@@ -10,6 +10,7 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
 import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useStableFn } from "../hooks/useStableFn";
+import { useResetOnLeave } from "../hooks/useResetOnLeave";
 import { useMarquee } from "../hooks/useMarquee";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
@@ -63,6 +64,8 @@ export const Library = memo(function Library() {
   useGridFit(scrollRef, "library");
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, items.length);
+  // the page stays mounted across tab switches (App.tsx): leaving it clears the selection, its grid goes back to the top
+  useResetOnLeave(scrollRef, () => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
 
   const filtered = useMemo(() => {
     const q = libQuery.trim().toLowerCase();

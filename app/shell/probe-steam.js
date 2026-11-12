@@ -491,13 +491,13 @@ app.whenReady().then(async () => {
       const wsName = srcs.find((x) => x.supportsTagFilter)?.name;
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
-      const tw = await page(`const t = document.querySelector(".scroll .card:not(.skel-card):not(:has([data-in-library])) .thumb-wrap") ?? document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap");
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      const tw = await page(`const t = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not(:has([data-in-library])) .thumb-wrap") ?? document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap");
         t.scrollIntoView({ block: "center" }); const r = t.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
       await sleep(300);
       const mv = (x, y) => win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
       // the FIRST card's button (re-found each time — a resize moves it)
-      const btnSel = `document.querySelector(".scroll .card:not(.skel-card) .dl-btn")`;
+      const btnSel = `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")`;
       const measure = async (label, css) => {
         await page(`let st = document.getElementById("__dlc"); if (!st) { st = document.createElement("style"); st.id = "__dlc"; document.head.append(st); } st.textContent = ${J(css)};`);
         await sleep(450);
@@ -539,7 +539,7 @@ app.whenReady().then(async () => {
       const sizes = (E.LIASCAPE_DLC_SIZES || "1000x800,1920x1080,1600x900").split(",").map((x) => x.split("x").map(Number));
       for (const [W0, H0] of sizes) {
         win.setContentSize(W0, H0); await sleep(900);
-        const t2 = await page(`const t = document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap"); t.scrollIntoView({ block: "center" });
+        const t2 = await page(`const t = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap"); t.scrollIntoView({ block: "center" });
           const r = t.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
         Object.assign(tw, t2); await sleep(300);
         mv(tw.x + 12, tw.y + 12); // on the card, off the button: the button shows (opacity 1), not hovered
@@ -565,8 +565,8 @@ app.whenReady().then(async () => {
       if (!ws) return ["no Workshop source"];
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(ws)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
-      await page(`document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap").click();`); await sleep(700);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap").click();`); await sleep(700);
       const btn = await page(`const b = [...document.querySelectorAll(".side-go")].find((x) => x.textContent.trim() === "Download"); if (!b) return false; b.click(); return true;`);
       if (!btn) return ["no Download button in the Browse sidebar"];
       const dl = await waitFor(() => js(`window.__st.dl && window.__st.dl.body`), 2000);
@@ -681,7 +681,8 @@ app.whenReady().then(async () => {
     const PANEL_W = `document.querySelector("[data-steam-todo]")?.getBoundingClientRect().height ?? null`;
     // the newest entry block's x offset (the carousel slide): the live one is the last [data-st-entry] with the new id
     const ENTRY_X = (id) => `(() => { const e = [...document.querySelectorAll('[data-st-entry="${id}"]')].at(-1); return e ? new DOMMatrix(getComputedStyle(e).transform).m41 : null; })()`;
-    const fakeBar = `if (!document.querySelector(".playlist-bar")) { const b = document.createElement("div"); b.className = "playlist-bar"; b.id = "__fakebar";
+    // (a bar that shows: the Library's stays in the document, hidden, while another tab shows — App.tsx)
+    const fakeBar = `if (![...document.querySelectorAll(".playlist-bar")].some((e) => e.getClientRects().length)) { const b = document.createElement("div"); b.className = "playlist-bar"; b.id = "__fakebar";
       b.style.cssText = "position:fixed;left:0;bottom:0;width:40px;height:130px;pointer-events:none"; document.body.append(b); }`;
 
     // the to-do panel moves smoothly — the lift
@@ -692,7 +693,7 @@ app.whenReady().then(async () => {
         const v = [];
         await setSettings({ morphs: motion });
         await load(SIGNED_OUT); await tab("Browse");
-        await page(`document.getElementById("__fakebar")?.remove(); document.querySelector(".playlist-bar") && (window.__realBar = true);`);
+        await page(`document.getElementById("__fakebar")?.remove(); [...document.querySelectorAll(".playlist-bar")].some((e) => e.getClientRects().length) && (window.__realBar = true);`);
         await ev("steam-todo", { ...STEP2, current: { id: "930001", title: "Rem – Edit" } }); await sleep(900);
         if (await js(`!!window.__realBar`)) console.log("        (a playlist bar already shows on Browse — the glide is measured against the fake one anyway)");
         // (a) the lift: a bar appears → the dock glides up to it (re-measured every 150 ms)
@@ -738,7 +739,7 @@ app.whenReady().then(async () => {
     // The Browse sidebar's subscribe / unsubscribe toggle for WE-local and Workshop items, and Open on Steam opening the Steam
     // client. The toggle (components/SubToggle.tsx) per the stubbed /workshop/state; its POSTs; Open on Steam
     // → POST /steam/open-page (ok:false → the https page through window.open). Shots steam-subtoggle*.png
-    const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll .card:not(.skel-card) .thumb-wrap")[${n}].click();`); await sleep(800); };
+    const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[${n}].click();`); await sleep(800); };
     const sub = () => page(`const s = document.querySelector("[data-side-sub]"); if (!s) return null; const b = s.querySelector("[data-side-sub-btn]");
       const ico = s.querySelector(".side-sub-ico");
       return { state: s.dataset.state, label: [...s.querySelectorAll("[data-side-sub-label]")].at(-1)?.textContent ?? null, hint: [...s.querySelectorAll("[data-side-sub-hint]")].at(-1)?.textContent ?? null,
@@ -753,7 +754,7 @@ app.whenReady().then(async () => {
       const wsName = srcs.find((s) => s.supportsTagFilter)?.name;
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
       await setWs("930000", { subscribed: false, pending: null, inLibrary: false, onDisk: false });
       await openSide(0);
       let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
@@ -810,7 +811,7 @@ app.whenReady().then(async () => {
       if (!local) return ["no Wallpaper Engine (Local) source"];
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
       await setWs("931000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
       await openSide(0);
       let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
@@ -833,7 +834,7 @@ app.whenReady().then(async () => {
       await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
       await load(SIGNED_OUT); await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
       await js(`window.__wsState = { "931000": { subscribed: true, pending: null, inLibrary: false, onDisk: true } }; true`);
       await openSide(0);
       s = await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);

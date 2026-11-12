@@ -33,9 +33,9 @@ export function SteamTodoPanel() {
   useEffect(() => {
     if (!show) return;
     const measure = () => {
-      const bar = document.querySelector<HTMLElement>(".playlist-bar");
-      const r = bar?.getBoundingClientRect();
-      const next = r && r.height > 0 ? Math.max(0, Math.round(window.innerHeight - r.top)) : 0;
+      // the bar that shows: the Library's stays in the document, hidden (no box), while another tab shows (App.tsx)
+      const r = [...document.querySelectorAll<HTMLElement>(".playlist-bar")].map((b) => b.getBoundingClientRect()).find((x) => x.height > 0);
+      const next = r ? Math.max(0, Math.round(window.innerHeight - r.top)) : 0;
       setLift((was) => (was === next ? was : next));
     };
     measure();

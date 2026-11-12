@@ -34,9 +34,11 @@ the floor; a new element is designed to delight within the toggles and the frame
 - Guard: `--probe probe-icons.js` (a new acting icon gets an `icon:act:<name>` cell).
 
 ## Performance
-- Keep `content-visibility:auto` + `contain-intrinsic-size` on every grid card.
+- Keep `content-visibility:auto` + `contain-intrinsic-size` on every grid card and playlist bar item (`.pl-item`).
+- Never write a measured size into a custom property on `.app` or `:root` that changes on a tab switch: every element inherits it, so each write restyles the whole page. Position against the element itself (`anchor()`, as the sidebar does to `.topbar`), and skip a write that didn't change. Guard: probe-layout `perf:tabs`.
 - Cards are `memo`'d and read their own slice (`useStore(s => …)`); never lift per-card state into a parent that re-renders the list. Stable keys (`pageUrl` / `videoPath`).
 - Hand a list's cards one handler per action that takes the item (`app/ui/src/hooks/useStableFn.ts`), never a fresh closure per card: it re-renders every card on any change of the list. Guard: probe-layout `perf:sidebar`.
+- The Library page and the playlist bar stay mounted across tab switches, hidden by `<Activity>` (`App.tsx`): reset what a fresh page starts without (a selection, the scroll position) on leaving (`app/ui/src/hooks/useResetOnLeave.ts`), and scope a rule that reacts to a page's parts to the shown page (`.app[data-page=…]`, as the sidebar's docking does). Guard: probe-layout `tabs:keep`, `perf:tabs`.
 - Never measure layout in a mount effect (it forces the new page's layout inside the click): size from a ResizeObserver callback, or read on the user's next input. Guard: probe-layout `perf:tabs`.
 - Animate transform / opacity / filter only. Glow is a static shadow toggled by state (pulse via opacity on a composited layer); never animate a blur radius. No `backdrop-filter: blur`.
 - Decode or animate nothing while `!appActive` (the store's focus/visibility flag) — it caused the main-thread freeze.

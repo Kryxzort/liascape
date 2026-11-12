@@ -123,11 +123,11 @@ async function browse() { // the Workshop source's (stubbed) items
   const srcs = (await http("GET", "/sources")).json || [];
   const ws = srcs.find((x) => x.supportsTagFilter)?.name;
   await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(ws)})?.click();`);
-  for (let i = 0; i < 40 && !(await js(`document.querySelectorAll(".scroll .card:not(.skel-card)").length > 0`)); i++) await sleep(100);
+  for (let i = 0; i < 40 && !(await js(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0`)); i++) await sleep(100);
 }
 async function browseSide() { // the first Browse card's sidebar
   await browse(); await mv(3, 3, 100);
-  await page(`document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap").click();`);
+  await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap").click();`);
   for (let i = 0; i < 30 && !(await js(`!!document.querySelector(".side-panel[data-side=browse]:not(.closing) .side-go")`)); i++) await sleep(100);
   await sleep(700);
 }
@@ -277,8 +277,8 @@ app.whenReady().then(async () => {
     await js(`window.__fakeWs("steam-todo", { finished: true })`);
     // the Browse card's own (hand-drawn) download button: the arrow drops into its tray
     await act("card-download", async () => { await closeSide(); await browse();
-      const t = await centre(`document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap")`); await mv(t.x - 10, t.y - 10, 300); },
-      `document.querySelector(".scroll .card:not(.skel-card) .dl-btn")`, ":scope .dl-glyph .dl-arrow", { stay: true });
+      const t = await centre(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")`); await mv(t.x - 10, t.y - 10, 300); },
+      `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")`, ":scope .dl-glyph .dl-arrow", { stay: true });
 
     // ---- hold ----
     await hold("trash", async () => { await lib(); const c = await centre(`document.querySelector(".card.lib .thumb-wrap")`); await mv(c.x, c.y - 20, 400); },
@@ -394,8 +394,8 @@ app.whenReady().then(async () => {
       const c = await centre(`document.querySelector(".card.lib .thumb-wrap")`); await mv(c.x, c.y - 20, 300);
       await visit(".card.lib:hover button");
       await browse(); await mv(3, 3, 200);
-      const t = await centre(`document.querySelector(".scroll .card:not(.skel-card) .thumb-wrap")`); await mv(t.x - 10, t.y - 10, 300);
-      await visit(".scroll .card:not(.skel-card) .dl-btn");
+      const t = await centre(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")`); await mv(t.x - 10, t.y - 10, 300);
+      await visit(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn");
       await browseSide();
       await visit(".side-panel:not(.closing) button");
       console.log(`        hovered ${hosts.length} icon hosts`);

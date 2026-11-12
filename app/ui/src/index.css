@@ -77,6 +77,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    beyond the tabs. The status has a 0 basis (min 140 px): it fills whatever a row leaves and truncates. */
 .topbar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px;
+  /* PERF: the item sidebar, the filter column and their scrims start at its bottom edge through anchor() — it changes
+     height with the tab's controls and as it wraps, and a measured height written on .app (an inherited custom property)
+     restyled the whole page on every tab switch. Guard: probe-layout perf:tabs, resize:side */
+  anchor-name: --topbar;
   background: color-mix(in srgb, var(--bg-crust) var(--tr), transparent); /* translucent chrome (--tr) */
   border-bottom: 1px solid var(--surface0);
   z-index: 5;
@@ -420,7 +424,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   /* COOL: the dock magnification — `--dock` (one transform: push, lift, scale from the bottom edge) is written every frame by
      hooks/useDockLift.ts (springs over the pointer's distance, so no CSS transition on transform); its own compositor layer →
      it moves at sub-pixel steps (no whole-pixel judder) */
-  transform: var(--dock, none); transform-origin: 50% 100%; will-change: transform; }
+  transform: var(--dock, none); transform-origin: 50% 100%; will-change: transform;
+  content-visibility: auto; contain-intrinsic-size: auto 112px; }
 /* PERF: --dock is the item's own transform, never its children's: not inherited, a frame's write restyles only the items
    it moves, not their thumbnails, titles and buttons (an unregistered custom property inherits). Unset → the `none` fallback. */
 @property --dock { syntax: "*"; inherits: false; }
@@ -1017,7 +1022,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .playlist-bar-row .pl-item:not(.playing):not(.hov):not(.dragging) { transform: none; }
 
 /* ---- the item sidebar (WE-style — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
-   An <aside> beside the page under the top bar (--topbar-h, measured by App), docked from 900 px (the grid and the playlist
+   An <aside> beside the page under the top bar (anchored to its bottom edge, `.topbar`), docked from 900 px (the grid and the playlist
    bar end at its edge — the grid re-fits its columns), floating over the page below that with a scrim. It scrolls on its
    own; the head (title + tools + close) stays. Look:
    the Settings page's language — an accent pool in its corner, the picture in a framed stage with a soft accent glow,
@@ -1026,7 +1031,7 @@ input[type=range]:focus-visible { outline: none; }
    quick stagger (picture → hero → actions → rows, ~30 ms apart, a small rise + fade, the picture scaling in), a faster
    re-stagger on an item switch, a quicker slide out (SIDE_CLOSE_MS = 170 in hooks/useLinger.ts). Done in ≤ 0.4 s. */
 .app { --side-w: clamp(300px, 26vw, 400px); --side-media-h: min(38vh, 320px); }
-.side-panel { position: absolute; top: var(--topbar-h, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 40;
+.side-panel { position: absolute; top: anchor(--topbar bottom, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 40;
   display: flex; flex-direction: column; overflow: hidden;
   background:
     radial-gradient(440px 300px at 100% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 70%),
@@ -1316,13 +1321,15 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 @keyframes side-in-t { from { transform: translateY(-34%); opacity: 0; } }
 @keyframes side-rise-sm { from { opacity: 0; transform: translateY(6px); } }
 .side-scrim { display: none; }
+/* only the shown page's sidebar docks: the Library's stays mounted while another tab shows (App.tsx `data-page`) */
 @media (min-width: 900px) {
-  .app:has(> .side-panel:not(.closing)) > .scroll { margin-right: var(--side-w); }
-  .app:has(> .side-panel:not(.closing)) > .playlist-bar { right: var(--side-w); }
+  .app[data-page="browse"]:has(> .side-panel[data-side="browse"]:not(.closing)) > .scroll,
+  .app[data-page="library"]:has(> .side-panel[data-side="library"]:not(.closing)) > .scroll { margin-right: var(--side-w); }
+  .app[data-page="library"]:has(> .side-panel[data-side="library"]:not(.closing)) > .playlist-bar { right: var(--side-w); }
 }
 @media (max-width: 899.98px) {
   .app { --side-w: min(360px, 100vw); }
-  .side-scrim { display: block; position: absolute; inset: var(--topbar-h, 56px) 0 0 0; z-index: 39; background: rgba(0,0,0,.4);
+  .side-scrim { display: block; position: absolute; inset: anchor(--topbar bottom, 56px) 0 0 0; z-index: 39; background: rgba(0,0,0,.4);
     animation: side-fade .2s ease-out; }
   .side-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
 }
@@ -1333,7 +1340,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
    Calm by design (40 switches must not look like a mixing desk): an untouched row's switch is faint — no fill, muted
    glyphs, half opacity — and only the active segment of an include / exclude row is coloured (accent / danger). */
 .app { --wf-w: 240px; }
-.wf-col { position: absolute; top: var(--topbar-h, 56px); left: 0; bottom: 0; width: var(--wf-w); z-index: 30;
+.wf-col { position: absolute; top: anchor(--topbar bottom, 56px); left: 0; bottom: 0; width: var(--wf-w); z-index: 30;
   display: flex; flex-direction: column; overflow: hidden;
   background:
     radial-gradient(300px 240px at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
@@ -1371,7 +1378,7 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   box-shadow: 14px 0 34px rgba(0,0,0,.42), var(--glow-sm);
   animation: wf-in .3s cubic-bezier(.2, 1.15, .36, 1); }
 .wf-col[data-mode="drawer"].closing { animation: wf-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
-.wf-scrim { position: absolute; inset: var(--topbar-h, 56px) 0 0 0; z-index: 45; background: rgba(0,0,0,.4); animation: side-fade .2s ease-out; }
+.wf-scrim { position: absolute; inset: anchor(--topbar bottom, 56px) 0 0 0; z-index: 45; background: rgba(0,0,0,.4); animation: side-fade .2s ease-out; }
 .wf-scrim.closing { opacity: 0; pointer-events: none; transition: opacity .16s; }
 @keyframes wf-in { from { transform: translateX(-40px); opacity: 0; } }
 @keyframes wf-out { to { transform: translateX(-32px); opacity: 0; } }

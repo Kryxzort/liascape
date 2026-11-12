@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { Activity, memo, useCallback, useDeferredValue, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { LEVELS, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
 import { LocateFixed, RefreshCw, Square, Undo2, Upload } from "lucide-react";
@@ -53,18 +53,17 @@ export default function App() {
   const setTab = (t: Tab) => {
     if (t !== picked.tab) setPicked({ tab: t, dir: TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(picked.tab) ? "r" : "l" });
   };
+  // PERF: the Library page and the playlist bar stay mounted once shown, hidden (React's <Activity>: display none) while
+  // another tab shows. A switch back reveals them instead of building their ~1,000 components and DOM again: about half the
+  // missed frames of a switch, at 240 Hz and at 4× CPU / 60 Hz. Hidden, their effects are cleaned up (key handlers,
+  // observers, timers: they listen to nothing), and leaving the page resets what a fresh one starts without
+  // (hooks/useResetOnLeave.ts). Its sidebar stays mounted too: `data-page` (the tab shown) lets index.css dock only the shown
+  // page's own. Browse and Settings are built on each visit, before the kept page in the document, so a query for the first
+  // `.scroll` / card finds the page showing. Guard: probe-layout perf:tabs, tabs:keep
+  const [libKept, setLibKept] = useState(tab === "library");
+  if (tab === "library" && !libKept) setLibKept(true);
   const showInLibrary = useStableFn((p: string) => { s.focusLib(p); setTab("library"); });
   const importRef = useRef<HTMLInputElement>(null);
-  // the item sidebar starts under the top bar, whose height changes as it wraps (any window size): --topbar-h on .app
-  const appRef = useRef<HTMLDivElement>(null);
-  const topbarRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const tb = topbarRef.current, a = appRef.current;
-    if (!tb || !a) return;
-    const ro = new ResizeObserver(() => a.style.setProperty("--topbar-h", `${tb.getBoundingClientRect().bottom - a.getBoundingClientRect().top}px`));
-    ro.observe(tb);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
   useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/liascape/freeze.log (catches the wedge)
@@ -177,10 +176,10 @@ export default function App() {
   const src = s.sources[s.activeSource];
   const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);
   return (
-    <div className="app" ref={appRef} data-tab-dir={tabDir ?? undefined}>
+    <div className="app" data-page={tab} data-tab-dir={tabDir ?? undefined}>
       {/* live wallpaper behind the UI — Settings always, or every tab when the advanced toggle is on */}
       {(tab === "settings" || bgAllTabs) && <WallpaperBg />}
-      <div className="topbar" ref={topbarRef}>
+      <div className="topbar">
         <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(picked.tab) } as React.CSSProperties}>
           <span className="tab-pill" aria-hidden />
           {TAB_ORDER.map((t) => (
@@ -247,10 +246,10 @@ export default function App() {
       {/* each grid view renders its own item sidebar next to its .scroll (components/SidePanel.tsx) */}
       <LayoutGroup>
         {tab === "browse" && <Browse onShowInLibrary={showInLibrary} />}
-        {tab === "library" && <Library />}
         {tab === "settings" && <Suspense fallback={<div className="loadbar" />}><Settings /></Suspense>}
+        {libKept && <Activity mode={tab === "library" ? "visible" : "hidden"}><Library /></Activity>}
 
-        {tab === "library" && <PlaylistBar />}
+        {libKept && <Activity mode={tab === "library" ? "visible" : "hidden"}><PlaylistBar /></Activity>}
 
       </LayoutGroup>
       <Suspense fallback={null}>

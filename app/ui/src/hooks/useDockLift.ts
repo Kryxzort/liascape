@@ -170,7 +170,9 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
     row.addEventListener("pointerleave", onLeave);
     row.addEventListener("scroll", kick, { passive: true }); // the items slide under a still pointer
     window.addEventListener("resize", stale);
-    kick(); // settle whatever a previous run (a drag, a toggle) left
+    // settle whatever a previous run (a drag, a toggle) left on the items. PERF: a fresh row has nothing to settle, and that
+    // frame would measure every item and walk them all in the frames right after a tab switch. Guard: probe-layout perf:tabs
+    if ((Array.from(row.children) as HTMLElement[]).some((el) => el.style.getPropertyValue("--dock") || el.style.zIndex)) kick();
     return () => {
       row.removeEventListener("pointerenter", stale);
       row.removeEventListener("pointermove", onMove);

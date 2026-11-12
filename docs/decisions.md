@@ -155,6 +155,12 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Keep the Library page mounted across tab switches; don't virtualise the grid — 2026-11-12
+The Library page and the playlist bar stay mounted once shown (React `<Activity>`, hidden = display none); Browse and
+Settings rebuild on each visit. Not a virtualised grid: `content-visibility` already skips off-screen cards, the cost
+was the rebuild plus whole-page restyles, and windowing breaks keyboard reveal, box selection, locate-playing and probes
+that find off-screen cards. Guard: probe-layout `tabs:keep`, `perf:tabs`; `.claude/rules/ui/design.md` § Performance.
+
 ### Make the UI itself a work of art — 2026-11-12
 The goal is an interface people would open just to interact with. Every control is designed, not defaulted: motion has
 physics (springs, overshoot that settles), icons act out their meaning, the cursor gets a response before the click, and

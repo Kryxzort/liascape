@@ -8,11 +8,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 1. [x] **UI performance** (done df573913; follow-ups 10–11): playlist-bar hover (`useDockLift` forced layout per frame, per-item
        re-renders) and tab switch + sidebar long tasks (100–250 ms). After they hand back: review, build + lint, matrix
        `--changed`, then re-measure the owner's live app with the same synthetic traces and commit.
-10. [ ] **Tab switch still drops frames in production** (bench-live-ui, 2026-11-12, 240 Hz: 23 double-frame misses over 5
-       switches, ~62 ms each; typical profile ~340 ms each): the page remount (~1,000 components for 160 cards) plus the
-       first style/layout/paint of every card. Investigate grid virtualisation (cards only near the viewport; probes that
-       look for off-screen cards would need to scroll) vs keeping pages mounted (duplicate `.scroll` / key handlers / kept
-       scroll state — see the tab agent's notes in the commit df573913). Pick by bench numbers at both profiles.
 11. [ ] Owner's call: the playing card's pulse animates `box-shadow` → a full repaint + layerize every frame, idle too
        (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
        mid-pulse frames look slightly different (crossfade, not blur interpolation).
@@ -28,6 +23,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 19. [ ] GIF previews resume where they stopped instead of restarting (on unhover, scroll-away, window backgrounded) — only
        if it costs no performance: measure (frames decoded, idle rAF, memory) before choosing a way (e.g. `ImageDecoder`
        to a canvas vs keeping the `<img>` mounted).
+20. [ ] Browse's loading skeletons (`.skel::after` shimmer, 72 cards) restyle on the main thread every frame (~600
+       style recalcs a frame in a trace): move the shimmer to a composited transform/opacity animation, same look.
 
 
 ## On a real desktop session (not hermetic)

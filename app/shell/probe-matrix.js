@@ -198,8 +198,13 @@ const PAGE = `window.__mx = {
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
   click(el, what) { if (!el) throw new Error("not found: " + what); el.click(); },
   tab(name) { this.click(this.byText(".tab", name), "tab " + name); },
-  card(t) { return [...document.querySelectorAll(".card.lib")].find((c) => c.querySelector(".lib-title")?.dataset.title === t); },
-  playlistBar(t) { return [...document.querySelectorAll(".pl-item")].find((e) => e.dataset.title === t); },
+  // what the page shows: the Library page and the playlist bar stay in the document, hidden, while another tab shows (App.tsx),
+  // and a hidden page's marks wait for it to show again
+  shown(e) { return e.getClientRects().length > 0; },
+  cards() { return [...document.querySelectorAll(".card.lib")].filter((c) => this.shown(c)); },
+  card(t) { return this.cards().find((c) => c.querySelector(".lib-title")?.dataset.title === t); },
+  barItems() { return [...document.querySelectorAll(".pl-item")].filter((e) => this.shown(e)); },
+  playlistBar(t) { return this.barItems().find((e) => e.dataset.title === t); },
   ctx(el, what) { if (!el) throw new Error("not found: " + what); const r = el.getBoundingClientRect();
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.x + 10, clientY: r.y + 10 })); },
   // a right-click on a card / a playlist bar item = the item's Library sidebar, nothing applied (no context menu)
@@ -222,7 +227,7 @@ const PAGE = `window.__mx = {
   modalReset(i) { return this.side()?.querySelector('[data-side-row="' + (i ? "speed" : "volume") + '"] button'); },
   closeModal() { this.click(this.side()?.querySelector("[data-side-close]"), "sidebar close"); },
   plCheck(text) { return [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith(text))?.querySelector("input"); },
-  playing() { return { playlistBar: [...document.querySelectorAll(".pl-item.playing")].map((e) => e.dataset.title), cards: [...document.querySelectorAll(".card.lib.playing")].map((c) => c.querySelector(".lib-title")?.dataset.title) }; },
+  playing() { return { playlistBar: this.barItems().filter((e) => e.classList.contains("playing")).map((e) => e.dataset.title), cards: this.cards().filter((c) => c.classList.contains("playing")).map((c) => c.querySelector(".lib-title")?.dataset.title) }; },
 }; true`;
 async function loadUi() {
   await win.loadURL(withToken(U + "/"));
@@ -1072,7 +1077,7 @@ async function playlistBarDrag(fromTitle, toTitle) {
   send({ type: "mouseUp", ...at(r.bx, r.by), button: "left", clickCount: 1 });
   await sleep(900); // the playlist bar's debounced /playlist/state save (200 ms) + the backend's live reorder
 }
-const playlistBarTitles = () => ui(`return [...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title);`);
+const playlistBarTitles = () => ui(`return m.barItems().map((e) => e.dataset.title);`);
 const moved = (list, from, to) => { const l = [...list]; const [x] = l.splice(from, 1); l.splice(to, 0, x); return l; };
 for (const [name, fromIdx, toIdx] of [["lastToSecond", -1, 1], ["firstToEnd", 0, -1]]) {
   const plan = (c) => { const s = c.before.ps?.videoPaths || []; const f = fromIdx < 0 ? s.length + fromIdx : fromIdx, t = toIdx < 0 ? s.length + toIdx : toIdx; return { s, f, t, want: moved(s, f, t) }; };
@@ -2954,8 +2959,9 @@ function editJson(file, fn) {
 }
 const keyIn = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.toLowerCase()) ?? name[0].toUpperCase() + name.slice(1);
 // what the page shows of the backend's data (read from the DOM, whichever tab — the cards are mounted on Library)
-const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib .lib-title")].map((e) => e.dataset.title).sort(),
-  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title),
+// (only what shows: a page kept hidden while another tab shows is still in the document — App.tsx)
+const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib")].filter((c) => c.getClientRects().length).map((c) => c.querySelector(".lib-title")?.dataset.title).filter(Boolean).sort(),
+  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item")].filter((e) => e.getClientRects().length).map((e) => e.dataset.title),
   aspect: document.documentElement.style.getPropertyValue("--thumb-aspect") })`);
 const libTitles = async () => ((await http("GET", "/library")).json || []).map((i) => i.title).sort();
 // k5 (a copy of k4) leaves the library through the backend's own delete (the page's stale card is fine: the next cell reloads)
@@ -3772,12 +3778,12 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   const asset = /\/(media|img|anim|assets|transitions)\b|favicon|icons\.svg/;
   for (const r of httpLog.slice(h0)) if (r.status >= 400 && r.status !== 409 && !asset.test(r.url)) v.push(`HTTP ${r.status} ${r.method} ${r.url.replace(U, "")}`);
   if (c.exp.settled && !c.noOutput) {
-    const p = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return m.playing();`).catch(() => null);
+    const p = await ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); } return m.playing();`).catch(() => null);
     const cur = c.after.cur?.path ? TITLE(c.after.cur.path) : null;
     if (p && cur && !p.cards.includes(cur)) v.push(`UI marks ${JSON.stringify(p.cards)} as playing, backend plays ${cur}`);
   }
   // the playlist bar the UI shows == the backend's playlist (a stale playlistBar saves itself back over it)
-  const playlistBar = await ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); } return [...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title);`).catch(() => null);
+  const playlistBar = await ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); } return m.barItems().map((e) => e.dataset.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (playlistBar && JSON.stringify(playlistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(playlistBar)}, backend playlist ${JSON.stringify(want)}`);
   if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
@@ -3929,10 +3935,10 @@ function fuzzContext(snap, fz) {
 async function loadUiFuzz() {
   await loadUi();
   await ui(`m.tab("Settings"); for (let i = 0; i < 100 && !document.querySelector(".settings .srow"); i++) await m.sleep(50);
-    m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150);`).catch(() => {});
+    m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150);`).catch(() => {});
 }
 // between steps: the Library tab, no selection (a click on the grid's background clears it)
-const tidyUi = () => ui(`if (!document.querySelector(".card.lib")) { m.tab("Library"); for (let i = 0; i < 40 && !document.querySelector(".card.lib"); i++) await m.sleep(50); await m.sleep(150); }
+const tidyUi = () => ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); }
   const g = document.querySelector(".lib-scroll .grid"); if (g) { g.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); await m.sleep(80); }`).catch(() => {});
 
 async function fuzzStep(name, x, fz) {

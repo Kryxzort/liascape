@@ -180,12 +180,14 @@ export function PlaylistBar() {
   // PERF: from the observer's own size (its first callback lands after the frame's layout, before its paint), written only
   // when it changed and kept while the bar is away (only the library page, shown with the bar, reads it): reading
   // offsetHeight at mount forced a layout inside the tab switch, and each write on :root restyles the whole page.
-  // Guard: probe-layout perf:tabs.
+  // A bar leaving the page reports a 0 height before its observer is disconnected (an unmount's passive cleanup runs after
+  // that frame's observations): it is never written — written, the next Library visit writes the real height back: two
+  // whole-page restyles and a grid re-fit (--cols) through the wrong height. Guard: probe-layout perf:tabs.
   const playlistBarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = playlistBarRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setBarH(Math.round(e.borderBoxSize[0].blockSize)));
+    const ro = new ResizeObserver(([e]) => { const h = Math.round(e.borderBoxSize[0].blockSize); if (h > 0) setBarH(h); });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);

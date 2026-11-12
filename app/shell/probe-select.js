@@ -375,7 +375,8 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 150; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
     await js(PAGE); await sleep(800);
 
-    const LIB = { key: "lib", async enter() { if (!(await js(`!!document.querySelector(".lib-scroll")`))) await tab("Library"); },
+    // (the Library's grid stays in the document, hidden, while another tab shows: App.tsx)
+    const LIB = { key: "lib", async enter() { if (!(await js(`!!document.querySelector(".lib-scroll")?.offsetParent`))) await tab("Library"); },
       // a selected card's playlist toggle adds the whole selection
       async bulk(g, want) {
         const at = await page(`const t = m.cards().find((c) => c.firstElementChild.dataset.morphId === ${J(want[0])}).querySelector(".pl-toggle").getBoundingClientRect();
@@ -389,7 +390,7 @@ app.whenReady().then(async () => {
     const BR = { key: "br", async enter() {
         if (await js(`!!document.querySelector(".scroll:not(.lib-scroll) .card.lib")`)) return;
         await tab("Browse"); await page(`m.byText(".pill", ${J(wsName)})?.click();`);
-        for (let i = 0; i < 60 && (await js(`document.querySelectorAll(".scroll .card.lib:not(.skel-card)").length`)) < BR_N; i++) await sleep(100);
+        for (let i = 0; i < 60 && (await js(`document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib:not(.skel-card)").length`)) < BR_N; i++) await sleep(100);
         await sleep(500);
       },
       // the selection toolbar's Download N: the (stubbed) /download gets exactly the boxed cards

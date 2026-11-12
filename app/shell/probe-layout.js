@@ -11,6 +11,8 @@
 //                         no easing
 //   tabs:slide[:off|:reduced] switching tabs slides the active pill (transform) and slides/fades the page in
 //                         (transform + opacity); off / prefers-reduced-motion → it jumps, nothing animates
+//   tabs:keep             the Library page is kept while Browse shows (hidden, its sidebar too, taking no room from Browse's
+//                         grid); back on it: the same grid, at its top, its selection cleared, its sidebar docked again
 //   scroll:bound          booted straight into the Library (its items arrive after mount): .lib-scroll carries the smooth
 //                         scroll's wheel listener
 //   scroll:glide[:browse|:settings] a notched wheel tick (whole-pixel delta, not precise) glides: the page cancels it and
@@ -26,7 +28,9 @@
 //   seg:glow              the highlight glows, none under no-glow; the track goes translucent under bg-live
 //   perf:idle             an idle page asks for no frames
 //   perf:tabs             on a PERF_N-item library: each real tab click forces no layout from script (an effect / handler
-//                         measuring the new page before its frame does); prints the longest task and what mounted
+//                         measuring the new page before its frame does); a switch to Library restyles under PERF_STYLED_MAX
+//                         elements per element of the document (no whole-page restyle) and runs no requestAnimationFrame
+//                         callback; prints the longest task, what mounted and what was restyled
 //   perf:sidebar          right-click open / switch / Escape close re-render the sidebar, not the grid's cards or the
 //                         playlist bar (React's commit hook counts the components that ran), and force no layout
 //                         (LIASCAPE_PERF_DUMP=1: every step's trace → <LIASCAPE_OUT>/perf-trace-<n>.json)
@@ -111,7 +115,14 @@ async function reducedMotion(on) {
 const PERF_N = 160;           // library items the perf cells add (copies of the 10 s clip)
 const PERF_PLAYLIST = 30;     // of them in the playlist bar
 const PERF_FORCED_MAX = 0;    // layouts forced from script per step
-const PERF_SCRIPT_SHARE_MAX = 0.5; // of a Library switch's script time, the most one task may run
+const PERF_SCRIPT_SHARE_MAX = 0.5; // of the script of a switch that builds a page, the most one task may run
+const PERF_BUILD_MOUNTS = 200;     // components mounted by a switch that builds its page (the Library's: ~1,000)
+const PERF_KEPT_MOUNTS_MAX = 50;   // components mounted by a switch back to the kept Library page (its sidebar, a status line)
+// elements restyled by a switch to Library, per element in the document: the new page and the playlist bar are styled
+// about once (their offscreen cards and items are content-visibility skipped); a value written that every element inherits
+// (a measured height on .app or :root, a grid re-fit through a wrong height) restyles the page again each time
+const PERF_STYLED_MAX = 0.6;
+const PERF_RAFS_MAX = 0;      // requestAnimationFrame callbacks on a switch to Library: its motion is CSS, nothing to settle
 const PERF_SIDE_RENDERS_MAX = 200; // components re-rendered per sidebar step: the sidebar's own few dozen pass, the grid's
                                    // cards (~6 components each, PERF_N of them) don't
 const DOCK_PLAYLIST = 45;          // perf:dockRepaint: playlist bar items (most of them scrolled out of the bar's view)
@@ -240,8 +251,12 @@ async function perfStep(fn) {
   const top = jsSpans.filter((e) => !jsSpans.some((j) => j !== e && e.ts >= j.ts && e.ts + e.dur <= j.ts + j.dur && (j.ts < e.ts || j.dur > e.dur)));
   const perTask = tasks.map((t) => top.filter((e) => e.ts >= t.ts && e.ts < t.ts + t.dur).reduce((s, e) => s + e.dur, 0) / 1000);
   const script = perTask.reduce((a, b) => a + b, 0), maxScript = Math.max(0, ...perTask);
+  // elements the style recalcs visited (an inherited custom property written high up restyles every element under it again)
+  // against the document's size; the requestAnimationFrame callbacks that ran
+  const styled = on.filter((e) => e.name === "UpdateLayoutTree").reduce((n, e) => n + (e.args?.elementCount ?? 0), 0);
+  const dom = await js(`document.getElementsByTagName("*").length`);
   return { longest: Math.max(0, ...tasks.map((e) => e.dur)) / 1000, busy: tasks.reduce((s, e) => s + e.dur, 0) / 1000,
-    script, maxScript, share: script ? maxScript / script : 0,
+    script, maxScript, share: script ? maxScript / script : 0, styled, dom, rafs: on.filter((e) => e.name === "FireAnimationFrame").length,
     forced: forced.length, forcedMs: forced.reduce((s, e) => s + e.dur, 0) / 1000,
     // who forced it: the JS frame that asked (file:line:col of the bundle)
     forcedBy: forced.map((e) => { const f = e.args?.beginData?.stackTrace?.[0]; return f ? `${f.functionName || "?"}@${String(f.url).split("/").pop()}:${f.lineNumber}:${f.columnNumber}` : "?"; }).join(", "),
@@ -336,7 +351,8 @@ app.whenReady().then(async () => {
           const del = m.byText(".side-panel button", "Delete"); del?.scrollIntoView({ block: "nearest" }); const db = del ? m.rect(del) : null;
           const sc = document.querySelector(".scroll"); const sb = sc ? m.rect(sc) : null;
           const cards = [...document.querySelectorAll(".card.lib")].slice(0, 40).map((c) => c.getBoundingClientRect()).filter((x) => x.width > 0);
-          return { b, cb, db, sb, under: cards.filter((x) => x.right > b.x + 1 && x.bottom > b.y && x.top < b.b).length,
+          const scrimEl = document.querySelector(".side-scrim"), scrimTop = scrimEl && getComputedStyle(scrimEl).display !== "none" ? m.rect(scrimEl).y : null;
+          return { b, cb, db, sb, tb: m.rect(document.querySelector(".topbar")), scrimTop, under: cards.filter((x) => x.right > b.x + 1 && x.bottom > b.y && x.top < b.b).length,
             scrim: document.elementFromPoint(Math.max(2, b.x / 2), b.y + 20)?.classList.contains("side-scrim") ?? false,
             doc: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1, W: visualViewport?.width ?? innerWidth, H: visualViewport?.height ?? innerHeight };`);
         const v = [];
@@ -347,6 +363,9 @@ app.whenReady().then(async () => {
         if (!r.cb || r.cb.b > H + 0.5 || r.cb.y < 0 || r.cb.r > W + 0.5) v.push("its close button is out of reach");
         if (!r.db || r.db.b > H + 0.5 || r.db.y < r.b.y - 0.5) v.push("its Delete button can't be scrolled into view");
         if (r.doc) v.push("the page scrolls sideways with the sidebar open");
+        // it (and its scrim) start where the top bar ends, at every height the bar wraps to (index.css anchor(--topbar bottom))
+        if (Math.abs(r.b.y - r.tb.b) > 0.5) v.push(`the sidebar starts at y ${r.b.y.toFixed(1)}, the top bar ends at ${r.tb.b.toFixed(1)}`);
+        if (r.scrimTop !== null && Math.abs(r.scrimTop - r.tb.b) > 0.5) v.push(`the scrim starts at y ${r.scrimTop.toFixed(1)}, the top bar ends at ${r.tb.b.toFixed(1)}`);
         if (W >= 900) {
           if (r.under) v.push(`docked, but ${r.under} cards sit under the sidebar`);
           if (r.sb && r.sb.r > r.b.x + 1) v.push(`docked, but the grid runs under the sidebar (grid right ${r.sb.r.toFixed(0)} > ${r.b.x.toFixed(0)})`);
@@ -615,7 +634,7 @@ app.whenReady().then(async () => {
     await reducedMotion(false);
 
     // ---- perf: tab switches and the item sidebar on a full library ----
-    if (!ONLY || ONLY.test("perf:tabs") || ONLY.test("perf:sidebar") || ONLY.test("perf:dockRepaint")) await perfSetup();
+    if (!ONLY || ["perf:tabs", "tabs:keep", "perf:sidebar", "perf:dockRepaint"].some((c) => ONLY.test(c))) await perfSetup();
     // A tab switch: Browse → Library → Settings → Library → Browse, each one a real click (sendInputEvent) under a trace.
     // Per switch: the longest main-thread task, the layouts forced from script (a Layout inside a JS call: the effect that
     // reads a size before the frame would lay out anyway), and the React components that rendered / mounted.
@@ -627,14 +646,56 @@ app.whenReady().then(async () => {
         // measured and pointed at before the trace (the probe's own read forces a layout; a hand reaches the tab before it clicks)
         const at = await centreOf(".tab", t); win.webContents.sendInputEvent({ type: "mouseMove", x: at.x, y: at.y }); await sleep(400);
         const r = await perfStep(async () => { await clickAt(at); await sleep(900); });
-        rows.push({ t, ...r });
-        console.log(`        → ${t.padEnd(8)} longest task ${r.longest.toFixed(0)} ms, busy ${r.busy.toFixed(0)} ms, script ${r.script.toFixed(0)} ms (one task ${r.maxScript.toFixed(0)} ms = ${(r.share * 100).toFixed(0)} %), ${r.forced} forced layouts (${r.forcedMs.toFixed(1)} ms), rendered ${r.rendered}, mounted ${r.mounted}`);
+        // the page the click asked for is the one showing (a kept page is in the document while hidden too)
+        const showing = await js(`(() => { const sc = [...document.querySelectorAll(".app > .scroll")].filter((e) => e.offsetParent);
+          return { n: sc.length, lib: sc.length === 1 && sc[0].classList.contains("lib-scroll") ? sc[0].querySelectorAll(".card.lib").length : -1 }; })()`);
+        rows.push({ t, ...r, showing });
+        console.log(`        → ${t.padEnd(8)} longest task ${r.longest.toFixed(0)} ms, busy ${r.busy.toFixed(0)} ms, script ${r.script.toFixed(0)} ms (one task ${r.maxScript.toFixed(0)} ms = ${(r.share * 100).toFixed(0)} %), ${r.forced} forced layouts (${r.forcedMs.toFixed(1)} ms), rendered ${r.rendered}, mounted ${r.mounted}, styled ${r.styled} of ${r.dom} elements, ${r.rafs} rAF callbacks`);
       }
       const lib = rows.filter((r) => r.t === "Library");
-      if (lib.some((r) => r.mounted < 20)) v.push(`a switch to Library mounted only ${Math.min(...lib.map((r) => r.mounted))} components — nothing measured (proved nothing)`);
-      // building the library page (~1000 components) is split into short slices: no one task runs most of the switch's script
-      for (const r of lib) if (r.share > PERF_SCRIPT_SHARE_MAX) v.push(`→ Library: one task ran ${(r.share * 100).toFixed(0)} % of the switch's script (${r.maxScript.toFixed(0)} of ${r.script.toFixed(0)} ms; ≤ ${PERF_SCRIPT_SHARE_MAX * 100} %)`);
+      for (const r of rows) if (r.showing.n !== 1) v.push(`→ ${r.t}: ${r.showing.n} pages showing after the switch (one)`);
+      for (const r of lib) if (r.showing.lib < PERF_N) v.push(`→ Library: the Library page isn't showing its ${PERF_N} cards (${r.showing.lib}) — nothing measured (proved nothing)`);
+      // the Library page stays mounted while another tab shows (App.tsx): coming back reveals it, nothing is built again
+      for (const r of lib) if (r.mounted > PERF_KEPT_MOUNTS_MAX) v.push(`→ Library: ${r.mounted} components mounted (≤ ${PERF_KEPT_MOUNTS_MAX}): the page was built again, not kept`);
+      // a page that is built (Settings, a first visit) builds in short slices: no one task runs most of the switch's script
+      for (const r of rows) if (r.mounted >= PERF_BUILD_MOUNTS && r.share > PERF_SCRIPT_SHARE_MAX) v.push(`→ ${r.t}: one task ran ${(r.share * 100).toFixed(0)} % of the switch's script (${r.maxScript.toFixed(0)} of ${r.script.toFixed(0)} ms; ≤ ${PERF_SCRIPT_SHARE_MAX * 100} %)`);
       for (const r of rows) if (r.forced > PERF_FORCED_MAX) v.push(`→ ${r.t}: ${r.forced} layouts forced from script (≤ ${PERF_FORCED_MAX}): ${r.forcedBy}`);
+      for (const r of lib) if (!r.styled) v.push("→ Library: the trace saw no style recalc — nothing measured (proved nothing)");
+      for (const r of lib) if (r.styled > PERF_STYLED_MAX * r.dom) v.push(`→ Library: ${r.styled} elements restyled = ${(r.styled / r.dom).toFixed(2)}× the document's ${r.dom} (≤ ${PERF_STYLED_MAX}×): a whole-page restyle`);
+      for (const r of lib) if (r.rafs > PERF_RAFS_MAX) v.push(`→ Library: ${r.rafs} requestAnimationFrame callbacks (≤ ${PERF_RAFS_MAX})`);
+      return v;
+    });
+    // tabs:keep (on the PERF_N-card library) — the Library page is kept across tab switches (App.tsx <Activity>). Scrolled down with a card selected (a
+    // Ctrl+click: selects and focuses it, the sidebar opens, nothing is applied), then Browse: the Library's grid and sidebar
+    // are hidden, not gone, and take no room from Browse's grid; back on the Library: the same grid element, at its top with
+    // nothing selected (as a page built anew), its sidebar showing and docked again.
+    await cell("tabs:keep", async () => {
+      const v = [];
+      await tab("Library"); await sleep(500);
+      const s0 = await page(`const sc = document.querySelector(".lib-scroll"); if (!sc) return null; sc.__kept = 1;
+        sc.querySelector(".card.lib .thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
+        await m.sleep(500); sc.scrollTop = Math.min(400, sc.scrollHeight - sc.clientHeight); await m.sleep(300);
+        return { top: sc.scrollTop, sel: sc.querySelectorAll(".card.selected").length, side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)') };`);
+      if (!s0) return ["no Library grid"];
+      if (!(s0.top > 0) || !s0.sel || !s0.side) return [`couldn't set the Library up (scrolled ${s0.top} px, ${s0.sel} selected, sidebar ${s0.side}) — proved nothing`];
+      await tab("Browse"); await sleep(300);
+      const b = await page(`const lib = document.querySelector(".lib-scroll"), sc = document.querySelector(".scroll");
+        return { lib: !!lib, libShown: !!lib?.offsetParent, first: !!sc && !sc.classList.contains("lib-scroll") && !!sc.offsetParent,
+          mr: sc ? parseFloat(getComputedStyle(sc).marginRight) : null, side: !!document.querySelector('.side-panel[data-side="library"]')?.offsetParent };`);
+      if (!b.lib) v.push("on Browse: the Library's grid left the document (it is built again on the way back)");
+      if (b.libShown) v.push("on Browse: the Library's grid still shows");
+      if (!b.first) v.push("on Browse: the document's first .scroll isn't Browse's showing grid");
+      if (b.mr) v.push(`on Browse: its grid leaves ${b.mr} px on its right for the Library's hidden sidebar`);
+      if (b.side) v.push("on Browse: the Library's sidebar still shows");
+      await tab("Library"); await sleep(300);
+      const l = await page(`const sc = document.querySelector(".lib-scroll"); return { same: sc?.__kept === 1, top: sc?.scrollTop, sel: sc?.querySelectorAll(".card.selected").length,
+        side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)')?.offsetParent, mr: sc ? parseFloat(getComputedStyle(sc).marginRight) : 0 };`);
+      if (!l.same) v.push("back on the Library: its grid is a new element (built again, not kept)");
+      if (l.top !== 0) v.push(`back on the Library: the grid is at ${l.top} px, not at its top`);
+      if (l.sel) v.push(`back on the Library: ${l.sel} cards still selected`);
+      if (!l.side) v.push("back on the Library: the focused card's sidebar isn't showing");
+      else if (!(l.mr > 0)) v.push("back on the Library: its sidebar shows but the grid doesn't make room for it (not docked)");
+      win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" }); win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" }); await sleep(500);
       return v;
     });
     // The item sidebar: right-click a card (opens it), two more cards (switches), Escape (closes). A focus change re-renders

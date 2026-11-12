@@ -83,7 +83,8 @@ const PAGE = `window.__wf = {
   last() { return window.__browse[window.__browse.length - 1] ?? null; },
   async settle(n0, ms = 1500) { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (window.__browse.length > n0) break; await this.sleep(30); }
     await this.sleep(380); return window.__browse.length > n0 ? this.last() : null; },
-  cards() { return document.querySelectorAll(".scroll .card:not(.skel-card)").length; },
+  // Browse's cards (the Library's grid stays in the document, hidden, once shown: App.tsx)
+  cards() { return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length; },
 }; true`;
 const page = (code) => js(`(async () => { const m = window.__wf; ${code} })()`);
 
@@ -508,7 +509,7 @@ app.whenReady().then(async () => {
       await page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); await m.sleep(400);`);
       if (await page(`return !!document.querySelector(".wf-col");`)) v.push("Escape didn't close the drawer");
       // the scrim closes it; with the item sidebar open the drawer sits above it
-      await page(`document.querySelector(".scroll .card .thumb-wrap")?.click(); await m.sleep(600); document.querySelector("[data-wf-open]").click(); await m.sleep(450);`);
+      await page(`document.querySelector(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(600); document.querySelector("[data-wf-open]").click(); await m.sleep(450);`);
       r = await page(`const c = m.col(), s = document.querySelector(".side-panel:not(.closing)"); if (!c) return null;
         const b = m.rect(c); const hit = document.elementFromPoint(b.x + b.w / 2, b.y + 60); return { side: !!s, top: !!hit?.closest(".wf-col"), W: innerWidth };`);
       if (!r) v.push("the drawer didn't open again with the item sidebar open");
@@ -544,7 +545,7 @@ app.whenReady().then(async () => {
         if (docked && g.s.x < g.col.r.r - 1) v.push("the grid runs under the column");
         await shot(`size-${w}x${h}`);
         // the item sidebar open too
-        await page(`document.querySelector(".scroll .card .thumb-wrap")?.click(); await m.sleep(650);`);
+        await page(`document.querySelector(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(650);`);
         g = await geo();
         const side = await page(`const p = document.querySelector(".side-panel:not(.closing)"); return p ? m.rect(p) : null;`);
         if (side && W >= 900) {
@@ -668,7 +669,7 @@ app.whenReady().then(async () => {
         const g0 = await geo();
         await page(`document.querySelector("[data-wf-open]").click(); await m.sleep(700);`);
         if (!g0 || g0.ml > 1) return [`folding the column left the grid ${g0 ? `a ${g0.ml} px margin` : "empty"} — proved nothing`];
-        await page(`document.querySelector(".scroll .card .thumb-wrap")?.click(); await m.sleep(800);`);
+        await page(`document.querySelector(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(800);`);
         const gBoth = await geo();
         await page(`document.querySelector(".side-panel [data-side-close]")?.click(); await m.sleep(600);`);
         console.log(`        no panel ${show(g0)}; filter column ${show(gCol)}; column + item sidebar ${show(gBoth)}`);
