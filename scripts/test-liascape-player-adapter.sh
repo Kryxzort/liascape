@@ -384,25 +384,38 @@ g55=$(dB 55); g20=$(dB 20)
 post /volume '{"delta":5}' >/dev/null; waitfor $WAIT cur_near gain.user "$g55" && ok "/volume +5 → 55%" || bad "volume+5 → $(cur gain.user)"
 post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20" && ok "/preview volume 20 → that item's source" || bad "preview → $(cur gain.user)"
 
-echo "== normalization: an out-of-range target in settings.json is clamped; an af mpv can't build plays without it, never silent"
-# TODO "A rejected `af` silences the video": a target of 0 LUFS builds a loudnorm ffmpeg refuses
-# (I takes −70…−5), and mpv would play the video with NO audio. The backend clamps a stored target; the player survives any
-# af mpv can't build (falls back to its chain without it, re-selects the audio track, reports `source.rejected`).
+echo "== normalization: a target of 0 plays at its fixed gain; one below −70 is clamped; an af mpv can't build plays without it, never silent"
+# A video plays at ONE fixed gain, `lavfi=[volume=<g>dB]`, g = min(target − I, −1 − TP), the target clamped to −70…0
+# (LibraryService.LoudnormAf; never ffmpeg's loudnorm at playback: it falls back to a dynamic rider — docs/decisions.md).
+# A target of 0, written straight into the file (the UI offers −70…−5), is valid for that gain; loudnorm refused it and
+# mpv then played the video with no audio at all. The player survives any af mpv can't build (falls back to its chain
+# without it, re-selects the audio track, reports `source.rejected`).
 sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }
 src_probe() { ctl probe '{"name":"sources"}' | jq -c --arg id "$1" '.sources[] | select(.id==$id) | {ao: .mpv_current_ao, refused: .af_refused}'; }
-af_has() { cur af | grep -q -- "$1"; }
 refused_seen() { ctl logs '{"kind_prefix":"source.rejected","limit":1000}' | jq -e --arg id "$1" '[.events[] | select(.id==$id and .prop=="af")] | length >= 1' >/dev/null; }
 ao_up() { src_probe "$1" | jq -e '.ao == "null"' >/dev/null; }
-sf_raw '.NormalizeAudio = true | .NormalizeTargetLufs = 0'   # written straight into the file (the UI can't send 0 any more)
+# the fixed gain (dB) an item's af carries, empty when it isn't one
+af_gain() { sed -nE 's/^lavfi=\[volume=(-?[0-9.]+)dB\]$/\1/p' <<<"$1"; }
+# the gain LoudnormAf gives library item $1 at target $2, from its measured loudness in the index (empty: unmeasured)
+want_gain() { jq -r --arg k "$(basename "$(dirname "$1")")" --argjson t "$2" \
+  '.[$k] | select(.loudnessI != null) | [($t - .loudnessI), (if .loudnessTP != null then -1 - .loudnessTP else infinite end)] | min' \
+  "$(dirname "$(dirname "$1")")/index.json" 2>/dev/null; }
+gain_at() { local g w; g=$(af_gain "$(cur af)"); w=$(want_gain "$NC" "$1"); [ -n "$g" ] && [ -n "$w" ] && near "$g" "$w" 0.011; }
+sf_raw '.NormalizeAudio = true | .NormalizeTargetLufs = 0'
 NC=$(lib_import "$C" "norm cee")   # a library item: its loudness is measured and stored on first play
 post /apply "{\"path\":\"$NC\"}" >/dev/null
 waitfor $WAIT shows "$NC" || bad "/apply norm cee → cur $(cur path)"
-# its loudness is measured on first need; once it lands the backend re-applies: its af becomes a loudnorm
-waitfor 30000 af_has loudnorm && af_has 'I=-5:' && ok "target 0 in settings.json → loudnorm clamped to I=-5 ($(cur af | cut -c1-40)…)" \
-  || bad "target 0: its af = $(cur af)"
+# its loudness is measured on first need; once it lands the backend re-applies: its af becomes the fixed gain
+waitfor 30000 gain_at 0 && ok "target 0 in settings.json → its fixed gain at 0 LUFS ($(cur af), want $(want_gain "$NC" 0) dB)" \
+  || bad "target 0: its af = $(cur af), want the gain at 0 LUFS: $(want_gain "$NC" 0) dB"
 SIDC=$(srcIdForPath "$NC")
 waitfor $WAIT ao_up "$SIDC" && src_probe "$SIDC" | jq -e '.refused == null' >/dev/null && ok "…mpv builds it: audio output up ($(src_probe "$SIDC"))" \
-  || bad "clamped loudnorm: $(src_probe "$SIDC")"
+  || bad "target 0 gain: $(src_probe "$SIDC")"
+# below −70 (the settings file takes down to −100): the gain at −70, never at the stored target. The target − I term is
+# the smaller one this low, so the two can't come out the same through the peak cap.
+setting '.NormalizeTargetLufs = -90'
+waitfor $WAIT gain_at -70 && ! gain_at -90 && ok "target −90 → its fixed gain clamped to −70 LUFS ($(cur af))" \
+  || bad "target −90: its af = $(cur af), want the gain at −70 LUFS: $(want_gain "$NC" -70) dB"
 # any af mpv can't build, set on the live source: refused (source.rejected, the backend's log), audio output still up.
 # (The backend's next settings pass may put its own af back meanwhile — that clears `af_refused`; the event stays.)
 ctl set "{\"path\":\"$SIDC.af\",\"value\":\"loudnorm=I=0:TP=-1.5:LRA=11\"}" >/dev/null
@@ -1114,13 +1127,18 @@ code=$(sp_set "{\"path\":\"$S1\",\"reset\":true}")
   && ok "reset all → no sceneProps in the index, clock back to true live" || bad "reset all: HTTP $code, index $(idx_sp), scene_props $(live_sp "$SID3")"
 stop_now
 
-# a WebSocket client of the backend's /events (one text message per line) → $1; its pid in $WSP
+# a WebSocket client of the backend's /events (one text message per line) → $1; its pid in $WSP. It upgrades the way the
+# UI does, or the API guard answers 403/401 (api.md § Security): Host = 127.0.0.1:<port> (any other Host is refused:
+# DNS rebinding) and the token as ?token= (a browser's WebSocket can't set a header), read from serve.token when it
+# connects (a restarted backend may have written a new one).
 ws_listen() {
 python3 - "${U##*:}" > "$1" 2>&1 <<'PY' & WSP=$!
 import socket, sys, base64, os
-s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
-s.send(("GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % base64.b64encode(os.urandom(16)).decode()).encode())
+port = int(sys.argv[1])
+token = open(os.path.join(os.environ["XDG_CONFIG_HOME"], "liascape", "serve.token")).read().strip()
+s = socket.create_connection(("127.0.0.1", port))
+s.send(("GET /events?token=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (token, port, base64.b64encode(os.urandom(16)).decode())).encode())
 buf = b""
 def need(n):
     global buf
@@ -1559,7 +1577,9 @@ waitfor 12000 eval '[ -n "$(ctl logs "{\"kind_prefix\":\"transition.scheduled\",
 qa_src=$(ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --argjson n "$nb0" --arg p "$QA" '[.events[$n:][] | select(.path==$p)][0].to // empty')
 waitfor $WAIT eval 'near "$(ctl get "{\"path\":\"$qa_src.gain.user\"}" | jq -r .value)" "$(dB 60)" 0.01' && ok "…and its next B is created with it ($qa_src gain.user $(ctl get "{\"path\":\"$qa_src.gain.user\"}" | jq -r .value))" || bad "next B of qa ($qa_src): gain.user $(ctl get "{\"path\":\"$qa_src.gain.user\"}" 2>&1 | head -c 200)"
 setting '.NormalizeAudio = true'
-waitfor 30000 eval 'item_props "$QA" | jq -e "(.af // \"\") | test(\"loudnorm\")" >/dev/null' && ok "normalization on → a measured item's own af (loudnorm) in its props" || bad "no loudnorm af in qa's props: $(item_props "$QA")"
+# its own fixed gain at the target (want_gain: the normalization section's)
+qa_gain_ok() { local g w; g=$(af_gain "$(item_props "$QA" | jq -r '.af // ""')"); w=$(want_gain "$QA" "$(jq -r '.NormalizeTargetLufs // -14' "$XDG_CONFIG_HOME/liascape/settings.json")"); [ -n "$g" ] && [ -n "$w" ] && near "$g" "$w" 0.011; }
+waitfor 30000 qa_gain_ok && ok "normalization on → a measured item's own af (its fixed gain $(item_props "$QA" | jq -r .af)) in its props" || bad "qa's props lack its own gain af (want $(want_gain "$QA" "$(jq -r '.NormalizeTargetLufs // -14' "$XDG_CONFIG_HOME/liascape/settings.json")") dB): $(item_props "$QA")"
 setting '.NormalizeAudio = false'
 waitfor $WAIT eval '[ "$(item_props "$QA" | jq -r ".af // \"none\"")" = none ]' && ok "normalization off → its af gone (= the defaults')" || bad "qa af after off: $(item_props "$QA" | jq -c .af)"
 post /library/volume "{\"path\":\"$QA\",\"intValue\":null}" >/dev/null; post /library/volume "{\"path\":\"$QB\",\"intValue\":null}" >/dev/null
@@ -1767,9 +1787,11 @@ post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >
 armed_only
 python3 - "${U##*:}" > "$T/ws.log" 2>&1 <<'PY' & WSP=$!
 import socket, sys, time, base64, os
-s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
-s.send(("GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % base64.b64encode(os.urandom(16)).decode()).encode())
+port = int(sys.argv[1])   # the upgrade as ws_listen's (Host with the port, the token): else the guard refuses it
+token = open(os.path.join(os.environ["XDG_CONFIG_HOME"], "liascape", "serve.token")).read().strip()
+s = socket.create_connection(("127.0.0.1", port))
+s.send(("GET /events?token=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (token, port, base64.b64encode(os.urandom(16)).decode())).encode())
 print(s.recv(256).split(b"\r\n")[0].decode(), flush=True)
 time.sleep(120)
 PY

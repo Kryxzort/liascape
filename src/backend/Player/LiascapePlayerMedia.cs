@@ -1241,7 +1241,7 @@ public static class LiascapePlayerMedia
     // OUTPUT per source (`Desired` — the same computation `SourceProps` gives a NEW source):
     //   gain.user = VolumeDb(transient item ?? its override ?? transient global ?? Volume)
     //   speed     = clamp(transient item ?? its override ?? transient global ?? Speed, 0.1, 4)
-    //   af        = its OWN item's loudnorm at the target ("" off / NoAudio / unmeasured — kicks a measure)
+    //   af        = its OWN item's fixed normalization gain at the target (LoudnormAf; "" off / NoAudio / unmeasured — kicks a measure)
     //   gain.normalize (scenes only) = SceneNormalizeDb(its learned loudness, the target) — 0 off / not
     //               learned yet — for a NEW source; a live one keeps its pin (NormalizePin: set once per play —
     //               the window landing, the user's normalization settings, a property commit's new configuration);

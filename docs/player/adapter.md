@@ -88,7 +88,7 @@ The semantics are the rule's; the player's `recipes/program/` runs them (`docs/p
 ## Targeting (`ResolveNow`)
 
 Per live source: `gain.user` = VolumeDb(transient item ?? override ?? transient global ?? `Volume`), `speed` =
-clamp(the same chain, 0.1, 4), `af` = its own item's loudnorm ("" off / `NoAudio` / unmeasured, which kicks a
+clamp(the same chain, 0.1, 4), `af` = its own item's fixed gain (`LoudnormAf`; "" off / `NoAudio` / unmeasured, which kicks a
 measure), a scene's `gain.normalize`, `scene_props`, `loudness_key`, the globals (`no_audio`, `hwdec`, `fps_cap`,
 `cache`, `demuxer_*`), `gain.mute` = −96 when `PlayerHelper.IsMuted`; plus `lay:*:main.fit` from `VideoScale`.
 Numbers diff within 1e-4; a cached pass diffs against the last read plus every successful `set` since.
