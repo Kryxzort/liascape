@@ -11,6 +11,14 @@
 //                        "Playing now" pill — and a Looping chip only while loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
 //                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; YouTube muted (stubbed)
+//   preview:volume       the Video preview's own volume slider beside the mute chip: opens muted (slider 0); unmute plays at the
+//                        remembered level (default 50); the slider sets the <video>'s volume and the saved level; 0 shows the
+//                        muted glyph and unmuting brings the last level back; the wheel steps it (the sidebar doesn't scroll);
+//                        Tab from the chip reaches it, arrows / Home step it (the grid stays); kept across items and a reload;
+//                        never the global / the item's volume, nothing applied
+//   look:previewVolume   the slider's pill slides + fades out from under the chip on hover (per frame), instant with motion off,
+//                        no pointer while hidden, inside the picture, theme text + accent fill; no chip glow under no-glow; a dark
+//                        fill under bg-live. Screenshots side-pvol-*.png
 //   look:strip:<w>x<h>   the preview switch is the segmented control's strip fused to the picture: 0 px gap, the same left /
 //                        right edges, the unit as wide as the content (full width at 16:9), rounded strip top + picture bottom,
 //                        shorter than the old pills; the highlight glides (per frame) and lands centred, jumps with motion off;
@@ -588,8 +596,10 @@ app.whenReady().then(async () => {
           const ym = await page(`const s = m.side(), f = s.querySelector("iframe"); if (!f) return null;
             const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
             const out = { src: f.src };
-            say({ muted: false, volume: 40 }); await m.sleep(50);
-            out.saved = { muted: localStorage.getItem("liascape_yt_muted"), volume: localStorage.getItem("liascape_yt_volume") };
+            // its volume is the previews' shared level (sidePreview.ts): the player first answers at that level, then moves
+            const P = JSON.parse(localStorage.getItem("liascape.previewVolume") ?? "50");
+            say({ muted: false, volume: P }); await m.sleep(50); say({ muted: false, volume: 40 }); await m.sleep(50);
+            out.saved = { muted: localStorage.getItem("liascape_yt_muted"), volume: localStorage.getItem("liascape.previewVolume") };
             // a message from anywhere else never counts
             window.dispatchEvent(new MessageEvent("message", { origin: "https://evil.example", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info: { muted: true } }) }));
             await m.sleep(50); out.foreign = localStorage.getItem("liascape_yt_muted");
@@ -611,9 +621,9 @@ app.whenReady().then(async () => {
           await pick("image"); await pick("youtube");
           const y2 = await page(`const f = m.side().querySelector("iframe"); if (!f) return null;
             const say = (info) => window.dispatchEvent(new MessageEvent("message", { origin: "https://www.youtube.com", source: f.contentWindow, data: JSON.stringify({ event: "infoDelivery", info }) }));
-            const out = { src: f.src }; say({ muted: false, volume: 100 }); await m.sleep(50); out.afterDefault = localStorage.getItem("liascape_yt_volume");
-            say({ muted: false, volume: 40 }); await m.sleep(50); say({ muted: false, volume: 55 }); await m.sleep(50); out.afterMove = localStorage.getItem("liascape_yt_volume");
-            localStorage.removeItem("liascape_yt_muted"); localStorage.removeItem("liascape_yt_volume"); return out;`);
+            const out = { src: f.src }; say({ muted: false, volume: 100 }); await m.sleep(50); out.afterDefault = localStorage.getItem("liascape.previewVolume");
+            say({ muted: false, volume: 40 }); await m.sleep(50); say({ muted: false, volume: 55 }); await m.sleep(50); out.afterMove = localStorage.getItem("liascape.previewVolume");
+            for (const k of ["liascape_yt_muted", "liascape_yt_volume", "liascape.previewVolume", "liascape.previewVolumeLast"]) localStorage.removeItem(k); return out;`);
           console.log(`        next trailer: ${JSON.stringify(y2)}`);
           if (y2) {
             if (!/[?&]mute=0/.test(y2.src)) v.push(`the next trailer didn't open unmuted (${y2.src})`);
@@ -628,6 +638,159 @@ app.whenReady().then(async () => {
         fs.writeFileSync(idx, idx0);
         win.webContents.session.webRequest.onBeforeRequest(null);
         await page(`await m.closeAll();`); await loadUi();
+      }
+      return v;
+    });
+
+    // the Video preview's own volume (components/SidePanel.tsx PreviewVolume, sidePreview.ts previewVolume): a slider beside
+    // the mute chip; it sets the <video>'s volume and nothing else (not the global volume, not the item's, not the wallpaper);
+    // remembered across items and a reload; mute and level compose; wheel and keys drive it. (The stack's audio is private.)
+    const PV_KEYS = `["liascape.previewVolume", "liascape.previewVolumeLast", "liascape_yt_volume"]`;
+    const openVideo = async (t) => page(`await m.closeAll(); await m.openSide(${JSON.stringify(t)}); await m.sleep(300);
+      const b = m.side().querySelector('[data-preview-src="video"]'); if (b && b.getAttribute("aria-checked") !== "true") b.click();
+      for (let i = 0; i < 60 && !m.side().querySelector("[data-side-mute]"); i++) await m.sleep(50); await m.sleep(200); return !!m.side().querySelector("[data-side-mute]");`);
+    const VS = `const s = m.side(), vd = s.querySelector('video[data-preview-layer="video"]'), b = s.querySelector("[data-side-mute]"), rg = s.querySelector("[data-side-vol-range]");
+      const st = () => ({ muted: vd?.muted, vol: vd ? Math.round(vd.volume * 100) : null, pressed: s.querySelector("[data-side-mute]")?.getAttribute("aria-pressed"),
+        x: !!s.querySelector("[data-side-mute] svg.lucide-volume-x"), slider: rg ? +rg.value : null, saved: localStorage.getItem("liascape.previewVolume") });`;
+    await cell("preview:volume", async () => {
+      const v = [], J = JSON.stringify;
+      await page(`for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await loadUi();
+      const set0 = await getSettings(), item0 = await libItem(K[0]), cur0 = await current();
+      if (!await openVideo("k1")) return ["k1: the Video preview has no mute chip (proved nothing)"];
+      const r = await page(`${VS} if (!rg) return { none: true, first: st() };
+        const out = { first: st() };
+        b.click(); await m.sleep(150); out.unmuted = st();
+        m.setValue(rg, 30); await m.sleep(150); out.at30 = st();
+        m.setValue(rg, 0); await m.sleep(150); out.at0 = st();
+        s.querySelector("[data-side-mute]").click(); await m.sleep(150); out.restored = st();
+        s.querySelector("[data-side-mute]").click(); await m.sleep(150); out.muted = st();
+        s.querySelector("[data-side-mute]").click(); await m.sleep(150);
+        const wheel = (el, dy) => { const e = new WheelEvent("wheel", { deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true }); el.dispatchEvent(e); return e.defaultPrevented; };
+        const sc = s.querySelector(".side-scroll"), top0 = sc.scrollTop;
+        out.wheelPrevented = wheel(s.querySelector("[data-side-mute]"), -120); await m.sleep(120); out.wheelUp = st();
+        wheel(s.querySelector("[data-side-vol-range]"), 120); wheel(s.querySelector("[data-side-vol-range]"), 120); await m.sleep(120); out.wheelDown = st();
+        out.scrolled = sc.scrollTop !== top0;
+        // muted, a wheel up starts from the 0 it shows and unmutes
+        s.querySelector("[data-side-mute]").click(); await m.sleep(120); wheel(s.querySelector("[data-side-mute]"), -120); await m.sleep(120); out.wheelFromMuted = st();
+        m.setValue(rg, 40); await m.sleep(150); out.at40 = st();
+        return out;`);
+      console.log(`        ${J(r)}`);
+      if (r.none) return [`no volume slider beside the mute chip (${J(r.first)})`];
+      if (!r.first.muted || r.first.pressed !== "false" || !r.first.x || r.first.slider !== 0) v.push(`opens muted, the slider at 0, the muted glyph: ${J(r.first)}`);
+      if (r.unmuted.muted || r.unmuted.vol !== 50 || r.unmuted.slider !== 50 || r.unmuted.x) v.push(`unmute: plays at the default 50 with the sound glyph (${J(r.unmuted)})`);
+      if (r.at30.vol !== 30 || r.at30.muted || r.at30.saved !== "30") v.push(`slider → 30: the video's volume / the saved level (${J(r.at30)})`);
+      if (!r.at0.x || r.at0.pressed !== "false" || !r.at0.muted) v.push(`slider → 0: not shown / played as muted (${J(r.at0)})`);
+      if (r.restored.vol !== 30 || r.restored.muted || r.restored.slider !== 30 || r.restored.x) v.push(`unmute after dragging to 0: the last level 30 isn't back (${J(r.restored)})`);
+      if (!r.muted.muted || r.muted.slider !== 0 || r.muted.saved !== "30" || !r.muted.x) v.push(`mute: silent, slider 0, the level kept at 30 (${J(r.muted)})`);
+      if (!r.wheelPrevented || r.scrolled) v.push(`the wheel over the control scrolls the sidebar (prevented ${r.wheelPrevented}, scrolled ${r.scrolled})`);
+      if (r.wheelUp.slider !== 35 || r.wheelUp.vol !== 35) v.push(`a wheel notch up: 30 → ${r.wheelUp.slider} (want 35)`);
+      if (r.wheelDown.slider !== 25) v.push(`two notches down: 35 → ${r.wheelDown.slider} (want 25)`);
+      if (r.wheelFromMuted.muted || r.wheelFromMuted.slider !== 5) v.push(`muted + a notch up: ${J(r.wheelFromMuted)} (want unmuted at 5)`);
+      if (r.at40.vol !== 40) v.push(`slider → 40: video at ${r.at40.vol}`);
+      // keyboard: Tab from the chip lands on the slider (shown), arrows step it, the grid's arrows don't fire
+      const box = await page(`const b = m.side().querySelector("[data-side-mute]"); b.focus(); return m.rect(b);`);
+      const key = async (k) => { send({ type: "keyDown", keyCode: k }); await sleep(30); send({ type: "keyUp", keyCode: k }); await sleep(120); };
+      await key("Tab"); await sleep(400);
+      const kb0 = await page(`const a = document.activeElement, sl = m.side().querySelector(".side-vol-slide");
+        return { onRange: a?.matches?.("[data-side-vol-range]"), op: +getComputedStyle(sl).opacity, title: m.sideTitle() };`);
+      await key("Right"); await key("Right"); await key("Left"); await key("Right");
+      const kb = await page(`${VS} return { ...st(), title: m.sideTitle(), focused: document.querySelector(".card.focused .lib-title")?.dataset.title ?? null };`);
+      await key("Home");
+      const kbH = await page(`${VS} return st();`);
+      await key("End"); await sleep(50);
+      await page(`${VS} m.setValue(rg, 40);`); await sleep(150);
+      console.log(`        keys: ${J({ box, kb0, kb, kbH })}`);
+      if (!kb0.onRange) v.push("Tab from the mute chip doesn't reach the volume slider");
+      if (!(kb0.op > 0.95)) v.push(`the slider has keyboard focus but isn't shown (opacity ${kb0.op})`);
+      if (kb.slider !== 42 || kb.vol !== 42) v.push(`arrows on the slider: 40 → ${kb.slider} (want 42)`);
+      if (kb.title !== "k1" || kb.focused !== "k1") v.push(`the arrows moved the grid's focus (sidebar ${kb.title}, focused card ${kb.focused})`);
+      if (kbH.slider !== 0 || !kbH.x) v.push(`Home: ${J(kbH)} (want 0, the muted glyph)`);
+      // remembered across items and a reload; never the global / the item's volume; nothing applied
+      if (!await openVideo("k2")) v.push("k2: no Video preview");
+      else {
+        const k2 = await page(`${VS} const out = { first: st() }; b.click(); await m.sleep(150); out.unmuted = st(); b.click(); return out;`);
+        if (k2.first.slider !== 0 || !k2.first.muted) v.push(`k2 doesn't open muted (${J(k2.first)})`);
+        if (k2.unmuted.vol !== 40 || k2.unmuted.slider !== 40) v.push(`k2 unmuted: ${J(k2.unmuted)} (want the remembered 40)`);
+      }
+      await page(`await m.closeAll();`); await loadUi();
+      if (!await openVideo("k1")) v.push("after a reload: no Video preview");
+      else {
+        const rl = await page(`${VS} b.click(); await m.sleep(150); const o = st(); s.querySelector("[data-side-mute]").click(); return o;`);
+        if (rl.vol !== 40 || rl.slider !== 40) v.push(`after a reload: ${J(rl)} (want the remembered 40)`);
+      }
+      const set1 = await getSettings(), item1 = await libItem(K[0]);
+      if (set1.volume !== set0.volume || set1.noAudio !== set0.noAudio) v.push(`the global volume changed (${set0.volume}/${set0.noAudio} → ${set1.volume}/${set1.noAudio})`);
+      if (J(item1?.volume ?? null) !== J(item0?.volume ?? null)) v.push(`k1's own volume changed (${item0?.volume} → ${item1?.volume})`);
+      if ((await current()) !== cur0) v.push("the volume control applied a wallpaper");
+      await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`);
+      return v;
+    });
+
+    // its look: the pill slides + fades out from under the chip on hover (per frame, transform + opacity), instant with motion
+    // off; hidden it takes no pointer; it stays inside the picture; the chip's glow goes under no-glow; the pill keeps its own
+    // dark fill under bg-live. Screenshots side-pvol-*.png.
+    await cell("look:previewVolume", async () => {
+      const v = [], J = JSON.stringify;
+      const reveal = async () => {
+        if (!await openVideo("k1")) return null;
+        const b = await page(`const b = m.side().querySelector("[data-side-mute]"); return b ? m.rect(b) : null;`);
+        if (!b) return { none: true };
+        await mv(5, 5, 300);
+        const hid = await page(`const sl = m.side().querySelector(".side-vol-slide"); if (!sl) return null; const c = getComputedStyle(sl); return { op: +c.opacity, pe: c.pointerEvents };`);
+        if (!hid) return { none: true };
+        const samp = page(`const sl = m.side().querySelector(".side-vol-slide"); const out = []; const t0 = performance.now();
+          await new Promise((res) => { const f = () => { const c = getComputedStyle(sl); out.push({ op: +(+c.opacity).toFixed(3), tx: new DOMMatrixReadOnly(c.transform === "none" ? undefined : c.transform).m41 });
+            if (performance.now() - t0 < 700) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); }); return out;`);
+        await sleep(30); await mv(b.x + b.w / 2, b.y + b.h / 2);
+        const frames = await samp;
+        const geo = await page(`const s = m.side(), sl = s.querySelector(".side-vol-slide"), md = s.querySelector("[data-side-media]"), rg = s.querySelector("[data-side-vol-range]");
+          const a = m.rect(sl), p = m.rect(md), c = getComputedStyle(sl), cb = getComputedStyle(s.querySelector("[data-side-mute]"));
+          return { sl: a, md: p, inside: a.x >= p.x - 0.5 && a.x + a.w <= p.x + p.w + 0.5 && a.y >= p.y - 0.5 && a.y + a.h <= p.y + p.h + 0.5,
+            bg: c.backgroundColor, color: c.color, text: (() => { const d = document.createElement("div"); d.style.color = "var(--text)"; document.body.appendChild(d); const x = getComputedStyle(d).color; d.remove(); return x; })(),
+            fill: rg?.style.getPropertyValue("--fill"), chipShadow: cb.boxShadow, pe: c.pointerEvents };`);
+        return { hid, frames, geo, b };
+      };
+      try {
+        await loadUi(); await setMotion(true);
+        const on = await reveal();
+        if (!on) return ["k1: no Video preview (proved nothing)"];
+        if (on.none) return ["no volume control beside the mute chip"];
+        const mid = on.frames.filter((f) => f.op > 0.02 && f.op < 0.98).length, last = on.frames[on.frames.length - 1];
+        console.log(`        motion on: hidden ${J(on.hid)}, ${on.frames.length} frames, ${mid} between, last ${J(last)}; ${J(on.geo)}`);
+        if (!(on.hid.op === 0 && on.hid.pe === "none")) v.push(`not hovered: the slider shows or takes the pointer (${J(on.hid)})`);
+        if (mid < 2) v.push(`motion on: the slider popped in (${mid} frames between)`);
+        if (!(last.op > 0.98) || Math.abs(last.tx) > 0.5) v.push(`hovered: the slider isn't fully shown in place (${J(last)})`);
+        if (!on.geo.inside) v.push(`the slider leaves the picture (${J(on.geo.sl)} vs ${J(on.geo.md)})`);
+        if (on.geo.color !== on.geo.text) v.push(`the slider's text isn't the theme's text colour (${on.geo.color} vs ${on.geo.text})`);
+        if (!on.geo.fill) v.push("the slider's track has no accent fill (--fill)");
+        if (!on.geo.chipShadow || on.geo.chipShadow === "none") v.push("glows on: the hovered chip doesn't glow");
+        await shot("pvol-hover");
+        await page(`${VS} b.click(); await m.sleep(250); m.setValue(rg, 65); await m.sleep(200);`);
+        await shot("pvol-hover-unmuted");
+        // no-glow + bg-live while hovered
+        const ng = await page(`const root = document.documentElement, s = m.side(); root.classList.add("no-glow"); await m.sleep(300);
+          const out = { chip: getComputedStyle(s.querySelector("[data-side-mute]")).boxShadow }; root.classList.remove("no-glow");
+          const had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(50); out.bg = getComputedStyle(s.querySelector(".side-vol-slide")).backgroundColor; if (!had) root.classList.remove("bg-live");
+          return out;`);
+        if (ng.chip !== "none") v.push(`no-glow: the hovered chip still glows (${ng.chip})`);
+        const a = /\/\s*([\d.]+)\s*\)/.exec(ng.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(ng.bg)?.[1] ?? "1";
+        if (+a < 0.5) v.push(`bg-live: the slider's pill has no dark fill of its own (${ng.bg})`);
+        await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("pvol-noglow"); await page(`document.documentElement.classList.remove("no-glow");`);
+        // a mid-reveal frame for the eye
+        await mv(5, 5, 600); const bb = on.b; await mv(bb.x + bb.w / 2, bb.y + bb.h / 2); await sleep(70); await shot("pvol-midreveal"); await sleep(600);
+        await page(`${VS} b.click(); await m.sleep(250);`); await shot("pvol-muted");
+        await mv(5, 5, 400); await shot("pvol-rest");
+        // motion off: it shows at once
+        await setMotion(false); await mv(5, 5);
+        const off = await reveal();
+        if (!off || off.none) v.push("motion off: no control");
+        else {
+          const mid0 = off.frames.filter((f) => f.op > 0.02 && f.op < 0.98).length, tx0 = off.frames.filter((f) => Math.abs(f.tx) > 0.5 && f.op > 0.02).length;
+          console.log(`        motion off: ${mid0} frames between (opacity), ${tx0} (moving)`);
+          if (mid0 || tx0) v.push(`motion off: the slider still animates (${mid0} fading, ${tx0} moving frames)`);
+        }
+      } finally {
+        await mv(5, 5); await page(`await m.closeAll(); for (const k of ${PV_KEYS}) localStorage.removeItem(k);`); await setMotion(true);
       }
       return v;
     });

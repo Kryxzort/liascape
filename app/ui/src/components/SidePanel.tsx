@@ -4,8 +4,9 @@ import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX 
 import { captureSource, sourceEl, useMotion } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
-import { useStore, type PreviewKind } from "../store";
-import { type usePreview } from "./sidePreview";
+import { type PreviewKind } from "../store";
+import { useStableFn } from "../hooks/useStableFn";
+import { type usePreview, usePreviewVolume, setPreviewVolume, rangeFill } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
 // item sidebar"; docs/superpowers/specs/2026-11-10-we-sidebar-design.md). One shell for the Library and
@@ -155,11 +156,13 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
   const [vidMounted, setVidMounted] = useState(false);
   if (mode === "video" && video && !vidMounted) setVidMounted(true);
   const vidRef = useRef<HTMLVideoElement>(null);
-  // the Video preview's sound (a mute / unmute button): muted by default — the desktop's
-  // wallpaper owns the sound — unmuted at the app's global volume; a new item (a remount) starts muted again
+  // the Video preview's sound: muted by default — the desktop's wallpaper owns the sound — and a new item (a remount) starts
+  // muted again; unmuted it plays at the previews' own remembered level (PreviewVolume), never the wallpaper's or the global
+  // volume. A level of 0 is silent too.
   const [vidMuted, setVidMuted] = useState(true);
-  const appVolume = useStore((s) => Number(s.settings?.volume ?? 100));
-  useEffect(() => { const v = vidRef.current; if (v) v.volume = Math.max(0, Math.min(1, (Number.isFinite(appVolume) ? appVolume : 100) / 100)); }, [appVolume, vidMounted]);
+  const { level } = usePreviewVolume();
+  const silent = vidMuted || level === 0;
+  useEffect(() => { const v = vidRef.current; if (v) v.volume = level / 100; }, [level, vidMounted]);
   useEffect(() => { const v = vidRef.current; if (!v) return; if (mode === "video") v.play().catch(() => {}); else v.pause(); }, [mode, vidMounted]);
   const a = aspect ?? 16 / 9;
   // the frame takes the SHOWN preview's own shape (a 16:9 video cover-cropped into a square picture's frame loses its
@@ -186,22 +189,79 @@ export function SideMedia({ id, cardId, base, full, gif, video, youtube, preview
           {full && <img className={`sm-full${fullOn === full ? " on" : ""}`} src={full} alt=""
             onLoad={(e) => { known(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight); setFullOn(full); }} />}
           {gif && <img className={`sm-anim${mode === "gif" ? " on" : ""}`} src={gif} alt="" data-preview-layer="gif" />}
-          {video && vidMounted && <video ref={vidRef} className={`sm-anim${mode === "video" && vidOn === video ? " on" : ""}`} src={video} muted={vidMuted} loop autoPlay playsInline
+          {video && vidMounted && <video ref={vidRef} className={`sm-anim${mode === "video" && vidOn === video ? " on" : ""}`} src={video} muted={silent} loop autoPlay playsInline
             data-preview-layer="video"
             onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth && v.videoHeight) setVidAspect(v.videoWidth / v.videoHeight);
               if (src.videoTime != null && v.duration) v.currentTime = src.videoTime % v.duration; }}
             onPlaying={() => setVidOn(video)} />}
           {yt && <YouTubeEmbed url={youtube} />}
           {/* above the click-to-play layer (z 3): a press here never applies the wallpaper */}
-          {mode === "video" && video && vidOn === video && (
-            <button className={`side-mute${vidMuted ? "" : " on"}`} data-side-mute aria-pressed={!vidMuted} aria-label={vidMuted ? "Unmute the preview" : "Mute the preview"}
-              onClick={(e) => { e.stopPropagation(); setVidMuted((m) => !m); }}>
-              {vidMuted ? <VolumeX size={16} className="ico-pop" /> : <Volume2 size={16} className="ico-pop" />}</button>
-          )}
+          {mode === "video" && video && vidOn === video && <PreviewVolume muted={vidMuted} setMuted={setVidMuted} />}
           {playable && (
             <button className="side-play" data-side-play aria-label={play.label} onClick={play.onPlay} />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The Video preview's sound: the mute chip in the picture's corner, and beside it — revealed while the chip or the control is
+// hovered, a slider in it is held, or the keyboard is in it — the previews' own volume slider, in a dark pill like the preview
+// strip's. Mute and level compose: the slider shows 0 while muted and moving it unmutes; dragged to 0 it shows the muted
+// glyph, and unmuting from there brings back the last audible level. Wheel over the chip or the slider steps the level
+// (≈ 5 per notch); Tab reaches the chip, then the slider (arrows / PageUp / PageDown / Home / End). Above the click-to-play
+// layer (z 3) and stopping its clicks: a press here never applies the wallpaper.
+// Guard: probe-sidebar preview:volume, preview:volumeLook.
+const WHEEL_PX_PER_STEP = 24;
+function PreviewVolume({ muted, setMuted }: { muted: boolean; setMuted: (m: boolean) => void }) {
+  const { level, last } = usePreviewVolume();
+  const silent = muted || level === 0;
+  const shown = silent ? 0 : level;
+  // several wheel events can land before React renders the last one's level: step from the level the last one asked for
+  const wheelAt = useRef({ v: 0, t: -Infinity });
+  // the glyph pops on a change the user made, never when the chip first shows
+  const [touched, setTouched] = useState(false);
+  const change = (v: number) => { setTouched(true); setPreviewVolume(v); if (v > 0) setMuted(false); };
+  const toggle = () => {
+    setTouched(true); wheelAt.current.t = -Infinity;
+    if (!silent) { setMuted(true); return; }
+    setMuted(false);
+    if (level === 0) setPreviewVolume(last);
+  };
+  const step = useStableFn((n: number) => {
+    const now = performance.now(), base = now - wheelAt.current.t < 150 ? wheelAt.current.v : shown;
+    const v = Math.max(0, Math.min(100, base + n));
+    wheelAt.current = { v, t: now };
+    if (v !== base) change(v);
+  });
+  // the wheel needs a non-passive listener (React's is passive) so the sidebar doesn't scroll under it
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    let acc = 0;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault(); e.stopPropagation();
+      acc -= e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+      const steps = Math.trunc(acc / WHEEL_PX_PER_STEP);
+      if (!steps) return;
+      acc -= steps * WHEEL_PX_PER_STEP;
+      step(steps);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [step]);
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  return (
+    <div ref={ref} className="side-vol" data-side-vol onClick={stop} onPointerDown={stop} onDoubleClick={stop}>
+      <button className={`side-mute${silent ? "" : " on"}`} data-side-mute aria-pressed={!silent} aria-label={silent ? "Unmute the preview" : "Mute the preview"}
+        onClick={toggle}>
+        {/* keyed by the state: the new glyph pops once on a change (icon motion: toggle) */}
+        <span className={`side-mute-ico${touched ? " ico-pop" : ""}`} key={silent ? "off" : "on"}>{silent ? <VolumeX size={16} /> : <Volume2 size={16} />}</span></button>
+      <div className="side-vol-slide">
+        <span className="side-vol-val" aria-hidden>{shown}</span>
+        <input type="range" min={0} max={100} step={1} value={shown} style={rangeFill(shown, 0, 100)} data-side-vol-range
+          aria-label="Preview volume" aria-valuetext={silent ? "muted" : `${shown}%`} onChange={(e) => change(+e.target.value)} />
       </div>
     </div>
   );

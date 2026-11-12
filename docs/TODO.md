@@ -20,8 +20,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        loads (Chromium's 6 connections per host). The general fix serves media from a second host (e.g.
        `localhost:<port>` for media, the API on `127.0.0.1:<port>`) so they never share connections — touches every
        media URL, the dev proxy and the Host checks.
-16. [ ] Sidebar preview volume: the item sidebar's video preview gets its own volume control (today only mute), themed
-       like the other sliders, remembered across items; it never touches the wallpaper's or the global volume.
 17. [ ] "Play video previews" without the cap of 4 (`AUTOPLAY_VIDEO_CAP`, `components/autoplay.ts`): every on-screen video
        preview plays while the toggle is on. Keep the on-screen / window-active gating; measure decode cost and idle
        frames with many cards (bench-live-ui at both profiles) and say what it costs in the setting's hint.

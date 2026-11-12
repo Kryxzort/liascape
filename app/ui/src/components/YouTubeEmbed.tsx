@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { previewVolume, setPreviewVolume } from "./sidePreview";
 
 // Shared between the Browse and the Library item sidebars (1:1 — the only fully-duplicate
 // bit). Overlays the thumbnail stage with a 16:9 YouTube player (the video's own aspect), centered. The picture's preview
@@ -10,17 +11,17 @@ import { useEffect, useRef, useState } from "react";
 // real end. `data-yt-loops` counts our restarts (the probe's hook).
 //
 // Its mute state and volume are REMEMBERED: muted by default — the desktop's wallpaper owns the sound — and after that whatever the player's own button was
-// last set to, across trailers and restarts (localStorage `liascape_yt_muted`). The player reports it through YouTube's
+// last set to, across trailers and restarts (localStorage `liascape_yt_muted`). Its volume is the sidebar previews' one
+// level (sidePreview.ts `previewVolume`, shared with the Video preview's slider): the player's own volume slider sets it.
+// The player reports both through YouTube's
 // embed messaging (`enablejsapi=1`, the channel its IFrame Player API uses): once the iframe loads we post `listening`,
 // and it answers with `infoDelivery` messages carrying `info.muted` whenever it changes. Only messages from THIS iframe
 // (`event.source`) and from youtube.com count. The next trailer opens with `mute=0|1`; the volume has no URL parameter, so
 // it's a `setVolume` command once the player answers — and the player's FIRST reports (its default 100, before that
 // command lands) are ignored until the saved level shows up in one (`applied`), or they'd overwrite it every time.
-// localStorage `liascape_yt_volume` (0–100; absent = the player's own default).
 const ytId = (u: string) => u.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/)?.[1] ?? null;
-const KEY = "liascape_yt_muted", VKEY = "liascape_yt_volume";
+const KEY = "liascape_yt_muted";
 const ytMutedPref = () => localStorage.getItem(KEY) !== "0";
-const ytVolumePref = (): number | null => { const v = Number(localStorage.getItem(VKEY)); return localStorage.getItem(VKEY) != null && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null; };
 const post = (w: Window | null | undefined, msg: object) => w?.postMessage(JSON.stringify(msg), "*");
 const YT_ORIGINS = new Set(["https://www.youtube.com", "https://www.youtube-nocookie.com"]);
 
@@ -28,9 +29,9 @@ export function YouTubeEmbed({ url }: { url: string }) {
   const id = ytId(url);
   const frame = useRef<HTMLIFrameElement>(null);
   const [muted] = useState(ytMutedPref); // read once per embed: the src must not change while it plays
-  const [volume] = useState(ytVolumePref);
+  const [volume] = useState(() => previewVolume().level); // read once per embed, like the mute
   useEffect(() => {
-    let applied = volume == null, tries = 0; // nothing saved → the player's own reports are the truth from the start
+    let applied = false, tries = 0;
     const onMsg = (e: MessageEvent) => {
       if (!YT_ORIGINS.has(e.origin) || e.source !== frame.current?.contentWindow) return;
       let d: unknown = e.data;
@@ -47,11 +48,11 @@ export function YouTubeEmbed({ url }: { url: string }) {
       if (!applied) {
         // the player is up: give it the saved volume, and trust its reports once they carry it
         // (it reports several times a second while playing: 10 tries, then its reports count anyway — never a loop)
-        if ((typeof info.volume === "number" && Math.round(info.volume) === Math.round(volume!)) || ++tries > 10) applied = true;
+        if ((typeof info.volume === "number" && Math.round(info.volume) === volume) || ++tries > 10) applied = true;
         else { post(frame.current?.contentWindow, { event: "command", func: "setVolume", args: [volume] }); return; }
       }
       if (typeof info.muted === "boolean") localStorage.setItem(KEY, info.muted ? "1" : "0");
-      if (typeof info.volume === "number") localStorage.setItem(VKEY, String(Math.round(info.volume)));
+      if (typeof info.volume === "number") setPreviewVolume(info.volume);
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);

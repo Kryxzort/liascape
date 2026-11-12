@@ -35,3 +35,32 @@ export function usePreview(side: "library" | "browse", a: PreviewAvail) {
   return { mode, options: options.length > 1 ? options : [], def, pick };
 }
 
+
+// ---- the sidebar previews' own sound level (SidePanel.tsx PreviewVolume, YouTubeEmbed.tsx): one 0–100 level for the video
+// preview and the YouTube trailer, remembered across items and restarts. A UI-only preference (localStorage, like the
+// trailer's mute) — never the wallpaper's own volume, the global one or anything the backend plays. `last` is the last
+// audible level: unmuting a preview dragged down to 0 brings it back. No saved level yet → the trailer's older saved level
+// (`liascape_yt_volume`), else half: a preview shouldn't blast the first time it's unmuted.
+const PV_KEY = "liascape.previewVolume", PV_LAST_KEY = "liascape.previewVolumeLast", PV_DEFAULT = 50;
+type PreviewVol = { level: number; last: number };
+const readNum = (k: string): number | null => {
+  try { const s = localStorage.getItem(k); const n = s == null ? NaN : Number(JSON.parse(s)); return Number.isFinite(n) ? Math.round(Math.max(0, Math.min(100, n))) : null; }
+  catch { return null; }
+};
+let pv: PreviewVol = (() => {
+  const level = readNum(PV_KEY) ?? readNum("liascape_yt_volume") ?? PV_DEFAULT;
+  const last = readNum(PV_LAST_KEY) || level || PV_DEFAULT;
+  return { level, last };
+})();
+const pvSubs = new Set<() => void>();
+export const previewVolume = () => pv;
+export function setPreviewVolume(v: number) {
+  const level = Math.round(Math.max(0, Math.min(100, Number.isFinite(v) ? v : 0)));
+  const last = level > 0 ? level : pv.last;
+  if (level === pv.level && last === pv.last) return;
+  pv = { level, last };
+  try { localStorage.setItem(PV_KEY, JSON.stringify(level)); localStorage.setItem(PV_LAST_KEY, JSON.stringify(last)); } catch { /* ignore */ }
+  for (const f of pvSubs) f();
+}
+const subscribePv = (cb: () => void) => { pvSubs.add(cb); return () => { pvSubs.delete(cb); }; };
+export const usePreviewVolume = () => useSyncExternalStore(subscribePv, previewVolume);

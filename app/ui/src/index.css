@@ -1101,13 +1101,30 @@ input[type=range]:focus-visible { outline: none; }
    the hover cue is the unit's lift + glow (`.side-stage.playable`, above); keyboard focus gets the accent edge */
 .side-play { position: absolute; inset: 0; z-index: 3; padding: 0; border: 0; border-radius: inherit; background: none; cursor: pointer; }
 .side-play:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* the Video preview's mute toggle: a round dark chip in the picture's corner, above the click-to-play layer; on = sound */
-.side-mute { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 32px; height: 32px; padding: 0; border-radius: 50%;
+/* the Video preview's sound (SidePanel.tsx PreviewVolume): the mute chip in the picture's corner, above the click-to-play
+   layer; on = sound. Beside it the volume slider, in a dark pill in the preview strip's language (its fill, its 11 px bold
+   numerals), that the chip sits at the end of. The pill slides out from under the chip and fades in (transform + opacity)
+   while the chip or the pill is hovered, its slider held, or the keyboard is in it; motion off → it just shows. Hidden it
+   takes no pointer (only the chip opens it). */
+.side-vol { position: absolute; right: 10px; bottom: 10px; z-index: 4; width: 32px; height: 32px; }
+.side-mute { position: relative; z-index: 1; width: 32px; height: 32px; padding: 0; border-radius: 50%;
   display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.18);
   transition: background .15s, color .15s, box-shadow .2s, border-color .15s; }
+.side-mute-ico { display: grid; place-items: center; }
 .side-mute:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .side-mute.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 :root.no-glow .side-mute:hover { box-shadow: none; }
+.side-vol-slide { position: absolute; right: 0; top: 0; height: 32px; display: flex; align-items: center; gap: 6px;
+  padding: 0 40px 0 11px; border-radius: 16px; color: var(--text);
+  background: color-mix(in srgb, var(--bg-crust) 78%, transparent); box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  opacity: 0; transform: translateX(14px); transform-origin: right center; pointer-events: none;
+  transition: opacity .16s ease-out, transform var(--spring-soft-dur) var(--spring-soft); }
+:is(.side-vol:hover, .side-vol:has(input:focus-visible, input:active), :root.kbd-nav .side-vol:has(:focus-visible)) .side-vol-slide { opacity: 1; transform: none; pointer-events: auto; }
+.side-vol-val { min-width: 2.2em; font-size: 11px; font-weight: 700; letter-spacing: .2px; text-align: right; font-variant-numeric: tabular-nums; }
+.side-panel .side-vol input[type=range] { flex: none; width: 84px; min-width: 0; max-width: none; height: 18px; }
+.side-panel .side-vol input[type=range]::-webkit-slider-runnable-track { height: 4px; }
+.side-panel .side-vol input[type=range]::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4px; }
+:root.no-motion .side-vol-slide { transition: none; }
 /* the preview switch (GIF / Video / YouTube / Picture): the segmented control's flat strip, fused to the picture's top edge
    (not an overlay, not tabs) — a little shorter than a pill row; its highlight is clipped to the strip's rounded top, and
    the unit's glow stands in for its own */
