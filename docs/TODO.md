@@ -21,6 +21,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
+24. [ ] The Workshop filter column on the Library and on Browse's "Wallpaper Engine (Local)" too (the owner: "cuz why
+       not"): the same column, chips and tri-state tags, filtering locally (tags, type, age rating… from each item's
+       project.json / the library index) with no backend Workshop query; the features a source can't know stay hidden.
 
 
 ## On a real desktop session (not hermetic)
