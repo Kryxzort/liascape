@@ -143,6 +143,35 @@ public static class WorkshopTags
         return (age, tags.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
+    public static bool IsResolution(string tag) => Resolve(tag).G == Resolution;
+    public static string? AgeOf(IEnumerable<string>? tags) => tags?.Select((t) => Resolve(t)).FirstOrDefault((x) => x.G == Age).Tag;
+
+    // A frame size (a video's, a scene's project size) → the Workshop resolution tag a user filtering the Library expects:
+    //   - the class by shape: Portrait (taller than wide), else by width ÷ height — Standard below 2.1 (16:9 = 1.78, 16:10,
+    //     4:3), Ultrawide below 2.9 (21:9 = 2.37–2.39), Dual below 4.4 (32:9 = 3.56), Triple above (48:9 = 5.33);
+    //   - within it, the listed size both sides are within 7 % of (so 4096 x 2160 DCI 4K is "3840 x 2160", 1920 x 1088 —
+    //     a codec's padded height — is "1920 x 1080"; 1920 x 1200 is 11 % off, "Other resolution");
+    //   - smaller than the class's smallest listed size on both sides → its "Standard Definition"; anything else → "Other
+    //     resolution".
+    // null for a size that isn't one (≤ 0).
+    public static string? ResolutionTagOf(int w, int h)
+    {
+        if (w <= 0 || h <= 0) return null;
+        const double Tol = 0.07;
+        bool portrait = h > w;
+        double r = (double)w / h;
+        string prefix = portrait ? "Portrait " : r < 2.1 ? "" : r < 2.9 ? "Ultrawide " : r < 4.4 ? "Dual " : "Triple ";
+        var sizes = Resolution.Tags.Where((t) => t.StartsWith(prefix, StringComparison.Ordinal) && (prefix != "" || char.IsAsciiDigit(t[0])))
+            .Select((t) => (Tag: t, Wh: t[prefix.Length..].Split(" x ")))
+            .Where((x) => x.Wh.Length == 2 && int.TryParse(x.Wh[0], out _) && int.TryParse(x.Wh[1], out _))
+            .Select((x) => (x.Tag, W: int.Parse(x.Wh[0]), H: int.Parse(x.Wh[1]))).ToList();
+        foreach (var s in sizes)
+            if (Math.Abs((double)w / s.W - 1) <= Tol && Math.Abs((double)h / s.H - 1) <= Tol) return s.Tag;
+        var least = sizes.MinBy((s) => s.W * s.H);
+        if (w < least.W * (1 - Tol) && h < least.H * (1 - Tol)) return prefix + "Standard Definition";
+        return "Other resolution";
+    }
+
     public static string Describe(Plan p) => p.Empty ? "(nothing can match)"
         : string.Join(" AND ", p.TagGroups.Select((g) => g.Length == 1 ? g[0] : "(" + string.Join(" OR ", g) + ")"))
           + (p.Excluded.Count > 0 ? " NOT " + string.Join(",", p.Excluded) : "");

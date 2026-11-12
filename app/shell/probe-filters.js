@@ -54,8 +54,8 @@
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
-//                     what the items know: Age / Type / Genre / Features (no "In my library", no Resolution), Everyone + Mature,
-//                     Anime + Nature; no row above the grid
+//                     what the items know: Age / Type / Resolution / Genre / Features (no "In my library"), Everyone + Mature,
+//                     Standard Definition (k1-k4's 320×180 files, read by the backend), Anime + Nature; no row above the grid
 //   lib:filter        include / exclude / age (untagged out under any age filter) / genre any → all / features all, from the
 //                     page: the cards follow, no /browse request; nothing left → "No wallpapers match" + Clear filters
 //   lib:scope         the Library's filter and the Workshop's never mix (each column, the POST, localStorage); both kept over a reload
@@ -67,6 +67,9 @@
 //   lib:drawer        below 900 px the Library's toggle opens its drawer; a switch works in it; Escape closes; a tab visit closes it
 //   local:weFolder    Browse's "Wallpaper Engine (Local)": the column with what the folder's items know, filtered in the page
 //                     (no filter POSTed), "In my library" too, its own saved filter; its client sort in the split, no Workshop sort
+//   lib:steamTags     an item auto-imported from a Wallpaper Engine folder (its project.json: a genre, no resolution, no age)
+//                     gets Steam's tags from the backend's one look-up (the stack's fake Steam servers, LIASCAPE_STEAM_CM_FIXTURE —
+//                     asked for its id alone): the Library's column grows its rows (3840 x 2160, Questionable) and they filter it
 // Screenshots: <LIASCAPE_OUT>/wf-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -1049,7 +1052,7 @@ app.whenReady().then(async () => {
         const rows = (g) => [...(c.querySelector('[data-wf-group="' + g + '"]')?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);
         return { mode: c.dataset.mode, scope: c.dataset.wfScope, c: m.rect(c), grid: m.rect(grid), bar: bar ? m.rect(bar) : null,
           groups: [...c.querySelectorAll("[data-wf-group]")].map((g) => g.dataset.wfGroup), age: rows("age"), type: rows("type"), genre: rows("genre"),
-          row: !!sc.querySelector(".wfilter"), W: innerWidth, label: c.getAttribute("aria-label"),
+          res: rows("resolution"), row: !!sc.querySelector(".wfilter"), W: innerWidth, label: c.getAttribute("aria-label"),
           cards: m.qa(".lib-scroll .card").length };`);
       if (!r) return ["no filter column on the Library"];
       console.log(`        ${J(r)}`);
@@ -1061,8 +1064,9 @@ app.whenReady().then(async () => {
         if (r.c.b > r.bar.y + 1) v.push(`the column runs into the playlist bar (column bottom ${r.c.b}, bar top ${r.bar.y})`);
         if (r.bar.x > 0.5) v.push(`the playlist bar starts at x ${r.bar.x} (want its full width)`);
       }
-      if (J(r.groups) !== J(["age", "type", "genre", "features"])) v.push(`groups ${J(r.groups)} (want age, type, genre, features)`);
+      if (J(r.groups) !== J(["age", "type", "resolution", "genre", "features"])) v.push(`groups ${J(r.groups)} (want age, type, resolution, genre, features)`);
       if (J(r.age) !== J(["Everyone", "Mature"])) v.push(`age rows ${J(r.age)} (want what the items know: Everyone, Mature)`);
+      if (J(r.res) !== J(["Standard Definition"])) v.push(`resolution rows ${J(r.res)} (want k1-k4's: Standard Definition)`);
       if (J(r.type) !== J(["Video", "Scene"])) v.push(`type rows ${J(r.type)}`);
       if (J(r.genre) !== J(["Anime", "Nature"])) v.push(`genre rows ${J(r.genre)}`);
       if (r.row) v.push("a sort / filter row above the Library's grid");
@@ -1242,6 +1246,57 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    await cell("lib:steamTags", async () => {
+      const v = [];
+      await libSetup(); await tab("Library");
+      const s0 = (await http("GET", "/settings")).json;
+      const ID = "930000001";
+      // the column's rows of one group
+      const rows = (g) => page(`await m.ensure(); const c = m.q('.wf-col[data-wf-page="library"]:not(.closing)');
+        return [...(c?.querySelector('[data-wf-group="${g}"]')?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);`);
+      const before = { res: await rows("resolution"), age: await rows("age") };
+      if (before.res.includes("3840 x 2160") || before.age.includes("Questionable")) return [`before the import the column has ${J(before)} — proved nothing`];
+      // what Steam's servers answer for it (the stack's fixture) — its project.json knows only its genre
+      const fx = E.LIASCAPE_STEAM_CM_FIXTURE;
+      if (!fx) return ["no LIASCAPE_STEAM_CM_FIXTURE in the probe's environment"];
+      fs.writeFileSync(fx + ".tmp", JSON.stringify({ [ID]: { tags: ["Video", "Questionable", "3840 x 2160", "Retro"] } })); fs.renameSync(fx + ".tmp", fx);
+      const we = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "steam-tags-we"), d = path.join(we, ID);
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ type: "video", file: "v.mp4", title: "st-a", preview: "preview.jpg", tags: ["Retro"] }));
+      fs.writeFileSync(path.join(d, "v.mp4"), ""); fs.copyFileSync(THUMBS[0], path.join(d, "preview.jpg"));
+      const logLen = fs.existsSync(E.LIASCAPE_BACKEND_LOG) ? fs.statSync(E.LIASCAPE_BACKEND_LOG).size : 0;
+      await setSettings({ workshopFolder: we });
+      let item = null;
+      try {
+        const added = (await post("/library/sync")).json?.added ?? [];
+        if (!added.some((p) => p.includes(`/${ID}/`))) return [...v, `/library/sync added ${J(added)} (want ${ID}) — proved nothing`];
+        let after = null;
+        for (let i = 0; i < 40; i++) {
+          await sleep(250);
+          after = { res: await rows("resolution"), age: await rows("age"), genre: await rows("genre") };
+          if (after.res.includes("3840 x 2160") && after.age.includes("Questionable")) break;
+        }
+        console.log(`        before ${J(before)}; after ${J(after)}`);
+        if (!after.res.includes("3840 x 2160")) v.push(`resolution rows ${J(after.res)} (want 3840 x 2160 from Steam's tags)`);
+        if (!after.age.includes("Questionable")) v.push(`age rows ${J(after.age)} (want Questionable from Steam's tags)`);
+        if (!after.genre.includes("Retro")) v.push(`genre rows ${J(after.genre)} (want Retro)`);
+        await libSeg("3840 x 2160", "inc");
+        if (J(await libTitles()) !== J(["st-a"])) v.push(`3840 x 2160 → ${J(await libTitles())} (want st-a)`);
+        await shot("lib-steam-tags");
+        await libClear();
+        // the look-up asked Steam about the new arrival alone
+        const log = fs.readFileSync(E.LIASCAPE_BACKEND_LOG, "utf8").slice(logLen);
+        const asks = log.split("\n").filter((l) => l.includes("steam-cm: GetDetails"));
+        if (asks.length !== 1 || !asks[0].includes(`(fixture: ${ID})`)) v.push(`Steam asked: ${J(asks)} (want one GetDetails of ${ID} alone)`);
+        item = (await http("GET", "/library")).json.find((x) => x.videoPath.includes(`/${ID}/`)) ?? null;
+      } finally {
+        await setSettings({ workshopFolder: s0.workshopFolder });
+        if (item) await post("/library/delete", item); // only the link goes; the later cells count the stack's items
+        await sleep(300);
+      }
+      return v;
+    });
+
     await cell("lib:interplay", async () => {
       const v = [];
       await libSetup();
@@ -1253,6 +1308,13 @@ app.whenReady().then(async () => {
       for (let i = 0; i < 300; i += 8) await Promise.all(Array.from({ length: Math.min(8, 300 - i) }, (_, j) => {
         const f = path.join(dir, `x${i + j}.mp4`); fs.copyFileSync(clip, f);
         return post("/library/import", { path: f, title: `x${String(i + j).padStart(3, "0")}` }); }));
+      // the backend reads each new file's frame size in the background (Web/LibraryFactsOps.cs) and re-sends the library as
+      // it goes: wait for it to finish, so no library reload lands among the renders counted below
+      for (let i = 0; i < 120; i++) {
+        const lib = (await http("GET", "/library")).json;
+        if (lib.filter((x) => /^x\d{3}$/.test(x.title)).every((x) => x.resolution)) break;
+        await sleep(500);
+      }
       // React's commit hook before the page's scripts (probe-layout's RC_HOOK): what a filter change re-renders
       const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3");
       await d.sendCommand("Page.enable"); await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: RC_HOOK });

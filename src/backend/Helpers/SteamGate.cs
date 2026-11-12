@@ -24,6 +24,10 @@ namespace Liascape.Helpers;
 public static class SteamGate
 {
     public enum Kind { Interactive, Background }
+    // Steam publishes no steamcommunity.com limit; the one measured is the trip at ~150 page reads close together. Background
+    // work at 4 s a start takes 10 min to reach 150, so it can't be the burst; an interactive start every 500 ms only gets
+    // there with 75 s of non-stop clicking (a Browse fallback load is 2 pages: SteamWorkshopService.FallbackPagesPerLoad).
+    // The 429 cooldown below is the backstop for what spacing can't foresee.
     private const int InteractiveGapMs = 500, BackgroundGapMs = 4000, BackgroundQuietMs = 10_000, BaseCooldownMin = 10, MaxCooldownMin = 60;
     private static readonly SemaphoreSlim _slot = new(1, 1);
     private static long _lastStart, _lastInteractive; // Environment.TickCount64

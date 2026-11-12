@@ -22,11 +22,10 @@ namespace Liascape.Services;
 // LIASCAPE_WORKSHOP_FALLBACK=1 forces the fallback (testing).
 public class SteamWorkshopService : IBgsProvider
 {
-    private const int CmPageSize = 100; // QueryFiles' numperpage cap
-    // the fallback: two 30-item pages per app page (it was three + a prefetch of three — six requests a scroll on a
-    // per-IP-limited host)
+    private const int CmPageSize = 100; // QueryFiles' numperpage cap (measured: asked for 200 or 500, Steam returns 100)
+    // the fallback: two 30-item pages per app page — two SteamGate-spaced requests a scroll on a per-IP-limited host
     private const int FallbackPagesPerLoad = 2;
-    // Steam's servers' share of a Browse request's ~15 s budget; the fallback gets the rest
+    // Steam's servers' share of a Browse request's ~15 s budget, ~6× a measured page (1.1–1.8 s); the fallback gets the rest
     private static readonly TimeSpan CmTimeout = TimeSpan.FromSeconds(10);
 
     public string Name => "Wallpaper Engine (Workshop)";
@@ -152,11 +151,11 @@ public class SteamWorkshopService : IBgsProvider
         string? youtube = result.YoutubeUrl;
         if (!result.TrailerKnown && result.WorkshopId is { } wid)
         {
-            Dictionary<ulong, SteamWorkshopDetails.Trailer>? cm = null;
+            Dictionary<ulong, SteamWorkshopDetails.Details>? cm = null;
             if (ulong.TryParse(wid, out var n))
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                try { cm = await SteamWorkshopDetails.GetTrailersAsync([n], cts.Token).ConfigureAwait(false); } catch { }
+                try { cm = await SteamWorkshopDetails.GetDetailsAsync([n], cts.Token).ConfigureAwait(false); } catch { }
             }
             youtube = cm != null && cm.TryGetValue(n, out var t) && t.Found
                 ? t.Youtube is { } y ? $"https://www.youtube.com/watch?v={y}" : null

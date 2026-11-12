@@ -13,25 +13,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
-28. [ ] Complete the Library's filter data (owner): auto-imported Workshop items (subscribed through Steam, so never
-       downloaded by Liascape) have no Steam tags — no resolution, partial genres. Fetch their real tags once over the
-       anonymous client-protocol session (`Helpers/SteamAnonymous.cs`, PublishedFile.GetDetails, many IDs per call,
-       through `SteamGate`), save them with the item, and only look up new arrivals after. Non-Workshop items get their
-       resolution from the file (video frame size via ffprobe, cached; a scene's project size), bucketed into the
-       Workshop's resolution groups. Batch sizes are measured, not guessed (owner: "we should know exact number for all
-       batch related stuff"): the web GetPublishedFileDetails caps at ~213–220 IDs by URL length (third-party reports),
-       but our path is the client protocol, where that doesn't apply — measure GetDetails at 100/200/500/1000 IDs (every ID
-       back?) and QueryFiles numperpage at 100/200/500, a few gated requests; then audit every batch / concurrency
-       constant (SteamGate spacing, the ffmpeg gate, the clip worker, download concurrency) and back each with a
-       measurement or source in its comment, or fix it.
-30. [ ] Motion off means "nothing moves, short fades" (owner): the "Smooth window animations" toggle (and the system's
-       prefers-reduced-motion) serves both people sensitive to motion and people avoiding its cost. Today off makes
-       everything instant, so panels and menus pop. Instead: appear / leave / content swaps cross-fade in ~120 ms
-       (opacity only: no movement, compositor-only, ~free); every slide, zoom, morph, tilt or spring becomes that fade or
-       nothing; never a flash or a loop. Chevrons, carets and spinners keep showing state, as now. Sweep every
-       `:root.no-motion` rule and every `useMotion()` / `motionOn()` caller; the motion-off cells change from "no
-       in-between frames" to "only opacity changes, nothing moves" (probe-icons `icon:still:off` stays). Rewrite the
-       design.md Motion-off bullet and add a docs/decisions.md entry.
 
 ## On a real desktop session (not hermetic)
 - [ ] Battery rerun: `programs.sh dropout` with `P3_RECORD` on the real session (Phase 3 findings, below). It plays

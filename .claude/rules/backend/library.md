@@ -8,7 +8,8 @@ paths:
   - "src/backend/Helpers/ImportService.cs"
   - "src/backend/Helpers/WorkshopUnsubQueue.cs"
   - "src/backend/Models/LibraryItem.cs"
-  - "src/backend/Web/TrailerOps.cs"
+  - "src/backend/Web/LibraryFactsOps.cs"
+  - "scripts/test-library-facts.sh"
 ---
 
 # Library
@@ -43,9 +44,12 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - `Visible(condition, values)`: an unevaluable condition → shown.
 - Under legacy they are launch-only (`--set-property`); under liascape-player live (`SceneProperties.PlayerMap`).
 
-## Trailers (`Web/TrailerOps.cs`)
-- Ask Steam's servers over the client protocol first (`Helpers/SteamWorkshopDetails.cs`); read the Workshop page (through `SteamGate`) only as a fallback.
-- Cache per item: found → `youtubeUrl`; none → `trailerCheckedAt` (re-check after 30 days); couldn't check → store nothing (never save "can't tell" as "none").
+## Steam tags, trailers and frame sizes (`Web/LibraryFactsOps.cs`)
+- One background pass, single-flight, kicked after the startup sync, `/library/sync`, an import and a download. It writes each fact field-level (`UpdateIndex`) and asks only for what an item doesn't have yet: never on every launch.
+- Tags and trailers: ONE `GetDetails` over Steam's client protocol for every Workshop item missing either (`Helpers/SteamWorkshopDetails.cs`, up to 1000 ids a request: measured, docs/decisions.md § "Ask Steam for a whole library's details in one request"). A Workshop item's id is its index `workshopId`, else its `local/` or `workshop/` folder name.
+- Cache per item: tags → `tags` (never asked again; never written over a download's); no such public item → `tagsCheckedAt` (asked again after 30 days); a trailer → `youtubeUrl`; none → `trailerCheckedAt` (re-check after 30 days); couldn't ask → store nothing (never save "can't tell" as "none"). Only a trailer falls back to reading the Workshop page (through `SteamGate`).
+- Frame size: read only for an item whose Steam tags carry no resolution — ffprobe for a video or image (rotation applied), a scene's `general.orthogonalprojection` (scene.json, loose or in scene.pkg); `frameSize` + `frameSizeOf` (the file's size + mtime: a changed file is read again), one ffprobe at a time. `LibraryService.Build` adds its Workshop resolution tag (`WorkshopTags.ResolutionTagOf`) to the item's tags.
+- Steam's tags beat project.json's (`Build`): its age rating and resolution tag too. Guard: `scripts/test-library-facts.sh`, matrix probe-filters `lib:steamTags`.
 
 ## Trash, delete and Delete from Source
 - Trash moves the item folder to `.trash/<batchId>/…` with a `<key>.meta.json` (the whole `LibMeta`); Undo (`RestoreBatch`) replays it. Trash is purged at startup/close.
@@ -55,5 +59,5 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - Undo of a Delete from Source re-subscribes when Steam already unsubscribed it (`Restore` → true → `WorkshopDownloader.ResubscribeAsync`). Guard: `scripts/test-steam-signin.sh` § 3.
 
 ## WE auto-import
-- `LibraryService.SyncWallpaperEngine` creates `local/<id>` links + index entries; it runs at `serve` start (then WS `library-synced`) and in `liascape restore` before playback.
+- `LibraryService.SyncWallpaperEngine` creates `local/<id>` links + index entries; it runs at `serve` start (then WS `library-synced`) and in `liascape restore` before playback. Steam's tags for what it adds: § Steam tags, trailers and frame sizes.
 - With `AutoAddLibraryToPlaylist` on, new items join the playlist and `LastSession` mid-session.

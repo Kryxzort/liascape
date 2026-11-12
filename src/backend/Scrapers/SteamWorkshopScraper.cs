@@ -25,7 +25,7 @@ public static class SteamWorkshopScraper
     public enum PageCheck { Ok, Failed, RateLimited }
 
     // The same, telling "checked: no trailer" (Ok, Url null) from "couldn't check" (!Ok — offline, Steam down, an error
-    // page, a removed item): the trailer cache (Web/TrailerOps) stores the first and retries the second. `Ok` needs the
+    // page, a removed item): the trailer cache (Web/LibraryFactsOps) stores the first and retries the second. `Ok` needs the
     // page to BE an item page (its title block), not just a 200 — Steam answers some errors with a 200 page. `RateLimited`
     // = Steam's 429 (it limits page reads: ~100+ quick reads in a row trip it) — wait and retry, it isn't "offline".
     // Through SteamGate (every steamcommunity request is): a cooldown → RateLimited without sending anything.

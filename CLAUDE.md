@@ -16,6 +16,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Adapter self-test: `LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`
 - Settings merge / cross-process writes / settings latency: `bash scripts/test-settings-merge.sh`, `bash scripts/test-cross-process.sh`, `bash scripts/test-settings-latency.sh`
 - Steam paths (no account needed): `bash scripts/test-steam-signin.sh`
+- Library tags, trailers and frame sizes (no network, fake Steam servers): `bash scripts/test-library-facts.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`
 - Agent window (NOT hermetic — its own headless compositor, sandboxed backend, Vite and CDP port; it never writes to the session's Hyprland; CDP scripts and benches drive it, never the owner's window): `bash scripts/agent-window.sh up|status|down`

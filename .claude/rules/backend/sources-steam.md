@@ -36,6 +36,8 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Filter semantics (`Helpers/WorkshopTags.cs` `Build`): a group's includes are ONE taggroup (OR); Features are ANDed unless `featureMatch: "any"`; Genres ORed unless `genreMatch: "all"`; any age filter drops untagged items; Type always excludes Web / Application / Preset (and Scene with `AllowScenes` off).
 - Prefetch the next page only after the current one and only on the CM path; compare filters by value (`Key()`).
 - Fallback (CM unreachable, or `LIASCAPE_WORKSHOP_FALLBACK=1`): the browse page via `SteamGate`, filtering the rest client-side with `WorkshopTags.Matches`.
+- `QueryFiles` pages hold 100 (Steam's cap); `GetDetails` takes up to 1000 ids a request (both measured: docs/decisions.md § "Ask Steam for a whole library's details in one request").
+- Tests never reach Steam's servers for item details: `LIASCAPE_STEAM_CM_FIXTURE=<file.json>` answers `GetDetailsAsync` from a file (the UI matrix, `scripts/test-library-facts.sh`).
 
 ## Secrets (`Helpers/SecretStore.cs`)
 - Every reader/writer of the Steam tokens goes through `SteamAuthService` → `SecretStore` (`steam-refresh-token`, `steam-access-token`, `steam-login-secure`).

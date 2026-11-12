@@ -122,10 +122,10 @@ Owner: "steam token is kept in plaintext??" → "system keyring and then fallbac
 settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`; a denied
 keyring means signed out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
 
-### Ask Steam's servers for trailers and never cache "can't tell" as "none" — 2026-11-11
-A trailer is part of the Workshop listing, not the item's files, so auto-imported items had none. The CM `GetDetails`
-call answers 100 items a request; the Workshop page is the fallback. A failed check stores nothing (Wallpaper Engine's
-offline mode caches "none" and loses trailers for good). `Web/TrailerOps.cs`; `.claude/rules/backend/library.md` § Trailers.
+### Ask Steam for a whole library's details in one request; never cache "can't tell" as "none" — 2026-11-12
+Tags and trailers are Workshop listing, not files: auto-imported items lack them. CM `GetDetails` takes 1000 ids, not 100
+"to be safe": 100–1000 all came back in 574–600 ms (the web API's ~200 cap is a URL length); `QueryFiles` returns 100
+whatever is asked. A failed check stores nothing (WE's offline mode caches "none" for good). `Web/LibraryFactsOps.cs`.
 
 ### Keep the Workshop in Steam's own sort orders — 2026-06-02
 Only Steam's sorts are offered for the Workshop (trend + period, newest, updated, most subscribed, top rated): results

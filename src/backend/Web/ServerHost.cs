@@ -163,7 +163,7 @@ public static class ServerHost
             // every scene without an offline loudness estimate for its current configuration (new since the last run,
             // incomplete then, or a run cancelled / cut short by a restart) — one nice'd child at a time
             SceneLoudnessOps.AfterImport("startup");
-            TrailerOps.Kick("startup"); // the library's Workshop items without a cached YouTube trailer answer
+            LibraryFactsOps.Kick("startup"); // Steam tags, trailers and frame sizes the library doesn't have yet
         });
 
         // the preview clips no card can ask for any more (sources gone or changed, replaced variants, unfinished encodes)
@@ -249,7 +249,8 @@ public static class ServerHost
 
     // PERF: cap concurrent ffmpeg. A fast scroll over hundreds of gif cards fires many /still + /anim
     // requests at once; ungated, each spawns up to 3 ffmpeg → CPU meltdown + slow thumbnails. Bound to
-    // ~half the cores (min 2, max 6) so extractions run in parallel but never swamp the machine.
+    // ~half the cores (min 2, max 6). Measured on 24 cores, 24 gif stills: 2 at once 456 ms, 4 250 ms, 6 183 ms, 8 135 ms,
+    // 12 115 ms — past 6 a card waits a few ms less for twice the CPU the UI's frames share.
     private static readonly SemaphoreSlim _ffmpegGate = new(Math.Clamp(Environment.ProcessorCount / 2, 2, 6));
     private static string RunFfmpeg(string[] args)
     {
@@ -497,6 +498,7 @@ public static class ServerHost
         {
             var item = await ImportService.ImportAsync(r.Path, r.Title);
             SceneLoudnessOps.Imported(item, "import");
+            if (item != null) LibraryFactsOps.Kick("import"); // its frame size
             return item == null ? Results.BadRequest("import failed") : Results.Json(item);
         });
 
@@ -546,7 +548,7 @@ public static class ServerHost
             var added = LibraryService.SyncWallpaperEngine(s.WorkshopFolder, s.AllowScenes, s.CopyFilesInsteadOfSymlinking);
             EventBus.Broadcast("library-synced", new { count = added.Count });
             SceneLoudnessOps.AfterImport("sync"); // new scenes + any whose folder was incomplete last time
-            TrailerOps.Kick("sync");
+            LibraryFactsOps.Kick("sync");
             return Results.Json(new { added });
         });
         // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; .claude/rules/backend/api.md § Scene loudness queue):

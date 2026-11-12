@@ -400,7 +400,9 @@ public static class LibraryService
         if (System.Threading.Interlocked.Exchange(ref _backfilling, 1) == 1) return;
         try
         {
-            using var sem = new System.Threading.SemaphoreSlim(3); // 3 ffmpegs at once — fast, still gentle
+            // 3 ffmpegs at once: measured over 12 library videos, 1 at a time 22.9 s, 2 14.5 s, 3 13.5 s, 4 12.9 s, 6 11.5 s —
+            // past 2-3 the run waits on its longest file, not on cores
+            using var sem = new System.Threading.SemaphoreSlim(3);
             var tasks = new List<System.Threading.Tasks.Task>();
             var indexes = new Dictionary<string, Dictionary<string, LibMeta>>();
             LibMeta? Meta(string path)
@@ -509,8 +511,12 @@ public static class LibraryService
         string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
         DateTime added; try { var fi = new FileInfo(media); added = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime; } catch { added = DateTime.Now; }
         var loud = isScene || m.IsScene ? SceneLoudnessInfoOf(m) : default;
-        // the index's (Steam's, saved at download) win; an auto-imported WE item has none, so its own project.json speaks
-        var proj = m.Tags == null || m.AgeRating == null ? ProjectFactsOf(folder) : default;
+        // the index's (Steam's, saved at download or asked for an auto-imported item) win; until they're known the item's
+        // own project.json speaks
+        var steamTags = m.Tags is { Length: > 0 } st ? st : null;
+        var age = m.AgeRating ?? WorkshopTags.AgeOf(steamTags);
+        var proj = steamTags == null || age == null ? ProjectFactsOf(folder) : default;
+        var (tags, resolution) = WithFrameSize(steamTags ?? proj.Tags, m);
         return new LibraryItem
         {
             Title = m.Title ?? key,
@@ -528,10 +534,26 @@ public static class LibraryService
             AddedAt = added,
             LoudnessLufs = loud.Lufs, LoudnessEstimated = loud.Estimated, LoudnessSeconds = loud.Seconds,
             LoudnessConfidence = loud.Confidence, LoudnessNote = loud.Note,
-            Resolution = m.Resolution, AgeRating = m.AgeRating ?? proj.Age, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
+            Resolution = m.Resolution ?? resolution, AgeRating = age ?? proj.Age, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
             AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes,
-            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = m.Tags ?? proj.Tags,
+            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = tags,
         };
+    }
+
+    // The item's resolution for the filter column and the sidebar: Steam's resolution tag when it has one; else the size read
+    // from the file (LibMeta.FrameSize), as the Workshop's resolution tag it falls in, added to the tags, and as "W x H".
+    // Guard: scripts/test-library-facts.sh § frame sizes
+    private static (string[]? Tags, string? Resolution) WithFrameSize(string[]? tags, LibMeta m)
+    {
+        if (tags?.FirstOrDefault(WorkshopTags.IsResolution) is { } res) return (tags, res);
+        if (FrameSizeOf(m) is not var (w, h)) return (tags, null);
+        return (WorkshopTags.ResolutionTagOf(w, h) is { } tag ? [.. tags ?? [], tag] : tags, $"{w} x {h}");
+    }
+
+    public static (int W, int H)? FrameSizeOf(LibMeta m)
+    {
+        var p = m.FrameSize?.Split(" x ");
+        return p is [var a, var b] && int.TryParse(a, out var w) && int.TryParse(b, out var h) && w > 0 && h > 0 ? (w, h) : null;
     }
 
     // A WE item folder's age rating + tags from its project.json (WorkshopTags.FromProject), for the UI's filter column.

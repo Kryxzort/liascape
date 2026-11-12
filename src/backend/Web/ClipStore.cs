@@ -274,7 +274,9 @@ public static class ClipStore
         try { return new FileInfo(dst).Length > 0; } catch { return false; }
     }
 
-    // stand-ins (and the full clip of a video no longer than one) are made on the request: a card waits for them
+    // stand-ins (and the full clip of a video no longer than one) are made on the request: a card waits for them. A cap of
+    // a quarter of the cores (2–4): x264 already threads each encode — measured on 24 cores, 8 stand-ins (10 s, 480 px):
+    // 1 at a time 3.0 s, 2 2.1 s, 4 1.9 s, 6 2.0 s, 8 1.9 s; more at once only adds CPU contention
     private static readonly SemaphoreSlim _nowGate = new(Math.Clamp(Environment.ProcessorCount / 4, 2, 4));
     private static int _nowInFlight;
     private static readonly ConcurrentDictionary<string, Task<Clip?>> _making = new();
@@ -306,6 +308,8 @@ public static class ClipStore
     }
 
     // ---- the background queue: full clips, upgrades, shrinks — one at a time ---------------------------------------------
+    // One: x264 threads each encode (one 10 s, 480 px clip alone: ~0.38 s; two at once finish 8 in 2.1 s, not 1.5), so a
+    // second worker would mostly take cores from the stand-ins a card is waiting for.
     private sealed class Job
     {
         public required string Path, Item;

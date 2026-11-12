@@ -249,6 +249,10 @@ else
 fi
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
+# Steam's servers for the library's tag / trailer look-ups (Helpers/SteamWorkshopDetails.cs): this file, never Steam — {}
+# = no Workshop item has a public listing; probe-filters lib:steamTags adds one
+export LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
+printf '{}' > "$LIASCAPE_STEAM_CM_FIXTURE"
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
 # per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }

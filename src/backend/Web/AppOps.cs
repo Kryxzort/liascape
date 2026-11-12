@@ -255,6 +255,7 @@ public static class AppOps
         var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim);
         if (item.WorkshopId is string wid) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
         SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
+        LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
         EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
         return item;
     }

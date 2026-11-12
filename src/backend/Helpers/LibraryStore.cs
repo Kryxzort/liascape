@@ -46,9 +46,18 @@ public sealed class LibMeta
     public string? Resolution { get; set; }
     public string? AgeRating { get; set; }
     public string? YoutubeUrl { get; set; }
-    // Unix seconds the item's Steam page was last READ and showed no trailer (Web/TrailerOps — re-checked after 30 days, an
+    // Unix seconds the item's Steam page was last READ and showed no trailer (Web/LibraryFactsOps — re-checked after 30 days, an
     // author may add one); absent = never checked, or every check so far failed (offline …) → tried again next start.
     public long? TrailerCheckedAt { get; set; }
+    // Unix seconds Steam's servers last said they have no public item with this id (removed, private) when asked for its
+    // tags (Web/LibraryFactsOps — asked again after 30 days); absent = never asked, a failed ask, or found (Tags holds them).
+    public long? TagsCheckedAt { get; set; }
+    // The media's frame size read from the file itself ("W x H"; "" = it has none: no video stream, a scene without a fixed
+    // projection) and the file state it was read at (FrameSizeOf = "<bytes>:<mtime ticks>": a changed file is read again).
+    // Read only for an item whose Steam tags carry no resolution (Web/LibraryFactsOps); the filter column's Resolution group
+    // shows it bucketed (WorkshopTags.ResolutionTagOf).
+    public string? FrameSize { get; set; }
+    public string? FrameSizeOf { get; set; }
     public string? PageUrl { get; set; }
     public string? AuthorName { get; set; }
     public string? Description { get; set; }
@@ -56,6 +65,8 @@ public sealed class LibMeta
     public long? Subscriptions { get; set; }
     public long? Favorites { get; set; }
     public long? Views { get; set; }
+    // Steam's Workshop tags: saved at a download, or asked once for an auto-imported item (Web/LibraryFactsOps); absent =
+    // not known (a non-Workshop item, or not asked yet: the item's project.json speaks meanwhile).
     public string[]? Tags { get; set; }
 }
 
