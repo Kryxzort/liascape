@@ -12,21 +12,22 @@ paths:
 
 # Backend web API (`liascape-backend serve`)
 
-`Web/` wraps the scrapers, helpers and daemons for the Electron/React UI. Kestrel binds `127.0.0.1:0` (or
-`LIASCAPE_PORT`), writes `serve.token` then `serve.port` to `~/.config/liascape/`. Endpoint list: read
+`Web/` wraps the scrapers, helpers and daemons for the Electron/React UI. Kestrel binds a free `127.0.0.1` port P (or
+`LIASCAPE_PORT`) for the API and P + 1 for media (`ApiSecurity.PickPorts`), writes `serve.token` then `serve.port` (P) to `~/.config/liascape/`. Endpoint list: read
 `ServerHost.cs`. Why behind the choices here: `docs/decisions.md` § Backend/API.
 
 ## Security (`Web/ApiSecurity.cs`, the first middleware)
 - Every request presents the token: header `X-Liascape-Token`, or `?token=` on a GET/HEAD only (img/video src, the WebSocket). Writes use the header. Exempt: `GET /health` and the static UI files.
 - Write the token file 0600 (temp + rename) BEFORE `serve.port`; reuse a valid one across restarts so an open page keeps working. It stays beside `serve.port`, not in `$XDG_RUNTIME_DIR` (hermetic tests keep the session's runtime dir).
-- `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) → else 403.
+- `Host` must be `127.0.0.1:<port>` or `localhost:<port>` of the listener it reached (DNS rebinding) → else 403.
 - A foreign `Origin` → 403. Allowed: the Vite dev origins only while this backend serves no UI (`LIASCAPE_UI_DIR` unset), plus `LIASCAPE_DEV_ORIGINS`. Never add `Access-Control-Allow-Origin: *` or `UseCors`.
+- The media listener (P + 1) is its own origin with its own 6 browser connections, so slow media never queues an API call: it answers only token-carrying GETs of `/media` `/clip` `/img` `/anim` `/still` (anything else 404, no `/health`, no UI files, no WebSocket, no preflight). An `Origin` there must be the API's or an allowed dev origin, echoed back (the transition preview's `<video crossorigin>`); the media origin is foreign to the API. The API keeps serving the media routes for clients without the media port. Why: `docs/decisions.md` § "Serve media from a second listener". Guard: matrix `browse:mediaPool`.
 - Local files (`/media`, `/clip`, `/anim`, `/still`, `/library/duration`, `/open` reveal) only under the data dir, the caches and the `WorkshopFolder` (`ApiSecurity.MediaAllowed`); refuse `..`.
 - Remote fetches (`/img`, remote `/anim` `/still`): http(s) only, every resolved address public, checked again at connect (`PublicOnlyHttp`). No proxy.
 - `POST /open`: http(s) URLs, or `{path, reveal: true}` under `MediaAllowed`. Never a bare path, `file:` or a custom scheme; `steam://` only via `POST /steam/open-page` with a digits-only id.
 - Spawn processes with an argument list (`ArgumentList`), never by pasting values into an `sh -c` string or one command string.
-- Serve `/media` `/clip` `/img` `/anim` `/still` with `Content-Security-Policy: sandbox; default-src 'none'`.
-- Check after a security change: a private backend + curl — no token → 401, wrong `Host` → 403, foreign `Origin` → 403, `/media` outside → 403, `/img` to 127.0.0.1 / 192.168.x / 169.254.169.254 / `[::1]` → 403.
+- Serve `/media` `/clip` `/img` `/anim` `/still`, and every answer of the media listener, with `Content-Security-Policy: sandbox; default-src 'none'`.
+- Check after a security change: a private backend + curl — no token → 401, wrong `Host` → 403, foreign `Origin` → 403, `/media` outside → 403, `/img` to 127.0.0.1 / 192.168.x / 169.254.169.254 / `[::1]` → 403; on the media port an API route → 404, and on the API the media origin as `Origin` → 403.
 
 ## Endpoint conventions
 - Keep endpoints thin: logic goes in `AppOps` / `SteamOps` / helpers, not lambdas.

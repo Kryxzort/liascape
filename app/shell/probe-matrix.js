@@ -830,6 +830,58 @@ C["browse:switchSource"] = { states: ["idle"], noSwitch: true, async run(c) {
     if (!c.shown) return [`${c.to}'s list never replaced ${c.from}'s within 12 s of its pill (${c.pending} thumbnail loads were in flight)`];
     return c.ms > 2500 ? [`${c.to}'s list showed ${c.ms} ms after its pill (≤ 2500): it waited for ${c.from}'s ${c.pending} thumbnail loads`] : [];
   } };
+// a search while the list's remote thumbnails still load: the search's list shows at once. Unlike a source switch, a search
+// keeps the old cards (and their loads) up until its reply lands, so nothing aborts them: only media on an origin of its own
+// (its own 6 browser connections, `MEDIA` in api/client.ts) keeps the API call out of their queue. Staged: Wallpaper Engine
+// (Local)'s unsearched list is a stubbed page of 24 cards with remote thumbnails, every /img response held 8 s once its headers
+// arrive; the search itself is the real backend's (/browse with a query, over the network). RED when the search's /browse
+// queues behind the held thumbnails.
+C["browse:mediaPool"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const ws = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-pool"), d = path.join(ws, "9102");
+    fs.mkdirSync(d, { recursive: true });
+    fs.copyFileSync(K[0], path.join(d, "v.mp4"));
+    fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title: "wePool", type: "video", file: "v.mp4" }));
+    const s0 = await getSettings();
+    const wr = session.defaultSession.webRequest, filter = { urls: ["<all_urls>"] }, isImg = (u) => /\/img\?/.test(u);
+    const held = new Set(), live = new Set(), hosts = new Set(); // live: the /img requests sent and not finished
+    wr.onBeforeRequest(filter, (q, cb) => { if (isImg(q.url)) { live.add(q.id); hosts.add(new URL(q.url).host); } cb({}); });
+    wr.onErrorOccurred(filter, (q) => live.delete(q.id));
+    wr.onHeadersReceived(filter, (q, cb) => {
+      if (!isImg(q.url)) return cb({});
+      const go = () => { held.delete(go); clearTimeout(t); live.delete(q.id); cb({}); }, t = setTimeout(go, 8000); held.add(go);
+    });
+    try {
+      await post("/settings", { ...s0, workshopFolder: ws, autoAddWeWallpapersToLibrary: false });
+      const srcs = (await http("GET", "/sources")).json || [];
+      c.src = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
+      const items = Array.from({ length: 24 }, (_, i) => ({ title: `mp-${i + 1}`, thumbnailUrl: `https://thumb.invalid/mp-${i + 1}.jpg`, animatedThumbnailUrl: null,
+        pageUrl: `https://thumb.invalid/page/${i + 1}`, isScene: false, workshopId: null, addedAt: null }));
+      await js(`(() => { const items = ${JSON.stringify(items)}, f = window.fetch; window.fetch = (u, o) => {
+        if (String(u).split("?")[0].endsWith("/browse") && o?.method === "POST") { const b = JSON.parse(o.body);
+          if (b.source === 3 && !b.query) return Promise.resolve(new Response(JSON.stringify(b.page > 1 ? [] : items), { status: 200, headers: { "Content-Type": "application/json" } })); }
+        return f(u, o); }; })(); true`);
+      await ui(`m.tab("Browse"); await m.sleep(300); m.click(m.byText(".pill", ${JSON.stringify(c.src)}), "source pill");`);
+      await waitFor(() => live.size >= 6, 6000, 50);
+      await sleep(300); // past the 6th: the rest queue
+      c.pending = live.size;
+      const t0 = Date.now();
+      await ui(`m.setValue(document.querySelector("input.search"), "wePool", "search box");`);
+      c.shown = await waitFor(() => ui(`return !!m.card("wePool") && !m.card("mp-1");`), 12000, 50);
+      c.ms = Date.now() - t0;
+      c.hosts = [...hosts];
+      console.log(`        mediaPool: ${c.pending} /img loads in flight (${c.hosts.join(", ")}) at the search, its list after ${c.ms} ms`);
+    } finally {
+      wr.onBeforeRequest(filter, null); wr.onErrorOccurred(filter, null); wr.onHeadersReceived(filter, null);
+      for (const go of [...held]) go();
+      await ui(`m.setValue(document.querySelector("input.search"), "", "search box");`).catch(() => {});
+      await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary });
+      await ui(`m.tab("Library"); await m.sleep(400);`);
+    }
+  }, check(c) {
+    if (!(c.pending >= 6)) return [`only ${c.pending} /img loads of ${c.src}'s stubbed list in flight at the search (want ≥ 6, the browser's connections per host) — the cell proved nothing`];
+    if (!c.shown) return [`the search's list never replaced ${c.src}'s stubbed one within 12 s (${c.pending} thumbnail loads were in flight)`];
+    return c.ms > 2500 ? [`the search's list showed ${c.ms} ms after typing (≤ 2500): its /browse waited for ${c.pending} thumbnail loads on ${c.hosts.join(", ")}`] : [];
+  } };
 // a right click on a card or bar item whose hover preview plays (a right-click opens the item's sidebar — no menu):
 // the same <video> keeps playing while the pointer stays on the item, nothing applies; off the item it stops. The card's case
 // right-clicks with the sidebar already open (no grid re-fit under the pointer — opening it from closed re-fits the columns and

@@ -51,9 +51,10 @@ public static class ServerHost
         var builder = WebApplication.CreateBuilder(args);
         builder.Logging.ClearProviders();
         // LIASCAPE_PORT pins the port (dev: dotnet-watch restarts keep the same port → the open UI survives);
-        // otherwise bind a random free port.
+        // otherwise bind a random free port. The media listener is the next port (ApiSecurity.PickPorts).
         var fixedPort = int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_PORT"), out var lp) ? lp : 0;
-        builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Loopback, fixedPort));
+        var (apiPort, mediaPort) = ApiSecurity.PickPorts(fixedPort);
+        builder.WebHost.ConfigureKestrel(o => { o.Listen(IPAddress.Loopback, apiPort); o.Listen(IPAddress.Loopback, mediaPort); });
         var app = builder.Build();
 
         // Local API security (.claude/rules/backend/api.md § Security):
@@ -98,11 +99,11 @@ public static class ServerHost
         MapEndpoints(app);
 
         app.Start();
-        var port = new Uri(app.Urls.First()).Port;
+        var port = apiPort;
         Directory.CreateDirectory(ConfigDir);
         // after serve.token (InitToken, before Start): a client that sees the port finds the token too
         AtomicFile.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this (whole or not at all)
-        Console.WriteLine($"liascape serve listening on 127.0.0.1:{port}");
+        Console.WriteLine($"liascape serve listening on 127.0.0.1:{port} (media 127.0.0.1:{mediaPort})");
 
         // The serve backend owns the AudioMonitor in-process while running: take over from any detached
         // `monitor-daemon` on startup so the AutoMute toggle can Start/Stop it live (`/settings`), then hand

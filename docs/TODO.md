@@ -12,10 +12,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (~240/s at 240 Hz). An opacity pulse on a composited glow layer removes it (design.md already asks for that) but
        mid-pulse frames look slightly different (crossfade, not blur interpolation). It also restyles every other running animation each
        frame (Browse's 72 skeleton shimmers: probe-layout `perf:skeleton` measures the cost).
-15. [ ] Serve media from a second host so slow thumbnail loads never block browsing: a reload / search / filter within
-       one Browse source can queue behind slow `/img` loads (Chromium's 6 connections per host). Media on its own host
-       (e.g. `localhost:<port>`, the API on `127.0.0.1:<port>`) so they never share connections — touches every media
-       URL, the dev proxy, the Host / Origin checks and the CSP.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

@@ -26,6 +26,8 @@ namespace Liascape.Web;
 //  • the Host header must be 127.0.0.1:<port> / localhost:<port> (DNS rebinding: a foreign name pointing at us);
 //  • a cross-origin request only from the dev UI's origin (Vite :5173 — only while this backend serves no UI itself) or
 //    LIASCAPE_DEV_ORIGINS; any other Origin is refused outright;
+//  • the media listener (the API's port + 1) answers only GET/HEAD of the media routes, every response sandboxed: it is
+//    its own origin so the browser gives it its own 6 connections, never a way into the API;
 //  • local files only from where the app keeps / finds wallpapers (MediaAllowed), remote fetches only to public addresses
 //    (PublicOnlyHttp — the image proxy never reaches the LAN or this machine).
 public static class ApiSecurity
@@ -112,6 +114,50 @@ public static class ApiSecurity
         _devOrigins = set;
     }
 
+    // ---- the two listeners ------------------------------------------------------------------------------------------
+    // Chromium opens at most 6 HTTP/1.1 connections per host:port, and slow media loads (the /img proxy behind a slow
+    // site, a full-size <video>) can hold all six: every API call — a search, a reload, a click — then queues behind them.
+    // So media gets a listener of its own at the API's port + 1: another origin, its own pool. The page derives it from the
+    // API's port (api/client.ts MEDIA), so no restart, reload or extra request is needed to find it. Not a second hostname
+    // on one port: `localhost` resolves to ::1 first in Chromium, where another local user could listen and collect the
+    // token from media URLs, and `localhost:<port>` already counts as the API's own origin. Guard: matrix browse:mediaPool.
+    public static int ApiPort { get; private set; }
+    public static int MediaPort { get; private set; }
+    public static readonly string[] MediaRoutes = ["/media", "/clip", "/img", "/anim", "/still"];
+
+    // LIASCAPE_PORT pinned → that port and the next (both must be free: Kestrel fails loudly, the shell retries on random
+    // ones); else a random free port whose next one is free too. The probe sockets close before Kestrel binds (a tiny
+    // window: a local listener grabbing exactly one of them makes the start fail, never a silent mix-up).
+    public static (int Api, int Media) PickPorts(int fixedApi)
+    {
+        if (fixedApi > 0)
+        {
+            if (fixedApi >= 65535) throw new ArgumentOutOfRangeException(nameof(fixedApi), "LIASCAPE_PORT must leave room for the media port (port + 1)");
+            return Use(fixedApi);
+        }
+        for (int i = 0; i < 64; i++)
+        {
+            int p;
+            using (var a = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+            {
+                a.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+                p = ((IPEndPoint)a.LocalEndPoint!).Port;
+                if (p >= 65535 || !CanBind(p + 1)) continue;
+            }
+            return Use(p);
+        }
+        throw new IOException("no two adjacent free loopback ports for the API and its media listener");
+
+        static (int, int) Use(int p) { ApiPort = p; MediaPort = p + 1; return (p, p + 1); }
+        static bool CanBind(int port)
+        {
+            try { using var s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp); s.Bind(new IPEndPoint(IPAddress.Loopback, port)); return true; }
+            catch (SocketException) { return false; }
+        }
+    }
+
+    public static bool IsMediaRoute(string path) => Array.IndexOf(MediaRoutes, path) >= 0;
+
     private static bool HostOk(string host, int port) =>
         string.Equals(host, $"127.0.0.1:{port}", StringComparison.OrdinalIgnoreCase)
         || string.Equals(host, $"localhost:{port}", StringComparison.OrdinalIgnoreCase);
@@ -123,22 +169,33 @@ public static class ApiSecurity
     {
         var req = ctx.Request; var res = ctx.Response;
         int port = ctx.Connection.LocalPort;
+        bool mediaListener = port == MediaPort && MediaPort > 0;
         // DNS rebinding: evil.example resolving to 127.0.0.1 arrives with Host: evil.example:<port>
         if (!HostOk(req.Host.Value ?? "", port)) { await Refuse(ctx, 403, "unexpected Host header"); return; }
 
         res.Headers["X-Content-Type-Options"] = "nosniff";
         res.Headers["X-Frame-Options"] = "DENY";
         var path = req.Path.Value ?? "/";
+        bool get = HttpMethods.IsGet(req.Method) || HttpMethods.IsHead(req.Method);
         // served bytes from disk / the internet: never a document with this origin's rights, should one be opened
-        if (path is "/media" or "/clip" or "/img" or "/anim" or "/still") res.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+        if (mediaListener || IsMediaRoute(path)) res.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+        // the media origin is media only: no API route, no UI file, no WebSocket, no write, no preflight
+        if (mediaListener && !(get && IsMediaRoute(path))) { await Refuse(ctx, 404, "the media origin serves only GET /media /clip /img /anim /still"); return; }
 
         var origin = req.Headers.Origin.ToString();
-        if (origin.Length > 0 && !HostOk(OriginHost(origin) ?? "", port))
+        if (origin.Length > 0)
         {
-            if (!_devOrigins.Contains(origin.TrimEnd('/'))) { await Refuse(ctx, 403, "origin not allowed"); return; }
-            res.Headers["Access-Control-Allow-Origin"] = origin;
-            res.Headers.Append("Vary", "Origin");
-            if (HttpMethods.IsOptions(req.Method) && req.Headers.ContainsKey("Access-Control-Request-Method"))
+            // the app's own page is the API's origin; on the media listener it is a cross-origin caller like the dev UI
+            bool appOrigin = HostOk(OriginHost(origin) ?? "", ApiPort > 0 ? ApiPort : port);
+            if (!appOrigin && !_devOrigins.Contains(origin.TrimEnd('/'))) { await Refuse(ctx, 403, "origin not allowed"); return; }
+            if (!appOrigin || mediaListener)
+            {
+                // the dev UI's calls, and on the media listener the app's own <video crossorigin> (the transition preview
+                // draws it into WebGL); a plain <img>/<video> sends no Origin at all
+                res.Headers["Access-Control-Allow-Origin"] = origin;
+                res.Headers.Append("Vary", "Origin");
+            }
+            if (!appOrigin && HttpMethods.IsOptions(req.Method) && req.Headers.ContainsKey("Access-Control-Request-Method"))
             {
                 // a preflight never carries the token (no custom header values) — answered here, before the token check
                 res.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
@@ -149,8 +206,7 @@ public static class ApiSecurity
             }
         }
 
-        bool get = HttpMethods.IsGet(req.Method) || HttpMethods.IsHead(req.Method);
-        bool open = get && (path == "/health" || IsUiFile(ui, path));
+        bool open = !mediaListener && get && (path == "/health" || IsUiFile(ui, path));
         if (!open)
         {
             string? presented = req.Headers[Header].FirstOrDefault();

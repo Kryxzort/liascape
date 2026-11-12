@@ -5,6 +5,15 @@ Choices that ruled out a tempting alternative, so nobody "fixes" them back. Form
 
 ## Backend/API
 
+### Serve media from a second listener — 2026-11-12
+Chromium opens 6 HTTP/1.1 connections per origin; slow `/img` `/media` `/clip` `/anim` `/still` loads held all six and
+every API call (a search, a reload) queued behind them. Media gets its own listener at the API's port + 1
+(`ApiSecurity.PickPorts`): its own origin and pool, answering only token-carrying GETs of the media routes; the page derives
+it from the API's port (`api/client.ts` `MEDIA`). Rejected: `localhost:<port>` on the same listener (Chromium tries `[::1]`
+first, where another local user could listen and collect the token; `localhost` is already the API's own origin), HTTP/2
+(browsers need TLS), a discovered random port (races the first thumbnails). `.claude/rules/backend/api.md`; matrix
+`browse:mediaPool`.
+
 ### Authenticate media URLs with `?token=`, not a cookie — 2026-11-11
 Every page in the user's browser and every local user can reach `127.0.0.1`, so the API needs a capability only the
 app's page holds. `<img>`/`<video>` src and the WebSocket can't send headers, so GET/HEAD may carry `?token=`; writes need

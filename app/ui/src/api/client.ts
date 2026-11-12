@@ -4,6 +4,12 @@ const params = new URLSearchParams(location.search);
 const port = params.get("api") || localStorage.getItem("liascape_api_port") || "";
 if (port) localStorage.setItem("liascape_api_port", port);
 export const API = port ? `http://127.0.0.1:${port}` : "";
+// API: media (/img /media /clip /anim /still) comes from the backend's media listener, the API's port + 1: another origin, so
+// slow thumbnail and video loads fill the browser's 6 connections to IT and never queue an API call behind them
+// (.claude/rules/backend/api.md § Security; docs/decisions.md § "Serve media from a second listener"). A page whose API
+// port is unknown keeps media on the API's own origin, which still serves them. Guard: matrix browse:mediaPool.
+const apiPort = Number(port || location.port);
+export const MEDIA = Number.isInteger(apiPort) && apiPort > 0 && apiPort < 65535 ? `http://127.0.0.1:${apiPort + 1}` : API;
 
 // API: the backend's token (.claude/rules/backend/api.md § Security — every request but the static UI and /health needs it).
 // The shell (app/shell/main.js) opens the window with ?token=<~/.config/liascape/serve.token>; browser dev: append
@@ -23,16 +29,16 @@ export const withToken = (url: string) => (TOKEN ? `${url}${url.includes("?") ? 
 
 // route remote thumbs/gifs through the proxy (UA + Referer + CORS); local files via /media
 export const img = (u: string, referer?: string) =>
-  withToken(`${API}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
-export const media = (path: string) => withToken(`${API}/media?path=${encodeURIComponent(path)}`);
+  withToken(`${MEDIA}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
+export const media = (path: string) => withToken(`${MEDIA}/media?path=${encodeURIComponent(path)}`);
 // API: a small preview clip of a local video (/clip): what "Animate wallpapers without a GIF" plays (components/autoplay.ts)
-export const clip = (path: string) => withToken(`${API}/clip?path=${encodeURIComponent(path)}`);
+export const clip = (path: string) => withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}`);
 // animated preview: serve remote gifs from a disk cache (/anim, range/length → loops cleanly, like
 // local /media) instead of the live /img proxy which flashes black at the gif loop seam.
 // gif (remote OR local) → /anim, which trims the leading fade-from-black + serves seekable so it loops
 // without a black seam. Other local formats (animated webp) loop fine raw → /media.
 export const anim = (u: string) =>
-  /^https?:/i.test(u) || /\.gif$/i.test(u) ? withToken(`${API}/anim?u=${encodeURIComponent(u)}`) : media(u);
+  /^https?:/i.test(u) || /\.gif$/i.test(u) ? withToken(`${MEDIA}/anim?u=${encodeURIComponent(u)}`) : media(u);
 // static thumbnail for an animated preview: a non-black/white extracted frame (so AutoPlayGifs-off
 // doesn't show the gif's black frame-0, AND so a gif used as a static thumbnail doesn't self-animate).
 // Remote URLs and local gif/webp → /still (ffmpeg extract); plain local images → /media as-is.
@@ -41,8 +47,8 @@ export const anim = (u: string) =>
 // A NATIVE request (enlarged modal, no w) only needs /still for gif/webp/remote (frame extraction);
 // plain local images pass straight to /media uncropped + un-re-encoded (crisp, no quality loss).
 export const still = (u: string, w?: number) => {
-  if (w) return withToken(`${API}/still?u=${encodeURIComponent(u)}&w=${w}`);
-  return /^https?:/i.test(u) || /\.(gif|webp)$/i.test(u) ? withToken(`${API}/still?u=${encodeURIComponent(u)}`) : media(u);
+  if (w) return withToken(`${MEDIA}/still?u=${encodeURIComponent(u)}&w=${w}`);
+  return /^https?:/i.test(u) || /\.(gif|webp)$/i.test(u) ? withToken(`${MEDIA}/still?u=${encodeURIComponent(u)}`) : media(u);
 };
 // card thumbnails decode to this width (never upscales — min(w,iw) caps at the source). Generous
 // enough for Large cards at hidpi; previews are usually ≤640px so most are served at native size.

@@ -43,7 +43,7 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 - Built from the owner's fork at the commit in `third_party/lwe/PIN`, with `patches/lwe/` on top, by `scripts/lwe.sh fetch prepare build check`. Patch and upstream policy: `UPSTREAM.md`.
 
 ## Dev stack
-- `bash scripts/dev.sh` installs and starts the systemd user units `liascape-vite` (HMR :5173) and `liascape-watch` (`dotnet watch … serve`, :5174) from `scripts/dev/`; `bash scripts/dev-stop.sh` stops them. Launch the app normally; `app/shell/main.js` detects Vite.
+- `bash scripts/dev.sh` installs and starts the systemd user units `liascape-vite` (HMR :5173) and `liascape-watch` (`dotnet watch … serve`, :5174, media :5175) from `scripts/dev/`; `bash scripts/dev-stop.sh` stops them. Launch the app normally; `app/shell/main.js` detects Vite.
 - The dev backend keeps `serve.token` across `dotnet watch` restarts; Vite's dev-only `/__liascape/token` (`app/ui/vite.config.ts`) hands it to a page opened without `?token=`. A browser tab without Electron: `http://localhost:5173/?api=5174&token=$(cat ~/.config/liascape/serve.token)`.
 
 ## Binary resolution (backend)

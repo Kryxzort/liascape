@@ -72,7 +72,7 @@ async function startBackend() {
   // a fresh API token for every app launch: the backend makes one when the file is gone (.claude/rules/backend/api.md § Security)
   try { fs.unlinkSync(tokenFile()); } catch { /* none yet */ }
   const env = { ...process.env };
-  if (!env.LIASCAPE_PORT && prev && (await portFree(prev))) env.LIASCAPE_PORT = String(prev);
+  if (!env.LIASCAPE_PORT && prev && (await portFree(prev)) && (await portFree(prev + 1))) env.LIASCAPE_PORT = String(prev);
   const spawnIt = () => {
     backend = process.env.LIASCAPE_BACKEND
       ? spawn(process.env.LIASCAPE_BACKEND, ["serve"], { env, stdio: "inherit" })
