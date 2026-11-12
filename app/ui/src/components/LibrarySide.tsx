@@ -192,7 +192,7 @@ export function LibrarySide({
   const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl && online });
   const loud = item.isScene && sceneSpeed ? sceneLoudnessText(item) : null;
   // the pills below show the resolution and the age rating: their tags would only repeat them
-  const tags = sideTags(item.tags, [item.resolution, item.ageRating]);
+  const tags = sideTags(item.tags, { resolution: !!item.resolution, age: !!item.ageRating });
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
   const showLoud = !!loud && at("standard");

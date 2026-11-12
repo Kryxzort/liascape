@@ -62,7 +62,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
-  const tags = sideTags(w.tags, [w.resolution]);
+  const tags = sideTags(w.tags, { resolution: !!w.resolution });
   const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
 
   return (

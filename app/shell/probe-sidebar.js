@@ -1673,7 +1673,7 @@ app.whenReady().then(async () => {
       ff(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(d, "v.mp4")]);
       // Steam's kind of tags (look:sideTags): the category, the type, a genre, a resolution
       fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title, type: "video", file: "v.mp4", preview: "preview.jpg",
-        ...(title === "we1" ? { tags: ["Wallpaper", "Video", "Anime", "1920 x 1080"] } : {}) }));
+        ...(title === "we1" ? { tags: ["Wallpaper", "Video", "Anime", "1920 x 1080", "Standard Definition"] } : {}) }));
     }
     await setSettings({ workshopFolder: we, autoAddWeWallpapersToLibrary: false });
     const srcs = (await http("GET", "/sources")).json;
@@ -1685,7 +1685,8 @@ app.whenReady().then(async () => {
     const libCount = async () => ((await http("GET", "/library")).json || []).length;
 
     // look:sideTags — the sidebar lists only the tags that say something (components/sideTags.ts): never "Wallpaper" (every
-    // item here is one) nor the type ("Video" / "Scene"), nor a tag repeating a pill it shows (the resolution); a genre stays
+    // item here is one) nor the type ("Video" / "Scene"), nor any tag of a group a pill it shows tells (the resolution:
+    // "Standard Definition" too); a genre stays
     await cell("look:sideTags", async () => {
       const v = [];
       await page(`await m.closeAll();`); await sleep(200);
@@ -1693,11 +1694,14 @@ app.whenReady().then(async () => {
         return { tags: [...p.querySelectorAll(".side-tags .tag")].map((e) => e.textContent.trim()),
           pills: [...p.querySelectorAll(".side-hero .side-pill")].map((e) => e.textContent.trim()) };`);
       console.log(`        ${JSON.stringify(r)}`);
-      const resPill = r.pills.some((x) => /1920\s*[×x]\s*1080/.test(x));
+      // any resolution pill (its text is the frame size) makes every resolution-group tag a repeat
+      const resPill = r.pills.some((x) => /\d+\s*[×x]\s*\d+/.test(x));
       for (const t of ["Wallpaper", "Video"]) if (r.tags.includes(t)) v.push(`lists "${t}" (says nothing here)`);
       if (!r.tags.includes("Anime")) v.push(`the genre "Anime" is missing (tags ${JSON.stringify(r.tags)})`);
-      if (resPill && r.tags.includes("1920 x 1080")) v.push("lists the resolution its pill already shows");
-      if (!resPill && !r.tags.includes("1920 x 1080")) v.push("hid the resolution though no pill shows it");
+      for (const t of ["1920 x 1080", "Standard Definition"]) {
+        if (resPill && r.tags.includes(t)) v.push(`lists "${t}" though a resolution pill shows`);
+        if (!resPill && !r.tags.includes(t)) v.push(`hid "${t}" though no resolution pill shows`);
+      }
       await page(`await m.closeAll();`);
       return v;
     });
