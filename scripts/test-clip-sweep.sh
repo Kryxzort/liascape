@@ -6,7 +6,9 @@
 #  2. down + priority: Mid then Low (the last one wins: the sweep follows Low, never Mid); the item a "card" keeps asking
 #     about is re-made first; every clip ends up Low, one file per item, fewer bytes on disk once the old ones' grace is
 #     over; the wallpapers' own files untouched; GET /library/ops counted it ("clips", phase low, total 4) and is empty after.
-#  3. up: Mid → every clip Mid.
+#  3. up, held: the UI holds the sweep (POST /clip/sweep-hold, the Settings tab showing), Mid: nothing starts while held;
+#     released, the sweep starts at once and every clip ends up Mid.
+#  3b. a hold nobody renews runs out (the lease): Low, held and never released: the sweep starts on its own.
 #  4. cancel: High, then Low while a High encode runs: it is stopped, the sweep re-targets, every clip ends up Low.
 #  5. restart: High, the backend stopped mid-sweep; the next start resumes it (only what is left) to the end; a card
 #     waiting for a new item's first clip goes before the sweep's rest.
@@ -49,7 +51,7 @@ H=$T/home
 mkdir -p "$H/.config/liascape" "$H/.cache" "$H/.local/share" "$H/rt" "$H/st"
 export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME=$H/.local/share XDG_RUNTIME_DIR=$H/rt XDG_STATE_HOME=$H/st
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
-export LIASCAPE_CLIP_SETTLE_MS=1000 LIASCAPE_CLIP_GRACE_MS=2000
+export LIASCAPE_CLIP_SETTLE_MS=1000 LIASCAPE_CLIP_GRACE_MS=2000 LIASCAPE_CLIP_RELEASE_MS=500 LIASCAPE_CLIP_HOLD_MS=5000
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
 bad() { echo "FAIL  $1"; FAIL=$((FAIL + 1)); }
@@ -136,17 +138,34 @@ if [ "$LOW_BYTES" -lt "$HIGH_BYTES" ]; then ok "space freed: $HIGH_BYTES → $LO
 check "/library/ops empty once done" "$(api "$U/library/ops" | jq -c '[.ops[] | select(.id == "clips")]')" "[]"
 check "the wallpapers' own files untouched" "$(sha256sum "$LIB"/imported/*/*.mp4 | sha256sum)" "$SRC_SUM"
 
-echo "== 3. up"
+echo "== 3. up, held while Settings shows"
+hold() { api -X POST "$U/clip/sweep-hold" -d "{\"hold\":$1}" >/dev/null || bad "POST /clip/sweep-hold $1"; }
+hold true
 quality mid
+sleep 3   # three settles, inside the lease
+check "held: no sweep started" "$(grep -c 'the library follows mid' "$LOG")" 0
+check "held: the clips still Low" "$(fulls a b c d)" "a:0 b:0 c:0 d:0"
+hold false
+waitlog 'the library follows mid' 1 3 && ok "released: the sweep started within 3 s" || bad "released: no sweep within 3 s"
 waitq "a:1 b:1 c:1 d:1" 180 || true
 check "every clip Mid" "$(fulls a b c d)" "a:1 b:1 c:1 d:1"
+
+echo "== 3b. a hold nobody renews runs out"
+hold true
+quality low
+sleep 3
+check "held (lease running): no sweep started" "$(grep -c 'the library follows low' "$LOG")" 1   # 1: case 2's
+waitlog 'the library follows low' 2 8 && ok "the lease ran out: the sweep started on its own" || bad "the lease ran out: no sweep"
+waitq "a:0 b:0 c:0 d:0" 180 || true
+check "every clip Low again" "$(fulls a b c d)" "a:0 b:0 c:0 d:0"
 
 echo "== 4. a new choice stops the running sweep and re-targets it"
 quality high
 waitlog "the library follows high" 1 30 || bad "no High sweep"
 waitlog "clips: re-made .* high" 1 120 || bad "no High clip made"
+nlow=$(grep -c "the library follows low" "$LOG")   # the earlier cases' Low sweeps
 quality low   # one done, the next running (≈ 2 s an encode, longer than the settling)
-waitlog "the library follows low" 2 30 || bad "no re-target to Low"
+waitlog "the library follows low" $((nlow + 1)) 30 || bad "no re-target to Low"
 check "the running High encode was stopped" "$(grep -c 'clips: stopping a high encode' "$LOG")" 1
 waitq "a:0 b:0 c:0 d:0" 180 || true
 check "every clip Low after all" "$(fulls a b c d)" "a:0 b:0 c:0 d:0"

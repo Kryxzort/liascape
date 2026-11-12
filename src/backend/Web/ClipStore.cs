@@ -497,6 +497,9 @@ public static class ClipStore
     // A user who picks Low wants the disk and decode savings, one who picks High the better picture, so a change reaches every
     // clip of the library, up and down (docs/decisions.md § "Play every on-screen video preview, each as a small clip"):
     //   - it settles for SETTLE first: flipping through Low / Mid / High starts nothing; each change restarts the wait.
+    //   - and waits while the UI holds it (HoldSweep: the Settings tab is showing, where the choice is still being made);
+    //     leaving Settings releases it (RELEASE later). The hold is a lease (HOLD_LEASE, renewed by the UI), so a closed or
+    //     crashed window can't keep the library at the old quality.
     //   - then the sweep re-makes, on the background queue above (one at a time, nice 19 / idle I/O, behind every stand-in
     //     and every card's own job), each library item whose full clip is another quality: first the items a card asked
     //     about within ASK_WINDOW (a card on screen keeps asking while `pending`, clipSource.ts: that is the UI saying what
@@ -507,6 +510,9 @@ public static class ClipStore
     // Progress: LibraryOps "clips" (the top bar's line). Guard: scripts/test-clip-sweep.sh; matrix clip:size.
     private static readonly double[] FACTOR = [0.75, 1, 1.5]; // the box factor of each quality: clipSource.ts QUALITY_FACTOR
     private static readonly TimeSpan SETTLE = EnvMs("LIASCAPE_CLIP_SETTLE_MS", 4000);
+    private static readonly TimeSpan RELEASE = EnvMs("LIASCAPE_CLIP_RELEASE_MS", 1000);
+    private static readonly TimeSpan HOLD_LEASE = EnvMs("LIASCAPE_CLIP_HOLD_MS", 60000);
+    private static DateTime _holdUntil;
     private static int _target = -1, _pendingQ = -1, _gen, _swDone, _swTotal, _armSeq;
     private static bool _settling;
     private static DateTime _checkedAt;
@@ -521,6 +527,15 @@ public static class ClipStore
         int q = ParseQuality(quality);
         if (q < 0) return;
         lock (_lock) { _pendingQ = q; ArmSettle(); }
+    }
+    // POST /clip/sweep-hold: the Settings tab shows (renewed while it does) or was left
+    public static void HoldSweep(bool hold)
+    {
+        lock (_lock)
+        {
+            _holdUntil = hold ? DateTime.UtcNow + HOLD_LEASE : default;
+            if (!hold && _settling) _settleTimer?.Change(RELEASE, Timeout.InfiniteTimeSpan);
+        }
     }
     // at start-up: whatever a sweep left undone before the restart
     public static void ResumeSweep()
@@ -585,7 +600,13 @@ public static class ClipStore
         lock (_settleRun)
         {
             int seq, q;
-            lock (_lock) seq = _armSeq;
+            lock (_lock)
+            {
+                // held: look again when the lease runs out (a release re-arms it sooner)
+                var left = _holdUntil - DateTime.UtcNow;
+                if (left > TimeSpan.Zero) { _settleTimer?.Change(left + TimeSpan.FromMilliseconds(50), Timeout.InfiniteTimeSpan); return; }
+                seq = _armSeq;
+            }
             try { q = ParseQuality(SettingsService.Load().VideoPreviewQuality); } catch { q = -1; }
             if (q < 0) lock (_lock) q = _pendingQ >= 0 ? _pendingQ : 1;
             bool same;

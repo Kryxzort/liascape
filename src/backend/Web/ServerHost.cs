@@ -798,6 +798,8 @@ public static class ServerHost
         app.MapGet("/clip/qualities", () => Results.Json(new { qualities = ClipStore.Qualities() }));
         // the library's background operations running now, with their counts (the top bar's progress line; WS library-ops)
         app.MapGet("/library/ops", () => Results.Json(LibraryOps.Snapshot()));
+        // the Settings tab shows (a quality change waits; renewed while it shows) or was left (the sweep may start)
+        app.MapPost("/clip/sweep-hold", (ClipHoldBody body) => { ClipStore.HoldSweep(body.Hold); return Results.Ok(); });
         // The app went inactive with these boxes last seen off screen (shrink clips now 2x wider than they need), or came back.
         app.MapPost("/clip/shrink", (ClipShrinkBody body) =>
         {
@@ -972,6 +974,7 @@ public static class ServerHost
     public record PlayFromReq(List<string> Paths, int StartIndex, PlaylistSettings? Settings);
     public record ImportReq(string Path, string Title);
     public record SceneLoudnessReq(List<string>? Paths = null, bool? Force = null);
+    public record ClipHoldBody(bool Hold);
     public record ClipShrinkBody(bool Idle, List<ClipStore.ShrinkItem>? Items);
     public record OpenReq(string? Path, string? Url, bool Reveal, bool IsScene = false, string? WorkshopId = null, string? CopiedSceneDir = null);
 }

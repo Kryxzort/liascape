@@ -9,6 +9,8 @@
 //                    the fill, the tab keeps a translucent fill of its own
 //   libops:noMotion  "Smooth window animations" off: the line and its tab fade in and out in place (opacity only, in-between
 //                    frames, nothing moves), the fill steps (no ease), no sweep
+//   libops:hold      on the Settings tab a quality change waits (well past its settle, nothing runs); switching to the
+//                    Library starts it and the line shows (App.tsx holds the sweep while Settings shows: ClipStore.HoldSweep)
 //   libops:resync    a page opened mid-operation shows the line at once (GET /library/ops)
 // Pictures (looked at, not only counted): libops-appear.png, libops-steady.png, libops-noglow-bglive.png, libops-nomotion.png,
 // in $LIASCAPE_OUT. Exit 1 on any FAIL.
@@ -177,6 +179,28 @@ app.whenReady().then(async () => {
       if (gliding(sm.fill)) v.push(`motion off: the fill glided in ${gliding(sm.fill)} frames (want steps)`);
       if (look && look.sweep !== "none") v.push(`motion off: the highlight still sweeps (${look.sweep})`);
       if (!sm.texts.every((t) => /^Making High previews\d+ \/ \d+$/.test(t || ""))) v.push(`the tab read ${J(sm.texts)}`);
+      return v;
+    });
+
+    await cell("libops:hold — on Settings a quality change waits; switching to the Library starts it", async () => {
+      await opsIdle();
+      const tabTo = (t) => js(`const b = [...document.querySelectorAll(".tab")].find((x) => x.textContent.trim() === ${J(t)}); b?.click(); return !!b`);
+      if (!(await tabTo("Settings"))) return ["no Settings tab"];
+      await sleep(800);
+      const cur = (await http("GET", "/settings")).json?.videoPreviewQuality;
+      const q = cur === "mid" ? "low" : "mid";
+      await http("POST", "/settings", { videoPreviewQuality: q });
+      await sleep(7000);   // the settle is 4 s
+      const v = [];
+      const held = ((await http("GET", "/library/ops")).json?.ops ?? []).some((o) => o.id === "clips");
+      if (held) v.push(`on Settings: the sweep to ${q} started anyway`);
+      if (await js(`return !!document.querySelector(".libops")`)) v.push("on Settings: the line showed");
+      await tabTo("Library");
+      const t0 = Date.now();
+      const shown = await waitFor(async () => js(`return !!document.querySelector(".libops")`), 8000, 50);
+      if (!shown) v.push("back on the Library: no sweep line within 8 s");
+      else console.log(`        the line showed ${Date.now() - t0} ms after leaving Settings`);
+      await opsIdle();
       return v;
     });
 

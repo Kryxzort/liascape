@@ -53,6 +53,10 @@ export const clipFile = (path: string, v: string) => withToken(`${MEDIA}/clip?pa
 export const clipShrink = (idle: boolean, items: { path: string; w: number; h: number; q: ClipQuality }[]) =>
   fetch(`${API}/clip/shrink`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
     body: JSON.stringify({ idle, items }) }).catch(() => undefined);
+// API: POST /clip/sweep-hold — a held quality change waits (ClipStore.HoldSweep); the hold is a lease the caller renews
+export const clipSweepHold = (hold: boolean) =>
+  fetch(`${API}/clip/sweep-hold`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
+    body: JSON.stringify({ hold }) }).catch(() => undefined);
 // animated preview: serve remote gifs from a disk cache (/anim, range/length → loops cleanly, like
 // local /media) instead of the live /img proxy which flashes black at the gif loop seam.
 // gif (remote OR local) → /anim, which trims the leading fade-from-black + serves seekable so it loops

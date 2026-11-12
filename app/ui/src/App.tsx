@@ -10,7 +10,7 @@ import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
 import { PlaylistBar as PlaylistBarView } from "./components/PlaylistBar";
 import { useMotion } from "./components/motion";
-import { CLIENT_ID } from "./api/client";
+import { CLIENT_ID, clipSweepHold } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { SortFilterButton } from "./components/SortFilterButton";
@@ -59,6 +59,16 @@ export default function App() {
   const setTab = (t: Tab) => {
     if (t !== picked.tab) setPicked({ tab: t, dir: TAB_ORDER.indexOf(t) > TAB_ORDER.indexOf(picked.tab) ? "r" : "l" });
   };
+  // While Settings shows, a "Video preview quality" change waits: the library is re-made at the new quality only once
+  // the user leaves Settings (ClipStore.HoldSweep). The hold is a lease the backend drops on its own (60 s), so it is
+  // renewed while Settings shows. Guard: scripts/test-clip-sweep.sh (hold), probe-libops libops:hold.
+  const onSettings = picked.tab === "settings";
+  useEffect(() => {
+    if (!onSettings) return;
+    void clipSweepHold(true);
+    const t = setInterval(() => void clipSweepHold(true), 20_000);
+    return () => { clearInterval(t); void clipSweepHold(false); };
+  }, [onSettings]);
   // PERF: the Library page and the playlist bar stay mounted once shown, hidden (React's <Activity>: display none) while
   // another tab shows. A switch back reveals them instead of building their ~1,000 components and DOM again: about half the
   // missed frames of a switch, at 240 Hz and at 4× CPU / 60 Hz. Hidden, their effects are cleaned up (key handlers,
