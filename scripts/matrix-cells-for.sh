@@ -44,6 +44,7 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
+    scripts/agent-window.sh|scripts/bench-live-ui.mjs|app/shell/cdp.js|app/shell/drive.js) echo "  $f → nothing (the agent window and its drivers — run: bash scripts/agent-window.sh up)" >&2 ;;
     src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
     src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET|cover|plStart|parked|expert" "$f" ;;

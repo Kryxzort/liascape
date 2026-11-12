@@ -5,6 +5,13 @@ Choices that ruled out a tempting alternative, so nobody "fixes" them back. Form
 
 ## Backend/API
 
+### Run the agent window in a private compositor, not an output of the session's Hyprland — 2026-11-12
+Agents drive their own Liascape window (`scripts/agent-window.sh`) inside a headless gamescope (no seat, no input, no DRM,
+sandboxed in bwrap with its own network namespace), never a headless output added to the owner's Hyprland: removing an
+output always warps the cursor to another monitor's centre and focuses it (`CMonitor::onDisconnect`, a forced warp that
+`cursor:no_warps` doesn't stop), and an output that stays is a workspace the owner's keys can land on. The script only
+reads Hyprland; its watcher aborts on any owner-side event. Rule: `.claude/rules/ui/shell-and-probes.md`.
+
 ### Serve media from a second listener — 2026-11-12
 Chromium opens 6 HTTP/1.1 connections per origin; slow `/img` `/media` `/clip` `/anim` `/still` loads held all six and
 every API call (a search, a reload) queued behind them. Media gets its own listener at the API's port + 1

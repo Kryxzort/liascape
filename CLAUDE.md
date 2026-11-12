@@ -18,7 +18,8 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Steam paths (no account needed): `bash scripts/test-steam-signin.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`
-- Live UI benchmark (NOT hermetic — drives the running debug app): `node scripts/bench-live-ui.mjs <scenario>` — real frame times at the real refresh rate
+- Agent window (NOT hermetic — its own headless compositor, sandboxed backend, Vite and CDP port; it never writes to the session's Hyprland; CDP scripts and benches drive it, never the owner's window): `bash scripts/agent-window.sh up|status|down`
+- Live UI benchmark (NOT hermetic — drives the agent window; `--owner` the owner's): `node scripts/bench-live-ui.mjs <scenario>` — real frame times at the window's measured refresh rate
 - Inspect a running player (read-only): `liascape ctl state|logs|probe` (skill `player-debug`)
 
 ## Hard rules

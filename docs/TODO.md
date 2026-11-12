@@ -13,13 +13,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
-29. [ ] (next, ahead of 28) An agent-only app window (owner): agents drive their own Liascape window, never the owner's.
-       `scripts/agent-window.sh up|down`: a Hyprland headless output (runtime `hyprctl output create headless …`, never
-       a config change) so the window renders at a real refresh off the owner's screens; its own backend (private HOME /
-       settings / port, the owner's library linked read-only, no player or a headless one, no audio); the Electron
-       window on that output with its own CDP port; Vite dev for it. Probes / benches / screenshots default to it;
-       the owner's window is off limits (CLAUDE.local.md). Before / after: the owner's monitors, workspaces and windows
-       unchanged; `down` removes everything.
 28. [ ] Complete the Library's filter data (owner): auto-imported Workshop items (subscribed through Steam, so never
        downloaded by Liascape) have no Steam tags — no resolution, partial genres. Fetch their real tags once over the
        anonymous client-protocol session (`Helpers/SteamAnonymous.cs`, PublishedFile.GetDetails, many IDs per call,

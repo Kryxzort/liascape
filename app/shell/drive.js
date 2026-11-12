@@ -1,11 +1,13 @@
-// Drive the LIVE debug window over CDP, measure REAL fps (visible → real rAF). node app/shell/drive.js
+// Drive a live debug window over CDP, measure REAL fps (visible → real rAF). node app/shell/drive.js [--owner]
+// The target: the agent window by default, --owner the user's own (cdp.js cdpPort).
 const http = require("http");
+const { port } = require("./cdp").cdpPort(process.argv.slice(2));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FPS = `new Promise(r=>{let n=0,t=performance.now();(function f(){n++;performance.now()-t<1500?requestAnimationFrame(f):r(Math.round(n*1000/(performance.now()-t)))})()})`;
 
 function connect() {
   return new Promise((res, rej) => {
-    http.get("http://localhost:9222/json", (r) => {
+    http.get(`http://127.0.0.1:${port}/json`, (r) => {
       let d = ""; r.on("data", (c) => (d += c)); r.on("end", () => {
         const t = JSON.parse(d).find((x) => x.type === "page");
         const ws = new WebSocket(t.webSocketDebuggerUrl);

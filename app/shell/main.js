@@ -1,5 +1,5 @@
 // Electron shell. Two modes, auto-detected:
-//  • DEV (HMR): if a Vite dev server is up on :5173 (systemd liascape-vite), load the UI from Vite
+//  • DEV (HMR): if a Vite dev server is up on :5173 (systemd liascape-vite; LIASCAPE_VITE = another), load the UI from Vite
 //    (hot-reload) and talk to the systemd `dotnet watch -- serve` backend (port via serve.port).
 //  • PROD: no Vite → spawn our own backend (LIASCAPE_BACKEND or `dotnet run`) and load the built dist
 //    same-origin. Packaging spawns the published binary.
@@ -15,10 +15,12 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const uiDir = path.join(repoRoot, "app", "ui", "dist");
 // the backend's config dir ($XDG_CONFIG_HOME/liascape, else ~/.config/liascape — .NET's ApplicationData)
 const portFile = path.join(configDir(), "serve.port");
-const VITE = "http://localhost:5173";
+const VITE = process.env.LIASCAPE_VITE || "http://localhost:5173";
 // Chromium's profile (the renderer's localStorage, caches) in ~/.config/liascape-shell — productName
 // "Liascape" would otherwise put it in ~/.config/Liascape, beside the backend's own ~/.config/liascape.
 app.setPath("userData", path.join(app.getPath("appData"), "liascape-shell"));
+// LIASCAPE_MUTE=1: no sound reaches any device (the agent window, scripts/agent-window.sh).
+if (process.env.LIASCAPE_MUTE) { app.commandLine.appendSwitch("mute-audio"); app.commandLine.appendSwitch("disable-audio-output"); }
 
 // ── GPU / ozone platform selection (the load-bearing bit on Linux) ─────────────────────────────
 // ozone platform follows the ACTUAL session: Wayland if WAYLAND_DISPLAY is set, else X11. Use the
@@ -56,8 +58,9 @@ if (angle) {
 let backend;
 // The UI's origin is http://127.0.0.1:<backend port>. A new random port every launch is a new origin, so
 // everything the renderer keeps per origin (localStorage: library sort, source tab, …) started empty on
-// every launch. Reuse the last port while it's free (LIASCAPE_PORT, honoured by the backend); if it gets taken
-// before the backend binds it, the backend exits without writing serve.port → retry on a random one.
+// every launch. Reuse the last port while it and the next one (the backend's media listener) are free (LIASCAPE_PORT,
+// honoured by the backend); if one gets taken before the backend binds it, the backend exits without writing serve.port →
+// retry on random ones.
 function portFree(port) {
   return new Promise((res) => {
     const s = net.createServer();
@@ -94,8 +97,10 @@ function waitForPort(cb, tries = 120) {
   setTimeout(() => waitForPort(cb, tries - 1), 500);
 }
 
-// Is a Vite dev server already running? → dev/HMR mode.
+// Is a Vite dev server already running? → dev/HMR mode. A LIASCAPE_VITE the caller started counts as up without asking:
+// its first answer can take longer than the probe waits (a cold transform), and PROD mode would start a backend of its own.
 function viteUp(cb) {
+  if (process.env.LIASCAPE_VITE) return cb(true);
   const req = http.get(VITE, (res) => { res.destroy(); cb(true); });
   req.on("error", () => cb(false));
   req.setTimeout(400, () => { req.destroy(); cb(false); });
@@ -129,8 +134,12 @@ function openWindow(loadUrl) {
   try { appOrigin = new URL(loadUrl).origin; if (appOrigin === "null") appOrigin = null; } catch { appOrigin = null; }
   const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "fullscreen"]);
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(ALLOWED_PERMISSIONS.has(perm)));
+  // LIASCAPE_WINDOW=<w>x<h>: that size with no frame — the agent window's private compositor (scripts/agent-window.sh)
+  // neither tiles nor decorates windows, so the page gets exactly the output's size
+  const fixed = /^(\d+)x(\d+)$/.exec(process.env.LIASCAPE_WINDOW || "");
   const win = new BrowserWindow({
     width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "Liascape",
+    ...(fixed ? { width: Number(fixed[1]), height: Number(fixed[2]), frame: false } : {}),
     webPreferences: {
       backgroundThrottling: false, preload: path.join(__dirname, "preload.js"),
       // Electron's defaults, pinned: the page never gets Node, the preload runs isolated and sandboxed (it only bridges
@@ -157,8 +166,8 @@ function openWindow(loadUrl) {
 // It does NOT show the on-screen HUD: the visual overlay is gated to the Settings "Show debug overlay"
 // toggle only (see DebugHud overlayOn) — bridge mode keeps the values accessible without painting them.
 const DBG = process.env.LIASCAPE_DEBUG ? "debug" : "";
-// LIASCAPE_DEBUG opens a CDP remote-debugging port so tooling can attach to the live window.
-if (process.env.LIASCAPE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", "9222");
+// LIASCAPE_DEBUG opens a CDP remote-debugging port (LIASCAPE_CDP_PORT, default 9222) so tooling can attach to the live window.
+if (process.env.LIASCAPE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", process.env.LIASCAPE_CDP_PORT || "9222");
 
 app.whenReady().then(() => {
   viteUp((dev) => {

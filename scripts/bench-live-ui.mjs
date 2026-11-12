@@ -1,17 +1,19 @@
-// Live UI benchmark — NOT hermetic: drives the RUNNING app's window through its debug port (start it with
-// LIASCAPE_DEBUG=1, CDP on :9222) with synthetic input, while recording a Chromium trace + CPU profile.
+// Live UI benchmark — NOT hermetic: drives a running app window through its debug port with synthetic input, while
+// recording a Chromium trace + CPU profile. The target: the agent window (bash scripts/agent-window.sh up) by default;
+// --owner drives the user's own window (LIASCAPE_DEBUG=1, CDP on :9222) instead (app/shell/cdp.js cdpPort).
 // The repeatable half of the performance standard: the UI matrix gates refresh-independent COUNTS (layers, forced
 // layouts, renders); this measures real TIME on real hardware, judged in frames of the display's measured refresh rate.
 // Harmless input only: pointer moves, wheel scrolls, tab clicks, right-click (opens the item sidebar without applying) +
 // Escape. Never a left-click on a card (applies it), Enter (plays) or any button. Restores the tab (and the Library's
 // scroll position) it started on.
-// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|libscroll|tabs|sidebar> [out-label] [--profile high|typical]
+// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|libscroll|tabs|sidebar> [out-label] [--profile high|typical] [--owner]
 //   prints one JSON line (hz, budgetMs, overBudget = main-thread tasks longer than one frame, over2Frames, main-thread ms by
 //   phase, worst tasks, layouts, the preview <video>s' decode: how many play, frames decoded / dropped, and the renderer +
 //   GPU processes' CPU time as % of one core) + the top JS self-time; writes <label>.trace.json + <label>.cpuprofile in the cwd.
 // Compare runs only at the same refresh rate, build (Vite dev vs packaged) and tab. Rules: .claude/rules/testing.md.
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 // one heavy test run at a time on this machine (scripts/test-lock.sh): a matrix running beside a bench skews its frame times
 if (!process.env.LIASCAPE_TEST_LOCK_HELD) {
   const r = spawnSync("bash", [new URL("./test-lock.sh", import.meta.url).pathname, process.execPath, ...process.argv.slice(1)], { stdio: "inherit" });
@@ -20,11 +22,12 @@ if (!process.env.LIASCAPE_TEST_LOCK_HELD) {
 // --profile high (default): this machine's CPU, judged at the display's measured refresh rate.
 // --profile typical: the CPU slowed 4× (Chromium's DevTools throttling) and judged at 60 Hz — most users' screens, on a
 // weaker PC. A change must hold up under both.
-const args = process.argv.slice(2), pi = args.indexOf("--profile");
+const { port, args } = createRequire(import.meta.url)("../app/shell/cdp.js").cdpPort(process.argv.slice(2));
+const pi = args.indexOf("--profile");
 const profile = pi >= 0 ? args.splice(pi, 2)[1] : "high";
 if (!["high", "typical"].includes(profile)) { console.error("--profile high|typical"); process.exit(2); }
 const scen = args[0], label = args[1] || `${scen}-${profile}`;
-const list = await (await fetch("http://localhost:9222/json")).json();
+const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
 const ws = new WebSocket(list.find((x) => x.type === "page").webSocketDebuggerUrl);
 let id = 0; const pend = new Map(); const events = []; let done;
 const finished = new Promise((r) => (done = r));
@@ -49,7 +52,7 @@ const leftClickTab = async (name) => {
 };
 // CPU time per process (renderer = the page + its media decoders, GPU = compositing / hardware decode) from the browser target
 const procCpu = async () => {
-  const b = new WebSocket((await (await fetch("http://localhost:9222/json/version")).json()).webSocketDebuggerUrl);
+  const b = new WebSocket((await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl);
   await new Promise((r) => b.addEventListener("open", r));
   const r = await new Promise((res) => { b.onmessage = (e) => res(JSON.parse(e.data)); b.send(JSON.stringify({ id: 1, method: "SystemInfo.getProcessInfo" })); });
   b.close();

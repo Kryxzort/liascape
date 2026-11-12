@@ -4,6 +4,7 @@ paths:
   - "scripts/test-ui-matrix.sh"
   - "scripts/matrix-cells-for.sh"
   - "scripts/freeze-monitor.sh"
+  - "scripts/agent-window.sh"
 ---
 
 # Electron shell and UI probes (`app/shell`)
@@ -13,7 +14,8 @@ paths:
 - The `liascape:pick` IPC (native pickers, `window.liascape.pickFolder()/pickFile()`) answers only the app's own frame; the UI falls back to a text input when `window.liascape` is undefined.
 - The shell deletes `serve.token` before starting its own backend (a new token per launch), waits for `serve.port`, and opens `http://127.0.0.1:<port>/?token=…`; with Vite running it opens `http://localhost:5173/?api=5174&token=…`.
 - GPU: NVIDIA defaults to hardware GL via ANGLE `--use-angle=gles-egl`; `LIASCAPE_SOFTGL=1` forces SwiftShader, `LIASCAPE_ANGLE=<backend>` picks another ANGLE backend. The "'--ozone-platform=wayland' is not compatible with Vulkan" log line is harmless.
-- `LIASCAPE_DEBUG=1` opens CDP on :9222 (`node app/shell/cdp.js "<expr>"`) — read-only inspection; anyone local can drive the window meanwhile.
+- `LIASCAPE_DEBUG=1` opens CDP on :9222 (`LIASCAPE_CDP_PORT` = another port); anyone local can drive the window meanwhile.
+- Drive the agent window, never the owner's: `bash scripts/agent-window.sh up` (a private headless gamescope compositor, sandboxed backend, Vite and CDP port; `down` stops all of it). `app/shell/cdp.js`, `drive.js` and `scripts/bench-live-ui.mjs` target it by default; `--owner` targets the owner's window (:9222). Never give it an output in the session's Hyprland: removing one snaps the user's cursor to another monitor (the script's header).
 
 ## Probes and the UI matrix
 - Probes load pages with `withToken(U + "/")` and send `authHeaders()` from `app/shell/api-auth.js`; in-page fetches read `sessionStorage.liascape_token`.
