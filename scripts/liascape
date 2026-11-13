@@ -34,6 +34,11 @@ done
 
 case "${1-}" in
   "")
+    # No core dumps from the window: where systemd-coredump takes them, a crashed renderer stays alive while its core
+    # is written (a minute or more), and only then does the shell hear it died and reload the page
+    # (app/shell/renderer-recovery.js). Soft limit only, so a process that wants dumps can raise it back; it reaches
+    # what the shell starts too (its own backend and player when no other backend runs).
+    ulimit -S -c 0
     exec "${LIASCAPE_ELECTRON:-electron}" "$lib/shell" ;;
   ctl)
     shift
