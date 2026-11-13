@@ -38,6 +38,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
 - [ ] Some scenes still build in 5-8 s warm with the shader-pass fix (3042492564 7.9 s, 3163060610 7.4 s, 2828233985
       5.8 s in the WE-ref run): the cost is outside the shader-rule regexes. Profile one (perf, DWARF call graphs).
+- [ ] The adapter IT's backend-restart section no longer gets its overlap: it SIGTERMs the old backend and expects it
+      still up (held by its WebSocket) while the new one starts, but a stopping backend now exits in ~40 ms
+      (`test-backend-stop.sh`), so the check prints "the overlap this tests didn't happen" and the handover runs
+      without one. Force a real overlap (start the new backend before the old one's SIGTERM, or hold the old one up
+      for the window) so "no switch storm / one advance across the restart" is tested with two backends alive.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
