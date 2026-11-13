@@ -5,12 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-41. [ ] (owner) First-time preview clips show on the progress line: ClipStore's queue (Enqueue → the background maker, one
-       full clip at a time) runs silently, so opening the Library on items with no clip yet (16 at once after a start)
-       encodes for a minute with no sign in the UI. When the queue holds more than one clip, report it as a library op
-       (`LibraryOps.Set("previews", …)`, done/total as clips finish, ended when the queue drains), shown and combined like
-       the others (never on Browse, like the rest); one clip for a hovered card stays silent. A test: the op appears
-       for a batch and not for one.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

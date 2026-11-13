@@ -29,8 +29,10 @@
 //   libops:combined  three operations at once: one line, its fill the sum of done over the sum of total; the words name the one
 //                    that started first with its own count and "· +2 more" (narrow: "+2"), the line's accessible name lists all
 //                    three; counts moving never switch the named one; when it ends the words cross-fade to the next
+//   libops:previews  the cards' own first clips (ClipStore's queue, "clips" phase make): the slot reads "Making previews
+//                    n / total", the line names it and fills to its count
 // Pictures (looked at, not only counted): libops-appear.png, libops-steady.png, libops-noglow-bglive.png, libops-nomotion.png,
-// libops-browse-mid.png, libops-status-*.png, libops-combined*.png in $LIASCAPE_OUT. Exit 1 on any FAIL.
+// libops-browse-mid.png, libops-status-*.png, libops-combined*.png, libops-previews.png in $LIASCAPE_OUT. Exit 1 on any FAIL.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
 const path = require("path");
@@ -78,7 +80,22 @@ async function fixtures(q) {
   const done = await waitFor(async () => (await Promise.all(paths.map(ask))).every((r) => r.json?.full && r.json?.q === q), 90000, 600);
   return done ? paths : null;
 }
-const opsIdle = () => waitFor(async () => !((await http("GET", "/library/ops")).json?.ops ?? [1]).length, 120000, 300);
+// the background queue at rest: every library video's full clip at the setting's quality with nothing queued for it, and no
+// operation listed, on two reads a second apart. An empty GET /library/ops alone isn't rest: one card's clip runs silently,
+// and the page's cards may not have asked yet (the stack's own library videos get their first clips from them); a cell that
+// starts a sweep then sees that batch's line first. Asking with a tiny box never queues a wider clip.
+const VIDEO = /\.(mp4|webm|mkv|mov|m4v|avi)$/i;
+const opsIdle = () => {
+  let calm = 0;
+  return waitFor(async () => {
+    const q = (await http("GET", "/settings")).json?.videoPreviewQuality ?? "mid";
+    const vids = ((await http("GET", "/library")).json ?? []).filter((i) => !i.isScene && VIDEO.test(i.videoPath ?? ""));
+    const rs = await Promise.all(vids.map((i) => http("GET", `/clip?path=${encodeURIComponent(i.videoPath)}&info=1&w=16&h=16&q=${q}`)));
+    const rest = rs.every((r) => r.json?.full && !r.json.pending && r.json.q === q) && !((await http("GET", "/library/ops")).json?.ops ?? [1]).length;
+    calm = rest ? calm + 1 : 0;
+    return calm >= 2;
+  }, 180000, 1000);
+};
 // `debug`: the page with the liascapeDbg bridge (fake operations, a status message)
 const loadLibrary = async (debug = false) => {
   await win.loadURL(withToken(U + "/") + (debug ? "&debug" : ""));
@@ -121,6 +138,7 @@ const LOOK = `const l = document.querySelector(".libops"); if (!l) return null; 
     bar: document.querySelector(".topbar").getBoundingClientRect().bottom };`;
 // a sweep: change the quality, sample the line until it has come and gone, a picture as it appears and one while it runs
 async function sweep(q, pics) {
+  await opsIdle();
   const sm = js(`return ${LINE_SAMPLE(60000)}`);
   await http("POST", "/settings", { videoPreviewQuality: q });
   let look = null;
@@ -235,12 +253,12 @@ app.whenReady().then(async () => {
     await cell("libops:resync — a page opened mid-operation shows the line at once", async () => {
       await opsIdle();
       await http("POST", "/settings", { videoPreviewQuality: "low" });
-      const running = await waitFor(async () => ((await http("GET", "/library/ops")).json?.ops ?? []).some((o) => o.id === "clips"), 20000, 100);
+      const running = await waitFor(async () => ((await http("GET", "/library/ops")).json?.ops ?? []).some((o) => o.id === "clips" && o.phase === "low"), 20000, 100);
       if (!running) return ["no sweep ran — proved nothing"];
       await win.loadURL(withToken(U + "/"));
       const t0 = Date.now();
       const shown = await waitFor(async () => js(`return !!document.querySelector(".libops")`), 5000, 50);
-      const still = ((await http("GET", "/library/ops")).json?.ops ?? []).some((o) => o.id === "clips");
+      const still = ((await http("GET", "/library/ops")).json?.ops ?? []).some((o) => o.id === "clips" && o.phase === "low");
       if (!shown && still) return [`the reloaded page didn't show the running sweep within 5 s`];
       if (!shown) return ["the sweep ended before the page loaded — proved nothing"];
       return Date.now() - t0 > 4000 ? [`the line took ${Date.now() - t0} ms to show on the reloaded page`] : [];
@@ -382,6 +400,27 @@ app.whenReady().then(async () => {
       await set([]); await sleep(900);
       r = await slot();
       if (r.kind !== "hint" || r.line) v.push(`all ended: the slot reads ${r.kind}, the line ${r.line} (want the hint, no line)`);
+      return v;
+    });
+
+    await cell("libops:previews — the cards' own first clips: \"Making previews n / total\" in the slot, the line named and filled", async () => {
+      const v = [];
+      await opsIdle();
+      await loadLibrary(true);
+      if (!(await js(`return typeof window.liascapeDbg?.ops === "function"`))) return ["no debug bridge (liascapeDbg.ops) — proved nothing"];
+      await dbg(`status("")`);
+      // API: the backend's op for the cards' own first clips (Web/ClipStore.cs ReportLocked): id clips, phase make
+      await dbg(`ops([{ id: "clips", phase: "make", done: 3, total: 16 }])`); await sleep(1300);
+      const l = await js(`const l = document.querySelector(".libops"); if (!l) return null; const m = new DOMMatrixReadOnly(getComputedStyle(l.querySelector(".libops-fill")).transform);
+        return { label: l.getAttribute("aria-label"), text: l.getAttribute("aria-valuetext"), scale: +m.a.toFixed(3) };`);
+      const r = await slot();
+      console.log(`        previews: ${J({ l, r })}`);
+      if (!l) return ["no line for the previews operation"];
+      if (r.kind !== "op" || r.text !== "Making previews3 / 16") v.push(`the slot reads ${r.kind} "${r.text}" (want "Making previews" "3 / 16")`);
+      if (l.label !== "Making previews" || l.text !== "Making previews: 3 of 16") v.push(`the line's name "${l.label}", value text "${l.text}"`);
+      if (Math.abs(l.scale - 3 / 16) > 0.01) v.push(`the fill is ${l.scale}, want ${(3 / 16).toFixed(3)}`);
+      await shot("previews");
+      await dbg(`ops([])`); await sleep(900);
       return v;
     });
 

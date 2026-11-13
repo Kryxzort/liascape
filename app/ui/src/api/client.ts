@@ -171,8 +171,9 @@ export interface LibraryItem {
   loudnessLufs?: number | null; loudnessEstimated?: boolean | null; loudnessSeconds?: number | null;
   loudnessConfidence?: string | null; loudnessNote?: string | null;
 }
-// a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips following "Video preview
-// quality" (phase low | mid | high), `facts` = Steam's tags (steam), trailer pages (trailers), frame sizes (sizes)
+// a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips' queue: following "Video
+// preview quality" (phase low | mid | high) or the cards' own first clips (make), `facts` = Steam's tags (steam), trailer
+// pages (trailers), frame sizes (sizes)
 export interface LibraryOp { id: string; phase: string; done: number; total: number }
 export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }
 export interface PlaylistSettings {

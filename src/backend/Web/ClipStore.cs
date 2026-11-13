@@ -360,6 +360,7 @@ public static class ClipStore
             if (_jobs.TryGetValue(item, out var j) && !j.Shrink) { j.W = Math.Max(j.W, w); j.Q = Math.Max(j.Q, q); j.Asked = DateTime.UtcNow; }
             else _jobs[item] = new Job { Path = path, Item = item, W = w, Q = q, Asked = DateTime.UtcNow };
             _worker ??= Task.Run(Work);
+            ReportLocked();
         }
         _wake.Release();
     }
@@ -406,10 +407,13 @@ public static class ClipStore
             var j = _jobs.Values.Where(x => !x.Shrink).OrderByDescending(x => x.Asked).FirstOrDefault()
                     ?? NextSweep(now)
                     ?? (_idle ? _jobs.Values.FirstOrDefault(x => x.Shrink) : null);
-            if (j == null) return null;
-            if (!j.Sweep) _jobs.Remove(j.Item);
-            _running = j;
-            _runningCts = new CancellationTokenSource();
+            if (j != null)
+            {
+                if (!j.Sweep) _jobs.Remove(j.Item);
+                _running = j;
+                _runningCts = new CancellationTokenSource();
+            }
+            ReportLocked(); // the jobs nobody asked for any more are gone from the count
             return j;
         }
     }
@@ -431,9 +435,13 @@ public static class ClipStore
                 {
                     lock (_lock)
                     {
+                        // one more done (made, already right, gone or failed): of this sweep (a re-targeted one's doesn't
+                        // count), or of the cards' own clips (a stopped one doesn't: its card asks again at the new quality)
+                        bool stopped = _runningCts?.IsCancellationRequested == true;
                         _running = null; _runningCts?.Dispose(); _runningCts = null;
-                        // one more done of this sweep (made, already right, gone or failed); a re-targeted one's doesn't count
-                        if (j.Sweep) { if (j.Gen == _gen) _swDone++; ReportLocked(); }
+                        if (j.Sweep) { if (j.Gen == _gen) _swDone++; }
+                        else if (!j.Shrink && !stopped) _ownDone++;
+                        ReportLocked();
                     }
                 }
             }
@@ -507,7 +515,8 @@ public static class ClipStore
     //   - the old clip goes GRACE after the new one exists (Superseded); the wallpaper's own file is only ever read.
     //   - a newer change re-targets it: a running encode of another quality is killed, the list is taken again.
     //   - a restart resumes it: the clips on disk are its state (ResumeSweep reads the setting and settles).
-    // Progress: LibraryOps "clips" (the top bar's line). Guard: scripts/test-clip-sweep.sh; matrix clip:size.
+    // Progress: LibraryOps "clips" (the top bar's line, § the background queue as one operation). Guard:
+    // scripts/test-clip-sweep.sh; matrix clip:size.
     private static readonly double[] FACTOR = [0.75, 1, 1.5]; // the box factor of each quality: clipSource.ts QUALITY_FACTOR
     private static readonly TimeSpan SETTLE = EnvMs("LIASCAPE_CLIP_SETTLE_MS", 4000);
     private static readonly TimeSpan RELEASE = EnvMs("LIASCAPE_CLIP_RELEASE_MS", 1000);
@@ -526,7 +535,7 @@ public static class ClipStore
     {
         int q = ParseQuality(quality);
         if (q < 0) return;
-        lock (_lock) { _pendingQ = q; ArmSettle(); }
+        lock (_lock) { _pendingQ = q; ArmSettle(); ReportLocked(); }
     }
     // POST /clip/sweep-hold: the Settings tab shows (renewed while it does) or was left
     public static void HoldSweep(bool hold)
@@ -630,8 +639,8 @@ public static class ClipStore
                         _runningCts?.Cancel();
                     }
                     if (!first || todo.Count > 0) Console.WriteLine($"clips: the library follows {QUALITY[q].Name}: {todo.Count} clip(s) to re-make");
-                    ReportLocked();
                 }
+                ReportLocked();
                 _worker ??= Task.Run(Work);
             }
             _wake.Release();
@@ -658,11 +667,35 @@ public static class ClipStore
         return list.OrderByDescending(x => x.Used).Select(x => (x.Item, x.Path)).ToList();
     }
 
-    // the top bar's line: this sweep's count while it runs; gone once its list is empty and nothing of it is running
+    // ---- the top bar's line: the background queue as one operation ---------------------------------------------------------
+    // One queue, one operation, "clips": the sweep's re-makes and the cards' own clips (first full clips, wider ones) share
+    // the worker, and every encode counts once, in the sweep's count (a Sweep job) or the cards'. One id for all of it,
+    // because a page shows a new id only after a moment (app/ui/src/components/libraryOps.ts): handing the work from one id
+    // to another would end one line and start another for the same queue. What it is doing is the phase:
+    //   - a quality (low | mid | high, "Making Low previews") from a change of "Video preview quality" on: while the change
+    //     settles (the cards' clips asked meanwhile are that change's first), while the sweep runs, and after it until the
+    //     queue drains. The sweep's count joins once its list is taken; the total never drops back when its part ends first.
+    //   - make ("Making previews"): no change about, the cards' own clips once two items wait at once (a library page opened
+    //     on items without a clip: a minute of encoding with no other sign). One clip, for one card, stays silent.
+    // Shown from then until the queue drains, counted from the queue's last empty moment: done = what finished, total = done +
+    // what is queued or running (a card that left the screen, its job dropped after ASK_WINDOW, takes its clip out).
+    // Guard: scripts/test-clip-sweep.sh (cases 2, 7, 8); --probe probe-libops.js.
+    private static int _ownDone, _phaseQ = -1;
+    private static bool _ownBatch, _sweepShown;
     private static void ReportLocked()
     {
-        if (_todo.Count == 0 && _running is not { Sweep: true }) LibraryOps.End("clips");
-        else if (_target >= 0) LibraryOps.Set("clips", QUALITY[_target].Name, _swDone, Math.Max(_swTotal, _swDone));
+        int own = _jobs.Values.Count(j => !j.Shrink), items = own;
+        if (_running is { Shrink: false, Sweep: false } r) { own++; if (!_jobs.ContainsKey(r.Item)) items++; }
+        bool sweep = _target >= 0 && (_todo.Count > 0 || _running is { Sweep: true });
+        // a change of the setting waiting to settle (not a flip back to the quality the library already follows)
+        bool change = _target >= 0 && _settling && _pendingQ >= 0 && _pendingQ != _target;
+        _sweepShown = sweep || (_sweepShown && own > 0);
+        if (own == 0 && !_sweepShown && !change) { _ownDone = 0; _ownBatch = false; }
+        if (items > 1) _ownBatch = true;
+        _phaseQ = change ? _pendingQ : _sweepShown || (_ownBatch && _phaseQ >= 0) ? _target : -1;
+        if (!_sweepShown && !_ownBatch) { LibraryOps.End("clips"); return; }
+        int done = _ownDone + (_sweepShown ? _swDone : 0), total = _ownDone + own + (_sweepShown ? Math.Max(_swTotal, _swDone) : 0);
+        LibraryOps.Set("clips", _phaseQ >= 0 ? QUALITY[_phaseQ].Name : "make", done, total);
     }
 
     // ---- removal: with the library item, and the start-up sweep ----------------------------------------------------------

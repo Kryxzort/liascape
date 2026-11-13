@@ -13,6 +13,10 @@
 #  6. the video-loudness pass (normalization turned on) is listed on GET /library/ops while it measures, then dropped.
 #  5. restart: High, the backend stopped mid-sweep; the next start resumes it (only what is left) to the end; a card
 #     waiting for a new item's first clip goes before the sweep's rest.
+#  7. a card's own first clips (the background queue, no sweep): one clip alone lists no operation; three cards asking at
+#     once list "clips" (phase make) on GET /library/ops, total 3, done counting up, gone once the queue drains.
+#  8. a quality change while the cards' batch runs: the same operation goes on (never ended in between) with the new
+#     quality as its phase until the sweep and the cards' clips are done; every clip ends up at the new quality.
 # Never touches ~/.config/liascape, ~/.cache or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-clip-sweep.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -208,6 +212,47 @@ sleep 1; kill $OPSP 2>/dev/null; wait $OPSP 2>/dev/null
 [ -n "$(loudf)" ] && ok "f measured ($(loudf) LUFS)" || bad "f never measured"
 grep -qx "video-loudness" "$T/ops-seen" && ok "/library/ops listed video-loudness while it ran" || bad "/library/ops never listed video-loudness"
 check "/library/ops dropped it once done" "$(api "$U/library/ops" | jq -c '[.ops[] | select(.id == "video-loudness")]')" "[]"
+stopbe
+
+echo "== 7. a card's own first clips: a batch shows as \"clips\" (make), one clip alone doesn't"
+# copies of a: new items (their own paths) with no clip yet
+for n in g h i j; do mkdir -p "$LIB/imported/$n"; cp "$(P a)" "$(P $n)"; done
+start run3
+ask j high >/dev/null
+for _ in $(seq 1 240); do [ "$(fulls j)" = "j:2" ] && break; ask j high >/dev/null; sleep 0.5; done
+check "one card: its first full clip made" "$(fulls j)" "j:2"
+check "one card: no operation listed" "$(grep -c 'library-ops: clips started' "$LOG")" 0
+( for _ in $(seq 1 1200); do api "$U/library/ops" | jq -c '.ops[] | select(.id == "clips") | [.done, .total, .phase]' 2>/dev/null; sleep 0.05; done ) > "$T/previews-seen" &
+OPSP=$!
+asks=(); for n in g h i; do ask $n high >/dev/null & asks+=($!); done; wait "${asks[@]}"
+for _ in $(seq 1 240); do [ "$(fulls g h i)" = "g:2 h:2 i:2" ] && break; for n in g h i; do ask $n high >/dev/null; done; sleep 0.5; done
+check "three cards: their first full clips made" "$(fulls g h i)" "g:2 h:2 i:2"
+waitlog 'library-ops: clips ended' 1 5 || true
+sleep 0.5; kill $OPSP 2>/dev/null; wait $OPSP 2>/dev/null
+check "three cards: the operation started once" "$(grep -c 'library-ops: clips started' "$LOG")" 1
+check "three cards: its phase (make)" "$(jq -rs 'map(.[2]) | unique | join(" ")' "$T/previews-seen")" make
+check "three cards: its total" "$(jq -s 'map(.[1]) | max' "$T/previews-seen")" 3
+check "three cards: done counted up" "$(jq -s '[.[] | .[0]] | (. == sort) and (unique | length >= 2)' "$T/previews-seen")" true
+check "three cards: ended once the queue drained" "$(grep -c 'library-ops: clips ended' "$LOG")" 1
+check "/library/ops dropped it" "$(api "$U/library/ops" | jq -c '[.ops[] | select(.id == "clips")]')" "[]"
+
+echo "== 8. a quality change during the cards' batch: one operation from the batch's first clip to the sweep's last"
+for n in k l m; do mkdir -p "$LIB/imported/$n"; cp "$(P a)" "$(P $n)"; done
+( for _ in $(seq 1 3600); do api "$U/library/ops" | jq -r '.ops[] | select(.id == "clips") | .phase' 2>/dev/null; sleep 0.05; done ) > "$T/phases-seen" &
+OPSP=$!
+asks=(); for n in k l m; do ask $n high >/dev/null & asks+=($!); done; wait "${asks[@]}"
+waitlog 'library-ops: clips started' 2 10 || bad "no batch to change the quality under"
+quality low
+ALL="a b c d e g h i j k l m"
+for _ in $(seq 1 480); do
+  [ "$(fulls $ALL)" = "a:0 b:0 c:0 d:0 e:0 g:0 h:0 i:0 j:0 k:0 l:0 m:0" ] && break
+  for n in k l m; do ask $n low >/dev/null; done; sleep 0.5   # the cards on screen keep asking at the new quality
+done
+check "every clip Low, the batch's too" "$(fulls $ALL)" "a:0 b:0 c:0 d:0 e:0 g:0 h:0 i:0 j:0 k:0 l:0 m:0"
+waitlog 'library-ops: clips ended' 2 10 || true
+sleep 0.5; kill $OPSP 2>/dev/null; wait $OPSP 2>/dev/null
+check "one operation throughout (started and ended once more)" "$(grep -c 'library-ops: clips started' "$LOG") $(grep -c 'library-ops: clips ended' "$LOG")" "2 2"
+check "its phase: the batch's, then the change's" "$(uniq "$T/phases-seen" | tr '\n' ' ')" "make low "
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

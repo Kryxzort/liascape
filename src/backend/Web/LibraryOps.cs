@@ -7,7 +7,9 @@ namespace Liascape.Web;
 
 // The library's long background operations, for the progress line on the top bar's bottom edge
 // (app/ui/src/components/LibraryOpsLine.tsx): each with its count while it runs.
-//   clips  ClipStore's sweep to the chosen "Video preview quality" (phase: low | mid | high)
+//   clips  ClipStore's background queue, one operation for all of it: the sweep to the chosen "Video preview quality" and
+//          the cards' own clips (phase: low | mid | high from a quality change to the queue's end; else make, the cards'
+//          first clips once two items wait at once)
 //   facts  LibraryFactsOps: Steam's tags (phase steam), trailer pages (trailers), frame sizes (sizes)
 //   scene-loudness  SceneLoudnessOps' queue (phase measure)
 //   video-loudness  LibraryService.BackfillLoudnessAsync, the library's videos not yet measured (phase measure)
