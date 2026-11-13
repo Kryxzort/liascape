@@ -115,6 +115,7 @@ impl Sup {
     ) -> Sup {
         let mut c = Command::new(BIN);
         guard(&mut c);
+        common::private_shader_cache(&mut c, &root);
         c.args([
             "serve",
             "--headless",
@@ -758,6 +759,7 @@ fn gives_up_without_compositor_after_backoff() {
     let root = new_root();
     let mut c = Command::new(BIN);
     guard(&mut c);
+    common::private_shader_cache(&mut c, &root);
     c.args(["serve", "--ao", "null"])
         .env("XDG_RUNTIME_DIR", root.join("run"))
         .env("XDG_STATE_HOME", root.join("state"))
@@ -822,6 +824,7 @@ fn sigterm_during_compositor_backoff_exits_at_once() {
     let root = new_root();
     let mut c = Command::new(BIN);
     guard(&mut c);
+    common::private_shader_cache(&mut c, &root);
     c.args(["serve", "--ao", "null"])
         .env("XDG_RUNTIME_DIR", root.join("run"))
         .env("XDG_STATE_HOME", root.join("state"))

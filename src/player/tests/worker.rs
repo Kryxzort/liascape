@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use liascape_player::worker::proto::{self, AudioRoute, FromWorker, Plane, ToWorker};
@@ -52,11 +52,33 @@ fn start() -> ToWorker {
     }
 }
 
-fn stub_spec(id: &str, knobs: &str) -> WorkerSpec {
+/// NVIDIA's shader disk cache folder for a worker spawned with crash dir `dir` (`tests/common`'s
+/// `shader_cache_dir`, which this suite doesn't include).
+fn shader_cache_dir(dir: &Path) -> PathBuf {
+    dir.join("nv-shader-cache")
+}
+
+/// Every worker a test spawns starts from this: crash records and NVIDIA's shader cache in a
+/// private dir (the renderer would otherwise create and fill the caller's
+/// `__GL_SHADER_DISK_CACHE_PATH`). Guard `spawned_worker_never_inherits_the_shader_cache_path`.
+fn spec(id: &str) -> WorkerSpec {
     let mut s = WorkerSpec::new(id, bin(), start());
-    s.args = vec!["--stub".into()];
-    s.env = vec![("LIASCAPE_SCENE_WORKER_TEST".into(), knobs.into())];
     s.crash_dir = tmp_dir(id);
+    let cache = shader_cache_dir(&s.crash_dir);
+    set_env(&mut s, "__GL_SHADER_DISK_CACHE_PATH", &cache.to_string_lossy());
+    s
+}
+
+/// Set `k` in `s`'s environment, replacing an earlier value (the child would read the first).
+fn set_env(s: &mut WorkerSpec, k: &str, v: &str) {
+    s.env.retain(|(sk, _)| sk != k);
+    s.env.push((k.into(), v.into()));
+}
+
+fn stub_spec(id: &str, knobs: &str) -> WorkerSpec {
+    let mut s = spec(id);
+    s.args = vec!["--stub".into()];
+    set_env(&mut s, "LIASCAPE_SCENE_WORKER_TEST", knobs);
     s
 }
 
@@ -275,15 +297,16 @@ fn spawn_handshake_hello() {
 }
 
 /// Spawn the real renderer (no `--stub`) with `env` and wait for its `Hello`, which it sends
-/// after its GL context attempt — so after the shader cache step, GPU or not.
-fn renderer_hello(id: &str, env: &[(&str, &std::path::Path)], extra: &[(&str, &str)]) {
-    let mut spec = WorkerSpec::new(id, bin(), start());
-    spec.crash_dir = tmp_dir(id);
+/// after its GL context attempt — so after the shader cache step, GPU or not. Returns its crash
+/// dir.
+fn renderer_hello(id: &str, env: &[(&str, &std::path::Path)], extra: &[(&str, &str)]) -> PathBuf {
+    let mut spec = spec(id);
+    let crash_dir = spec.crash_dir.clone();
     for (k, v) in env {
-        spec.env.push((k.to_string(), v.to_string_lossy().into_owned()));
+        set_env(&mut spec, k, &v.to_string_lossy());
     }
     for (k, v) in extra {
-        spec.env.push((k.to_string(), v.to_string()));
+        set_env(&mut spec, k, v);
     }
     let t0 = Instant::now();
     let mut host = WorkerHost::spawn(spec).unwrap();
@@ -296,6 +319,60 @@ fn renderer_hello(id: &str, env: &[(&str, &std::path::Path)], extra: &[(&str, &s
         host.log_tail().join("\n")
     );
     host.stop();
+    crash_dir
+}
+
+/// Set in the child [`spawned_worker_never_inherits_the_shader_cache_path`] re-runs this binary
+/// as: only then does [`shader_cache_guard_child`] do anything.
+const SHADER_CACHE_GUARD_ENV: &str = "LIASCAPE_TEST_SHADER_CACHE_GUARD";
+
+/// A test's workers never use the caller's NVIDIA shader cache: on a desktop that sets
+/// `__GL_SHADER_DISK_CACHE_PATH` (its real cache), the renderer would create that folder and
+/// fill it. Re-runs this binary with the variable naming a missing sentinel and starts the real
+/// renderer through [`spec`] there; it creates whatever folder it's given before its GL
+/// context, so an inherited sentinel would appear.
+#[test]
+fn spawned_worker_never_inherits_the_shader_cache_path() {
+    const PATH: &str = "__GL_SHADER_DISK_CACHE_PATH";
+    let root = tmp_dir("nvguard");
+    let sentinel = root.join("callers-nv");
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "shader_cache_guard_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(SHADER_CACHE_GUARD_ENV, "1")
+        .env(PATH, &sentinel)
+        .output()
+        .expect("re-run this test binary");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !sentinel.exists(),
+        "a spawned worker inherited the caller's {PATH} and created {sentinel:?}\n{text}"
+    );
+    assert!(out.status.success(), "{text}");
+    assert!(
+        text.contains("SHADER_CACHE_GUARD_SPAWNED"),
+        "the child never spawned a renderer: proved nothing\n{text}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// [`spawned_worker_never_inherits_the_shader_cache_path`]'s child: spawn the real renderer the
+/// way every test does; it must have made its cache folder in its own dir.
+#[test]
+fn shader_cache_guard_child() {
+    if std::env::var_os(SHADER_CACHE_GUARD_ENV).is_none() {
+        return;
+    }
+    let dir = renderer_hello("nvguard-child", &[], &[]);
+    let own = shader_cache_dir(&dir);
+    assert!(own.is_dir(), "the renderer didn't create its own {own:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+    println!("SHADER_CACHE_GUARD_SPAWNED");
 }
 
 /// NVIDIA's shader disk cache works only when `__GL_SHADER_DISK_CACHE_PATH` exists; the

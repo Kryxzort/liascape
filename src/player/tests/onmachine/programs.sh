@@ -193,7 +193,8 @@ SERVE_PID=
 PLAYER_PID=
 lp() {
     env -u LD_LIBRARY_PATH -u PULSE_SERVER -u LIASCAPE_PLAYER_SOCKET XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" \
-        XDG_CACHE_HOME="$PCACHE" PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LIASCAPE_SCENE_WORKER_BIN="$WBIN" "$BIN" "$@"
+        XDG_CACHE_HOME="$PCACHE" __GL_SHADER_DISK_CACHE_PATH="$PCACHE/nv" PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" \
+        LIASCAPE_SCENE_WORKER_BIN="$WBIN" "$BIN" "$@"
 }
 ctl() { lp ctl --timeout-ms "${CTL_MS:-10000}" "$@"; }
 evdir() { echo "$PSTATE/liascape/liascape-player"; }
@@ -229,7 +230,7 @@ serve_up() { # a bare `serve` on the real session (or headless outputs: --headle
     pw_start
     prlimit --core=1:1 env -u LD_LIBRARY_PATH -u PULSE_SERVER "${session[@]}" \
         XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" XDG_CACHE_HOME="$PCACHE" PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" \
-        LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 \
+        __GL_SHADER_DISK_CACHE_PATH="$PCACHE/nv" LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 \
         "$BIN" serve --log-level info "${hl[@]}" "$@" >>"$RESULTS/serve-$STEP.log" 2>&1 &
     SERVE_PID=$!
     wait_socket 15 || die "serve never answered (log $RESULTS/serve-$STEP.log)"
@@ -266,6 +267,7 @@ be_env() {
     PCACHE=$BE/home/.cache
     BE_ENV=(-u LD_LIBRARY_PATH -u PULSE_SERVER -u LIASCAPE_PORT -u LIASCAPE_PLAYER_SOCKET -u LIASCAPE_UI_DIR
         HOME="$BE/home" XDG_CONFIG_HOME="$BE/home/.config" XDG_CACHE_HOME="$PCACHE" XDG_DATA_HOME="$BE/home/.local/share"
+        __GL_SHADER_DISK_CACHE_PATH="$PCACHE/nv"
         XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" PIPEWIRE_RUNTIME_DIR="$PW_DIR/run"
         WAYLAND_DISPLAY="$WL" HYPRLAND_INSTANCE_SIGNATURE="$HYPR_SIG" XDG_SESSION_TYPE=wayland
         LIASCAPE_PLAYER_BIN="$BIN" LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_TRANSITIONS_DIR="$REPO/transitions"

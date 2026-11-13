@@ -178,6 +178,7 @@ PLAYER_PID=
 SERVE_MODE=
 lp() {
     env -u LD_LIBRARY_PATH -u PULSE_SERVER XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" XDG_CACHE_HOME="$SCRATCH/cache" \
+        __GL_SHADER_DISK_CACHE_PATH="$SCRATCH/cache/nv" \
         PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 "$BIN" "$@"
 }
 ctl() { lp ctl --timeout-ms "${CTL_MS:-10000}" "$@"; }
@@ -204,6 +205,7 @@ serve_up() {
     SERVE_MODE=$mode
     prlimit --core=1:1 env "${wl[@]}" "$@" \
         env -u LD_LIBRARY_PATH -u PULSE_SERVER XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$PSTATE" XDG_CACHE_HOME="$SCRATCH/cache" \
+        __GL_SHADER_DISK_CACHE_PATH="$SCRATCH/cache/nv" \
         PIPEWIRE_RUNTIME_DIR="$PW_DIR/run" LIASCAPE_SCENE_WORKER_BIN="$WBIN" LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 \
         "$BIN" "${args[@]}" >>"$RESULTS/serve-$STEP.log" 2>&1 &
     SERVE_PID=$!

@@ -671,6 +671,9 @@ setup_hermetic_backend() {
   mkdir -p "$HERMETIC_T/home/.config/liascape" "$HERMETIC_T/home/.cache" "$HERMETIC_T/home/.local/share" "$HERMETIC_T/rt" "$HERMETIC_T/st"
   export HOME=$HERMETIC_T/home XDG_CONFIG_HOME=$HERMETIC_T/home/.config XDG_CACHE_HOME=$HERMETIC_T/home/.cache
   export XDG_DATA_HOME=$HERMETIC_T/home/.local/share XDG_RUNTIME_DIR=$HERMETIC_T/rt XDG_STATE_HOME=$HERMETIC_T/st
+  # NVIDIA's shader cache too: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one (the player
+  # creates and fills it), and unset the driver falls back to ~/.cache/nvidia.
+  export __GL_SHADER_DISK_CACHE_PATH=$XDG_CACHE_HOME/nv
   export LIASCAPE_PLAYER_BIN=$BIN LIASCAPE_TRANSITIONS_DIR=$REPO/transitions
   export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
   unset LIASCAPE_PLAYER_SOCKET WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT

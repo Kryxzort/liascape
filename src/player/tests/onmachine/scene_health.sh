@@ -150,6 +150,9 @@ run_all() {
     mkdir -p "$priv/run"
     chmod 700 "$priv/run"
     export XDG_RUNTIME_DIR=$priv/run PIPEWIRE_RUNTIME_DIR=$priv/run PIPEWIRE_REMOTE=liascape-scene-health-none
+    # NVIDIA's shader cache too: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one (the player
+    # creates and fills it), and unset the driver falls back to ~/.cache/nvidia.
+    export __GL_SHADER_DISK_CACHE_PATH=$priv/nv-shader-cache
     export PULSE_SERVER=unix:$priv/run/no-pulse DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
     unset WAYLAND_DISPLAY DISPLAY WPENGINE_HEALTH
 

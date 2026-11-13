@@ -197,6 +197,9 @@ run_player() {
     SOCK=$priv/run/lp.sock
     export LIASCAPE_PLAYER_SOCKET=$SOCK XDG_RUNTIME_DIR=$priv/run XDG_STATE_HOME=$priv/state
     export XDG_CACHE_HOME=$priv/cache XDG_CONFIG_HOME=$priv/config
+    # NVIDIA's shader cache too: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one (the player
+    # creates and fills it), and unset the driver falls back to ~/.cache/nvidia.
+    export __GL_SHADER_DISK_CACHE_PATH=$priv/cache/nv
     export PIPEWIRE_RUNTIME_DIR=$priv/run PIPEWIRE_REMOTE=liascape-scene-corpus-none
     export PULSE_SERVER=unix:$priv/run/no-pulse DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
     export LIASCAPE_PLAYER_VRAM_PROBE=none LIASCAPE_SCENE_WORKER_BIN=$BIN/liascape-scene-worker

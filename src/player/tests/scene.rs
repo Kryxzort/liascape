@@ -29,6 +29,15 @@ fn crash_dir(name: &str) -> std::path::PathBuf {
     d
 }
 
+/// The worker's NVIDIA shader cache in the test's own crash dir (`common::shader_cache_dir`).
+fn private_shader_cache(o: &mut SceneOpts) {
+    let dir = common::shader_cache_dir(&o.crash_dir);
+    o.env.push((
+        liascape_player::gfx::shader_cache::PATH_ENV.into(),
+        dir.to_string_lossy().into_owned(),
+    ));
+}
+
 fn spec(pattern: Pattern) -> SyntheticSpec {
     SyntheticSpec {
         pattern,
@@ -55,6 +64,7 @@ fn open_with(
     o.max_size = [1920, 1080];
     o.env = vec![("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into())];
     o.crash_dir = crash_dir(name);
+    private_shader_cache(&mut o);
     tweak(&mut o);
     SceneSource::open_opts(gfx, o).expect("open the scene source")
 }
@@ -1421,6 +1431,7 @@ fn open_real(
     o.max_size = [640, 360];
     o.assets_dir = assets.map(|a| a.display().to_string());
     o.crash_dir = crash_dir(name);
+    private_shader_cache(&mut o);
     tweak(&mut o);
     SceneSource::open_opts(gfx, o).expect("open the scene source")
 }

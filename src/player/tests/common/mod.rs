@@ -5,8 +5,11 @@
 pub mod harness;
 pub mod pw;
 
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 use glow::HasContext;
-use liascape_player::gfx::{Gfx, Tex};
+use liascape_player::gfx::{Gfx, Tex, shader_cache};
 
 /// `LIASCAPE_REQUIRE_GPU` (TODO "`LIASCAPE_REQUIRE_GPU` test mode"): set (any value but empty or `0`)
 /// for a run that is *supposed* to have a GPU — a missing GPU-test precondition (no EGL
@@ -29,6 +32,60 @@ pub fn skip_gpu(reason: &str) {
         panic!("{REQUIRE_GPU_ENV} is set but a GPU test would skip: {reason}");
     }
     println!("SKIP: {reason}");
+}
+
+/// NVIDIA's shader disk cache folder for the processes a test spawns in `root` (its own temp
+/// dir). Every spawn helper sets it ([`private_shader_cache`]): left alone, a child inherits the
+/// caller's `__GL_SHADER_DISK_CACHE_PATH` (a desktop's real cache, which `serve` and the scene
+/// worker create and fill), and unsetting it only sends the driver to its default
+/// `~/.cache/nvidia`, still the user's home. Guard `tests/api.rs`
+/// `spawned_serve_never_inherits_the_shader_cache_path`.
+#[allow(dead_code)]
+pub fn shader_cache_dir(root: &Path) -> PathBuf {
+    root.join("nv-shader-cache")
+}
+
+/// Point `cmd`'s NVIDIA shader cache at [`shader_cache_dir`]`(root)`.
+#[allow(dead_code)]
+pub fn private_shader_cache<'a>(cmd: &'a mut Command, root: &Path) -> &'a mut Command {
+    cmd.env(shader_cache::PATH_ENV, shader_cache_dir(root))
+}
+
+/// The NVIDIA shader cache folder of this test process itself: [`PROCESS_SHADER_CACHE`] points
+/// the process's own `__GL_SHADER_DISK_CACHE_PATH` here.
+#[allow(dead_code)]
+pub fn process_shader_cache_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("liascape-test-nv-{}", std::process::id()))
+}
+
+/// Not everything GL in a suite is a spawn a helper can configure: the test process makes its
+/// own EGL contexts ([`headless_gl`], compiling real shaders), and `SourceHost` / `SceneSource`
+/// spawn scene workers that inherit this process's environment. So before `main` (one thread,
+/// no context yet: the only point where changing the environment is sound) every suite that
+/// includes this module moves its own variable off the caller's cache. Created up front, so
+/// the in-process driver caches as it would on a desktop, and removed at exit
+/// ([`PROCESS_SHADER_CACHE_CLEANUP`]). Guard `tests/api.rs`
+/// `spawned_serve_never_inherits_the_shader_cache_path`.
+#[used]
+#[unsafe(link_section = ".init_array")]
+static PROCESS_SHADER_CACHE: extern "C" fn() = private_process_shader_cache;
+
+/// Removes [`process_shader_cache_dir`] when the test process exits normally, so runs don't
+/// pile compiled shaders up in the temp dir; its spawned players are gone by then
+/// (`PR_SET_PDEATHSIG` or an explicit kill).
+#[used]
+#[unsafe(link_section = ".fini_array")]
+static PROCESS_SHADER_CACHE_CLEANUP: extern "C" fn() = remove_process_shader_cache;
+
+extern "C" fn private_process_shader_cache() {
+    let dir = process_shader_cache_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    // SAFETY: `.init_array` runs before `main`, with no other thread to read the environment.
+    unsafe { std::env::set_var(shader_cache::PATH_ENV, &dir) };
+}
+
+extern "C" fn remove_process_shader_cache() {
+    let _ = std::fs::remove_dir_all(process_shader_cache_dir());
 }
 
 /// Create a real, surfaceless [`Gfx`] for a test, or skip cleanly.
@@ -251,8 +308,6 @@ pub fn solid_png(name: &str, rgb: [u8; 3]) -> std::path::PathBuf {
 /// ever getting here.
 #[allow(dead_code)]
 pub fn ensure_clip(name: &str, spec: ClipSpec) -> std::path::PathBuf {
-    use std::process::Command;
-
     let _guard = CLIP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-media");
     std::fs::create_dir_all(&dir).expect("create target/test-media");

@@ -110,6 +110,7 @@ impl Serve {
                 .open(self.root.join("stderr.log"))
                 .unwrap(),
         ));
+        common::private_shader_cache(&mut c, &self.root);
         for (k, v) in &self.env {
             c.env(k, v);
         }

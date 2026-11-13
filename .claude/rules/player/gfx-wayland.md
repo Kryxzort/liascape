@@ -103,6 +103,13 @@ measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`
   set, absolute and missing, never with `__GL_SHADER_DISK_CACHE=0`; never change the variable; a failure is a debug
   log, never fatal. Mesa creates its own. Guards `src/player/tests/api.rs` `serve_creates_the_shader_cache_dir`,
   `src/player/tests/worker.rs` `renderer_creates_the_shader_cache_dir`.
+- Tests never touch the caller's cache: every spawn in `src/player/tests/` points the variable into its test's temp
+  dir (`common::private_shader_cache`, `worker.rs` `spec`, `scene.rs` `private_shader_cache`), and `tests/common`
+  moves the test process's own value to a per-process temp dir before `main` (its in-process GL, the workers
+  `SourceHost` spawns). Unsetting isn't enough: the driver then uses `~/.cache/nvidia`. A new spawn site uses the
+  helper; the on-machine scripts set it in their private dirs. Guards `src/player/tests/api.rs`
+  `spawned_serve_never_inherits_the_shader_cache_path`, `src/player/tests/worker.rs`
+  `spawned_worker_never_inherits_the_shader_cache_path`.
 
 ## Redraw policy (`src/player/src/redraw.rs`)
 - Every output presents on its own frame callbacks; nothing waits on another output.

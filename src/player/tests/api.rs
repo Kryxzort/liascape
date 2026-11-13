@@ -74,6 +74,7 @@ fn die_with_parent(c: &mut Command) {
 fn serve_cmd(root: &Path, extra: &[&str]) -> Command {
     let mut c = Command::new(BIN);
     die_with_parent(&mut c);
+    common::private_shader_cache(&mut c, root);
     c.args([
         "serve",
         "--no-supervise",
@@ -3223,6 +3224,7 @@ fn wayland_serve_args_and_missing_compositor() {
     let run = |args: &[&str]| {
         let mut c = Command::new(BIN);
         die_with_parent(&mut c);
+        common::private_shader_cache(&mut c, &root);
         c.args(args)
             .env("XDG_RUNTIME_DIR", root.join("run"))
             .env("XDG_STATE_HOME", root.join("state"))
@@ -4709,6 +4711,7 @@ fn t20e_wayland_present_heap_stays_flat() {
     let root = new_root();
     let mut cmd = Command::new(BIN);
     die_with_parent(&mut cmd);
+    common::private_shader_cache(&mut cmd, &root);
     cmd.args(["serve", "--no-supervise", "--clock", "real", "--ao", "null"])
         .env("XDG_RUNTIME_DIR", root.join("run"))
         .env("XDG_STATE_HOME", root.join("state"))
@@ -5779,6 +5782,7 @@ fn wayland_render_worker_plays_video() {
         let root = new_root();
         let mut cmd = Command::new(BIN);
         die_with_parent(&mut cmd);
+        common::private_shader_cache(&mut cmd, &root);
         cmd.args(["serve", "--no-supervise", "--clock", "real", "--ao", "null"])
             .args(["--render-worker", mode])
             .env("XDG_RUNTIME_DIR", root.join("run"))
@@ -11022,4 +11026,66 @@ fn serve_creates_the_shader_cache_dir() {
     assert_eq!(evs.len(), 1, "{logs}");
     assert_eq!(evs[0]["created"], json!(false), "{logs}");
     assert!(evs[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{logs}");
+}
+
+/// Set in the child [`spawned_serve_never_inherits_the_shader_cache_path`] re-runs this
+/// binary as: only then does [`shader_cache_guard_child`] do anything.
+const SHADER_CACHE_GUARD_ENV: &str = "LIASCAPE_TEST_SHADER_CACHE_GUARD";
+
+/// A test's players never use the caller's NVIDIA shader cache: on a desktop that sets
+/// `__GL_SHADER_DISK_CACHE_PATH` (its real cache), `serve` would create that folder and fill
+/// it. Re-runs this binary with the variable naming a missing sentinel and starts `serve`
+/// through the common helper there; `serve` creates whatever folder it's given at start-up,
+/// so an inherited sentinel would appear.
+#[test]
+fn spawned_serve_never_inherits_the_shader_cache_path() {
+    const PATH: &str = "__GL_SHADER_DISK_CACHE_PATH";
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let sentinel = root.join("callers-nv");
+    let out = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "shader_cache_guard_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(SHADER_CACHE_GUARD_ENV, "1")
+        .env(PATH, &sentinel)
+        .output()
+        .expect("re-run this test binary");
+    drop(serial);
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !sentinel.exists(),
+        "a spawned serve inherited the caller's {PATH} and created {sentinel:?}\n{text}"
+    );
+    assert!(out.status.success(), "{text}");
+    assert!(
+        text.contains("SHADER_CACHE_GUARD_SERVED"),
+        "the child never started serve: proved nothing\n{text}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// [`spawned_serve_never_inherits_the_shader_cache_path`]'s child: start `serve` the way every
+/// test does; it must have made its cache folder in its own root.
+#[test]
+fn shader_cache_guard_child() {
+    if std::env::var_os(SHADER_CACHE_GUARD_ENV).is_none() {
+        return;
+    }
+    // This process's own GL and the workers it spawns directly use the process's folder.
+    assert_eq!(
+        std::env::var_os("__GL_SHADER_DISK_CACHE_PATH"),
+        Some(common::process_shader_cache_dir().into_os_string())
+    );
+    let Some(srv) = Serve::start() else { return };
+    let own = common::shader_cache_dir(&srv.root);
+    assert!(own.is_dir(), "serve didn't create its own {own:?}");
+    println!("SHADER_CACHE_GUARD_SERVED");
 }
