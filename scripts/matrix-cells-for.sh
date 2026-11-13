@@ -93,7 +93,7 @@ for f in $FILES; do
     app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
     # the pixel-centre judge for round icon buttons: the probes that call it
-    app/shell/pixel-centre.js) echo "  $f → nothing in the matrix (--probe probe-sidebar.js --only look:iconCentre)" >&2 ;;
+    app/shell/pixel-centre.js) echo "  $f → nothing in the matrix (--probe probe-icons.js --only icon:centre, probe-sidebar.js --only look:iconCentre, probe-filters.js --only wf:emblem:centre)" >&2 ;;
     app/shell/motion-off.js) add "appear:morphs" "$f (+ --probe probe-sidebar.js motion:, probe-filters.js, probe-layout.js, probe-select.js, probe-steam.js, probe-expert.js, probe-cardpreview.js — their motion-off cells)" ;;
     app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
     # box selection in the Library / Browse grids: the selection cells + its own probe
@@ -101,7 +101,7 @@ for f in $FILES; do
     # the grids' column fit and the cards' stable handlers (a tab switch, a sidebar focus)
     app/ui/src/hooks/useGridFit.ts|app/ui/src/hooks/useStableFn.ts)
       add "$CARD|$KEYS|browse:" "$f (+ --probe probe-layout.js — perf:tabs, perf:sidebar, resize:)" ;;
-    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover, perf:skeleton; --probe probe-icons.js — icon motion)" ;;
+    app/ui/src/index.css) add "$CARD|$PL|$MODAL|appear|$KEYS" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js — sizes, tab slide, dock hover, perf:skeleton; --probe probe-icons.js — icon motion, icon:centre:* — every icon chip centred)" ;;
     # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;

@@ -5,12 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-32. [ ] (owner, in progress) The library operations' text moves into the top bar's status slot (an app message beats it,
-       it beats the Library's muted hint; at narrow widths the count alone), leaving only the progress line on the bar's
-       edge (no tab over the cards); and at narrow widths the search field folds to an icon that expands in place.
-38. [ ] (owner) Every round / square icon chip's glyph is pixel-centred: a sweep with the shared pixel-centre check
-       (app/shell/pixel-centre.js, from #34) over all icon chips and icon-only buttons, at rest and hovered, two window
-       sizes; fix each with whole-pixel icon sizes and even margins. Off-centre icons keep coming back: make it a guard.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

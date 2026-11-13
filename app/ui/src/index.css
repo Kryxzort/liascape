@@ -156,6 +156,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* below 761 px (the top bar wraps there) pills keep their natural one-row width while their row has room; only a pill row
    wider than the whole window wraps inside itself. From 761 px up their strip scrolls instead (§ narrow windows). */
 .pills { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
+/* Refresh beside the pills: a whole-pixel chip (30 px: 7 px round its 16 px glyph), not stretched to the pills' 30.84 px line
+   — a fractional chip puts its glyph half a pixel off. Guard: probe-icons icon:centre:browse */
+.pill-strip + .mini { align-self: center; height: 30px; }
 .pill {
   padding: 6px 12px; border-radius: 999px; color: var(--subtext); font-size: 13px; font-weight: 600;
   background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: all .15s, box-shadow .2s;
@@ -877,14 +880,17 @@ input[type=range]:focus-visible { outline: none; }
 .wf-none { display: grid; justify-items: center; gap: 12px; padding: 12vh 16px; color: var(--muted); animation: side-rise-sm .25s ease-out; }
 :root.bg-live .wf-none > span { filter: drop-shadow(0 0 3.5px #000); }
 /* ---- the top bar's split button: the filter panel's toggle + the sort (components/SortFilterButton.tsx) ----
-   One control of two halves sharing the select's frame: the left half's own border stops where the sort's left border
-   draws the divider. COOL: the toggle fills with the accent (its small glow) while the panel is open; the count is an accent
-   chip (inverted on the lit toggle) that pops when it changes and shrinks away at 0. */
+   One control of two halves sharing the select's frame: the divider is the left half's own right border (the sort draws no
+   left one), so the toggle's glyph sits between two edges of its own — its lit fill and its hover ring are whole, and the
+   glyph (15 px in 1 + 10 | 10 + 1) lands on their centre. Hovering the sort lights the divider with the sort's other edges.
+   COOL: the toggle fills with the accent (its small glow) while the panel is open; the count is an accent
+   chip (inverted on the lit toggle) that pops when it changes and shrinks away at 0. Guard: probe-icons icon:centre:* */
 .ss-split { flex: none; display: inline-flex; align-items: stretch; }
 .ss-filter { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--subtext);
-  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); border-right: 0;
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1);
   border-radius: 8px 0 0 8px; transition: background-color .15s, border-color .15s, color .15s, box-shadow .2s; }
-.ss-split.filter-only .ss-filter { border-right: 1px solid var(--surface1); border-radius: 8px; }
+.ss-split.filter-only .ss-filter { border-radius: 8px; }
+.ss-split:has(> .ss-sort:hover:not(:disabled)) > .ss-filter:not(.on) { border-right-color: var(--accent); }
 .ss-filter:hover, .ss-filter.active { color: var(--text); }
 .ss-filter:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .ss-filter.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); }
@@ -895,8 +901,11 @@ input[type=range]:focus-visible { outline: none; }
 .ss-n.pop { animation: icon-pop var(--spring-dur) var(--spring); }
 .ss-n.out { animation: ss-n-out .17s cubic-bezier(.55, 0, .8, .2) forwards; }
 @keyframes ss-n-out { to { transform: scale(.5); opacity: 0; } }
-.ss-split:not(.sort-only) .ss-sort { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.ss-split:not(.sort-only) .ss-sort { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .ss-sort { gap: 7px; }
+/* a whole-pixel line (the font's own is 20.3 px) gives the pair an odd height, 33 px, that the toggle's 15 px glyph centres in
+   (9 px each side); folded to its icon the sort is 29 px, odd too. Guard: probe-icons icon:centre:* (ss-filter) */
+.ss-sort .sel-val { line-height: 19px; }
 .ss-sort-ico { flex: none; opacity: .8; }
 /* ---- custom dropdown (Select.tsx) — app-controlled, translucent ---- */
 .sel { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
@@ -934,6 +943,8 @@ input[type=range]:focus-visible { outline: none; }
 .ns-ghost { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
   color: var(--text); font-variant-numeric: tabular-nums; opacity: 0; }
 :root.kbd-nav .num-step:has(input.num:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the stepper's 14 px glyph (NumInput.tsx), its 20 px hover circle and the 24 px button are all even: the glyph sits on the
+   circle's centre in whole pixels (an odd glyph lands half a pixel off it). Guard: probe-icons icon:centre:settings */
 .ns-btn { position: relative; flex: none; width: 24px; display: inline-flex; align-items: center; justify-content: center;
   color: var(--subtext); transition: color .15s; }
 .ns-btn::before { content: ""; position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%;
@@ -1575,6 +1586,9 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 10px -3px var(--accent);
   transition: transform var(--spring-dur) var(--spring); }
+/* the glyph's size is the chip's (whatever size a tile's icon asks for): 16 px in 26 leaves 5 px each side, so the glyph lands on
+   whole pixels on the chip's centre (an odd glyph in an even chip can't). Guard: probe-icons icon:centre:libSide / browseSide */
+.side-tile-ico > svg { width: 16px; height: 16px; }
 /* a tile is a verb: its icon acts its meaning (iconMotion.ts / § icon motion) while the chip rises a little on the spring */
 .side-tile:hover .side-tile-ico { transform: translateY(-1px) scale(1.06); }
 .side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
@@ -1766,7 +1780,9 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .wf-sw { flex: none; display: inline-flex; gap: 1px; padding: 2px; border-radius: 7px;
   background: color-mix(in srgb, var(--bg-crust) 40%, transparent); opacity: .5; transition: opacity .15s; }
 .wf-row:hover .wf-sw, .wf-row.inc .wf-sw, .wf-row.exc .wf-sw, .wf-sw:focus-within { opacity: 1; }
-.wf-seg { width: 20px; height: 17px; display: grid; place-items: center; border-radius: 5px; color: var(--muted);
+/* 20 × 18: even, like its 12 px check / cross and 14 px dot, so a lit segment's glyph sits on its fill's centre in whole pixels.
+   Guard: probe-icons icon:centre:filters */
+.wf-seg { width: 20px; height: 18px; display: grid; place-items: center; border-radius: 5px; color: var(--muted);
   transition: background .12s, color .12s, box-shadow .2s; }
 .wf-seg.i:hover { color: var(--accent); }
 .wf-seg.e:hover { color: var(--danger); }

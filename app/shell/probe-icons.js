@@ -28,6 +28,12 @@
 //   icon:act:off / icon:act:reduced   motion off / prefers-reduced-motion: hover / press start no animation and no transition
 //                       frames (download, the close X, sort, the press)
 //   icon:still:off                    motion off: the hover holds, an emblem's tilt and the press squeeze end where they started
+//   icon:centre:<scene> every icon chip on screen (found, not listed: a button, link or *ico* chip ≤ 48 px with one svg and no
+//                       words) has a whole-pixel glyph with equal whole-pixel margins, and its drawn glyph on its drawn chip's
+//                       centre (pixel-centre.js), at rest and hovered, at 1400×900 and 840×700. Scenes: library (top bar, playlist
+//                       bar, a card), libSide (the Library sidebar: picture, then video preview), browse, browseSide, filters (the
+//                       filter column), settings (section emblems, a number field's steppers), steamTodo. LIASCAPE_ICON_DPR=1 runs
+//                       them at ratio 1. Close-ups icons-pxc-*.png, measurements icons-centre.json
 //   icon:perf           while one-shots, holds and the magnet run: no layout forced from script and none bigger than an icon's
 //                       own SVG (dirty objects per Layout, from a trace; an idle stretch alongside for comparison), and an idle
 //                       page afterwards asks for no frames (rAF callbacks)
@@ -40,6 +46,7 @@ const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth");
 const K = JSON.parse(E.LIASCAPE_CLIPS);
+if (E.LIASCAPE_ICON_DPR) app.commandLine.appendSwitch("force-device-scale-factor", E.LIASCAPE_ICON_DPR); // icon:centre:* at a set ratio
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -83,6 +90,7 @@ const STUB = `(() => {
 })();`;
 
 let win;
+const centreRows = []; // icon:centre:* measurements → <OUT>/icons-centre.json
 const js = (code) => win.webContents.executeJavaScript(code);
 const PAGE = `window.__ic = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -599,12 +607,162 @@ app.whenReady().then(async () => {
     });
     await cell("icon:act:reduced", () => off("reduced"));
     await cell("icon:magnet:off", async () => { await setMotion(false); try { return await magnet(true); } finally { await setMotion(true); } });
+
+    // ---- centre: every icon chip's glyph on its chip's centre ----
+    // The chips are found, not listed (FIND), so a new one is measured the day it appears; `must` names the ones a scene has
+    // to have judged, else it proved nothing.
+    const PXC = require("./pixel-centre");
+    const FIND = `(() => {
+      for (const e of document.querySelectorAll("[data-pxc]")) e.removeAttribute("data-pxc");
+      const shown = (e) => { for (let x = e; x && x !== document.documentElement; x = x.parentElement) { const cs = getComputedStyle(x);
+        if (cs.display === "none" || cs.visibility === "hidden" || +cs.opacity < 0.9) return false; } return true; };
+      const out = []; let n = 0;
+      for (const e of document.querySelectorAll("button, a, [role=button], [class*='ico']")) {
+        if (e.querySelectorAll("svg").length !== 1 || e.innerText.trim()) continue;
+        const r = e.getBoundingClientRect(), g = e.querySelector("svg").getBoundingClientRect();
+        if (r.width < 10 || r.height < 10 || r.width > 48 || r.height > 48) continue;
+        if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight || !shown(e)) continue;
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        if (!hit || !(e.contains(hit) || hit.contains(e))) continue; // under a drawer or a modal
+        e.setAttribute("data-pxc", String(++n));
+        const cls = (typeof e.className === "string" ? e.className : e.className.baseVal).trim().split(/\\s+/).filter(Boolean).slice(0, 3).join(".");
+        const label = e.getAttribute("aria-label") || e.getAttribute("title") || "";
+        out.push({ id: n, name: e.tagName.toLowerCase() + (cls ? "." + cls : "") + (label ? "[" + label + "]" : ""), x: r.x + r.width / 2, y: r.y + r.height / 2,
+          // the layout at rest: the glyph's margins inside the chip's border box
+          lay: { cw: r.width, ch: r.height, gw: g.width, gh: g.height, l: g.x - r.x, r: r.right - g.right, t: g.y - r.y, b: r.bottom - g.bottom },
+          // a chip drawn by the button's ::before (a stepper's hover circle): the same margins against that box
+          pse: (() => { const p = getComputedStyle(e, "::before"); if (p.content === "none" || p.position !== "absolute") return null;
+            const x = e.clientLeft + parseFloat(p.left) + parseFloat(p.marginLeft), y = e.clientTop + parseFloat(p.top) + parseFloat(p.marginTop);
+            const w = parseFloat(p.width), h = parseFloat(p.height), gx = g.x - r.x, gy = g.y - r.y;
+            return [x, y, w, h].every(Number.isFinite) ? { cw: w, ch: h, gw: g.width, gh: g.height, l: gx - x, r: x + w - gx - g.width, t: gy - y, b: y + h - gy - g.height } : null; })() });
+      }
+      return out;
+    })()`;
+    // Is the chip or its glyph drawn through a rotation, a scale or a fractional shift (a hover tilt, a held turn)? Then its
+    // raster is resampled: an edge lands between pixels and the ink's box moves by up to a device pixel with the icon's own shape.
+    const RESAMPLED = (id) => `(() => { const g = document.querySelector('[data-pxc="${id}"] svg');
+      for (let x = g; x && x !== document.documentElement; x = x.parentElement) { const cs = getComputedStyle(x);
+        if (cs.rotate !== "none" && parseFloat(cs.rotate) % 360 !== 0) return true;
+        if (cs.scale !== "none" && cs.scale.split(" ").some((v) => +v !== 1)) return true;
+        if (cs.transform !== "none") { const mx = new DOMMatrixReadOnly(cs.transform);
+          if (mx.a !== 1 || mx.b !== 0 || mx.c !== 0 || mx.d !== 1 || !Number.isInteger(mx.e) || !Number.isInteger(mx.f)) return true; } }
+      return false; })()`;
+    // whole css pixels; at a fractional ratio a border snaps to whole device pixels (1 css px draws 1 device px = 0.955 css px
+    // at 1.047), so a bordered chip's margins come out a few hundredths short there
+    const whole = (x, dpr) => Math.abs(x - Math.round(x)) < (Math.abs(dpr - Math.round(dpr)) < 1e-3 ? 0.01 : 0.1);
+    // what moves under a chip while it's measured (a playing preview, the volume pill sliding out of the mute chip)
+    const HUSH = "video, .side-vol-slide { visibility: hidden !important; }";
+    // icon:centre:<scene>: every icon chip on screen, at rest and hovered, at two window sizes (the narrow one folds the top
+    // bar's Import / Stop to their icons and the search to its magnifier). A chip is judged twice:
+    //  - its layout at rest: whole-pixel glyph, and the glyph's margins in the chip whole pixels and equal on opposite sides.
+    //    Independent of the ratio (but for a snapped border, `whole`): an odd glyph in an even chip, or a chip stretched to a
+    //    fractional line, puts the glyph half a pixel off however it rasterises.
+    //  - its pixels (pixel-centre.js), against the chip's own fill and ring: under Glow effects off (index.css's :root.no-glow
+    //    keeps every ring; a glow is soft and the capture window clips it unevenly). Within PXC.tolerance — half a css pixel
+    //    at a whole ratio, the fractional ratio's resolution in the matrix — plus half a pixel while the hover resamples the
+    //    glyph (RESAMPLED). A glyph with no chip behind it (a card's bare trash can) has nothing to be off-centre against:
+    //    logged, not judged.
+    // LIASCAPE_ICON_DPR=1 runs at ratio 1 (the agent window's). Close-ups <OUT>/icons-pxc-<scene>-<w>-<park>-<n>-<rest|hover>.png,
+    // every measurement in <OUT>/icons-centre.json.
+    async function sweep(scene, setup, { parks = [null], must = [], done = async () => {} } = {}) {
+      await cell(`icon:centre:${scene}`, async () => {
+        const v = [], judged = new Set();
+        try {
+          for (const [w, h] of [[1400, 900], [840, 700]]) {
+            win.setContentSize(w, h); await sleep(700);
+            await setup();
+            await js(`document.documentElement.classList.add("no-glow"); true`); await sleep(300);
+            const dpr = await js("devicePixelRatio"), tag = `${w}x${h}@${+dpr.toFixed(3)}`, seen = new Set();
+            for (const [pi, park] of parks.entries()) {
+              const p = park ? await park() : { x: 3, y: 3 };
+              await mv(p.x, p.y, 600);
+              for (const c of await js(FIND)) {
+                if (seen.has(c.name)) continue; // one of each kind (every card's own copy is the same chip)
+                seen.add(c.name);
+                let restBare = false;
+                for (const hov of [false, true]) {
+                  await mv(hov ? c.x : p.x, hov ? c.y : p.y, hov ? 450 : 350);
+                  // the hover's one-shots landed and its tilt held (a loop — a spinner — left running)
+                  await page(`for (const a of document.querySelector('[data-pxc="${c.id}"]')?.getAnimations({ subtree: true }) ?? [])
+                    if (a.effect?.getComputedTiming().iterations !== Infinity) a.finish(); await m.sleep(80);`);
+                  const sel = `[data-pxc="${c.id}"]`, st = hov ? "hover" : "rest";
+                  const png = `icons-pxc-${scene}-${w}-${pi}-${c.id}-${st}.png`;
+                  const r = await PXC.measure(win, { chip: sel, glyph: `${sel} svg`, css: HUSH, png: path.join(OUT, png) });
+                  const bare = !r.error && r.chipPx < 8, resampled = !r.error && await js(RESAMPLED(c.id));
+                  const tol = PXC.tolerance(r, dpr) + (resampled ? 0.5 : 0), L = c.lay;
+                  centreRows.push({ scene, size: tag, name: c.name, st, png, dx: r.dx, dy: r.dy, tol, bare, resampled, error: r.error, glyph: r.glyph, box: r.box, lay: L });
+                  console.log(`        ${tag} ${c.name} ${st}: ${r.error ?? (bare ? "a bare glyph (no chip drawn behind it): nothing to centre on"
+                    : `(${r.dx.toFixed(2)}, ${r.dy.toFixed(2)}) css px (±${tol.toFixed(2)}${resampled ? ", resampled" : ""}), glyph ${J(r.glyph)} in ${J(r.box)}`)}`);
+                  if (bare) { if (!hov) restBare = true; continue; }
+                  // the layout once per chip: at rest, or — a chip that only shows when hovered — its ::before box
+                  const lay = !hov ? L : restBare ? c.pse : null;
+                  if (lay) {
+                    const f = (x) => +x.toFixed(2), what = hov ? "hover chip (::before)" : "chip";
+                    console.log(`          layout: ${what} ${f(lay.cw)}×${f(lay.ch)}, glyph ${f(lay.gw)}×${f(lay.gh)}, margins ${f(lay.l)} | ${f(lay.r)}, ${f(lay.t)} / ${f(lay.b)}`);
+                    if (!whole(lay.gw, dpr) || !whole(lay.gh, dpr) || !whole(lay.l, dpr) || !whole(lay.t, dpr) || Math.abs(lay.l - lay.r) > 0.01 || Math.abs(lay.t - lay.b) > 0.01)
+                      v.push(`${tag} ${c.name}: glyph ${f(lay.gw)}×${f(lay.gh)} with margins ${f(lay.l)} | ${f(lay.r)}, ${f(lay.t)} / ${f(lay.b)} in its ${f(lay.cw)}×${f(lay.ch)} ${what} — want a whole-pixel glyph with equal whole-pixel margins`);
+                  } else if (hov && restBare) v.push(`${tag} ${c.name}: a chip shows only when hovered and it isn't its ::before — its layout can't be judged`);
+                  v.push(...PXC.judge(`${tag} ${c.name} ${st}`, r, tol));
+                  judged.add(c.name);
+                }
+              }
+            }
+          }
+        } finally {
+          await js(`document.documentElement.classList.remove("no-glow"); true`);
+          win.setContentSize(1400, 900); await sleep(400); await mv(3, 3, 100); await done();
+        }
+        for (const re of must) if (![...judged].some((n) => re.test(n))) v.push(`no chip matching ${re} was judged — proved nothing`);
+        return v;
+      });
+    }
+    const thumbPark = (sel) => async () => { const t = await centre(`document.querySelector(${J(sel)})`); return { x: t.x - t.w / 2 + 14, y: t.y - t.h / 2 + 14 }; };
+    await sweep("library", async () => { await http("POST", "/apply", { path: K[0] }); await lib(); await sleep(400); },
+      { parks: [null, thumbPark(".card.lib .thumb-wrap")], done: () => http("POST", "/stop"),
+        must: [/pl-fold/, /\[Playlist settings\]/, /\[Save playlist\]/, /\[Load playlist\]/, /\[Import\]/, /\[Stop\]/, /ss-filter/] });
+    // the Library sidebar: a picture preview (its open chip), then the video one (its mute chip)
+    await sweep("libSide", async () => {
+      await lib();
+      await page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="k1"]')) ?? document.querySelector(".card.lib");
+        c.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+        for (let i = 0; i < 30 && !document.querySelector(".side-panel:not(.closing) [data-side-close]"); i++) await m.sleep(100);
+        const o = document.querySelector('.side-panel:not(.closing) [data-preview-src="image"]'); if (o && o.getAttribute("aria-checked") !== "true") o.click();`);
+      await sleep(900);
+    }, { done: closeSide, must: [/side-close/, /side-sec-ico/, /side-tile-ico/, /side-open/, /side-mute/],
+      parks: [null, async () => {
+        await page(`const b = document.querySelector('.side-panel:not(.closing) [data-preview-src="video"]'); if (b && b.getAttribute("aria-checked") !== "true") b.click();
+          for (let i = 0; i < 60 && !document.querySelector(".side-panel:not(.closing) [data-side-mute]"); i++) await m.sleep(50);
+          document.querySelector('.side-panel:not(.closing) video[data-preview-layer="video"]')?.pause(); await m.sleep(700);`);
+        return { x: 3, y: 3 };
+      }] });
+    await sweep("browse", async () => { await closeSide(); await browse(); await sleep(400); },
+      { parks: [null, thumbPark(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")], must: [/\[Refresh\]/, /ss-filter/] });
+    await sweep("browseSide", browseSide, { done: closeSide, must: [/side-close/, /side-sub-ico/, /side-tile-ico/] });
+    // the filter column with no tag set (the lit toggle), then one tag included and one hidden: their switches' lit segments
+    // are chips (the others are bare glyphs; the toggle shows its count, words, from then on)
+    const clearTags = `for (const s of document.querySelectorAll('.wf-col .wf-seg[aria-checked="true"]:not([data-seg="off"])')) s.closest(".wf-sw").querySelector('[data-seg="off"]').click();
+      await m.sleep(400);`;
+    await sweep("filters", async () => { await closeSide(); await browse();
+      await page(`const t = document.querySelector("[data-wf-toggle]"); if (t && !t.classList.contains("on")) t.click(); await m.sleep(900); ${clearTags}`); },
+      { parks: [null, async () => {
+        await page(`const rows = [...document.querySelectorAll(".wf-col .wf-row[data-wf-tag]")];
+          rows[0]?.querySelector('.wf-seg[data-seg="inc"]')?.click(); rows[1]?.querySelector('.wf-seg[data-seg="exc"]')?.click(); await m.sleep(600);`);
+        return { x: 3, y: 3 };
+      }],
+      done: () => page(`${clearTags} const t = document.querySelector("[data-wf-toggle].on"); t?.click(); await m.sleep(500);`),
+      must: [/wf-gico/, /wf-close/, /ss-filter\.on/, /wf-seg\.i\[Include/, /wf-seg\.e\[Hide/] });
+    // Settings: the section emblems, then a number field's steppers (their round chip shows on hover)
+    await sweep("settings", async () => { await closeSide(); await tab("Settings"); await sleep(600); }, { must: [/ssection-ico/, /ns-btn/],
+      parks: [null, async () => { await page(`document.querySelector(".settings .num-step:not(.dis) .ns-btn:not(:disabled)")?.scrollIntoView({ block: "center" }); await m.sleep(400);`); return { x: 3, y: 3 }; }] });
+    await sweep("steamTodo", async () => { await lib(); await steamTodo(); },
+      { done: () => js(`window.__fakeWs("steam-todo", { finished: true })`), must: [/st-fold/] });
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });
     console.log(`ERROR setup: ${e.message}`);
   }
   const fail = results.filter((r) => r.v.length).length;
   console.log(`ICONS pass=${results.length - fail} fail=${fail}`);
+  if (centreRows.length) fs.writeFileSync(path.join(OUT, "icons-centre.json"), JSON.stringify(centreRows, null, 1));
   fs.writeFileSync(path.join(OUT, "icons.json"), JSON.stringify(results, null, 1));
   app.exit(fail ? 1 : 0);
 });

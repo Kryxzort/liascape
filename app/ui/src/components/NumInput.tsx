@@ -143,7 +143,7 @@ export function NumInput({ value, onChange, min, max, emptyValue, integer, step,
       <button type="button" className="ns-btn" data-step="-1" tabIndex={-1} disabled={disabled || atMin}
         aria-label={name ? `Decrease ${name}` : "Decrease"}
         onPointerDown={(e) => startHold(e, -1)} onPointerLeave={endHold} onMouseDown={(e) => e.preventDefault()}>
-        <Minus size={13} strokeWidth={2.4} /></button>
+        <Minus size={14} strokeWidth={2.4} /></button>
       <span className="ns-field">
         <input ref={input} {...rest} className={className} type="number" min={min} max={max} step={step} disabled={disabled}
           style={{ ...style, "--ns-ch": chars } as CSSProperties}
@@ -173,7 +173,7 @@ export function NumInput({ value, onChange, min, max, emptyValue, integer, step,
       <button type="button" className="ns-btn" data-step="1" tabIndex={-1} disabled={disabled || atMax}
         aria-label={name ? `Increase ${name}` : "Increase"}
         onPointerDown={(e) => startHold(e, 1)} onPointerLeave={endHold} onMouseDown={(e) => e.preventDefault()}>
-        <Plus size={13} strokeWidth={2.4} /></button>
+        <Plus size={14} strokeWidth={2.4} /></button>
     </span>
   );
 }

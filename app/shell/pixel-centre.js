@@ -5,8 +5,9 @@
 //   const PXC = require("./pixel-centre");
 //   const r = await PXC.measure(win, { chip: "<selector of the chip>", glyph: "<selector of its glyph>", css: "<extra css>",
 //                                      png: "<path for an 8x close-up, optional>" });
-//   r = { dx, dy, glyphPx, chipPx, glyph: [x0, y0, x1, y1], box: [x0, y0, x1, y1], scale } | { error }
+//   r = { dx, dy, glyphPx, chipPx, glyph: [x0, y0, x1, y1], box: [x0, y0, x1, y1], css: [w, h], scale } | { error }
 //   PXC.judge(name, r, tol = 0.5)  → [] or the violations (off by more than `tol` css px, nothing drawn — proved nothing)
+//   PXC.tolerance(r, dpr)          → the `tol` the window's device pixel ratio can resolve (below)
 //
 // Three captures of the chip's area: A as shown, B with the glyph hidden (visibility), C with the whole chip hidden. The
 // glyph's box = the pixels where A ≠ B, the chip's box = where B ≠ C (its fill, its edge or ring), both read only inside the
@@ -17,7 +18,8 @@
 // Before measuring: settle what moves under the chip (pause a <video>, finish the icon's one-shots); a hover glow is part of
 // the chip's box — pass `css` that removes it (`box-shadow: none`) to measure against the ring itself, and hide anything
 // that overlaps the chip but isn't it (a pill sliding out from under it).
-// The technique comes from probe-steam look:dlCentre. Used by probe-sidebar look:iconCentre.
+// The technique comes from probe-steam look:dlCentre. Used by probe-sidebar look:iconCentre, probe-filters wf:emblem:centre
+// and probe-icons icon:centre:* (every icon chip on screen).
 const fs = require("fs");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -62,7 +64,7 @@ async function once(win, { chip, glyph, css = "", png = null, pad = 6, glyphThre
     if (moved > 3) return { moved };
     const g = box(a, bb, glyphThresh), k = box(bb, c, chipThresh);
     if (png) fs.writeFileSync(png, A.resize({ width: W * 8, quality: "good" }).toPNG());
-    return { dx: (g.cx - k.cx) / scale, dy: (g.cy - k.cy) / scale, glyphPx: g.n, chipPx: k.n, glyph: g.b, box: k.b, scale };
+    return { dx: (g.cx - k.cx) / scale, dy: (g.cy - k.cy) / scale, glyphPx: g.n, chipPx: k.n, glyph: g.b, box: k.b, css: [b.w, b.h], scale };
   } finally {
     await wc.executeJavaScript(`document.getElementById(${J(STYLE)})?.remove(); true`).catch(() => {});
   }
@@ -77,4 +79,18 @@ function judge(name, r, tol = 0.5) {
   return [];
 }
 
-module.exports = { measure, judge };
+// Half a css pixel at a whole device pixel ratio. At a fractional one (the matrix's Xvfb draws at ~1.047) the glyph's and the
+// chip's edges round to device pixels each on their own, so one device pixel is the resolution; and a chip can draw a row or
+// column short (22 css px = 23.03 device px rounds to 23 or 24 by its position), which moves its measured centre half a device
+// pixel without the glyph being off. A square chip shows it (its drawn box isn't square); an oblong one can't be told apart
+// from an off glyph, so it gets no allowance. At ratio 1 every centred chip measures exactly centred, so none of this widens
+// what a ratio-1 run accepts.
+function tolerance(r, dpr) {
+  if (Math.abs(dpr - Math.round(dpr)) < 1e-3) return 0.5;
+  const base = Math.max(0.5, 1.01 / dpr);
+  if (!r?.box || !r.css || Math.abs(r.css[0] - r.css[1]) > 0.01) return base;
+  const lost = Math.abs((r.box[2] - r.box[0]) - (r.box[3] - r.box[1]));
+  return base + (lost * 0.5) / dpr;
+}
+
+module.exports = { measure, judge, tolerance };

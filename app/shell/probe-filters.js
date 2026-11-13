@@ -1405,7 +1405,7 @@ app.whenReady().then(async () => {
       try {
         for (const [w, h] of [[1400, 900], [1920, 1080]]) {
           await resize(w, h); await toWorkshop(); await mvTo(3, 3, 300);
-          const dpr = await js("devicePixelRatio"), tag = `${w}x${h}@${+dpr.toFixed(3)}`, tol = Number.isInteger(dpr) ? 0.5 : Math.max(0.5, 1.01 / dpr);
+          const dpr = await js("devicePixelRatio"), tag = `${w}x${h}@${+dpr.toFixed(3)}`, tol = PXC.tolerance(null, dpr);
           const lay = await page(`return [...m.col().querySelectorAll("[data-wf-gico]")].map((e) => { const c = e.getBoundingClientRect(), g = e.querySelector("svg").getBoundingClientRect();
             return { id: e.dataset.wfGico, cw: c.width, ch: c.height, gw: g.width, gh: g.height, dx: g.x + g.width / 2 - (c.x + c.width / 2), dy: g.y + g.height / 2 - (c.y + c.height / 2) }; });`);
           if (lay.length < 6) v.push(`${tag}: only ${lay.length} emblems — proved little`);
@@ -1420,11 +1420,9 @@ app.whenReady().then(async () => {
             const r = await PXC.measure(win, { chip: chipSel(id), glyph: `${chipSel(id)} > svg`, css: `${chipSel(id)} { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent) !important; transition: none !important; }`,
               png: path.join(OUT, `wf-emblem-px-${id}-${w}.png`) });
             console.log(`        ${tag} ${id}: ${r.error ?? `(${r.dx.toFixed(2)}, ${r.dy.toFixed(2)}) css px, glyph ${r.glyphPx} px, chip ${r.chipPx} px`} (±${tol.toFixed(2)})`);
-            // At a fractional ratio a square chip can draw one row or column short (22 css px = 23.03 device px rounds to 23 or
-            // 24 by its position): its measured centre then moves half a device pixel, which isn't the glyph's doing. At ratio 1
-            // (the agent window) every emblem measures exactly centred.
-            const lost = !Number.isInteger(dpr) && r.box ? Math.abs((r.box[2] - r.box[0]) - (r.box[3] - r.box[1])) : 0;
-            v.push(...PXC.judge(`${tag} ${id}`, r, tol + (lost * 0.5) / dpr));
+            // a chip drawn a row or column short at a fractional ratio moves its own measured centre (PXC.tolerance); at ratio 1
+            // (the agent window) every emblem measures exactly centred
+            v.push(...PXC.judge(`${tag} ${id}`, r, PXC.tolerance(r, dpr)));
           }
           await page(`m.col().querySelector(".wf-scroll").scrollTop = 0; true`);
         }
