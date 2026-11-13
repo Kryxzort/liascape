@@ -422,7 +422,16 @@ public static class LiascapePlayerMedia
         var outcome = OutcomeOf(kind, e);
         if ((outcome == null && kind != "transition.started") || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;
         var corr = c.GetString()!;
-        if (outcome == null) { Started(corr); return; }
+        if (outcome == null)
+        {
+            Started(corr);
+            // `cur:*` (/current) names B from here, and only from here. /apply announced B when it was requested, so a page
+            // that loaded in between missed that and read /current while it still said A (or nothing): tell every client
+            // again now. B's path comes with the event (no query to time out into a "nothing plays"); Broadcast never
+            // blocks, so it goes from this thread, in the events' order. Guard: matrix load:afterApply:wsEarly
+            if (e.TryGetProperty("b", out var b) && Str(b, "path") is { Length: > 0 } bPath) PlayerHelper.OnWallpaperChanged?.Invoke(bPath);
+            return;
+        }
         Interlocked.Increment(ref _eventOutcomes);
         Record(corr, outcome);
         // our latest switch FAILED (a file mpv can't play): A stays on screen, but every client was told B when it was

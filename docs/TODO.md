@@ -48,15 +48,16 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
-- [ ] In the matrix, a page loaded in the player's first moments after `/apply` showed no Stop button and no now-playing
-      line (the probes now apply with the page open). Check whether the same load race hits the real app (a reload
-      or a second window right after applying) and make the page read the current state once the player answers.
 - [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
       research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
       triggers/actions can't express (the escape hatch, not just one more action type).
 
 ## Legacy player (current app) — small fixes
+- [ ] A page loaded during a cold mpvpaper launch (the first apply with nothing playing, or after a scene) can keep showing
+      nothing playing: `/apply` announces B at once, `/current` asks mpv's IPC socket, which isn't up yet, and nothing is
+      sent when it comes up. liascape-player sends `wallpaper-changed` at `transition.started` (matrix `load:afterApply:*`,
+      which run liascape-player only); legacy needs the same when the launch's IPC first answers (`PlayerHelper.Launch`).
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
       - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
         `duration + coverMs` for every method; `--align-a-end` only exists for full-live). So A freezes several

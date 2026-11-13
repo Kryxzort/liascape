@@ -28,6 +28,7 @@ and § Settings & state.
 - Trash/undo: drop the items from the playlist bar first, then re-read it (`syncPlaylist()`).
 - ONE `resync()` (`readBackend`) reads everything the store mirrors, at start (retried while the backend is down) and on every WS reopen. Apply each piece only when ITS read succeeded — never `[]` for a failed read — and keep a local edit whose debounced save is pending (`playlistBarSavePending`, `settingsSavePending`). Guards: matrix `restart:backend`, `restart:midLibrary`, `restart:initDown`.
 - The UI never guesses which item plays: the mark comes from `wallpaper-changed` (and `/current` for a Play that switches nothing; drop it if an event landed meanwhile). Guard: matrix `playlistMark:shufflePlay`.
+- Ask `/current` only through `askCurrent()`: an answer applies while it is the newest asked and no `wallpaper-changed` landed since. The page asks once more when its first socket opens (`rereadPlaying`): the store's first reads race it. Guards: matrix `load:afterApply:*`.
 - A Browse list reply belongs to its generation (`browseGen`): drop replies from an older `reload()`.
 - The production origin is `http://127.0.0.1:<port>`; the shell reuses the last port (`LIASCAPE_PORT`, when it and the media port after it are free) so localStorage prefs survive a relaunch.
 

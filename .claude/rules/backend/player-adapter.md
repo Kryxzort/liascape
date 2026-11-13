@@ -52,6 +52,7 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 - Subscribe only to the kinds consumed (`LiascapePlayerClient.Topics`); never `source.` as a whole (it streams `source.position`).
 - `WaitCorr` checks the outcome map first (the event can beat the reply) and polls `logs {corr}` every 2 s as a safety net.
 - Our latest switch failing → re-broadcast `wallpaper-changed` with the real current path. Matrix `apply:broken`.
+- Every `transition.started` → broadcast `wallpaper-changed` with the event's `b.path`, from the event thread: `/current` names B only from then, so a page that loaded after `/apply`'s announcement learns it here. Matrix `load:afterApply:wsEarly`.
 - Drain the player's outbox on every subscribe ack; ack only after the handler stored synchronously; handlers must be idempotent (`OnOutboxEvent`). Self-test `OutboxAckAssertions`.
 
 ## Rotation (the one home of its semantics)

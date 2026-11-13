@@ -3570,6 +3570,89 @@ C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
     return v;
   } };
 
+// A page loaded while an /apply is on its way (a reload, a second window): the backend announces B at the request
+// (wallpaper-changed), the player starts it a moment later, and /current names B only from then. A page that missed the
+// announcement and read /current before the start must still end on B — Stop, the now-playing line, B's card marked — with
+// no further action.
+//   reload      the real path: the page reloads the moment /apply answered (nothing held; the player takes ~0.4–1 s to start B
+//               here, the page asks /current within ~0.1 s of loading)
+// The others are made deterministic by holding the page's first /current and its /events socket:
+//   wsLate      /current answered before the player starts B; the socket opens only after it started
+//   wsEarly     /current answered before the start; the socket opens at once (up before the player starts B)
+//   staleReply  the socket is up for the announcement; /current, asked before the apply, answers only after B started
+for (const how of ["reload", "wsLate", "wsEarly", "staleReply"]) C[`load:afterApply:${how}`] = { states: ["idle", "single"], switch: true, async run(c) {
+    c.target = c.state === "idle" ? K[1] : c.other;
+    const t = TITLE(c.target), wsUrl = `${U.replace(/^http/, "ws")}/events*`, curUrl = `${U}/current*`;
+    let curSeen = false, wsSeen = false, releaseCur, releaseWs;
+    const curGo = new Promise((r) => (releaseCur = r)), wsGo = new Promise((r) => (releaseWs = r));
+    const wr = session.defaultSession.webRequest;
+    if (how === "reload") { /* nothing held */ } else if (how === "staleReply") wr.onHeadersReceived({ urls: [curUrl] }, (d, cb) => { if (curSeen) return cb({}); curSeen = true; curGo.then(() => cb({})); });
+    else {
+      wr.onBeforeRequest({ urls: [curUrl, wsUrl] }, (d, cb) => {
+        if (/\/events/.test(d.url)) { if (wsSeen) return cb({}); wsSeen = true; return wsGo.then(() => cb({})); }
+        if (curSeen) return cb({}); curSeen = true; curGo.then(() => cb({}));
+      });
+    }
+    const started = () => events.find((e) => e._t >= c.t0 && e.event === "transition.started" && e.b?.path === c.target);
+    try {
+      c.tLoad = Date.now();
+      if (how === "reload") {
+        c.held = true; c.t0 = Date.now();
+        const ap = await post("/apply", { path: c.target });
+        if (ap.status !== 200) c.applyErr = `${ap.status} ${JSON.stringify(ap.json)}`;
+        c.tLoad = Date.now();
+        await win.loadURL(withToken(U + "/"));
+        c.startedSeen = await waitFor(() => !!started(), 8000, 10);
+        c.tStart = started()?._t;
+      } else {
+      const loading = win.loadURL(withToken(U + "/"));
+      c.held = await waitFor(() => curSeen && (how === "staleReply" || wsSeen), 8000, 10);
+      // staleReply: the page's socket is up before the apply (its announcement reaches the page)
+      if (how === "staleReply") c.wsUp = await waitFor(() => httpLog.some((r) => r.t >= c.tLoad && /\/events/.test(r.url)), 4000, 20);
+      c.t0 = Date.now();
+      const ap = await post("/apply", { path: c.target });
+      if (ap.status !== 200) c.applyErr = `${ap.status} ${JSON.stringify(ap.json)}`;
+      if (how !== "staleReply") { releaseCur(); if (how === "wsEarly") releaseWs(); }
+      c.startedSeen = await waitFor(() => !!started(), 8000, 10);
+      c.tStart = started()?._t;
+      await sleep(150);
+      c.tRelease = Date.now(); releaseCur(); releaseWs();
+      await loading;
+      }
+    } finally {
+      releaseCur(); releaseWs();
+      if (how === "staleReply") wr.onHeadersReceived(null); else if (how !== "reload") wr.onBeforeRequest(null);
+    }
+    await js(PAGE);
+    c.page = null;
+    c.shows = await waitFor(async () => { const p = (c.page = await ui(`return { stop: !!document.querySelector(".topbar [aria-label=Stop]"),
+        line: document.querySelector(".topbar > .status [data-st=playing]")?.textContent ?? null, marks: m.playing().cards };`));
+      return p.stop && (p.line ?? "").includes(t) && p.marks.length === 1 && p.marks[0] === t; }, 4000, 100);
+    // the top bar and the first card rows once the slot's cross-fade and the cards' glow settled (looked at: Stop, the
+    // now-playing line, the marked card)
+    await sleep(900);
+    fs.writeFileSync(path.join(OUT, `mx-load-${how}-${c.state}.png`), (await win.webContents.capturePage({ x: 0, y: 0, width: 1400, height: 420 })).toPNG());
+    // when the page's first /current and its socket came back (the order is the variant: proved nothing if it ran the other way)
+    // (staleReply: the held one, released last — the page may ask /current again meanwhile)
+    const back = (re, from = c.tLoad) => httpLog.find((r) => r.t >= from && re.test(r.url))?.t;
+    c.tCur = back(/\/current/, how === "staleReply" ? c.tRelease : c.tLoad); c.tWs = back(/\/events/);
+  }, check(c) {
+    const v = [], t = TITLE(c.target);
+    if (!c.held) return ["the page's first /current (and /events) were never seen — nothing was held, proved nothing"];
+    if (c.applyErr) v.push(`/apply answered ${c.applyErr}`);
+    if (!c.startedSeen) return [...v, `the player never started ${t} (no transition.started) — proved nothing`];
+    const how = c.control.split(":").pop(), order = `/current back +${c.tCur - c.t0} ms, socket +${c.tWs - c.t0} ms, player started ${t} +${c.tStart - c.t0} ms`;
+    console.log(`        ${c.state} × ${c.control}: ${order}`);
+    if (c.tCur == null || c.tWs == null) return [...v, `the page's /current or socket never completed (${order}) — proved nothing`];
+    if (how !== "staleReply" && c.tCur >= c.tStart) v.push(`/current came back after the player started ${t} (${order}) — proved nothing`);
+    if (how === "reload" && c.tWs <= c.tLoad) v.push(`the page's socket opened before the apply (${order}) — proved nothing`);
+    if (how === "wsLate" && c.tWs <= c.tStart) v.push(`the socket opened before the player started ${t} (${order}) — proved nothing`);
+    if (how === "wsEarly" && c.tWs >= c.tStart) v.push(`the socket opened after the player started ${t} (${order}) — proved nothing`);
+    if (how === "staleReply" && (!c.wsUp || c.tCur <= c.tStart)) v.push(`the socket wasn't up before the apply, or /current came back before the player started ${t} (${order}) — proved nothing`);
+    if (!c.shows) v.push(`the page loaded during the apply doesn't show ${t} playing 4 s after the player started it: Stop ${c.page?.stop}, now-playing line ${JSON.stringify(c.page?.line)}, marked ${JSON.stringify(c.page?.marks)}`);
+    return v;
+  } };
+
 // a scene's user properties (the card settings modal's "Scene properties"): s1's project.json declares `color` (the synthetic
 // renderer's colour, WE-encoded — red by default), `clock` (bool) and `bars` (shown while clock is on). Oracle: s1's own
 // picture (a pixel of its source), its source's scene_props, the worker's `properties` answer, the index, the modal.

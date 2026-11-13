@@ -3,6 +3,7 @@ import {
   steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
   type LibraryOp,
 } from "../api/client";
+import { eventsOpened } from "../api/events";
 
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
@@ -235,13 +236,22 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
 
 // `wallpaper-changed` events seen so far (setPlaying). A Play's reply can come before or after the event of what it started.
 let playingEvents = 0;
+// A /current answer is applied only while it's the newest one asked and no `wallpaper-changed` landed since it was asked: one
+// made before the player started B (/current names B only from then) must not replace the event that said B, nor a newer
+// answer. Guard: matrix load:afterApply:staleReply
+let currentAsks = 0;
+function askCurrent() {
+  const ev = playingEvents, ask = ++currentAsks;
+  return { reply: api.current(), fresh: () => ev === playingEvents && ask === currentAsks };
+}
 // After a Play / play-from: the UI never guesses what plays (under Shuffle it's the player's pick, not item 1; under Resume it
 // may be what already plays). The player's `program.current` → `wallpaper-changed` says, when B starts; if none came yet, ask
 // /current for the Play that switches nothing — unless the event lands meanwhile: it is newer than this answer can be.
 async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) => void, seen: number) {
   if (playingEvents === seen) {
-    const cur = await api.current().catch(() => null);
-    if (playingEvents === seen && cur?.path) set({ playingPath: cur.path });
+    const q = askCurrent();
+    const cur = await q.reply.catch(() => null);
+    if (playingEvents === seen && q.fresh() && cur?.path) set({ playingPath: cur.path });
   }
   get().refreshPlayingStatus(); // persistent now-playing line
 }
@@ -272,6 +282,7 @@ export const useStore = create<State>((set, get) => ({
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
   // page shows (a failed /library taken as [] would say "Library is empty" for good while a wallpaper plays).
   async init() {
+    eventsOpened.then(() => rereadPlaying(set, get));
     for (let i = 0; !(await get().resync()); i++) await new Promise((r) => setTimeout(r, Math.min(250 * 2 ** i, 2000)));
     await get().reload();
   },
@@ -711,8 +722,9 @@ type Setter = (p: Partial<State>) => void;
 async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   let unreachable = false;
   const r = <T,>(p: Promise<T>, core = true) => p.then((v) => ({ v }), (e) => { if (core && e instanceof TypeError) unreachable = true; return null; });
+  const curQ = askCurrent();
   const [sources, themes, settings, cur, lib, pstate, names, depth, steam, todo, ops] = await Promise.all([
-    r(api.sources()), r(api.themes()), r(api.settings()), r(api.current()), r(api.library()), r(api.playlistState()),
+    r(api.sources()), r(api.themes()), r(api.settings()), r(curQ.reply), r(api.library()), r(api.playlistState()),
     r(api.playlistNames(), false), r(api.undoDepth(), false), r(api.steamStatus(), false), r(api.steamTodo(), false),
     r(api.libraryOps(), false),
   ]);
@@ -735,7 +747,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
-  if (cur) { p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
+  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
@@ -748,4 +760,17 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   set(p);
   if (playingLine) get().refreshPlayingStatus(); // the now-playing line follows (a transient notice reverts to it itself)
   return !unreachable;
+}
+
+// The page's first reads run beside its socket's opening: an apply's announcement sent before the socket was up never reached
+// the page, and its first /current may have come before the player started what was announced (a reload or a second window
+// right after an apply). Once the socket is up, every later change arrives as an event; ask /current once more for the one
+// before it. Guard: matrix load:afterApply:wsLate
+async function rereadPlaying(set: Setter, get: () => State) {
+  const q = askCurrent();
+  const cur = await q.reply.catch(() => null);
+  if (!cur || !q.fresh()) return;
+  const playingLine = get().status === "" || get().status === buildPlayingStatus(get);
+  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep });
+  if (playingLine) get().refreshPlayingStatus();
 }

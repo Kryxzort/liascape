@@ -43,6 +43,10 @@ export type LiascapeEvent =
 // download progress, Steam sign-in).
 // `onReconnect`: every open after the first — the backend restarted (or the socket dropped): whatever changed in the
 // gap was never pushed, so the page re-reads what it mirrors (store.resync).
+// `eventsOpened`: the page's first socket is up. The store's first reads run beside the socket's opening, so what the
+// backend pushed before it was up never reached the page (store.init re-reads /current on it).
+let markOpened: () => void;
+export const eventsOpened = new Promise<void>((r) => (markOpened = r));
 export function useEvents(onEvent: (e: LiascapeEvent) => void, onReconnect?: () => void) {
   useEffect(() => {
     const base = (API || location.origin).replace(/^http/, "ws");
@@ -53,7 +57,7 @@ export function useEvents(onEvent: (e: LiascapeEvent) => void, onReconnect?: () 
     const connect = () => {
       if (stop) return;
       ws = new WebSocket(withToken(`${base}/events`));
-      ws.onopen = () => { if (opened) onReconnect?.(); opened = true; };
+      ws.onopen = () => { if (opened) onReconnect?.(); opened = true; markOpened(); };
       ws.onmessage = (m) => {
         try { onEvent(JSON.parse(m.data)); } catch { /* ignore */ }
       };
