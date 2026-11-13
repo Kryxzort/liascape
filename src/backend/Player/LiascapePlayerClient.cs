@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using Liascape.Helpers;
 
 namespace Liascape.Player;
 
@@ -788,13 +789,16 @@ public sealed class LiascapePlayerClient
         return args;
     }
 
-    // `setsid <bin> <args>` with stdio → the serve log (never a pipe: the player outlives this backend —
-    // a dead pipe would turn its next stderr write into an error).
+    // `setsid [systemd-run --user --scope …] <bin> <args>` with stdio → the serve log (never a pipe: the player outlives
+    // this backend — a dead pipe would turn its next stderr write into an error). Its own scope keeps it running when a
+    // systemd unit the backend runs in is stopped (`UserScope`); every wrapper execs, so the returned process IS the
+    // player's supervisor (its exit code, 1 = "already running").
     private static Process? Spawn(string bin, List<string> args)
     {
         var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "liascape-player-serve.log");
         Directory.CreateDirectory(Path.GetDirectoryName(outLog)!);
         var psi = new ProcessStartInfo("setsid") { UseShellExecute = false };
+        foreach (var a in UserScope.Prefix("liascape-player", Log)) psi.ArgumentList.Add(a);
         psi.ArgumentList.Add("sh");
         psi.ArgumentList.Add("-c");
         psi.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >\"$LIASCAPE_SERVE_LOG\" 2>&1");

@@ -38,10 +38,10 @@ evidence.
 - **Binary** (`PlayerEngine.ResolveBinary`): `LIASCAPE_PLAYER_BIN` → next to the running liascape executable → the
   dev tree `src/player/target/{release,debug}/liascape-player` (release first: debug is `opt-level 0` and the player
   mixes audio itself) → `PATH`. Missing → the engine reads as unavailable, `/player-engine` says why, legacy works.
-- **Start** (`EnsureRunning`, only from a switch): `setsid sh -c 'exec liascape-player serve …'` with the session's
-  environment, waiting ≤ 3 s for the socket. Once this client has talked to a player it restarts with that player's
+- **Start** (`EnsureRunning`, only from a switch): `setsid [systemd-run --scope] sh -c 'exec … serve'` with the
+  session's environment, waiting ≤ 3 s for the socket. Once this client has talked to a player it restarts with that player's
   own arguments + `--restore` (`UserServeArgs`, from the supervisor's cmdline minus `--supervised`, `--restore`,
-  `--restarted`, `--session-start`), so a player that went away comes back with the same outputs, socket and AO.
+  `--restarted`, `--session-start`), so a player that went away comes back with its outputs, socket and AO.
   `Restore` starts a first player with `serve --restore --session-start` and waits ≤ 30 s (a restore creates a
   source per output first). A failed start isn't retried for 10 s. Exit 5 seen here means the supervisor's own
   compositor backoff hasn't succeeded within our wait, not that it gave up.

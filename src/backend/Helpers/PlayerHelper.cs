@@ -3636,6 +3636,8 @@ public static class PlayerHelper
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        // its own scope: a stopped systemd unit the backend runs in must not take the wallpaper with it (UserScope)
+        foreach (var a in UserScope.Prefix("mpvpaper", m => Console.Error.WriteLine(m))) psi.ArgumentList.Add(a);
         psi.ArgumentList.Add("mpvpaper");
         psi.ArgumentList.Add("-o");
         psi.ArgumentList.Add(options);
@@ -4087,6 +4089,7 @@ public static class PlayerHelper
                 RedirectStandardOutput = false,
                 RedirectStandardError = false,
             };
+            foreach (var a in UserScope.Prefix("linux-wallpaperengine", m => Console.Error.WriteLine(m))) psi.ArgumentList.Add(a);
             psi.ArgumentList.Add("linux-wallpaperengine");
             psi.ArgumentList.Add("--noautomute");
             psi.ArgumentList.Add("--screen-root");

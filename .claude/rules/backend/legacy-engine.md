@@ -16,6 +16,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` �
 
 ## Processes and IPC
 - `PlayerHelper` is the single entry point for mpvpaper; it kills existing mpvpaper processes before starting one.
+- mpvpaper and LWE start in their own systemd user scope when one is available (`UserScope.Prefix`, as liascape-player): a stopped unit the backend runs in must not take the wallpaper along.
 - Drain stdout/stderr (`BeginOutputReadLine`/`BeginErrorReadLine`) for mpvpaper, `timer-daemon` and `restart-daemon` — an undrained pipe deadlocks. Do NOT redirect LWE's (`SpawnLweProcesses`).
 - mpv may send several JSON replies in one read: split on `\n` (`TryQueryTimeRemaining`).
 - Pre-shuffle playlists in `ApplyPlaylist`; never use mpv's `--shuffle`, `--playlist=file` or `--loop-playlist` — the timed machinery owns rotation.
