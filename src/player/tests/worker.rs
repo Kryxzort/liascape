@@ -274,6 +274,53 @@ fn spawn_handshake_hello() {
     assert!(matches!(host.state(), WorkerState::Stopped));
 }
 
+/// Spawn the real renderer (no `--stub`) with `env` and wait for its `Hello`, which it sends
+/// after its GL context attempt — so after the shader cache step, GPU or not.
+fn renderer_hello(id: &str, env: &[(&str, &std::path::Path)], extra: &[(&str, &str)]) {
+    let mut spec = WorkerSpec::new(id, bin(), start());
+    spec.crash_dir = tmp_dir(id);
+    for (k, v) in env {
+        spec.env.push((k.to_string(), v.to_string_lossy().into_owned()));
+    }
+    for (k, v) in extra {
+        spec.env.push((k.to_string(), v.to_string()));
+    }
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(20), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    assert!(
+        matches!(evs.last(), Some((_, WorkerEvent::Msg(FromWorker::Hello { .. }, _)))),
+        "no Hello from the renderer: {evs:?}\n{}",
+        host.log_tail().join("\n")
+    );
+    host.stop();
+}
+
+/// NVIDIA's shader disk cache works only when `__GL_SHADER_DISK_CACHE_PATH` exists; the
+/// renderer creates it (0700) before its GL context, leaves it alone when the cache is off,
+/// and an uncreatable path never stops it.
+#[test]
+fn renderer_creates_the_shader_cache_dir() {
+    use std::os::unix::fs::MetadataExt;
+    const PATH: &str = "__GL_SHADER_DISK_CACHE_PATH";
+    let root = tmp_dir("nvcache");
+    let dir = root.join("cache/nv");
+    renderer_hello("nvcache", &[(PATH, &dir)], &[]);
+    assert!(dir.is_dir(), "the renderer didn't create {dir:?}");
+    assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o7777, 0o700);
+
+    let off = root.join("off/nv");
+    renderer_hello("nvcache-off", &[(PATH, &off)], &[("__GL_SHADER_DISK_CACHE", "0")]);
+    assert!(!root.join("off").exists(), "__GL_SHADER_DISK_CACHE=0 created {off:?}");
+
+    let file = root.join("file");
+    std::fs::write(&file, b"").unwrap();
+    renderer_hello("nvcache-bad", &[(PATH, &file.join("nv"))], &[]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn worker_exit_is_seen_with_its_signal() {
     let mut spec = stub_spec("sig", "crash_after_ms:100");

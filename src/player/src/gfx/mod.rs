@@ -9,6 +9,7 @@
 //! - [`effects`] — the gl-transitions effect catalogue: [`Catalogue`],
 //!   [`EffectProgram`].
 //! - [`compose`] — layer composition: [`Composer`], [`fit_rect`], [`UvRect`].
+//! - [`shader_cache`] — creates NVIDIA's shader disk cache directory before the first context.
 //!
 //! See `docs/player/modules/gfx-egl.md` and `docs/player/modules/composition.md`
 //! for the display-selection order, the surfaceless requirement, the `read_rgba`/
@@ -21,6 +22,7 @@ pub mod dmabuf;
 pub mod effects;
 pub mod egl;
 pub mod gl;
+pub mod shader_cache;
 
 pub use compose::{Composer, UvRect, fit_rect};
 pub use effects::{Catalogue, EffectProgram};

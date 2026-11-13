@@ -97,6 +97,13 @@ measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`
   libwayland's default queue, which wayland-rs never dispatches. Keep both parts.
 - Guard `src/player/tests/api.rs` `t20e_wayland_present_heap_stays_flat` (opt-in, `LIASCAPE_PLAYER_TEST_WAYLAND`).
 
+## NVIDIA shader disk cache (`src/player/src/gfx/shader_cache.rs`)
+- `serve` and the scene worker's GL modes call `shader_cache::ensure_from_env` before any EGL/GL: the driver ignores a
+  missing `__GL_SHADER_DISK_CACHE_PATH` dir (never creates it) and recompiles every shader. Create it 0700 only when
+  set, absolute and missing, never with `__GL_SHADER_DISK_CACHE=0`; never change the variable; a failure is a debug
+  log, never fatal. Mesa creates its own. Guards `src/player/tests/api.rs` `serve_creates_the_shader_cache_dir`,
+  `src/player/tests/worker.rs` `renderer_creates_the_shader_cache_dir`.
+
 ## Redraw policy (`src/player/src/redraw.rs`)
 - Every output presents on its own frame callbacks; nothing waits on another output.
 - Draw an output only if, since its last present, `picture_rev` moved, an animated value changed on a node it shows

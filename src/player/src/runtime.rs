@@ -4878,6 +4878,9 @@ fn signal_fd() -> Result<OwnedFd, String> {
 /// connection is lost — then every source is silenced and torn down, and it returns `Err`).
 pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
     crate::mem::apply_policy(); // Allocator policy, first thing (before the mpv cores exist)
+    // Before any EGL/GL, ours or mpv's: NVIDIA uses its shader cache dir only if it exists.
+    // Guard: tests/api.rs serve_creates_the_shader_cache_dir.
+    let shader_cache = crate::gfx::shader_cache::ensure_from_env();
     if opts.wayland {
         crate::wl::apply_driver_env(); // Before any thread (setenv) and before EGL
     }
@@ -4908,6 +4911,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
             f.clone(),
         );
     }
+    crate::gfx::shader_cache::log_outcome(&shader_cache);
     if std::env::var(supervise::TEST_CRASH_ENV).as_deref() == Ok("startup") {
         log::event(
             "runtime",

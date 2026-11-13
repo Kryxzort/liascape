@@ -10974,3 +10974,52 @@ fn switches_never_compose_a_hole() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+/// `serve` creates NVIDIA's shader cache dir (0700) before its EGL context and mpv's, and logs
+/// it at debug level; an uncreatable path is logged and never stops it.
+#[test]
+fn serve_creates_the_shader_cache_dir() {
+    use std::os::unix::fs::MetadataExt;
+    const PATH: &str = "__GL_SHADER_DISK_CACHE_PATH";
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let dir = root.join("cache/nv");
+    let srv = Serve::spawn_env(
+        root.clone(),
+        &["--log-level", "debug"],
+        &[(PATH, &dir)],
+        Some(serial),
+    );
+    assert!(dir.is_dir(), "serve didn't create {dir:?}");
+    assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o7777, 0o700);
+    let logs = srv
+        .client()
+        .ok("logs", json!({"kind_prefix": "gfx.shader_cache_dir"}));
+    let evs = logs["events"].as_array().unwrap();
+    assert_eq!(evs.len(), 1, "{logs}");
+    assert_eq!(evs[0]["created"], json!(true), "{logs}");
+    assert_eq!(evs[0]["level"], json!("debug"), "{logs}");
+    drop(srv);
+
+    // Through a regular file: can't be created; serve still comes up (`spawn_env` waits for it).
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let root = new_root();
+    let file = root.join("file");
+    std::fs::write(&file, b"").unwrap();
+    let srv = Serve::spawn_env(
+        root.clone(),
+        &["--log-level", "debug"],
+        &[(PATH, &file.join("nv"))],
+        Some(serial),
+    );
+    let logs = srv
+        .client()
+        .ok("logs", json!({"kind_prefix": "gfx.shader_cache_dir"}));
+    let evs = logs["events"].as_array().unwrap();
+    assert_eq!(evs.len(), 1, "{logs}");
+    assert_eq!(evs[0]["created"], json!(false), "{logs}");
+    assert!(evs[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{logs}");
+}

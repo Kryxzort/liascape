@@ -17,7 +17,9 @@
 //! hold the newest tick while the host has them all — the renderer's slot starvation),
 //! `freeze_after_ms:N` + `freeze_ms:M` (N ms after `Hello` stop reading for M ms, then carry on).
 //!
-//! Without `--stub`: the renderer — a surfaceless EGL context at LOW priority, a
+//! Without `--stub`: the renderer — the NVIDIA shader cache directory created if
+//! `__GL_SHADER_DISK_CACHE_PATH` names a missing one (`gfx::shader_cache`; `--lwe-smoke` and
+//! `--shader-sweep` do it too), then a surfaceless EGL context at LOW priority, a
 //! 3-slot ring exported as dmabufs (`ring.rs`), one frame per `Tick` into a free slot, an
 //! acquire fence (`sync: fence`) or a CPU wait on its own `sync_file` (`sync: fdpoll`, env
 //! `LIASCAPE_SCENE_SYNC=fdpoll` or no `EGL_ANDROID_native_fence_sync`). It renders a real WE scene
@@ -59,7 +61,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use liascape_player::gfx::{Gfx, OffscreenOpts, Priority};
+use liascape_player::gfx::{Gfx, OffscreenOpts, Priority, shader_cache};
 use liascape_player::scene::cover_size;
 use liascape_player::scene::synthetic::{Fail, Pattern, SyntheticSpec, input_level};
 use liascape_player::worker::proto::{self, FromWorker, ToWorker};
@@ -116,10 +118,12 @@ fn main() {
     // a diagnostic, not part of the protocol: render a real scene through LWE's core offscreen
     #[cfg(feature = "lwe")]
     if std::env::args().nth(1).as_deref() == Some("--lwe-smoke") {
+        shader_cache::ensure_from_env(); // as in `run_renderer`: before the GL context
         lwe::smoke(&std::env::args().skip(1).collect::<Vec<_>>());
     }
     #[cfg(feature = "lwe")]
     if std::env::args().nth(1).as_deref() == Some("--shader-sweep") {
+        shader_cache::ensure_from_env(); // as in `run_renderer`: before the GL context
         lwe::shader_sweep(&std::env::args().skip(1).collect::<Vec<_>>());
     }
     // `liascape-player scene-check` asks what this build can render.
@@ -1175,6 +1179,10 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     if cfg!(feature = "lwe") {
         features.push("lwe");
     }
+    // Before the context: NVIDIA uses its shader cache dir only if it exists, and without it
+    // every scene load compiles every shader. Reported after `Hello`. Guard:
+    // tests/worker.rs renderer_creates_the_shader_cache_dir.
+    let shader_cache = shader_cache::ensure_from_env();
     let gfx = match Gfx::new_offscreen_with(OffscreenOpts {
         priority: Some(Priority::Low),
         // A GPU reset / video-memory purge is reported (→ `ContextLost`, a restart).
@@ -1198,6 +1206,15 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     let fdpoll =
         std::env::var("LIASCAPE_SCENE_SYNC").as_deref() == Ok("fdpoll") || !gfx.has_native_fences();
     hello(&sock, &features, if fdpoll { "fdpoll" } else { "fence" });
+    if let Some(line) = shader_cache.note() {
+        send(
+            &sock,
+            &FromWorker::Log {
+                level: "debug".into(),
+                line,
+            },
+        );
+    }
     let gate = Arc::new(LoadGate::new());
     let audio = Arc::new(audio::Control::default());
     let (tx, inbox) = mpsc::channel();
