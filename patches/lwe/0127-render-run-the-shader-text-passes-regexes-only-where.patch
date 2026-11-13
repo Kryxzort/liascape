@@ -1,0 +1,534 @@
+From c6e0236b081528298bf6bb9a3e3df8175485bf74 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 09:13:37 +0530
+Subject: [PATCH 127/127] render: run the shader text passes' regexes only
+ where they can match
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The WE-rule passes over each shader unit (ShaderUnit::compile's varying passes, WERules' intrinsic overloads, clip,
+reserved words, #if/#endif lines) ran some 30 std::regex searches over the whole unit text, most of them built per
+varying or per intrinsic. libstdc++'s regex executor backtracks and copies its sub-matches at every start position:
+about 1 ms per search over a 20 kB particle unit (genericparticle with LightingV1). A scene with many particle
+systems compiles that unit pair once per system, so 2371103399 (36 systems) spent ~1.7 s of its 2.5 s build in
+regex; it built in 0.92 s before 259c1b6 (+0.6 s: the writable-varying copy, a regex per varying) and cbdf2fb
+(+0.85 s: WE's preprocessing rules, the intrinsic overloads' 8 regexes and the vertex side of the copy).
+
+Each search now first runs a hand-written check that is a necessary condition for its regex (WERules::Scan: a
+whole-word occurrence with the regex's neighbours, `\bname\b` itself, a line starting `#`, …), so the regex only
+runs where it can match and decides there; an iterator over declarations tries its regex only where the leading
+keyword is, anchored (match_continuous + match_prev_avail: what the search finds at that position). No rule changed.
+
+Measured (warm `liascape-scene-worker --lwe-smoke`, build_ms, alternating 8 runs each): 2371103399 2400-2559 ms
+(median 2490) before, 684-803 ms (median 710) now. The WE-reference compare's 96 scenes render in 862 s instead of
+990 s.
+
+Same output: every toGlsl input (each unit's compiled text and its spliced/#endif-dropped copy) was dumped before and
+after for the shader sweep (4085 checks of the stock and library shaders: 3426 distinct texts) and the 96 WE-ref
+scenes (5119 compiles, 586 distinct): byte-identical, in the same order per process; the sweep's results (ok, stage,
+compat records) are identical; 2371103399's frames byte-identical at 1, 1.7, 3.2 and 6.2 s. Frames that differ
+between the two runs are wall-clock content (clock text a second or minute earlier: the build ended sooner under
+libfaketime) or differ run to run with either core.
+
+Origin: ours
+Why: docs/TODO.md (Kimi 2371103399 builds in ~2.5 s since the WE port)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Shaders/ShaderUnit.cpp             | 172 ++++++++++++++----
+ .../Render/Shaders/WEShaderRules.cpp          |  50 ++++-
+ .../Render/Shaders/WEShaderRules.h            | 114 ++++++++++++
+ 3 files changed, 290 insertions(+), 46 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index 9eed10b..be5e75d 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -3,6 +3,7 @@
+ #include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+ #include <algorithm>
++#include <cctype>
+ #include <cstdlib>
+ #include <regex>
+ #include <sstream>
+@@ -104,6 +105,69 @@ using namespace WallpaperEngine::Render;
+ using namespace WallpaperEngine::Data::Builders;
+ using namespace WallpaperEngine::Render::Shaders;
+ 
++namespace {
++namespace Scan = WallpaperEngine::Render::Shaders::WERules::Scan;
++
++/**
++ * Whether applyWritableFragmentVaryings' `assigned` regex can match `name` in `source` (WERules::Scan): a whole-word
++ * `name`, then `\s*`, an optional `.swizzle\s*` and an assignment (`=`, `+=`, … not `==`) or `++` / `--`; or `++` /
++ * `--` and `\s*` before it. A plain read (`name * x`, `name == y`) fails it, so the regex runs only for a unit that
++ * writes to one of its inputs
++ */
++bool mayAssign (const std::string& source, const std::string& name) {
++    const auto charAt = [&] (size_t i) { return i < source.size () ? source[i] : '\0'; };
++    return Scan::anyWord (source, name, [&] (size_t at, size_t end) {
++	size_t k = Scan::skipSpace (source, end);
++	if (charAt (k) == '.') {
++	    k = Scan::skipSpace (source, k + 1);
++	    while (k < source.size () && std::isalpha (static_cast<unsigned char> (source[k]))) {
++		k++;
++	    }
++	    k = Scan::skipSpace (source, k);
++	}
++	const char op = charAt (k);
++	const bool arithmetic = op == '-' || op == '+' || op == '*' || op == '/';
++	// `[-+*/]?=(?!=)`
++	if ((op == '=' && charAt (k + 1) != '=') || (arithmetic && charAt (k + 1) == '=' && charAt (k + 2) != '=')) {
++	    return true;
++	}
++	// `\+\+|--`
++	if ((op == '+' || op == '-') && charAt (k + 1) == op) {
++	    return true;
++	}
++	size_t b = at;
++	while (b > 0 && Scan::isSpace (source[b - 1])) {
++	    b--;
++	}
++	return b >= 2 && source[b - 1] == source[b - 2] && (source[b - 1] == '+' || source[b - 1] == '-');
++    });
++}
++
++/**
++ * Whether applyBuiltinDeclarations' `declaration` regex can match (WERules::Scan): a `gl_<word>` after `\s`, then
++ * `\s*;`
++ */
++bool mayDeclareBuiltin (const std::string& source) {
++    for (size_t at = source.find ("gl_"); at != std::string::npos; at = source.find ("gl_", at + 1)) {
++	if (at == 0 || !Scan::isSpace (source[at - 1])) {
++	    continue;
++	}
++	size_t k = at + 3;
++	if (k >= source.size () || !Scan::isWord (source[k])) {
++	    continue;
++	}
++	while (k < source.size () && Scan::isWord (source[k])) {
++	    k++;
++	}
++	k = Scan::skipSpace (source, k);
++	if (k < source.size () && source[k] == ';') {
++	    return true;
++	}
++    }
++    return false;
++}
++} // namespace
++
+ ShaderUnit::ShaderUnit (
+     const GLSLContext::UnitType type, std::string file, std::string content, const AssetLocator& assetLocator,
+     const ShaderConstantMap& constants, const TextureMap& passTextures, const TextureMap& overrideTextures,
+@@ -366,15 +430,20 @@ std::string ShaderUnit::applyLinkedVaryingCompatibility (std::string source) con
+ 	return source;
+     }
+ 
+-    std::regex fragmentVec4Varying (R"(\bvarying\s+vec4\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)");
+-    std::smatch varyingMatch;
+-    std::string linked = this->m_link->m_preprocessed;
+-    size_t linkedOffset = 0;
+-
+-    while (std::regex_search (linked.cbegin () + linkedOffset, linked.cend (), varyingMatch, fragmentVec4Varying)) {
+-	const std::string name = varyingMatch[1].str ();
+-	linkedOffset += varyingMatch.position () + varyingMatch.length ();
++    static const std::regex fragmentVec4Varying (R"(\bvarying\s+vec4\s+([A-Za-z_][A-Za-z0-9_]*)\s*;)");
++    std::vector<std::string> names;
++    Scan::eachMatch (this->m_link->m_preprocessed, fragmentVec4Varying, "varying", [&] (const std::smatch& m, size_t) {
++	names.push_back (m[1].str ());
++	return false;
++    });
+ 
++    for (const auto& name : names) {
++	const bool mayBeVec2 = Scan::anyWord (source, name, [&] (size_t at, size_t end) {
++	    return Scan::declaresAt (source, at, end) && Scan::wordBefore (source, at) == "vec2";
++	});
++	if (!mayBeVec2) {
++	    continue;
++	}
+ 	const std::regex vertexVec2Decl ("\\bvarying\\s+vec2\\s+" + name + "\\s*;");
+ 	if (!std::regex_search (source, vertexVec2Decl)) {
+ 	    continue;
+@@ -417,29 +486,31 @@ std::string ShaderUnit::applyFragmentVaryingDeclarations (std::string source) co
+     std::string missing;
+     bool retyped = false;
+ 
+-    for (auto it = std::sregex_iterator (vertex.begin (), vertex.end (), vertexVarying); it != std::sregex_iterator ();
+-	 ++it) {
+-	const std::string type = (*it)[1].str ();
+-	const std::string name = (*it)[2].str ();
+-	const std::regex declared ("\\bvarying\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\s+)*?)([A-Za-z_][A-Za-z0-9_]*)\\s+" + name + "\\s*;");
+-	const std::regex used ("\\b" + name + "\\b");
+-	std::smatch own;
+-
+-	if (std::regex_search (source, own, declared)) {
+-	    const std::string ownType = own[2].str ();
+-	    const auto v = width.find (type), f = width.find (ownType);
+-	    if (v != width.end () && f != width.end () && v->second > f->second) {
+-		source = std::regex_replace (source, declared, "varying $1" + type + " " + name + ";");
+-		retyped = true;
++    Scan::eachMatch (vertex, vertexVarying, "varying", [&] (const std::smatch& m, size_t) {
++	const std::string type = m[1].str ();
++	const std::string name = m[2].str ();
++	const bool mayDeclare = Scan::anyWord (source, name, [&] (size_t at, size_t end) {
++	    return Scan::declaresAt (source, at, end);
++	});
++	if (mayDeclare) {
++	    const std::regex declared ("\\bvarying\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\s+)*?)([A-Za-z_][A-Za-z0-9_]*)\\s+" + name + "\\s*;");
++	    std::smatch own;
++	    if (std::regex_search (source, own, declared)) {
++		const std::string ownType = own[2].str ();
++		const auto v = width.find (type), f = width.find (ownType);
++		if (v != width.end () && f != width.end () && v->second > f->second) {
++		    source = std::regex_replace (source, declared, "varying $1" + type + " " + name + ";");
++		    retyped = true;
++		}
++		return false;
+ 	    }
+-	    continue;
+ 	}
+-	if (!std::regex_search (source, used) || missing.find (" " + name + ";") != std::string::npos) {
+-	    continue;
++	// `\bname\b`
++	if (Scan::hasWord (source, name) && missing.find (" " + name + ";") == std::string::npos) {
++	    missing += "varying " + type + " " + name + ";\n";
+ 	}
+-
+-	missing += "varying " + type + " " + name + ";\n";
+-    }
++	return false;
++    });
+ 
+     if (retyped) {
+ 	WPENGINE_HEALTH ("compat", { { "what", "WE: a fragment varying takes the vertex unit's type" } });
+@@ -458,12 +529,34 @@ std::string ShaderUnit::applyFragmentTexCoordCompatibility (std::string source)
+ 	return source;
+     }
+ 
++    // wideTexCoordDecl needs `vec3|vec4\s+v_TexCoord\s*;`; texCoordBeforeCast2 `v_TexCoord\s*<op>\s*CAST2`,
++    // cast2BeforeTexCoord `<op>\s*v_TexCoord`
++    const auto isOperator = [] (char c) { return c == '-' || c == '+' || c == '*' || c == '/'; };
++    const bool mayBeWide = Scan::anyWord (source, "v_TexCoord", [&] (size_t at, size_t end) {
++	const std::string_view type = Scan::wordBefore (source, at);
++	return Scan::declaresAt (source, at, end) && (type == "vec3" || type == "vec4");
++    });
++    const bool mayMeetCast2 = Scan::anyWord (source, "v_TexCoord", [&] (size_t at, size_t end) {
++	const size_t k = Scan::skipSpace (source, end);
++	if (k < source.size () && isOperator (source[k]) && source.compare (Scan::skipSpace (source, k + 1), 5, "CAST2") == 0) {
++	    return true;
++	}
++	size_t b = at;
++	while (b > 0 && Scan::isSpace (source[b - 1])) {
++	    b--;
++	}
++	return b > 0 && isOperator (source[b - 1]);
++    });
++    if (!mayBeWide || !mayMeetCast2) {
++	return source;
++    }
++
+     const std::regex texCoordBeforeCast2 (R"(\bv_TexCoord\b(\s*[-+*/]\s*CAST2\s*\())");
+     const std::regex cast2BeforeTexCoord (R"((CAST2\s*\([^)]+\)\s*[-+*/]\s*)\bv_TexCoord\b)");
+ 
+     const std::regex wideTexCoordDecl (R"(\bvarying\s+vec[34]\s+v_TexCoord\s*;)");
+-    if (!std::regex_search (source, wideTexCoordDecl)
+-	|| (!std::regex_search (source, texCoordBeforeCast2) && !std::regex_search (source, cast2BeforeTexCoord))) {
++    const bool wide = Scan::eachMatch (source, wideTexCoordDecl, "varying", [] (const std::smatch&, size_t) { return true; });
++    if (!wide || (!std::regex_search (source, texCoordBeforeCast2) && !std::regex_search (source, cast2BeforeTexCoord))) {
+ 	return source;
+     }
+ 
+@@ -493,19 +586,22 @@ std::string ShaderUnit::applyWritableFragmentVaryings (std::string source) const
+     static const std::regex mainOpen (R"(\bvoid\s+main\s*\(\s*(?:void)?\s*\)\s*\{)");
+     std::vector<std::pair<std::string, std::string>> written; // (type, name)
+ 
+-    for (auto it = std::sregex_iterator (source.begin (), source.end (), declaration); it != std::sregex_iterator ();
+-	 ++it) {
+-	const std::string name = (*it)[2].str ();
++    Scan::eachMatch (source, declaration, fragment ? "varying" : "attribute", [&] (const std::smatch& m, size_t) {
++	const std::string name = m[2].str ();
++	const bool listed = std::any_of (written.begin (), written.end (), [&] (const auto& w) { return w.second == name; });
++	if (listed || !mayAssign (source, name)) {
++	    return false;
++	}
+ 	// `name = …`, `name += …`, `name.xy *= …` (not `==`), or `name++` / `++name`
+ 	const std::regex assigned ("\\b" + name + "\\b(?:\\s*\\.\\s*[xyzwrgba]+)?\\s*(?:[-+*/]?=(?!=)|\\+\\+|--)|(?:\\+\\+|--)\\s*" + name + "\\b");
+-	const bool listed = std::any_of (written.begin (), written.end (), [&] (const auto& w) { return w.second == name; });
+-	if (!listed && std::regex_search (source, assigned)) {
++	if (std::regex_search (source, assigned)) {
+ 	    // the type without its qualifiers
+-	    std::string type = (*it)[1].str ();
++	    std::string type = m[1].str ();
+ 	    type = type.substr (type.find_last_of (" \t") == std::string::npos ? 0 : type.find_last_of (" \t") + 1);
+ 	    written.emplace_back (type, name);
+ 	}
+-    }
++	return false;
++    });
+ 
+     std::smatch open;
+     if (written.empty () || !std::regex_search (source, open, mainOpen)) {
+@@ -555,7 +651,7 @@ std::string ShaderUnit::applyBuiltinDeclarations (std::string source) {
+     static const std::regex declaration (
+ 	R"((^|\n)[ \t]*(?:in|out|varying|attribute)\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)+(gl_[A-Za-z0-9_]+)\s*;[^\n]*)"
+     );
+-    if (!std::regex_search (source, declaration)) {
++    if (!mayDeclareBuiltin (source) || !std::regex_search (source, declaration)) {
+ 	return source;
+     }
+     source = std::regex_replace (source, declaration, "$1// built in: $2");
+diff --git a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+index b08184d..03c7d65 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+@@ -46,6 +46,17 @@ const std::regex& directive () {
+     static const std::regex re (R"(^\s*#\s*([a-z]+)\b\s*([^\n]*)$)");
+     return re;
+ }
++
++/** Whether the line's first word is a storage keyword: `^\s*(?:uniform|attribute|varying|in|out)\s+` can match it */
++bool startsWithStorage (std::string_view line) {
++    const size_t begin = Scan::skipSpace (line, 0);
++    size_t end = begin;
++    while (end < line.size () && Scan::isWord (line[end])) {
++	end++;
++    }
++    const std::string_view word = line.substr (begin, end - begin);
++    return word == "uniform" || word == "attribute" || word == "varying" || word == "in" || word == "out";
++}
+ } // namespace
+ 
+ std::string expandIncludes (const std::string& source, const IncludeLoader& load, std::set<std::string>& seen) {
+@@ -107,7 +118,7 @@ std::string hoistDeclarations (const std::string& source) {
+ 	const std::string& line = lines[i];
+ 	const bool topLevel = braces == 0 && parens == 0 && !block;
+ 	std::smatch m;
+-	if (!block && std::regex_match (line, m, directive ())) {
++	if (!block && Scan::directiveLine (line) && std::regex_match (line, m, directive ())) {
+ 	    const std::string kind = m[1].str ();
+ 	    if (kind == "if" || kind == "ifdef" || kind == "ifndef") {
+ 		chains.push_back ({ line });
+@@ -130,7 +141,7 @@ std::string hoistDeclarations (const std::string& source) {
+ 	    // the first include: before the outermost #if it is in, so the whole chain stays below
+ 	    hoistAt = chainStart.empty () ? static_cast<long> (i) : static_cast<long> (chainStart.front ());
+ 	    // the chains open at that point are above the hoisted block: a declaration in them keeps only the inner ones
+-	} else if (hoistAt >= 0 && topLevel && std::regex_match (line, declaration)) {
++	} else if (hoistAt >= 0 && topLevel && startsWithStorage (line) && std::regex_match (line, declaration)) {
+ 	    // the chains the hoisted copy needs: those opened after the hoist point
+ 	    std::string open, close;
+ 	    bool readsLocalDefine = false;
+@@ -264,7 +275,12 @@ std::string renameReservedWords (const std::string& source) {
+     static const std::regex textureVariable (
+ 	R"(\b(?:float|int|uint|bool|[biu]?vec[234]|mat[234]|sampler2D|float[234])\s+texture\s*[;=,\[)])"
+     );
+-    const bool textureIsAVariable = std::regex_search (source, textureVariable);
++    // the regex needs `<type>\s+texture\s*<one of ;=,[)>`
++    const bool textureIsAVariable = Scan::anyWord (source, "texture", [&] (size_t at, size_t end) {
++	const size_t k = Scan::skipSpace (source, end);
++	return !Scan::wordBefore (source, at).empty () && k < source.size ()
++	    && std::string_view (";=,[)").find (source[k]) != std::string_view::npos;
++    }) && std::regex_search (source, textureVariable);
+     bool renamed = false;
+ 
+     std::string out = mapIdentifiers (source, [&] (const std::string& word, size_t after) -> std::string {
+@@ -308,7 +324,8 @@ std::string falsifyUnreadableIfs (const std::string& source) {
+     bool changed = false;
+     for (auto& line : lines) {
+ 	std::smatch m;
+-	if (!std::regex_match (line, m, directive ()) || (m[1].str () != "if" && m[1].str () != "elif")) {
++	if (!Scan::directiveLine (line) || !std::regex_match (line, m, directive ())
++	    || (m[1].str () != "if" && m[1].str () != "elif")) {
+ 	    continue;
+ 	}
+ 	const std::string expression = withoutLineComment (m[2].str ());
+@@ -340,8 +357,20 @@ std::string intrinsicOverloads (const std::string& source) {
+ 	{ "ddy", "T ddy (T x) { return dFdy (-x); }" },
+     };
+     static const char* types[] = { "float", "vec2", "vec3", "vec4" };
++    static const std::regex typeParameter ("\\bT\\b");
+     std::string out;
+     for (const auto& intrinsic : intrinsics) {
++	// the regex needs `<return type>\s+name\s*(`
++	const bool mayDefine = Scan::anyWord (source, intrinsic.name, [&] (size_t at, size_t end) {
++	    const std::string_view type = Scan::wordBefore (source, at);
++	    const size_t k = Scan::skipSpace (source, end);
++	    return (type == "float" || type == "vec2" || type == "vec3" || type == "vec4" || type == "float2"
++		    || type == "float3" || type == "float4" || type == "int" || type == "void")
++		&& k < source.size () && source[k] == '(';
++	});
++	if (!mayDefine) {
++	    continue;
++	}
+ 	const std::regex definition (
+ 	    std::string (R"(\b(?:float|vec[234]|float[234]|int|void)\s+)") + intrinsic.name
+ 	    + R"(\s*\(\s*(?:(?:in|const)\s+)*([A-Za-z_][A-Za-z0-9_]*))"
+@@ -362,7 +391,7 @@ std::string intrinsicOverloads (const std::string& source) {
+ 	    if (own.contains (type)) {
+ 		continue;
+ 	    }
+-	    out += std::regex_replace (intrinsic.body, std::regex ("\\bT\\b"), type) + "\n";
++	    out += std::regex_replace (intrinsic.body, typeParameter, type) + "\n";
+ 	}
+     }
+     if (!out.empty ()) {
+@@ -374,7 +403,11 @@ std::string intrinsicOverloads (const std::string& source) {
+ std::string clipFunctions (const std::string& source) {
+     static const std::regex call (R"(\bclip\s*\()");
+     static const std::regex variable (R"(\b(?:float|vec[234]|float[234]|int|bool)\s+clip\b)");
+-    if (!std::regex_search (source, call) || std::regex_search (source, variable)) {
++    const bool calls = Scan::anyWord (source, "clip", [&] (size_t, size_t end) {
++	const size_t k = Scan::skipSpace (source, end);
++	return k < source.size () && source[k] == '(';
++    });
++    if (!calls || !std::regex_search (source, call) || std::regex_search (source, variable)) {
+ 	return "";
+     }
+     return "void clip (float x) { if (x < 0.0) discard; }\n"
+@@ -395,9 +428,10 @@ std::string dropUnmatchedEndifs (const std::string& source) {
+ 	size_t end = source.find ('\n', begin);
+ 	end = end == std::string::npos ? source.size () : end + 1;
+ 	const std::string line = source.substr (begin, end - begin);
+-	if (std::regex_search (line, opens)) {
++	const bool hashLine = Scan::directiveLine (line);
++	if (hashLine && std::regex_search (line, opens)) {
+ 	    depth++;
+-	} else if (std::regex_search (line, closes)) {
++	} else if (hashLine && std::regex_search (line, closes)) {
+ 	    if (depth == 0) {
+ 		sLog.out ("Dropping an #endif with no #if: ", line);
+ 		WPENGINE_HEALTH ("compat", { { "what", "glslang: unmatched #endif dropped" } });
+diff --git a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h
+index 3e674c6..b13a6aa 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h
++++ b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.h
+@@ -2,8 +2,10 @@
+ 
+ #include <functional>
+ #include <optional>
++#include <regex>
+ #include <set>
+ #include <string>
++#include <string_view>
+ 
+ /**
+  * Wallpaper Engine's own shader preprocessing, ported. WE's shaders are a GLSL dialect that WE turns into HLSL and
+@@ -82,4 +84,116 @@ std::string dropUnmatchedEndifs (const std::string& source);
+ 
+ /** A backslash at the end of a line joins it to the next (D3DCompile's preprocessor); the line count is kept */
+ std::string spliceLines (const std::string& source);
++
++/**
++ * Cheap pre-checks for the text passes' regexes. A libstdc++ std::regex search is slow (a backtracking executor that
++ * copies its sub-matches at every start position: about 1 ms over a 20 kB particle unit), and a unit goes through some 30
++ * whole-text searches (one per varying, per intrinsic, …), so a scene with dozens of particle systems would spend
++ * seconds of its build in them. Each check below is a necessary condition for its regex to match (never stricter), so
++ * a caller that skips the regex when the check fails gets the result the regex would have given; the regex still
++ * decides when the check passes. eachMatch runs a regex only where its match can start, with the same result.
++ */
++namespace Scan {
++/** `\w`: the characters a regex word boundary separates */
++inline bool isWord (char c) {
++    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
++}
++
++/** `\s` in the C locale */
++inline bool isSpace (char c) {
++    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
++}
++
++/** The first index at or after `at` that isn't `\s` (or the size) */
++inline size_t skipSpace (std::string_view text, size_t at) {
++    while (at < text.size () && isSpace (text[at])) {
++	at++;
++    }
++    return at;
++}
++
++/**
++ * Calls `fn (begin, end)` for each occurrence of `word` (an identifier) with no word character on either side —
++ * where `\bword\b` matches — in order, until `fn` returns true; returns whether it did
++ */
++template <typename F> bool anyWord (std::string_view text, std::string_view word, F fn) {
++    if (word.empty ()) {
++	return false;
++    }
++    for (size_t at = text.find (word); at != std::string_view::npos; at = text.find (word, at + 1)) {
++	const size_t end = at + word.size ();
++	if ((at > 0 && isWord (text[at - 1])) || (end < text.size () && isWord (text[end]))) {
++	    continue;
++	}
++	if (fn (at, end)) {
++	    return true;
++	}
++    }
++    return false;
++}
++
++/** Whether `\bword\b` matches in `text` (exactly, for an identifier `word`) */
++inline bool hasWord (std::string_view text, std::string_view word) {
++    return anyWord (text, word, [] (size_t, size_t) { return true; });
++}
++
++/**
++ * The word that ends where the `\s+` run just before `at` starts (empty when no `\s` is just before `at`, or no word
++ * ends there): the `T` of `T\s+name` with `name` at `at`
++ */
++inline std::string_view wordBefore (std::string_view text, size_t at) {
++    size_t end = at;
++    while (end > 0 && isSpace (text[end - 1])) {
++	end--;
++    }
++    if (end == at) {
++	return {};
++    }
++    size_t begin = end;
++    while (begin > 0 && isWord (text[begin - 1])) {
++	begin--;
++    }
++    return text.substr (begin, end - begin);
++}
++
++/** Whether a declaration `… name\s*;` can be at the whole word `name` at [at, end): `\s` before it, `\s*;` after */
++inline bool declaresAt (std::string_view text, size_t at, size_t end) {
++    if (at == 0 || !isSpace (text[at - 1])) {
++	return false;
++    }
++    const size_t k = skipSpace (text, end);
++    return k < text.size () && text[k] == ';';
++}
++
++/**
++ * The matches `std::sregex_iterator (text, re)` lists, in order, for a `re` whose every match starts with the whole word
++ * `lead` (`\blead\s…`): the regex is tried only where `lead` is, anchored there (match_continuous, with the character
++ * before it for `\b`), which is what the iterator's search finds at that position. Calls `fn (match, position)` until
++ * it returns true; returns whether it did
++ */
++template <typename F> bool eachMatch (const std::string& text, const std::regex& re, std::string_view lead, F fn) {
++    size_t from = 0;
++    return anyWord (text, lead, [&] (size_t at, size_t) {
++	if (at < from) {
++	    return false;
++	}
++	std::smatch match;
++	auto flags = std::regex_constants::match_continuous;
++	if (at > 0) {
++	    flags |= std::regex_constants::match_prev_avail;
++	}
++	if (!std::regex_search (text.cbegin () + static_cast<std::ptrdiff_t> (at), text.cend (), match, re, flags)) {
++	    return false;
++	}
++	from = at + static_cast<size_t> (match.length (0));
++	return static_cast<bool> (fn (match, at));
++    });
++}
++
++/** Whether `^\s*#` (a directive) can match the line: its first non-`\s` character is `#` */
++inline bool directiveLine (std::string_view line) {
++    const size_t k = skipSpace (line, 0);
++    return k < line.size () && line[k] == '#';
++}
++} // namespace Scan
+ } // namespace WallpaperEngine::Render::Shaders::WERules

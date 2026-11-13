@@ -1,7 +1,7 @@
 From 5a42e7e071c3434d8f9e05454d848d14c950e81a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 18:21:46 +0530
-Subject: [PATCH 109/126] render: a colour-blend layer takes its colour and
+Subject: [PATCH 109/127] render: a colour-blend layer takes its colour and
  alpha once
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

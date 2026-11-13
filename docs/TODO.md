@@ -36,8 +36,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `programs.sh crash`), and the owner's calls in § 5 (count frozen onsets? start-up seam? Phase 4 vs 5?).
       Fixed on the way: the battery's late-B "handoff" check (the test) and the dropout probe's ended-A snapshot
       (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
-- [ ] Kimi (2371103399) builds in ~2.5 s since the WE port (warm `--lwe-smoke` build_ms; 11-03 pin 0.86–1.13 s, 10-28
-      0.69 s): profile LWE's build and bring it back.
+- [ ] Some scenes still build in 5-8 s warm with the shader-pass fix (3042492564 7.9 s, 3163060610 7.4 s, 2828233985
+      5.8 s in the WE-ref run): the cost is outside the shader-rule regexes. Profile one (perf, DWARF call graphs).
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 

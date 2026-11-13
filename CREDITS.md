@@ -158,3 +158,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0124-render-a-full-screen-layer-covers-the-screen-whateve.patch` | render: a full-screen layer covers the screen whatever the camera's zoom | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0125-render-a-text-layer-with-effects-draws-its-glyphs-in.patch` | render: a text layer with effects draws its glyphs into its picture as WE's font pass | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0126-render-a-constant-takes-the-declaration-its-pass-com.patch` | render: a constant takes the declaration its pass compiles | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0127-render-run-the-shader-text-passes-regexes-only-where.patch` | render: run the shader text passes' regexes only where they can match | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

@@ -1,7 +1,7 @@
 From 867a5e7928c584c7da33e83e056293e6dda6b108 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 6 Nov 2026 18:10:00 +0530
-Subject: [PATCH 108/126] render: a 3D scene's fog reaches its image layers,
+Subject: [PATCH 108/127] render: a 3D scene's fog reaches its image layers,
  which take their colour once
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

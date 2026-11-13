@@ -1,7 +1,7 @@
 From 2e321fc52fbb994162fffb8c2fdde80439061c70 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 4 Nov 2026 20:43:23 +0530
-Subject: [PATCH 074/126] effect: FBO fit / width / height / uvs, and the swap
+Subject: [PATCH 074/127] effect: FBO fit / width / height / uvs, and the swap
  command
 
 WE's effect loader (GH 0x1402131b0) reads an FBO's `scale`, `fit`, `width`, `height` (each a

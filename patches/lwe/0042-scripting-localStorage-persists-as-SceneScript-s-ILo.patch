@@ -1,7 +1,7 @@
 From 84b98070a7d2330864c285503ab89dd08b10851c Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 20:30:54 +0530
-Subject: [PATCH 042/126] scripting: localStorage persists, as SceneScript's
+Subject: [PATCH 042/127] scripting: localStorage persists, as SceneScript's
  ILocalStorage
 
 localStorage was an in-memory object that stored String(value), had

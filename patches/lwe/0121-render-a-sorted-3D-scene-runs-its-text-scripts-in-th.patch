@@ -1,7 +1,7 @@
 From 4c34ba8550a5f34edde6b01b672251eed1bf3142 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 10 Nov 2026 22:42:26 +0530
-Subject: [PATCH 121/126] render: a sorted 3D scene runs its text scripts in
+Subject: [PATCH 121/127] render: a sorted 3D scene runs its text scripts in
  the scene's object order
 
 A text layer's script runs as the layer draws. Since transparentsorting draws WE's two passes (0119), every text is in

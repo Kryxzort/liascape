@@ -1,7 +1,7 @@
 From 7bbd6de783a4674e253a3ea8a9e605b36633b907 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 10 Nov 2026 20:13:30 +0530
-Subject: [PATCH 118/126] render: a puppet's effects run on its image, its
+Subject: [PATCH 118/127] render: a puppet's effects run on its image, its
  material draws the mesh last
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
