@@ -41,10 +41,11 @@
 //                         seg:jump:<w>x<h> / seg:jump:reduced — motion off / reduced motion: it jumps. Screenshots seg-*-midglide.png
 //   seg:keys              arrows / Home / End move the choice and the focus, the key is taken, only the checked option is a Tab stop
 //   seg:glow              the highlight glows, none under no-glow; the track goes translucent under bg-live
-//   look:textShadow       Settings → "Text shadow": applies live and saves; body text, labels and buttons carry the subtitle
+//   look:textShadow       Settings → "Text shadow": applies live and saves; body text, labels and buttons carry the drop
 //                         shadow, text on an accent fill none, no-glow keeps it; under bg-live no doubled shadow (no text-shadow
 //                         inside bg-live's drop-shadow filters, the sidebar title's pixels the same on and off); the clamped
-//                         sidebar title's shadow reaches out of its box; off: gone. Screenshots look-textShadow-*.png
+//                         sidebar title draws it through its clamp; a light theme's crust turns it white; off: gone.
+//                         Screenshots look-textShadow-*.png
 //   perf:idle             an idle page asks for no frames
 //   perf:skeleton         Browse's placeholder cards + the load bar (a /browse that never answers): nothing asks for a main frame
 //                         every refresh (≤ SKEL_RECALCS_PER_FRAME main-thread style recalcs per frame the compositor drew);
@@ -836,15 +837,15 @@ app.whenReady().then(async () => {
       return v;
     });
     // look:textShadow — Settings → "Text shadow" (:root.text-shadow, index.css): Netflix's subtitle shadow on all text. Clicked
-    // on, it applies at once (no reload) and saves; body text, a Settings label and a tab button carry `#000 0 0 7px`; text on
+    // on, it applies at once (no reload) and saves; body text, a Settings label and a tab button carry the drop shadow (`2px 1.9px 2px`, black); text on
     // an accent fill (its colour is --accent-fg) carries none; no-glow keeps it. Under bg-live (a static backdrop, bright on the
     // right, dark on the left, stands in for the wallpaper: LIASCAPE_TS_BACKDROP=<image> puts a real one on the bright side)
     // no text inside an element that already draws bg-live's black drop-shadow filter carries a text-shadow too, and the
     // sidebar title's pixels are the same with the option on or off (no doubled shadow). With bg-live off, on a white panel,
-    // the sidebar title's shadow reaches left of its clamped box (the clamp's overflow: hidden doesn't cut it off). Clicked
+    // the sidebar title draws it through its clamp (a filter on the unclipped wrapper). Clicked
     // off, it's gone. Screenshots look-textShadow-*.png
     await cell("look:textShadow", async () => {
-      const v = [], J = JSON.stringify, SHADOW = /^rgb\(0, 0, 0\) 0px 0px 7px$/;
+      const v = [], J = JSON.stringify, SHADOW = /^(rgb\(0, 0, 0\)|oklch\(0 0 0\)) 2px 1\.9px 2px$/; // black: the theme's crust rounded (index.css --ts-c)
       const ROW = `[...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel-row")?.textContent.trim() === "Text shadow")`;
       // the computed text-shadow of: body, a Settings label, a top-bar tab (a button: Chromium resets its text-shadow), every
       // element showing its own text in --accent-fg (on an accent fill), the root class
@@ -903,6 +904,13 @@ app.whenReady().then(async () => {
         if (!on.nFilled) v.push("on: no text on an accent fill on Settings to check — proved nothing");
         if (on.filledShadowed.length) v.push(`on: text on an accent fill is shadowed: ${on.filledShadowed.join(", ")}`);
         if (!(await saved(true))) v.push("turning Text shadow on wasn't saved (textShadow !== true)");
+        // a light theme (its crust light, its letters dark) turns the shadow white; the theme's own crust comes back after
+        const lt = await page(`const r = document.documentElement, was = r.style.getPropertyValue("--bg-crust");
+          r.style.setProperty("--bg-crust", "#dce0e8"); const light = getComputedStyle(document.body).textShadow;
+          r.style.setProperty("--bg-crust", "#11111b"); const dark = getComputedStyle(document.body).textShadow;
+          if (was) r.style.setProperty("--bg-crust", was); else r.style.removeProperty("--bg-crust"); return { light, dark };`);
+        if (!/^(rgb\(255, 255, 255\)|oklch\(1 0 0\)) 2px 1\.9px 2px$/.test(lt.light ?? "")) v.push(`light theme: the shadow isn't white (${lt.light})`);
+        if (!SHADOW.test(lt.dark ?? "")) v.push(`dark crust: the shadow isn't black (${lt.dark})`);
         const cut = new Set(await page(CLIPS));
         // no-glow: not a glow, so it stays
         const ng = await page(`document.documentElement.classList.add("no-glow"); await m.sleep(50); const r = (() => { ${READ} })();
@@ -925,7 +933,7 @@ app.whenReady().then(async () => {
         await js(BACKDROP); await sleep(300);
         // inside every element drawing a black drop-shadow filter, no text carries a text-shadow as well
         const dbl = await page(`const own = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
-          const f = [...document.querySelectorAll("body *")].filter((e) => /drop-shadow\\(rgba?\\(0, 0, 0/.test(getComputedStyle(e).filter) && e.getClientRects().length);
+          const f = [...document.querySelectorAll("body *")].filter((e) => /drop-shadow\\((rgba?\\(0, 0, 0|oklch\\(0 0 0)/.test(getComputedStyle(e).filter) && e.getClientRects().length);
           const withText = f.filter((e) => [e, ...e.querySelectorAll("*")].some(own));
           const name = (x) => x.className + ":" + x.textContent.trim().slice(0, 16);
           return { n: withText.length, twice: withText.flatMap((e) => [e, ...e.querySelectorAll("*")].filter((x) => own(x) && getComputedStyle(x).textShadow !== "none").map(name)),
@@ -955,14 +963,16 @@ app.whenReady().then(async () => {
         if (so.wrapClips) v.push("the sidebar title's wrapper clips its overflow: the filter's shadow is cut off");
         await page(`const s = document.createElement("style"); s.id = "ts-white"; s.textContent = ".side-panel { background: #fff !important; }"; document.head.append(s);`);
         await sleep(200);
-        const edge = () => lum(so.x - 5, so.y + 4, 4, Math.min(14, so.h - 6));
+        // the title's own area on the white panel (its letters are light): the shadow darkens it. Whether the clamp cuts it is
+        // the structure above (the filter on an unclipped wrapper) and CLIPS: an offset shadow off a one-line title stays inside
+        const edge = () => lum(so.x, so.y, Math.min(60, so.w), so.h);
         const lOn = await edge();
         await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(150);
         const lOff = await edge();
         await page(`document.documentElement.classList.add("text-shadow"); document.getElementById("ts-white")?.remove();`);
-        console.log(`        solid: brightness left of the title's box: on ${lOn.toFixed(1)}, off ${lOff.toFixed(1)}`);
-        if (lOff < 240) v.push(`left of the sidebar title isn't the white test panel (brightness ${lOff.toFixed(0)}) — proved nothing`);
-        else if (!(lOff - lOn > 12)) v.push(`the sidebar title's shadow stops at its box (brightness left of it: on ${lOn.toFixed(0)}, off ${lOff.toFixed(0)}): the clamp clips it`);
+        console.log(`        solid: brightness of the title's area: on ${lOn.toFixed(1)}, off ${lOff.toFixed(1)}`);
+        if (lOff < 225) v.push(`the sidebar title's area isn't the white test panel with light letters (brightness ${lOff.toFixed(0)}) — proved nothing`);
+        else if (!(lOff - lOn > 6)) v.push(`the sidebar title draws no shadow (brightness of its area: on ${lOn.toFixed(0)}, off ${lOff.toFixed(0)})`);
 
         // off again, through the row
         await tab("Settings"); await sleep(400);
