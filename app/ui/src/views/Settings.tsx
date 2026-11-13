@@ -313,8 +313,8 @@ export const Settings = memo(function Settings() {
         <Row label="Mute wallpapers" hint="silence every wallpaper — your other apps are untouched" rk="noAudio"><input type="checkbox" checked={mute} onChange={(e) => set("noAudio", e.target.checked)} /></Row>
         <Row label="Even out loudness" hint={"keeps every wallpaper at about the same loudness, so switching never blasts your ears. Each video gets measured once in the background the first time it plays; your volume still applies on top." + (liascapeActive ? " Scenes start from an estimate and fine-tune themselves over their first minute." : "")} disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
-        {!mute && g("normalizeAudio", false) && <Row label="Loudness target" hint="how loud the evened-out level is. −14 is what Spotify and YouTube aim for; lower is quieter. Anything from −70 to −5." rk="normalizeTargetLufs">
-          <Combo value={g("normalizeTargetLufs", -14) as number} min={-70} max={-5} step={1}
+        {!mute && g("normalizeAudio", false) && <Row label="Loudness target" hint="how loud the evened-out level is. −14 is what Spotify and YouTube aim for; lower is quieter. Anything from −70 to 0." rk="normalizeTargetLufs">
+          <Combo value={g("normalizeTargetLufs", -14) as number} min={-70} max={0} step={1}
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
         {liascapeActive && !mute && g("normalizeAudio", false) && atLeast("standard") && <SceneLoudnessRow />}
