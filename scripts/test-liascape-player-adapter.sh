@@ -1778,25 +1778,56 @@ near "$(sv "$TG1" speed)" 1.6 || bad "volume-only global drag moved A's speed: $
 stop_now
 
 armed_only() { for _ in $(seq 1 80); do ctl state | jq -e '[.transitions[] | select(.phase != "done")] | length == 1 and .[0].phase == "waiting_start"' >/dev/null && return; sleep 0.1; done; echo "  note: no lone armed switch within 8 s: $(ctl state | jq -c '[.transitions[] | .phase]')"; }
-echo "== a backend restart hands the playlist over without two timers (dotnet watch / app relaunch)"
-# A stopping backend hands its timed playlist to a detached timer-daemon, but kept ticking itself until
-# the process exited — up to Kestrel's 30 s shutdown timeout while the UI's WebSocket holds it open — and a
-# new backend then resumed the playlist too: two or three owners each armed an aligned switch and
-# superseded the others' (a switch every 1–16 s, "cancelled:superseded → switching in N s" storm).
+echo "== a backend restart hands the playlist over without two timers (the app launched again, then its first window closed)"
+# Two backends overlap when the app is launched while it runs (Electron takes no single-instance lock; the new
+# backend binds another port) and the first window is closed after: the old backend runs its stop with a page open
+# while the new one serves. Both see the player's program; were either to own the rotation again (arm its own aligned
+# switch, re-load the program, stop on exit), the two would supersede each other's switches — a switch every few
+# seconds, "cancelled:superseded → switching in N s". Started in that order, the overlap needs no timing: the old
+# one stops in milliseconds (test-backend-stop.sh). A dev restart (dotnet watch, a pinned port) has no overlap: the
+# new process can't bind before the old one exits — the restarts below.
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 armed_only
+# a page on the old backend (its window): prints the upgrade's status line, then how the socket ended
 python3 - "${U##*:}" > "$T/ws.log" 2>&1 <<'PY' & WSP=$!
-import socket, sys, time, base64, os
+import socket, sys, base64, os, struct
 port = int(sys.argv[1])   # the upgrade as ws_listen's (Host with the port, the token): else the guard refuses it
 token = open(os.path.join(os.environ["XDG_CONFIG_HOME"], "liascape", "serve.token")).read().strip()
 s = socket.create_connection(("127.0.0.1", port))
 s.send(("GET /events?token=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
         "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (token, port, base64.b64encode(os.urandom(16)).decode())).encode())
-print(s.recv(256).split(b"\r\n")[0].decode(), flush=True)
-time.sleep(120)
+buf = b""
+while b"\r\n\r\n" not in buf:
+    d = s.recv(4096)
+    if not d: break
+    buf += d
+head, _, buf = buf.partition(b"\r\n\r\n")
+print(head.split(b"\r\n")[0].decode(), flush=True)
+def need(n):
+    global buf
+    while len(buf) < n:
+        d = s.recv(65536)
+        if not d: raise EOFError
+        buf += d
+    out, buf = buf[:n], buf[n:]
+    return out
+s.settimeout(120)
+try:
+    while True:   # the backend's event frames until its close frame
+        b0, b1 = need(2)
+        n = b1 & 0x7f
+        if n == 126: n = struct.unpack(">H", need(2))[0]
+        elif n == 127: n = struct.unpack(">Q", need(8))[0]
+        if b1 & 0x80: need(4)
+        payload = need(n)
+        if b0 & 0x0f == 8:
+            print("close %d" % (struct.unpack(">H", payload[:2])[0] if len(payload) >= 2 else 0), flush=True)
+            break
+except (EOFError, OSError):
+    print("ended without a close frame", flush=True)
 PY
 ws_up() { grep -q " 101 " "$T/ws.log"; }
-waitfor $WAIT ws_up && ok "a WebSocket client holds the backend open (like the UI)" || bad "WebSocket upgrade: $(cat "$T/ws.log")"
+waitfor $WAIT ws_up && ok "a page's WebSocket is open on the old backend (like its window)" || bad "WebSocket upgrade: $(cat "$T/ws.log")"
 storms() { grep -c "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true; }
 new_backend_up() {   # $1 = the old port; sets U
   waitfor 60000 port_moved "$1" || bad "the new backend never wrote its port"
@@ -1821,10 +1852,19 @@ one_advance() {   # exactly one handoff (after index h0) before tw, and it hande
 }
 # the play's own switch has handed off and only the next aligned one is armed (a baseline to count from)
 st0=$(storms); nw0=$(nows); h0=$(handoffs); port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); pe=$(tpos 0); te=$(ms_now)
-kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; OLD1=$BP; sleep 1.5
-"$DOTNET" "$DLL" serve > "$T/backend2.log" 2>&1 & BP=$!
+OLD1=$BP
+"$DOTNET" "$DLL" serve > "$T/backend2.log" 2>&1 & BP=$!; BP_OLD="${BP_OLD:-} $OLD1"
 new_backend_up "$port0"
-kill -0 "$OLD1" 2>/dev/null && ok "the old backend is still shutting down (WebSocket open) while the new one runs" || echo "  note the old backend already exited — the overlap this tests didn't happen"
+# the overlap itself: when the new backend answers, the old one still serves on its own port with its page open
+{ kill -0 "$OLD1" 2>/dev/null && command curl -sf -m 2 "http://127.0.0.1:$port0/health" >/dev/null && ! grep -q "^close\|^ended" "$T/ws.log"; } \
+  && ok "two backends serve at once: the old one (:$port0, its page open) and the new one (:${U##*:})" \
+  || bad "no overlap: the old backend (pid $OLD1, :$port0) no longer served when the new one answered — ws: $(tail -1 "$T/ws.log")"
+term_alive=no; kill -0 "$OLD1" 2>/dev/null && term_alive=yes
+kill -TERM "$OLD1" 2>/dev/null
+old_gone() { ! kill -0 "$OLD1" 2>/dev/null; }
+{ [ $term_alive = yes ] && waitfor 3000 old_gone && grep -q "^close 1001" "$T/ws.log" && healthy; } \
+  && ok "the old backend stopped (its page closed with 1001) while the new one serves" \
+  || bad "the old backend's stop beside the new one: alive at its TERM $term_alive, 3 s after $(kill -0 "$OLD1" 2>/dev/null && echo yes || echo no), ws: $(tail -1 "$T/ws.log"), new healthy: $(healthy && echo yes || echo no)"
 e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one aligned advance
 [ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
@@ -1833,7 +1873,6 @@ one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, 
 [ ! -e "$XDG_CONFIG_HOME/liascape/gui_timer.pid" ] && ok "no backend claims the timer (no gui_timer.pid: the player's program rotates)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
 tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no timer-daemon left running" || bad "a timer-daemon (pid $tp) runs next to the new backend"
 kill "$WSP" 2>/dev/null; WSP=""
-for _ in $(seq 1 50); do kill -0 "$OLD1" 2>/dev/null || break; sleep 0.1; done
 stop_now
 
 echo "== a backend restart keeps the item's play time (a maximum play time counts across it, the player played on)"
