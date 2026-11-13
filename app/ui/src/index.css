@@ -1258,14 +1258,29 @@ input[type=range]:focus-visible { outline: none; }
 :root.text-shadow :is(.tab.active, .pill.active, .seg-ghost, .dl, .badge, .check, .btn.accent, .btn.danger.solid, .mini.on, .play-btn,
   .ss-filter.on, .ss-n, .sel-opt.on, .pl-name.sel, .tr-toggle.on, .tr-refresh:hover, .tr-chip.on, .side-tool.accent, .side-mute.on,
   .wf-n, .wf-seg[aria-checked="true"], .wf-fm-seg[aria-checked="true"]) { text-shadow: none; }
+/* the shadow is for plain text: text in the accent or a state colour (a heading, a warning, a lit control, a hovered glow)
+   is lit already, and a black copy under it reads as dirt, or glows along with it under a drop-shadow glow. Every selector
+   that colours text so or glows it (index.css) keeps its own look */
+:root.text-shadow :is(.badge, .btn.accent, .btn.danger, .card-pv-cap[data-making] > span, .card-pv-h, .check, .dbg-hud b.bad, .del:hover, .dl,
+  .dl-btn:hover, .dl-glyph, .err-modal h2, .go-playing:hover:not(:disabled), .health-sum-head, .hms span.s-warn-text, .mini.on, .mpv,
+  .ns-btn:not(:disabled):hover, .pill.active, .pl-name.sel, .pl-remove:hover, .pl-toggle, .play-btn, .pw-err, .pw-wait, .s-expert,
+  .s-reset:hover, .s-warn, .s-warn-text, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
+  .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title, .side-sub-ico.subscribed, .side-sub-ico.subscribing,
+  .side-sub-ico.unsubscribing, .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
+  .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-msg, .st-name, .st-use,
+  .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
+  .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
+  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done) { text-shadow: none; }
 /* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
    the same shadow as a filter instead, as bg-live does */
 :root.text-shadow .side-head-text { filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
 /* the same for text that clips itself (an ellipsis, a card title's clamp, a pill) and has no fill of its own: a filter on the
    element isn't cut by its own overflow, so the shadow keeps its soft edge instead of a dark box at the clip. (A bar that
    clips its own text, like .pl-title, cuts the shadow at its fill's edge, which shows anyway.) The chosen pill sits under the
-   accent highlight: no shadow, or it would leak out round the highlight. */
-:root.text-shadow :is(.st-layer, .lib-title span, .st-title, .sel-val, .sh-text, .side-sub-text b, .wf-name, .seg-opt:not(.on)) {
+   accent highlight: no shadow, or it would leak out round the highlight. A filter shadows its whole subtree, so a status line
+   showing a coloured message or name, or an excluded filter row, takes none. */
+:root.text-shadow :is(.st-layer:not(:has(.st-msg, .st-name)), .lib-title span, .st-title, .sel-val, .sh-text, .side-sub-text b,
+  .wf-row:not(.exc) .wf-name, .seg-opt:not(.on)) {
   filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
 :root.text-shadow .seg-opt.on { text-shadow: none; }
 /* under bg-live the loose text over the wallpaper already carries this shadow as a filter: never twice */

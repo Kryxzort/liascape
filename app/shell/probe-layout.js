@@ -838,7 +838,7 @@ app.whenReady().then(async () => {
     });
     // look:textShadow — Settings → "Text shadow" (:root.text-shadow, index.css): Netflix's subtitle shadow on all text. Clicked
     // on, it applies at once (no reload) and saves; body text, a Settings label and a tab button carry the drop shadow (`2px 1.9px 2px`, black); text on
-    // an accent fill (its colour is --accent-fg) carries none; no-glow keeps it. Under bg-live (a static backdrop, bright on the
+    // an accent fill (its colour is --accent-fg) and text in the accent or a state colour carry none; no-glow keeps it. Under bg-live (a static backdrop, bright on the
     // right, dark on the left, stands in for the wallpaper: LIASCAPE_TS_BACKDROP=<image> puts a real one on the bright side)
     // no text inside an element that already draws bg-live's black drop-shadow filter carries a text-shadow too, and the
     // sidebar title's pixels are the same with the option on or off (no doubled shadow). With bg-live off, on a white panel,
@@ -856,7 +856,13 @@ app.whenReady().then(async () => {
         const filled = [...document.querySelectorAll("body *")].filter((e) => own(e) && e.getClientRects().length && getComputedStyle(e).color === fg);
         return { cls: root.classList.contains("text-shadow"), body: ts(document.body), label: ts(document.querySelector(".srow .slabel")),
           tab: ts(document.querySelector(".tab:not(.active)")), nFilled: filled.length,
-          filledShadowed: filled.filter((e) => ts(e) !== "none").map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)) };`;
+          filledShadowed: filled.filter((e) => ts(e) !== "none").map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)),
+          ...(() => { // text in the accent or a state colour is lit already: no shadow on it, nor from a shadowing filter above it
+            const col = (v) => { const s = document.createElement("span"); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
+            const lit = new Set(["var(--accent)", "var(--accent-hover)", "var(--danger)", "var(--success)", "var(--warn, #f9e2af)"].map(col));
+            const filtered = (e) => { for (let a = e; a; a = a.parentElement) if (/2px 1\.9px/.test(getComputedStyle(a).filter)) return true; return false; };
+            const els = [...document.querySelectorAll("body *")].filter((e) => own(e) && e.getClientRects().length && lit.has(getComputedStyle(e).color));
+            return { nLit: els.length, litShadowed: els.filter((e) => ts(e) !== "none" || filtered(e)).map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)) }; })() };`;
       // (Settings is a lazy chunk: a first visit can take seconds to mount)
       // text whose own overflow clip cuts its text-shadow off (a hard-edged dark box on a bright backdrop): an element showing its
       // own text with a shadow, overflow not visible, no fill of its own (a fill's edge shows anyway: the clip adds none) and
@@ -903,6 +909,8 @@ app.whenReady().then(async () => {
         for (const k of ["body", "label", "tab"]) if (!SHADOW.test(on[k] ?? "")) v.push(`on: the ${k} text has no subtitle shadow (${on[k]})`);
         if (!on.nFilled) v.push("on: no text on an accent fill on Settings to check — proved nothing");
         if (on.filledShadowed.length) v.push(`on: text on an accent fill is shadowed: ${on.filledShadowed.join(", ")}`);
+        if (!on.nLit) v.push("on: no accent / state-coloured text on Settings to check — proved nothing");
+        if (on.litShadowed.length) v.push(`on: coloured text (accent / state colour, lit already) is shadowed: ${on.litShadowed.join(", ")}`);
         if (!(await saved(true))) v.push("turning Text shadow on wasn't saved (textShadow !== true)");
         // a light theme (its crust light, its letters dark) turns the shadow white; the theme's own crust comes back after
         const lt = await page(`const r = document.documentElement, was = r.style.getPropertyValue("--bg-crust");
