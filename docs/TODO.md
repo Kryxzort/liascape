@@ -5,6 +5,12 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
+41. [ ] (owner) First-time preview clips show on the progress line: ClipStore's queue (Enqueue → the background maker, one
+       full clip at a time) runs silently, so opening the Library on items with no clip yet (16 at once after a start)
+       encodes for a minute with no sign in the UI. When the queue holds more than one clip, report it as a library op
+       (`LibraryOps.Set("previews", …)`, done/total as clips finish, ended when the queue drains), shown and combined like
+       the others (never on Browse, like the rest); one clip for a hovered card stays silent. A test: the op appears
+       for a batch and not for one.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
@@ -39,9 +45,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] What's left of a big scene's build with the disk cache working: the WE shader text passes (~0.37 s) and glslang +
       SPIRV-Cross (~0.25 s) of 3042492564's ~1.3 s, the same inputs at every launch. A cache of `toGlsl`'s output across
       launches, keyed by its input text, is the candidate; decide before building it.
-- [ ] Player tests aren't hermetic about NVIDIA's shader cache: the players and workers they spawn inherit the caller's
-      `__GL_SHADER_DISK_CACHE_PATH`, so a run on a desktop that sets it writes compiled shaders into that user's cache
-      folder (and now creates it). Point it into each test's temp dir (or unset it) in the spawn helpers.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
