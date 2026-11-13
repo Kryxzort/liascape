@@ -50,6 +50,11 @@ public static class ServerHost
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.Logging.ClearProviders();
+        // How long a SIGTERM waits for open requests before Kestrel cuts them (the default 30 s). A service manager kills
+        // after its own stop timeout (systemd's often 10 s), and an open response can stay open for good: a paused
+        // <video>'s /media download stops reading. Every request is safe to cut here; the WebSocket closes itself (/events).
+        // Guard: scripts/test-backend-stop.sh "media".
+        builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(2));
         // LIASCAPE_PORT pins the port (dev: dotnet-watch restarts keep the same port → the open UI survives);
         // otherwise bind a random free port. The media listener is the next port (ApiSecurity.PickPorts).
         var fixedPort = int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_PORT"), out var lp) ? lp : 0;
@@ -936,11 +941,21 @@ public static class ServerHost
             var id = Guid.NewGuid();
             EventBus.Add(id, sock);
             var buf = new byte[1024];
+            // Kestrel's graceful stop waits for this request to end, and an open page never ends it: a SIGTERMed backend
+            // would sit out HostOptions.ShutdownTimeout. Stopping closes the socket from this side (the page answers the
+            // close frame, ending the loop below); one that doesn't answer within a second is cut.
+            // Guard: scripts/test-backend-stop.sh "ws".
+            using var cut = new CancellationTokenSource();
+            using var onStop = app.Lifetime.ApplicationStopping.Register(() =>
+            {
+                _ = EventBus.CloseForStopAsync(id, sock, 500);
+                try { cut.CancelAfter(1000); } catch (ObjectDisposedException) { }
+            });
             try
             {
-                while (sock.State == WebSocketState.Open)
+                while (sock.State == WebSocketState.Open || sock.State == WebSocketState.CloseSent)
                 {
-                    var res = await sock.ReceiveAsync(buf, CancellationToken.None);
+                    var res = await sock.ReceiveAsync(buf, cut.Token);
                     if (res.MessageType == WebSocketMessageType.Close) break;
                 }
             }

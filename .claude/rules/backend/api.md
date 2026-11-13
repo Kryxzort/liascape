@@ -51,6 +51,7 @@ paths:
 
 ## WebSocket events (`Web/EventBus.cs`, `/events`)
 - Serialize sends per socket (concurrent `SendAsync` throws).
+- Stopping closes every socket from our side (1001, through its send gate; cut after 1 s) and `HostOptions.ShutdownTimeout` (2 s) cuts any other open request: an open page never closes first, and Kestrel's graceful stop otherwise waits 30 s for it, past a service manager's stop timeout. Guard: `scripts/test-backend-stop.sh`.
 - The event list is `grep -rho 'Broadcast("[a-z-]*"' src/backend`; the UI handles them in `app/ui/src/store/`. Reuse an existing event before adding one.
 - `library-item-changed` and `settings-changed` carry only the changed fields; the UI merges them (every UI save posts its whole copy, so a missed merge reverts a backend change).
 - `wallpaper-changed` is the only source of "what plays" for the UI (sent at B's effect start).

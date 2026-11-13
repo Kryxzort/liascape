@@ -84,6 +84,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       owner's call.
 
 ## liascape-player (after design approval)
+- [ ] The player a backend spawns stays in that backend's cgroup (`setsid` doesn't leave it): stopping the dev stack's
+      `liascape-watch` unit (KillMode=control-group) SIGTERMs the player too, so the wallpaper stops with the backend,
+      against "the player outlives the backend" (`.claude/rules/backend/player-adapter.md` § Process lifecycle). Start
+      it in its own scope when a user manager answers (`systemd-run --user --scope --collect …`), else as now.
 - [x] **Advance-on-end play-time limits** (owner, 2026-10-28: "maximum minimum when end on wallpaper"): a minimum
       (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
       for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),

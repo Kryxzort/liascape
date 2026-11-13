@@ -19,6 +19,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Library tags, trailers and frame sizes (no network, fake Steam servers): `bash scripts/test-library-facts.sh`
 - Preview clips following "Video preview quality" (debounce, up / down, cancel, restart): `bash scripts/test-clip-sweep.sh`
 - Legacy engine: a cold launch's late announce and one auto-mute monitor (stub mpvpaper, own PID namespace): `bash scripts/test-legacy-launch.sh`
+- `serve` exits within 3 s of SIGTERM (idle, an open page's WebSocket, playing, a stalled /media download, the clip sweep): `bash scripts/test-backend-stop.sh`
 - The sidebar's crash-mark Clear and "open in your default app" (a stub xdg-open; what /open/media refuses): `bash scripts/test-item-actions.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`

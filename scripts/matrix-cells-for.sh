@@ -44,7 +44,7 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh|scripts/test-backend-stop.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
     src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
       echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;

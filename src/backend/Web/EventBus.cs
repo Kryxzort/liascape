@@ -41,6 +41,23 @@ public static class EventBus
         finally { c.Gate.Release(); }
     }
 
+    // The backend is stopping: tell a connected page so (1001 going away; it reconnects, app/ui/src/api/events.ts) instead
+    // of waiting for it to close first, which an open page never does. Through the socket's send gate (a broadcast may be
+    // mid-send); a page that doesn't read within `ms` gets no frame, and its socket is cut by the caller.
+    public static async System.Threading.Tasks.Task CloseForStopAsync(Guid id, WebSocket sock, int ms)
+    {
+        _clients.TryRemove(id, out var c);
+        using var cts = new CancellationTokenSource(ms);
+        var gate = c.Gate;
+        try
+        {
+            if (gate != null) await gate.WaitAsync(cts.Token);
+            try { await sock.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "backend stopping", cts.Token); }
+            finally { gate?.Release(); }
+        }
+        catch { }
+    }
+
     // Wires PlayerHelper's wallpaper-changed / scene-crashed / timed-stopped callbacks to fan out
     // to the UI over WS.
     public static void WirePlayer()
