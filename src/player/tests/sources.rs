@@ -294,6 +294,34 @@ fn frame_exact_seek() {
     assert_rgb(rest, [128, 128, 128], 2, "mid-grey background");
 }
 
+/// A source opened where it never moves — paused, at a frame's exact time — reports that time.
+/// mpv's only `time-pos` change (the start's seek target) arrives before the load's
+/// PLAYBACK_RESTART, and the frame it lands on has the same time, so no later change follows:
+/// the source must still end up knowing it (`time_pos` unknown reads as the graph's 0.0, and a
+/// snapshot would save 0). The restore end to end: `tests/supervise.rs`
+/// `loop_off_clip_restored_on_its_last_frame_stays_there`.
+#[test]
+fn opened_still_at_an_exact_frame_reports_its_position() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let mut src = open_ready(&gfx, path_str(&clip), json!({"paused": true, "position": 2.0}));
+    let wake = Some(src.wake_fd());
+    pump(&gfx, &mut src, wake, Duration::from_millis(300), |_, _| {
+        false
+    });
+    assert!(
+        matches!(src.read("time_pos"), Some(PropValue::F64(t)) if (t - 2.0).abs() < 1e-3),
+        "time_pos {:?}, want 2.0",
+        src.read("time_pos")
+    );
+    assert_rgb(
+        read_rgba(&gfx, src.texture().expect("texture"), 32, 32),
+        [60, 60, 60],
+        1,
+        "frame 60 shown",
+    );
+}
+
 /// `docs/player/modules/sources.md` § Hardware decoding: a hardware `hwdec` on the render worker decodes zero-copy
 /// through the worker's GL interop (nvdec frames written into mpv's textures by CUDA, then
 /// rendered into ours on the lane and fenced) — and the picture is exactly the software

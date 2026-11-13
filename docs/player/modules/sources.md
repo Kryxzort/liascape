@@ -80,7 +80,11 @@ Every `loadfile` is async; its reply carries the playlist entry id and START_FIL
 belong to, so events and observed props are attributed to a load and a superseded load's events are dropped.
 `Ready` needs the current load's PLAYBACK_RESTART and a frame rendered after its FILE_LOADED in either order:
 restart-first happens for paused clips and images, frame-first for most playing videos. `Position` comes from
-`time-pos`, rate-limited to 100 ms. On a looping file `time-pos` drops to 0 while the last frame is still shown;
+`time-pos`, rate-limited to 100 ms. mpv reports a `time-pos` only when it differs from the last one it sent, and
+the one sent between FILE_LOADED and the first PLAYBACK_RESTART is the start's seek target: when the frame the load
+lands on has that same time (a paused source at an exact frame, a clip restored on its last frame) no change
+follows, so that value is kept and adopted at the restart; otherwise `time_pos` stays unknown and reads as the
+graph's 0.0 (a snapshot then saves 0). On a looping file `time-pos` drops to 0 while the last frame is still shown;
 frame 0 follows one frame later (33.9–34.3 ms at 30 fps) — the transition recipe anchors loop boundaries on it.
 
 **Dropped first frame.** vo_libmpv drops a frame the API user didn't render within 200 ms and stops reporting it.

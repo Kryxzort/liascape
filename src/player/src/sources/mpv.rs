@@ -584,6 +584,14 @@ pub struct MpvSource {
 
     // Observed mpv state (of the current load).
     time_pos: Option<f64>,
+    /// The current load's latest `time-pos` from between its FILE_LOADED and its first
+    /// PLAYBACK_RESTART (the start's seek target), adopted at that restart: mpv sends a change
+    /// only when the value differs from the last one sent, so when the frame the load lands on
+    /// has that same time (a still at an exact frame, a clip restored on its last frame) no
+    /// later change ever comes. Guards `tests/sources.rs`
+    /// `opened_still_at_an_exact_frame_reports_its_position`, `tests/supervise.rs`
+    /// `loop_off_clip_restored_on_its_last_frame_stays_there`.
+    time_pos_before_restart: Option<f64>,
     duration: Option<f64>,
     dsize: (i64, i64),
     ready: bool,
@@ -1005,6 +1013,7 @@ impl MpvSource {
             refetched_at: None,
             refetches: 0,
             time_pos: None,
+            time_pos_before_restart: None,
             duration: None,
             dsize: (0, 0),
             ready: false,
@@ -1378,6 +1387,7 @@ impl MpvSource {
         self.back_valid = false;
         self.ended_sent = false;
         self.time_pos = None;
+        self.time_pos_before_restart = None;
         self.duration = None;
         self.load_failed = None;
         self.step = None;
@@ -1664,6 +1674,7 @@ impl MpvSource {
                         self.restarted_at = None;
                         self.refetched_at = None;
                         self.time_pos = None;
+                        self.time_pos_before_restart = None;
                         self.duration = None;
                         self.has_audio = None;
                     }
@@ -1683,6 +1694,9 @@ impl MpvSource {
                             self.restarted_at = Some(Instant::now());
                         }
                         self.restarted = true;
+                        if let Some(t) = self.time_pos_before_restart.take() {
+                            self.on_prop(OBS_TIME_POS, PropData::F64(t));
+                        }
                         let mut settle = false;
                         if let Some(st) = self.step.as_mut()
                             && st.replied
@@ -1798,9 +1812,16 @@ impl MpvSource {
 
     fn on_prop(&mut self, id: u64, value: PropData) {
         // Playback-scoped values only once the current load has (re)started — a value
-        // delivered after a path change may still describe the previous file.
+        // delivered after a path change may still describe the previous file. The current
+        // load's own `time-pos` from after its FILE_LOADED is kept for that restart.
         let live = self.is_current() && self.restarted;
         match (id, value) {
+            (OBS_TIME_POS, v) if !live && self.is_current() && self.file_loaded => {
+                self.time_pos_before_restart = match v {
+                    PropData::F64(t) => Some(t),
+                    _ => None,
+                };
+            }
             (OBS_TIME_POS, PropData::F64(t)) if live => {
                 self.time_pos = Some(t);
                 if self.awaiting_flowing && self.flowing_arm_pos.is_none() {

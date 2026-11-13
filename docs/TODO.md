@@ -592,8 +592,6 @@ Two bug classes kept recurring; fix the class, not the instance:
                 sampler's `components` combos (PBRMASKS: 3477054430, 3509243656).
 - [ ] Optionally offer our LWE patches upstream as PRs, with AI assistance disclosed. Upstream merged nothing since
       2026-06-20.
-- [ ] Player: with loop off, an item resumed while on its last frame comes back at position 0.0 and stays there (loop on
-      restores correctly). Found by Phase 3 Task 8's restore probes.
 - [ ] Phase 3 battery findings (`docs/player/reports/phase3.md`):
   - F1: `frozen`: B's ramp-in starts 2–5 ms late in about 1 of 15 onsets (recorded on the sink; mostly S→V). At most a
     faint tick. Probably the same graph change as "F7 residual".

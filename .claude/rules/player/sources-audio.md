@@ -88,6 +88,10 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
 - Only the current load counts: ignore a superseded load's FILE_LOADED, PLAYBACK_RESTART, END_FILE (errors
   included), `eof-reached` and `time-pos`; count `time-pos`/`eof-reached` only after the current load's restart.
   Guards `path_change_before_first_pump_shows_only_new_file`, `stale_load_error_is_not_reported_for_new_path`.
+- Keep the current load's `time-pos` from between its FILE_LOADED and first restart and adopt it at that restart:
+  mpv never re-sends an unchanged value, so a still at an exact frame would read 0. Guards
+  `opened_still_at_an_exact_frame_reports_its_position`, `tests/supervise.rs`
+  `loop_off_clip_restored_on_its_last_frame_stays_there`.
 - `Ready` = the current load's PLAYBACK_RESTART and a frame rendered after its FILE_LOADED, in either order —
   requiring the frame after the restart can wait forever on a paused clip or image.
 - `Ended` comes from `eof-reached` (keep-open sends no END_FILE), once per play-through, never with `loop`, never

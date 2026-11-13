@@ -480,6 +480,90 @@ fn crash_restores() {
     assert_eq!(st["graph"][&nid]["gain"]["anticlick"], json!(0.0));
 }
 
+/// A clip with loop off that ended (holding its last frame) comes back on that frame, ended, and
+/// stays there: its `time_pos` is the last frame's (never the graph's 0.0 default), it reports
+/// `source.ended` again, and the restarted player's own snapshot saves the end, so a second
+/// restart can't fall back to 0. 61 frames at 30 fps put the last frame at exactly 2.000 s: mpv
+/// reports the restore's seek target and the frame it lands on as the same value, the case where
+/// the only `time-pos` change arrives before the load's restart.
+#[test]
+fn loop_off_clip_restored_on_its_last_frame_stays_there() {
+    let Some(mut sup) = Sup::start(&[]) else {
+        return;
+    };
+    let clip = ensure_clip("sup_last_frame_at_2s", ClipSpec::FrameIndex { frames: 61 });
+    const FRAME: f64 = 1.0 / 30.0;
+    let mut c = sup.client();
+    let id = c.create(json!({"path": s(&clip), "loop": false, "position": 1.5}));
+    c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
+    let ended = |c: &mut Client, id: &str| {
+        c.logs("source.ended").iter().any(|e| e["id"] == json!(id))
+    };
+    let t = Instant::now();
+    while !ended(&mut c, &id) {
+        assert!(t.elapsed() < Duration::from_secs(20), "the clip never ended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let end = c.get(&format!("{id}.time_pos")).as_f64().unwrap();
+    assert!((end - 2.0).abs() < 1e-6, "ended at {end}, not its last frame at 2.0");
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        sn["sources"].as_object().is_some_and(|m| {
+            m.values()
+                .any(|v| v["path"] == s(&clip) && v["position"].as_f64() == Some(end))
+        })
+    });
+    drop(c);
+    sup.crash(libc::SIGSEGV);
+
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(20), |st| {
+        sources(st)
+            .iter()
+            .any(|(_, n)| n["path"] == s(&clip) && n["ready"] == json!(true))
+    });
+    let (nid, node) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == s(&clip))
+        .unwrap();
+    assert_eq!(node["loop"], json!(false), "{node}");
+    let ready_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let t = Instant::now();
+    while !ended(&mut c, &nid) {
+        assert!(t.elapsed() < Duration::from_secs(5), "the restored clip never reported its end");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // A second apart: on its last frame the whole time, never at 0 and never playing on.
+    for _ in 0..10 {
+        let n = c.state()["graph"][&nid].clone();
+        let tp = n["time_pos"].as_f64().unwrap();
+        assert!(
+            (tp - end).abs() <= FRAME,
+            "restored at {tp}, not on its last frame ({end}): {n}"
+        );
+        assert_eq!(n["paused"], json!(false), "{n}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for conn in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(content(&c.state(), conn), nid, "{conn} shows the restored clip");
+    }
+    // The restarted player saves where its clip is (the 2 s refresh), not 0.
+    let sn = sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        sn["saved_unix_ms"].as_u64().unwrap_or(0) > ready_unix_ms + 500 && snap_has_path(sn, s(&clip))
+    });
+    let saved = sn["sources"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|v| v["path"] == s(&clip))
+        .unwrap()
+        .clone();
+    let pos = saved["position"].as_f64().unwrap();
+    assert!((pos - end).abs() <= FRAME, "re-saved at {pos}, not {end}: {saved}");
+}
+
 /// SIGKILLing the supervisor must orphan nothing — its
 /// `PR_SET_PDEATHSIG(SIGTERM)` (set between fork and exec) fires from the kernel's own
 /// notice of the parent's death, not from any cleanup code of ours. Asserted directly
