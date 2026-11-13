@@ -1359,7 +1359,7 @@ app.whenReady().then(async () => {
       return v;
     });
     // tabs:keep (on the PERF_N-card library) — the Library page is kept across tab switches (App.tsx <Activity>). Scrolled deep
-    // with a card selected (a Ctrl+click: selects and focuses it, the sidebar opens, nothing is applied), then Browse: the
+    // with a card selected (a Ctrl+click) and its sidebar open (a right-click; nothing is applied), then Browse: the
     // Library's grid and sidebar are hidden, not gone, and take no room from Browse's grid; back on the Library: the same grid
     // element at the offset it was left at (the same card at the same place: the rows it skipped hold their size), nothing
     // selected, its sidebar showing and docked again.
@@ -1367,7 +1367,9 @@ app.whenReady().then(async () => {
       const v = [];
       await tab("Library"); await sleep(500);
       const s0 = await page(`const sc = document.querySelector(".lib-scroll"); if (!sc) return null; sc.__kept = 1;
-        sc.querySelector(".card.lib .thumb-wrap").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
+        const c = sc.querySelector(".card.lib .thumb-wrap"), cr = c.getBoundingClientRect();
+        c.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
+        c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: cr.x + 10, clientY: cr.y + 10 }));
         await m.sleep(500); sc.scrollTop = Math.round(0.6 * (sc.scrollHeight - sc.clientHeight)) + 37; await m.sleep(400);
         return { top: sc.scrollTop, sel: sc.querySelectorAll(".card.selected").length, side: !!document.querySelector('.side-panel[data-side="library"]:not(.closing)'), ...m.libAt() };`);
       if (!s0) return ["no Library grid"];

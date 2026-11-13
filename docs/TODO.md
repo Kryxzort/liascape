@@ -19,6 +19,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        unsubscribing a downloaded item also removes its files; this keeps them in the Library).
 47. [ ] (owner) A locate (crosshair) button on Browse too, like the Library's go-to-playing: it scrolls to and pulses the
        card whose sidebar is open (the selected card); disabled when none is.
+49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
+       (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 48. [ ] Hide Settings → "Full-live sync nudge" unless the legacy engine runs: only the legacy transition helper reads
        FullLiveSyncOffsetMs (TransitionService --lag-offset); under liascape-player it does nothing.
 49. [ ] Settings → "Clear thumbnail cache" says what it clears and how much: today it deletes only the Workshop browse

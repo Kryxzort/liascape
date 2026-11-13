@@ -1,5 +1,5 @@
 // Regression probe: a right-click on a playlist bar item must never start playback. It opens the item's Library sidebar and
-// no menu (docs/decisions.md § "Open the item sidebar on right-click; no context menus"); a menu portal'd to document.body
+// no menu (docs/decisions.md § "Left click does the tab's main action, right click opens the item sidebar"); a menu portal'd to document.body
 // has React bubble its clicks up to the .pl-item's onClick (playFrom).
 // Loads the UI offscreen, stubs the playback endpoints (nothing reaches the backend, so the live wallpaper is never touched),
 // right-clicks a playlist item, then clicks the sidebar's playlist toggle twice and its picture's switch area, and reports which

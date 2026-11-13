@@ -31,8 +31,8 @@ export function revealCard(morphId: string) {
   }));
 }
 
-// A card the pointer just focused (a click / right-click) while the sidebar was closed: the docked sidebar opens and the grid
-// re-fits its columns (`useGridFit` — a frame or two later), which moved the card — often out of view, from under the pointer.
+// A card the pointer just focused (a right-click, Browse's plain click) while the sidebar was closed: the docked sidebar opens
+// and the grid re-fits its columns (`useGridFit` — a frame or two later), which moved the card — often out of view, from under the pointer.
 // Keep its top where it was in the scroll view for the next ~12 frames (the re-fit lands within them), then make sure it's
 // whole in view. A wheel / pointer-down in the list hands the scroll back to the user.
 export function keepCardInView(sc: HTMLElement | null, morphId: string) {

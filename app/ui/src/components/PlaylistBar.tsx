@@ -103,8 +103,9 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
     <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`} data-title={item?.title}
       {...attributes} {...listeners} onClick={() => playFrom(index)}
       onMouseEnter={onEnter}
-      // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (docs/decisions.md §
-      // "Open the item sidebar on right-click; no context menus" — the sidebar has the playlist toggle, Open in file manager, Delete)
+      // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (docs/decisions.md § "Left
+      // click does the tab's main action, right click opens the item sidebar" — the sidebar has the playlist toggle, Open in
+      // file manager, Delete)
       onContextMenu={(e) => { e.preventDefault(); focusLib(path); revealCard(`lib-${path}`); }}>
       {item && <MotionThumb item={item} hover={hover} autoGif={autoGif} autoVideo={autoVideo} videoOverGif={videoOverGif} />}
       {/* #99000000 title bar, 10px white ellipsis */}

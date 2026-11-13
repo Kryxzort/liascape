@@ -14,6 +14,11 @@
 //                     cards under the box afterwards (cards that were off screen at the start included); the top edge scrolls up
 //   <g>:tiny          a 2 px drag is a click: no box, the selection clears (the empty-space click)
 //   <g>:fromCard      a drag that starts on a card draws no box and selects nothing
+//   <g>:plainClick    a plain click: Library — applies the card, the sidebar stays closed, and stays on the item it shows when open;
+//                     Browse — opens the sidebar on the card (and moves an open one to it), downloads nothing
+//   <g>:modClick      Ctrl+click and Shift+click only select: the sidebar stays closed, an open one stays where it is, nothing applies
+//   <g>:rightClickSel three cards Ctrl-selected, a right-click on one opens its sidebar and keeps all three selected (the Library's
+//                     sidebar says it applies to 3); a right-click on an unselected card moves the sidebar, the three stay
 //   look:glow         the box: rounded corners, a translucent accent fill, the small glow; none under no-glow; still
 //                     translucent under bg-live; the fill strengthens as it catches more cards
 //   look:motion[:off] motion on: the box fades in and out (per-frame samples pass through in-between opacities); "Smooth window
@@ -142,9 +147,10 @@ const mid = (c) => ({ x: Math.round((c.x + c.r) / 2), y: Math.round((c.y + c.b) 
 const gap = (g, i) => ({ x: Math.round((g.cards[i].r + g.cards[i + 1].x) / 2), y: Math.round((g.cards[i].y + g.cards[i].b) / 2) });
 const mods = (o) => [...(o.ctrl ? ["control"] : []), ...(o.shift ? ["shift"] : [])];
 async function press(at, o = {}) {
+  const button = o.right ? "right" : "left";
   send({ type: "mouseMove", x: at.x, y: at.y, modifiers: mods(o) }); await sleep(40);
-  send({ type: "mouseDown", x: at.x, y: at.y, button: "left", clickCount: 1, modifiers: mods(o) }); await sleep(60);
-  send({ type: "mouseUp", x: at.x, y: at.y, button: "left", clickCount: 1, modifiers: mods(o) }); await sleep(500);
+  send({ type: "mouseDown", x: at.x, y: at.y, button, clickCount: 1, modifiers: mods(o) }); await sleep(60);
+  send({ type: "mouseUp", x: at.x, y: at.y, button, clickCount: 1, modifiers: mods(o) }); await sleep(500);
 }
 // a held drag: down at a, `steps` moves to b (one per ~frame); `held` runs before the release (if `up`)
 async function drag(a, b, o = {}) {
@@ -179,8 +185,108 @@ function box4(g) {
   return { a: gap(g, 0), b: mid(g.cards[g.cols + 2]), want: [1, 2, g.cols + 1, g.cols + 2].map((i) => g.cards[i].id) };
 }
 
+// a card's centre, scrolled into view first: opening the docked sidebar re-fits the grid's columns and keepCardInView
+// (hooks/gridKeys.ts) holds the card under the pointer — which can scroll row 0 above the container. A press there lands on
+// the top bar and does nothing, so the point must hit the card itself.
+async function cardAt(id, g) {
+  const p = await page(`const c = m.cards().find((x) => x.firstElementChild.dataset.morphId === ${J(id)}); if (!c) return null;
+    c.scrollIntoView({ block: "nearest" }); await m.sleep(400);
+    const r = c.getBoundingClientRect(), x = Math.round((r.left + r.right) / 2), y = Math.round((r.top + r.bottom) / 2);
+    return { x, y, hit: c.contains(document.elementFromPoint(x, y)) };`);
+  if (!p?.hit) throw new Error(`card ${fmt([id], g)} can't be clicked (${J(p)}): the click would prove nothing`);
+  return p;
+}
+// the item the open sidebar shows (its path / page URL), null when closed; its "applies to N selected" note
+const sideId = () => js(`document.querySelector(".side-panel:not(.closing)")?.dataset.sideId ?? null`);
+const sideNote = () => js(`document.querySelector(".side-panel:not(.closing) .side-sub")?.textContent ?? ""`);
+const current = async () => (await http("GET", "/current")).json?.path ?? null;
+async function waitCurrent(want, ms = 6000) {
+  let cur = null;
+  for (let t = 0; t < ms && (cur = await current()) !== want; t += 150) await sleep(150);
+  return cur;
+}
+
 function gridCells(cell, G) {
   const n = G.key;
+  const item = (id) => id.slice(n.length + 1); // a card's id → the item's path (lib-) / page URL (br-)
+  const lib = n === "lib";
+  const short = (x) => (x ? path.basename(x) : String(x));
+  cell(`${n}:plainClick`, async () => {
+    const v = [];
+    await G.enter(); await reset(); await js(`window.__dl = []`);
+    let g = await geo();
+    const a = g.cards[1].id, b = g.cards[2].id, c = g.cards[3].id;
+    await press(await cardAt(a, g));
+    await sleep(300);
+    let side = await sideId();
+    if (lib) {
+      if (side) v.push(`a plain click on card 1 opened the sidebar (on ${short(side)}): it only applies`);
+      const cur = await waitCurrent(item(a));
+      if (cur !== item(a)) v.push(`a plain click on card 1 didn't apply it (/current ${short(cur)})`);
+    } else if (side !== item(a)) v.push(`a plain click on card 1: the sidebar shows ${side}, want card 1's ${item(a)}`);
+    // the sidebar already open on another card (a right-click): a plain click on a third card
+    await press(await cardAt(b, g), { right: true });
+    if ((await sideId()) !== item(b)) return [...v, `a right-click on card 2 didn't open its sidebar (${await sideId()}) — proved nothing`];
+    g = await geo();
+    await press(await cardAt(c, g));
+    await sleep(300);
+    side = await sideId();
+    if (lib) {
+      if (side !== item(b)) v.push(`with the sidebar open on card 2, a plain click on card 3 moved it to ${short(side)}: it stays where it was`);
+      const cur = await waitCurrent(item(c));
+      if (cur !== item(c)) v.push(`with the sidebar open, a plain click on card 3 didn't apply it (/current ${short(cur)})`);
+    } else if (side !== item(c)) v.push(`with the sidebar open on card 2, a plain click on card 3: the sidebar shows ${side}, want card 3's`);
+    if ((await sel()).length) v.push(`a plain click left ${(await sel()).length} cards selected`);
+    if (!lib && (await js(`window.__dl.length`))) v.push(`a plain click downloaded ${J(await js(`window.__dl`))}`);
+    return v;
+  });
+  cell(`${n}:modClick`, async () => {
+    const v = [];
+    await G.enter(); await reset();
+    const cur0 = lib ? await current() : null;
+    let g = await geo();
+    const ids = [1, 2, 3].map((i) => g.cards[i].id);
+    await press(await cardAt(ids[0], g), { ctrl: true });
+    if (!same(await sel(), [ids[0]])) v.push(`Ctrl+click on card 1 selected ${fmt(await sel(), g)}, want [1]`);
+    if (await sideId()) v.push(`Ctrl+click on card 1 opened the sidebar (on ${short(await sideId())}): it only selects`);
+    await press(await cardAt(ids[2], g), { shift: true });
+    if (!same(await sel(), ids)) v.push(`Shift+click on card 3 after card 1 selected ${fmt(await sel(), g)}, want [1,2,3]`);
+    if (await sideId()) v.push(`Shift+click on card 3 opened the sidebar (on ${short(await sideId())}): it only selects`);
+    // with the sidebar open on another card (a right-click), Ctrl / Shift leave it there
+    const z = g.cards[g.cols + 1].id;
+    await press(await cardAt(z, g), { right: true });
+    if ((await sideId()) !== item(z)) return [...v, `a right-click on card ${g.cols + 1} didn't open its sidebar — proved nothing`];
+    g = await geo();
+    const w = g.cards[5].id, w2 = g.cards[6].id;
+    await press(await cardAt(w, g), { ctrl: true });
+    if ((await sideId()) !== item(z)) v.push(`with the sidebar open, Ctrl+click on card 5 moved it to ${short(await sideId())}`);
+    await press(await cardAt(w2, g), { shift: true });
+    if ((await sideId()) !== item(z)) v.push(`with the sidebar open, Shift+click on card 6 moved it to ${short(await sideId())}`);
+    if (!(await sel()).includes(w2)) v.push(`with the sidebar open, Shift+click on card 6 didn't select it (${fmt(await sel(), g)})`);
+    if (lib) { await sleep(500); const cur = await current(); if (cur !== cur0) v.push(`a Ctrl / Shift click applied something (/current ${short(cur0)} → ${short(cur)})`); }
+    return v;
+  });
+  cell(`${n}:rightClickSel`, async () => {
+    const v = [];
+    await G.enter(); await reset();
+    const cur0 = lib ? await current() : null;
+    let g = await geo();
+    const ids = [1, 2, 3].map((i) => g.cards[i].id);
+    for (const id of ids) await press(await cardAt(id, g), { ctrl: true });
+    if (!same(await sel(), ids)) return [`Ctrl+clicks on cards 1–3 selected ${fmt(await sel(), g)} — proved nothing`];
+    if (await sideId()) v.push(`the Ctrl+clicks opened the sidebar (on ${short(await sideId())}): the right-click must be what opens it`);
+    await press(await cardAt(ids[1], g), { right: true });
+    if ((await sideId()) !== item(ids[1])) v.push(`a right-click on the selected card 2: the sidebar shows ${short(await sideId())}, want card 2`);
+    g = await geo(); // the docked sidebar re-fitted the columns
+    if (!same(await sel(), ids)) v.push(`after the right-click ${fmt(await sel(), g)} selected, want all three [1,2,3]`);
+    if (lib && !/applies to 3 selected/.test(await sideNote())) v.push(`the sidebar's head doesn't say it applies to the 3 selected ("${await sideNote()}")`);
+    const o = g.cards.find((x) => !ids.includes(x.id) && x.y > g.sc.y && x.b < g.sc.b).id;
+    await press(await cardAt(o, g), { right: true });
+    if ((await sideId()) !== item(o)) v.push(`a right-click on an unselected card: the sidebar shows ${short(await sideId())}, want that card`);
+    if (!same(await sel(), ids)) v.push(`a right-click on an unselected card changed the selection to ${fmt(await sel(), g)}`);
+    if (lib) { await sleep(500); const cur = await current(); if (cur !== cur0) v.push(`a right-click applied something (/current ${short(cur0)} → ${short(cur)})`); }
+    return v;
+  });
   cell(`${n}:box`, async () => {
     const v = [];
     await G.enter(); await reset();
@@ -205,17 +311,7 @@ function gridCells(cell, G) {
     await drag(a, b);
     if (!same(await sel(), want)) return [`the box selected ${fmt(await sel(), g)}, want ${fmt(want, g)}`];
     const extra = g.cards[2 * g.cols + 4].id, drop = g.cards[2].id;
-    // the card's centre, scrolled into view first: the first click docks the sidebar, the grid re-fits its columns and
-    // keepCardInView (hooks/gridKeys.ts) holds the clicked card under the pointer — which can scroll row 0 above the
-    // container. A press there lands on the top bar and toggles nothing, so the point must hit the card itself.
-    const at = async (id) => {
-      const p = await page(`const c = m.cards().find((x) => x.firstElementChild.dataset.morphId === ${J(id)}); if (!c) return null;
-        c.scrollIntoView({ block: "nearest" }); await m.sleep(400);
-        const r = c.getBoundingClientRect(), x = Math.round((r.left + r.right) / 2), y = Math.round((r.top + r.bottom) / 2);
-        return { x, y, hit: c.contains(document.elementFromPoint(x, y)) };`);
-      if (!p?.hit) throw new Error(`card ${fmt([id], g)} can't be clicked (${J(p)}): the Ctrl+click would prove nothing`);
-      return p;
-    };
+    const at = (id) => cardAt(id, g);
     await press(await at(extra), { ctrl: true });
     const s1 = await sel(), w1 = [...want, extra];
     if (!same(s1, w1)) v.push(`Ctrl+click on card ${2 * g.cols + 4} after the box: ${fmt(s1, g)}, want ${fmt(w1, g)}`);
@@ -247,7 +343,7 @@ function gridCells(cell, G) {
     const x = g.cards[3 * g.cols + 5].id;
     await press(mid(g.cards[3 * g.cols + 5]), { ctrl: true });
     await page(`m.sc().scrollTop = 0;`); await sleep(500);
-    g = await geo(); // the docked sidebar re-fitted the columns
+    g = await geo(); // scrolled back to the top
     const { a, b, want } = box4(g);
     await drag(a, b, { ctrl: true });
     const s1 = await sel();
@@ -265,8 +361,10 @@ function gridCells(cell, G) {
     let g = await geo();
     const x = g.cards[3 * g.cols + 5].id;
     await press(mid(g.cards[3 * g.cols + 5]), { ctrl: true });
+    await press(await cardAt(x, g), { right: true }); // the sidebar on it (a Ctrl+click only selects)
+    if (!(await sideId())) return ["no sidebar after the right-click — proved nothing"];
     await page(`m.sc().scrollTop = 0;`); await sleep(500);
-    g = await geo();
+    g = await geo(); // the docked sidebar re-fitted the columns
     const { a, b, want } = box4(g);
     const r = await drag(a, b, { up: false, held: async () => {
       const live = await sel();

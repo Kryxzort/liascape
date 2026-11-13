@@ -5,9 +5,10 @@ import { useStore } from "../store";
 import { shortDownloadStatus } from "./downloadStatus";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
-// title overlay. Interactions (docs/decisions.md § "Focus Browse cards on click, download on double-click"): click / right-click → focus (the Browse sidebar shows it:
-// the preview, the numbers, Download & Apply); double-click → download & apply; the hover download button (bottom-right,
-// where the Library card's trash sits) → download & apply; middle-click → open the source page/location.
+// title overlay. Interactions (docs/decisions.md § "Left click does the tab's main action, right click opens the item
+// sidebar"): click / right-click → focus (the Browse sidebar shows it: the preview, the numbers, Download & Apply); Ctrl /
+// Shift-click → select only; double-click → download & apply; the hover download button (bottom-right, where the Library
+// card's trash sits) → download & apply; middle-click → open the source page/location.
 // COOL: animated preview is a *layered* element kept mounted (opacity-toggled), not a src swap.
 export const Card = memo(function Card({
   w, playing, selected, focused, inLibrary, progress, autoPlayGifs, onClick, onContext, onMiddle, onCancel, onDownload,

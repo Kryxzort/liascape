@@ -171,6 +171,12 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Left click does the tab's main action, right click opens the item sidebar — 2026-11-14
+A plain click applies in the Library, opens the item to look over in Browse (double-click, Enter or the hover button
+downloads and applies; a library item's card has no button). A right-click opens the sidebar everywhere, applies nothing, keeps
+the selection; no context menus. Ctrl / Shift-click only select. A Library click opened it too before.
+`.claude/rules/ui/design.md` § Interaction rules; probe-select `*:plainClick`, `modClick`, `rightClickSel`.
+
 ### Fade, never move, with motion off — 2026-11-12
 "Smooth window animations" off and `prefers-reduced-motion` mean nothing moves and what appears, leaves or swaps
 cross-fades in place on opacity alone, in 120 ms — not "every change is instant": the setting serves people sensitive to
@@ -217,10 +223,6 @@ Owner: "the tooltips everywhere is really annoying and redundant, not everything
 Owner: "we never want those pesky yellow outlines anywhere". Chromium shows its system-colour ring after any key press,
 even on a clicked button; `.kbd-nav` limits the ring to Tab navigation. `hooks/focusRing.ts`.
 
-### Open the item sidebar on right-click; no context menus — 2026-11-11
-Owner: "right-click opens the sidebar on that item without applying it — no context menu anywhere". The sidebar holds
-what the menus had. `.claude/rules/ui/design.md` § Interaction rules.
-
 ### Make the sidebar's picture the Play control — 2026-11-11
 The Play / In-playlist row was "redundant clutter": the picture is an invisible button (no Play icon, a hover scale), a
 playing item gets a green frame instead of a "Playing now" pill, and the playlist checkbox lives on the card and the bar
@@ -234,10 +236,6 @@ letterboxing or a cover crop. `components/sidePreview.ts`.
 ### Loop trailers on the player's "ended", not YouTube's `loop=1` — 2026-11-11
 YouTube's `loop=1&playlist=<id>` restarted early; `seekTo(0)` + `playVideo` on "ended" fires at the content's end.
 `components/YouTubeEmbed.tsx`.
-
-### Focus Browse cards on click, download on double-click — 2026-11-11
-A click focuses (the sidebar); double-click, Enter or the hover button downloads and applies. A card already in the
-library has no download button: it would only apply the library's copy. `components/Card.tsx`.
 
 ### Filter the Library and the local Wallpaper Engine folder in the page — 2026-11-12
 Owner: "make it so we can filter on library and wallpaper engine local too, cuz why not". The same column, toggle, chips and

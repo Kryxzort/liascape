@@ -9,7 +9,7 @@ import { useAutoplayVideo } from "./autoplay";
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
 // PERF: memo'd; content-visibility (CSS) + per-card props; lift+glow hover (design choice).
-// Its settings and actions live in the item sidebar (a click or a right-click focuses the card) — components/LibrarySide.tsx.
+// A click applies it; its settings and actions live in the item sidebar (a right-click focuses the card) — components/LibrarySide.tsx.
 // COOL: animated preview on hover (MotionThumb); gif/webp assets also auto-play when AutoPlayGifs on, video previews under
 // "Animate wallpapers without a GIF".
 export const LibraryCard = memo(function LibraryCard({
@@ -30,8 +30,8 @@ export const LibraryCard = memo(function LibraryCard({
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>
-      {/* right-click = the item sidebar on this card WITHOUT applying it (docs/decisions.md § "Open the item sidebar on
-          right-click; no context menus"); the sidebar has Open in file manager / Delete / Delete from
+      {/* right-click = the item sidebar on this card WITHOUT applying it, a click = apply only (docs/decisions.md § "Left click
+          does the tab's main action, right click opens the item sidebar"); the sidebar has Open in file manager / Delete / Delete from
           source. Library.tsx keeps the card where it was while the docked sidebar re-fits the grid (gridKeys.ts keepCardInView). */}
       <div ref={wrapRef} className="thumb-wrap" data-morph-id={`lib-${item.videoPath}`} onClick={(e) => onClick(item, e)}
         onContextMenu={(e) => { e.preventDefault(); onContextFocus(item); }}

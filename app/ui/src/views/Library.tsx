@@ -161,21 +161,22 @@ export const Library = memo(function Library() {
     return () => removeEventListener("keydown", h);
   });
 
-  // a pointer focus (a click, a right-click): when the sidebar wasn't open, the docked one re-fits the grid's columns — the card
-  // stays where it was in the view instead of sliding away from under the pointer (gridKeys.ts keepCardInView)
+  // a right-click focuses the card (the sidebar shows it): when the sidebar wasn't open, the docked one re-fits the grid's
+  // columns — the card stays where it was in the view instead of sliding away from under the pointer (gridKeys.ts keepCardInView)
   const focusFromCard = (path: string) => {
     if (!useStore.getState().libFocus) keepCardInView(scrollRef.current, `lib-${path}`);
     focusLib(path);
   };
-  // a click focuses the card (the sidebar shows it) — a plain click also applies it, as before (and as WE does); a right-click
-  // (LibraryCard) focuses it without applying (docs/decisions.md § "Open the item sidebar on right-click; no context menus")
+  // a plain click applies the card and nothing else: the sidebar stays as it was — closed, or on the item it shows (its edits
+  // name that item's paths, so it keeps working while another one plays); Ctrl / Shift only select; the sidebar is a right-click
+  // (docs/decisions.md § "Left click does the tab's main action, right click opens the item sidebar"). Guard: probe-select
+  // lib:plainClick, lib:modClick, lib:rightClickSel
   const onCardClick = (it: LibraryItem, e: React.MouseEvent) => {
-    focusFromCard(it.videoPath);
     if (e.shiftKey && anchor.current) {
       const ids = filtered.map((x) => x.videoPath);
       const a = ids.indexOf(anchor.current), b = ids.indexOf(it.videoPath);
       if (a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; setSel(new Set(ids.slice(lo, hi + 1))); }
-    } else if (e.ctrlKey || e.metaKey) {
+    } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
       const n = new Set(sel); if (n.has(it.videoPath)) n.delete(it.videoPath); else n.add(it.videoPath);
       setSel(n); anchor.current = it.videoPath;
     } else { setSel(new Set()); anchor.current = it.videoPath; applyItem(it.videoPath); }
@@ -192,7 +193,7 @@ export const Library = memo(function Library() {
   const cardClick = useStableFn(onCardClick);
   const cardTrash = useStableFn((it: LibraryItem) => doTrash(targetsFor(it)));
   const cardToggle = useStableFn(doToggle);
-  const cardContext = useStableFn((it: LibraryItem) => focusFromCard(it.videoPath));
+  const cardContext = useStableFn((it: LibraryItem) => focusFromCard(it.videoPath)); // keeps the selection: the sidebar edits it
   // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
   const onMarquee = useMarquee(scrollRef, { prefix: "lib-", sel, setSel, anchor });
 

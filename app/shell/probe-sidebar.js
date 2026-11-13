@@ -1,9 +1,10 @@
 // Wallpaper Engine-style sidebar probe — `scripts/test-ui-matrix.sh --probe probe-sidebar.js` (the matrix's hermetic
 // stack: private backend + headless liascape-player + this tree's UI bundle on a private Xvfb). docs/decisions.md §
 // "Replace the card settings and preview modals with an item sidebar" (docs/superpowers/specs/2026-11-10-we-sidebar-design.md).
-//   lib:click            a plain click focuses the card AND applies it (WE); the sidebar shows it — volume, speed, the actions
-//   lib:rightClick       right-click = the sidebar on that card, nothing applies, no menu (docs/decisions.md § "Open the item
-//                        sidebar on right-click; no context menus"); with the sidebar open it moves to the card; Escape closes it
+//   lib:click            a plain click applies the card and nothing else: no sidebar, no focus (docs/decisions.md § "Left click
+//                        does the tab's main action, right click opens the item sidebar")
+//   lib:rightClick       right-click = the sidebar on that card — volume, speed, the actions — nothing applies, no menu; with the
+//                        sidebar open it moves to the card; Escape closes it
 //   lib:reflow           a right-click on a card in a scrolled grid while the sidebar is closed: the docked sidebar re-fits the
 //                        grid's columns, the card stays in view near where it was (real input events)
 //   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete from source (a Workshop item)
@@ -51,7 +52,7 @@
 //   lib:still            a `library-item-changed` (two volume keybinds on the playing item) moves nothing and replays nothing;
 //                        the slider follows (guards against a morph replay on an item's update)
 //   lib:keys             ← → ↑ ↓ move the focus between cards, Enter applies, Escape closes
-//   lib:selection        a focused card inside a Ctrl-selection: the sidebar says how many it applies to
+//   lib:selection        a card right-clicked inside a Ctrl-selection: the sidebar says how many it applies to
 //   bar:settings         a right-click on a playlist bar item opens the sidebar on it; nothing applies, no menu
 //   lib:levels           Basic hides Speed; an item with its own speed shows it anyway
 //   lib:popin            a scene's sidebar shows its body once, with its scene properties in it — nothing pops in later
@@ -195,21 +196,14 @@ app.whenReady().then(async () => {
 
     await cell("lib:click", async () => {
       await page(`m.thumb("k2").click();`);
-      const open = await page(`return await m.waitSide("library");`);
-      if (!open) return ["no Library sidebar after a click on k2"];
-      const r = await page(`await m.sleep(400); return { title: m.sideTitle(), ranges: m.side().querySelectorAll("input[type=range]").length,
-        btns: ["Open in file manager", "Delete"].filter((t) => m.sideBtn(t)), play: !!m.side().querySelector("[data-side-play], [data-side-playing]"),
-        modal: !!document.querySelector(".modal-backdrop"),
-        focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.dataset.title) };`);
       const v = [];
-      if (r.title !== "k2") v.push(`the sidebar shows "${r.title}", not k2`);
-      if (r.ranges < 2) v.push(`${r.ranges} sliders in the sidebar (volume + speed)`);
-      for (const b of ["Open in file manager", "Delete"]) if (!r.btns.includes(b)) v.push(`no "${b}" button`);
-      if (!r.play) v.push(`no Play control / Playing now badge on the picture`);
-      if (r.modal) v.push("a modal opened too");
-      if (r.focused.join() !== "k2") v.push(`focused cards: [${r.focused}]`);
       let cur = null; for (let i = 0; i < 50 && (cur = await current()) !== K[1]; i++) await sleep(100);
       if (cur !== K[1]) v.push(`the click didn't apply k2 (/current ${T(cur)})`);
+      const r = await page(`await m.sleep(300); return { side: !!document.querySelector(".side-panel"), modal: !!document.querySelector(".modal-backdrop"), menu: !!m.menu(),
+        focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.dataset.title) };`);
+      if (r.side) v.push("a plain click opened the sidebar (it only applies; a right-click opens it)");
+      if (r.modal || r.menu) v.push("a modal or menu opened too");
+      if (r.focused.length) v.push(`focused cards: [${r.focused}]`);
       await shot("lib-click");
       return v;
     });
@@ -222,6 +216,15 @@ app.whenReady().then(async () => {
       if (r.menu) v.push("a right-click opened a context menu");
       if (!r.side) return [...v, "a right-click didn't open the sidebar"];
       if (r.title !== "k3") v.push(`the right-click opened the sidebar on "${r.title}", not k3`);
+      const c = await page(`await m.sleep(400); return { ranges: m.side().querySelectorAll("input[type=range]").length,
+        btns: ["Open in file manager", "Delete"].filter((t) => m.sideBtn(t)), play: !!m.side().querySelector("[data-side-play], [data-side-playing]"),
+        modal: !!document.querySelector(".modal-backdrop"),
+        focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.dataset.title) };`);
+      if (c.ranges < 2) v.push(`${c.ranges} sliders in the sidebar (volume + speed)`);
+      for (const b of ["Open in file manager", "Delete"]) if (!c.btns.includes(b)) v.push(`no "${b}" button`);
+      if (!c.play) v.push(`no Play control / Playing now badge on the picture`);
+      if (c.modal) v.push("a modal opened too");
+      if (c.focused.join() !== "k3") v.push(`focused cards: [${c.focused}]`);
       await shot("lib-rightclick");
       // open: a right-click on another card moves the sidebar to it
       await page(`m.ctx(m.thumb("k4")); await m.sleep(300);`);
@@ -373,10 +376,11 @@ app.whenReady().then(async () => {
     });
 
     await cell("lib:selection", async () => {
-      await page(`for (const t of ["k1", "k3"]) { m.thumb(t).dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })); await m.sleep(250); } await m.sleep(300);`);
+      await page(`for (const t of ["k1", "k3"]) { m.thumb(t).dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })); await m.sleep(250); }
+        m.ctx(m.thumb("k3")); await m.waitSide("library"); await m.sleep(300);`);
       const r = await page(`return { title: m.sideTitle(), text: m.side()?.querySelector(".side-head")?.textContent ?? "" };`);
       const v = [];
-      if (r.title !== "k3") v.push(`the sidebar shows "${r.title}" after Ctrl-clicking k1, k3`);
+      if (r.title !== "k3") v.push(`the sidebar shows "${r.title}" after Ctrl-clicking k1, k3 and right-clicking k3`);
       if (!/2 selected/.test(r.text)) v.push(`the head doesn't say it applies to 2 selected ("${r.text.slice(0, 80)}")`);
       await page(`m.key("Escape"); await m.sleep(400);`);
       if (await page(`return document.querySelectorAll(".card.lib.selected").length;`)) v.push("Escape left the selection");

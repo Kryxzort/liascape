@@ -119,21 +119,22 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     return () => removeEventListener("keydown", h);
   });
 
-  // a click focuses (the sidebar shows it) — it never downloads: double-click, Enter or a download button does
   // a pointer focus with the sidebar closed: the card stays where it was while the docked sidebar re-fits the grid (gridKeys.ts)
   const focusFromCard = (pageUrl: string) => {
     if (!useStore.getState().browseFocus) keepCardInView(scrollRef.current, `br-${pageUrl}`);
     focusBrowse(pageUrl);
   };
+  // a plain click focuses (the sidebar shows it) — it never downloads: double-click, Enter or a download button does; Ctrl /
+  // Shift only select, the sidebar stays as it was (docs/decisions.md § "Left click does the tab's main action, right click
+  // opens the item sidebar"). Guard: probe-select br:plainClick, br:modClick, br:rightClickSel
   const onCardClick = (e: React.MouseEvent, w: Wallpaper) => {
-    focusFromCard(w.pageUrl);
     if (e.shiftKey && anchor.current) {
       const ids = sorted.map((x) => x.pageUrl);
       const a = ids.indexOf(anchor.current), b = ids.indexOf(w.pageUrl);
       if (a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; setSel(new Set(ids.slice(lo, hi + 1))); }
-    } else if (e.ctrlKey || e.metaKey) {
+    } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
       const n = new Set(sel); if (n.has(w.pageUrl)) n.delete(w.pageUrl); else n.add(w.pageUrl); setSel(n); anchor.current = w.pageUrl;
-    } else { anchor.current = w.pageUrl; if (sel.size) setSel(new Set()); }
+    } else { focusFromCard(w.pageUrl); anchor.current = w.pageUrl; if (sel.size) setSel(new Set()); }
   };
 
   const bulkDownload = () => {
@@ -152,7 +153,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const cardCancel = useStableFn((x: Wallpaper) => cancelDownload(x.pageUrl));
   const cardClick = useStableFn(onCardClick);
   const cardDownload = useStableFn(dlApply);
-  const cardContext = useStableFn((x: Wallpaper) => focusFromCard(x.pageUrl)); // right-click → the sidebar too
+  const cardContext = useStableFn((x: Wallpaper) => focusFromCard(x.pageUrl)); // right-click → the sidebar, the selection kept
   // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
   const onMarquee = useMarquee(scrollRef, { prefix: "br-", sel, setSel, anchor });
   const cardMiddle = useStableFn((x: Wallpaper) => x.pageUrl.startsWith("http") // middle-click → open source page/location
