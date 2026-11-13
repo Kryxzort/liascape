@@ -91,6 +91,8 @@ for f in $FILES; do
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
     app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
+    # the shell itself: no matrix cell loads main.js; probe-recover.js runs it as a child per cell
+    app/shell/main.js|app/shell/renderer-recovery.js|app/shell/probe-recover.js) echo "  $f → nothing in the matrix (--probe probe-recover.js)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
     # the pixel-centre judge for round icon buttons: the probes that call it
     app/shell/pixel-centre.js) echo "  $f → nothing in the matrix (--probe probe-icons.js --only icon:centre, probe-sidebar.js --only look:iconCentre, probe-filters.js --only wf:emblem:centre)" >&2 ;;

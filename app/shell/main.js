@@ -159,6 +159,8 @@ function openWindow(loadUrl) {
   win.on("minimize", () => sendActive(false));
   win.on("show", () => sendActive(true));
   win.on("restore", () => sendActive(true));
+  // a page whose renderer dies or hangs comes back by itself; each reload carries the token the backend has now
+  require("./renderer-recovery").recoverRenderer(win, () => withToken(loadUrl));
   win.loadURL(loadUrl);
 }
 
