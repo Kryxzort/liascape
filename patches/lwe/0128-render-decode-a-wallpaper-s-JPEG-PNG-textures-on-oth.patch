@@ -1,0 +1,409 @@
+From 6acc7f37f0017673458b1b5298cd8fbed41114e8 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 13:24:55 +0530
+Subject: [PATCH 128/128] render: decode a wallpaper's JPEG / PNG textures on
+ other threads while it builds
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A .tex holding a JPEG or PNG (FreeImage format) was decoded by stb_image inside CTexture's constructor, on the GL
+thread, one texture at a time. For a scene with large PNG textures that was the largest part of its build: perf
+(DWARF call graphs, warm `liascape-scene-worker --lwe-smoke`) put 41% of 3042492564's build in stb's PNG decoder
+(inflate 69% of it, unfiltering 25%) and 49% of 3163060610's (56 and 32 PNG textures, 52 and 63 Mpx). zlib's
+inflate is no faster than stb's here (2066 of the library's 2067 TEX PNGs decoded both ways: same pixels, same
+time), so the decode itself is the real cost; what was wasted is that it ran serially while the rest of the
+machine idled.
+
+While Project::render builds the wallpaper, RenderContext now defers the upload of every new JPEG / PNG texture:
+CTexture still generates its names and sets its parameters at once, in the same order, but hands each mipmap's
+decode to a small pool (at most 4 threads, half the cores below 8; each job owns the mipmap it reads) and uploads
+the pixels in finishUpload. Project::render calls finishTextureUploads once the wallpaper is built (and when the
+build throws), so the first frame sees every texture; getTextureID finishes a texture first, so nothing can sample
+one before its pixels are in, and finishUpload puts back the 2D texture and unpack-buffer bindings it borrows.
+Textures created later (scripts' createLayer, the album art) still decode where they are created, as before.
+DXT / raw textures are untouched (their uploads keep their place among GL_UNPACK_ALIGNMENT changes); RGBA8 rows
+read the same at any alignment.
+
+Measured (warm --lwe-smoke build_ms, the pinned core vs this, alternating, 5 runs each, the NVIDIA shader disk
+cache off): 3042492564 2881-2937 ms (median 2903) → 2145-2250 (2186); 3163060610 2258-2407 (2329) → 1815-1862
+(1818); 2828233985 814-836 (830) → 720-748 (728); 2371103399 683-703 (695) → 611-659 (622). With the disk cache
+on: 3042492564 2058 → 1331 ms, 3163060610 1612 → 1205 (medians). The main thread no longer decodes; the pool is
+done well before the build is. What is left of these builds is NVIDIA's GLSL compiler (with no disk cache),
+the WE shader text passes and glslang / SPIRV-Cross.
+
+Same output: every toGlsl input was dumped with and without this (the shader sweep: 4085 compiles, 3426 distinct
+texts; the 96 WE-ref scenes: 5119 compiles, 586 distinct) — byte-identical, same order per process, and the
+sweep's results identical. The WE-ref frames of 3042492564, 3163060610, 2828233985 and 2371103399 are
+byte-identical. Of the 96 scenes' 377 frames, 311 are identical; 64 differ between two runs of the old core as
+well; 3219908811's clock shows the second before (the build ends sooner under libfaketime); 3413117423's 1 s
+frame differs, but its frames differ between any two plain runs of either core and one run of each core gave
+byte-identical frames throughout.
+
+Origin: ours
+Why: docs/TODO.md (3042492564, 3163060610, 2828233985 still build in seconds after 0127)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Project.cpp          |   4 +
+ src/core/WallpaperEngine/Render/CTexture.cpp  | 147 ++++++++++++++++--
+ src/core/WallpaperEngine/Render/CTexture.h    |  28 +++-
+ .../WallpaperEngine/Render/RenderContext.cpp  |  15 +-
+ .../WallpaperEngine/Render/RenderContext.h    |  14 ++
+ 5 files changed, 193 insertions(+), 15 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Project.cpp b/src/core/WallpaperEngine/Project.cpp
+index 79b5081..790deb8 100644
+--- a/src/core/WallpaperEngine/Project.cpp
++++ b/src/core/WallpaperEngine/Project.cpp
+@@ -297,14 +297,18 @@ void WallpaperEngine::Project::render () {
+     if (this->renderContext == nullptr) {
+ 	// initialize render if not available
+ 	this->renderContext = std::make_unique<RenderContext> (this->context, *this->ref->assetLocator);
++	// its JPEG / PNG / … textures decode on other threads while the wallpaper builds and upload once it's built
++	this->renderContext->deferTextureUploads ();
+ 	try {
+ 	    this->wallpaper = CWallpaper::fromWallpaper (
+ 		*this->ref->wallpaper, *this->renderContext, *this->context.audio, this->mouse_input
+ 	    );
+ 	} catch (const std::exception& e) {
++	    this->renderContext->finishTextureUploads ();
+ 	    WPENGINE_HEALTH ("renderer_failed", { { "message", WallpaperEngine::Health::brief (e.what ()) } });
+ 	    throw;
+ 	}
++	this->renderContext->finishTextureUploads ();
+ 	this->wallpaper->setDestinationFramebuffer (this->framebuffer);
+ 	this->wallpaper->setFrameRate (this->frameRate);
+ 	// give hint about size to the wallpaper only if web
+diff --git a/src/core/WallpaperEngine/Render/CTexture.cpp b/src/core/WallpaperEngine/Render/CTexture.cpp
+index c583d0a..8493a1f 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.cpp
++++ b/src/core/WallpaperEngine/Render/CTexture.cpp
+@@ -8,9 +8,94 @@
+ 
+ #include <stb_image.h>
+ 
++#include <algorithm>
++#include <condition_variable>
++#include <deque>
++#include <mutex>
++#include <pthread.h>
++#include <system_error>
++#include <thread>
++
+ using namespace WallpaperEngine::Render;
+ 
+-CTexture::CTexture (RenderContext& context, TextureUniquePtr header) :
++namespace {
++DecodedTextureImage decodeImage (const MipmapSharedPtr& mipmap) {
++    DecodedTextureImage image;
++    image.width = mipmap->width;
++    image.height = mipmap->height;
++    int fileChannels;
++    image.pixels.reset (stbi_load_from_memory (
++	reinterpret_cast<unsigned char*> (mipmap->uncompressedData.get ()), mipmap->uncompressedSize, &image.width,
++	&image.height, &fileChannels, 4
++    ));
++    return image;
++}
++
++/**
++ * The threads deferred textures decode on: started as needed, at most half the cores and never more than 4 (a scene
++ * loading next to a playing one leaves the rest of the machine alone). Never destroyed: a thread may still be
++ * decoding when the process exits, and each job owns the mipmap it reads.
++ */
++class DecodePool {
++public:
++    static DecodePool& get () {
++	static auto* pool = new DecodePool ();
++	return *pool;
++    }
++
++    std::future<DecodedTextureImage> submit (std::packaged_task<DecodedTextureImage ()> job) {
++	auto future = job.get_future ();
++	{
++	    std::lock_guard lock (this->m_mutex);
++	    // more queued jobs than threads waiting for one: another thread, while there is room
++	    if (static_cast<int> (this->m_jobs.size ()) >= this->m_idle && this->m_threads < this->m_maxThreads) {
++		try {
++		    std::thread (&DecodePool::run, this).detach ();
++		    this->m_threads++;
++		} catch (const std::system_error&) {
++		    // no thread to be had: with none running, nothing would ever run the job
++		}
++	    }
++	    if (this->m_threads == 0) {
++		job ();
++		return future;
++	    }
++	    this->m_jobs.push_back (std::move (job));
++	}
++	this->m_wake.notify_one ();
++	return future;
++    }
++
++private:
++    DecodePool () :
++	m_maxThreads (std::clamp (static_cast<int> (std::thread::hardware_concurrency ()) / 2, 1, 4)) { }
++
++    void run () {
++	pthread_setname_np (pthread_self (), "wp-tex-decode");
++	for (;;) {
++	    std::packaged_task<DecodedTextureImage ()> job;
++	    {
++		std::unique_lock lock (this->m_mutex);
++		this->m_idle++;
++		this->m_wake.wait (lock, [this] { return !this->m_jobs.empty (); });
++		this->m_idle--;
++		job = std::move (this->m_jobs.front ());
++		this->m_jobs.pop_front ();
++	    }
++	    job ();
++	}
++    }
++
++    const int m_maxThreads;
++    int m_threads = 0;
++    int m_idle = 0;
++    std::mutex m_mutex;
++    std::condition_variable m_wake;
++    std::deque<std::packaged_task<DecodedTextureImage ()>> m_jobs;
++};
++} // namespace
++
++CTexture::CTexture (RenderContext& context, TextureUniquePtr header, const bool deferUpload) :
+     Helpers::ContextAware (context), m_header (std::move (header)) {
+     // ensure the header is parsed
+     this->setupResolution ();
+@@ -53,7 +138,18 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header) :
+ 	int level = 0;
+ 
+ 	for (const auto& mipmap : mipmaps) {
+-	    stbi_uc* handle = nullptr;
++	    if (this->m_header->freeImageFormat != FIF_UNKNOWN && deferUpload) {
++		this->m_pendingUploads.push_back (
++		    { index, level,
++		      DecodePool::get ().submit (std::packaged_task<DecodedTextureImage ()> ([mipmap] {
++			  return decodeImage (mipmap);
++		      })) }
++		);
++		level++;
++		continue;
++	    }
++
++	    DecodedTextureImage decoded;
+ 	    const void* dataptr = mipmap->uncompressedData.get ();
+ 	    int width = mipmap->width;
+ 	    int height = mipmap->height;
+@@ -61,12 +157,10 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header) :
+ 	    GLenum textureFormat = GL_RGBA;
+ 
+ 	    if (this->m_header->freeImageFormat != FIF_UNKNOWN) {
+-		int fileChannels;
+-
+-		dataptr = handle = stbi_load_from_memory (
+-		    reinterpret_cast<unsigned char*> (mipmap->uncompressedData.get ()), mipmap->uncompressedSize,
+-		    &width, &height, &fileChannels, 4
+-		);
++		decoded = decodeImage (mipmap);
++		dataptr = decoded.pixels.get ();
++		width = decoded.width;
++		height = decoded.height;
+ 	    } else {
+ 		if (this->m_header->format == TextureFormat_R8) {
+ 		    // red textures are 1-byte-per-pixel, so it's alignment has to be set manually
+@@ -96,16 +190,41 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header) :
+ 		    sLog.exception ("Cannot load texture, unknown format", this->m_header->format);
+ 	    }
+ 
+-	    // stbi_image buffer won't be used anymore, so free memory
+-	    if (this->m_header->freeImageFormat != FIF_UNKNOWN) {
+-		stbi_image_free (handle);
+-	    }
+-
+ 	    level++;
+ 	}
+     }
+ }
+ 
++void CTexture::finishUpload () const {
++    if (this->m_pendingUploads.empty ()) {
++	return;
++    }
++
++    // this may run in the middle of a frame (getTextureID): upload from client memory and put the bindings back
++    GLint boundTexture = 0, unpackBuffer = 0;
++    glGetIntegerv (GL_TEXTURE_BINDING_2D, &boundTexture);
++    glGetIntegerv (GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
++    if (unpackBuffer != 0) {
++	glBindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
++    }
++
++    // JPEG / PNG / … rows are RGBA8, so whatever GL_UNPACK_ALIGNMENT another texture left reads them the same
++    for (auto& pending : this->m_pendingUploads) {
++	const DecodedTextureImage image = pending.decoded.get ();
++	glBindTexture (GL_TEXTURE_2D, this->m_textureID[pending.image]);
++	glTexImage2D (
++	    GL_TEXTURE_2D, pending.level, GL_RGBA8, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
++	    image.pixels.get ()
++	);
++    }
++    this->m_pendingUploads.clear ();
++
++    if (unpackBuffer != 0) {
++	glBindBuffer (GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
++    }
++    glBindTexture (GL_TEXTURE_2D, boundTexture);
++}
++
+ CTexture::~CTexture () {
+     // first release the player to prevent using null references
+     this->m_player.reset ();
+@@ -194,6 +313,8 @@ void CTexture::setupOpenGLParameters (const uint32_t textureID) const {
+ }
+ 
+ GLuint CTexture::getTextureID (const uint32_t imageIndex) const {
++    this->finishUpload ();
++
+     // ensure we do not go out of bounds
+     if (imageIndex >= this->m_header->imageCount) {
+ 	return this->m_textureID[0];
+diff --git a/src/core/WallpaperEngine/Render/CTexture.h b/src/core/WallpaperEngine/Render/CTexture.h
+index 380740b..5198014 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.h
++++ b/src/core/WallpaperEngine/Render/CTexture.h
+@@ -6,6 +6,8 @@
+ #include "WallpaperEngine/VideoPlayback/MPV/GLPlayer.h"
+ 
+ #include <glad/glad.h>
++#include <cstdlib>
++#include <future>
+ #include <glm/vec4.hpp>
+ #include <memory>
+ #include <mpv/client.h>
+@@ -17,14 +19,30 @@ namespace WallpaperEngine::Render {
+ class RenderContext;
+ using namespace WallpaperEngine::Data::Assets;
+ using namespace WallpaperEngine::VideoPlayback::MPV;
++/** A JPEG / PNG / … mipmap decoded to RGBA8 by stb_image (null: it refused the file), freed as stbi_image_free does */
++struct DecodedTextureImage {
++    std::unique_ptr<unsigned char, void (*) (void*)> pixels { nullptr, std::free };
++    int width = 0;
++    int height = 0;
++};
+ /**
+  * A normal texture file in WallpaperEngine's format
+  */
+ class CTexture final : public TextureProvider, public Helpers::ContextAware {
+ public:
+-    explicit CTexture (RenderContext& context, TextureUniquePtr header);
++    /**
++     * @param deferUpload decode a JPEG / PNG / … texture on a pool thread and upload it in finishUpload instead of
++     * here (the texture names and parameters are still set up here)
++     */
++    explicit CTexture (RenderContext& context, TextureUniquePtr header, bool deferUpload = false);
+     ~CTexture () override;
+ 
++    /**
++     * Uploads the mipmaps still decoding (waits for them), leaving the GL bindings as they were; a no-op once done.
++     * getTextureID calls it, so nothing can sample a texture before its pixels are in
++     */
++    void finishUpload () const;
++
+     [[nodiscard]] GLuint getTextureID (uint32_t imageIndex) const override;
+     [[nodiscard]] uint32_t getTextureWidth (uint32_t imageIndex) const override;
+     [[nodiscard]] uint32_t getTextureHeight (uint32_t imageIndex) const override;
+@@ -90,5 +108,13 @@ private:
+     glm::vec4 m_resolution {};
+     /** The video player in use */
+     GLPlayerUniquePtr m_player;
++
++    struct PendingUpload {
++	uint32_t image;
++	GLint level;
++	std::future<DecodedTextureImage> decoded;
++    };
++    /** Deferred mipmaps, in the order the constructor would have uploaded them */
++    mutable std::vector<PendingUpload> m_pendingUploads;
+ };
+ } // namespace WallpaperEngine::Assets
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/RenderContext.cpp b/src/core/WallpaperEngine/Render/RenderContext.cpp
+index d0b5708..10de6f6 100644
+--- a/src/core/WallpaperEngine/Render/RenderContext.cpp
++++ b/src/core/WallpaperEngine/Render/RenderContext.cpp
+@@ -48,14 +48,27 @@ std::shared_ptr<const TextureProvider> RenderContext::resolveTexture (const std:
+ 	};
+ 
+ 	auto parsedTexture = Data::Parsers::TextureParser::parse (stream, name, metadataLoader);
+-	auto texture = std::make_shared<CTexture> (*this, std::move (parsedTexture));
++	auto texture = std::make_shared<CTexture> (*this, std::move (parsedTexture), this->m_deferTextureUploads);
+ 
+ 	this->m_textureCache.store (name, texture);
++	if (this->m_deferTextureUploads) {
++	    this->m_deferredTextures.push_back (texture);
++	}
+ 
+ 	return texture;
+     }
+ }
+ 
++void RenderContext::deferTextureUploads () { this->m_deferTextureUploads = true; }
++
++void RenderContext::finishTextureUploads () {
++    this->m_deferTextureUploads = false;
++    for (const auto& texture : this->m_deferredTextures) {
++	texture->finishUpload ();
++    }
++    this->m_deferredTextures.clear ();
++}
++
+ const Assets::AssetLocator& RenderContext::getAssetLocator () const { return this->m_locator; }
+ 
+ void RenderContext::albumArtUrlChange (std::optional<std::string>& url) {
+diff --git a/src/core/WallpaperEngine/Render/RenderContext.h b/src/core/WallpaperEngine/Render/RenderContext.h
+index 9a0bc72..2307111 100644
+--- a/src/core/WallpaperEngine/Render/RenderContext.h
++++ b/src/core/WallpaperEngine/Render/RenderContext.h
+@@ -2,6 +2,7 @@
+ 
+ #include <memory>
+ #include <optional>
++#include <vector>
+ 
+ #include "TextureCache.h"
+ namespace WallpaperEngine {
+@@ -14,6 +15,7 @@ namespace Assets {
+ class Context;
+ namespace Render {
+     class AlbumTexture;
++    class CTexture;
+     class TextureCache;
+ 
+     class RenderContext {
+@@ -26,6 +28,14 @@ namespace Render {
+ 
+ 	void albumArtUrlChange (std::optional<std::string>& url);
+ 
++	/**
++	 * From now until finishTextureUploads, a new JPEG / PNG / … texture decodes on a pool thread while the caller
++	 * goes on building: decoded one at a time on the GL thread, they are the largest part of a big scene's build
++	 */
++	void deferTextureUploads ();
++	/** Uploads every texture deferred since deferTextureUploads, in order, and stops deferring */
++	void finishTextureUploads ();
++
+     private:
+ 	/** The previous album thumbnail texture */
+ 	std::shared_ptr<const AlbumTexture> m_previousThumbnail = nullptr;
+@@ -37,6 +47,10 @@ namespace Render {
+ 	Context& m_context;
+ 	/** The asset locator used for this render context */
+ 	Assets::AssetLocator& m_locator;
++	/** New textures defer their upload (deferTextureUploads) */
++	bool m_deferTextureUploads = false;
++	/** The textures created while deferring */
++	std::vector<std::shared_ptr<const CTexture>> m_deferredTextures;
+     };
+ } // namespace Render
+ } // namespace WallpaperEngine

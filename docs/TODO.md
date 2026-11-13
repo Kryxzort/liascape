@@ -36,8 +36,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `programs.sh crash`), and the owner's calls in § 5 (count frozen onsets? start-up seam? Phase 4 vs 5?).
       Fixed on the way: the battery's late-B "handoff" check (the test) and the dropout probe's ended-A snapshot
       (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
-- [ ] Some scenes still build in 5-8 s warm with the shader-pass fix (3042492564 7.9 s, 3163060610 7.4 s, 2828233985
-      5.8 s in the WE-ref run): the cost is outside the shader-rule regexes. Profile one (perf, DWARF call graphs).
+- [ ] NVIDIA's GL shader disk cache is off when `__GL_SHADER_DISK_CACHE_PATH` names a directory that doesn't exist (the
+      driver never creates it; the common XDG tip sets it to `$XDG_CACHE_HOME/nv`), so every scene load compiles every
+      shader: 3042492564 builds in ~2.2 s instead of ~1.3 s (warm `--lwe-smoke`, deferred texture decode in). Have the
+      worker create that directory before it makes its GL context.
+- [ ] What's left of a big scene's build with the disk cache working: the WE shader text passes (~0.37 s) and glslang +
+      SPIRV-Cross (~0.25 s) of 3042492564's ~1.3 s, the same inputs at every launch. A cache of `toGlsl`'s output across
+      launches, keyed by its input text, is the candidate; decide before building it.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 

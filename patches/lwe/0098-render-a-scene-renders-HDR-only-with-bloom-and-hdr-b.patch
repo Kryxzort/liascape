@@ -1,7 +1,7 @@
 From aca1053b9b9b9c7d5ec7cffc76d30c4f775e5170 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 02:44:30 +0530
-Subject: [PATCH 098/127] render: a scene renders HDR only with bloom and hdr
+Subject: [PATCH 098/128] render: a scene renders HDR only with bloom and hdr
  both literally true, as WE's gate
 
 WE's project classifier (GH 0x14013f860) sets the renderer's HDR flag 0x2000 when scene.json's

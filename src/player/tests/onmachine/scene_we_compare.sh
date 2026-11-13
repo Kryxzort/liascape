@@ -192,12 +192,13 @@ run_all() {
             [[ -n $pt ]] && args+=(--pointer-time "$pt")
         fi
         # WE's wall time when its scene clock read 0: a frame's PNG was written ~0.1 s after the frame its strip
-        # read (scene_time); a re-encoded frame's raw copy keeps the capture's mtime
+        # read (scene_time); a re-encoded frame's raw copy keeps the capture's mtime. NO_FAKE_STAT: faked file times
+        # make every fontconfig cache look stale, and the rescan of all fonts added ~5 s to each scene's build
         local ft_env=()
         if [[ -n $faketime ]]; then
             local wall0
             wall0=$(python3 -I "$REPO/scripts/dev/we_ref_tool.py" wall0 "$REFS/$id")
-            [[ -n $wall0 ]] && ft_env=(LD_PRELOAD="$faketime" FAKETIME="@$(date -d "@$wall0" '+%Y-%m-%d %H:%M:%S')" FAKETIME_DONT_FAKE_MONOTONIC=1)
+            [[ -n $wall0 ]] && ft_env=(LD_PRELOAD="$faketime" FAKETIME="@$(date -d "@$wall0" '+%Y-%m-%d %H:%M:%S')" FAKETIME_DONT_FAKE_MONOTONIC=1 NO_FAKE_STAT=1)
         fi
         t0=$(date +%s%3N)
         env "${ft_env[@]}" LIASCAPE_SCENE_STORAGE_DIR=$out/storage LD_LIBRARY_PATH=$core_lib prlimit --core=1:1 \

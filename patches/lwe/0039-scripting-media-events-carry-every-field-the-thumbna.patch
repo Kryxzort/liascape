@@ -1,7 +1,7 @@
 From 612983bd5af72ceba65a2845659834b70b2c78fb Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 3 Nov 2026 20:17:14 +0530
-Subject: [PATCH 039/127] scripting: media events carry every field, the
+Subject: [PATCH 039/128] scripting: media events carry every field, the
  thumbnail's colours and the status
 
 The host's media notifications now give scripts what SceneScript

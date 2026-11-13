@@ -1,7 +1,7 @@
 From 5cb69c7d4a68b5c07fcc81444f803e7791ba2ab8 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 02:20:42 +0530
-Subject: [PATCH 126/127] render: a constant takes the declaration its pass
+Subject: [PATCH 126/128] render: a constant takes the declaration its pass
  compiles
 
 A shader's parameters are read from its source with every #if branch, so the vertex and fragment shaders may
