@@ -39,6 +39,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] What's left of a big scene's build with the disk cache working: the WE shader text passes (~0.37 s) and glslang +
       SPIRV-Cross (~0.25 s) of 3042492564's ~1.3 s, the same inputs at every launch. A cache of `toGlsl`'s output across
       launches, keyed by its input text, is the candidate; decide before building it.
+- [ ] Player tests aren't hermetic about NVIDIA's shader cache: the players and workers they spawn inherit the caller's
+      `__GL_SHADER_DISK_CACHE_PATH`, so a run on a desktop that sets it writes compiled shaders into that user's cache
+      folder (and now creates it). Point it into each test's temp dir (or unset it) in the spawn helpers.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
