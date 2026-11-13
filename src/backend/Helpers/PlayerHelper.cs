@@ -1454,6 +1454,7 @@ public static class PlayerHelper
             return;
         }
 
+        int shownGen = Interlocked.Increment(ref _shownGen); // a launch still waiting for its IPC no longer announces
         // Cancel any in-flight pre-launch transition from a previous switch.
         _prelaunchCts?.Cancel();
         _prelaunchCts = null;
@@ -1695,7 +1696,7 @@ public static class PlayerHelper
                     lo += $" --volume={vol}";
                     if (paused && !lo.Contains("--pause")) lo += " --pause=yes";
                     if (startSec > 0.2) lo += $" --start={startSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}";  // pre-buffer near the handoff
-                    _current = Launch(lo, path, rt);
+                    _current = Launch(lo, path, rt, shownGen);
                     _currentSpeed = spd;
                     Task.Run(() => { SetSpeed(spd); if (_isMuted) SendCommand("set_property", "mute", true); });
                     OnWallpaperChanged?.Invoke(path);
@@ -3610,7 +3611,9 @@ public static class PlayerHelper
         return null;
     }
 
-    private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null)
+    // `shownGen`: the switch this launch belongs to, for a launch that comes after its switch returned (S→V's mpvpaper-B,
+    // started under the overlay); null = a launch of its own, which is the newest thing shown.
+    private static Process? Launch(string mpvOptions, string file, TaskCompletionSource<bool>? readyTcs = null, int? shownGen = null)
     {
         // liascape-player: a cold launch = a cut to `file` (whatever was on screen was just stopped)
         if (PlayerEngine.IsLiascapePlayer)
@@ -3641,6 +3644,7 @@ public static class PlayerHelper
         var process = Process.Start(psi);
         process?.BeginOutputReadLine();
         process?.BeginErrorReadLine();
+        AnnounceWhenIpcAnswers(shownGen ?? Interlocked.Increment(ref _shownGen));
         if (readyTcs != null)
         {
             Task.Run(async () =>
@@ -3658,6 +3662,34 @@ public static class PlayerHelper
         }
         ReapExcessMpvpaper(2); // cap orphaned/excess mpvpaper (see method) → never OOM the GPU
         return process;
+    }
+
+    // Bumped by every legacy switch, stop and cold launch: the generation of what the clients were last told plays.
+    private static int _shownGen;
+
+    // A cold launch's file is announced when the switch is asked for, but /current asks mpv's IPC, which answers only
+    // 0.3–2 s later: a page that loaded in between read "nothing plays" and was never told otherwise. So say it again the
+    // moment the launch's IPC first answers. What goes out is the path mpv itself reports (what /current now says), never
+    // the launch's file, and only while no newer switch, stop or launch came since: checked and sent under _lock, which
+    // every switch and stop holds while it bumps the generation and announces, so this can never land after a newer
+    // announcement (a superseded or stopped launch says nothing). Polling stops at the first answer, a newer generation
+    // or 15 s. Guard: scripts/test-legacy-launch.sh § launch
+    private static void AnnounceWhenIpcAnswers(int gen)
+    {
+        if (OnWallpaperChanged == null) return; // a daemon or a one-shot CLI: no page listens here
+        Task.Run(async () =>
+        {
+            for (int i = 0; i < 150 && Volatile.Read(ref _shownGen) == gen; i++)
+            {
+                await Task.Delay(100).ConfigureAwait(false);
+                if (TryQueryCurrentPath() == null) continue;
+                lock (_lock)
+                {
+                    if (_shownGen == gen && TryQueryCurrentPath() is string playing) OnWallpaperChanged?.Invoke(playing);
+                }
+                return;
+            }
+        });
     }
 
     // Match processes by their FULL /proc/<pid>/cmdline (the untruncated argv[0] path) — NOT the
@@ -3731,6 +3763,7 @@ public static class PlayerHelper
         // the player process stays up
         if (PlayerEngine.IsLiascapePlayer) { StopPlaylistObserver(); LiascapePlayerMedia.QueueStop(); _current = null; return; }
         StopPlaylistObserver();
+        Interlocked.Increment(ref _shownGen); // what a launch waiting for its IPC would announce is going away
         foreach (var proc in MpvpaperProcs())
         {
             using (proc)

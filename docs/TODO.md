@@ -48,10 +48,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       triggers/actions can't express (the escape hatch, not just one more action type).
 
 ## Legacy player (current app) — small fixes
-- [ ] A page loaded during a cold mpvpaper launch (the first apply with nothing playing, or after a scene) can keep showing
-      nothing playing: `/apply` announces B at once, `/current` asks mpv's IPC socket, which isn't up yet, and nothing is
-      sent when it comes up. liascape-player sends `wallpaper-changed` at `transition.started` (matrix `load:afterApply:*`,
-      which run liascape-player only); legacy needs the same when the launch's IPC first answers (`PlayerHelper.Launch`).
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
       - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
         `duration + coverMs` for every method; `--align-a-end` only exists for full-live). So A freezes several
@@ -598,8 +594,6 @@ Two bug classes kept recurring; fix the class, not the instance:
       2026-06-20.
 - [ ] Player: with loop off, an item resumed while on its last frame comes back at position 0.0 and stays there (loop on
       restores correctly). Found by Phase 3 Task 8's restore probes.
-- [ ] Legacy: a forwarded `play` spawns `monitor-daemon` next to the backend's own monitor (fixed for liascape-player
-      only, Phase 3 Task 8).
 - [ ] Phase 3 battery findings (`docs/player/reports/phase3.md`):
   - F1: `frozen`: B's ramp-in starts 2–5 ms late in about 1 of 15 onsets (recorded on the sink; mostly S→V). At most a
     faint tick. Probably the same graph change as "F7 residual".

@@ -21,6 +21,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` Â
 - Pre-shuffle playlists in `ApplyPlaylist`; never use mpv's `--shuffle`, `--playlist=file` or `--loop-playlist` â€” the timed machinery owns rotation.
 - A videoâ†’video IPC switch carries the effective volume/speed/mute as `loadfile` per-file options, `mute=yes|no` explicitly both ways (file-local options restore the pre-file value at the next load).
 - Read `_isMuted` fresh inside the task; never capture it into a local before `Task.Run`.
+- A cold `Launch` re-announces `wallpaper-changed` with mpv's own `path` once its IPC first answers, only while `_shownGen` is unchanged (`AnnounceWhenIpcAnswers`): a page loaded during the launch can't stay on "nothing playing", and a superseded or stopped launch never announces. Guard: `scripts/test-legacy-launch.sh`.
 
 ## Timed playlist (legacy only)
 - At most one process owns the timer: `timer.pid` (daemon) / `gui_timer.pid` (GUI). A stopping backend `ReleaseTimer()`s FIRST, deletes only its OWN pid, then hands off to `timer-daemon`.
@@ -43,6 +44,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` Â
 - Classify a stream (ours / LWE / mpv / foreign) before counting its level; remember our ids until their `remove`.
 - Reset `_aboveThresholdCount` at the top of `WatchStreamsAsync`, not in `Stop()`.
 - `monitor-daemon` (app closed) is legacy only; under liascape-player the player's Signal mutes.
+- `AudioMonitor.SpawnDetachedMonitor` is a no-op while `AudioMonitor.RunsHere` (a forwarded `play` inside `serve` never adds a second monitor). Guard: `scripts/test-legacy-launch.sh`.
 
 ## Transitions (`TransitionService` + `src/native/liascape-transition`)
 - `SwitchToFile` is the one switch chokepoint; the transition hook lives there.

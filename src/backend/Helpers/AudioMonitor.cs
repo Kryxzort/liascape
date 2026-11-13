@@ -38,6 +38,10 @@ public static class AudioMonitor
             Liascape.Player.LiascapePlayerClient.Log("monitor-daemon: legacy-only — under liascape-player the player's Signal mutes with the app closed (skipped)");
             return;
         }
+        // A `serve` backend with AutoMute on runs the monitor in this process: a daemon beside it would be a second monitor
+        // on the same streams (a forwarded `play` reaches Restore here). `serve` closing stops its own first (Shutdown),
+        // then hands over. Guard: scripts/test-legacy-launch.sh § monitor
+        if (RunsHere) return;
         KillDetachedMonitor();
         try
         {
