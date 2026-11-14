@@ -108,8 +108,6 @@ interface State {
   unsub: { done: number; total: number; currentId: string; active: boolean } | null;
   // the Steam to-do (WS steam-todo; null / finished = idle) — components/SteamTodoPanel.tsx
   steamTodo: SteamTodo | null; setSteamTodo(t: SteamTodo | null): void;
-  // the background scene-loudness queue's progress (WS scene-loudness-progress; null = idle)
-  sceneLoudness: { done: number; total: number; currentId: string } | null;
   // the library's background operations running now (WS library-ops, GET /library/ops): the top bar's progress line
   libraryOps: LibraryOp[]; setLibraryOps(ops: LibraryOp[]): void;
   // the Browse sidebar's subscription toggle: a Subscribe's step per Workshop id (WS subscribe-progress; gone at its end), and
@@ -197,7 +195,6 @@ interface State {
   cancelPwLogin(): Promise<void>; onPwCode(p: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean }): void;
   onPwError(message: string): void;
   setUnsub(u: State["unsub"]): void;
-  setSceneLoudness(p: State["sceneLoudness"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
   focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void;
   setPreviewPref(side: "library" | "browse", k: PreviewKind): void;
@@ -281,7 +278,7 @@ export const useStore = create<State>((set, get) => ({
   filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false), filterDrawer: null,
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
-  steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, sceneLoudness: null, libraryOps: [],
+  steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
   themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, wallpaperPaused: false, status: "", statusPlaying: true, error: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
@@ -620,7 +617,6 @@ export const useStore = create<State>((set, get) => ({
   onPwError(message) { if (get().pwLogin) set({ pwLogin: { step: "credentials", hint: null, retry: false, busy: false, error: message } }); },
   setUnsub(u) { set({ unsub: u }); },
   setSteamTodo(t) { set({ steamTodo: t && "finished" in t && t.finished ? null : t }); },
-  setSceneLoudness(p) { set({ sceneLoudness: p }); },
   setLibraryOps(ops) { set({ libraryOps: ops }); },
 
   openExternal(body) { api.open(body).catch(() => {}); },

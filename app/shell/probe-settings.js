@@ -8,6 +8,7 @@
 //                     and "linux-wallpaperengine command" blocks
 //   preview:monitors  removing a scene monitor drops it from the linux-wallpaperengine command (the preview used to read
 //                     the settings file before the debounced save landed, so it showed the old list)
+//   hint:transition   the Transition style hint explains only the chosen style; Settings has no Pre-measure scenes row
 //   copy:sidebarPill  the Library sidebar's Workshop ID pill, which shares the feedback (hooks/useCopied.ts), still flips and copies
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
@@ -311,6 +312,21 @@ app.whenReady().then(async () => {
       if (!(await waitFor(async () => { const s = (await lwe()) ?? ""; return /PRB-A/.test(s) && !/PRB-B/.test(s); }, 4000)))
         v.push(`after removing PRB-B the command still reads ${J(await lwe())}`);
       await setSettings({ SceneMonitors: [], AllowScenes: false, SettingsLevel: "standard" });
+      return v;
+    });
+
+    await cell("hint:transition — the Transition style hint says what the chosen style does; no Pre-measure scenes row", async () => {
+      const v = [];
+      const want = { reveal: /Reveal: the old one holds its last frame/, frozen: /Frozen: both hold still/, "full-live": /Full-live: both keep playing/ };
+      for (const [m, re] of Object.entries(want)) {
+        await setSettings({ SettingsLevel: "expert", TransitionMethod: m }); await load();
+        const h = await js(`return window.__x.row("Transition style")?.querySelector(".shint")?.textContent ?? null`);
+        if (!re.test(h ?? "")) v.push(`${m}: the hint reads ${J(h)}`);
+        for (const [o, ro] of Object.entries(want)) if (o !== m && ro.test(h ?? "")) v.push(`${m}: the hint also explains ${o}`);
+      }
+      await setSettings({ NormalizeAudio: true }); await load();
+      if (await has("Pre-measure scenes")) v.push("a Pre-measure scenes row is still there (imports and syncs measure scenes by themselves)");
+      await setSettings({ TransitionMethod: "reveal", NormalizeAudio: false, SettingsLevel: "standard" });
       return v;
     });
 

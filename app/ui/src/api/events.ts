@@ -24,7 +24,7 @@ export type LiascapeEvent =
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)
   | { type: "library-item-changed"; payload: { path: string } & Partial<Pick<LibraryItem, "volumeOverride" | "hasCrashed" | "loudnessLufs" | "loudnessEstimated" | "loudnessSeconds" | "loudnessConfidence" | "loudnessNote">> }
-  // the background scene-loudness queue (Settings → Sound → "Pre-measure scenes", imports): shaped like unsub-progress
+  // the background scene-loudness queue (imports and syncs measure every scene not measured yet): shaped like unsub-progress
   | { type: "scene-loudness-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; cancelled?: boolean } }
   // the library's background operations running now, the whole list on each change (the top bar's progress line)
   | { type: "library-ops"; payload: { ops: LibraryOp[] } }

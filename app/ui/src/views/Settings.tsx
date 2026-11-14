@@ -33,43 +33,13 @@ function useS() {
   return { g, set: setSetting, settings };
 }
 
-// Settings → Playback (under "Normalize audio", liascape-player only): a scene's loudness can be ESTIMATED from its
-// files before it ever plays (`liascape-player scene-loudness`, a background queue in the backend — one nice'd child at
-// a time; also run on import). Estimate = every scene without an estimate for its current properties; Recalculate all
-// = every scene again; Cancel stops the queue (what's done stays). Progress from WS scene-loudness-progress (the store).
-function SceneLoudnessRow() {
-  const prog = useStore((s) => s.sceneLoudness);
-  const [failed, setFailed] = useState<{ path: string; error: string }[]>([]);
-  const [note, setNote] = useState("");
-  const running = prog != null;
-  useEffect(() => {
-    if (running) return;
-    let alive = true;
-    api.sceneLoudnessStatus().then((st) => {
-      if (!alive) return;
-      setFailed(st.failed);
-      if (st.running) useStore.getState().setSceneLoudness({ done: st.done, total: st.total, currentId: st.current?.split("/").pop() ?? "" });
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, [running]);
-  const start = (force: boolean) => {
-    setNote("");
-    api.sceneLoudnessEstimate(force).then((r) => { if (r.queued === 0) setNote("Every scene is already measured."); }).catch((e) => setNote(String(e)));
-  };
-  const hint = "measures a scene's loudness before it ever plays, so it's evened out from the first second. New scenes get measured when they're added."
-    + (running ? ` Measuring ${prog!.done} of ${prog!.total}${prog!.currentId ? ` (${prog!.currentId})` : ""}…`
-      : note ? ` ${note}` : failed.length ? ` ${failed.length} couldn't be measured (not a scene, or incomplete).` : "");
-  return (
-    <Row label="Pre-measure scenes" hint={hint} wk="normalizeAudio" lv="standard">
-      {running
-        ? <button className="btn ghost" data-scene-loudness="cancel" onClick={() => api.sceneLoudnessCancel().catch(() => {})}>Cancel</button>
-        : <>
-          <button className="btn ghost" data-scene-loudness="estimate" title="measure every scene not measured yet" onClick={() => start(false)}>Measure new</button>
-          <button className="btn ghost" data-scene-loudness="recalculate" title="measure every scene again" onClick={() => start(true)}>Measure all again</button>
-        </>}
-    </Row>
-  );
-}
+// "Transition style": the row's hint says what the CHOSEN style does (one style at a time reads easier than all three).
+// Guard: probe-settings hint:transition
+const TRANSITION_STYLE: Record<string, string> = {
+  reveal: "Reveal: the old one holds its last frame while the new one plays in, like Wallpaper Engine.",
+  frozen: "Frozen: both hold still until it's done, the old one on its last frame and the new one on its first.",
+  "full-live": "Full-live: both keep playing through it. The heaviest, noticeable at 4K.",
+};
 
 const fmtBytes = (b: number) => b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB`
   : b >= 1 << 20 ? `${Math.round(b / (1 << 20))} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
@@ -367,7 +337,6 @@ export const Settings = memo(function Settings() {
 
   const settingsAll = useStore((s) => s.settings) ?? {};
   const level = levelOf(settingsAll.settingsLevel);
-  const atLeast = (l: Level) => rank(level) >= rank(l);
   const hidden = hiddenChanged(settingsAll, level);
   // a playlist is playing now → the start-mode hint says a change waits for its next start
   const playlistPlaying = useStore((s) => s.playlist.length > 1 && !!s.playingPath && s.playlist.includes(s.playingPath));
@@ -440,7 +409,6 @@ export const Settings = memo(function Settings() {
           <Combo value={g("normalizeTargetLufs", -14) as number} min={-70} max={0} step={1}
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
-        {liascapeActive && !mute && g("normalizeAudio", false) && atLeast("standard") && <SceneLoudnessRow />}
       </Section>
 
       <Section title="Auto-mute" icon={<VolumeX size={15} />}>
@@ -596,7 +564,7 @@ export const Settings = memo(function Settings() {
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
         {/* four ways, one radio group (docs/decisions.md § "Offer four Workshop download modes, the user's choice") — each
             route its own radio, never a switch inside another or a silent fallback */}
-        <Row label="Use the Steam app" hint="like Wallpaper Engine does it. Cleanest, but needs Wallpaper Engine. You get a live progress bar, but Steam shows you as playing Wallpaper Engine for a few seconds while it downloads." wk="workshopDownloadMode">
+        <Row label="Use the Steam app" hint="like Wallpaper Engine does it, with a live progress bar. Needs Wallpaper Engine, and Steam shows you playing it for a few seconds." wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
         <Row label="Open in the Steam app" hint="opens the wallpaper's page in Steam. You subscribe there and it downloads here.">
           <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>
@@ -654,9 +622,9 @@ export const Settings = memo(function Settings() {
               options={[{ value: "legacy", label: "Legacy" }, { value: "liascape-player", label: "liascape-player (experimental)" }]} />
           </Row>;
         })()}
-        <Row label="Transition style" hint="how transitions play. Reveal: the old one freezes on its last frame and the new one plays live (like Wallpaper Engine). Frozen: both hold still during the transition, the old one on its last frame and the new one on its first. Full-live: both keep playing (heavy at 4K)." rk="transitionMethod">
+        <Row label="Transition style" hint={"how one wallpaper changes to the next. " + (TRANSITION_STYLE[g<string>("transitionMethod", "reveal")] ?? TRANSITION_STYLE.reveal)} rk="transitionMethod">
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
-            options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
+            options={[{ value: "reveal", label: "Reveal" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
         </Row>
         {/* only the legacy transition helper reads it (TransitionService --lag-offset); hidden, the value stays saved.
             Guard: probe-settings nudge:engine */}
