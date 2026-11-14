@@ -13,6 +13,34 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        parameters, so it isn't cached), and a first-ever load's NVIDIA compiles (~0.28 s, then its disk cache). A
        video texture's first decoded frame isn't part of the first frame: 3426575339 (all video) is still black 1 s
        after it in 2 of 51 loads.
+51. [ ] (owner) Workshop wallpapers live in the Library by default: "Import new Workshop wallpapers"
+       (AutoAddWeWallpapersToLibrary) defaults on (a settings file without the key gets it on; one with false keeps
+       false). While it's on, a Workshop item in the Library has no plain Delete: its actions are "Unsubscribe" (today's
+       delete + unsubscribe, Undo subscribes again) and "Unsubscribe without deleting" (unsubscribe-keep: it stays as the
+       library's own copy, a plain local item from then on). The card's trash button, the Delete key and the selection
+       toolbar follow (a mixed selection: Workshop items unsubscribe, the rest delete). Off = today's Delete /
+       "Delete and unsubscribe", for users who want the control.
+       The Browse sidebar follows: with auto-import on and the "Subscribe" download mode, a subscription lands in the
+       library anyway, so "Download" and the subscription card's "Subscribe" are one action: the buttons read
+       "Subscribe & Apply" and "Subscribe", and the card only shows once subscribed (its state and Unsubscribe /
+       right-click keep). Other download modes (steamcmd copy, the Steam app / page) keep "Download" and the card.
+53. [ ] (owner) Download without subscribing, from a right-click: the Browse sidebar's download / subscribe button
+       (and "& Apply") gets a right-click menu (components/ContextMenu.tsx, as Unsubscribe's) with "Download without
+       subscribing" (+ "…and apply"): a one-off copy into the library, never subscribed, never auto-updated. It uses
+       whatever the user has, best first: a direct download from Steam's content servers with the signed-in session
+       (SteamKit2, already a dependency: the item's UGC manifest — no steamcmd binary), else steamcmd when it's set
+       up and logged in, else the option says what's missing. The copy is a plain library item (Delete deletes; no
+       Unsubscribe). After #51 and #52 (same sidebar).
+55. [ ] (owner) The Library sidebar shows #52's Workshop features for a Workshop item too: favourite, comments (+ post),
+       the creator with browse-by-creator (opens Browse on them). Reuse #52's components; they sit below the scene
+       properties (#54), with its stat pills: current subscribers and favourites (no views). Every Library item
+       shows its size on disk. After #52.
+56. [ ] (owner) Long titles and copying text. The sidebar heading (components/SidePanel.tsx h2, clamped to 2 lines)
+       unfolds to the full title on a click and folds back on another (a morph; motion off: a fade). The title and
+       the creator's name (#52) can be copied on both tabs: selectable text plus a small copy control that shows on
+       hover / focus, reusing CopyButton / useCopied (design.md § Reuse first), "Copied" feedback like the ID pill.
+       Browse cards show 2 title lines like Library cards (`.title` is 1 line today; the card keeps its
+       aspect-ratio height, so the grid doesn't reflow). After #52 (it adds the creator and edits the Browse sidebar).
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the

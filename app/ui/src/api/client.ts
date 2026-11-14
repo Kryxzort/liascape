@@ -46,6 +46,9 @@ export async function clipInfo(path: string, w: number, h: number, q: ClipQualit
 // API: each quality's fps cap and its disk cost per wallpaper (MB: the store's median full clip, else a typical one) — the
 // backend's own table (/clip/qualities), for Settings' card preview caption
 export type ClipQualityInfo = { name: ClipQuality; fps: number; mb: number; measured: boolean };
+// one cache Settings → Housekeeping can clear (AppOps.CacheCategories): what a clear would free now, and after one what it freed
+export type CacheSize = { id: string; bytes: number; count: number };
+export type CacheCleared = CacheSize & { freedBytes: number };
 export const clipQualities = () => jget<{ qualities: ClipQualityInfo[] }>("/clip/qualities").then((r) => r.qualities);
 export const clipFile = (path: string, v: string) => withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&v=${encodeURIComponent(v)}`);
 // API: the app went inactive with these clip boxes last seen off screen (the backend shrinks a clip 2x wider than needed),
@@ -88,8 +91,18 @@ export const CLIENT_ID = globalThis.crypto?.randomUUID?.() ?? Math.random().toSt
 
 async function jget<T>(path: string): Promise<T> {
   const r = await fetch(`${API}${path}`, { headers: authHeaders() });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) throw await apiError(path, r);
   return r.json();
+}
+// API: a refused request's {error} words, its status, and `signIn` — the action needs the Steam sign-in (the UI's "Sign in to …")
+export class ApiError extends Error {
+  readonly status: number; readonly signIn: boolean;
+  constructor(message: string, status: number, signIn = false) { super(message); this.status = status; this.signIn = signIn; }
+}
+async function apiError(path: string, r: Response): Promise<ApiError> {
+  let body: { error?: string; signIn?: boolean } | null = null;
+  if (r.headers.get("content-type")?.includes("json")) { try { body = await r.json(); } catch { /* not JSON after all */ } }
+  return new ApiError(body?.error ?? `${path} → ${r.status}`, r.status, body?.signIn === true);
 }
 // WS steam-todo / GET /steam-todo (Web/SteamTodo.cs): the current entry + the count, or `finished` (idle). `delivered` = Steam
 // already has the current one (its download finished) — still the user's Next; `message` = the Steam app couldn't be opened /
@@ -112,11 +125,7 @@ async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSigna
     signal,
   });
   // an error the backend explains ({error}: e.g. Steam's cooldown — "try again in N min") is shown as its own words
-  if (!r.ok) {
-    let msg: string | null = null;
-    if (r.headers.get("content-type")?.includes("json")) { try { msg = (await r.json())?.error ?? null; } catch { /* not JSON after all */ } }
-    throw new Error(msg ?? `${path} → ${r.status}`);
-  }
+  if (!r.ok) throw await apiError(path, r);
   return (r.headers.get("content-type")?.includes("json") ? r.json() : undefined) as Promise<T>;
 }
 
@@ -133,6 +142,16 @@ export interface WorkshopFilter {
   // default is "any" (docs/decisions.md § "AND Workshop features, OR genres, each switchable") — only these two groups have the choice
   featureMatch: "all" | "any"; genreMatch: "all" | "any";
 }
+// API: POST /browse `list` (Models/WorkshopList.cs): which Workshop items Browse shows — the whole Workshop (null), the signed-in
+// account's favourites, or one creator's items (`name` / `avatar` only for the pill). A list sorts by "lastupdated" or
+// "toprated" only and has no search (Steam's client protocol can't search a user's files).
+export type WsList = { kind: "favorites" } | { kind: "creator"; id: string; name: string | null; avatar: string | null } | null;
+export type WsListSort = "lastupdated" | "toprated";
+// API: the Browse sidebar's Workshop community pieces (Web/WorkshopSocialOps.cs). A comment's text is plain text — the backend
+// takes it out of Steam's HTML — and is only ever rendered as text.
+export type WsCreator = { steamId: string; name: string | null; avatar: string | null };
+export type WsComment = { id: string; author: string; authorId: string | null; avatar: string | null; time: number; text: string };
+export type WsComments = { signedIn: boolean; owner: string; total: number; start: number; comments: WsComment[] };
 export interface Source {
   index: number; name: string; supportsSearch: boolean; supportsPagination: boolean;
   supportsSorting: boolean; supportsTagFilter: boolean; pageSizeHint: number; available: boolean;
@@ -143,7 +162,9 @@ export interface Wallpaper {
   title: string; thumbnailUrl: string; animatedThumbnailUrl: string | null; pageUrl: string;
   resolution: string | null; isScene: boolean; workshopId: string | null; addedAt: string | null;
   description: string | null; authorName: string | null; fileSizeBytes: number | null;
-  subscriptions: number | null; favorites: number | null; views: number | null; tags: string[] | null;
+  // a Workshop result's creator (a Steam ID): its sidebar's creator row and comment thread
+  authorId?: string | null;
+  subscriptions: number | null; favorites: number | null; tags: string[] | null;
   // Workshop results: the item's YouTube trailer when known, and whether the backend looked it up (none ≠ not checked)
   youtubeUrl?: string | null; trailerKnown?: boolean;
   // the local Wallpaper Engine folder's items: project.json's age rating (a Workshop result's is in its tags)
@@ -154,7 +175,7 @@ export interface Detail {
   referrer: string | null; isScene: boolean; workshopId: string | null; isWorkshopAcquire: boolean;
   resolution: string | null; ageRating: string | null; youtubeUrl: string | null; pageUrl: string | null;
   authorName: string | null; description: string | null; fileSizeBytes: number | null;
-  subscriptions: number | null; favorites: number | null; views: number | null; tags: string[] | null;
+  subscriptions: number | null; favorites: number | null; tags: string[] | null;
 }
 export interface LibraryItem {
   title: string; videoPath: string; thumbnailPath: string | null; animatedThumbnailPath: string | null;
@@ -164,7 +185,7 @@ export interface LibraryItem {
   speedOverride: number | null; addedAt: string;
   resolution: string | null; ageRating: string | null; youtubeUrl: string | null; pageUrl: string | null;
   authorName: string | null; description: string | null; fileSizeBytes: number | null;
-  subscriptions: number | null; favorites: number | null; views: number | null; tags: string[] | null;
+  subscriptions: number | null; favorites: number | null; tags: string[] | null;
   // a scene's loudness under liascape-player (its current audio configuration): the applied LUFS, estimated (the
   // offline estimate — not played in this configuration yet) or measured (loudnessSeconds of audible play), the
   // estimate's confidence and, when low, its first note. null for a video / nothing known.
@@ -213,8 +234,8 @@ export interface Theme {
 
 export const api = {
   sources: () => jget<Source[]>("/sources"),
-  browse: (source: number, page: number, query?: string, filter?: WorkshopFilter) =>
-    jpost<Wallpaper[]>("/browse", { source, page, query, filter }),
+  browse: (source: number, page: number, query?: string, filter?: WorkshopFilter, list?: { kind: string; id?: string; sort: WsListSort }) =>
+    jpost<Wallpaper[]>("/browse", { source, page, query, filter, list }),
   detail: (source: number, result: Wallpaper) => jpost<Detail>("/detail", { source, result }),
   settings: () => jget<Record<string, unknown>>("/settings"),
   monitors: () => jget<{ name: string; refreshHz: number; primary: boolean }[]>("/monitors"),
@@ -230,9 +251,10 @@ export const api = {
   lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
   importFile: (path: string, title: string) => jpost<LibraryItem>("/library/import", { path, title }),
   libraryClear: () => jpost("/library/clear"),
-  // API: the thumbnail cache (ServerHost /cache/size, /cache/clear — AppOps.ThumbCacheFiles says what's in it)
-  cacheSize: () => jget<{ bytes: number; count: number }>("/cache/size"),
-  clearCache: () => jpost<{ freedBytes: number; count: number }>("/cache/clear"),
+  // API: the caches Settings → Housekeeping clears (ServerHost /cache/size, /cache/clear; ids and folders: AppOps.CacheCategories).
+  // A clear names its ids (an unknown one → 400); each answer says what it freed and what the cache still holds.
+  cacheSize: () => jget<{ categories: CacheSize[] }>("/cache/size"),
+  clearCache: (ids: string[]) => jpost<{ categories: CacheCleared[]; freedBytes: number; count: number }>("/cache/clear", { ids }),
   themes: () => jget<Theme[]>("/themes"),
   library: () => jget<LibraryItem[]>("/library"),
   libraryDelete: (item: LibraryItem) => jpost("/library/delete", item),
@@ -301,6 +323,15 @@ export const api = {
     jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),
   workshopUnsubscribe: (workshopId: string, title: string) =>
     jpost<{ inLibrary: boolean; batch: string | null }>("/workshop/unsubscribe", { workshopId, title }),
+  // the Browse sidebar's creator, favourite and comments; favourite / post without a sign-in → ApiError.signIn
+  workshopCreator: (id: string, owner?: string | null) =>
+    jget<WsCreator>(`/workshop/creator?id=${encodeURIComponent(id)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}`),
+  workshopFavorite: (id: string) => jget<{ signedIn: boolean; favorited: boolean | null }>(`/workshop/favorite?id=${encodeURIComponent(id)}`),
+  workshopSetFavorite: (workshopId: string, favorite: boolean) => jpost<{ favorited: boolean }>("/workshop/favorite", { workshopId, favorite }),
+  workshopComments: (id: string, owner: string | null | undefined, start: number, count: number) =>
+    jget<WsComments>(`/workshop/comments?id=${encodeURIComponent(id)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}&start=${start}&count=${count}`),
+  workshopPostComment: (workshopId: string, owner: string | null | undefined, text: string, count: number) =>
+    jpost<WsComments>("/workshop/comment", { workshopId, owner, text, count }),
   // "Unsubscribe without deleting": its own route; the library copy is kept (kept = links turned into the library's own copy)
   workshopUnsubscribeKeep: (workshopId: string, title: string) =>
     jpost<{ inLibrary: boolean; kept: number }>("/workshop/unsubscribe-keep", { workshopId, title }),

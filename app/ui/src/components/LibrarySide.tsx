@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Hash, Check, Repeat } from "lucide-react";
+import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
@@ -11,7 +11,7 @@ import { scenePropsCache } from "./scenePropsCache";
 import { sideTags } from "./sideTags";
 import { useMotion } from "./motion";
 import { useLinger } from "../hooks/useLinger";
-import { useCopied } from "../hooks/useCopied";
+import { WorkshopIdPill } from "./WorkshopIdPill";
 import { snapFlip, glideFlip } from "./flipGlide";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
@@ -199,9 +199,6 @@ export function LibrarySide({
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
   const showLoud = !!loud && at("standard");
   const steam = item.pageUrl ?? (item.workshopId ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}` : null);
-  // keyed by the ID copied, so switching items never carries "Copied" over
-  const [copiedId, copy] = useCopied();
-  const copied = !!item.workshopId && copiedId === item.workshopId;
 
   return (
     <>
@@ -220,25 +217,14 @@ export function LibrarySide({
           {item.resolution && <span className="side-pill"><Monitor size={13} /> {item.resolution}</span>}
           {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
           {/* the Workshop ID: a pill that copies itself (a "Details" card for one property looks odd) */}
-          {item.workshopId && at("standard") && (
-            // both faces share one grid cell (index.css .xfade): the wider sets the pill's width in either state, so "Copied"
-            // never changes it and the row never re-wraps; the hidden face is aria-hidden and the name is the aria-label
-            // Guard: probe-steam side:idPill:still
-            <button className={`side-pill copy${copied ? " done" : ""}`} data-side-row="workshop-id" data-copied={copied ? "" : undefined}
-              title="Copy the Workshop ID" aria-label={`Workshop ID ${item.workshopId} — ${copied ? "copied" : "copy"}`}
-              onClick={() => copy(item.workshopId!)}>
-              <span className="xfade">
-                <span data-off={copied ? "" : undefined} aria-hidden={copied}><Hash size={13} /> {item.workshopId}</span>
-                <span data-off={copied ? undefined : ""} aria-hidden={!copied}><Check size={13} className={copied ? "ico-pop" : undefined} /> Copied</span>
-              </span></button>
-          )}
+          {item.workshopId && at("standard") && <WorkshopIdPill id={item.workshopId} />}
         </div>
         {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
         {/* the crash mark, as a notice block of the body (the tiles' material, a danger stripe) with its own Clear */}
         {crash.value && (
           <div className={`side-crash${crash.closing ? " leaving" : ""}`} data-side-crash role="status">
             <span className="side-crash-ico"><AlertTriangle size={16} /></span>
-            <span className="side-crash-text">This scene crashed the player — it won't be played</span>
+            <span className="side-crash-text">This scene crashed the player — rotations skip it; a click still plays it</span>
             <button className="mini side-crash-clear" data-side-crash-clear aria-label="Clear the crash mark" disabled={crash.closing}
               onClick={clearCrash}>Clear</button>
           </div>

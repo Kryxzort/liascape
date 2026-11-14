@@ -22,6 +22,5 @@ public class WallpaperDetail
     public long? FileSizeBytes { get; init; }
     public long? Subscriptions { get; init; }
     public long? Favorites { get; init; }
-    public long? Views { get; init; }
     public string[]? Tags { get; init; }
 }

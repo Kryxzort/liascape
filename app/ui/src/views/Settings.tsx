@@ -19,6 +19,7 @@ import { ROT_HINT } from "../components/rotHint";
 import { WarnIcon } from "../components/FeatureWarn";
 import { HealthCtx, healthWarnings } from "../components/featureHealth";
 import { CopyButton } from "../components/CopyButton";
+import { useMotion } from "../components/motion";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
@@ -73,33 +74,122 @@ function SceneLoudnessRow() {
 const fmtBytes = (b: number) => b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB`
   : b >= 1 << 20 ? `${Math.round(b / (1 << 20))} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
 
-// Settings → Housekeeping: the thumbnail cache. The words say what a clear deletes (AppOps.ThumbCacheFiles: the cards' saved
-// stills, GIF previews and Workshop folder pictures — never the preview clips); beside the button, its size on disk, then
-// what the clear freed (the two cross-fade in one cell, `.xfade`). Guard: probe-settings cache:size, cache:clear
-function ThumbCacheRow() {
+// Settings → Housekeeping: the caches a user can clear, one line each (its words say what goes and what it costs to make
+// again), its size and a tick, then "Clear selected". The ids and folders are the backend's (AppOps.CacheCategories); a
+// line the backend doesn't list is left out. Every visit starts with the thumbnails ticked: the clips and measurements
+// take a while to make again, so a remembered tick would quietly redo them on the next quick thumbnail clear.
+// Guard: probe-settings cache:*
+// API: /cache/size, /cache/clear {ids}
+const CACHE_LINES: { id: string; label: string; hint: string }[] = [
+  { id: "thumbs", label: "Card stills and GIF previews", hint: "the frames and trimmed GIFs the cards show; made again as cards come on screen" },
+  { id: "we-thumbs", label: "Workshop folder thumbnails", hint: "the Wallpaper Engine folder's pictures in Browse; made again on its next visit" },
+  { id: "clips", label: "Video preview clips", hint: "the small clips the cards play; made again in the background, which takes a while" },
+  { id: "scene-loudness", label: "Scene sound measurements", hint: "each scene's sounds are measured again the next time it's estimated; the volumes it set stay" },
+  { id: "media-art", label: "Album art", hint: "the cover art scenes show for what's playing; fetched again when one shows it" },
+  { id: "shaders", label: "Scene shader cache", hint: "the shader work scenes save between loads; each scene's next load is slower while it's redone" },
+];
+const CACHE_DEFAULT_TICKS = ["thumbs", "we-thumbs"];
+const SIZE_EASE_MS = 700;
+const sizeText = (b: number) => (b > 0 ? fmtBytes(b) : "Empty");
+
+// A cache's size. A new value replaces the old in place (`.xfade`: the old words roll out as the new roll in; motion off,
+// they cross-fade); a size that shrank — after a clear — first counts down to its new value in the shown words.
+// Guard: probe-settings cache:clear:*
+type SizeFaces = { t: [string, string]; cur: -1 | 0 | 1; bytes: number | null };
+// `text` into the hidden face, which then shows: the leaving one keeps its words while it fades
+const swapIn = (f: SizeFaces, text: string, bytes: number | null): SizeFaces => {
+  const n = f.cur === 0 ? 1 : 0;
+  const t: [string, string] = [...f.t];
+  t[n] = text;
+  return { t, cur: n, bytes };
+};
+function EasedSize({ id, bytes }: { id: string; bytes: number | null }) {
+  const on = useMotion();
+  const active = useStore((s) => s.appActive);
+  const [face, setFace] = useState<SizeFaces>({ t: ["", ""], cur: -1, bytes: null });
+  const [count, setCount] = useState<{ from: number; to: number } | null>(null);
+  if (bytes != null && bytes !== face.bytes) {
+    const from = face.bytes;
+    if (from == null || bytes > from || !on || !active) { setFace(swapIn(face, sizeText(bytes), bytes)); setCount(null); }
+    else { setFace({ ...face, bytes }); setCount({ from, to: bytes }); }
+  }
+  useEffect(() => {
+    if (!count) return;
+    const shown = (text: string) => setFace((f) => {
+      const i = f.cur;
+      if (i < 0 || f.t[i as 0 | 1] === text) return f;
+      const t: [string, string] = [...f.t];
+      t[i as 0 | 1] = text;
+      return { ...f, t };
+    });
+    // COOL: the number counts down (ease-out) to what's left; at nothing, "Empty" rolls in
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / SIZE_EASE_MS), e = 1 - (1 - k) ** 3;
+      if (k < 1) { shown(fmtBytes(count.from + (count.to - count.from) * e)); raf = requestAnimationFrame(step); return; }
+      if (count.to > 0) shown(fmtBytes(count.to));
+      else setFace((f) => swapIn(f, "Empty", f.bytes));
+      setCount(null);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [count]);
+  return (
+    <span className="xfade end cache-size" data-cache-size={id}>
+      {face.t.map((t, i) => <span key={i} data-off={face.cur === i ? undefined : ""}>{t}</span>)}
+    </span>
+  );
+}
+
+function CachePicker() {
   const clearCache = useStore((s) => s.clearCache);
-  const [size, setSize] = useState<number | null>(null);
-  const [freed, setFreed] = useState<number | null>(null);
+  const [sizes, setSizes] = useState<Record<string, number> | null>(null);
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set(CACHE_DEFAULT_TICKS));
+  // what the last clear freed: shown until the ticks change (its words stay while it fades out)
+  const [freed, setFreed] = useState<{ text: string; on: boolean }>({ text: "", on: false });
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let alive = true;
-    api.cacheSize().then((r) => { if (alive) setSize(r.bytes); }).catch(() => {});
+    api.cacheSize().then((r) => { if (alive) setSizes(Object.fromEntries(r.categories.map((c) => [c.id, c.bytes]))); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  const lines = CACHE_LINES.filter((l) => sizes == null || l.id in sizes);
+  const picked = lines.filter((l) => ticked.has(l.id)).map((l) => l.id);
+  // nothing ticked, or every ticked cache already empty (or not read yet): nothing a click could free
+  const canClear = !busy && sizes != null && picked.some((id) => (sizes[id] ?? 0) > 0);
+  const tick = (id: string, on: boolean) => {
+    setTicked((t) => { const n = new Set(t); if (on) n.add(id); else n.delete(id); return n; });
+    setFreed((f) => ({ ...f, on: false }));
+  };
   const clear = async () => {
     setBusy(true);
-    const r = await clearCache();
+    const r = await clearCache(picked);
     setBusy(false);
-    if (r) setFreed(r.freedBytes); // the size keeps its words while it fades out
+    if (!r) return;
+    setSizes((s) => ({ ...s, ...Object.fromEntries(r.categories.map((c) => [c.id, c.bytes])) }));
+    setFreed({ text: r.freedBytes > 0 ? `Freed ${fmtBytes(r.freedBytes)}` : "Nothing to free", on: true });
   };
   return (
-    <Row label="Clear thumbnails and GIF previews" hint="the copies saved on disk for the cards; they're fetched or made again as needed. Video preview clips aren't touched.">
-      <span className="xfade end cache-note" data-cache-note>
-        <span data-size data-off={size == null || freed != null ? "" : undefined}>{size == null ? "" : size > 0 ? fmtBytes(size) : "Empty"}</span>
-        <span data-freed data-off={freed == null ? "" : undefined}>{freed == null ? "" : freed > 0 ? `Freed ${fmtBytes(freed)}` : "Nothing to free"}</span>
-      </span>
-      <button className="btn ghost" data-cache-clear disabled={busy || size === 0 || freed != null} onClick={clear}>Clear Cache</button>
-    </Row>
+    <div className="cache-pick" data-cache-pick>
+      <Row label="Clear cached files" hint="copies the app makes again when it needs them; logs, settings and your library are never touched">{null}</Row>
+      {lines.map((l) => (
+        <label key={l.id} className="srow toggle cache-line" data-cache-line={l.id}>
+          <div className="slabel">
+            <span className="slabel-row">{l.label}</span>
+            <span className="shint">{l.hint}</span>
+          </div>
+          <div className="sctl">
+            <EasedSize id={l.id} bytes={sizes?.[l.id] ?? null} />
+            <input type="checkbox" checked={ticked.has(l.id)} onChange={(e) => tick(l.id, e.target.checked)} />
+          </div>
+        </label>
+      ))}
+      <div className="cache-foot">
+        <span className="cache-freed" data-cache-freed data-off={freed.on ? undefined : ""}>{freed.text}</span>
+        <button className="btn ghost" data-cache-clear disabled={!canClear} onClick={clear}>Clear selected</button>
+      </div>
+    </div>
   );
 }
 
@@ -609,7 +699,7 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Housekeeping" icon={<LibraryIcon size={15} />}>
-        <ThumbCacheRow />
+        <CachePicker />
         <Row label="Reset all settings" hint="every setting back to its default" lv="standard">
           <div className="hms">
             {wipeArm < 0 && <button className="btn danger" onClick={() => setWipeArm(3)}>Reset Settings</button>}

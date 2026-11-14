@@ -3171,7 +3171,8 @@ C["trash:playingScene"] = { states: ["scene", "sceneS"], switch: true, async run
   }, check: (c) => [...afterTrash(c, SC[0]), ...(c.aGone ? [] : [`s1's worker ${c.aPid} still runs after it was trashed`])] };
 
 // a scene that crashes (s3: 1.5 s after every start) played from the playlist bar: broken after 3 restarts → marked
-// crashed in its index entry, its card shows it, the rotation advances to the playlist bar's next (s1)
+// crashed in its index entry, its card shows it, the rotation advances to the playlist bar's next (s1); a plain click
+// on its card still applies it (a user's pick plays a crashed scene; only rotations skip it)
 C["crash:scene"] = { states: ["scene"], switch: true, exp: { paused: false },
   allowErr: (e) => String(e.reason ?? "").includes(SC_KEY(SC[2])), // "scene worker broken (crash record …/900000003-….json)"
   async pre() { await post("/playlist/state", { videoPaths: [SC[2], SC[0]], settings: PS(), name: null }); },
@@ -3181,12 +3182,16 @@ C["crash:scene"] = { states: ["scene"], switch: true, exp: { paused: false },
     c.advanced = await waitSettled(12000, SC[0]);
     c.card = await waitFor(() => ui(`return !!m.card("s3")?.classList.contains("crashed");`), 5000, 100);
     c.broken = (await scLogs("source.broken")).filter((e) => e.path === SC[2]);
+    c.cur1 = (await http("GET", "/current")).json?.path;
+    await ui(`m.click(m.card("s3")?.querySelector(".thumb-wrap"), "card s3");`);
+    c.reapplied = await waitFor(async () => (await http("GET", "/current")).json?.path === SC[2], 8000, 150);
   }, check(c) {
     const v = [];
     if (!c.broken.length) v.push("no source.broken for s3");
     if (!c.marked) v.push(`s3 not marked crashed in its index entry (${JSON.stringify(readScIndex()[SC_KEY(SC[2])])})`);
     if (!c.card) v.push("the UI doesn't show s3's card as crashed");
-    if (c.after.cur?.path !== SC[0]) v.push(`after s3 broke: /current ${TITLE(c.after.cur?.path)}, expected s1 (the playlist bar's next)`);
+    if (c.cur1 !== SC[0]) v.push(`after s3 broke: /current ${TITLE(c.cur1)}, expected s1 (the playlist bar's next)`);
+    if (!c.reapplied) v.push("a plain click on the crashed s3's card didn't apply it");
     return v;
   } };
 

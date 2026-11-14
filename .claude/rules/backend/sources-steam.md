@@ -9,7 +9,10 @@ paths:
   - "src/backend/Helpers/Workshop*.cs"
   - "src/backend/Web/Steam*.cs"
   - "src/backend/Web/WorkshopSubOps.cs"
+  - "src/backend/Web/WorkshopSocialOps.cs"
+  - "src/backend/Models/WorkshopList.cs"
   - "scripts/test-steam-signin.sh"
+  - "scripts/test-workshop-social.sh"
   - "scripts/test-fixtures/**"
 ---
 
@@ -65,5 +68,14 @@ choices here: `docs/decisions.md` § Steam & sources.
 - The Browse sidebar's Unsubscribe of a library item = Delete from source (trash + unsubscribe, undoable); its right-click "Unsubscribe without deleting" is its own route, `POST /workshop/unsubscribe-keep` (`WorkshopSubOps.UnsubscribeKeepAsync`), which never trashes or deletes: the library's copy is made first, and a failed copy unsubscribes nothing. Guard: `test-steam-signin.sh` § 3 i.
 - "Open on Steam" → `POST /steam/open-page` (`steam://url/CommunityFilePage/<digits>`); it is not a to-do entry.
 
+## Workshop community: favourites, comments, creators (`Helpers/SteamCommunity.cs`, `Web/WorkshopSocialOps.cs`)
+- Reading works signed out (comments, a profile's XML); favourite / unfavourite and posting a comment need the sign-in's cookie and answer 403 `{error, signIn: true}` without one, sending nothing.
+- Every call goes through `SteamGate` (Interactive); the UI asks only for what the user looks at (WorkshopSocial.tsx: after the sidebar settles, comments once in view) and keeps answers for the session; the backend keeps profiles per run.
+- Comment HTML is Steam's, untrusted: only plain text, a name, an http(s) avatar URL, ids and times leave the backend (`ParseComments`); the UI renders them as text only.
+- A user's files (a creator's, the signed-in account's favourites) come from `PublishedFile.GetUserFiles` on the anonymous CM session: sorts `lastupdated` / `score` only, no search, tags matched client-side; a private profile's favourites fall back to its community page with the cookie.
+- The item counts are Steam's current `subscriptions` / `favorited`, never the `lifetime_*` ones. Guard: `test-workshop-social.sh`.
+- Tests point `LIASCAPE_STEAM_COMMUNITY` / `LIASCAPE_STEAM_API` at `scripts/test-fixtures/fake-steam-community.mjs`; nothing in a test favourites or posts on Steam.
+
 ## Verify
+- `bash scripts/test-workshop-social.sh` — hermetic (`unshare -rn`, the fake community server, `LIASCAPE_STEAM_CM_FIXTURE` `@userfiles`).
 - `bash scripts/test-steam-signin.sh` — hermetic (stub `xdg-open`, fake Workshop folder, fake `steamclient.so` from `scripts/test-fixtures/`); includes `liascape-backend steam-selftest`, which fails if the password appears anywhere or a token reaches settings.json.

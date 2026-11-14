@@ -6,6 +6,7 @@ import { LIBRARY_TAG, facetsOf, knownTags, localMatcher, useFilterPanel } from "
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
+import { WsListNote } from "../components/WorkshopSocial";
 import { useMotion } from "../components/motion";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -174,6 +175,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     <>
     <div className="scroll br-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
+      <WsListNote />
       <div className="grid">
           {sorted.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}

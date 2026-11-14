@@ -80,7 +80,7 @@ public static class SteamWorkshopScraper
     private static string BuildUrl(WorkshopFilter filter, WorkshopTags.Plan plan, string? query, int page)
     {
         var sb = new StringBuilder(
-            "https://steamcommunity.com/workshop/browse/?appid=431960&section=readytouseitems&numperpage=30");
+            $"{SteamCommunity.Base}/workshop/browse/?appid=431960&section=readytouseitems&numperpage=30");
 
         string sort = filter.Sort switch
         {
@@ -130,6 +130,9 @@ public static class SteamWorkshopScraper
         return ids;
     }
 
+    // LIASCAPE_STEAM_API=<base URL>: the keyless web API on another server (the hermetic tests' fake)
+    private static string ApiBase => Environment.GetEnvironmentVariable("LIASCAPE_STEAM_API") is { Length: > 0 } b ? b.TrimEnd('/') : "https://api.steampowered.com";
+
     public static async Task<Dictionary<string, PublishedFileDetail>> GetDetailsBatchAsync(IReadOnlyList<string> ids)
     {
         if (ids.Count == 0) return new Dictionary<string, PublishedFileDetail>();
@@ -143,7 +146,7 @@ public static class SteamWorkshopScraper
 
         using var req = new HttpRequestMessage(
             HttpMethod.Post,
-            "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/")
+            $"{ApiBase}/ISteamRemoteStorage/GetPublishedFileDetails/v1/")
         {
             Content = new FormUrlEncodedContent(formData)
         };
@@ -191,9 +194,9 @@ public static class SteamWorkshopScraper
                 TimeUpdated = item.TryGetProperty("time_updated", out var tu)
                     ? DateTimeOffset.FromUnixTimeSeconds(tu.GetInt64()).UtcDateTime
                     : DateTime.MinValue,
-                Subscriptions = item.TryGetProperty("lifetime_subscriptions", out var subs) ? subs.GetInt64() : 0,
-                Favorites = item.TryGetProperty("lifetime_favorited", out var fav) ? fav.GetInt64() : 0,
-                Views = item.TryGetProperty("views", out var views) ? views.GetInt64() : 0,
+                // the current counts (Steam's own page shows these): the lifetime ones also count everyone who has since left
+                Subscriptions = item.TryGetProperty("subscriptions", out var subs) ? subs.GetInt64() : 0,
+                Favorites = item.TryGetProperty("favorited", out var fav) ? fav.GetInt64() : 0,
                 Tags = tags.ToArray()
             };
         }
@@ -251,7 +254,6 @@ public static class SteamWorkshopScraper
                 FileSizeBytes = d.FileSizeBytes > 0 ? d.FileSizeBytes : null,
                 Subscriptions = d.Subscriptions,
                 Favorites = d.Favorites,
-                Views = d.Views,
                 Tags = d.Tags,
                 // QueryFiles carries the previews: the detail then needs no page read for the trailer
                 TrailerKnown = d.TrailerKnown,
@@ -273,7 +275,6 @@ public static class SteamWorkshopScraper
         public DateTime TimeUpdated { get; init; }
         public long Subscriptions { get; init; }
         public long Favorites { get; init; }
-        public long Views { get; init; }
         public string[] Tags { get; init; } = [];
         // set by the client-protocol path (its previews are inline): the YouTube id is known, null = no trailer
         public bool TrailerKnown { get; init; }

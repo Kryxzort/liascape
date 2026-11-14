@@ -190,13 +190,15 @@ public static class ServerHost
     private static bool SameMonitors(IReadOnlyList<SceneMonitor> a, IReadOnlyList<SceneMonitor> b) =>
         a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Fps == p.Second.Fps && p.First.IsPrimary == p.Second.IsPrimary);
 
-    private static void ConfigureProvider(IBgsProvider p, AppSettings s, WorkshopFilter? filter)
+    // `list` (a /browse's): which Workshop items it lists — absent = the whole Workshop (a /detail leaves it as it was)
+    private static void ConfigureProvider(IBgsProvider p, AppSettings s, WorkshopFilter? filter, WorkshopList? list, bool browse = true)
     {
         if (p is SteamWorkshopService ws)
         {
             ws.AllowScenes = s.AllowScenes;
             ws.WorkshopBasePath = s.WorkshopFolder;
             if (filter != null) ws.Filter = filter;
+            if (browse) ws.List = list ?? new();
         }
         else if (p is WallpaperEngineService we)
         {
@@ -286,6 +288,12 @@ public static class ServerHost
         {
             try { await make(); } finally { _extracting.TryRemove(key, out _); }
         }));
+    // where /still and /anim keep what they made (Settings → Housekeeping's "thumbs", AppOps.CacheCategories)
+    internal static string PreviewCacheDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".cache", "liascape", "workshop_previews");
+    // an extraction in flight owns `file`: its output, or a temporary named after it (`<out>.tmp.jpg`, `<out>.src.gif`, a
+    // remote /anim's `<hash>.<ext>` under the key `<hash>`), so a cache clear leaves it to finish
+    internal static bool Extracting(string file) => _extracting.Keys.Any(k => file.StartsWith(k, StringComparison.Ordinal));
 
     // LRU-bound the animated-preview cache by total SIZE (gifs vary 0.3–1MB+, so size is more
     // predictable than a file count). Keep the most-recently-used up to maxBytes; delete the rest.
@@ -328,7 +336,7 @@ public static class ServerHost
         {
             if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
             var p = Providers[r.Source];
-            ConfigureProvider(p, SettingsService.Load(), r.Filter); // refresh AllowScenes/path/filter from live settings
+            ConfigureProvider(p, SettingsService.Load(), r.Filter, r.List); // refresh AllowScenes/path/filter from live settings
             var page = r.Page <= 0 ? 1 : r.Page;
             try
             {
@@ -339,12 +347,14 @@ public static class ServerHost
             }
             // Steam asked us to slow down (SteamGate): say when to retry — nothing more was sent
             catch (SteamCooldownException e) { return Results.Json(new { error = e.Message }, statusCode: 429); }
+            // the favourites list without a sign-in: the UI says "Sign in to …"
+            catch (SteamCommunity.SignInRequiredException e) { return Results.Json(new { error = e.Message, signIn = true }, statusCode: 403); }
         });
 
         app.MapPost("/detail", async (DetailReq r) =>
         {
             if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
-            ConfigureProvider(Providers[r.Source], SettingsService.Load(), null);
+            ConfigureProvider(Providers[r.Source], SettingsService.Load(), null, null, browse: false);
             return Results.Json(await Providers[r.Source].GetDetailAsync(r.Result));
         });
 
@@ -376,16 +386,23 @@ public static class ServerHost
                 catch { }
             return Results.Ok();
         });
-        // the thumbnail cache (what's in it: AppOps.ThumbCacheFiles): its size for the Settings row, and the clear
+        // the caches Settings → Housekeeping can clear (AppOps.CacheCategories): each one's size, and a clear of the ones named
+        // ({ids: [...]} → what each freed and still holds; an unknown or no id → 400, nothing deleted). An id-less body is an
+        // older page's single row: the thumbnail categories (AppOps.LegacyCacheIds), answered with its totals too.
         app.MapGet("/cache/size", () =>
         {
-            var (bytes, count) = AppOps.ThumbCacheSize();
-            return Results.Json(new { bytes, count });
+            var cats = AppOps.CacheCategories.Select(AppOps.SizeOf).ToList();
+            var legacy = cats.Where(c => AppOps.LegacyCacheIds.Contains(c.Id)).ToList();
+            return Results.Json(new { categories = cats, bytes = legacy.Sum(c => c.Bytes), count = legacy.Sum(c => c.Count) });
         });
-        app.MapPost("/cache/clear", () =>
+        app.MapPost("/cache/clear", (CacheClearReq? r) =>
         {
-            var (freed, count) = AppOps.ClearThumbCache();
-            return Results.Json(new { freedBytes = freed, count });
+            var ids = r?.Ids ?? AppOps.LegacyCacheIds.ToList();
+            if (ids.Count == 0) return Results.Json(new { error = "ids: name at least one cache" }, statusCode: 400);
+            var unknown = ids.Where(id => AppOps.CacheCategoryOf(id) == null).ToList();
+            if (unknown.Count > 0) return Results.Json(new { error = $"unknown cache: {string.Join(", ", unknown)}" }, statusCode: 400);
+            var done = AppOps.ClearCaches(ids.Distinct().Select(id => AppOps.CacheCategoryOf(id)!));
+            return Results.Json(new { categories = done, freedBytes = done.Sum(c => c.FreedBytes), count = done.Sum(c => c.Count) });
         });
         // PATCH semantics: the body's keys over the saved settings, the rest kept (SettingsService.Patch —
         // the UI posts its whole copy, a script or agent may post just {"Volume": 50}); a bad value → 400.
@@ -685,6 +702,13 @@ public static class ServerHost
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));
         // "Unsubscribe without deleting": its own route, so nothing that deletes is on its path (WorkshopSubOps.UnsubscribeKeepAsync)
+        // the Browse sidebar's creator, favourite and comments (Web/WorkshopSocialOps.cs over Helpers/SteamCommunity.cs)
+        app.MapGet("/workshop/creator", (string? id, string? owner, HttpContext ctx) => WorkshopSocialOps.CreatorAsync(id, owner, ctx.RequestAborted));
+        app.MapGet("/workshop/favorite", (string? id, HttpContext ctx) => WorkshopSocialOps.FavoriteStateAsync(id, ctx.RequestAborted));
+        app.MapPost("/workshop/favorite", (FavoriteReq r, HttpContext ctx) => WorkshopSocialOps.SetFavoriteAsync(r.WorkshopId, r.Favorite, ctx.RequestAborted));
+        app.MapGet("/workshop/comments", (string? id, string? owner, int? start, int? count, HttpContext ctx) =>
+            WorkshopSocialOps.CommentsAsync(id, owner, start ?? 0, count ?? 10, ctx.RequestAborted));
+        app.MapPost("/workshop/comment", (CommentReq r, HttpContext ctx) => WorkshopSocialOps.PostCommentAsync(r.WorkshopId, r.Owner, r.Text, r.Count ?? 10, ctx.RequestAborted));
         app.MapPost("/workshop/unsubscribe-keep", async (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));
@@ -826,8 +850,7 @@ public static class ServerHost
         {
             try
             {
-                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".cache", "liascape", "workshop_previews");
+                var dir = PreviewCacheDir;
                 Directory.CreateDirectory(dir);
                 bool remote = Uri.TryCreate(u, UriKind.Absolute, out var uri) && (uri.Scheme == "http" || uri.Scheme == "https");
 
@@ -896,8 +919,7 @@ public static class ServerHost
                 // decode-to-size: card layer asks for w=<card px> (small texture); enlarged modal omits w
                 // → native still. Bucket to 64px so a handful of cache entries cover all card sizes.
                 int width = w is > 0 ? Math.Min(2048, ((w.Value + 63) / 64) * 64) : 0;
-                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".cache", "liascape", "workshop_previews");
+                var dir = PreviewCacheDir;
                 Directory.CreateDirectory(dir);
                 bool remote = Uri.TryCreate(u, UriKind.Absolute, out var uri) && (uri.Scheme == "http" || uri.Scheme == "https");
                 // local: key the cache on path+mtime so a replaced file re-extracts; remote URLs are immutable
@@ -966,7 +988,7 @@ public static class ServerHost
     }
 
     // ---- request DTOs --------------------------------------------------------------------
-    public record BrowseReq(int Source, int Page, string? Query, WorkshopFilter? Filter);
+    public record BrowseReq(int Source, int Page, string? Query, WorkshopFilter? Filter, WorkshopList? List = null);
     public record DetailReq(int Source, WallpaperResult Result);
     public record PathReq(string Path);
     public record OverrideReq(string Path, int? IntValue, double? DoubleValue);
@@ -980,6 +1002,8 @@ public static class ServerHost
     public record TrashReq(List<LibraryItem> Items);
     public record WorkshopIdReq(string? WorkshopId, string? Title = null);
     public record IdsReq(List<string>? Ids);
+    public record FavoriteReq(string? WorkshopId, bool Favorite);
+    public record CommentReq(string? WorkshopId, string? Owner, string? Text, int? Count);
     // not a record: a record's ToString prints every property — the password must never be printable
     public sealed class LoginReq
     {
@@ -997,6 +1021,7 @@ public static class ServerHost
     public record ImportReq(string Path, string Title);
     public record SceneLoudnessReq(List<string>? Paths = null, bool? Force = null);
     public record ClipHoldBody(bool Hold);
+    public record CacheClearReq(List<string>? Ids = null);
     public record ClipShrinkBody(bool Idle, List<ClipStore.ShrinkItem>? Items);
     public record OpenReq(string? Path, string? Url, bool Reveal, bool IsScene = false, string? WorkshopId = null, string? CopiedSceneDir = null);
 }

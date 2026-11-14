@@ -835,10 +835,10 @@ public static class PlayerHelper
                 if (PlayerEngine.IsLiascapePlayer)
                 {
                     // liascape-player plays scenes when they're on and the player can (its worker +
-                    // WE's assets) — else the reason; a crashed one only when whitelisted (D6)
+                    // WE's assets) — else the reason. A crashed one plays too: the user picked it, and a repeat
+                    // crash only leaves its last frame up (OnSceneBroken); the crash mark keeps it out of rotations
+                    // (SkipScene). Guard: matrix crash:scene (the click after the mark)
                     if (PlayerEngine.SceneUnavailableReason(SettingsService.Load()) is string why) throw new InvalidOperationException(why);
-                    if (LibraryService.HasCrashed(videoPath) && !LibraryService.IsWhitelisted(videoPath))
-                        throw new InvalidOperationException("This scene crashed and won't be played — tick \"Whitelist\" in its settings to play it anyway");
                 }
                 else
                 {
@@ -3900,8 +3900,8 @@ public static class PlayerHelper
         !string.IsNullOrEmpty(path) && Path.GetExtension(path).Length == 0;
 
     // Is this item skipped by the pickers (next/prev/random, a rotation's advance)? A scene when scenes
-    // can't play, or (D6) when it is marked crashed and not whitelisted — what the item settings
-    // modal promises ("Scene crashed — won't be played"). Pure — the self-test's truth table. Marking
+    // can't play, or (D6) when it is marked crashed and not whitelisted — what the sidebar's crash notice
+    // promises ("rotations skip it"); a user's own apply still plays it (Apply). Pure — the self-test's truth table. Marking
     // happens only under liascape-player (OnSceneBroken), so it is inert for legacy unless liascape-player marked one.
     public static bool SkipScene(bool isScene, bool playable, bool crashed, bool whitelisted) =>
         isScene && (!playable || (crashed && !whitelisted));
@@ -3919,7 +3919,7 @@ public static class PlayerHelper
         : IsLweRunning;
 
     // liascape-player: `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) →
-    // marked crashed in its index entry (skipped from now on unless whitelisted, D6), the UI told
+    // marked crashed in its index entry (rotations skip it unless whitelisted, D6; a click still plays it), the UI told
     // (WS `scene-crashed`), and — by design — a rotation PLAYING it advances at once (the tick's
     // own advance: its owner check, pause and mode rules apply). A single wallpaper keeps what the player
     // shows (its last frame or preview, silent). A broken PENDING B is the switch's own failure

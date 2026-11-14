@@ -16,7 +16,7 @@ import { WallpaperBg } from "./components/WallpaperBg";
 import { SortFilterButton } from "./components/SortFilterButton";
 import { SourcePills } from "./components/SourcePills";
 import { BUTTONS_NARROW, useNarrow } from "./hooks/useTopbarCompact";
-import { WS_SORT_OPTIONS, wsSortPatch, wsSortValue } from "./components/workshopFilter";
+import { WS_LIST_SORTS, WS_SORT_OPTIONS, wsSortPatch, wsSortValue } from "./components/workshopFilter";
 import { Segmented } from "./components/Segmented";
 import LibraryOpsLine from "./components/LibraryOpsLine";
 import { TopbarStatus } from "./components/TopbarStatus";
@@ -241,11 +241,13 @@ export default function App() {
 
         {/* "Go to selected": glides the grid to the card whose sidebar is open and rings it, like the Library's go to playing */}
         {tab === "browse" && <BrowseLocate focus={s.browseFocus} motion={motion} />}
-        {tab === "browse" && src?.supportsSearch && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
+        {/* a Workshop list (favourites, a creator's) has no search: Steam can't search a user's files */}
+        {tab === "browse" && src?.supportsSearch && !(src.supportsTagFilter && s.wsList) && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
         {/* the filter panel's toggle + the sort, one split button (the Workshop's period is in its sort menu) */}
         {tab === "browse" && (
           <SortFilterButton page="browse" scope={s.browseScope()}
-            sort={src?.supportsTagFilter ? { value: wsSortValue(s.browseFilter), options: WS_SORT_OPTIONS, onChange: (v) => s.setBrowseFilter(wsSortPatch(v)) }
+            sort={src?.supportsTagFilter && s.wsList ? { value: s.wsListSort, options: WS_LIST_SORTS, onChange: (v) => s.setWsListSort(v === "toprated" ? "toprated" : "lastupdated") }
+              : src?.supportsTagFilter ? { value: wsSortValue(s.browseFilter), options: WS_SORT_OPTIONS, onChange: (v) => s.setBrowseFilter(wsSortPatch(v)) }
               : src?.supportsSorting ? { value: String(s.browseSort), options: BROWSE_SORTS, onChange: (v) => s.setBrowseSort(+v) } : null} />
         )}
         {tab === "library" && (

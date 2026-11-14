@@ -39,7 +39,7 @@ export const LibraryCard = memo(function LibraryCard({
        >
         <MotionThumb item={item} hover={hover} autoGif={autoGif} autoVideo={autoVideo} videoOverGif={videoOverGif} />
         {item.isScene && <span className="badge">SCENE</span>}
-        {item.hasCrashed && <span className="warn" title="Scene crashed — won't be played"><AlertTriangle size={15} /></span>}
+        {item.hasCrashed && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
           onClick={(e) => { e.stopPropagation(); onToggle(item); }}><PlaylistToggle on={inPlaylist} /></button>
         <button className="del" aria-label="Delete" onClick={(e) => { e.stopPropagation(); onTrash(item); }}><Trash2 size={24} /></button>

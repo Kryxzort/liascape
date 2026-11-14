@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
-  type LibraryOp,
+  type LibraryOp, type CacheCleared, type WsList, type WsListSort, ApiError,
 } from "../api/client";
 import { eventsOpened } from "../api/events";
 
@@ -15,6 +15,9 @@ const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
 // (index.css `.side-panel`): the two take turns on the right, so a swap between them never changes the grid.
 export const WF_DOCK_QUERY = "(min-width: 900px)";
 export type FilterPage = "browse" | "library";
+// what the backend gets for the Workshop's list: only on the Workshop source, never the pill's name / avatar
+const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boolean }) =>
+  s.wsList && s.isWorkshop() ? { kind: s.wsList.kind, id: s.wsList.kind === "creator" ? s.wsList.id : undefined, sort: s.wsListSort } : undefined;
 const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
@@ -99,6 +102,9 @@ interface State {
   // what the shown list was read for (its source, search and filter; "" while a switched-to source loads): Browse starts
   // a list read for anything else at its top, and brings a kept scroll offset back only onto the list it was left on
   browseFor: string;
+  // the Workshop source's list (api/client.ts WsList): the whole Workshop (null), the signed-in account's favourites or one
+  // creator's items, its sort, and why a list couldn't be read (a sign-in it needs, Steam unreachable) — shown in the grid
+  wsList: WsList; wsListSort: WsListSort; wsListNote: { text: string; signIn: boolean } | null;
   // library
   libraryItems: LibraryItem[]; libQuery: string; libSort: number; undoDepth: number;
   // playlist
@@ -150,6 +156,8 @@ interface State {
   resync(): Promise<boolean>;
   // browse
   setSource(i: number): void; setQuery(q: string): void; reload(): Promise<void>; loadMore(): Promise<void>;
+  // shows a Workshop list on the Workshop source (switching to it); null = the whole Workshop
+  setWsList(l: WsList): void; setWsListSort(s: WsListSort): void;
   setBrowseFilter(p: Partial<WorkshopFilter>): void; isWorkshop(): boolean; setBrowseSort(i: number): void;
   // the active Browse source's filter column, if it has one: the Workshop's or the local WE folder's
   browseScope(): FilterScope | null;
@@ -163,6 +171,8 @@ interface State {
   filterColHidden: boolean; libFilterColHidden: boolean; filterDrawer: FilterPage | null;
   setFiltersOpen(page: FilterPage, open: boolean): void;
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
+  // the Library sidebar's "Scene properties" folded: one remembered choice for every scene, never per item (ScenePropsEditor)
+  scenePropsFolded: boolean; setScenePropsFolded(v: boolean): void;
   download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
   cancelDownload(id: string): void;
   setDownload(id: string, v: number, status?: string): void;
@@ -182,7 +192,7 @@ interface State {
   savePlaylistAs(name: string): Promise<void>; loadNamedPlaylist(name: string): Promise<void>;
   // settings
   setSetting(key: string, value: unknown): void; mergeSettings(p: Record<string, unknown>): void;
-  clearLibrary(): Promise<void>; clearCache(): Promise<{ freedBytes: number; count: number } | null>;
+  clearLibrary(): Promise<void>; clearCache(ids: string[]): Promise<{ categories: CacheCleared[]; freedBytes: number; count: number } | null>;
   importFile(path: string, title: string): Promise<void>;
   // steam / workshop
   loadSteam(): Promise<void>; startQr(): Promise<void>; cancelQr(): Promise<void>; signoutSteam(): Promise<void>;
@@ -268,8 +278,10 @@ function closeFiltersFor(page: FilterPage) {
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
+  wsList: null, wsListSort: LS.get<WsListSort>("wsListSort", "lastupdated") === "toprated" ? "toprated" : "lastupdated", wsListNote: null,
   weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
+  scenePropsFolded: LS.get<boolean>("scenePropsFolded", false) === true,
   // the docked filter panel closed; remembered
   filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false), filterDrawer: null,
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
@@ -307,10 +319,22 @@ export const useStore = create<State>((set, get) => ({
   // browser's 6 connections to the backend, and the new source's /browse queues behind them for seconds — the old list
   // under the new pill all that time. Guard: matrix browse:switchSource.
   setSource(i) {
-    set(i === get().activeSource ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
+    // a source pill shows the whole source: the Workshop's own pill leaves a list (favourites, a creator) for the whole Workshop
+    const same = i === get().activeSource && !get().wsList;
+    set(same ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "", wsList: null, wsListNote: null });
     if (!get().browseScope() && get().filterDrawer === "browse") set({ filterDrawer: null }); // a source without filters
     LS.set("activeSource", i); get().reload();
   },
+  setWsList(l) {
+    const ws = get().sources.find((x) => x.supportsTagFilter && x.available);
+    if (!ws) return;
+    const cur = get().wsList;
+    const same = get().activeSource === ws.index && JSON.stringify(cur && { ...cur, name: null, avatar: null }) === JSON.stringify(l && { ...l, name: null, avatar: null });
+    if (same) { if (l?.kind === "creator") set({ wsList: l }); return; }
+    set({ activeSource: ws.index, wsList: l, wsListNote: null, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
+    LS.set("activeSource", ws.index); get().reload();
+  },
+  setWsListSort(v) { set({ wsListSort: v }); LS.set("wsListSort", v); if (get().wsList) get().reload(); },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
   browseScope() { const src = get().sources[get().activeSource]; return src?.supportsTagFilter ? "workshop" : src?.supportsLocalFilter ? "weLocal" : null; },
@@ -347,37 +371,46 @@ export const useStore = create<State>((set, get) => ({
     const c = get().filterCollapsed, n = c.includes(id) ? c.filter((x) => x !== id) : [...c, id];
     set({ filterCollapsed: n }); LS.set("browseFilterCollapsed", n);
   },
+  setScenePropsFolded(v) { if (v === get().scenePropsFolded) return; set({ scenePropsFolded: v }); LS.set("scenePropsFolded", v); },
   // API: every Browse list read carries the generation it started in (`browseGen`): a source switch / search / refresh
   // starts a new one, and a reply from an older one is dropped — else a slow online source's page lands AFTER the
   // source the user switched to and replaces (or extends) its list, under the new source's pill (seen in the
   // morph probe: MotionBgs' list shown under "Wallpaper Engine (Local)")
   async reload() {
-    const { activeSource, query } = get();
+    const { activeSource } = get();
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
+    const list = wireList(get());
+    const query = list ? "" : get().query; // a list has no search
     const gen = ++browseGen;
     set({ loading: true, page: 1 });
     try {
-      const list = await api.browse(activeSource, 1, query || undefined, filter);
+      const got = await api.browse(activeSource, 1, query || undefined, filter, list);
       if (gen !== browseGen) return;
-      set({ wallpapers: list, browseFor: JSON.stringify([activeSource, query, filter ?? null]),
-        hasMore: !!get().sources[activeSource]?.supportsPagination && list.length > 0 });
+      set({ wallpapers: got, browseFor: JSON.stringify([activeSource, query, filter ?? null, list ?? null]), wsListNote: null,
+        hasMore: !!get().sources[activeSource]?.supportsPagination && got.length > 0 });
     } catch (e) {
       // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
       if (gen === browseGen) {
-        get().setStatus(e instanceof Error ? e.message : String(e), true);
+        const text = e instanceof Error ? e.message : String(e);
+        // a list says why in the grid (its own words; "Sign in to …" with the way there); the rest in the status
+        if (list) set({ wallpapers: [], hasMore: false, browseFor: JSON.stringify([activeSource, query, filter ?? null, list]),
+          wsListNote: { text, signIn: e instanceof ApiError && e.signIn } });
+        else get().setStatus(text, true);
         if (!get().wallpapers.length) set({ hasMore: false }); // a switched-to source that failed: no placeholders asking for page 2
       }
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async loadMore() {
-    const { activeSource, query, page, loading, hasMore, wallpapers } = get();
+    const { activeSource, page, loading, hasMore, wallpapers } = get();
     if (loading || !hasMore) return;
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
+    const wl = wireList(get());
+    const query = wl ? "" : get().query;
     const gen = browseGen;
     set({ loading: true });
     try {
       const next = page + 1;
-      const list = await api.browse(activeSource, next, query || undefined, filter);
+      const list = await api.browse(activeSource, next, query || undefined, filter, wl);
       if (gen !== browseGen) return; // a reload started meanwhile: this page belongs to the old list
       // Dedup by pageUrl — "Most Popular" et al. shift between requests, so pages overlap
       // pages overlap; appending dupes = duplicate React keys → reorder/jump. Keep existing order, add
@@ -546,8 +579,8 @@ export const useStore = create<State>((set, get) => ({
       get().refreshPlayingStatus();
   },
   async clearLibrary() { await api.libraryClear(); await get().loadLibrary(); get().setStatus("Library cleared"); },
-  async clearCache() {
-    try { const r = await api.clearCache(); get().setStatus(`Cache cleared — freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB (${r.count} files)`); return r; }
+  async clearCache(ids) {
+    try { const r = await api.clearCache(ids); get().setStatus(`Cache cleared — freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB (${r.count} files)`); return r; }
     catch { get().setStatus("Failed to clear cache"); return null; }
   },
   async importFile(path, title) {

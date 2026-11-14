@@ -121,7 +121,7 @@ public static class WallpaperEngineScraper
         }
     }
 
-    private static string GifThumbCacheDir => Path.Combine(
+    internal static string GifThumbCacheDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".cache", "liascape", "we_thumbs");
 

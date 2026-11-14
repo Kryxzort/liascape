@@ -14,7 +14,7 @@
 //                     cards under the box afterwards (cards that were off screen at the start included); the top edge scrolls up
 //   <g>:tiny          a 2 px drag is a click: no box, the selection clears (the empty-space click)
 //   <g>:fromCard      a drag that starts on a card draws no box and selects nothing
-//   <g>:plainClick    a plain click: Library — applies the card, the sidebar stays closed, and stays on the item it shows when open;
+//   <g>:plainClick    a plain click: Library — applies the card, the sidebar stays closed, and an open one moves to the card;
 //                     Browse — opens the sidebar on the card (and moves an open one to it), downloads nothing
 //   <g>:modClick      Ctrl+click and Shift+click only select: the sidebar stays closed, an open one stays where it is, nothing applies
 //   <g>:rightClickSel three cards Ctrl-selected, a right-click on one opens its sidebar and keeps all three selected (the Library's
@@ -232,7 +232,7 @@ function gridCells(cell, G) {
     await sleep(300);
     side = await sideId();
     if (lib) {
-      if (side !== item(b)) v.push(`with the sidebar open on card 2, a plain click on card 3 moved it to ${short(side)}: it stays where it was`);
+      if (side !== item(c)) v.push(`with the sidebar open on card 2, a plain click on card 3: the sidebar shows ${short(side)}, want card 3's (it follows the click)`);
       const cur = await waitCurrent(item(c));
       if (cur !== item(c)) v.push(`with the sidebar open, a plain click on card 3 didn't apply it (/current ${short(cur)})`);
     } else if (side !== item(c)) v.push(`with the sidebar open on card 2, a plain click on card 3: the sidebar shows ${side}, want card 3's`);

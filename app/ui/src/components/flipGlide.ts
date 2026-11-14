@@ -25,6 +25,21 @@ function spring() {
   return tok;
 }
 
+// the same soft spring as an easing function of progress (framer's `ease`), for a framer `layout` morph that has to move
+// as one with a glide: `--spring-soft` is a `linear()` of evenly spaced stops (index.css :root), read piecewise
+let fn: { ease: (t: number) => number; ms: number } | null = null;
+export function softSpring() {
+  if (fn) return fn;
+  const { e, ms } = spring();
+  const pts = /^linear\((.*)\)$/s.exec(e)?.[1].split(",").map((x) => parseFloat(x)).filter(Number.isFinite) ?? [];
+  const ease = pts.length < 2 ? (t: number) => 1 - (1 - t) * (1 - t) : (t: number) => {
+    const x = Math.min(1, Math.max(0, t)) * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(x));
+    return pts[i] + (pts[i + 1] - pts[i]) * (x - i);
+  };
+  fn = { ease, ms };
+  return fn;
+}
+
 export function glideFlip(before: FlipSnap | null, root: Element | null, sel: string) {
   if (!before || !root) return;
   const { e, ms } = spring();

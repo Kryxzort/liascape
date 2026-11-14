@@ -20,7 +20,6 @@ public class WallpaperResult
     public long? FileSizeBytes { get; init; }
     public long? Subscriptions { get; init; }
     public long? Favorites { get; init; }
-    public long? Views { get; init; }
     public string[]? Tags { get; init; }
     // the local Wallpaper Engine folder's items: project.json's age rating (Workshop results carry theirs in Tags)
     public string? AgeRating { get; init; }

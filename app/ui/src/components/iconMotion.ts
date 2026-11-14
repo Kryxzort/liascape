@@ -76,8 +76,9 @@ const RECIPES: Record<string, Part[]> = {
   "lucide-cloud-off": [{ sel: ":scope > :nth-child(3)", ms: 750, k: reIn("scale(0)", "2px 2px", false) }],
   // the crosshair's turn is a held state (CSS); its centre dot locks on
   "lucide-locate-fixed": [dip(":scope > circle:nth-child(6)", 0.25, "scale(1.7)", 700)],
-  // direction: one nudge along it
+  // direction: one nudge along it (the comment box's Post sends it up and away)
   "lucide-arrow-right": [nudge("translateX(3px)")],
+  "lucide-send": [nudge("translate(2.5px, -2.5px)")],
   // sort (the top bar's, components/SortFilterButton.tsx): the arrow dips once down its shaft; as it lands the bars, pulled
   // in from their left ends, settle back out one after another, the widest first
   "lucide-arrow-down-wide-narrow": [{ sel: ":scope > :nth-child(1), :scope > :nth-child(2)", ms: 700, k: [{ t: "none", e: "O" }, { t: "translateY(3px)", at: 0.28, e: "S" }, { t: "none" }] },
@@ -92,9 +93,9 @@ const RECIPES: Record<string, Part[]> = {
 // hosts whose icons are state glyphs, not actions: the segmented control (its highlight moves), the number stepper (its own
 // squeeze), the filter column's tri-state switch
 const SKIP = ".seg-opt, .ns-btn, .wf-seg";
-// an emblem chip's glyph (a filter group's, index.css .wf-gico) is an object even inside a button: its chip tilts with its
-// group, the glyph never acts on its own
-const EMBLEM = ".wf-gico";
+// an emblem chip's glyph (a filter group's, index.css .wf-gico; a sidebar section's that is its own toggle, .side-sec-ico) is an
+// object even inside a button: its chip tilts with its group, the glyph never acts on its own
+const EMBLEM = ".wf-gico, .side-sec-ico";
 
 function play(svg: SVGSVGElement, parts: Part[]) {
   const T = tokens();

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Monitor, Star, Heart, Eye, HardDrive, User, ExternalLink, Copy, Download, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
+import { Monitor, Star, Users, HardDrive, User, ExternalLink, Download, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
@@ -8,7 +8,8 @@ import { SubToggle } from "./SubToggle";
 import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
-import { useCopied } from "../hooks/useCopied";
+import { WorkshopIdPill } from "./WorkshopIdPill";
+import { CommentsSection, CreatorRow, FavoriteTile } from "./WorkshopSocial";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -62,9 +63,6 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
-  // keyed by the ID copied, so another item's sidebar never shows "Copied"
-  const [copiedId, copy] = useCopied();
-  const idCopied = !!w.workshopId && copiedId === w.workshopId;
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
   const tags = sideTags(w.tags, { resolution: !!w.resolution });
   const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
@@ -82,12 +80,17 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
           )}
           {w.isScene && <span className="side-chip accent">SCENE</span>}
           {w.resolution && <span className="side-pill"><Monitor size={13} /> {w.resolution}</span>}
-          {fmt(w.subscriptions) && <span className="side-pill" title="Subscriptions"><Star size={13} /> {fmt(w.subscriptions)}</span>}
-          {fmt(w.favorites) && <span className="side-pill" title="Favourites"><Heart size={13} /> {fmt(w.favorites)}</span>}
-          {fmt(w.views) && <span className="side-pill" title="Views"><Eye size={13} /> {fmt(w.views)}</span>}
+          {/* Steam's current counts (the backend reads `subscriptions` / `favorited`, never the lifetime ones — Guard:
+              test-workshop-social.sh); the star is the favourite's everywhere (the Favourite tile below), the people the
+              subscribers'. Guard: probe-steam ws:counts */}
+          {fmt(w.subscriptions) && <span className="side-pill" title="Subscribers" data-side-stat="subscribers"><Users size={13} /> {fmt(w.subscriptions)}</span>}
+          {fmt(w.favorites) && <span className="side-pill" title="Favourites" data-side-stat="favorites"><Star size={13} /> {fmt(w.favorites)}</span>}
           {fmtSize(w.fileSizeBytes) && <span className="side-pill" title="Size"><HardDrive size={13} /> {fmtSize(w.fileSizeBytes)}</span>}
-          {w.authorName && <span className="side-pill" title="Author"><User size={13} /> {w.authorName}</span>}
+          {w.authorName && !w.workshopId && <span className="side-pill" title="Author"><User size={13} /> {w.authorName}</span>}
+          {w.workshopId && <WorkshopIdPill id={w.workshopId} />}
         </div>
+        {/* who made it — a click lists all of their wallpapers in Browse */}
+        {w.workshopId && <CreatorRow workshopId={w.workshopId} authorId={w.authorId} />}
         {/* the download buttons: the only way to download from here — the arrow drops into its tray on hover (components/iconMotion.ts) */}
         <div className="side-cta">
           {downloading ? (
@@ -121,22 +124,10 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             // the middle-click target: the page it came from, or a local folder
             <button className="side-tile" onClick={onOpenSource}>{web ? <><span className="side-tile-ico"><ExternalLink size={15} /></span>Open page</> : <><span className="side-tile-ico"><FolderFlap size={15} /></span>Open in file manager</>}</button>
           )}
-          {/* "Copy ID" turns into a green "Copied" (hooks/useCopied.ts, like the Library sidebar's ID pill): each pair of faces
-              shares one grid cell (index.css .xfade) and the tile its grid column, so nothing changes size; the hidden face is
-              aria-hidden, so the name is the shown words. Guard: probe-steam side:copyIdTile */}
-          {w.workshopId && (
-            <button className={`side-tile copy-tile${idCopied ? " done" : ""}`} data-copy-id data-copied={idCopied ? "" : undefined} onClick={() => copy(w.workshopId!)}>
-              <span className="side-tile-ico xfade">
-                <Copy size={15} data-off={idCopied ? "" : undefined} aria-hidden="true" />
-                <Check size={15} data-off={idCopied ? undefined : ""} aria-hidden="true" className={idCopied ? "ico-pop" : undefined} />
-              </span>
-              <span className="xfade">
-                <span data-off={idCopied ? "" : undefined} aria-hidden={idCopied}>Copy ID</span>
-                <span data-off={idCopied ? undefined : ""} aria-hidden={!idCopied}>Copied</span>
-              </span>
-            </button>
-          )}
+          {w.workshopId && <FavoriteTile workshopId={w.workshopId} />}
         </div>
+        {/* read once it scrolls into view: the sidebar's open asks Steam for nothing more */}
+        {w.workshopId && <CommentsSection workshopId={w.workshopId} authorId={w.authorId} />}
       </div>
     </>
   );

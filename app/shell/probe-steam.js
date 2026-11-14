@@ -63,9 +63,23 @@
 //                         status says "kept in your library"; the left-click still posts /workshop/unsubscribe; no menu for an
 //                         item not in the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
 //   steam:subToggle:keepMenuOff  motion off: the menu fades in and out in place (motion-off.js)
-//   side:copyIdTile       the Browse sidebar's Copy ID tile: a click copies the id (the clipboard) and the tile reads "Copied" (its
-//                         name too, never both faces) for ≈ 1.2 s; every tile keeps its box per frame; the words roll (motion
-//                         on) or only fade (motion off); another item's sidebar doesn't say "Copied". Shot steam-copyid.png
+//   side:copyIdPill       the Browse sidebar's Workshop ID pill (the Library's own component, components/WorkshopIdPill.tsx; no
+//                         Copy ID tile): a click copies the id and the pill reads "Copied" (its name "Workshop ID N — copied")
+//                         for ≈ 1.2 s; every hero chip keeps its box per frame; the faces roll (motion on) or only fade (motion
+//                         off); another item's sidebar doesn't say "Copied". Shot steam-copyid.png
+//   ws:counts             the Browse stat pills: subscribers (lucide users) and favourites (the star), no views / heart pill
+//   ws:creator[Off]       the creator row (avatar from the media origin + name, asked once with the item's owner); a click lists
+//                         their items (/browse list creator): the creator's pill slides in (per frame; Off: fades), the search
+//                         goes, the sort is the list's, the sidebar closes; × back (the pill leaves); no-glow + bg-live
+//   ws:favorite[Off]      the favourite tile: read state, a click POSTs, "Favourited" rolls in (Off: fades), the star fills and pops
+//                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; signed
+//                         out "Sign in to favourite", inert; no-glow + bg-live
+//   ws:comments[Off]      the comments: read only once in view, 10 of 23 newest first, the creator's marked, the text plain (markup
+//                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out "Sign in to
+//                         comment"; a failed read a quiet line, Retry; bg-live
+//   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
+//   ws:pills              the Favourites pill: signed out the grid's "Sign in …" note, signed in the list; the Workshop pill back
+//                         Shots steam-ws-*.png
 // Screenshots: <LIASCAPE_OUT>/steam-*.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow, clipboard } = require("electron");
 const fs = require("fs");
@@ -103,8 +117,8 @@ const STUB = `(() => {
   window.__fakeWs = (type, payload) => { let n = 0; for (const s of sockets) if (s.readyState === 1 && s.onmessage) { s.onmessage({ data: JSON.stringify({ type, payload }) }); n++; } return n; };
   const items = Array.from({ length: 6 }, (_, i) => ({ title: "ws-" + (i + 1), thumbnailUrl: "", animatedThumbnailUrl: null,
     pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + (930000 + i), resolution: "1920 x 1080", isScene: false,
-    workshopId: String(930000 + i), addedAt: null, description: "fake", authorName: "probe", fileSizeBytes: 1000, subscriptions: 1,
-    favorites: 1, views: 1, tags: ["Anime"], trailerKnown: true }));
+    workshopId: String(930000 + i), addedAt: null, description: "fake", authorName: "probe", authorId: "76561190000000007", fileSizeBytes: 1000,
+    subscriptions: 1234 + i, favorites: 56 + i, tags: ["Anime"], trailerKnown: true }));
   const f = window.fetch.bind(window);
   window.fetch = (u, o = {}) => {
     const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
@@ -126,6 +140,28 @@ const STUB = `(() => {
       for (const id of ids) r[id] = s[id] ?? { subscribed: false, pending: null, inLibrary: false, onDisk: false };
       return res(r);
     }
+    // the Browse sidebar's Workshop community pieces (ws:*): the state a cell puts in window.__ws, every call recorded
+    const W = (window.__ws ??= {});
+    if (p === "/workshop/creator") { st.calls.push({ p, q: String(u) }); return res(W.creator ?? { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null }); }
+    if (p === "/workshop/favorite" && m === "GET") { st.calls.push({ p, m }); return res(W.fav ?? { signedIn: false, favorited: null }); }
+    if (p === "/workshop/favorite" && m === "POST") {
+      const b = JSON.parse(o.body); st.calls.push({ p, m, body: b });
+      if (W.favFail) return res({ error: "Steam turned that down" }, 502);
+      W.fav = { signedIn: true, favorited: b.favorite }; return res({ favorited: b.favorite });
+    }
+    if (p === "/workshop/comments") {
+      const q = new URL(String(u), location.href).searchParams, s0 = +q.get("start"), n = +q.get("count");
+      st.calls.push({ p, start: s0, count: n });
+      if (W.comFail) return res({ error: "Couldn't reach Steam" }, 502);
+      const all = W.comments ?? [];
+      return res({ signedIn: !!W.signedIn, owner: "76561190000000007", total: all.length, start: s0, comments: all.slice(s0, s0 + n) });
+    }
+    if (p === "/workshop/comment" && m === "POST") {
+      const b = JSON.parse(o.body); st.calls.push({ p, body: b });
+      if (W.postFail) return res({ error: "Steam turned the comment down: you're posting too fast" }, 502);
+      W.comments = [{ id: "new" + st.calls.length, author: "me", authorId: null, avatar: null, time: Math.floor(Date.now() / 1000), text: b.text }, ...(W.comments ?? [])];
+      return res({ signedIn: true, owner: "76561190000000007", total: W.comments.length, start: 0, comments: W.comments.slice(0, b.count) });
+    }
     if ((p === "/workshop/subscribe" || p === "/workshop/unsubscribe") && m === "POST") {
       st.calls.push({ p, body: JSON.parse(o.body) });
       return res(p.endsWith("unsubscribe") ? { inLibrary: !!(window.__wsState?.[JSON.parse(o.body).workshopId]?.inLibrary), batch: null }
@@ -141,7 +177,12 @@ const STUB = `(() => {
     if (p === "/library" && m === "GET" && localStorage.getItem("__probe_lib_full") === "1")
       return f(u, o).then((r) => r.json()).then((list) => res(list.map((x) => (x.isScene && x.workshopId ? { ...x, resolution: "3840 x 2160", ageRating: "Everyone" } : x))));
     if (p === "/browse" && m === "POST") {
-      const b = JSON.parse(o.body); if (b.filter) return res(b.page > 1 ? [] : items);
+      const b = JSON.parse(o.body);
+      (st.browses ??= []).push(b); // every list read (ws:*), apart from the cells' own calls
+      // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
+      if (b.list) { if (b.list.kind === "favorites" && !(window.__ws ??= {}).signedIn) return res({ error: "Sign in to Steam to see your Workshop favourites", signIn: true }, 403);
+        return res(b.page > 1 ? [] : items.slice(0, 3)); }
+      if (b.filter) return res(b.page > 1 ? [] : items);
       // a fake Wallpaper Engine (Local) folder (steam:subToggle): local page paths + Workshop ids
       if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
         pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
@@ -1176,67 +1217,367 @@ app.whenReady().then(async () => {
       await setSettings({ morphs: true });
       return v;
     });
-    // The Browse sidebar's Copy ID tile turns into "Copied" (hooks/useCopied.ts) without any tile changing size or place
-    await cell("side:copyIdTile", async () => {
+    // The Browse sidebar's Workshop ID pill — the Library's (components/WorkshopIdPill.tsx, one component for both) — turns into
+    // "Copied" (hooks/useCopied.ts) without any hero chip changing size or place
+    await cell("side:copyIdPill", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true });
       await browseWs();
       await setWs("930000", { subscribed: false, pending: null, inLibrary: false, onDisk: false });
       await openSide(0);
-      const TILE = `${SIDE} [data-copy-id]`;
-      // layout boxes (offset*): the hover lift and the press squeeze are transforms, not a size change
-      const TILES = `(() => [...document.querySelectorAll("${SIDE} .side-tiles > *")].map((e) => [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]))()`;
-      const shownText = () => js(`document.querySelector("${TILE} .xfade:not(.side-tile-ico) > :not([data-off])")?.textContent.trim() ?? null`);
-      if (!(await waitFor(() => js(`!!document.querySelector("${TILE}")`), 3000))) return ["no Copy ID tile in the Browse sidebar"];
-      await page(`document.querySelector("${TILE}").scrollIntoView({ block: "center" });`); await sleep(400);
-      const before = await js(TILES);
-      const name0 = await axName(TILE);
-      if (name0 !== "Copy ID") v.push(`its name at rest is ${J(name0)}`);
-      const r = await js(`(() => { const r = document.querySelector("${TILE}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      const BPILL = `${SIDE} .side-hero [data-copy-id]`;
+      const shownText = () => js(`document.querySelector("${BPILL} .xfade > :not([data-off])")?.textContent.trim() ?? null`);
+      if (!(await waitFor(() => js(`!!document.querySelector("${BPILL}")`), 3000))) return ["no Workshop ID pill in the Browse sidebar's hero"];
+      if (await js(`!!document.querySelector("${SIDE} .side-tiles [data-copy-id], ${SIDE} .copy-tile")`)) v.push("the old Copy ID tile is still there");
+      if (await js(`document.querySelector("${BPILL}").dataset.sideRow !== "workshop-id"`)) v.push("the Browse pill isn't the shared one (data-side-row=workshop-id)");
+      const before = await js(HERO);
+      const name0 = await axName(BPILL);
+      if (name0 !== "Workshop ID 930000 — copy") v.push(`its name at rest is ${J(name0)}`);
+      const r = await js(`(() => { const r = document.querySelector("${BPILL}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
       clipboard.writeText("");
       const tClick = Date.now();
       const fr = js(`new Promise((res) => { const out = []; const t0 = performance.now();
-        const f = () => { out.push({ b: ${TILES}, on: !!document.querySelector("${TILE}[data-copied]"),
-          y: (() => { const e = document.querySelector("${TILE} .xfade:not(.side-tile-ico) > :last-child"); return e ? +new DOMMatrix(getComputedStyle(e).transform).m42.toFixed(2) : null; })() });
+        const f = () => { out.push({ b: ${HERO}, on: !!document.querySelector("${BPILL}[data-copied]"),
+          y: (() => { const e = document.querySelector("${BPILL} .xfade > :last-child"); return e ? +new DOMMatrix(getComputedStyle(e).transform).m42.toFixed(2) : null; })() });
           if (performance.now() - t0 < 600) requestAnimationFrame(f); else res(out); };
         requestAnimationFrame(f); })`);
       await sleep(30);
       await clickAt(r.x, r.y);
       await sleep(90); await shot("copyid-roll");
-      const frames = await fr;
-      if (!frames.some((f) => f.on)) return [...v, "the tile never turned into \"Copied\" — proved nothing"];
+      const frs = await fr;
+      if (!frs.some((f) => f.on)) return [...v, "the pill never turned into \"Copied\" — proved nothing"];
       if ((await shownText()) !== "Copied") v.push(`it reads ${J(await shownText())}, want "Copied"`);
-      const name1 = await axName(TILE);
-      if (name1 !== "Copied") v.push(`its name while copied is ${J(name1)}`);
+      const name1 = await axName(BPILL);
+      if (name1 !== "Workshop ID 930000 — copied") v.push(`its name while copied is ${J(name1)}`);
       if (clipboard.readText() !== "930000") v.push(`the clipboard holds ${J(clipboard.readText())}, want "930000"`);
-      const moved = frames.find((f) => J(f.b) !== J(before) && f.b.some((x, i) => x.some((n, k) => Math.abs(n - before[i][k]) > 0.75)));
-      if (moved) v.push(`a tile moved or resized: ${J(before)} → ${J(moved.b)}`);
-      const ys = frames.filter((f) => f.on && f.y != null).map((f) => f.y);
+      const moved = frs.find((f) => f.b && before && f.b.some((x, i) => before[i] && x.slice(1).some((n, k) => Math.abs(n - before[i][k + 1]) > 0.75)));
+      if (moved) v.push(`a hero chip moved or resized: ${J(before)} → ${J(moved.b)}`);
+      const ys = frs.filter((f) => f.on && f.y != null).map((f) => f.y);
       if (between(ys, 0.5) < 2) v.push(`"Copied" didn't roll in (y per frame ${J(ys.slice(0, 10))})`);
       await sleep(250); await mvTo(3, 3, 100); await shot("copyid");
-      // back after ≈ 1.2 s
-      if (!(await waitFor(() => shownText().then((t) => t === "Copy ID"), 2500))) v.push("it never went back to Copy ID");
+      if (!(await waitFor(() => shownText().then((t) => t === "930000"), 2500))) v.push("it never went back to the id");
       else if (Date.now() - tClick < 1000) v.push(`"Copied" held only ≈ ${Date.now() - tClick} ms (want ≈ 1200)`);
-      // another item's sidebar never carries "Copied"
       await clickAt(r.x, r.y); await sleep(200);
       await openSide(1);
-      if (await js(`!!document.querySelector("${TILE}[data-copied]")`)) v.push("another item's sidebar shows \"Copied\"");
-      // motion off: the words only fade, nothing moves
+      if (await js(`!!document.querySelector("${BPILL}[data-copied]")`)) v.push("another item's sidebar shows \"Copied\"");
+      // motion off: the faces only fade, nothing moves
       await setSettings({ morphs: false });
       await browseWs();
       await setWs("930000", { subscribed: false, pending: null, inLibrary: false, onDisk: false });
       await openSide(0);
-      await waitFor(() => js(`!!document.querySelector("${TILE}")`), 3000);
+      await waitFor(() => js(`!!document.querySelector("${BPILL}")`), 3000);
       if (!(await js(`document.documentElement.classList.contains("no-motion")`))) v.push("motion off: the page isn't in no-motion — proved nothing");
-      await page(`document.querySelector("${TILE}")?.scrollIntoView({ block: "center" });`); await sleep(500);
-      const r2 = await js(`(() => { const r = document.querySelector("${TILE}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      const r2 = await js(`(() => { const r = document.querySelector("${BPILL}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
       await mvTo(r2.x, r2.y, 300);
-      const smp = js(MO.SAMPLE({ face: `${TILE} .xfade:not(.side-tile-ico) > :last-child`, tile: TILE }, 500)); await sleep(40);
+      const smp = js(MO.SAMPLE({ face: `${BPILL} .xfade > :last-child`, pill: BPILL }, 500)); await sleep(40);
       await clickAt(r2.x, r2.y);
       const s2 = await smp;
       console.log(`        motion off: "Copied" ${MO.brief(s2.face)}`);
-      v.push(...MO.judge("motion off: \"Copied\"", s2.face, { appear: true }), ...MO.judge("motion off: the tile", s2.tile));
+      v.push(...MO.judge("motion off: \"Copied\"", s2.face, { appear: true }), ...MO.judge("motion off: the pill", s2.pill));
       await setSettings({ morphs: true });
+      return v;
+    });
+
+    // ---- the Browse sidebar's Workshop community pieces (components/WorkshopSocial.tsx) and the Workshop's lists ----
+    const W = (o) => js(`window.__ws = Object.assign(window.__ws || {}, ${J(o)}); true`);
+    const wsCalls = (p) => js(`window.__st.calls.filter((c) => c.p === ${J(p)})`);
+    const browses = () => js(`window.__st.browses ?? []`);
+    const libThumb = ((await http("GET", "/library")).json ?? []).map((i) => i.thumbnailPath).find((t) => t) ?? null;
+    const COMMENTS = Array.from({ length: 23 }, (_, i) => ({ id: String(900 + 23 - i), author: i === 3 ? "Probe Creator" : `fan ${i}`,
+      authorId: i === 3 ? "76561190000000007" : String(76561190000000100 + i), avatar: libThumb, time: Math.floor(Date.now() / 1000) - i * 7200,
+      text: i === 0 ? "first line\n<b>not bold</b> <img src=x onerror=window.__pwned=1>" : `comment ${23 - i}` }));
+    const scrollSideTo = (sel) => page(`const e = document.querySelector(${J(sel)}), sc = e?.closest(".side-scroll"); if (!e || !sc) return false;
+      sc.scrollTop += e.getBoundingClientRect().top - sc.getBoundingClientRect().top - 40; return true;`);
+    const looks = (sel) => js(`(() => { const e = document.querySelector(${J(sel)}); if (!e) return null; const cs = getComputedStyle(e);
+      return { bg: cs.backgroundColor, shadow: cs.boxShadow, html: document.documentElement.className }; })()`);
+
+    // the stat pills: Steam's current counts, subscribers with the people icon, favourites with the star; no view count
+    await cell("ws:counts", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs(); await openSide(0);
+      const r = await page(`const h = document.querySelector("${SIDE} .side-hero"); if (!h) return null;
+        const pill = (k) => { const e = h.querySelector('[data-side-stat="' + k + '"]'); return e ? { text: e.textContent.trim(), icon: [...(e.querySelector("svg")?.classList ?? [])].find((c) => c.startsWith("lucide-") && c !== "lucide") } : null; };
+        return { subs: pill("subscribers"), favs: pill("favorites"), eye: !!h.querySelector(".lucide-eye"), heart: !!h.querySelector(".lucide-heart"),
+          views: [...h.children].some((e) => /^Views$/i.test(e.title)) };`);
+      console.log(`        ${J(r)}`);
+      if (!r) return ["no hero row"];
+      if (r.subs?.text !== "1.2k" || r.subs?.icon !== "lucide-users") v.push(`subscribers pill ${J(r.subs)} (want 1.2k with lucide-users)`);
+      if (r.favs?.text !== "56" || r.favs?.icon !== "lucide-star") v.push(`favourites pill ${J(r.favs)} (want 56 with lucide-star)`);
+      if (r.eye || r.heart || r.views) v.push(`a views / heart pill is still there: ${J(r)}`);
+      return v;
+    });
+
+    // the creator: avatar + name (asked once the sidebar settles), a click lists their wallpapers: the creator's pill slides in
+    // beside the Workshop's, the search goes, the sort is the list's; × goes back to the whole Workshop (the pill slides out)
+    for (const motion of [true, false]) {
+      await cell(`ws:creator${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        await W({ avatar: libThumb });
+        await openSide(0);
+        const ROW = `${SIDE} [data-ws-creator]`;
+        if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
+        const c = await wsCalls("/workshop/creator");
+        if (c.length !== 1 || !/owner=76561190000000007/.test(c[0].q)) v.push(`creator asked ${c.length}× (${J(c)}), want once with the item's owner`);
+        const name = await js(`document.querySelector("${ROW} [data-ws-creator-name]")?.textContent`);
+        if (name !== "Probe Creator") v.push(`the row says ${J(name)}`);
+        if (libThumb && !(await waitFor(() => js(`document.querySelector("${ROW} [data-ws-avatar]")?.dataset.wsAvatar === "loaded"`), 3000))) v.push("the avatar never loaded");
+        const src = await js(`document.querySelector("${ROW} img")?.src ?? ""`);
+        const api = await js(`location.origin`);
+        if (libThumb && src.startsWith(api + "/")) v.push(`the avatar loads from the API origin (${src.slice(0, 60)}), not the media one`);
+        if (motion) {
+          // no-glow + bg-live: the row keeps its own dark fill, its hover no glow (the page re-read with them on)
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await W({ avatar: libThumb }); await openSide(0);
+          await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000); await sleep(300);
+          const rr = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+          await mvTo(rr.x, rr.y, 400);
+          const lk = await looks(ROW);
+          console.log(`        no-glow + bg-live: ${J(lk)}`);
+          if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the creator row has no fill of its own (${lk.bg})`);
+          if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the hovered row glows (${lk.shadow})`);
+          await shot("ws-creator-live");
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+          await browseWs(); await W({ avatar: libThumb }); await openSide(0);
+          await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000); await mvTo(3, 3, 100);
+        }
+        const PAIR = '[data-ws-pill="creator"]';
+        const smp = motion ? null : js(MO.SAMPLE({ pair: PAIR }, 600));
+        if (!motion) await sleep(40);
+        const fr = motion ? frames(`document.querySelector(${J(ROW)}).click();`, `(() => { const e = document.querySelector('${PAIR}'); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m41]; })()`, 500) : null;
+        if (!motion) await page(`document.querySelector(${J(ROW)}).click();`);
+        if (motion) { await sleep(90); await shot("ws-creator-pill-in"); }
+        const fin = motion ? await fr : null;
+        await sleep(600);
+        const b = (await browses()).at(-1);
+        if (b?.list?.kind !== "creator" || b.list.id !== "76561190000000007") v.push(`the click asked /browse ${J(b?.list)}`);
+        const st = await page(`const pair = document.querySelector('${PAIR}');
+          return { pill: pair?.textContent.trim() ?? null, active: !!pair?.querySelector(".pill.active"), side: !!document.querySelector("${SIDE}"),
+            wsActive: [...document.querySelectorAll(".pill-strip > .pill.active")].map((e) => e.textContent.trim()),
+            search: !!document.querySelector(".topbar .tsearch"), sort: document.querySelector("[data-sortsplit=browse] .ss-sort")?.textContent.trim() ?? null };`);
+        console.log(`        after the click: ${J(st)}`);
+        if (st.pill !== "Probe Creator" || !st.active) v.push(`the creator's pill: ${J(st)}`);
+        if (st.wsActive.length) v.push(`another pill is still lit: ${J(st.wsActive)}`);
+        if (st.side) v.push("the sidebar stayed open");
+        if (st.search) v.push("the search shows on a creator's list (Steam can't search it)");
+        if (st.sort !== "Recently Updated") v.push(`the sort reads ${J(st.sort)}, want the list's "Recently Updated"`);
+        if (motion) {
+          const ops = fin.filter((x) => x).map((x) => x[0]), xs = fin.filter((x) => x).map((x) => x[1]);
+          console.log(`        pill in: opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} x ${J(xs.slice(0, 8).map((o) => +o.toFixed(1)))}`);
+          if (between(ops, 0.05) < 3 || between(xs, 0.5) < 3) v.push("the creator's pill popped in (no in-between frames)");
+        } else {
+          const s1 = await smp; console.log(`        motion off: pill in ${MO.brief(s1.pair)}`);
+          v.push(...MO.judge("motion off: the creator's pill appearing", s1.pair, { appear: true, size: false }));
+        }
+        // × → the whole Workshop; the pill leaves
+        const smp2 = js(MO.SAMPLE({ pair: PAIR }, 500)); await sleep(40);
+        await page(`document.querySelector('${PAIR} .ws-pill-x').click();`);
+        if (motion) { await sleep(70); await shot("ws-creator-pill-out"); }
+        const s2 = await smp2; await sleep(400);
+        const after = await page(`return { pair: !!document.querySelector('${PAIR}'), search: !!document.querySelector(".topbar .tsearch") };`);
+        if (after.pair) v.push("the creator's pill stayed after ×");
+        if (!after.search) v.push("the search didn't come back on the whole Workshop");
+        const back = (await browses()).at(-1);
+        if (back?.list) v.push(`× still asked a list (${J(back.list)})`);
+        if (!motion) v.push(...MO.judge("motion off: the creator's pill leaving", s2.pair, { leave: true, size: false }));
+        else if (!s2.pair.some((f) => f[1] != null && f[1] > 0.05 && f[1] < 0.95)) v.push("the creator's pill vanished at once (no exit)");
+        return v;
+      });
+    }
+
+    // the favourite: a toggle tile — signed in it reads the state (once the sidebar settles), a click favourites (POST), the star
+    // fills and pops once (never on mount), the words roll and the tile keeps its box; Steam refusing puts it back with the reason;
+    // signed out it says "Sign in to favourite" and sends nothing. Motion off: the words only fade.
+    for (const motion of [true, false]) {
+      await cell(`ws:favorite${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        await W({ fav: { signedIn: true, favorited: false } });
+        await openSide(0);
+        const FAV = `${SIDE} [data-ws-fav]`;
+        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "off"`), 3000))) return ["the favourite tile never read its state"];
+        const t0 = await page(`const t = document.querySelector(${J(FAV)}); return { text: t.querySelector(".xfade > :not([data-off])")?.textContent, pressed: t.getAttribute("aria-pressed"),
+          pop: !!t.querySelector(".ico-pop"), inTiles: !!t.closest(".side-tiles") };`);
+        if (t0.text !== "Favourite" || t0.pressed !== "false" || t0.pop || !t0.inTiles) v.push(`at rest: ${J(t0)} (want "Favourite", not pressed, no pop on mount, among the tiles)`);
+        await scrollSideTo(FAV); await sleep(400);
+        const box0 = await js(`(() => { const e = document.querySelector(${J(FAV)}); return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]; })()`);
+        const smp = motion ? null : js(MO.SAMPLE({ face: `${FAV} .xfade > :nth-child(2)`, tile: FAV }, 500));
+        if (!motion) await sleep(40);
+        const fr = frames(`document.querySelector(${J(FAV)}).click();`, `(() => { const e = document.querySelector(${J(FAV)}); const f = e.querySelector(".xfade > :nth-child(2)"); const s = e.querySelector(".side-tile-ico svg");
+          return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, +new DOMMatrix(getComputedStyle(f).transform).m42.toFixed(2), +new DOMMatrix(getComputedStyle(s).transform).a.toFixed(3)]; })()`, 600);
+        if (motion) { await sleep(80); await shot("ws-fav-pop"); }
+        const f = await fr;
+        await sleep(300);
+        const post = (await wsCalls("/workshop/favorite")).filter((c) => c.m === "POST");
+        if (post.length !== 1 || post[0].body.workshopId !== "930000" || post[0].body.favorite !== true) v.push(`POSTs: ${J(post)}`);
+        const t1 = await page(`const t = document.querySelector(${J(FAV)}); return { text: t.querySelector(".xfade > :not([data-off])")?.textContent, pressed: t.getAttribute("aria-pressed"),
+          fill: t.querySelector(".side-tile-ico svg")?.getAttribute("fill"), pop: !!t.querySelector(".side-tile-ico svg.ico-pop") };`);
+        if (t1.text !== "Favourited" || t1.pressed !== "true" || t1.fill !== "currentColor" || !t1.pop) v.push(`after the click: ${J(t1)}`);
+        if (f.some((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75))) v.push(`the tile moved or resized: ${J(box0)} → ${J(f.find((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75)))}`);
+        if (motion) {
+          const ys = f.filter((x) => x).map((x) => x[4]), sc = f.filter((x) => x).map((x) => x[5]);
+          console.log(`        "Favourited" y ${J(ys.slice(0, 8))}; star scale ${J(sc.slice(0, 8))}`);
+          if (between(ys, 0.5) < 2) v.push("\"Favourited\" didn't roll in");
+          if (!sc.some((a) => a < 0.95)) v.push("the star didn't pop");
+        } else {
+          const s1 = await smp; console.log(`        motion off: "Favourited" ${MO.brief(s1.face)}`);
+          v.push(...MO.judge("motion off: \"Favourited\"", s1.face, { appear: true }), ...MO.judge("motion off: the tile", s1.tile));
+          if (f.some((x) => x && x[5] < 0.99)) v.push("motion off: the star popped");
+        }
+        // Steam refusing: back to "Favourited" (the state before), the reason as the tile's tooltip
+        await W({ favFail: true });
+        await page(`document.querySelector(${J(FAV)}).click();`); await sleep(500);
+        const t2 = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, title: t.title };`);
+        if (t2.state !== "on" || !/turned that down/.test(t2.title)) v.push(`a refused unfavourite: ${J(t2)} (want back on, with the reason)`);
+        if (motion) {
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await W({ fav: { signedIn: true, favorited: true } }); await openSide(0);
+          await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "on"`), 3000); await scrollSideTo(FAV); await sleep(400);
+          const lk = await looks(FAV), ico = await looks(`${FAV} .side-tile-ico`);
+          if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the tile has no fill (${lk.bg})`);
+          if (/0px 0px 10px/.test(ico.shadow)) v.push(`no-glow: the star's chip glows (${ico.shadow})`);
+          await shot("ws-fav-live");
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+        }
+        // signed out: inert, says so, sends nothing
+        await browseWs(); await openSide(0);
+        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "signed-out"`), 3000))) return [...v, "signed out: the tile never said so"];
+        const n0 = (await wsCalls("/workshop/favorite")).filter((c) => c.m === "POST").length;
+        await page(`document.querySelector(${J(FAV)}).click();`); await sleep(300);
+        const so = await page(`const t = document.querySelector(${J(FAV)}); return { text: t.querySelector(".xfade > :not([data-off])")?.textContent, disabled: t.disabled };`);
+        if (so.text !== "Sign in to favourite" || !so.disabled) v.push(`signed out: ${J(so)}`);
+        if ((await wsCalls("/workshop/favorite")).filter((c) => c.m === "POST").length !== n0) v.push("signed out: a click sent a favourite");
+        return v;
+      });
+    }
+
+    // the comments: read only once their section comes into view; 10 newest first, "Show older" pages, the creator's comment
+    // marked, the text plain (markup shows as typed, nothing injected); they rise in (motion off: fade); signed out "Sign in to
+    // comment"; a failed read a quiet line with Retry
+    for (const motion of [true, false]) {
+      await cell(`ws:comments${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        await W({ comments: COMMENTS, signedIn: false });
+        win.setContentSize(1400, 560); await sleep(300); // the section below the sidebar's fold: its read waits for it
+        await openSide(0); await sleep(500);
+        const SEC = `${SIDE} [data-ws-comments]`;
+        const inView = await page(`const e = document.querySelector(${J(SEC)}), sc = e?.closest(".side-scroll"); if (!e) return null;
+          return e.getBoundingClientRect().top < sc.getBoundingClientRect().bottom + 120;`);
+        if (inView === null) return ["no comments section"];
+        if (inView) v.push("the comments section is in view at once — the lazy read proved nothing");
+        else if ((await wsCalls("/workshop/comments")).length) v.push("the comments were read before their section came into view");
+        const smp = motion ? null : js(MO.SAMPLE({ c: `${SEC} .ws-c` }, 600));
+        const fr = frames(`const e = document.querySelector(${J(SEC)}), sc = e.closest(".side-scroll"); sc.scrollTop += e.getBoundingClientRect().top - sc.getBoundingClientRect().top - 40;`,
+          `(() => { const e = document.querySelector("${SEC} .ws-c"); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m42]; })()`, 700);
+        if (motion) { await sleep(120); await shot("ws-comments-in"); }
+        const f = await fr;
+        await sleep(400);
+        const calls = await wsCalls("/workshop/comments");
+        if (calls.length !== 1 || calls[0].start !== 0 || calls[0].count !== 10) v.push(`reads: ${J(calls)} (want one, start 0, count 10)`);
+        const r = await page(`const s = document.querySelector(${J(SEC)}); const cs = [...s.querySelectorAll(".ws-c")];
+          return { n: cs.length, count: s.querySelector("[data-ws-count]")?.textContent, first: cs[0]?.querySelector("[data-ws-text]")?.textContent,
+            firstEls: cs[0]?.querySelector("[data-ws-text]")?.children.length, img: !!s.querySelector(".ws-c-text img, .ws-c-text b"), pwned: !!window.__pwned,
+            op: cs.findIndex((c) => c.querySelector(".ws-c-op")), signin: !!s.querySelector("[data-ws-signin]"), box: !!s.querySelector("textarea"),
+            more: !!s.querySelector("[data-ws-more]"), avatars: s.querySelectorAll('[data-ws-avatar="loaded"]').length };`);
+        console.log(`        ${J(r)}`);
+        if (r.n !== 10 || r.count !== "23") v.push(`shown ${r.n} of ${r.count} (want 10 of 23)`);
+        if (r.first !== "first line\n<b>not bold</b> <img src=x onerror=window.__pwned=1>" || r.firstEls !== 0 || r.img || r.pwned) v.push(`the text isn't plain: ${J(r)}`);
+        if (r.op !== 3) v.push(`the creator's comment isn't marked (index ${r.op}, want 3)`);
+        if (!r.signin || r.box) v.push(`signed out: sign-in line ${r.signin}, box ${r.box}`);
+        if (!r.more) v.push("no Show older");
+        if (motion) {
+          const ops = f.filter((x) => x).map((x) => x[0]), ys = f.filter((x) => x).map((x) => x[1]);
+          console.log(`        first comment: opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} y ${J(ys.slice(0, 8).map((o) => +o.toFixed(1)))}`);
+          if (between(ops, 0.05) < 2 || between(ys, 0.3) < 2) v.push("the comments popped in (no in-between frames)");
+        } else {
+          const s1 = await smp; console.log(`        motion off: comment in ${MO.brief(s1.c)}`);
+          v.push(...MO.judge("motion off: a comment appearing", s1.c, { appear: true, size: false }));
+        }
+        await page(`document.querySelector("${SEC} [data-ws-more]").click();`); await sleep(500);
+        const r2 = await page(`return document.querySelectorAll("${SEC} .ws-c").length;`);
+        const c2 = (await wsCalls("/workshop/comments")).at(-1);
+        if (r2 !== 20 || c2?.start !== 10) v.push(`Show older: ${r2} shown, asked start ${c2?.start}`);
+        win.setContentSize(1400, 900); await sleep(300);
+        if (motion) {
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await W({ comments: COMMENTS }); await openSide(0); await scrollSideTo(SEC);
+          await waitFor(() => js(`document.querySelectorAll("${SEC} .ws-c").length > 0`), 3000); await sleep(400);
+          const lk = await looks(SEC);
+          if (!/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the section has no fill (${lk.bg})`);
+          await shot("ws-comments-live");
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+          // a failed read: a quiet line with Retry, no crash
+          await browseWs(); await W({ comFail: true }); await openSide(0); await scrollSideTo(SEC);
+          if (!(await waitFor(() => js(`!!document.querySelector("${SEC} [data-ws-error]")`), 3000))) v.push("a failed read shows no quiet line");
+          await W({ comFail: false, comments: COMMENTS });
+          await page(`document.querySelector("${SEC} .ws-retry").click();`); await sleep(500);
+          if ((await js(`document.querySelectorAll("${SEC} .ws-c").length`)) !== 10) v.push("Retry didn't read the comments");
+        }
+        return v;
+      });
+    }
+
+    // posting: signed in, the box posts the text as typed; the new comment drops in on top, the box empties; Steam's refusal
+    // shows its words under the box
+    await cell("ws:commentPost", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      await W({ comments: COMMENTS.slice(0, 4), signedIn: true });
+      await openSide(0);
+      const SEC = `${SIDE} [data-ws-comments]`;
+      await scrollSideTo(SEC);
+      if (!(await waitFor(() => js(`!!document.querySelector("${SEC} textarea")`), 3000))) return ["signed in: no comment box"];
+      await page(`document.querySelector("${SEC} textarea").focus();`);
+      await type("Lovely <3\nsecond line");
+      await page(`document.querySelector("${SEC} [data-ws-post-btn]").click();`);
+      await sleep(100); await shot("ws-comment-post");
+      await sleep(500);
+      const p = (await wsCalls("/workshop/comment")).at(-1);
+      if (p?.body?.text !== "Lovely <3\nsecond line" || p?.body?.workshopId !== "930000" || p?.body?.owner !== "76561190000000007") v.push(`the POST: ${J(p)}`);
+      const r = await page(`const s = document.querySelector(${J(SEC)}); const c = s.querySelector(".ws-c");
+        return { first: c?.querySelector("[data-ws-text]")?.textContent, fresh: c?.classList.contains("fresh"), box: s.querySelector("textarea").value, count: s.querySelector("[data-ws-count]")?.textContent };`);
+      if (r.first !== "Lovely <3\nsecond line" || !r.fresh || r.box !== "" || r.count !== "5") v.push(`after posting: ${J(r)}`);
+      await W({ postFail: true });
+      await page(`document.querySelector("${SEC} textarea").focus();`); await type("again");
+      await page(`document.querySelector("${SEC} [data-ws-post-btn]").click();`); await sleep(400);
+      const e = await js(`document.querySelector("${SEC} [data-ws-post-error]")?.textContent ?? null`);
+      if (!/too fast/.test(e ?? "")) v.push(`a refused post shows ${J(e)}`);
+      return v;
+    });
+
+    // the Workshop's Favourites pill: signed out the grid says "Sign in …" (no crash); signed in it lists them; the Workshop's
+    // own pill goes back to the whole Workshop
+    await cell("ws:pills", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      await page(`document.querySelector('[data-ws-pill="favorites"]').click();`); await sleep(700);
+      const b = (await browses()).at(-1);
+      if (b?.list?.kind !== "favorites") v.push(`the pill asked ${J(b?.list)}`);
+      const n1 = await page(`return { note: document.querySelector("[data-ws-list-note]")?.dataset.wsListNote ?? null, text: document.querySelector("[data-ws-list-note]")?.textContent ?? "",
+        active: document.querySelector('[data-ws-pill="favorites"]').classList.contains("active"), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
+      console.log(`        signed out: ${J(n1)}`);
+      if (n1.note !== "sign-in" || !/Sign in/.test(n1.text) || !n1.active || n1.cards) v.push(`signed out: ${J(n1)}`);
+      await shot("ws-favs-signin");
+      await W({ signedIn: true });
+      await page(`document.querySelector(".pills .mini[aria-label=Refresh]").click();`); await sleep(800);
+      const n2 = await page(`return { note: !!document.querySelector("[data-ws-list-note]"), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
+      if (n2.note || n2.cards !== 3) v.push(`signed in: ${J(n2)} (want 3 cards, no note)`);
+      const srcs = (await http("GET", "/sources")).json, wsName = srcs.find((s) => s.supportsTagFilter)?.name;
+      await page(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)}).click();`); await sleep(700);
+      const b3 = (await browses()).at(-1);
+      const n3 = await page(`return { active: [...document.querySelectorAll(".pill-strip .pill.active")].map((e) => e.textContent.trim()), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
+      if (J(n3.active) !== J([wsName]) || n3.cards !== 6) v.push(`back on the whole Workshop: ${J(n3)}`);
+      if (b3?.list) v.push("the whole Workshop still sent a list");
       return v;
     });
   } catch (e) {

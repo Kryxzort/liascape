@@ -10,10 +10,16 @@
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
 //                     "legacy" by a stubbed /player-engine; hidden, its value stays saved
-//   cache:size        Housekeeping names what it clears and shows the size of exactly those folders (workshop_previews,
-//                     we_thumbs — not video_clips)
-//   cache:clear       Clear Cache empties them (the clips stay), the row then shows what was freed (a cross-fade in place,
-//                     motion on and off); pictures settings-cache-*.png
+//   cache:lines       Housekeeping's cache picker: one line per cache (AppOps.CacheCategories) with its words, a themed tick
+//                     and the size of exactly its folder on disk (the shader cache's absent folder reads "Empty"); the
+//                     thumbnails ticked by default, nothing else; /cache/size agrees with the disk
+//   cache:disabled    "Clear selected" is off with nothing ticked or only empty caches ticked, on otherwise (ticks by click)
+//   cache:clear:<m>   a clear deletes exactly the ticked caches' files (the unticked ones, logs, history-*, src and we-ref
+//                     stay), each cleared size eases down to "Empty" — motion on it counts down through in-between sizes and
+//                     "Empty" rolls in; off / prefers-reduced-motion it only cross-fades — the button then turns off and
+//                     "Freed N" appears; pictures settings-cache-mid-*.png, settings-cache-done-*.png
+//   cache:look        a line's hover glow (and none under no-glow), the size and "Freed" in theme colours, bg-live: the
+//                     lines add no fill of their own over the section card; pictures settings-cache-*.png
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow, clipboard } = require("electron");
 const fs = require("fs");
@@ -162,17 +168,48 @@ const cell = async (name, fn) => {
   for (const x of v) console.log(`        - ${x}`);
 };
 
-// the cache fixtures: in the stack's own HOME (the backend sizes and clears ~/.cache/liascape/<dir>)
+// the cache fixtures: in the stack's own HOME (the backend sizes and clears ~/.cache/liascape/<dir>; the stack's
+// XDG_CACHE_HOME is ~/.cache, so the player's caches sit there too). No lwe-shaders: its line must read "Empty".
 const CACHE = path.join(E.HOME, ".cache", "liascape");
-const FIX = [["workshop_previews", "probe-still.jpg", 3 << 20], ["workshop_previews", "probe-anim.gif", 1 << 20], ["we_thumbs", "probe-we.jpg", 1 << 20]];
-const CLIP = ["video_clips", "probe-clip.mp4", 2 << 20];
+const CACHE_DIRS = { thumbs: "workshop_previews", "we-thumbs": "we_thumbs", clips: "video_clips", "scene-loudness": "scene-loudness", "media-art": "media-art", shaders: "lwe-shaders" };
+const CACHE_LABEL = { thumbs: "Card stills and GIF previews", "we-thumbs": "Workshop folder thumbnails", clips: "Video preview clips",
+  "scene-loudness": "Scene sound measurements", "media-art": "Album art", shaders: "Scene shader cache" };
+const FIX = [["thumbs", "probe-still.jpg", 16 << 20], ["thumbs", "probe-anim.gif", 8 << 20], ["we-thumbs", "probe-we.jpg", 3 << 20],
+  ["clips", "probe-clip.mp4", 12 << 20], ["scene-loudness", "00000000000000aa.json", 2 << 20], ["media-art", "00000000000000cc", 5 << 20]];
+// beside the caches: never cleared
+const BYSTANDERS = ["probe-bystander.log", "history-probe/h.json", "src/probe.c", "we-ref/probe.txt"];
 function writeFixtures() {
-  for (const [d, n, size] of [...FIX, CLIP]) { fs.mkdirSync(path.join(CACHE, d), { recursive: true }); fs.writeFileSync(path.join(CACHE, d, n), Buffer.alloc(size, 7)); }
+  for (const [id, n, size] of FIX) { const d = path.join(CACHE, CACHE_DIRS[id]); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, n), Buffer.alloc(size, 7)); }
+  for (const f of BYSTANDERS) { fs.mkdirSync(path.dirname(path.join(CACHE, f)), { recursive: true }); fs.writeFileSync(path.join(CACHE, f), "keep"); }
 }
-const dirBytes = (d) => { try { return fs.readdirSync(path.join(CACHE, d), { withFileTypes: true }).filter((x) => x.isFile()).reduce((s, x) => s + fs.statSync(path.join(CACHE, d, x.name)).size, 0); } catch { return 0; } };
-// Settings.tsx fmtBytes
+// what a clear of `id` would free now: the regular files directly in its folder, no writer's temporaries (AppOps.CacheFiles)
+const BUSY = /\.(tmp\d*|part)$|\.tmp\.jpg$|\.src\.gif$/;
+const dirBytes = (id) => { const d = path.join(CACHE, CACHE_DIRS[id]); try { return fs.readdirSync(d, { withFileTypes: true }).filter((x) => x.isFile() && !BUSY.test(x.name)).reduce((s, x) => s + fs.statSync(path.join(d, x.name)).size, 0); } catch { return 0; } };
+// Settings.tsx fmtBytes / sizeText
 const fmtBytes = (b) => b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} GB` : b >= 2 ** 20 ? `${Math.round(b / 2 ** 20)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
-const CACHE_ROW = "Clear thumbnails and GIF previews";
+const sizeText = (b) => (b > 0 ? fmtBytes(b) : "Empty");
+const LINE = (id) => `.settings [data-cache-line="${id}"]`;
+// the words a line's size shows (the face not marked off), as the page reads it
+const shownSize = (id) => js(`const f = document.querySelector('[data-cache-size="${id}"] > :not([data-off])'); return f ? f.textContent : null`);
+// tick the lines `ids` and untick the rest, by clicking the lines' names (the whole line is the label)
+async function setTicks(ids) {
+  for (const id of Object.keys(CACHE_DIRS)) {
+    const st = await js(`const l = document.querySelector(${J(LINE(id))}); if (!l) return null; const c = l.querySelector("input[type=checkbox]");
+      if (c.checked === ${J(ids)}.includes(${J(id)})) return "ok"; return await window.__x.show(l.querySelector(".slabel-row"))`);
+    if (st == null) throw new Error(`no line ${id}`);
+    if (st !== "ok") { await clickAt(st.x, st.y); await sleep(120); }
+  }
+  const got = await js(`return [...document.querySelectorAll(".settings [data-cache-line] input:checked")].map((c) => c.closest("[data-cache-line]").dataset.cacheLine)`);
+  if (J([...got].sort()) !== J([...ids].sort())) throw new Error(`ticked ${J(got)}, want ${J(ids)}`);
+}
+// per frame for `ms`: each line's two size faces (opacity, vertical offset, words) and the "Freed" note's opacity
+const SIZE_SAMPLE = (ms) => `(() => new Promise((res) => { const out = []; const t0 = performance.now();
+  const f = () => { const t = Math.round(performance.now() - t0), row = { t, lines: {} };
+    for (const e of document.querySelectorAll("[data-cache-size]")) row.lines[e.dataset.cacheSize] = [...e.children].map((x) => { const cs = getComputedStyle(x);
+      return { o: +(+cs.opacity).toFixed(3), ty: +new DOMMatrix(cs.transform).f.toFixed(2), tx: x.textContent, on: !x.hasAttribute("data-off") }; });
+    const n = document.querySelector("[data-cache-freed]"); row.freed = n ? +(+getComputedStyle(n).opacity).toFixed(3) : null;
+    out.push(row); if (t < ${ms}) requestAnimationFrame(f); else res(out); };
+  requestAnimationFrame(f); }))()`;
 
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
@@ -346,50 +383,173 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("cache:size — the row says what it clears and shows the size of exactly those folders", async () => {
+    await cell("cache:lines — one line per cache: its words, a themed tick, its folder's size; the thumbnails ticked", async () => {
       const v = [];
       writeFixtures();
-      const want = dirBytes("workshop_previews") + dirBytes("we_thumbs");
-      await load();
-      const r = await js(`const r = window.__x.row(${J(CACHE_ROW)}); if (!r) return null; await window.__x.show(r); await window.__x.sleep(400);
-        const sz = r.querySelector("[data-size]"); return { hint: r.querySelector(".shint")?.textContent ?? "", size: sz?.textContent ?? null, o: sz ? +getComputedStyle(sz).opacity : null }`);
-      if (!r) return [`no "${CACHE_ROW}" row in Housekeeping`];
-      if (!/clips aren't touched/.test(r.hint)) v.push(`the hint doesn't say the preview clips stay: ${J(r.hint)}`);
-      if (r.size !== fmtBytes(want) || !(r.o > 0.95)) v.push(`the size reads ${J(r.size)} (opacity ${r.o}), want ${J(fmtBytes(want))} — workshop_previews + we_thumbs, not video_clips (${fmtBytes(dirBytes("video_clips"))})`);
+      await setSettings({ SettingsLevel: "basic", Morphs: true }); await load();
+      if (!(await js(`return !!document.querySelector("[data-cache-pick]")`))) return ["no cache picker ([data-cache-pick]) in Housekeeping"];
+      await js(`await window.__x.show(document.querySelector("[data-cache-pick]")); return true`);
+      await sleep(500);
+      const lines = await js(`return [...document.querySelectorAll(".settings [data-cache-line]")].map((l) => { const c = l.querySelector("input[type=checkbox]"), cs = c && getComputedStyle(c);
+        return { id: l.dataset.cacheLine, label: l.querySelector(".slabel-row")?.textContent.trim(), hint: l.querySelector(".shint")?.textContent ?? "", tag: l.tagName,
+          box: !!c, themed: cs ? cs.appearance === "none" && cs.width === "18px" : false, checked: c?.checked }; })`);
+      const ids = Object.keys(CACHE_DIRS);
+      if (J(lines.map((l) => l.id)) !== J(ids)) v.push(`the lines are ${J(lines.map((l) => l.id))}, want ${J(ids)}`);
+      for (const l of lines) {
+        if (l.label !== CACHE_LABEL[l.id]) v.push(`${l.id}: labelled ${J(l.label)}, want ${J(CACHE_LABEL[l.id])}`);
+        if (l.tag !== "LABEL") v.push(`${l.id}: the line isn't a <label> (a click on its words must tick it)`);
+        if (!l.box || !l.themed) v.push(`${l.id}: no themed checkbox (${J(l)})`);
+        if (l.checked !== ["thumbs", "we-thumbs"].includes(l.id)) v.push(`${l.id}: ${l.checked ? "ticked" : "unticked"} by default (only the thumbnails are)`);
+        if (!l.hint) v.push(`${l.id}: no words on what clearing it costs`);
+      }
+      const sl = lines.find((l) => l.id === "scene-loudness");
+      if (sl && !/measured again/.test(sl.hint)) v.push(`scene-loudness: its words don't say a clear means measuring again: ${J(sl.hint)}`);
       const api = (await http("GET", "/cache/size")).json;
-      if (api?.bytes !== want) v.push(`/cache/size answers ${J(api)}, want bytes ${want}`);
-      const rect = await js(`const b = window.__x.row(${J(CACHE_ROW)}).getBoundingClientRect(); return { x: Math.round(b.x) - 8, y: Math.round(b.y) - 8, width: Math.round(b.width) + 16, height: Math.round(b.height) + 16 }`);
-      await shot("cache-size", rect);
+      for (const id of ids) {
+        const want = dirBytes(id), shown = await shownSize(id);
+        if (shown !== sizeText(want)) v.push(`${id}: the size reads ${J(shown)}, want ${J(sizeText(want))} (${CACHE_DIRS[id]})`);
+        const a = api?.categories?.find((c) => c.id === id);
+        if (a?.bytes !== want) v.push(`/cache/size ${id}: ${J(a)}, want bytes ${want}`);
+      }
+      if (fs.existsSync(path.join(CACHE, "lwe-shaders"))) v.push("the stack made lwe-shaders — the \"Empty\" line proved nothing");
+      const rect = await js(`const b = document.querySelector("[data-cache-pick]").getBoundingClientRect(); return { x: Math.round(b.x) - 10, y: Math.round(b.y) - 8, width: Math.round(b.width) + 20, height: Math.round(b.height) + 16 }`);
+      await shot("cache-lines", rect);
       return v;
     });
 
-    for (const mode of ["on", "off"]) {
-      await cell(`cache:clear:${mode} — Clear Cache empties those folders (not the clips) and the row shows what it freed`, async () => {
+    await cell("cache:disabled — \"Clear selected\" is off with nothing ticked or only empty caches ticked", async () => {
+      const v = [];
+      writeFixtures();
+      await load();
+      const dis = () => js(`return document.querySelector("[data-cache-clear]")?.disabled ?? null`);
+      if (await dis() !== false) v.push(`the default ticks (non-empty thumbnails): disabled is ${await dis()}, want false`);
+      await setTicks([]);
+      if (await dis() !== true) v.push(`nothing ticked: disabled is ${await dis()}, want true`);
+      await setTicks(["shaders"]);
+      if (dirBytes("shaders") !== 0) v.push("the shader cache isn't empty — proved nothing");
+      if (await dis() !== true) v.push(`only the empty shader cache ticked: disabled is ${await dis()}, want true`);
+      await setTicks(["shaders", "media-art"]);
+      if (await dis() !== false) v.push(`an empty and a full cache ticked: disabled is ${await dis()}, want false`);
+      return v;
+    });
+
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`cache:clear:${mode} — only the ticked caches go; their sizes ease to "Empty"; the button turns off`, async () => {
         const v = [];
-        await setSettings({ Morphs: mode === "on" });
-        writeFixtures();
-        await load();
-        const want = dirBytes("workshop_previews") + dirBytes("we_thumbs");
-        const row = `window.__x.row(${J(CACHE_ROW)})`;
-        if (!(await js(`return !!${row}`))) return [`no "${CACHE_ROW}" row`];
-        const p = await js(`await window.__x.show(${row}); await window.__x.sleep(300); return await window.__x.show(${row}.querySelector("[data-cache-clear]"))`);
-        const rect = await js(`const b = ${row}.getBoundingClientRect(); return { x: Math.round(b.x) - 8, y: Math.round(b.y) - 8, width: Math.round(b.width) + 16, height: Math.round(b.height) + 16 }`);
-        const samp = js(`return await ${SAMPLE("[data-cache-note]", "[data-cache-clear]", 900)}`);
-        await sleep(60); await clickAt(p.x, p.y);
-        if (mode === "on") { await sleep(110); await shot("cache-mid", rect); }
-        const fr = await samp;
-        v.push(...judgeSwap(`motion ${mode}`, fr, mode, { back: false, steady: false }));
-        const bx = fr.map((f) => f.nx).filter((x) => x != null);
-        if (Math.max(...bx) - Math.min(...bx) > 0.5) v.push(`the Clear Cache button moved (${Math.min(...bx)}–${Math.max(...bx)} px)`);
-        const after = await js(`const r = ${row}; return { freed: r.querySelector("[data-freed]")?.textContent ?? null, disabled: r.querySelector("[data-cache-clear]")?.disabled ?? null }`);
-        if (after.freed !== `Freed ${fmtBytes(want)}`) v.push(`after the clear it reads ${J(after.freed)}, want ${J(`Freed ${fmtBytes(want)}`)}`);
-        if (after.disabled !== true) v.push("Clear Cache stays enabled on an empty cache");
-        for (const [d, n] of FIX) if (fs.existsSync(path.join(CACHE, d, n))) v.push(`${d}/${n} survived the clear`);
-        if (!fs.existsSync(path.join(CACHE, ...CLIP.slice(0, 2)))) v.push("the clear deleted a preview clip (video_clips)");
-        await shot(`cache-freed-${mode}`, rect);
-        return v;
+        await setSettings({ Morphs: mode !== "off" }); await reducedMotion(mode === "reduced");
+        try {
+          writeFixtures();
+          await load();
+          const noMotion = await js(`return document.documentElement.classList.contains("no-motion")`);
+          if (noMotion !== (mode !== "on")) return [`:root.no-motion is ${noMotion} under motion ${mode} — proved nothing`];
+          const pick = ["thumbs", "clips", "media-art"], keep = ["we-thumbs", "scene-loudness"];
+          await setTicks(pick);
+          const before = Object.fromEntries(Object.keys(CACHE_DIRS).map((id) => [id, dirBytes(id)]));
+          for (const id of pick) if (!before[id]) return [`${id} holds nothing before the clear — proved nothing`];
+          const p = await js(`return await window.__x.show(document.querySelector("[data-cache-clear]"))`);
+          await sleep(300);
+          const rect = await js(`const b = document.querySelector("[data-cache-pick]").getBoundingClientRect(); return { x: Math.round(b.x) - 10, y: Math.round(b.y) - 8, width: Math.round(b.width) + 20, height: Math.round(b.height) + 16 }`);
+          const samp = js(`return await ${SIZE_SAMPLE(1700)}`);
+          await sleep(60); await clickAt(p.x, p.y);
+          await sleep(mode === "on" ? 300 : 90); await shot(`cache-mid-${mode}`, rect);
+          const fr = await samp;
+          // the files
+          for (const [id, n] of FIX) {
+            const there = fs.existsSync(path.join(CACHE, CACHE_DIRS[id], n));
+            if (pick.includes(id) && there) v.push(`${CACHE_DIRS[id]}/${n} survived the clear`);
+            if (keep.includes(id) && !there) v.push(`${CACHE_DIRS[id]}/${n} was deleted though ${id} wasn't ticked`);
+          }
+          for (const f of BYSTANDERS) if (!fs.existsSync(path.join(CACHE, f))) v.push(`${f} (beside the caches) was deleted`);
+          // the sizes, per frame
+          for (const id of pick) {
+            const seen = fr.map((f) => f.lines[id]).filter(Boolean);
+            const shownTx = seen.map((faces) => faces.filter((x) => x.o > 0.05).map((x) => x.tx));
+            const start = sizeText(before[id]), end = sizeText(dirBytes(id));
+            const last = seen[seen.length - 1]?.find((x) => x.on);
+            if (last?.tx !== end || !(last.o > 0.95)) v.push(`${id}: ends reading ${J(last)}, want ${J(end)} fully shown`);
+            const between = [...new Set(shownTx.flat())].filter((t) => t !== start && t !== end);
+            if (mode === "on") {
+              if (between.length < 3) v.push(`${id}: motion on, the size didn't count down (in-between sizes ${J(between)})`);
+              const inn = seen.filter((faces) => faces.some((x) => x.tx === end && x.o > 0.05 && x.o < 0.95 && Math.abs(x.ty) > 0.3)).length;
+              if (end === "Empty" && inn < 2) v.push(`${id}: motion on, "Empty" didn't roll in (${inn} frames mid-roll)`);
+            } else {
+              if (between.length) v.push(`${id}: motion ${mode}, the size counted (${J(between.slice(0, 5))}) — want a cross-fade only`);
+              const moved = seen.filter((faces) => faces.some((x) => Math.abs(x.ty) > 0.01 && x.o > 0.02));
+              if (moved.length) v.push(`${id}: motion ${mode}, the words moved in ${moved.length} frames`);
+              const mids = seen.filter((faces) => faces.some((x) => x.o > 0.05 && x.o < 0.95)).length;
+              if (!mids) v.push(`${id}: motion ${mode}, the new size popped in — no in-between opacity frame`);
+              const k0 = seen.findIndex((faces) => faces.some((x) => x.tx === end && x.o > 0.05)), k1 = seen.findIndex((faces) => faces.some((x) => x.tx === end && x.o >= 0.95));
+              if (k0 >= 0 && k1 >= 0 && fr[k1].t - fr[k0].t > 300) v.push(`${id}: motion ${mode}, the fade took ${fr[k1].t - fr[k0].t} ms (want ≈ 120)`);
+            }
+            // a face keeps its words while it fades out: only the shown one may count
+            for (const i of [0, 1]) {
+              const fading = seen.filter((faces) => faces[i] && !faces[i].on && faces[i].o > 0.05).map((faces) => faces[i].tx);
+              if (new Set(fading).size > 1) v.push(`${id}: a leaving face changed its words while it faded (${J([...new Set(fading)])})`);
+            }
+          }
+          for (const id of keep) {
+            const texts = new Set(fr.map((f) => f.lines[id]?.find((x) => x.on)?.tx));
+            if (texts.size !== 1 || !texts.has(sizeText(before[id]))) v.push(`${id} (unticked): its size changed (${J([...texts])})`);
+          }
+          const after = await js(`return { dis: document.querySelector("[data-cache-clear]").disabled, freed: document.querySelector("[data-cache-freed]")?.textContent,
+            fo: +getComputedStyle(document.querySelector("[data-cache-freed]")).opacity }`);
+          const freed = pick.reduce((n, id) => n + before[id] - dirBytes(id), 0);
+          if (after.dis !== true) v.push("\"Clear selected\" stays on with every ticked cache empty");
+          if (after.freed !== `Freed ${fmtBytes(freed)}` || !(after.fo > 0.95)) v.push(`the note reads ${J(after.freed)} (opacity ${after.fo}), want ${J(`Freed ${fmtBytes(freed)}`)}`);
+          const fo = fr.map((f) => f.freed).filter((o) => o != null);
+          if (!fo.some((o) => o > 0.05 && o < 0.95)) v.push(`"Freed" popped in — no in-between opacity frame (${J([...new Set(fo)].slice(0, 8))})`);
+          await shot(`cache-done-${mode}`, rect);
+          return v;
+        } finally { await reducedMotion(false); }
       });
     }
+    await setSettings({ Morphs: true });
+
+    await cell("cache:look — hover glow (none under no-glow), theme colours, bg-live adds no fill; pictures", async () => {
+      const v = [];
+      writeFixtures();
+      await load();
+      const C = (expr) => js(`const p = document.createElement("i"); p.style.color = ${J(expr)}; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c`);
+      const lit = (sh) => !!sh && sh !== "none" && sh.split(/,(?![^(]*\))/).some((part) => {
+        const m = /rgba?\(([^)]*)\)/.exec(part); if (!m) return false; const c = m[1].split(",").map(Number); return c.length < 4 || c[3] > 0; });
+      const id = "thumbs";
+      const p = await js(`return await window.__x.show(document.querySelector(${J(LINE(id))} + " .slabel-row"))`);
+      const rect = await js(`const b = document.querySelector("[data-cache-pick]").getBoundingClientRect(); return { x: Math.round(b.x) - 10, y: Math.round(b.y) - 8, width: Math.round(b.width) + 20, height: Math.round(b.height) + 16 }`);
+      const read = () => js(`const l = document.querySelector(${J(LINE(id))}), b = getComputedStyle(l, "::before"), c = getComputedStyle(l.querySelector("input"));
+        return { bar: b.boxShadow, barO: +b.opacity, box: c.boxShadow, bg: getComputedStyle(l).backgroundColor, size: getComputedStyle(document.querySelector('[data-cache-size="${id}"]')).color }`);
+      await mv(5, 5, 300);
+      await shot("cache-rest", rect);
+      const rest = await read();
+      if (rest.size !== await C("var(--subtext)")) v.push(`the size is ${rest.size}, want --subtext ${await C("var(--subtext)")}`);
+      await mv(p.x, p.y, 400);
+      const hov = await read();
+      if (!(hov.barO > 0.9) || !lit(hov.bar)) v.push(`hovered, the line's accent bar doesn't glow (${J(hov)})`);
+      if (!lit(hov.box)) v.push(`hovered, its ticked box doesn't glow (${hov.box})`);
+      await shot("cache-hover", rect);
+      await js(`document.documentElement.classList.add("no-glow"); return true`); await sleep(300);
+      const ng = await read();
+      if (lit(ng.bar) || lit(ng.box)) v.push(`no-glow: still glowing (${J(ng)})`);
+      await shot("cache-hover-noglow", rect);
+      await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await mv(5, 5, 300);
+      const bl = await read();
+      // rgb() / rgba() / color(srgb … / a): the alpha, 1 when none is given
+      const alpha = (c) => +(/\/\s*([0-9.]+)\s*\)$/.exec(c)?.[1] ?? /rgba\([^)]*,\s*([0-9.]+)\)/.exec(c)?.[1] ?? (/^(rgb|color)\(/.test(c) ? 1 : 0));
+      if (alpha(bl.bg) > 0.01) v.push(`bg-live: the line has a fill of its own (${bl.bg}); the section card carries the darkness`);
+      const card = await js(`return getComputedStyle(document.querySelector("[data-cache-pick]").closest(".ssection")).backgroundColor`);
+      if (!(alpha(card) > 0 && alpha(card) < 1)) v.push(`bg-live: the section card isn't a see-through dark fill (${card})`);
+      await shot("cache-bglive", rect);
+      await js(`document.documentElement.classList.remove("bg-live"); return true`);
+      // "Freed" in --success
+      await setTicks(["media-art"]);
+      const q = await js(`return await window.__x.show(document.querySelector("[data-cache-clear]"))`);
+      await clickAt(q.x, q.y);
+      await waitFor(() => js(`return +getComputedStyle(document.querySelector("[data-cache-freed]")).opacity > 0.95`), 3000);
+      const fc = await js(`return getComputedStyle(document.querySelector("[data-cache-freed]")).color`);
+      if (fc !== await C("var(--success)")) v.push(`"Freed" is ${fc}, want --success ${await C("var(--success)")}`);
+      await mv(5, 5, 900);
+      await shot("cache-freed", rect);
+      return v;
+    });
     await setSettings({ Morphs: true });
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });

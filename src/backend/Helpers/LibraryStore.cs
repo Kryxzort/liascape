@@ -64,6 +64,7 @@ public sealed class LibMeta
     public long? FileSizeBytes { get; set; }
     public long? Subscriptions { get; set; }
     public long? Favorites { get; set; }
+    // the Steam page's view count: neither filled nor sent; kept so an index.json that holds it round-trips
     public long? Views { get; set; }
     // Steam's Workshop tags: saved at a download, or asked once for an auto-imported item (Web/LibraryFactsOps); absent =
     // not known (a non-Workshop item, or not asked yet: the item's project.json speaks meanwhile).

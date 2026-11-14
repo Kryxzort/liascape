@@ -48,6 +48,14 @@ public class SteamWorkshopService : IBgsProvider
         get { lock (_lock) return _filter; }
         set { var k = (value ?? new()).Key(); lock (_lock) { _filter = value ?? new(); if (k != _filterKey) { _filterKey = k; Invalidate(); } } }
     }
+    // the list Browse shows (Models/WorkshopList.cs): the whole Workshop, the signed-in account's favourites or a creator's items
+    public WorkshopList List
+    {
+        get { lock (_lock) return _list; }
+        set { var k = (value ?? new()).Key(); lock (_lock) { _list = value ?? new(); if (k != _listKey) { _listKey = k; Invalidate(); } } }
+    }
+    private WorkshopList _list = new();
+    private string _listKey = "";
     public bool AllowScenes
     {
         get { lock (_lock) return _allowScenes; }
@@ -55,7 +63,7 @@ public class SteamWorkshopService : IBgsProvider
     }
     public string WorkshopBasePath { get; set; } = "";
 
-    private void Invalidate() { _gen++; DropPrefetch(); }
+    private void Invalidate() { _gen++; DropPrefetch(); _cursor.Clear(); }
 
     // Background-fetched next page so a scroll-load is instant. Keyed by (gen, query, page). A stale one (the filter
     // changed, another page was asked for) is CANCELLED: the session serves one request at a time, and the user's real
@@ -75,12 +83,14 @@ public class SteamWorkshopService : IBgsProvider
     // serves one request at a time, and the fallback never prefetches (each page read costs rate-limit budget).
     private Task<List<WallpaperResult>> GetWithPrefetch(string? query, int page)
     {
-        int gen; WorkshopFilter filter; bool scenes; Task<List<WallpaperResult>> task;
+        int gen; WorkshopFilter filter; bool scenes; WorkshopList list; Task<List<WallpaperResult>> task;
         lock (_lock)
         {
-            (gen, filter, scenes) = (_gen, _filter, _allowScenes);
+            (gen, filter, scenes, list) = (_gen, _filter, _allowScenes, _list);
+            // a list has no search (Steam's client protocol can't search a user's files): the query is ignored
+            if (list.Active) query = null;
             if (_prefetch is { } p && p.gen == gen && p.query == query && p.page == page) task = p.task;
-            else { DropPrefetch(); task = FetchAsync(filter, scenes, query, page, CancellationToken.None); }
+            else { DropPrefetch(); task = Fetch(filter, scenes, list, gen, query, page, CancellationToken.None); }
         }
         _ = task.ContinueWith((t) =>
         {
@@ -90,12 +100,84 @@ public class SteamWorkshopService : IBgsProvider
                 if (gen != _gen || _prefetch is { } q && q.gen == gen && q.query == query && q.page == page + 1) return;
                 DropPrefetch();
                 var cts = new CancellationTokenSource();
-                var next = FetchAsync(filter, scenes, query, page + 1, cts.Token);
+                var next = Fetch(filter, scenes, list, gen, query, page + 1, cts.Token);
                 next.ContinueWith((n) => _ = n.Exception, TaskContinuationOptions.OnlyOnFaulted); // observe faults
                 _prefetch = (gen, query, page + 1, next, cts);
             }
         }, TaskScheduler.Default);
         return task;
+    }
+
+    private Task<List<WallpaperResult>> Fetch(WorkshopFilter filter, bool allowScenes, WorkshopList list, int gen, string? query, int appPage, CancellationToken ct) =>
+        list.Active ? ListAsync(filter, allowScenes, list, gen, appPage, ct) : FetchAsync(filter, allowScenes, query, appPage, ct);
+
+    // A list (the favourites, a creator's items): Steam's client protocol pages a user's files 100 at a time and can't
+    // filter them by tag, so the filter's tags (and the playable types) are matched here — and a page the filter empties
+    // reads on (up to ListPagesPerLoad Steam pages), so an app page only comes back empty at the end of the list. Where the
+    // next app page starts is remembered per list generation (_cursor). A private profile's favourites (the client protocol
+    // sees none) come from the community's favourites page with the sign-in's cookie instead, 30 a page, SteamGate-paced.
+    private const int ListPagesPerLoad = 5, ListEnd = int.MaxValue / 2;
+    private readonly Dictionary<(int gen, int appPage), int> _cursor = [];
+    private readonly HashSet<ulong> _favoritesViaPage = [];
+
+    private async Task<List<WallpaperResult>> ListAsync(WorkshopFilter filter, bool allowScenes, WorkshopList list, int gen, int appPage, CancellationToken ct)
+    {
+        var plan = WorkshopTags.Build(filter, allowScenes);
+        if (plan.Empty) return [];
+        ulong steamId;
+        if (list.IsCreator) steamId = ulong.Parse(list.Id!);
+        else
+        {
+            var who = await SteamCommunity.SignInAsync(ct).ConfigureAwait(false);
+            if (who is not { SteamId: > 0 } w) throw new SteamCommunity.SignInRequiredException("Sign in to Steam to see your Workshop favourites (Settings → Getting Workshop wallpapers).");
+            steamId = w.SteamId;
+        }
+        string type = list.IsCreator ? "myfiles" : "myfavorites";
+        List<WallpaperResult> Keep(IReadOnlyList<SteamWorkshopScraper.PublishedFileDetail> page)
+        {
+            var byId = new Dictionary<string, SteamWorkshopScraper.PublishedFileDetail>();
+            foreach (var d in page) byId.TryAdd(d.Id, d);
+            return SteamWorkshopScraper.MapToResults(page.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes)
+                .Where((r) => WorkshopTags.Matches(plan, r.Tags ?? [])).ToList();
+        }
+        bool viaPage; lock (_lock) viaPage = !list.IsCreator && _favoritesViaPage.Contains(steamId);
+        if (!viaPage)
+        {
+            int start; lock (_lock) start = _cursor.TryGetValue((gen, appPage), out var c) ? c : appPage;
+            if (start >= ListEnd) return []; // the previous app page reached the list's end
+            var sw = Stopwatch.StartNew();
+            var outList = new List<WallpaperResult>();
+            int cm = start;
+            for (int n = 0; n < ListPagesPerLoad; n++, cm++)
+            {
+                var got = await SteamWorkshopDetails.UserFilesAsync(steamId, type, list.SteamSort, cm, CmPageSize, CmTimeout, ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                if (got == null) throw new InvalidOperationException("Steam's servers didn't answer — try again in a moment.");
+                // a private profile's favourites: the client protocol sees none — the community's page with the sign-in
+                if (!list.IsCreator && cm == 1 && got.Total == 0)
+                {
+                    lock (_lock) _favoritesViaPage.Add(steamId);
+                    viaPage = true;
+                    break;
+                }
+                outList.AddRange(Keep(got.Items));
+                bool end = (long)cm * CmPageSize >= got.Total || got.Items.Count == 0;
+                if (end) { cm = ListEnd; break; }
+                if (outList.Count > 0) { cm++; break; }
+            }
+            if (!viaPage)
+            {
+                lock (_lock) { if (gen == _gen) _cursor[(gen, appPage + 1)] = cm; }
+                Served(Path.Steam, $"Steam's client protocol (anonymous) — {type}: {outList.Count} item(s) in {sw.ElapsedMilliseconds} ms");
+                return outList;
+            }
+        }
+        // the favourites page (30 a page; app page = its page); a page the filter empties is an empty app page
+        Served(Path.Fallback, "the community's favourites page (a private profile — the sign-in's cookie, SteamGate-paced)");
+        var ids = await SteamCommunity.MyFavoritesPageAsync(appPage, ct).ConfigureAwait(false);
+        if (ids.Count == 0) return [];
+        var details = await SteamWorkshopScraper.GetDetailsBatchAsync(ids).ConfigureAwait(false);
+        return Keep(ids.Where(details.ContainsKey).Select((id) => details[id]).ToList());
     }
 
     private static bool ForceFallback => Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK") == "1";
@@ -175,7 +257,7 @@ public class SteamWorkshopService : IBgsProvider
             Resolution = result.Resolution, AgeRating = age, YoutubeUrl = youtube,
             PageUrl = result.PageUrl, AuthorName = result.AuthorName, Description = result.Description,
             FileSizeBytes = result.FileSizeBytes, Subscriptions = result.Subscriptions,
-            Favorites = result.Favorites, Views = result.Views, Tags = result.Tags,
+            Favorites = result.Favorites, Tags = result.Tags,
         };
     }
 }

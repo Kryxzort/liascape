@@ -286,7 +286,11 @@ app.whenReady().then(async () => {
     // ---- act ----
     await act("download", browseSide, sideBtn("Download & Apply"), ":scope svg.lucide-download > :nth-child(1)");
     await act("external-link", browseSide, sideBtn("Open on Steam"), ":scope svg.lucide-external-link > :nth-child(2)");
-    await act("copy", browseSide, `document.querySelector(".side-panel:not(.closing) [data-copy-id]")`, ":scope svg.lucide-copy > rect");
+    // the copy glyph acts on the Settings command copy buttons (components/CopyButton.tsx): the sidebars' Workshop ID pill wears
+    // the # (an object, below)
+    await act("copy", async () => { await closeSide(); await tab("Settings"); await sleep(600);
+      await page(`document.querySelector(".settings .copy-btn")?.scrollIntoView({ block: "center" });`); await sleep(500); },
+      `document.querySelector(".settings .copy-btn")`, ":scope svg.lucide-copy > rect");
     await act("cloud-download", browseSide, `document.querySelector("[data-side-sub-btn=subscribe]")`, ":scope svg.lucide-cloud-download > :nth-child(1)");
     await act("refresh", async () => { await closeSide(); await browse(); }, `document.querySelector(".pills .mini[aria-label=Refresh]")`, null, { n: 80 });
     await act("upload", lib, `[...document.querySelectorAll(".topbar .btn")].find((b) => b.textContent.trim() === "Import")`, ":scope svg.lucide-upload > :nth-child(1)");

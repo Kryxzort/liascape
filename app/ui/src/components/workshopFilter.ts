@@ -53,6 +53,8 @@ export const WS_SORT_OPTIONS = [
   ...PERIODS.map(([d, l]) => ({ value: `trend:${d}`, label: `Most Popular · ${l}` })),
   ...SORTS.filter(([v]) => v !== "trend").map(([v, l]) => ({ value: v, label: l })),
 ];
+// a Workshop list's sorts (favourites, a creator's items): the two Steam's client protocol orders a user's files by
+export const WS_LIST_SORTS = [{ value: "lastupdated", label: "Recently Updated" }, { value: "toprated", label: "Top Rated" }];
 export const wsSortValue = (f: WorkshopFilter) => (f.sort === "trend" ? `trend:${f.trendDays}` : f.sort);
 export const wsSortPatch = (v: string): Partial<WorkshopFilter> => (v.startsWith("trend:") ? { sort: "trend", trendDays: +v.slice(6) } : { sort: v });
 

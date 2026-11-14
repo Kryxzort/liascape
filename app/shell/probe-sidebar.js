@@ -56,6 +56,13 @@
 //   bar:settings         a right-click on a playlist bar item opens the sidebar on it; nothing applies, no menu
 //   lib:levels           Basic hides Speed; an item with its own speed shows it anyway
 //   lib:popin            a scene's sidebar shows its body once, with its scene properties in it — nothing pops in later
+//   lib:propsFold:on|off|reduced  "Scene properties · 3" is a button that folds s1's section and opens it (real clicks, per
+//                        frame): on, the box morphs, the head stays put unstretched, the chevron turns, the rows fade, a block
+//                        below glides; off / reduced, opacity only, sizes change at once; glow / no-glow, bg-live. Shots side-fold-*.png
+//   lib:propsFoldKeys    Enter on the focused header folds, Space opens; nothing applies, the sidebar stays
+//   lib:propsFoldKeep    one remembered fold for every scene: folded on s1 → s2 opens folded, a reload keeps it, opened on s2 → s1 open
+//   lib:propsCount       the header counts the shown properties, following s1's condition live (clock off → · 2); s2's group
+//                        heading, label and condition-hidden slider don't count; read late, the header never moves once shown
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
 //   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
 //   browse:dblclick      a double-click downloads & applies
@@ -1114,7 +1121,7 @@ app.whenReady().then(async () => {
         if (pre.none) return [`s2 marked crashed: no crash notice with a Clear (${J(pre)}) — proved nothing`];
         console.log(`        ${J(pre)}`);
         if (!pre.parent) v.push("the notice isn't a block of the side body");
-        if (!/crashed/i.test(pre.text) || !/won't be played/.test(pre.text)) v.push(`the notice says ${J(pre.text)}`);
+        if (!/crashed/i.test(pre.text) || !/rotations skip it/.test(pre.text)) v.push(`the notice says ${J(pre.text)}`);
         if (!pre.mini) v.push("Clear isn't the sidebar's small button (.mini)");
         if (J(pre.mat) !== J(pre.secMat)) v.push(`material ${J(pre.mat)}, the section cards' ${J(pre.secMat)}`);
         const dRgb = pre.danger.replace(/^rgba?\(|\)$/g, "").split(",").slice(0, 3).map((x) => x.trim()).join(", ");
@@ -1124,8 +1131,9 @@ app.whenReady().then(async () => {
         if (!pre.wl) v.push("s2 marked crashed: no whitelist row");
         if (!pre.card) v.push("s2's card isn't marked crashed");
         if (mode === "on") {
+          // a user's own apply plays a crashed scene; only rotations skip it (PlayerHelper.Apply)
           const r = await post("/apply", { path: SC[1] });
-          if (r.status < 400 || !/crash/i.test(r.json?.error ?? "")) v.push(`while marked, /apply s2 answered ${r.status} ${J(r.json)} — expected the crash refusal`);
+          if (r.status >= 400) v.push(`while marked, /apply s2 answered ${r.status} ${J(r.json)} — a crashed scene still applies by hand`);
         }
         await mv(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2, 400);
         const hov = await page(`const b = m.side().querySelector("[data-side-crash-clear]"), root = document.documentElement;
@@ -1181,6 +1189,268 @@ app.whenReady().then(async () => {
       }
       return v;
     });
+
+    // ---- "Scene properties" folds (ScenePropsEditor.tsx; store scenePropsFolded, localStorage). s1's fixture: color, clock and
+    // bars (shown while clock is on). A second scene with properties for the remembered choice and the count: s2's
+    // project.json, rewritten for these cells (a group heading, a label, a toggle and a slider hidden by its condition).
+    const FOLD_KEY = "liascape.scenePropsFolded";
+    const S2_PROPS = { look: { order: 0, text: "Look", type: "group" }, speed: { order: 1, text: "Spin speed", type: "slider", value: 2, min: 0, max: 10, fraction: false },
+      about: { order: 2, text: "Tuned for dark themes" }, show: { order: 3, text: "Show rings", type: "bool", value: false },
+      rings: { order: 4, text: "Rings", type: "slider", value: 3, min: 1, max: 8, fraction: false, condition: "show.value" } };
+    const withS2Props = async (fn) => {
+      const pj = path.join(SC[1], "project.json"), pj0 = fs.readFileSync(pj, "utf8");
+      const j = JSON.parse(pj0); j.general = { ...(j.general || {}), properties: S2_PROPS };
+      fs.writeFileSync(pj + ".pb", JSON.stringify(j)); fs.renameSync(pj + ".pb", pj);
+      try { return await fn(); } finally { fs.writeFileSync(pj + ".pb", pj0); fs.renameSync(pj + ".pb", pj); }
+    };
+    const foldHead = () => page(`const s = m.side()?.querySelector("[data-scene-props]"); const b = s?.querySelector("[data-scene-props-head]");
+      if (!b) return null; const r = b.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, tag: b.tagName, exp: b.getAttribute("aria-expanded"), body: !!s.querySelector("[data-scene-props-body]"),
+        count: s.querySelector("[data-scene-props-count]")?.textContent.trim() ?? null, text: b.textContent.replace(/\\s+/g, " ").trim(),
+        rows: s.querySelectorAll(".srow[data-scene-prop]").length, shown: s.querySelectorAll("[data-scene-prop]").length };`);
+    // the section on `t`'s sidebar: true with its fold header; a reason when it's missing, or has no header to fold it
+    const waitProps = async (t) => {
+      const r = await page(`for (let i = 0; i < 60; i++) { const s = m.sideTitle() === ${JSON.stringify(t)} ? m.side()?.querySelector("[data-scene-props]") : null;
+        if (s?.querySelector("[data-scene-props-head]")) return "ok"; if (s && i > 20) return "nohead"; await m.sleep(50); } return "none";`);
+      if (r === "ok") return true;
+      throw new Error(r === "nohead" ? `${t}'s Scene properties have no fold header (a button with aria-expanded and the count)` : `${t}'s sidebar shows no Scene properties — proved nothing`);
+    };
+    // every frame for `ms`: the section's box, its head's, the first row's opacity and box, the chevron's turn, what sits below
+    // (a probe block after the section in the body) and the properties any running animation in the section animates
+    const FOLD_SAMPLE = (ms) => `(() => new Promise((res) => { const out = [], props = new Set(); const t0 = performance.now();
+      const f = () => { const s = document.querySelector(".side-panel:not(.closing) [data-scene-props]");
+        if (s) { const h = s.querySelector("[data-scene-props-head]"), row = s.querySelector(".srow[data-scene-prop]"), ch = s.querySelector(".sp-chev"), bl = document.querySelector("[data-probe-below]");
+          for (const a of s.getAnimations({ subtree: true })) for (const k of a.effect?.getKeyframes?.() ?? []) for (const p of Object.keys(k)) if (!["offset", "easing", "composite", "computedOffset"].includes(p)) props.add(p);
+          const r = s.getBoundingClientRect(), hr = h.getBoundingClientRect(), tf = getComputedStyle(ch).transform, mx = new DOMMatrix(tf === "none" ? undefined : tf);
+          let op = null, rr = null; if (row && row.getClientRects().length) { op = 1; for (let e = row; e && e.nodeType === 1; e = e.parentElement) op *= +getComputedStyle(e).opacity; rr = row.getBoundingClientRect(); }
+          out.push({ t: Math.round(performance.now() - t0), h: +r.height.toFixed(1), y: +r.y.toFixed(1), hx: +hr.x.toFixed(1), hy: +hr.y.toFixed(1), hh: +hr.height.toFixed(1),
+            op: op == null ? null : +op.toFixed(3), ry: rr ? +rr.y.toFixed(1) : null, rh: rr ? +rr.height.toFixed(1) : null,
+            rot: +(Math.atan2(mx.b, mx.a) * 180 / Math.PI).toFixed(1), by: bl ? +bl.getBoundingClientRect().y.toFixed(1) : null }); }
+        if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); else res({ out, props: [...props] }); };
+      requestAnimationFrame(f); }))()`;
+    // frames strictly between a series' first and last value (more than `tol` from both)
+    const between = (xs, tol = 1) => { const a = xs[0], b = xs[xs.length - 1]; return xs.filter((x) => Math.min(Math.abs(x - a), Math.abs(x - b)) > tol && (x - a) * (b - x) > 0).length; };
+    const spread = (xs) => Math.max(...xs) - Math.min(...xs);
+    // what's wrong with one fold (collapse or expand), frame by frame
+    function judgeFold(dir, mode, f, props) {
+      const v = [], J = JSON.stringify, on = mode === "on";
+      if (f.length < 5) return [`${dir}: ${f.length} frames sampled — proved nothing`];
+      const hs = f.map((x) => x.h), d = hs[hs.length - 1] - hs[0];
+      if (dir === "collapse" ? d > -10 : d < 10) return [`${dir}: the section went ${hs[0]} → ${hs[hs.length - 1]} px — nothing folded (proved nothing)`];
+      const hb = between(hs), rots = f.map((x) => x.rot), rb = between(rots, 2), ops = f.map((x) => x.op);
+      console.log(`        ${mode} ${dir}: height ${hs[0]} → ${hs[hs.length - 1]} (${hb} frames between), chevron ${rots[0]}° → ${rots[rots.length - 1]}° (${rb} between), row opacity ${ops.map((x) => (x == null ? "-" : x.toFixed(2))).filter((x, i, a) => !i || x !== a[i - 1]).slice(0, 12).join(" ")}, animated ${J(props)}`);
+      // the box: through in-between heights (on), at once (off)
+      if (on && hb < 3) v.push(`${dir}: the box jumped ${hs[0]} → ${hs[hs.length - 1]} px (${hb} frames between) — it should morph`);
+      if (!on && hb > 0) v.push(`motion ${mode}, ${dir}: the box went through ${hb} in-between heights — it should take its size at once`);
+      // the head never moves or stretches (on: it rides the morph unscaled)
+      const hx = f.map((x) => x.hx), hy = f.map((x) => x.hy), hh = f.map((x) => x.hh);
+      if (spread(hx) > 0.75 || spread(hy) > 0.75) v.push(`${dir}: the head moved (x ${Math.min(...hx)}–${Math.max(...hx)}, y ${Math.min(...hy)}–${Math.max(...hy)}; t:y ${f.map((x) => `${x.t}:${x.hy}`).join(" ")})`);
+      if (spread(hh) > 1) v.push(`${dir}: the head's height went ${Math.min(...hh)}–${Math.max(...hh)} px — it was stretched with the box`);
+      // the chevron turns: through in-between angles (on), at once (off); right while folded, down while open
+      const want = dir === "collapse" ? -90 : 0;
+      if (Math.abs(rots[rots.length - 1] - want) > 1) v.push(`${dir}: the chevron ends at ${rots[rots.length - 1]}°, want ${want}°`);
+      if (on && rb < 2) v.push(`${dir}: the chevron didn't turn (${rb} in-between angles: ${rots[0]}° → ${rots[rots.length - 1]}°)`);
+      if (!on && rb > 0) v.push(`motion ${mode}, ${dir}: the chevron turned through ${rb} angles — it should turn at once`);
+      // the rows fade (in-between opacity frames, never a pop)
+      const last = ops[ops.length - 1], mid = ops.filter((o) => o != null && o > 0.02 && o < 0.95).length;
+      if (dir === "collapse" ? last != null : last == null || last < 0.95) v.push(`${dir}: the rows ended at opacity ${last}`);
+      if (!mid) v.push(`${dir}: the rows ${dir === "collapse" ? "popped out" : "popped in"} — no in-between opacity frame`);
+      // a row while it shows: never stretched; with motion off, never moved
+      const rows = f.filter((x) => x.op != null && x.op > 0.02);
+      if (rows.length && spread(rows.map((x) => x.rh)) > 1) v.push(`${dir}: a row's height went ${Math.min(...rows.map((x) => x.rh))}–${Math.max(...rows.map((x) => x.rh))} px — stretched with the box`);
+      if (!on && rows.length && spread(rows.map((x) => x.ry)) > 0.75) v.push(`motion ${mode}, ${dir}: a row moved while it faded (y ${Math.min(...rows.map((x) => x.ry))}–${Math.max(...rows.map((x) => x.ry))})`);
+      // what sits below: glides (on), takes its place at once (off)
+      const bys = f.map((x) => x.by).filter((x) => x != null);
+      if (bys.length < 2 || Math.abs(bys[bys.length - 1] - bys[0]) < 10) v.push(`${dir}: the block below didn't move (${bys[0]} → ${bys[bys.length - 1]}) — proved nothing`);
+      else {
+        const bb = between(bys);
+        if (on && bb < 3) v.push(`${dir}: the block below jumped ${bys[0]} → ${bys[bys.length - 1]} (${bb} frames between) — it should glide`);
+        if (!on && bb > 0) v.push(`motion ${mode}, ${dir}: the block below glided (${bb} frames between) — it should move at once`);
+      }
+      // what animates: opacity alone with motion off; never a layout property
+      const bad = props.filter((p) => (on ? /^(height|width|top|left|right|bottom|margin|padding|max-height|min-height)/.test(p) : p !== "opacity"));
+      if (bad.length) v.push(`motion ${mode}, ${dir}: animates ${J(bad)}${on ? " (a layout property)" : " (only opacity may change)"}`);
+      return v;
+    }
+    // lib:propsFold:<on|off|reduced> — the header (a real button with aria-expanded, "Scene properties · 3") folds s1's section
+    // with a real click and opens it again, sampled per frame: motion on, the box morphs through in-between heights, the head
+    // stays put and unstretched, the chevron turns through in-between angles, the rows fade, a block below glides; off /
+    // reduced motion: only opacity animates, the box and the block below change at once, the chevron turns at once. On: the
+    // chevron glows on hover (none under no-glow), the folded card keeps its fill under bg-live. Screenshots side-fold-*.png
+    for (const mode of ["on", "off", "reduced"]) await cell(`lib:propsFold:${mode}`, async () => {
+      const v = [], J = JSON.stringify;
+      try {
+        await page(`localStorage.removeItem("${FOLD_KEY}");`); await loadUi();
+        if (mode === "off") await setMotion(false);
+        if (mode === "reduced") await reducedMotion(true);
+        await page(`await m.closeAll(); await m.openSide("s1");`);
+        await waitProps("s1");
+        await sleep(600);
+        const h0 = await foldHead();
+        console.log(`        ${J(h0)}`);
+        if (h0.tag !== "BUTTON") v.push(`the header is a <${h0.tag}>, not a button`);
+        if (h0.exp !== "true" || !h0.body) return [...v, `s1's properties don't start open (${J(h0)})`];
+        if (!/^Scene properties · 3$/i.test(h0.text)) v.push(`the header reads ${J(h0.text)}, want "Scene properties · 3"`);
+        // a block after the section, where a later section would sit (React leaves a node it didn't make alone)
+        await page(`const b = document.createElement("div"); b.dataset.probeBelow = ""; b.style.cssText = "height: 24px; border: 1px dashed var(--accent)";
+          m.side().querySelector(".side-body").appendChild(b); m.side().querySelector(".side-scroll").scrollTop = 0;`);
+        await sleep(200);
+        if (mode === "on") {
+          await mv(h0.x, h0.y, 450);
+          const g = await page(`const c = m.side().querySelector(".sp-chev"), root = document.documentElement; const out = { glow: getComputedStyle(c).filter };
+            root.classList.add("no-glow"); await m.sleep(300); out.noGlow = getComputedStyle(c).filter; return out;`);
+          await shot("fold-noglow-hover"); await page(`document.documentElement.classList.remove("no-glow");`);
+          if (!/drop-shadow/.test(g.glow)) v.push(`the hovered header's chevron doesn't glow (${g.glow})`);
+          if (g.noGlow !== "none") v.push(`no-glow: the hovered chevron still glows (${g.noGlow})`);
+        }
+        const H = await foldHead();
+        for (const dir of ["collapse", "expand"]) {
+          const samp = js(FOLD_SAMPLE(900));
+          await sleep(40); await clickAt(H.x, H.y);
+          await sleep(mode === "on" ? 110 : 50); await shot(`fold-${mode}-${dir}-mid`);
+          const fr = await samp;
+          await sleep(200); await shot(`fold-${mode}-${dir === "collapse" ? "folded" : "open"}`);
+          const st = await foldHead();
+          if (st.exp !== String(dir === "expand") || st.body !== (dir === "expand")) v.push(`after the ${dir}: aria-expanded ${st.exp}, body ${st.body}`);
+          v.push(...judgeFold(dir, mode, fr.out, fr.props));
+          if (dir === "collapse" && mode === "on") {
+            await mv(5, 5, 300);
+            const live = await page(`const root = document.documentElement, had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(80);
+              return { bg: getComputedStyle(m.side().querySelector("[data-scene-props]")).backgroundColor, had };`);
+            await shot("fold-bglive-folded");
+            if (!live.had) await page(`document.documentElement.classList.remove("bg-live");`);
+            const a = /\/\s*([\d.]+)\s*\)/.exec(live.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(live.bg)?.[1] ?? "1";
+            if (+a < 0.3) v.push(`bg-live: the folded section has no fill of its own (${live.bg})`);
+            await mv(H.x, H.y, 300);
+          }
+        }
+      } finally {
+        await page(`document.querySelector("[data-probe-below]")?.remove(); localStorage.removeItem("${FOLD_KEY}");`).catch(() => {});
+        await mv(5, 5);
+        if (mode === "off") await setMotion(true);
+        if (mode === "reduced") await reducedMotion(false);
+        await loadUi();
+      }
+      return v;
+    });
+
+    // lib:propsFoldKeys — Enter on the focused header folds, Space opens (real key events): no card applies, the sidebar
+    // stays open on s1
+    await cell("lib:propsFoldKeys", async () => {
+      const v = [];
+      try {
+        await page(`localStorage.removeItem("${FOLD_KEY}");`); await loadUi();
+        await page(`await m.closeAll(); await m.openSide("s1");`);
+        await waitProps("s1");
+        await sleep(500);
+        const cur0 = await current();
+        await page(`m.side().querySelector("[data-scene-props-head]").focus();`);
+        if (!await page(`return document.activeElement?.matches("[data-scene-props-head]") ?? false;`)) return ["the header can't take the focus"];
+        for (const [key, want] of [["Return", "false"], ["Space", "true"]]) {
+          send({ type: "keyDown", keyCode: key }); if (key === "Return") send({ type: "char", keyCode: "\r" }); await sleep(30); send({ type: "keyUp", keyCode: key });
+          await sleep(700);
+          const st = await foldHead();
+          console.log(`        ${key}: aria-expanded ${st?.exp}, body ${st?.body}, sidebar on ${await page(`return m.sideTitle();`)}`);
+          if (st?.exp !== want) v.push(`${key === "Return" ? "Enter" : "Space"} on the header: aria-expanded ${st?.exp}, want ${want}`);
+        }
+        if (await page(`return m.sideTitle();`) !== "s1") v.push("the keys moved or closed the sidebar");
+        if ((await current()) !== cur0) v.push(`a key applied a wallpaper (${T(cur0)} → ${T(await current())})`);
+      } finally { await page(`localStorage.removeItem("${FOLD_KEY}");`).catch(() => {}); }
+      return v;
+    });
+
+    // lib:propsFoldKeep — the fold is one choice for every scene: folded on s1, s2's sidebar (a switch) opens folded, and a
+    // reload keeps it (no row shows on the way); opened on s2, s1 opens open
+    await cell("lib:propsFoldKeep", async () => withS2Props(async () => {
+      const v = [], J = JSON.stringify;
+      try {
+        await page(`localStorage.removeItem("${FOLD_KEY}");`); await loadUi();
+        await page(`await m.closeAll(); await m.openSide("s1");`);
+        await waitProps("s1");
+        await sleep(500);
+        let h = await foldHead();
+        if (h.exp !== "true") return [`s1 doesn't start open (${J(h)})`];
+        await clickAt(h.x, h.y); await sleep(700);
+        h = await foldHead();
+        if (h.exp !== "false") return [`a click didn't fold s1 (${J(h)})`];
+        const ls = await page(`return localStorage.getItem("${FOLD_KEY}");`);
+        if (ls !== "true") v.push(`localStorage ${FOLD_KEY} = ${J(ls)} after folding, want "true"`);
+        // another scene's sidebar: the sidebar moves to s2
+        await page(`m.ctx(m.thumb("s2"));`);
+        await waitProps("s2");
+        await sleep(600);
+        h = await foldHead();
+        console.log(`        s2 after folding s1: ${J(h)}`);
+        if (h.exp !== "false" || h.body) v.push(`s2 opened ${h.exp === "true" ? "open" : "folded"}${h.body ? " with its rows" : ""} after folding s1 — the choice is per item`);
+        await shot("fold-keep-s2");
+        // a reload
+        await loadUi(); await page(`await m.closeAll(); m.ctx(m.thumb("s1"));`);
+        const fr = await js(FOLD_SAMPLE(1200));
+        h = await foldHead();
+        console.log(`        s1 after a reload: ${J(h)}`);
+        if (!fr.out.length) v.push("after a reload s1 shows no Scene properties section — proved nothing");
+        if (h?.exp !== "false" || h?.body) v.push(`after a reload s1 opened ${h?.exp === "true" ? "open" : "folded"} — the choice wasn't kept`);
+        if (fr.out.some((x) => x.op != null)) v.push("after a reload a row of the folded section showed");
+        // opened on s2 → open on s1 too
+        await page(`m.ctx(m.thumb("s2"));`); await waitProps("s2"); await sleep(600);
+        h = await foldHead(); await clickAt(h.x, h.y); await sleep(700);
+        await page(`m.ctx(m.thumb("s1"));`); await waitProps("s1"); await sleep(600);
+        h = await foldHead();
+        if (h.exp !== "true" || !h.body) v.push(`opened on s2, s1 shows ${h.exp === "true" ? "open" : "folded"}`);
+      } finally { await page(`localStorage.removeItem("${FOLD_KEY}");`).catch(() => {}); }
+      return v;
+    }));
+
+    // lib:propsCount — the header counts the properties the editor shows: s1 "· 3" (color, clock, bars), "· 2" once clock is
+    // off (bars hides by its condition; a real click on the checkbox) and "· 3" again; s2 "· 2" (its group heading and label
+    // aren't properties, rings is hidden by its condition). Read late (held 900 ms, past the body's wait), the header shows
+    // once with its count: its title, count and chevron never move or change in the card after that
+    await cell("lib:propsCount", async () => withS2Props(async () => {
+      const v = [], J = JSON.stringify;
+      try {
+        await page(`localStorage.removeItem("${FOLD_KEY}");`); await loadUi();
+        await page(`await m.closeAll(); await m.openSide("s1");`);
+        await waitProps("s1");
+        await sleep(500);
+        const c0 = await foldHead();
+        if (c0.count !== "· 3" || c0.rows !== 3) v.push(`s1: count ${J(c0.count)} over ${c0.rows} rows, want "· 3" over 3`);
+        // found again before each click: bars hiding shortens the sidebar, which can scroll the checkbox
+        const clock = () => page(`const r = m.side().querySelector('[data-scene-prop="clock"] input[type=checkbox]'); if (!r) return null; r.scrollIntoView({ block: "nearest" }); await m.sleep(200); return m.rect(r);`);
+        for (const want of ["· 2", "· 3"]) {
+          const ck = await clock();
+          if (!ck) return [...v, "s1 has no clock checkbox — proved nothing"];
+          await clickAt(ck.x + ck.w / 2, ck.y + ck.h / 2);
+          let c = null; for (let i = 0; i < 30; i++) { c = await foldHead(); if (c.count === want) break; await sleep(100); }
+          const bars = await page(`return !!m.side().querySelector('[data-scene-prop="bars"]');`);
+          const st = want === "· 2" ? "off" : "on";
+          console.log(`        clock ${st}: count ${J(c.count)}, ${c.rows} rows, bars ${bars ? "shown" : "hidden"}`);
+          if (c.count !== want) v.push(`clock ${st}: the count reads ${J(c.count)}, want ${J(want)}`);
+          if (+want.slice(2) !== c.rows) v.push(`clock ${st}: ${c.rows} rows shown, the count says ${c.count}`);
+        }
+        await post("/library/scene-props", { path: SC[0], reset: true });
+        // s2, read late: the body shows first (its wait is capped), the section with its count after it
+        await loadUi();
+        await page(`const f0 = window.fetch; window.fetch = (u, o) => String(u).includes("/library/scene-props?") ? new Promise((r) => setTimeout(r, 900)).then(() => f0(u, o)) : f0(u, o);
+          await m.closeAll(); m.ctx(m.thumb("s2"));`);
+        const fr = await page(`const out = []; const t0 = performance.now();
+          await new Promise((res) => { const f = () => { const s = m.side()?.querySelector("[data-scene-props]");
+            if (s) { const sr = s.getBoundingClientRect(), b = s.querySelector("[data-scene-props-head]"), br = b.getBoundingClientRect(), c = s.querySelector("[data-scene-props-count]"), cr = c.getBoundingClientRect(), ch = s.querySelector(".sp-chev").getBoundingClientRect();
+              out.push({ t: Math.round(performance.now() - t0), bx: +(br.x - sr.x).toFixed(1), by: +(br.y - sr.y).toFixed(1), cx: +(cr.x - br.x).toFixed(1), chx: +(ch.x - br.x).toFixed(1), n: c.textContent.trim() }); }
+            if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+          return out;`);
+        if (!fr.length) return [...v, "s2's section never showed — proved nothing"];
+        console.log(`        s2 read late: the section showed at ${fr[0].t} ms with ${J(fr[0].n)}; ${fr.length} frames`);
+        if (fr[0].t < 700) v.push(`s2's section showed at ${fr[0].t} ms — the read wasn't late (proved nothing)`);
+        const moved = fr.filter((x) => x.bx !== fr[0].bx || x.by !== fr[0].by || x.cx !== fr[0].cx || x.chx !== fr[0].chx || x.n !== fr[0].n);
+        if (moved.length) v.push(`the header changed after it showed: ${J(fr[0])} → ${J(moved[0])}`);
+        const c2 = await foldHead();
+        console.log(`        s2: ${J(c2)}`);
+        if (c2.count !== "· 2") v.push(`s2: the count reads ${J(c2.count)}, want "· 2" (a group heading, a label and a condition-hidden slider aren't counted)`);
+        if (c2.shown !== 4 || c2.rows !== 2) v.push(`s2 shows ${c2.shown} entries / ${c2.rows} property rows, want 4 / 2 (the fixture didn't land)`);
+        await shot("fold-count-s2");
+      } finally { await post("/library/scene-props", { path: SC[0], reset: true }).catch(() => {}); await loadUi(); }
+      return v;
+    }));
 
     // the previews' level until the user sets one is the item's effective wallpaper volume (sidePreview.ts previewLevel):
     // k1's own, k2's the global; live while the sidebar's Volume row moves; the trailer is told the same level. Once the

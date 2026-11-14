@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { RotateCcw, Wand2 } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, RotateCcw, Wand2 } from "lucide-react";
 import { api, type SceneProp, type ScenePropsResp } from "../api/client";
+import { useStore } from "../store";
 import { Select } from "./Select";
 import { scenePropsCache as cache } from "./scenePropsCache";
 import { rangeFill } from "./sidePreview";
+import { FADE, useMotion } from "./motion";
+import { glideFlip, snapFlip, softSpring, type FlipSnap } from "./flipGlide";
 
 // "Scene properties" in the item sidebar (LibrarySide): a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
@@ -25,6 +29,16 @@ function fmtNum(p: SceneProp, v: unknown) {
   return n.toFixed(Math.min(4, p.precision ?? 2)).replace(/\.?0+$/, "") || "0";
 }
 
+// what the header counts: the rows the user sees (a group's heading and a label aren't properties; a condition-hidden one
+// isn't shown) — from the same answer the rows render from, so it follows a condition whenever they do
+const shownCount = (props: SceneProp[]) => props.filter((p) => p.visible && p.type !== "group" && p.type !== "text").length;
+// what sits after the section in the sidebar's body: it glides into / out of the room the fold makes
+const BELOW = ":scope > *";
+// how long the folded rows stay mounted: past the morph (index.css --spring-soft-dur, 0.5 s). Guard: probe-sidebar lib:propsFold:on
+const ROWS_GONE_S = 0.6;
+// the morph's timing, read at the first fold (a :root style read: never at a sidebar's mount)
+let morphT: { layout: { type: "tween"; duration: number; ease: (t: number) => number } } | undefined;
+
 // `onReady` fires once the first answer is in (or the read failed): the sidebar holds its body until then
 export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: () => void }) {
   const [data, setDataRaw] = useState<ScenePropsResp | null>(() => cache.get(path) ?? null);
@@ -36,6 +50,31 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
   const alive = useRef(true);
   const readyRef = useRef(onReady);
   useEffect(() => { readyRef.current = onReady; });
+
+  // COOL: the fold. One remembered choice for every scene (store scenePropsFolded, localStorage), open until the user folds
+  // it. Motion on: the card's box morphs (framer `layout`, on the soft spring), its head rides along unscaled, the rows fade
+  // in as the box opens / out as it closes (popped out of flow at once, so the box shrinks from the first frame), what sits
+  // below glides with it (a FLIP on the same spring). Motion off: the rows fade where they are; the box takes its new size
+  // at once (after the fade out when folding), nothing travels. The chevron turns (index.css .sp-chev).
+  // PERF: everything is measured on the user's click (the FLIP's before) or in that click's commit (framer's snapshot, the
+  // FLIP's after); `layoutDependency` keeps framer from measuring on any other render (a slider's drag re-renders every
+  // tick), and a mount measures nothing. Guard: probe-sidebar lib:propsFold:<on|off>, lib:propsFoldKeep, probe-layout perf:sidebar
+  const folded = useStore((s) => s.scenePropsFolded);
+  const setFolded = useStore((s) => s.setScenePropsFolded);
+  const motionOn = useMotion();
+  const bodyId = useId();
+  const secRef = useRef<HTMLElement>(null);
+  const below = useRef<FlipSnap | null>(null);
+  const toggle = () => {
+    const box = secRef.current?.parentElement;
+    if (motionOn && box) below.current = snapFlip(box, BELOW);
+    if (!morphT) { const { ease, ms } = softSpring(); morphT = { layout: { type: "tween", duration: ms / 1000, ease } }; }
+    setFolded(!folded);
+  };
+  useLayoutEffect(() => {
+    if (!below.current) return;
+    glideFlip(below.current, secRef.current?.parentElement ?? null, BELOW); below.current = null;
+  }, [folded]);
 
   useEffect(() => {
     alive.current = true; // a new item remounts (key={path} in the sidebar): its state starts from the cache
@@ -108,15 +147,41 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
       </div>);
   };
 
+  const n = shownCount(data.props);
+  const morph = morphT;
+  // the rows: in once the box has opened a little, out quickly (the box closes over them) and then held, unseen, until the
+  // morph has landed: their unmount re-measures the head, and mid-morph that replays a few px of its position
+  const fade = motionOn
+    ? { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: 0.22, delay: 0.06 } },
+      exit: { opacity: [1, 0, 0], transition: { duration: ROWS_GONE_S, times: [0, 0.12 / ROWS_GONE_S, 1], ease: "linear" as const } } }
+    : FADE;
   return (
-    <section className="scene-props side-sec" data-scene-props>
-      <div className="sp-head">
-        <h3 className="side-sec-title sp-title"><span className="side-sec-ico"><Wand2 size={15} /></span>Scene properties</h3>
+    // the corner radius as a style: framer keeps it round while it scales the box (index.css .side-sec has the same 13 px)
+    <motion.section ref={secRef} className="scene-props side-sec" data-scene-props data-folded={folded || undefined}
+      layout={motionOn} layoutDependency={folded} transition={morph} style={{ borderRadius: 13 }}>
+      <motion.div className="sp-head" layout={motionOn ? "position" : false} layoutDependency={folded} transition={morph}>
+        {/* the heading holds the toggle (a real button: Enter / Space, aria-expanded); the count sits after the words, so
+            neither its arrival nor a new number moves the title, and Reset all appearing moves nothing in the head */}
+        <h3 className="side-sec-title sp-title">
+          <button type="button" className="sp-fold" data-scene-props-head aria-expanded={!folded} aria-controls={folded ? undefined : bodyId}
+            onClick={toggle}>
+            <span className="side-sec-ico"><Wand2 size={15} /></span>Scene properties{" "}
+            <span className="sp-count" data-scene-props-count={n}>· {n}</span>
+            <ChevronDown size={15} className="sp-chev" aria-hidden="true" />
+          </button>
+        </h3>
         {anyOverridden && <button className="mini ico" onClick={() => reset()}><RotateCcw size={13} /> Reset all</button>}
-      </div>
-      {data.note && <div className="shint sp-note">{data.note}</div>}
-      {data.props.map(row)}
-    </section>
+      </motion.div>
+      <AnimatePresence initial={false} mode={motionOn ? "popLayout" : "sync"}>
+        {!folded && (
+          <motion.div key="body" id={bodyId} className="sp-body" data-scene-props-body layout={motionOn} layoutDependency={folded}
+            transition={morph} {...fade}>
+            {data.note && <div className="shint sp-note">{data.note}</div>}
+            {data.props.map(row)}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.section>
   );
 }
 

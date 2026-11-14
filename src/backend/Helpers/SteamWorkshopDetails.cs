@@ -36,8 +36,9 @@ public static class SteamWorkshopDetails
     private const int DetailsBatch = 1000, BatchGapMs = 1000, RequestTimeoutSeconds = 20;
 
     // per item: Found = Steam answered for it (result 1); Youtube = its first YouTube preview id (null = none); Tags = its
-    // Workshop tags, Steam's names. An item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false, no tags.
-    public readonly record struct Details(bool Found, string? Youtube, string[] Tags);
+    // Workshop tags, Steam's names; Creator = its creator's Steam ID (0 = unknown). An item Steam couldn't answer for
+    // (removed, private: result ≠ 1) is Found=false, no tags.
+    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0);
 
     private static string? Fixture => Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE") is { Length: > 0 } f ? f : null;
 
@@ -60,7 +61,7 @@ public static class SteamWorkshopDetails
                 var resp = await pub.GetDetails(req); // an AsyncJob (no ConfigureAwait)
                 if (resp.Result != EResult.OK) return null;
                 return resp.Body.publishedfiledetails.ToDictionary((d) => d.publishedfileid, (d) => d.result == (int)EResult.OK
-                    ? new Details(true, YoutubeOf(d), d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).Distinct().ToArray())
+                    ? new Details(true, YoutubeOf(d), d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).Distinct().ToArray(), d.creator)
                     : new Details(false, null, []));
             }, TimeSpan.FromSeconds(RequestTimeoutSeconds), ct).ConfigureAwait(false);
             Console.WriteLine(got == null ? $"steam-cm: GetDetails of {batch.Count} id(s) — no answer"
@@ -82,7 +83,8 @@ public static class SteamWorkshopDetails
                     ? new Details(true,
                         e.TryGetProperty("youtube", out var y) && y.ValueKind == System.Text.Json.JsonValueKind.String ? y.GetString() : null,
                         e.TryGetProperty("tags", out var ts) && ts.ValueKind == System.Text.Json.JsonValueKind.Array
-                            ? ts.EnumerateArray().Select((t) => t.GetString() ?? "").Where((t) => t.Length > 0).ToArray() : [])
+                            ? ts.EnumerateArray().Select((t) => t.GetString() ?? "").Where((t) => t.Length > 0).ToArray() : [],
+                        e.TryGetProperty("creator", out var cr) && ulong.TryParse(cr.ToString(), out var crId) ? crId : 0)
                     : new Details(false, null, []));
         }
         catch { return null; } // no fixture file = Steam unreachable
@@ -130,6 +132,71 @@ public static class SteamWorkshopDetails
         }, timeout, ct);
     }
 
+    // A user's Workshop files for Wallpaper Engine — `type` "myfiles" (what they made) or "myfavorites" (their favourites,
+    // when their profile shows them) — one page (1-based) of up to 100, in Steam's order for `sort`: "lastupdated" (newest
+    // first) or "score" (top rated). Measured on an anonymous session: both types answer for a public profile, another
+    // account's favourites can come back empty (a private profile), every other sort name tried gave the default order, and
+    // the request has no text search; its tag fields aren't relied on (the caller matches tags itself).
+    // null = Steam's servers unreachable / refused / timed out.
+    public sealed record UserFilesPage(List<PublishedFileDetail> Items, uint Total);
+
+    public static async Task<UserFilesPage?> UserFilesAsync(ulong steamId, string type, string sort, int page, int perPage, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var req = new CPublishedFile_GetUserFiles_Request
+        {
+            steamid = steamId, appid = AppId, type = type, sortmethod = sort, page = (uint)Math.Max(1, page),
+            numperpage = (uint)Math.Clamp(perPage, 1, 100), return_tags = true, return_previews = true, return_metadata = true,
+            return_short_description = false,
+        };
+        if (Fixture is { } fx)
+        {
+            var r = UserFilesFromFixture(fx, req);
+            Console.WriteLine($"steam-cm: GetUserFiles {type} sort={sort} page {req.page} — " + (r == null ? "no answer" : $"{r.Items.Count} of {r.Total} (fixture)"));
+            return r;
+        }
+        return await SteamAnonymous.UseAsync(async (pub) =>
+        {
+            var resp = await pub.GetUserFiles(req); // an AsyncJob (no ConfigureAwait)
+            if (resp.Result != EResult.OK) return null;
+            return new UserFilesPage(resp.Body.publishedfiledetails.Where((d) => d.result == (int)EResult.OK).Select(ToDetail).ToList(), resp.Body.total);
+        }, timeout, ct).ConfigureAwait(false);
+    }
+
+    // the fixture's `"@userfiles": {"<steamid>:<type>": [ {publishedfileid, title, tags, subscriptions, lifetime_subscriptions, …} ]}`
+    // (the client protocol's own field names): built into Steam's own reply objects, so the mapping below is the one tested
+    private static UserFilesPage? UserFilesFromFixture(string file, CPublishedFile_GetUserFiles_Request req)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+            if (!doc.RootElement.TryGetProperty("@userfiles", out var all)) return new UserFilesPage([], 0);
+            if (!all.TryGetProperty($"{req.steamid}:{req.type}", out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return new UserFilesPage([], 0);
+            var items = arr.EnumerateArray().Select(FixtureDetails).ToList();
+            if (req.sortmethod == "score") items = items.OrderByDescending((d) => d.vote_data?.score ?? 0).ToList();
+            var page = items.Skip((int)((req.page - 1) * req.numperpage)).Take((int)req.numperpage).Select(ToDetail).ToList();
+            return new UserFilesPage(page, (uint)items.Count);
+        }
+        catch { return null; } // no fixture file = Steam unreachable
+    }
+
+    private static PublishedFileDetails FixtureDetails(System.Text.Json.JsonElement e)
+    {
+        ulong U(string n) => e.TryGetProperty(n, out var v) && ulong.TryParse(v.ToString(), out var x) ? x : 0;
+        string S(string n) => e.TryGetProperty(n, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+        var d = new PublishedFileDetails
+        {
+            result = 1, publishedfileid = U("publishedfileid"), title = S("title"), preview_url = S("preview_url"), creator = U("creator"),
+            file_size = U("file_size"), file_description = S("file_description"), time_updated = (uint)U("time_updated"),
+            subscriptions = (uint)U("subscriptions"), lifetime_subscriptions = (uint)U("lifetime_subscriptions"),
+            favorited = (uint)U("favorited"), lifetime_favorited = (uint)U("lifetime_favorited"),
+        };
+        if (e.TryGetProperty("score", out var sc) && sc.TryGetSingle(out var score)) d.vote_data = new PublishedFileDetails.VoteData { score = score };
+        if (e.TryGetProperty("tags", out var ts) && ts.ValueKind == System.Text.Json.JsonValueKind.Array)
+            foreach (var t in ts.EnumerateArray()) d.tags.Add(new PublishedFileDetails.Tag { tag = t.GetString() ?? "" });
+        return d;
+    }
+
     private static PublishedFileDetail ToDetail(PublishedFileDetails d) => new()
     {
         Id = d.publishedfileid.ToString(),
@@ -139,9 +206,9 @@ public static class SteamWorkshopDetails
         FileSizeBytes = (long)d.file_size,
         CreatorId = d.creator.ToString(),
         TimeUpdated = d.time_updated > 0 ? DateTimeOffset.FromUnixTimeSeconds(d.time_updated).UtcDateTime : DateTime.MinValue,
-        Subscriptions = (long)d.lifetime_subscriptions,
-        Favorites = (long)d.lifetime_favorited,
-        Views = (long)d.views,
+        // the current counts (Steam's own page shows these): the lifetime ones also count everyone who has since left
+        Subscriptions = (long)d.subscriptions,
+        Favorites = (long)d.favorited,
         Tags = d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).ToArray(),
         TrailerKnown = true,
         YoutubeId = YoutubeOf(d),

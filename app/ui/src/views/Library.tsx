@@ -167,8 +167,8 @@ export const Library = memo(function Library() {
     if (!useStore.getState().libFocus) keepCardInView(scrollRef.current, `lib-${path}`);
     focusLib(path);
   };
-  // a plain click applies the card and nothing else: the sidebar stays as it was — closed, or on the item it shows (its edits
-  // name that item's paths, so it keeps working while another one plays); Ctrl / Shift only select; the sidebar is a right-click
+  // a plain click applies the card; it never opens the sidebar, but an open one moves to the clicked card (closed stays closed);
+  // Ctrl / Shift only select; opening the sidebar is a right-click
   // (docs/decisions.md § "Left click does the tab's main action, right click opens the item sidebar"). Guard: probe-select
   // lib:plainClick, lib:modClick, lib:rightClickSel
   const onCardClick = (it: LibraryItem, e: React.MouseEvent) => {
@@ -179,7 +179,10 @@ export const Library = memo(function Library() {
     } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
       const n = new Set(sel); if (n.has(it.videoPath)) n.delete(it.videoPath); else n.add(it.videoPath);
       setSel(n); anchor.current = it.videoPath;
-    } else { setSel(new Set()); anchor.current = it.videoPath; applyItem(it.videoPath); }
+    } else {
+      setSel(new Set()); anchor.current = it.videoPath; applyItem(it.videoPath);
+      if (useStore.getState().libFocus) focusLib(it.videoPath);
+    }
   };
 
   // click empty grid space clears the selection

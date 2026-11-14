@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Liascape.Helpers;
 using Liascape.Models;
 using Liascape.Player;
+using Liascape.Scrapers;
 
 namespace Liascape.Web;
 
@@ -267,7 +268,7 @@ public static class AppOps
                 Resolution = detail.Resolution, AgeRating = detail.AgeRating, YoutubeUrl = detail.YoutubeUrl,
                 PageUrl = detail.PageUrl, AuthorName = detail.AuthorName, Description = detail.Description,
                 FileSizeBytes = detail.FileSizeBytes, Subscriptions = detail.Subscriptions,
-                Favorites = detail.Favorites, Views = detail.Views, Tags = detail.Tags };
+                Favorites = detail.Favorites, Tags = detail.Tags };
         }
 
         var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim);
@@ -588,37 +589,80 @@ public static class AppOps
     public static int UndoDepth() { lock (_undoLock) return _undo.Count; }
     public static void PurgeTrash() => LibraryService.CleanTrash();
 
-    // ---- the thumbnail cache (Settings → Housekeeping) ----
-    // Only what is fetched or made again on demand: `workshop_previews` (the /still frames and the trimmed /anim GIFs, Browse
-    // and Library alike) and `we_thumbs` (the Workshop folder's preview pictures). Never the preview clips (`video_clips`,
-    // ClipStore), steamcmd downloads or state files. The Settings row names exactly these; keep its words in step.
-    private static readonly string[] ThumbCacheDirs = { "workshop_previews", "we_thumbs" };
-    private static IEnumerable<string> ThumbCacheFiles()
+    // ---- the caches Settings → Housekeeping can clear ----
+    // Each category is one folder of copies the app makes again on demand, under the cache dir its WRITER uses: the
+    // backend's own under ~/.cache/liascape (ServerHost.PreviewCacheDir, WallpaperEngineScraper.GifThumbCacheDir,
+    // ClipStore.Dir), the player's under $XDG_CACHE_HOME/liascape (else ~/.cache/liascape). A clear deletes only the
+    // regular files directly in a category's folder (never a symlink, a subfolder or the folder itself, and never a
+    // folder that is itself a link), so logs, settings, the library, history-*, src, we-ref and anything else beside them
+    // are out of its reach. `Busy` names the files a writer is still making: they are neither counted nor deleted, so a
+    // clear mid-write never breaks the writer (each writes a temporary name and renames it into place). The ids are the
+    // UI's (Settings.tsx CACHE_LINES). Guard: scripts/test-cache-clear.sh; probe-settings cache:*
+    public sealed record CacheCategory(string Id, Func<string> Dir, Func<string, bool> Busy);
+    private static string HomeCache => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape");
+    private static string PlayerCache => Path.Combine(
+        Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } x ? x
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache"), "liascape");
+    public static readonly CacheCategory[] CacheCategories =
+    [
+        // the /still frames and trimmed /anim GIFs of every card, Browse and Library: an extraction in flight owns its output
+        // and its temporaries (ServerHost.Extracting)
+        new("thumbs", () => ServerHost.PreviewCacheDir, ServerHost.Extracting),
+        // the Wallpaper Engine folder's still frames for Browse (ffmpeg writes `<id>.jpg.tmp`, then renames)
+        new("we-thumbs", () => WallpaperEngineScraper.GifThumbCacheDir, f => f.EndsWith(".tmp", StringComparison.Ordinal)),
+        // the cards' video preview clips (ClipStore: an encode writes `<clip>.mp4.tmp`; ClipBusy keeps its item's `.src`)
+        new("clips", () => ClipStore.Dir, f => f.EndsWith(".tmp", StringComparison.Ordinal)),
+        // the scene loudness estimator's per-sound-file readings (`<hash>.json`, written as `<hash>.tmp<pid>`): gone, the next
+        // estimate decodes each file again; the scenes' saved loudness (index.json) stays
+        new("scene-loudness", () => Path.Combine(PlayerCache, "scene-loudness"), f => Path.GetExtension(f).StartsWith(".tmp", StringComparison.Ordinal)),
+        // album art the scene worker fetched for media-aware scenes (curl writes `<hash>.part`, then renames)
+        new("media-art", () => Path.Combine(PlayerCache, "media-art"), f => f.EndsWith(".part", StringComparison.Ordinal)),
+        // the LWE core's shader text work (`<hash>.<kind>`, written as `….<pid>.<n>.tmp`): a missing entry is a miss that
+        // redoes the work (docs/player/modules/scene-lwe-core.md § Shader cache)
+        new("shaders", () => Path.Combine(PlayerCache, "lwe-shaders"), f => f.EndsWith(".tmp", StringComparison.Ordinal)),
+    ];
+    // what an id-less clear (an older page's single "Clear Cache" row) and the top-level size of `GET /cache/size` cover
+    public static readonly string[] LegacyCacheIds = ["thumbs", "we-thumbs"];
+    public static CacheCategory? CacheCategoryOf(string id) => Array.Find(CacheCategories, c => c.Id == id);
+
+    // the files a clear of `c` would delete now: regular files directly in its folder, not busy. A clip item's `.src` (its
+    // source path, read when the clip is made and swept) stays while one of its clips is still being encoded.
+    private static List<FileInfo> CacheFiles(CacheCategory c)
     {
-        var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape");
-        foreach (var sub in ThumbCacheDirs)
+        var d = new DirectoryInfo(c.Dir());
+        try { if (!d.Exists || d.LinkTarget != null) return []; } catch { return []; }
+        FileInfo[] all;
+        try { all = d.GetFiles(); } catch { return []; }
+        var files = all.Where(f => (f.Attributes & FileAttributes.ReparsePoint) == 0 && !c.Busy(f.FullName)).ToList();
+        if (c.Id == "clips")
         {
-            var d = Path.Combine(baseDir, sub);
-            if (!Directory.Exists(d)) continue;
-            string[] files;
-            try { files = Directory.GetFiles(d); } catch { continue; }
-            foreach (var f in files) yield return f;
+            var encoding = all.Where(f => c.Busy(f.FullName)).Select(f => f.Name.Split('_')[0]).ToHashSet();
+            files.RemoveAll(f => f.Name.EndsWith(".src", StringComparison.Ordinal) && encoding.Contains(Path.GetFileNameWithoutExtension(f.Name)));
         }
+        return files;
     }
 
-    public static (long Bytes, int Count) ThumbCacheSize()
+    public sealed record CacheSize(string Id, long Bytes, int Count);
+    public static CacheSize SizeOf(CacheCategory c)
     {
         long bytes = 0; int count = 0;
-        foreach (var f in ThumbCacheFiles())
-            try { bytes += new FileInfo(f).Length; count++; } catch { }
-        return (bytes, count);
+        foreach (var f in CacheFiles(c))
+            try { bytes += f.Length; count++; } catch { }
+        return new(c.Id, bytes, count);
     }
 
-    public static (long Freed, int Count) ClearThumbCache()
+    // FreedBytes / Count: what this clear deleted; Bytes: what the category still holds (a file a writer finished meanwhile)
+    public sealed record CacheCleared(string Id, long FreedBytes, int Count, long Bytes);
+    private static readonly object _cacheClearLock = new();
+    public static List<CacheCleared> ClearCaches(IEnumerable<CacheCategory> cats)
     {
-        long freed = 0; int count = 0;
-        foreach (var f in ThumbCacheFiles())
-            try { long n = new FileInfo(f).Length; File.Delete(f); freed += n; count++; } catch { }
-        return (freed, count);
+        lock (_cacheClearLock)
+            return cats.Select(c =>
+            {
+                long freed = 0; int count = 0;
+                foreach (var f in CacheFiles(c))
+                    try { long n = f.Length; f.Delete(); freed += n; count++; } catch { }
+                return new CacheCleared(c.Id, freed, count, SizeOf(c).Bytes);
+            }).ToList();
     }
 }

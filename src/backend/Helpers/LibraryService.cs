@@ -570,7 +570,7 @@ public static class LibraryService
             LoudnessConfidence = loud.Confidence, LoudnessNote = loud.Note,
             Resolution = m.Resolution ?? resolution, AgeRating = age ?? proj.Age, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
             AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes,
-            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Views = m.Views, Tags = tags,
+            Subscriptions = m.Subscriptions, Favorites = m.Favorites, Tags = tags,
         };
     }
 

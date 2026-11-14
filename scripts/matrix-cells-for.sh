@@ -44,7 +44,7 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh|scripts/test-backend-stop.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
     src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
       echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;
@@ -64,7 +64,7 @@ for f in $FILES; do
     src/backend/Helpers/AtomicFile.cs) add "race:|$LIB|$PL|$SET" "$f" ;;
     src/backend/Helpers/ImportService.cs) add "cardApply" "$f (the matrix imports its clips with it)" ;;
     src/backend/Scrapers/*|src/backend/Services/*|src/backend/Helpers/Steam*|src/backend/Web/SteamOps.cs|\
-    src/backend/Helpers/Workshop*|src/backend/Helpers/DownloadHelper.cs)
+    src/backend/Helpers/Workshop*|src/backend/Helpers/DownloadHelper.cs|src/backend/Web/WorkshopSocialOps.cs|src/backend/Models/WorkshopList.cs)
       echo "  $f → nothing (Browse/download/Steam: not in the matrix — test it by hand / its own script)" >&2 ;;
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
@@ -76,6 +76,9 @@ for f in $FILES; do
     # the Unsubscribe button's right-click menu (keep the files) and the menu itself
     app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx)
       echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, side:)" >&2 ;;
+    # the Browse sidebar's creator / favourite / comments, the Workshop's list pills and the shared Workshop ID pill
+    app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx)
+      add "browse:" "$f (+ --probe probe-steam.js — ws:, side:copyIdPill, side:idPill:still; probe-settings.js copy:sidebarPill; probe-filters.js split:noWrap)" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f (+ --probe probe-expert.js — the stepper: − / +, hold, wheel, keys, roll, look)" ;;
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)

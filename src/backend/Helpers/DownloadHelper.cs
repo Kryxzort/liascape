@@ -53,7 +53,7 @@ public static class DownloadHelper
             m.Resolution = detail.Resolution; m.AgeRating = detail.AgeRating; m.YoutubeUrl = detail.YoutubeUrl;
             m.PageUrl = detail.PageUrl; m.AuthorName = detail.AuthorName; m.Description = detail.Description;
             m.FileSizeBytes = detail.FileSizeBytes; m.Subscriptions = detail.Subscriptions;
-            m.Favorites = detail.Favorites; m.Views = detail.Views; m.Tags = detail.Tags;
+            m.Favorites = detail.Favorites; m.Tags = detail.Tags;
         });
 
         LibraryItem Result(string videoPath, bool isScene, string? thumb, string? anim, string? copiedSceneDir = null) => new()
@@ -64,7 +64,7 @@ public static class DownloadHelper
             Resolution = detail.Resolution, AgeRating = detail.AgeRating, YoutubeUrl = detail.YoutubeUrl,
             PageUrl = detail.PageUrl, AuthorName = detail.AuthorName, Description = detail.Description,
             FileSizeBytes = detail.FileSizeBytes, Subscriptions = detail.Subscriptions,
-            Favorites = detail.Favorites, Views = detail.Views, Tags = detail.Tags,
+            Favorites = detail.Favorites, Tags = detail.Tags,
         };
 
         // ---- workshop / local (id-keyed Steam folder) ----

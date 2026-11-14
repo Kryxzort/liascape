@@ -795,7 +795,7 @@ input[type=range]:focus-visible { outline: none; }
 .kb { background: var(--bg-crust); padding: 3px 8px; border-radius: 6px; font: 12px ui-monospace, monospace; color: var(--subtext); }
 /* a content swap in place: every face in one grid cell, so the widest sets the size and nothing beside it moves when the
    words change. The shown face rolls in as the other rolls out (the first face leaves upward, a later one waits below);
-   motion off, they only cross-fade. Guard: probe-settings copy:feedback, cache:size */
+   motion off, they only cross-fade. Guard: probe-settings copy:feedback, cache:clear:* */
 .xfade { display: inline-grid; }
 .xfade > * { grid-area: 1 / 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   transition: opacity .18s ease, transform var(--spring-soft-dur) var(--spring-soft); }
@@ -812,9 +812,21 @@ input[type=range]:focus-visible { outline: none; }
 .cmd-block { position: relative; }
 .cmd-block > .mpv { padding-right: 100px; }
 .cmd-block > .copy-btn { position: absolute; top: 8px; right: 8px; }
-/* Housekeeping → the thumbnail cache's size, then what a clear freed */
-.cache-note { font-size: 12px; color: var(--subtext); font-variant-numeric: tabular-nums; }
-.cache-note > [data-freed] { color: var(--success); }
+/* Housekeeping → the cache picker (Settings.tsx CachePicker): its lines sit under the heading row, indented by padding (the
+   rows' own hover band and rhythm kept); each size stays in a fixed-width cell before its tick, so a size counting down
+   never moves the tick; then the clear and what it freed, which rises in (motion off: fades in place).
+   Guard: probe-settings cache:look */
+.cache-line { padding-left: 27px; }
+/* every line keeps the divider above it (the first is a label of its own type: .srow:first-of-type would drop it) */
+.cache-pick > .cache-line:first-of-type { border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent); }
+.cache-line .sctl { display: flex; align-items: center; gap: 14px; }
+.cache-size { min-width: 64px; font-size: 12px; color: var(--subtext); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cache-foot { display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 9px 0 2px;
+  border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent); }
+.cache-freed { font-size: 12px; color: var(--success); font-variant-numeric: tabular-nums;
+  transition: opacity .18s ease, transform var(--spring-soft-dur) var(--spring-soft); }
+.cache-freed[data-off] { opacity: 0; transform: translateY(60%); pointer-events: none; }
+:root.no-motion .cache-freed { transform: none; transition: opacity var(--fade-dur) linear; }
 
 /* ---- steam QR modal ---- */
 .qr-modal { width: 340px; padding: 24px; text-align: center; }
@@ -1016,7 +1028,7 @@ input[type=range]:focus-visible { outline: none; }
 :where(svg.lucide) > * { transform-box: view-box; transform-origin: 12px 12px; transition: transform var(--spring-dur) var(--spring); }
 /* object: an icon with no verb of its own tilts while its button is hovered (iconMotion.ts marks the acting ones data-act) */
 :where(button, a):hover:not(:disabled, .seg-opt, .ns-btn, .wf-seg) svg.lucide:not(.lucide-x, .lucide-trash-2, .lucide-folder-flap,
-  .lucide-locate-fixed, .lucide-chevron-down, .lucide-chevron-right, .lucide-chevron-left, .lucide-check, .lucide-loader-circle, [data-act], .wf-gico > *) {
+  .lucide-locate-fixed, .lucide-chevron-down, .lucide-chevron-right, .lucide-chevron-left, .lucide-check, .lucide-loader-circle, [data-act], .wf-gico > *, .side-sec-ico > *) {
   transform: rotate(-8deg) scale(1.08); }
 /* hold: the trash lid lifts, hinged at its left end; the folder's flap falls open from its bottom edge; X turns a quarter;
    the crosshair turns a quarter. Leaving closes them on the same spring. */
@@ -1269,8 +1281,10 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 :root.no-glow .side-open:hover { box-shadow: none; }
+:root.no-glow :is(.ws-creator:hover:not(:disabled), .ws-pill-x:hover, .ws-post textarea:focus) { box-shadow: none; }
 :root.no-glow .side-crash::before { box-shadow: none; }
 :root.no-glow .side-crash-ico > svg { filter: none; }
+:root.no-glow .sp-fold .sp-chev { filter: none; }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .tr-live { box-shadow: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
@@ -1306,7 +1320,7 @@ input[type=range]:focus-visible { outline: none; }
   .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-msg, .st-name, .st-use,
   .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
   .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
-  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .copy-tile.done) { text-shadow: none; }
+  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op, .ws-creator-go) { text-shadow: none; }
 /* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
    the same shadow as a filter instead, as bg-live does */
 :root.text-shadow .side-head-text { filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
@@ -1354,13 +1368,19 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel.closing, :root.no-motion .side-panel .side-content.side-exit { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .side-scrim.closing, :root.no-motion .side-panel .sm-full, :root.no-motion .side-panel .sm-anim,
 :root.no-motion .side-panel .side-vol-slide, :root.no-motion .side-panel .side-open { transition: opacity var(--fade-dur) linear !important; }
-/* the sidebar's copy controls (the ID pill, Copy ID): their faces still cross-fade. Guard: probe-steam side:idPill:still, side:copyIdTile */
+/* the sidebar's two-faced controls (the ID pill, the favourite): their faces still cross-fade. Guard: probe-steam side:idPill:still, ws:favoriteOff */
 :root.no-motion .side-panel .xfade > * { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving,
 :root.no-motion .side-panel .side-wl.leaving { animation: nm-out var(--fade-dur) linear forwards !important; animation-delay: 0s !important; }
 :root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
 :root.no-motion .side-panel input[type=range]::-webkit-slider-thumb { transform: none !important; }
 :root.no-motion .side-panel .side-sub-spin { animation: side-sub-spin 1s linear infinite !important; }
+/* the comments and the avatars fade in in place; the creator row doesn't lift; the creator's pill fades in and out */
+:root.no-motion .side-panel .ws-c { animation: nm-in var(--fade-dur) linear both !important; }
+:root.no-motion .side-panel :is(.ws-avatar > img, .ws-creator-name) { transition: opacity var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .ws-creator { transform: none !important; }
+:root.no-motion .ws-pill-pair { animation: nm-in var(--fade-dur) linear both; }
+:root.no-motion .ws-pill-pair.closing { animation: nm-out var(--fade-dur) linear forwards; }
 /* the Settings card preview fades in and out in place, its caption fades each new text in (the busy breathing stands still) */
 :root.no-motion .card-pv-frame { transform: none; transition: opacity var(--fade-dur) linear, border-color .2s, box-shadow .25s; }
 :root.no-motion .card-pv-cap > span { animation: nm-in var(--fade-dur) linear both; }
@@ -1649,11 +1669,80 @@ button.side-pill.copy { overflow: hidden; }
 .side-tile-ico > svg { width: 16px; height: 16px; }
 /* a tile is a verb: its icon acts its meaning (iconMotion.ts / § icon motion) while the chip rises a little on the spring */
 .side-tile:hover .side-tile-ico { transform: translateY(-1px) scale(1.06); }
-/* the Browse sidebar's Copy ID (BrowseSide.tsx): its words roll (.xfade, left-aligned like every tile's label), its glyph only
-   cross-fades in the chip (the Check pops), done = green. Guard: probe-steam side:copyIdTile */
-.copy-tile .xfade > * { justify-content: flex-start; }
-.copy-tile .side-tile-ico.xfade > [data-off] { transform: none; }
-.copy-tile.done, .copy-tile.done .side-tile-ico { color: var(--success); }
+/* ---- the Browse sidebar's Workshop community pieces (components/WorkshopSocial.tsx) ----
+   The favourite: a toggle tile whose words roll (.xfade, left-aligned like every tile's label) and whose star fills and pops
+   once on a user change (.ico-pop); signed out a quiet, inert tile. Guard: probe-steam ws:favorite */
+.fav-tile .xfade > * { justify-content: flex-start; }
+/* the words roll inside their own slot, never over the tile's edge */
+.fav-tile > .xfade { overflow: hidden; }
+.fav-tile.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--surface1)); }
+.fav-tile.on .side-tile-ico { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.fav-tile[data-ws-fav=loading] .side-tile-ico { opacity: .55; }
+.fav-tile:disabled { cursor: default; color: var(--subtext); }
+.fav-tile:disabled:hover { transform: none; border-color: var(--surface1); background: color-mix(in srgb, var(--bg-crust) 50%, transparent); box-shadow: none; }
+.fav-tile:disabled .side-tile-ico { color: var(--subtext); background: color-mix(in srgb, var(--surface0) 70%, transparent); box-shadow: none; transform: none; }
+/* a Steam avatar: the person glyph until the picture has loaded, then the picture fades in over it */
+.ws-avatar { position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 50%; overflow: hidden;
+  color: var(--subtext); background: color-mix(in srgb, var(--surface0) 80%, transparent); box-shadow: inset 0 0 0 1px var(--surface1); }
+.ws-avatar > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .22s ease-out; }
+.ws-avatar > img.on { opacity: 1; }
+/* the creator: a row in the tiles' material — avatar, "Made by" + the name, and where a click goes. Guard: probe-steam ws:creator */
+.ws-creator { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 7px 10px; border-radius: 11px; text-align: left;
+  font: inherit; color: var(--text); background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
+  transition: border-color .15s, background .15s, box-shadow .2s, transform .15s; }
+.ws-creator:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 60%, var(--surface1));
+  background: linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent) 12%, transparent)),
+    color-mix(in srgb, var(--bg-crust) 50%, transparent);
+  box-shadow: 0 6px 16px rgba(0,0,0,.3), var(--glow-sm); transform: translateY(-1px); }
+.ws-creator:active:not(:disabled) { transform: scale(.98); transition-duration: .08s; }
+.ws-creator:disabled { cursor: default; }
+.ws-creator-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.ws-creator-by { font-size: 10.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--subtext); }
+.ws-creator-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
+.ws-creator.loading .ws-creator-name { opacity: .4; }
+.ws-creator-go { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--accent); }
+.ws-creator:disabled .ws-creator-go { visibility: hidden; }
+/* the comment thread (a .side-sec): each comment an avatar + its head (name, the creator's mark, when) + its plain text; they
+   rise in as a page lands, a posted one drops in on top. Guard: probe-steam ws:comments */
+.ws-count { margin-left: auto; font-size: 11px; font-weight: 800; letter-spacing: 0; color: var(--subtext); padding: 1px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface0) 70%, transparent); font-variant-numeric: tabular-nums; }
+.ws-list { list-style: none; margin: 0; padding: 0; }
+.ws-c { display: flex; gap: 9px; padding: 8px 0; border-top: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent);
+  animation: ws-c-in .26s cubic-bezier(.2, .9, .3, 1) both; }
+.ws-c:first-child { border-top: 0; }
+.ws-c.fresh { animation: ws-c-fresh var(--spring-dur) var(--spring) both; }
+@keyframes ws-c-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes ws-c-fresh { from { opacity: 0; transform: translateY(-10px) scale(.98); } }
+.ws-c-body { flex: 1; min-width: 0; }
+.ws-c-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.ws-c-name { color: var(--text); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ws-c-op { font-size: 9.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--accent); padding: 0 5px; border-radius: 4px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.ws-c-time { color: var(--muted); font-size: 11px; }
+.ws-c-text { margin: 2px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--subtext); white-space: pre-line; overflow-wrap: anywhere; user-select: text; }
+.ws-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; font-size: 12px; color: var(--subtext); }
+.ws-note.warn { color: var(--warn); margin: 0; }
+.ws-signin { margin: 0 0 8px; font-size: 12px; color: var(--subtext); }
+.ws-more { width: 100%; justify-content: center; margin: 4px 0 8px; }
+.ws-post { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
+.ws-post textarea { resize: vertical; min-height: 52px; max-height: 200px; padding: 7px 9px; border-radius: 9px; font: inherit; font-size: 12.5px;
+  color: var(--text); background: color-mix(in srgb, var(--bg-crust) 60%, transparent); border: 1px solid var(--surface1); outline: none;
+  transition: border-color .15s, box-shadow .2s; }
+.ws-post textarea:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.ws-post textarea::placeholder { color: var(--muted); }
+.ws-post-btn { align-self: flex-end; padding: 5px 12px; font-size: 12.5px; }
+/* the Workshop's lists beside its pill in Browse's source strip (components/SourcePills.tsx): Favourites, and the creator's pill
+   (avatar + name + ×) that slides in when a creator row is clicked and out when it's left. Guard: probe-steam ws:pills */
+.ws-pill { display: inline-flex; align-items: center; gap: 6px; }
+.ws-pill .ws-avatar { margin: -3px 0 -3px -6px; }
+.ws-pill-pair { display: inline-flex; align-items: center; gap: 3px; flex: none; animation: ws-pill-in .26s cubic-bezier(.2, 1.2, .4, 1) both; }
+.ws-pill-pair > .pill { flex: none; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.ws-pill-pair.closing { animation: ws-pill-out .17s ease-in forwards; pointer-events: none; }
+@keyframes ws-pill-in { from { opacity: 0; transform: translateX(-10px) scale(.92); } }
+@keyframes ws-pill-out { to { opacity: 0; transform: scale(.92); } }
+.ws-pill-x { flex: none; width: 22px; height: 22px; padding: 0; border-radius: 50%; display: grid; place-items: center; color: var(--subtext);
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: color .15s, box-shadow .2s; }
+.ws-pill-x:hover { color: var(--text); box-shadow: var(--glow-sm); }
 .side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
 .side-tile.danger .side-tile-ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent), 0 0 10px -3px var(--danger); }
@@ -1677,6 +1766,17 @@ button.side-pill.copy { overflow: hidden; }
   transition: box-shadow .25s, transform var(--spring-dur) var(--spring); }
 .side-sec:hover .side-sec-ico { box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); transform: rotate(-8deg) scale(1.1); }
 .side-sec .sp-head .side-sec-title { margin: 0; }
+/* "Scene properties" folds (ScenePropsEditor.tsx): its title is the toggle, a bare button in the title's own look, the count
+   after the words in the muted text, the chevron turning a quarter to point right while folded (a disclosure rotates: one
+   icon) on the soft spring, lit and glowing on hover. Its emblem chip tilts with the card, never with the button (the object
+   rule above, iconMotion.ts EMBLEM). Guard: probe-sidebar lib:propsFold:<on|off> */
+.sp-title { flex: 1 1 auto; min-width: 0; }
+.sp-fold { display: flex; align-items: center; gap: 9px; flex: 1 1 auto; min-width: 0; padding: 0; margin: 0; border: 0; border-radius: 8px;
+  background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+.sp-count { margin-left: -3px; color: var(--subtext); font-weight: 700; font-variant-numeric: tabular-nums; }
+.sp-chev { flex: none; color: var(--subtext); transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring), color .15s, filter .2s; }
+.sp-fold:hover .sp-chev { color: var(--accent); filter: drop-shadow(0 0 4px var(--accent)); }
+.sp-fold[aria-expanded="false"] .sp-chev { transform: rotate(-90deg); }
 .side-sec .srow { flex-wrap: wrap; gap: 6px 12px; }
 /* Playback's rows: the label in a fixed column, the slider filling the rest — Volume and Speed line up at every width */
 .side-sec[data-sec="playback"] .srow { display: grid; grid-template-columns: 106px minmax(0, 1fr); gap: 4px 10px; }
