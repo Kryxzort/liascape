@@ -53,7 +53,6 @@ the floor; a new element is designed to delight within the toggles and the frame
 
 ## Interaction rules
 - Tooltips (`title=`) only when they tell something you can't see (an unclear icon-only control, a warning's reason, a setting's explanation, a value a short form hides). Never one that repeats the label, explains a click, names an obvious icon, or sits on cards / bar items. Icon-only controls always get an `aria-label`.
-- A Settings hint (a row's `hint`) is one plain sentence, or two short ones: a lowercase start, no em dashes, semicolons or `·` lists, and what the setting does for the user, never how it works inside.
 - Focus rings only while tabbing: `.kbd-nav` (set by `hooks/focusRing.ts`). Never add a focus style that bypasses it. Guard: probe-sidebar `look:focusRing`.
 - No item context menus (a control may keep its own right-click menu for a variant of its action, `components/ContextMenu.tsx`: Unsubscribe → keep the files): a right-click on an item opens its sidebar on every tab without applying it or clearing the selection (`focusLib` / `focusBrowse`); a plain click does the tab's main action (Library: apply, and an open sidebar moves to the card; Browse: the sidebar); Ctrl / Shift-click only select (`docs/decisions.md` § "Left click does the tab's main action, right click opens the item sidebar"). Guard: probe-select `*:plainClick`, `*:modClick`, `*:rightClickSel`.
 - One right-hand panel per page: the filter panel and the item sidebar share the right side, so opening one closes the other in the store (`setFiltersOpen`, `focusLib` / `focusBrowse`). The filter panel takes the sidebar's width, dock breakpoint and slide (index.css `.wf-col`), so a swap never moves the grid; a docked panel's closed state is remembered per page, the sidebar's never. Guard: probe-filters `swap:*`, `motion:match`, `panel:persist`.
@@ -69,6 +68,24 @@ the floor; a new element is designed to delight within the toggles and the frame
 - The password field in `components/SteamPasswordModal.tsx` is uncontrolled: read once on submit, emptied, never in React state or the store.
 - Smooth wheel scrolling: every `.scroll` container and the playlist bar row takes the ref `useSmoothScroll(ref, axis)` returns (it fills `ref` too, and binds whenever the element appears); notched wheels glide, touchpads and motion off scroll natively. Never set `scrollbar-width` / `scrollbar-color` (Chromium then ignores `::-webkit-scrollbar`).
 - Settings levels: a row's level comes from `LEVEL_OF_KEY` in `src/settingsLevel.ts` (or `Row`'s `lv`); hidden settings stay saved and live. Tests find rows by label (`m.row(label)`), so a rename updates `app/shell/probe-*.js` too.
+
+## Settings words (names and hints)
+- A name says what the setting does, from the user's side, in sentence case: a short verb phrase for a behaviour
+  ("Pause behind windows", "Stay paused when switching", "Mute when other apps play audio"), a plain noun for a value
+  ("Loudness target", "Video preview quality"). Familiar product terms are fine ("Audio normalization"); internals aren't.
+- A name is honest: it says what really happens, not what we wish it did ("other apps play audio", not "other audio
+  plays", when it can't tell the sounds apart). Units go in the name only for a raw number ("Come back after (ms)").
+- A hint exists only when it adds something the name doesn't: no hint that repeats its name, a default, or the obvious.
+- A hint starts lowercase and runs one plain sentence, or two or three short ones ("when reached, switches even
+  mid-video. A pause stops it. 0 turns the limit off."): what it does or when, then what 0 / off means, then a cost
+  or a need ("needs steamcmd set up", "the heaviest, noticeable at 4K").
+- No em dashes, semicolons or `·` lists; commas and periods only. Examples go in parentheses, an open list ends in
+  `…` ("(Spotify, Strawberry, browsers, VLC…)").
+- No reassurance or decoration ("so switching never blasts your ears", "peeking through between the cards"), no
+  internals (how it measures, which process, engine defaults), no history.
+- A choice row's hint explains the CHOSEN option only ("Frozen: both hold still…"), or, when the options compare
+  better side by side, one short "Option: what it does." sentence each ("Auto: … This wallpaper: … Global: …").
+- Before renaming, grep `app/shell/probe-*.js` and `scripts/test-*.sh`: tests find rows by name.
 
 ## Comment tags (grep these)
 - `// PERF:` perf-critical — don't "simplify". `// COOL:` motion/glow intent. `// API:` coupling to a backend contract.

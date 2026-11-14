@@ -20,6 +20,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (SteamKit2, already a dependency: the item's UGC manifest — no steamcmd binary), else steamcmd when it's set
        up and logged in, else the option says what's missing. The copy is a plain library item (Delete deletes; no
        Unsubscribe). After #51 and #52 (same sidebar).
+64. [ ] (owner) A signed-out unsubscribe waits for the sign-in instead of opening the item's page in the Steam app: the
+       item leaves the library at once and auto-import must not bring it back meanwhile (WorkshopUnsubQueue pending /
+       blocked), the status says it reaches Steam once you sign in, and the drain runs on the next sign-in
+       (SteamOps drain + the signed-out branch in WorkshopDownloader's unsubscribe drain). Rewrite SteamSelfTest's
+       "unsub, signed out" checks to it.
 55. [ ] (owner) The Library sidebar shows #52's Workshop features for a Workshop item too: favourite, comments (+ post),
        the creator with browse-by-creator (opens Browse on them). Reuse #52's components; they sit below the scene
        properties (#54), with its stat pills: current subscribers and favourites (no views). Every Library item
