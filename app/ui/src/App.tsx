@@ -5,6 +5,7 @@ import { Square, Undo2, Upload } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
 import { useStableFn } from "./hooks/useStableFn";
 import { useStore } from "./store";
+import { useShallow } from "zustand/react/shallow";
 import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
@@ -44,7 +45,9 @@ const SORTS = ["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newe
 const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"].map((l, i) => ({ value: String(i), label: l }));
 
 export default function App() {
-  const s = useStore();
+  // PERF: only what App reads (useShallow: the store's actions are stable, so the state fields decide), never the whole
+  // store: a Library filter change or a selection re-rendered App and its top bar's ~30 icons. Guard: probe-filters lib:interplay
+  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, importFile: st.importFile, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSceneLoudness: st.setSceneLoudness, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setUnsub: st.setUnsub, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort })));
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
   const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
