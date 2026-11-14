@@ -5,7 +5,7 @@
 // a cell wants), /steam/login* and /steam/qr/* itself (recording each body), stubs POST /browse (Workshop items) and /download
 // (held until the cell lets go / cancels), wraps WebSocket so a cell can push fake WS events (steam-login-code, steam-signed-in,
 // steam-login-error, download-progress) through the page's own socket, and records every request body + console line.
-//   steam:row:signedOut   Settings → Getting Workshop wallpapers → Steam: "Not signed in — downloads open in the Steam app…",
+//   steam:row:signedOut   Settings → Getting Workshop wallpapers → Steam: "Not signed in." (no Steam-app fallback offered),
 //                         Sign in with QR + Sign in with password; no tooltips
 //   steam:row:rejected    a sign-in Steam turned down: the warning (in the warn colour), both sign-in buttons, no Sign out
 //   steam:row:signedIn    "Signed in as …" + Sign out, no sign-in buttons
@@ -286,7 +286,8 @@ app.whenReady().then(async () => {
       const r = await steamRow(); console.log(`        ${J(r)}`);
       if (!r) return ["no Steam row"];
       if (r.state !== "signed-out") v.push(`state ${r.state}`);
-      if (!/Not signed in/.test(r.text) || !/Steam app/.test(r.text) || !/Subscribe/.test(r.text)) v.push(`the row doesn't say downloads go through the Steam app: "${r.text}"`);
+      if (!/^Not signed in\./.test(r.text)) v.push(`the row doesn't say it's not signed in: "${r.text}"`);
+      if (/Steam app|Subscribe/.test(r.text)) v.push(`the row still offers the Steam app's page (no fallback in this mode): "${r.text}"`);
       if (!r.qr || !r.pw) v.push(`sign-in buttons: qr ${r.qr}, password ${r.pw}`);
       if (r.titles) v.push(`${r.titles} tooltip(s) in the row`);
       await page(`const el = document.querySelector("[data-steam-state]"), sc = el.closest(".scroll"); sc.scrollTop += el.getBoundingClientRect().top - innerHeight / 2;`); await sleep(900); await shot("row-signed-out");
@@ -297,7 +298,7 @@ app.whenReady().then(async () => {
       const r = await steamRow(); console.log(`        ${J(r)}`);
       if (!r) return ["no Steam row"];
       if (r.state !== "rejected") v.push(`state ${r.state}`);
-      if (!/signed acct1 out/.test(r.text) || !/Steam app/.test(r.text)) v.push(`text: "${r.text}"`);
+      if (!/signed acct1 out\. Sign in again/.test(r.text) || /Steam app/.test(r.text)) v.push(`text: "${r.text}"`);
       if (!r.qr || !r.pw) v.push(`sign-in buttons: qr ${r.qr}, password ${r.pw}`);
       if (r.signOut) v.push("a Sign out button on a rejected sign-in");
       if (!r.warnColor) v.push("no warning text");
