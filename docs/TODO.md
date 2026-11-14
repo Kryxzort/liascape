@@ -41,6 +41,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        hover / focus, reusing CopyButton / useCopied (design.md § Reuse first), "Copied" feedback like the ID pill.
        Browse cards show 2 title lines like Library cards (`.title` is 1 line today; the card keeps its
        aspect-ratio height, so the grid doesn't reflow). After #52 (it adds the creator and edits the Browse sidebar).
+57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
+       time, nudge:engine finds no nudge row right after switching to legacy, cache:clear:reduced starts on an already
+       emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
@@ -52,6 +55,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
+
+## Before the first release
+- [ ] Turn compatibility back on: CLAUDE.md § Hard rules, `.claude/rules/backend/state-files.md` and
+      `.claude/rules/build-and-packaging.md` say formats, settings and CLI flags may change freely only while no one
+      else runs Liascape. At release: never break a CLI flag or a state-file format again (an old file must load).
 
 ## Upstream PRs (once the project is done)
 - [ ] Draft PRs offering the LWE fork's patches upstream (Almamu/linux-wallpaperengine), several small focused ones.

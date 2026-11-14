@@ -28,7 +28,7 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 - `install.sh` preflights every toolchain before any side effect and hard-fails without the native helpers' toolchain (transitions are a core feature, never a silent no-op). `--no-scenes` is the only optional part.
 - Internal executables go in `<prefix>/libexec/liascape/`, never on `PATH`; only `bin/liascape` is user-facing.
 - The launcher resolves everything from its own real path (`readlink -f`) and lets an already-set `LIASCAPE_*` win; keep it relocatable (install.sh, AppImage and the flake share it).
-- Never break a CLI command or flag (`liascape help` lists them; `Program.cs` parses them).
+- CLI commands and flags (`liascape help` lists them; `Program.cs` parses them) may change freely before the first release (`CLAUDE.md` § Hard rules).
 
 ## Electron
 - Use the system's Electron (`electron` on PATH, AUR `depends`, the flake's `electron_42`; the AppImage bundles one). Keep the 42.x pin in `app/shell/package.json` with its exact-version `allowScripts` entry — older Chromium crash-loops the GPU process on NVIDIA with kernel ≥ 6.12.

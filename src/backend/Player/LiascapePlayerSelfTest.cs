@@ -71,7 +71,7 @@ public static class LiascapePlayerSelfTest
             string a = Path.Combine(dir, "a.mp4"), b = Path.Combine(dir, "b.mp4"), img = Path.Combine(dir, "c.png");
             var g = new AppSettings
             {
-                AllowScenes = false, Volume = 50, Speed = 1.5, NoAudio = false, Loop = true, TransitionMethod = "frozen",
+                AllowScenes = false, Volume = 50, Speed = 1.5, NoAudio = false, TransitionMethod = "frozen",
                 GlobalIntervalSeconds = 30, GlobalSwitchWhenVideoEnds = true, GlobalMaxPlaySeconds = 600,
                 GlobalSeparateSceneTiming = true, GlobalSwitchScenesAfterSeconds = 90,
                 GlobalTransitionEnabled = true, GlobalTransitionEffectIds = ["fade", "wipe"], GlobalTransitionDurationMs = 400,
@@ -954,7 +954,7 @@ public static class LiascapePlayerSelfTest
             void Phase(string what) { Console.Error.WriteLine($"  selftest {sw.ElapsedMilliseconds,6} ms  {what}"); }
             try
             {
-                var s = new AppSettings { Loop = true, NoAudio = false, Volume = 100 };
+                var s = new AppSettings { NoAudio = false, Volume = 100 };
 
                 // A = colour (no previous picture), align now
                 var red = client.Call("transition", new Dictionary<string, object?>

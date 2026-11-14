@@ -74,7 +74,7 @@ json.dump(idx, open(f"{lib}/index.json", "w"), indent=2)
 EOF
 echo "library: $N items, index.json $(stat -c %s "$LIB/index.json") bytes"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"Speed":1,"NormalizeAudio":true,"AutoMute":false,
+{"PlayerEngine":"liascape-player","NoAudio":false,"Volume":100,"Speed":1,"NormalizeAudio":true,"AutoMute":false,
  "GlobalTransitionEnabled":false,"RestartMpvpaperEverySeconds":600}
 EOF
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!

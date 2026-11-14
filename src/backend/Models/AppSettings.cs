@@ -7,7 +7,6 @@ namespace Liascape.Models;
 
 public class AppSettings
 {
-    public bool Loop { get; set; } = true;
     public bool NoAudio { get; set; } = true;
     public bool DisableCache { get; set; } = false;
     public int DemuxerMaxMib { get; set; } = 20;
@@ -207,7 +206,7 @@ public class AppSettings
     public string BuildMpvOptions()
     {
         var parts = new List<string>();
-        if (Loop) parts.Add("loop");
+        parts.Add("loop"); // a lone video always loops (docs/decisions.md § "A lone video always loops")
         if (NoAudio) parts.Add("--no-audio");
         else parts.Add($"--volume={Volume}");
         if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");

@@ -153,7 +153,7 @@ L1=$T/l1.mp4; clip "$L1" testsrc2 360 20
 LU=$T/lu.mp4; clip "$LU" testsrc2 360 30   # outlasts the 10 s stale check while an end-of-video switch is armed
 
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
+{"PlayerEngine":"liascape-player","NoAudio":false,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
  "GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
  "RestartMpvpaperEverySeconds":600}
@@ -374,8 +374,8 @@ setting '.DisableCache = true'; waitfor $WAIT cur_is cache false && ok "DisableC
 setting '.DemuxerMaxMib = 64'; waitfor $WAIT cur_near demuxer_max_mib 64 && ok "DemuxerMaxMib 64" || bad "demuxer → $(cur demuxer_max_mib)"
 setting '.NoAudio = true'; waitfor $WAIT cur_is no_audio true && ok "NoAudio → no_audio true" || bad "NoAudio → $(cur no_audio)"
 setting '.NoAudio = false'; waitfor $WAIT cur_is no_audio false && ok "NoAudio off" || bad "NoAudio off → $(cur no_audio)"
-setting '.Loop = false'; waitfor $WAIT cur_is loop false && ok "Loop off (single video)" || bad "Loop → $(cur loop)"
-setting '.Loop = true | .Speed = 1 | .VideoFpsCap = 0'; waitfor $WAIT cur_near speed 1 || bad "Loop/Speed/VideoFpsCap reset → speed $(cur speed)"
+cur_is loop true && ok "a single video loops" || bad "single video loop → $(cur loop)"
+setting '.Speed = 1 | .VideoFpsCap = 0'; waitfor $WAIT cur_near speed 1 || bad "Speed/VideoFpsCap reset → speed $(cur speed)"
 post /mute '{"value":true,"user":true}' >/dev/null; waitfor $WAIT cur_near gain.mute -96 && ok "user mute → gain.mute -96" || bad "mute → $(cur gain.mute)"
 post /mute '{"value":false,"user":true}' >/dev/null; waitfor $WAIT cur_near gain.mute 0 && ok "unmute → 0" || bad "unmute → $(cur gain.mute)"
 post /pause '{}' >/dev/null; waitfor $WAIT paused_is true && ok "/pause → player.paused" || bad "pause → $(playerPaused)"

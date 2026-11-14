@@ -24,7 +24,7 @@ The CLI, the daemons, `serve` and the player-side processes all read and write t
 - Compute a step (a volume key's +5) INSIDE the mutate from what's saved, never from an earlier load. Guard: `scripts/test-cross-process.sh`.
 - Write shared files atomically (`AtomicFile.WriteAllText`: temp + rename) and read them with a retried parse (`AtomicFile.ReadJson`). Never write a shared state file in place — a torn read loads C# defaults and the next save writes them back. Guards: matrix `race:settingsSaveLoad`, `race:playlistSaveLoad`, `race:indexSaveLoad`.
 - Cross-process locking: `FileLock` (`flock` on `<file>.lock`) inside the in-process lock (`PatchLock` for settings).
-- Never break a state-file format or a CLI flag: an old file must still load. A removed setting's key loads as an unknown one and disappears on the next save; there is no in-app migration code.
+- Formats may change freely before the first release (`CLAUDE.md` § Hard rules): no migration or compatibility code. A removed setting's key loads as an unknown one and disappears on the next save.
 
 ## Secrets
 - `settings.json` holds no secrets. The Steam sign-in's tokens live in `Helpers/SecretStore.cs` (keyring, else `steam-auth.json`; `.claude/rules/backend/sources-steam.md`). `AppSettings` keeps the old token keys only for reading (`Legacy*`), and `SecretStore` moves them out.

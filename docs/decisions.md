@@ -171,6 +171,10 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### A lone video always loops — 2026-11-14
+No "Loop videos" switch: play-once-and-freeze is too niche for a global setting that freezes every other video.
+Every player path loops a lone video; there is no `Loop` setting.
+
 ### Left click does the tab's main action, right click opens the item sidebar — 2026-11-14
 A plain click applies in the Library, opens the item to look over in Browse (double-click, Enter or the hover button
 downloads and applies; a library item's card has no button). A right-click opens the sidebar everywhere, applies nothing, keeps
@@ -249,13 +253,12 @@ Not a backend `/library` filter: the page already holds every item, and a reques
 
 ### Filter the Workshop in a column of three-way switches — 2026-11-11
 The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide;
-clicking the name toggles include only, because a cycle through hide surprised users ("users are gonna assume … it
-toggles left to right"), so hiding is always deliberate (✕ or right-click). `components/WorkshopFilterColumn.tsx`.
-Placement (2026-11-12, the owner's pick from live mockups): the column sits on the right, one panel at a time with the item
-sidebar and in its shape (its width, its 900 px dock, its slide: a swap moves no card), toggled by the left half of a split
-sort button in the top bar (`components/SortFilterButton.tsx`); the top bar never wraps for it from 761 px up. It replaced a
-left column folded by a "Filters · N" pill in a row above the grid, which scrolled away with the grid; rejected too: that
-pill in the top bar (it wrapped the bar), an edge handle (it cost grid width), a sticky row (it looked heavy). Guard
+clicking the name toggles include only (a cycle through hide surprised users), so hiding is always deliberate (✕ or
+right-click). `components/WorkshopFilterColumn.tsx`.
+Placement (the owner's pick from live mockups): on the right, one panel at a time with the item sidebar and in its shape
+(width, 900 px dock, slide: a swap moves no card), toggled by the left half of the top bar's split sort button
+(`components/SortFilterButton.tsx`). Rejected: a left column under a "Filters · N" pill above the grid (it scrolled away),
+that pill in the top bar (it wrapped it), an edge handle (it cost grid width), a sticky row. Guard
 probe-filters `split:*`, `panel:*`, `swap:*`.
 
 ### Keep the playlist bar's items 112 px tall at every Thumbnail shape; the dock aims at a fixed rise — 2026-11-12

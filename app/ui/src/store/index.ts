@@ -229,7 +229,7 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 // or steam tokens). Used for the per-setting reset icon + "Clear settings". workshopFolder is
 // environment-derived so it's intentionally omitted (no fixed default to reset to).
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
-  loop: true, noAudio: true, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
+  noAudio: true, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
   debugMode: false, debugOverlay: true, restartOnlyAtPlaylistChangeover: false, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartMpvpaperEverySeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
   globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,
@@ -574,7 +574,7 @@ export const useStore = create<State>((set, get) => ({
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
     settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
-    if (get().playingPath && ["volume", "noAudio", "loop", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
+    if (get().playingPath && ["volume", "noAudio", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
       get().refreshPlayingStatus();
   },

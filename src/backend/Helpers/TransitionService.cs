@@ -259,12 +259,10 @@ public static class TransitionService
                 args.Add("--log"); args.Add(logPath);
             } catch { }
             foreach (var u in EffectUniforms(effect)) args.Add(u);
-            // Mirror the DESKTOP loop semantic into the overlay decoders (settings.Loop is exactly
-            // what mpvpaper runs with — timed / wait-for-video-end sessions launch with it too):
-            // loop ctx → a side shorter than the effect wraps through it like the wallpaper would;
-            // Loop off → it freezes on its last frame (and the B pre-seek clamps instead of wrapping).
-            args.Add("--from-loop"); args.Add(aset.Loop ? "1" : "0");
-            args.Add("--to-loop");   args.Add(aset.Loop ? "1" : "0");
+            // the overlay decoders loop like the desktop does (a lone video always loops): a side shorter than the
+            // effect wraps through it like the wallpaper would
+            args.Add("--from-loop"); args.Add("1");
+            args.Add("--to-loop");   args.Add("1");
             // Timed video-end V→V: gate the effect on A's decoded remaining (see RequestAlignAEnd).
             // Needs a live A decoder → full-live only (reveal/frozen freeze A at the cover anyway,
             // so there is nothing to align — a still can't rewind).

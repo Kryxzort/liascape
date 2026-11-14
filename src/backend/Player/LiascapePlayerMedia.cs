@@ -809,7 +809,7 @@ public static class LiascapePlayerMedia
         {
             ["path"] = path,
             ["kind"] = scene ? "scene" : IsImagePath(path) ? "image" : "video",
-            ["loop"] = s.Loop,
+            ["loop"] = true,
         };
         // what the player shows while no worker frame exists (a crash before the first frame,
         // a broken scene — docs/player/modules/scene-crash-policy.md); the video-only props are stored, no effect
@@ -829,7 +829,7 @@ public static class LiascapePlayerMedia
     // of `path` gets (SourceProps minus `path`); the program carries only the entries that differ from these.
     public static Dictionary<string, object?> DesiredGlobal(AppSettings s)
     {
-        var d = new Dictionary<string, object?> { ["kind"] = "video", ["loop"] = s.Loop };
+        var d = new Dictionary<string, object?> { ["kind"] = "video", ["loop"] = true };
         foreach (var (k, v) in Desired(null, () => s, PlayerHelper.IsMuted, null, item: false)) d[k] = v;
         return d;
     }

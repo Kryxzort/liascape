@@ -108,7 +108,7 @@ printf '%s' "$IDX" > "$LIB/imported/index.json"
 W=$T/w.mp4
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -t 30 -c:v libx264 -pix_fmt yuv420p "$W"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"liascape-player","WorkshopFolder":"$T/we","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,"Loop":true,
+{"PlayerEngine":"liascape-player","WorkshopFolder":"$T/we","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,
  "GlobalTransitionEnabled":false,"AutoMute":false,"VideoPreviewQuality":"high"}
 EOF
 

@@ -561,7 +561,6 @@ for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "
 setting("volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`);
 setting("speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`);
 setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
-setting("loopOff", "loop", false, `m.setCheck(m.input("Loop videos"), false, "Loop videos");`);
 setting("scaleFit", "videoScale", "fit", `await m.select("Fit to screen", "Fit");`);
 setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video frame rate cap"), 24, "fps");`);
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
@@ -972,7 +971,7 @@ for (const t of ["shown", "other"]) C[`trashUndo:${t}`] = { switch: true, async 
 // keybind volume-up, then any UI settings save: the keybind's volume must survive (the UI posts its whole copy)
 C["cli:volume-up+uiSave"] = { async run(c) {
     c.cli = await cli("volume-up"); await sleep(400);
-    await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Loop videos"), false, "Loop videos");`); await sleep(900); },
+    await ui(`m.tab("Settings"); await m.sleep(500); m.setCheck(m.input("Disable video cache"), true, "Disable video cache");`); await sleep(900); },
   check: (c) => volKeyAuto(c, "volume-up", " + a UI save") };
 C["plAdvanceOff"] = { async run(c) {
   await ui(`m.click(document.querySelector('button[title="Playlist settings"]'), "pl settings"); await m.sleep(500); m.setCheck(m.plCheck("Switch when video ends"), false, "advance"); await m.sleep(400); m.click(m.byText(".pl-modal button", "Close"), "close");`);

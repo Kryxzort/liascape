@@ -84,7 +84,7 @@ clip "$C1" testsrc2 440 6; clip "$C2" smptebars 550 6
 # in older files; the Steam fields are dummies (still never printed — the real file holds a real token).
 SJ=$XDG_CONFIG_HOME/liascape/settings.json
 cat > "$SJ" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
+{"PlayerEngine":"liascape-player","NoAudio":false,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
  "DemuxerMaxMib":32,"DemuxerMaxBackMib":8,"LweSilent":true,"LweVolume":55,
  "SceneMonitors":[{"Name":"DP-1","Fps":144,"IsPrimary":true},{"Name":"HDMI-A-1","Fps":30,"IsPrimary":false}],
  "SceneTransitionDelayMs":1500,"Theme":"Catppuccin Latte","CardSize":"Large","ThumbnailAspect":"16:9","LibrarySortIndex":2,

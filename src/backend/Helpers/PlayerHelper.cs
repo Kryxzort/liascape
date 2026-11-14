@@ -1413,7 +1413,6 @@ public static class PlayerHelper
             {
                 held = true;
                 LiascapePlayerClient.Log($"{(min >= NeverMs ? "no time set" : $"min play time {min / 1000.0:0.#} s")}: holding {Path.GetFileName(LiascapePlayerMedia.CurrentPath() ?? "?")} (played {played / 1000.0:0.0} s{(still ? ", a still image" : $", this loop ends in {(rem ?? 0) / 1000.0:0.0} s")})");
-                if (!still && !SettingsService.Load().Loop) LiascapePlayerMedia.SetLoop(true);
             }
             var wait = (int)Math.Clamp((rem ?? (min - played)) + 60, 100, 1000);
             try { await Task.Delay(wait, ct).ConfigureAwait(false); }
@@ -1802,11 +1801,9 @@ public static class PlayerHelper
 
     private static bool TryIpcSwitchToFile(string path, int volume, double speed, bool pauseAtStart = false)
     {
-        // Read AppSettings.Loop directly so the loop state is explicit rather
-        // than parsed out of the kill+launch options string. Other launch-only
-        // options (hwdec, cache, demuxer) can't be toggled mid-session and only
-        // take effect on next cold start.
-        bool loopFile = SettingsService.Load().Loop;
+        // a lone video always loops (docs/decisions.md § "A lone video always loops"). Other launch-only options (hwdec,
+        // cache, demuxer) can't be toggled mid-session and only take effect on the next cold start.
+        bool loopFile = true;
         // Per-file options applied atomically with the load (mpv ≥ 0.38: loadfile <url> <flags> <index> <opts>).
         // Carries the effective volume/speed + mute so the new file starts at them — no post-load reset race.
         // mute is set EXPLICITLY both ways: file-local options are restored to the pre-file value at the
@@ -2541,8 +2538,7 @@ public static class PlayerHelper
                     _waitingForVideoEnd = false;
                     _waitCts = null;
 
-                    var settings = SettingsService.Load();
-                    TrySendCommand("set", "loop-file", settings.Loop ? "inf" : "no");
+                    TrySendCommand("set", "loop-file", "inf");
                     TrySendCommand("playlist-clear");
 
                     OnWallpaperChanged?.Invoke(next);
@@ -3376,7 +3372,6 @@ public static class PlayerHelper
     public static void ApplyEffectiveLive(AppSettings prev, AppSettings cur, string? playingPath)
     {
         LiascapePlayerMedia.ApplyEffective();
-        if (prev.Loop != cur.Loop && !_waitingForVideoEnd && !IsTimedPlaylistActive()) LiascapePlayerMedia.SetLoop(cur.Loop);
         var speed = (playingPath != null ? ReadSpeedOverride(playingPath) : null) ?? cur.Speed;
         lock (_lock) { _currentSpeed = speed; }
         _speedChangeTcs?.TrySetResult(true);
@@ -3431,11 +3426,6 @@ public static class PlayerHelper
 
         if (!mpvAlive) return; // the rest are video-only mpv decode/buffer properties
 
-        // Loop: match the displayed video's loop-file. Only for a SINGLE (non-timed) video — the timed
-        // machinery owns loop-file (loadfile-append during advance-waits, per-item loop while displayed),
-        // so re-asserting it under a running playlist would break the advance / stop the clip early.
-        if (prev.Loop != cur.Loop && !_waitingForVideoEnd && !IsTimedPlaylistActive())
-            SetLoop(cur.Loop);
         if (prev.VideoFpsCap != cur.VideoFpsCap)
             TrySendCommand("set", "vf", cur.VideoFpsCap > 0 ? $"fps={cur.VideoFpsCap}" : "");
         if (prev.DisableCache != cur.DisableCache)
