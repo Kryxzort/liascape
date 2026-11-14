@@ -207,7 +207,8 @@ export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
   // the rotation: switchWhenVideoEnds off → intervalSeconds is a timer; on → it is the minimum play time and
   // maxPlaySeconds the maximum, and separateSceneTiming gives scenes + still images their own
-  // switchScenesAfterSeconds (wall-clock seconds, 0 = off everywhere) — player-adapter.md § Rotation
+  // switchScenesAfterSeconds (wall-clock seconds; the minimum and maximum 0 = off, the maximum 0 or at least the
+  // minimum, scenes-after at least 1) — player-adapter.md § Rotation
   switchWhenVideoEnds: boolean; maxPlaySeconds: number; separateSceneTiming: boolean; switchScenesAfterSeconds: number;
   // "When the playlist starts again" (gated by overrideGlobalSettings; else the globalPlaylistStart setting) — plan § Playlist start
   playlistStart: "start_over" | "resume";

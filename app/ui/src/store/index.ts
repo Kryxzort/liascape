@@ -216,6 +216,11 @@ let searchTimer: ReturnType<typeof setTimeout>;
 let filterTimer: ReturnType<typeof setTimeout>;
 let stateTimer: ReturnType<typeof setTimeout>;
 let settingsTimer: ReturnType<typeof setTimeout>;
+// The maximum play time is 0 (off) or at least the minimum (player-adapter.md § Rotation): an edit of the minimum, the
+// maximum or "Switch when video ends" (which makes the interval the minimum) raises a set maximum to the minimum, at
+// once and on screen; it follows the minimum up, never back down. The backend stores the same (AppSettings.RotationMax).
+// Guard: probe-settings playtime:*
+const maxOverMin = (advance: boolean, min: number, max: number) => (advance && max > 0 && max < min ? min : max);
 let statusTimer: ReturnType<typeof setTimeout>;
 let statusHeldUntil = 0;
 // a playlist bar / settings edit whose debounced save hasn't fired yet: a resync keeps the local copy (that save is on its way)
@@ -547,7 +552,9 @@ export const useStore = create<State>((set, get) => ({
     await markPlayingAfterPlay(get, set, seen);
   },
   setPlaylistSettings(p) {
-    set({ playlistSettings: { ...get().playlistSettings, ...p } }); savePlaylistDebounced(get);
+    const ps = { ...get().playlistSettings, ...p };
+    ps.maxPlaySeconds = maxOverMin(ps.switchWhenVideoEnds, ps.intervalSeconds ?? 0, ps.maxPlaySeconds ?? 0);
+    set({ playlistSettings: ps }); savePlaylistDebounced(get);
     if (get().playingPath) get().refreshPlayingStatus();
   },
   async savePlaylistAs(name) {
@@ -571,7 +578,10 @@ export const useStore = create<State>((set, get) => ({
     if (get().playingPath) get().refreshPlayingStatus();
   },
   setSetting(key, value) {
-    const s = { ...(get().settings ?? {}), [key]: value };
+    const s: Record<string, unknown> = { ...(get().settings ?? {}), [key]: value };
+    if (["globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds"].includes(key))
+      s.globalMaxPlaySeconds = maxOverMin((s.globalSwitchWhenVideoEnds as boolean | undefined) ?? true,
+        (s.globalIntervalSeconds as number | undefined) ?? 0, (s.globalMaxPlaySeconds as number | undefined) ?? 0);
     set({ settings: s });
     clearTimeout(settingsTimer); settingsSavePending = true;
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
@@ -734,7 +744,7 @@ function buildPlayingStatus(get: () => State): string {
     // advance-on-end: the interval is the minimum play time (player-adapter.md § Rotation)
     let desc = advance
       ? `${pl.length} wallpapers, on video end${interval > 0 ? `, at least ${fmtInterval(interval)}` : ""}${maxPlay > 0 ? `, at most ${fmtInterval(maxPlay)}` : ""}`
-        + (sepScenes ? (scenesAfter > 0 ? `, scenes after ${fmtInterval(scenesAfter)}` : ", scenes stay") : "")
+        + (sepScenes ? `, scenes after ${fmtInterval(scenesAfter)}` : "")
       : `${pl.length} wallpapers, every ${fmtInterval(interval)}`;
     if (shuffle) desc += " (shuffled)";
     if (st.keepCurrent) desc += ", looping this one (toggle-loop-current)";

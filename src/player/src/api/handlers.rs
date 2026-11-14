@@ -49,22 +49,22 @@ pub const VERBS: &[(&str, Handler, &str)] = &[
     (
         "program.play",
         program_play,
-        "a program (re)starts {id, from?: start|resume|index, index?, keep_pause?} → {corr, path, index, resumed}",
+        "a program (re)starts {id, from?: start|resume|index, index?} → {corr, path, index, resumed}",
     ),
     (
         "program.next",
         program_next,
-        "a program's next item {id, keep_pause?} → {corr, path} (null = nothing to do)",
+        "a program's next item {id} → {corr, path} (null = nothing to do)",
     ),
     (
         "program.prev",
         program_prev,
-        "a program's previous item (its history) {id, keep_pause?} → {corr, path}",
+        "a program's previous item (its history) {id} → {corr, path}",
     ),
     (
         "program.random",
         program_random,
-        "a program's random item {id, keep_pause?} → {corr, path}",
+        "a program's random item {id} → {corr, path}",
     ),
     (
         "automute.release",
@@ -703,21 +703,10 @@ fn cancel(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
 
 // ---------------------------------------------------------------- programs
 
-fn opt_bool(args: &Value, key: &str) -> Result<bool, ApiError> {
-    match args.get(key) {
-        None | Some(Value::Null) => Ok(false),
-        Some(Value::Bool(b)) => Ok(*b),
-        Some(other) => Err(bad_request(format!(
-            "args.{key} must be a bool, got {other}"
-        ))),
-    }
-}
-
-/// `program.<verb> {id, index?, keep_pause?}` — a thin recipe over `transition`: the
-/// program picks the item and the effect, the transition recipe switches.
+/// `program.<verb> {id, index?}` — a thin recipe over `transition`: the program picks the
+/// item and the effect, the transition recipe switches.
 fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, ApiError> {
     let id = arg_str(args, "id")?.to_string();
-    let keep_pause = opt_bool(args, "keep_pause")?;
     let index = match opt_f64(args, "index")? {
         Some(i) if i < 0.0 || i.fract() != 0.0 => {
             return Err(bad_request(format!(
@@ -727,7 +716,7 @@ fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, Api
         Some(i) => Some(i as usize),
         None => None,
     };
-    let now = rt.now();
+    let now = rt.rotation_now();
     let cat = &rt.cat;
     let acts = if verb == "play" {
         // `docs/player/modules/programs.md` § Playlist start and resume points: `from` start | resume | index
@@ -740,25 +729,15 @@ fn program_verb(rt: &mut Runtime, verb: &str, args: &Value) -> Result<Value, Api
                 )));
             }
         };
-        let paused = matches!(
-            rt.graph.get(&PropPath("player.paused".into())),
-            Ok(crate::graph::PropValue::Bool(true))
-        );
-        let (acts, early) = rt.programs.play(
-            &id,
-            from,
-            index,
-            keep_pause && paused,
-            &rt.graph,
-            &|e| cat.defaults(e),
-        )?;
+        let (acts, early) = rt
+            .programs
+            .play(&id, from, index, &rt.graph, &|e| cat.defaults(e))?;
         if let Some(reply) = early {
             return Ok(reply);
         }
         acts
     } else {
-        rt.programs
-            .verb(verb, &id, keep_pause, &rt.graph, now, &|e| cat.defaults(e))?
+        rt.programs.verb(verb, &id, now, &|e| cat.defaults(e))?
     };
     let out = rt.run_program_actions(acts);
     Ok(rt.programs.verb_reply(&id, out))

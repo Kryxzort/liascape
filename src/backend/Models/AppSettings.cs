@@ -77,14 +77,15 @@ public class AppSettings
     public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
     public bool RestartOnlyAtPlaylistChangeover { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
-    public bool StayPausedWhenSwitching { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (a cut)
+    public bool StayPausedWhenSwitching { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (liascape-player: the transition plays on the still frames; legacy: a cut)
     public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
     // The global rotation (PlayerHelper § Rotation): GlobalSwitchWhenVideoEnds ("Switch when video ends") off →
     // GlobalIntervalSeconds is a plain timer ("Switch every"); on → it is the minimum play time and
     // GlobalMaxPlaySeconds the maximum (below), and GlobalSeparateSceneTiming gives scenes + still images (they never
-    // end) their own GlobalSwitchScenesAfterSeconds instead. Every limit is 0 = off. Defaults: a video plays to its
-    // end however long (no minimum, no maximum); a scene / still image switches after 30 min.
+    // end) their own GlobalSwitchScenesAfterSeconds instead. The minimum and maximum are 0 = off; the maximum is never
+    // under the minimum (RotationMax); scenes-after is at least 1 s (SceneTime). Defaults: a video plays to its end
+    // however long (no minimum, no maximum); a scene / still image switches after 30 min.
     public int GlobalIntervalSeconds { get; set; } = 0;
     public bool GlobalSwitchWhenVideoEnds { get; set; } = true;
     public string Theme { get; set; } = "Catppuccin Mocha";
@@ -95,17 +96,31 @@ public class AppSettings
         set => _restartMpvpaperEverySeconds = Math.Clamp(value, 0, 3600);
     }
     // The maximum play time under advance-on-end (wall-clock seconds, 0 = off): the playing item — a video mid-clip,
-    // a scene / still image unless they have their own timing — advances once it played that long (a cap beats the
-    // minimum). Default off: a video plays to its end, even a 10 h one.
+    // a scene / still image unless they have their own timing — advances once it played that long. Never under the
+    // minimum (RotationMax, applied on every save). Default off: a video plays to its end, even a 10 h one.
     private int _globalMaxPlaySeconds = 0;
     public int GlobalMaxPlaySeconds { get => _globalMaxPlaySeconds; set => _globalMaxPlaySeconds = PlayLimit(value); }
     // "Separate timing for scenes" (advance-on-end only): on → a scene or a still image ignores the minimum / maximum
-    // and switches after "Switch scenes after" (wall-clock seconds, 0 = off: it stays until a user switch); off → they
-    // follow the video rules (the minimum reached is their end, else the maximum, else they stay).
+    // and switches after "Switch scenes after" (wall-clock seconds, at least 1: SceneTime); off → they follow the video
+    // rules (the minimum reached is their end, else the maximum, else they stay).
     public bool GlobalSeparateSceneTiming { get; set; } = true;
     private int _globalSwitchScenesAfterSeconds = 1800;
-    public int GlobalSwitchScenesAfterSeconds { get => _globalSwitchScenesAfterSeconds; set => _globalSwitchScenesAfterSeconds = PlayLimit(value); }
+    public int GlobalSwitchScenesAfterSeconds { get => _globalSwitchScenesAfterSeconds; set => _globalSwitchScenesAfterSeconds = SceneTime(value); }
     public static int PlayLimit(int seconds) => Math.Clamp(seconds, 0, MaxPlayLimitSeconds);
+    // "Switch scenes and pictures after" has no "off": a scene or picture always moves on (0 or less → the 1 s floor).
+    // Guard: test-settings-merge.sh "never 0"
+    public static int SceneTime(int seconds) => Math.Clamp(seconds, 1, MaxPlayLimitSeconds);
+    // The maximum play time is 0 (off) or at least the minimum: under advance-on-end a maximum below the minimum would
+    // always win for a video and never apply to a scene (docs/decisions.md § "A scene's minimum play time beats its
+    // maximum"), so it is stored as the minimum — it follows the minimum up. With advance-on-end off the interval is
+    // "Switch every", no minimum, and the maximum is left alone. Guard: test-settings-merge.sh "0 (off) or at least the minimum"
+    public static int RotationMax(bool advance, int minSeconds, int maxSeconds)
+    {
+        int max = PlayLimit(maxSeconds);
+        return advance && max > 0 && max < minSeconds ? PlayLimit(minSeconds) : max;
+    }
+    // every settings save (SettingsService.Save): field setters can't, a body's keys arrive in any order
+    public void NormalizeRotation() => GlobalMaxPlaySeconds = RotationMax(GlobalSwitchWhenVideoEnds, GlobalIntervalSeconds, GlobalMaxPlaySeconds);
     // "When the playlist starts again" (docs/decisions.md § "Fold "Resume from last" into the playlist start setting";
     // liascape-player — the program's
     // `start_mode`): "start_over" (default — sequential from the first wallpaper, shuffle shuffles anew) | "resume"

@@ -241,10 +241,9 @@ YouTube's `loop=1&playlist=<id>` restarted early; `seekTo(0)` + `playVideo` on "
 `components/YouTubeEmbed.tsx`.
 
 ### Filter the Library and the local Wallpaper Engine folder in the page — 2026-11-12
-Owner: "make it so we can filter on library and wallpaper engine local too, cuz why not". The same column, toggle, chips and
-semantics as the Workshop's (`WorkshopTags.Build`), matched in the page against what each item knows: its saved Steam tags,
+Owner's call. The same column, toggle, chips and semantics as the Workshop's (`WorkshopTags.Build`), matched in the page against what each item knows: its saved Steam tags,
 else its project.json's genres, age rating and declared features, read at library load (cached by write time), never
-written to the index (Steam updates the file under a `local/<id>` link; old index files need nothing). Each list keeps its
+written to the index (Steam updates the file under a `local/<id>` link). Each list keeps its
 own filter: one shared with the Workshop would silently empty a local list with tags it can't know. A local column offers
 only the tags some item has (a project.json never states a resolution, nor most features), not Steam's whole list.
 Not a backend `/library` filter: the page already holds every item, and a request per click is slower than the match.
@@ -357,7 +356,8 @@ is a present gate, not a second worker. `docs/player/modules/scene-worker.md`.
 Owner's call, decoded from Wallpaper Engine's frame limiter: scenes run at their author's rate, not the monitor's.
 
 ### A scene's minimum play time beats its maximum — ~2026-11
-Owner's call, for scenes only. Videos and images keep "a cap beats the minimum". `docs/player/modules/transitions.md`.
+Owner's call. A maximum below the minimum (it would always win for a video) is raised to it on save, never refused.
+`.claude/rules/backend/player-adapter.md` § Rotation.
 
 ### Count a GPU context loss as a crash restart, through the same budget — 2026-10-28
 Even an innocent reset: the protocol carries no reset kind, so a separate allowance could loop forever.

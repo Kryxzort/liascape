@@ -1686,8 +1686,11 @@ fn next_storm_lands_on_the_last() {
     assert_eq!(prog(&mut c)["path"], json!(want));
 }
 
+/// A user `next` while paused (the backend's "Stay paused when switching" leaves the pause on)
+/// switches with the program's own transition, played on the still frames: B is current and
+/// shown, paused, and the rotation clock stays frozen through the effect and after it.
 #[test]
-fn keep_pause_next_is_a_cut_paused() {
+fn paused_next_plays_its_effect_on_still_frames() {
     let Some(srv) = Serve::start() else { return };
     let mut c = srv.client();
     let items = [clip("kp_a", 6.0), clip("kp_b", 6.0)];
@@ -1702,13 +1705,27 @@ fn keep_pause_next_is_a_cut_paused() {
     step_for(&mut c, 16, 600);
     c.ok("set", json!({"path": "player.paused", "value": true}));
     c.step(16);
-    let r = verb(&mut c, "next", json!({"keep_pause": true}));
+    let r = verb(&mut c, "next", json!({}));
     step_until(&mut c, 16, 3000, "the next", n_currents(2));
     let sch = scheduled(&c);
     let req = sch.iter().find(|e| e["corr"] == r["corr"]).unwrap();
-    assert_eq!(req["effect_id"], Value::Null, "a cut: {req}");
-    c.step(16);
+    assert_eq!(req["effect_id"], "fade", "with its transition: {req}");
+    assert_eq!(req["still"], json!(true), "on the still frames: {req}");
+    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
+    let corr = r["corr"].as_str().unwrap().to_string();
+    step_until(&mut c, 16, 3000, "the effect while paused", |evs| {
+        evs.iter()
+            .any(|e| e["event"] == "transition.done" && e["corr"] == corr)
+    });
+    close(
+        c.get("prog:main.remaining_ms").as_f64().unwrap(),
+        r0,
+        1.0,
+        "the rotation clock stays frozen through the effect",
+    );
+    assert_eq!(c.get("player.paused"), json!(true));
     let b = currents(&c)[1]["source"].as_str().unwrap().to_string();
+    assert_eq!(c.get("lay:VIRTUAL-1:main.content"), json!(b));
     let p = c.ok("probe", json!({"name": "sources"}));
     let bs = p["sources"]
         .as_array()
@@ -1718,7 +1735,6 @@ fn keep_pause_next_is_a_cut_paused() {
         .cloned()
         .unwrap();
     assert_eq!(bs["effective_paused"], json!(true), "{bs}");
-    let r0 = c.get("prog:main.remaining_ms").as_f64().unwrap();
     step_for(&mut c, 100, 2000);
     close(
         c.get("prog:main.remaining_ms").as_f64().unwrap(),

@@ -178,21 +178,32 @@ public static class LiascapePlayerSelfTest
         var old = JsonSerializer.Deserialize<AppSettings>("""{"GlobalIntervalSeconds":20,"GlobalSwitchWhenVideoEnds":true,"GlobalWaitForVideoEnd":true,"GlobalMinPlaySeconds":9,"GlobalMaxPlaySeconds":0}""")!;
         if ((old.GlobalIntervalSeconds, old.GlobalSwitchWhenVideoEnds, old.GlobalMaxPlaySeconds) != (20, true, 0))
             fails.Add($"an old-model settings.json loads as {(old.GlobalIntervalSeconds, old.GlobalSwitchWhenVideoEnds, old.GlobalMaxPlaySeconds)}, want (20, True, 0) — its removed keys ignored");
-        // the maximum is clamped 0…359999 (negative = off)
-        foreach (var (v, want) in new[] { (-5, 0), (0, 0), (90, 90), (359999, 359999), (400000, 359999) })
+        // the maximum is clamped 0…359999 (negative = off); "switch scenes after" 1…359999 (never 0)
+        foreach (var (v, want, wantAfter) in new[] { (-5, 0, 1), (0, 0, 1), (1, 1, 1), (90, 90, 90), (359999, 359999, 359999), (400000, 359999, 359999) })
         {
             var s = new AppSettings { GlobalMaxPlaySeconds = v }; var p = new PlaylistSettings { MaxPlaySeconds = v };
             if (s.GlobalMaxPlaySeconds != want || p.MaxPlaySeconds != want) fails.Add($"max play time {v} → {s.GlobalMaxPlaySeconds}/{p.MaxPlaySeconds}, want {want}");
             var s2 = new AppSettings { GlobalSwitchScenesAfterSeconds = v }; var p2 = new PlaylistSettings { SwitchScenesAfterSeconds = v };
-            if (s2.GlobalSwitchScenesAfterSeconds != want || p2.SwitchScenesAfterSeconds != want)
-                fails.Add($"switch scenes after {v} → {s2.GlobalSwitchScenesAfterSeconds}/{p2.SwitchScenesAfterSeconds}, want {want}");
+            if (s2.GlobalSwitchScenesAfterSeconds != wantAfter || p2.SwitchScenesAfterSeconds != wantAfter)
+                fails.Add($"switch scenes after {v} → {s2.GlobalSwitchScenesAfterSeconds}/{p2.SwitchScenesAfterSeconds}, want {wantAfter}");
         }
+        // the maximum is 0 (off) or at least the minimum under advance-on-end (it follows the minimum up); with
+        // advance-on-end off the interval is a timer and the maximum is left alone
+        foreach (var (adv, min, max, want) in new[] { (true, 60, 30, 60), (true, 60, 0, 0), (true, 60, 90, 90), (true, 60, 60, 60),
+                                                      (true, 0, 5, 5), (false, 600, 40, 40), (true, 400000, 5, 359999) })
+            if (AppSettings.RotationMax(adv, min, max) != want) fails.Add($"RotationMax(advance {adv}, min {min}, max {max}) = {AppSettings.RotationMax(adv, min, max)}, want {want}");
+        var under = new PlaylistSettings { OverrideGlobalSettings = true, SwitchWhenVideoEnds = true, IntervalSeconds = 50, MaxPlaySeconds = 20 };
+        if (PlayerHelper.EffectiveRotation(g, under).Max != 50) fails.Add($"EffectiveRotation of a playlist's own maximum 20 under its minimum 50 = {PlayerHelper.EffectiveRotation(g, under).Max}, want 50");
+        var gUnder = new AppSettings { GlobalSwitchWhenVideoEnds = true, GlobalIntervalSeconds = 40, GlobalMaxPlaySeconds = 10 };
+        if (PlayerHelper.EffectiveRotation(gUnder, null).Max != 40) fails.Add($"EffectiveRotation of a global maximum 10 under the minimum 40 = {PlayerHelper.EffectiveRotation(gUnder, null).Max}, want 40");
+        under.NormalizeRotation(); gUnder.NormalizeRotation();
+        if ((under.MaxPlaySeconds, gUnder.GlobalMaxPlaySeconds) != (50, 40)) fails.Add($"NormalizeRotation left the maximums {(under.MaxPlaySeconds, gUnder.GlobalMaxPlaySeconds)}, want (50, 40)");
         // what each kind of item plays under advance-on-end: (minimum — for an item that never ends, reaching it IS its
-        // end; NeverMs = it stays —, maximum — 0 = none). 0 = off everywhere. A video: always the minimum / maximum (0/0 →
+        // end; NeverMs = it stays —, maximum — 0 = none). The minimum / maximum 0 = off. A video: always the minimum / maximum (0/0 →
         // its end, however short or long). Separate timing for scenes OFF: a scene's end = the minimum (none → only the
         // maximum moves it, else it stays), a still image shows for the minimum (0 → it flashes by) — the old rules.
-        // ON: a scene AND a still image switch after "Switch scenes after" (0 → they stay), the minimum / maximum don't
-        // apply to them.
+        // ON: a scene AND a still image switch after "Switch scenes after" (never 0: AppSettings.SceneTime), the minimum /
+        // maximum don't apply to them.
         const long N = PlayerHelper.NeverMs;
         foreach (var (kind, min, max, sep, after, want) in new (PlayerHelper.PlayKind, long, long, bool, long, (long, long))[] {
                  (PlayerHelper.PlayKind.Video, 0, 0, false, 0, (0, 0)),          // 0/0: a video switches at its end, whatever its length
@@ -202,13 +213,13 @@ public static class LiascapePlayerSelfTest
                  (PlayerHelper.PlayKind.Image, 0, 0, false, 3000, (0, 0)),       // toggle off: the minimum (0 → it flashes by)
                  (PlayerHelper.PlayKind.Image, 4000, 9000, false, 3000, (4000, 9000)),
                  (PlayerHelper.PlayKind.Image, 4000, 9000, true, 3000, (3000, 0)),  // toggle on: its own time, no maximum
-                 (PlayerHelper.PlayKind.Image, 0, 0, true, 0, (N, 0)),           // …0 = off → it stays
+                 (PlayerHelper.PlayKind.Image, 0, 0, true, 1000, (1000, 0)),     // …the 1 s floor: it moves on
                  (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 0)),  // both set → the minimum (docs/decisions.md § "A scene's minimum play time beats its maximum")
                  (PlayerHelper.PlayKind.Scene, 9000, 4000, false, 3000, (9000, 0)),  // …even when the maximum is shorter
                  (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → the maximum moves it
                  (PlayerHelper.PlayKind.Scene, 0, 0, false, 3000, (N, 0)),       // neither → it stays
                  (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 3000, (3000, 0)),
-                 (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 0, (N, 0)) })
+                 (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 1000, (1000, 0)) })
         {
             var got = PlayerHelper.ItemPlayRule(kind, min, max, sep, after);
             if (got != want) fails.Add($"ItemPlayRule({kind}, min {min}, max {max}, separate {sep}, scenes after {after}) = {got}, want {want}");

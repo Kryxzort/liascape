@@ -17,8 +17,9 @@ Runs right after `Transitions::tick` on both clocks; its actions go through `Tra
 `transition_parked`). Transition events reach it on the next tick, which is why the `transition`/`cancel` verbs
 and output removal stash the outbox instead of dropping it.
 
-- **Clocks.** Play time and countdown advance with `Runtime::now`, so a user pause, the low-VRAM hold and the
-  cover hold stop them and a wall-clock jump never shows. Play time is wall rate; the timer countdown is scaled by
+- **Clocks.** Play time and countdown advance with `Runtime::rotation_now` (every paused interval excised), so a
+  user pause, the low-VRAM hold and the cover hold stop them — through an effect played on the still frames too,
+  when `Runtime::now` runs — and a wall-clock jump never shows. Play time is wall rate; the timer countdown is scaled by
   the current source's `speed`. No rule starts a switch under a hold; a rule an edit made true meanwhile waits for
   the resume.
 - **Commit** at the program's own `transition.started` (B becomes current, play time 0 from that instant); a
@@ -41,8 +42,9 @@ and output removal stash the outbox instead of dropping it.
   `BACKOFF_MS` (1, 2, 4, 8, 16, 30 s; a handoff resets it), the path marked failed until the items change, then the
   next playable item. Nothing playable → `program.empty` once. When every playable item has failed the marks are
   cleared and retried at the ladder's pace (≤ 6 requests a minute).
-- **User verbs** (`program.next|prev|random|play`) are always `align: now` with the program's effect pick (a cut
-  with `keep_pause` while paused; the rotation clock stays frozen) and supersede an armed switch. `next` while
+- **User verbs** (`program.next|prev|random|play`) are always `align: now` with the program's effect pick (made in
+  a pause too: the effect plays on the still frames, `transitions.md` § A switch in a pause, and the rotation clock
+  stays frozen) and supersede an armed switch. `next` while
   armed takes the armed B; a verb while the program's own `now` request hasn't started goes on from that step
   (`Order::plan_after`: ten `next`s in a burst land ten items on); during a Running effect the recipe commits B
   and `next` goes past it. `prev` at the session's first item → `{corr: null}`; `state.programs[].can_prev` tells

@@ -63,7 +63,9 @@ The `loop` probe shows `gain_timer_armed`, `gain_ticks`, `gain_pushes` and `rece
 ### Three clocks for gains
 
 - The player clock (`Runtime::now`) excises player-paused time: the recipe's slots (`xfade`, `anticlick`) and
-  every non-gain animation run on it, so a pause freezes a transition exactly.
+  every non-gain animation run on it, so a pause freezes a transition exactly — except a switch requested in a
+  user pause, which it runs through on still frames (`transitions.md` § A switch in a pause). The rotations read
+  `Runtime::rotation_now`, which excises every paused interval.
 - `teardown_anim` (retire and park ramps, `pending_destroy` deadlines) and `setting_anim` (user setting slots,
   `GainSlot::is_setting`) run on the unpaused base clock: a destroy, `stop`, output removal or a 30 ms
   `animate srcs:*.gain.mute` completes while paused instead of racing the resume's ramp-in.

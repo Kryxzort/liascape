@@ -9,6 +9,13 @@
 //   preview:monitors  removing a scene monitor drops it from the linux-wallpaperengine command (the preview used to read
 //                     the settings file before the debounced save landed, so it showed the old list)
 //   hint:transition   the Transition style hint explains only the chosen style; Settings has no Pre-measure scenes row
+//   playtime:maxFloor:<where>  the maximum play time is 0 (off) or at least the minimum, in Settings (global) and the
+//                     playlist window (its own rotation): a total typed under the minimum is a draft (shown, never saved)
+//                     and leaving the fields saves the minimum; 0 saves "off"; the minimum raised past the maximum moves the
+//                     maximum up with it at once (on screen and saved), lowered it leaves it; with "Switch when video ends"
+//                     off ("Switch every") a smaller maximum is left alone until advance-on-end turns on
+//   playtime:scenesFloor  "Switch scenes and pictures after" is never 0: an all-zero entry is a draft that leaving drops,
+//                     a 0 saved through the API comes back as 1 s
 //   copy:sidebarPill  the Library sidebar's Workshop ID pill, which shares the feedback (hooks/useCopied.ts), still flips and copies
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
@@ -327,6 +334,96 @@ app.whenReady().then(async () => {
       await setSettings({ NormalizeAudio: true }); await load();
       if (await has("Pre-measure scenes")) v.push("a Pre-measure scenes row is still there (imports and syncs measure scenes by themselves)");
       await setSettings({ TransitionMethod: "reveal", NormalizeAudio: false, SettingsLevel: "standard" });
+      return v;
+    });
+
+    // --- the rotation's h/m/s fields (components/PlayTimeInput.tsx): `grp` = the group's selector in the page
+    const hmsOf = (grp) => js(`return [...(${grp})?.querySelectorAll("input") ?? []].map((x) => +x.value)`);
+    // set field `i` (0 h, 1 m, 2 s) of a group as typing does, unfocused (a complete value commits at once); `blur` =
+    // focus then leaves the group
+    const setHms = (grp, i, v, blur = false) => js(`const g = ${grp}; const el = g.querySelectorAll("input")[${i}];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, String(${v})); el.dispatchEvent(new Event("input", { bubbles: true }));
+      await window.__x.sleep(120); ${blur ? 'el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); await window.__x.sleep(120);' : ""} return true`);
+    const blurHms = (grp) => js(`const el = (${grp}).querySelector("input"); el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); await window.__x.sleep(150); return true`);
+    const psOf = async () => (await http("GET", "/playlist/state")).json?.settings ?? {};
+    for (const where of ["global", "playlist"]) {
+      await cell(`playtime:maxFloor:${where} — the maximum is 0 or at least the minimum; a raised minimum carries it up`, async () => {
+        const v = [];
+        const G = where === "global";
+        const MIN = G ? `window.__x.row("Minimum play time")?.querySelector(".hms")` : `document.querySelectorAll(".pl-modal .hms")[0]`;
+        const MAX = G ? `window.__x.row("Maximum play time")?.querySelector(".hms")` : `document.querySelectorAll(".pl-modal .hms")[1]`;
+        const EVERY = G ? `window.__x.row("Switch every")?.querySelector(".hms")` : MIN;
+        const saved = async () => { if (G) { const st = (await http("GET", "/settings")).json ?? {}; return [st.globalSwitchWhenVideoEnds, st.globalIntervalSeconds, st.globalMaxPlaySeconds]; }
+          const ps = await psOf(); return [ps.switchWhenVideoEnds, ps.intervalSeconds, ps.maxPlaySeconds]; };
+        const settle = (want) => waitFor(async () => J(await saved()) === J(want), 3000);
+        const advance = (on) => G ? js(`const c = window.__x.row("Switch when video ends")?.querySelector("input"); if (c.checked !== ${on}) c.click(); await window.__x.sleep(400); return true`)
+          : js(`const c = [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith("Switch when video ends"))?.querySelector("input"); if (c.checked !== ${on}) c.click(); await window.__x.sleep(400); return true`);
+        const ps0 = (await http("GET", "/playlist/state")).json;
+        const g0 = { GlobalSwitchWhenVideoEnds: await field("globalSwitchWhenVideoEnds"), GlobalIntervalSeconds: await field("globalIntervalSeconds"), GlobalMaxPlaySeconds: await field("globalMaxPlaySeconds") };
+        try {
+          if (G) await setSettings({ SettingsLevel: "standard", GlobalSwitchWhenVideoEnds: true, GlobalIntervalSeconds: 600, GlobalMaxPlaySeconds: 0 });
+          else await http("POST", "/playlist/state", { settings: { overrideGlobalSettings: true, switchWhenVideoEnds: true, intervalSeconds: 600, maxPlaySeconds: 0 } });
+          await load();
+          if (!G) await js(`await window.__x.tab("Library"); document.querySelector('button[title="Playlist settings"]').click(); await window.__x.sleep(600); return true`);
+          if (J(await hmsOf(MIN)) !== J([0, 10, 0]) || J(await hmsOf(MAX)) !== J([0, 0, 0])) return [`setup: minimum ${J(await hmsOf(MIN))} / maximum ${J(await hmsOf(MAX))}, want 0:10:00 / off — proved nothing`];
+          // 5 min typed under the 10 min minimum: shown, not saved; leaving the fields saves the minimum
+          await setHms(MAX, 1, 5); await sleep(600);
+          if (J(await hmsOf(MAX)) !== J([0, 5, 0])) v.push(`typing 5 m into the maximum shows ${J(await hmsOf(MAX))}, want the draft [0,5,0]`);
+          if (J(await saved()) !== J([true, 600, 0])) v.push(`a 5 min maximum under the 10 min minimum was saved: ${J(await saved())}`);
+          await blurHms(MAX);
+          if (!(await settle([true, 600, 600]))) v.push(`leaving the 5 min draft saved ${J(await saved())}, want the maximum raised to the minimum (600)`);
+          if (J(await hmsOf(MAX)) !== J([0, 10, 0])) v.push(`after leaving, the maximum shows ${J(await hmsOf(MAX))}, want [0,10,0]`);
+          // over the minimum: saved as typed; 0 = off is allowed
+          await setHms(MAX, 1, 15);
+          if (!(await settle([true, 600, 900]))) v.push(`a 15 min maximum saved ${J(await saved())}, want 900`);
+          await setHms(MAX, 1, 0);
+          if (!(await settle([true, 600, 0]))) v.push(`a 0 maximum (off) saved ${J(await saved())}, want 0`);
+          if (!(await js(`return !!(${MAX})?.querySelector(".playtime-zero")`))) v.push("a 0 maximum doesn't say \"off\"");
+          await setHms(MAX, 1, 15); await settle([true, 600, 900]);
+          // the minimum raised past the maximum: the maximum follows at once, on screen and saved
+          await setHms(MIN, 1, 20);
+          const at = await hmsOf(MAX);
+          if (J(at) !== J([0, 20, 0])) v.push(`the minimum raised to 20 m: the maximum shows ${J(at)} at once, want [0,20,0]`);
+          if (!(await settle([true, 1200, 1200]))) v.push(`the minimum raised to 20 m saved ${J(await saved())}, want [true,1200,1200]`);
+          // lowered again: the maximum stays where it was carried
+          await setHms(MIN, 1, 5);
+          if (!(await settle([true, 300, 1200]))) v.push(`the minimum lowered to 5 m saved ${J(await saved())}, want the maximum kept at 1200`);
+          if (J(await hmsOf(MAX)) !== J([0, 20, 0])) v.push(`after lowering the minimum the maximum shows ${J(await hmsOf(MAX))}, want [0,20,0]`);
+          // "Switch when video ends" off: the field is "Switch every" (no minimum), a longer one leaves the maximum alone…
+          await advance(false);
+          await setHms(EVERY, 1, 30);
+          if (!(await settle([false, 1800, 1200]))) v.push(`advance-on-end off, "Switch every" 30 m saved ${J(await saved())}, want [false,1800,1200]`);
+          // …until advance-on-end turns on and the 30 m becomes the minimum
+          await advance(true);
+          if (J(await hmsOf(MAX)) !== J([0, 30, 0])) v.push(`advance-on-end back on: the maximum shows ${J(await hmsOf(MAX))}, want [0,30,0] (the 30 m minimum)`);
+          if (!(await settle([true, 1800, 1800]))) v.push(`advance-on-end back on saved ${J(await saved())}, want [true,1800,1800]`);
+        } finally {
+          if (G) await setSettings(g0);
+          else { await js(`[...document.querySelectorAll(".pl-modal button")].find((b) => b.textContent.trim() === "Close")?.click(); return true`); await sleep(300);
+            await http("POST", "/playlist/state", { settings: ps0?.settings ?? { overrideGlobalSettings: false, switchWhenVideoEnds: true, intervalSeconds: 0, maxPlaySeconds: 0 } }); }
+        }
+        return v;
+      });
+    }
+
+    await cell("playtime:scenesFloor — \"Switch scenes and pictures after\" is never 0 (a draft in the page, 1 s from the API)", async () => {
+      const v = [];
+      const AFTER = `window.__x.row("Switch scenes and pictures after")?.querySelector(".hms")`;
+      const after = async () => (await http("GET", "/settings")).json?.globalSwitchScenesAfterSeconds;
+      try {
+        await setSettings({ SettingsLevel: "standard", GlobalSwitchWhenVideoEnds: true, GlobalSeparateSceneTiming: true, GlobalSwitchScenesAfterSeconds: 1800 }); await load();
+        if (J(await hmsOf(AFTER)) !== J([0, 30, 0])) return [`setup: the row shows ${J(await hmsOf(AFTER))}, want [0,30,0] — proved nothing`];
+        await setHms(AFTER, 1, 0); await sleep(600);
+        if (J(await hmsOf(AFTER)) !== J([0, 0, 0])) v.push(`zeroing the minutes shows ${J(await hmsOf(AFTER))}, want the draft [0,0,0]`);
+        if ((await after()) !== 1800) v.push(`an all-zero entry was saved: ${await after()}`);
+        await blurHms(AFTER);
+        if (J(await hmsOf(AFTER)) !== J([0, 30, 0])) v.push(`leaving the all-zero draft shows ${J(await hmsOf(AFTER))}, want the saved [0,30,0] back`);
+        if ((await after()) !== 1800) v.push(`leaving the all-zero draft saved ${await after()}, want 1800 kept`);
+        await setSettings({ GlobalSwitchScenesAfterSeconds: 0 });
+        if ((await after()) !== 1) v.push(`the API's 0 saved as ${await after()}, want 1 (the floor)`);
+        await load();
+        if (J(await hmsOf(AFTER)) !== J([0, 0, 1])) v.push(`after the API's 0 the row shows ${J(await hmsOf(AFTER))}, want [0,0,1]`);
+      } finally { await setSettings({ GlobalSwitchScenesAfterSeconds: 1800 }); }
       return v;
     });
 

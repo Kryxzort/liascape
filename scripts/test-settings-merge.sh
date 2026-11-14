@@ -281,13 +281,54 @@ same l0 l4 '[]' "the limits back to 0"
 post /settings '{"GlobalSeparateSceneTiming":false}' >/dev/null; snap l5
 [ "$(f .globalSeparateSceneTiming l5)" = false ] && ok "{GlobalSeparateSceneTiming:false} → false" || bad "globalSeparateSceneTiming → $(f .globalSeparateSceneTiming l5)"
 same l4 l5 '["globalSeparateSceneTiming"]' "{GlobalSeparateSceneTiming:false}"
+# "Switch scenes and pictures after" is never 0: 1 s is the floor (no "stay until you switch" any more)
 post /settings '{"globalSwitchScenesAfterSeconds":-3}' >/dev/null; snap l6
-[ "$(f .globalSwitchScenesAfterSeconds l6)" = 0 ] && ok "{globalSwitchScenesAfterSeconds:-3} → clamped to 0 (off)" || bad "globalSwitchScenesAfterSeconds -3 → $(f .globalSwitchScenesAfterSeconds l6)"
+[ "$(f .globalSwitchScenesAfterSeconds l6)" = 1 ] && ok "{globalSwitchScenesAfterSeconds:-3} → clamped to 1 (the floor)" || bad "globalSwitchScenesAfterSeconds -3 → $(f .globalSwitchScenesAfterSeconds l6), want 1"
 same l5 l6 '["globalSwitchScenesAfterSeconds"]' "{globalSwitchScenesAfterSeconds:-3}"
+post /settings '{"GlobalSwitchScenesAfterSeconds":0}' >/dev/null; snap l6b
+[ "$(f .globalSwitchScenesAfterSeconds l6b)" = 1 ] && ok "{GlobalSwitchScenesAfterSeconds:0} → 1 (0 is no longer \"stay\")" || bad "globalSwitchScenesAfterSeconds 0 → $(f .globalSwitchScenesAfterSeconds l6b), want 1"
 post /settings '{"GlobalSwitchScenesAfterSeconds":99999999}' >/dev/null; snap l7
 [ "$(f .globalSwitchScenesAfterSeconds l7)" = 359999 ] && ok "{GlobalSwitchScenesAfterSeconds:99999999} → clamped to 359999" || bad "globalSwitchScenesAfterSeconds 99999999 → $(f .globalSwitchScenesAfterSeconds l7)"
 post /settings '{"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":1800}' >/dev/null; snap l8
 same l4 l8 '[]' "the scene timing back to on, 1800 s"
+
+echo "== the maximum play time is 0 (off) or at least the minimum (advance-on-end); a playlist's own too"
+# what the section changes, put back at its end
+rot0=$(f '{GlobalSwitchWhenVideoEnds:.globalSwitchWhenVideoEnds, GlobalIntervalSeconds:.globalIntervalSeconds, GlobalMaxPlaySeconds:.globalMaxPlaySeconds}' l8)
+mx() { snap "$1"; f '[.globalSwitchWhenVideoEnds, .globalIntervalSeconds, .globalMaxPlaySeconds]' "$1"; }
+post /settings '{"GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":60,"GlobalMaxPlaySeconds":30}' >/dev/null
+[ "$(mx n1)" = '[true,60,60]' ] && ok "{minimum 60, maximum 30} → the maximum stored as 60 (never below the minimum)" || bad "{minimum 60, maximum 30} → $(mx n1), want [true,60,60]"
+post /settings '{"GlobalMaxPlaySeconds":45}' >/dev/null
+[ "$(mx n2)" = '[true,60,60]' ] && ok "{maximum 45} under a 60 s minimum → 60" || bad "{maximum 45} under minimum 60 → $(mx n2), want [true,60,60]"
+post /settings '{"GlobalMaxPlaySeconds":0}' >/dev/null
+[ "$(mx n3)" = '[true,60,0]' ] && ok "{maximum 0} → 0 (off stays allowed)" || bad "{maximum 0} → $(mx n3), want [true,60,0]"
+post /settings '{"GlobalMaxPlaySeconds":90}' >/dev/null
+[ "$(mx n4)" = '[true,60,90]' ] && ok "{maximum 90} over a 60 s minimum → 90" || bad "{maximum 90} → $(mx n4)"
+post /settings '{"GlobalIntervalSeconds":120}' >/dev/null
+[ "$(mx n5)" = '[true,120,120]' ] && ok "the minimum raised to 120 past the maximum 90 → the maximum follows to 120" || bad "{minimum 120} over maximum 90 → $(mx n5), want [true,120,120]"
+post /settings '{"GlobalIntervalSeconds":30}' >/dev/null
+[ "$(mx n6)" = '[true,30,120]' ] && ok "the minimum lowered to 30 → the maximum stays 120 (it follows up only)" || bad "{minimum 30} → $(mx n6), want [true,30,120]"
+# advance-on-end off: the field is "Switch every" and there's no minimum, so a smaller hidden maximum is left alone…
+post /settings '{"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600,"GlobalMaxPlaySeconds":40}' >/dev/null
+[ "$(mx n7)" = '[false,600,40]' ] && ok "advance-on-end off: \"Switch every\" 600 keeps the maximum 40" || bad "advance off → $(mx n7), want [false,600,40]"
+# …until advance-on-end turns on and the 600 becomes the minimum
+post /settings '{"GlobalSwitchWhenVideoEnds":true}' >/dev/null
+[ "$(mx n8)" = '[true,600,600]' ] && ok "advance-on-end on with minimum 600 → the maximum 40 becomes 600" || bad "advance on → $(mx n8), want [true,600,600]"
+post /settings "$rot0" >/dev/null; snap n9
+same l8 n9 '[]' "the rotation put back"
+# a playlist's own rotation: the playlist bar's state (POST /playlist/state merges) and a named playlist
+pss() { curl -sf -m 5 "$U/playlist/state" | jq -c "[.settings.switchWhenVideoEnds, .settings.intervalSeconds, .settings.maxPlaySeconds, .settings.switchScenesAfterSeconds]"; }
+ps0=$(curl -sf -m 5 "$U/playlist/state")
+post /playlist/state '{"settings":{"switchWhenVideoEnds":true,"intervalSeconds":50,"maxPlaySeconds":20,"switchScenesAfterSeconds":0}}' >/dev/null
+[ "$(pss)" = '[true,50,50,1]' ] && ok "the playlist bar: {minimum 50, maximum 20, scenes after 0} → stored [maximum 50, scenes after 1]" || bad "playlist bar → $(pss), want [true,50,50,1]"
+post /playlist/state '{"settings":{"intervalSeconds":80}}' >/dev/null
+[ "$(pss)" = '[true,80,80,1]' ] && ok "the playlist bar: its minimum raised to 80 → its maximum follows" || bad "playlist bar minimum 80 → $(pss), want [true,80,80,1]"
+post /playlist/state '{"settings":{"maxPlaySeconds":0}}' >/dev/null
+[ "$(pss)" = '[true,80,0,1]' ] && ok "the playlist bar: maximum 0 → off" || bad "playlist bar maximum 0 → $(pss), want [true,80,0,1]"
+post /playlist/save '{"name":"merge-norm","playlist":{"videoPaths":[],"settings":{"switchWhenVideoEnds":true,"intervalSeconds":70,"maxPlaySeconds":10,"switchScenesAfterSeconds":-2}}}' >/dev/null
+pn=$(post /playlist/load '{"name":"merge-norm"}' | jq -c "[.settings.maxPlaySeconds, .settings.switchScenesAfterSeconds]")
+[ "$pn" = '[70,1]' ] && ok "a saved playlist {minimum 70, maximum 10, scenes after -2} → [maximum 70, scenes after 1]" || bad "saved playlist → $pn, want [70,1]"
+post /playlist/state "$ps0" >/dev/null
 
 echo "== parallel partial bodies all land"
 # 8 rounds × 10 bodies released at once, each setting a different field: without one poster at a time, two
@@ -440,17 +481,35 @@ d_mx=$(( $(date +%s%3N) - t_mx ))
 post /settings '{"GlobalMaxPlaySeconds":0,"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
+echo "== a maximum below the minimum reaches the running rotation as the minimum (live; globals, then a playlist's own)"
+post /settings '{"GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":20,"GlobalMaxPlaySeconds":0}' >/dev/null
+post /playlist/play "{\"paths\":[\"$C1\",\"$C2\"],\"settings\":{\"Order\":0}}" >/dev/null
+for _ in $(seq 1 40); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
+n_nm=$(nsched)
+waitms() { local i; for i in $(seq 1 40); do [ "$(prog "$1" | jq floor 2>/dev/null)" = "$2" ] && return 0; sleep 0.1; done; return 1; }   # the prop is a float
+post /settings '{"GlobalMaxPlaySeconds":3}' >/dev/null
+waitms max_ms 20000 && ok "{maximum 3} under a 20 s minimum → prog:main.max_ms 20000 live" || bad "{maximum 3} under minimum 20 → prog:main.max_ms $(prog max_ms), want 20000"
+post /settings '{"GlobalIntervalSeconds":40}' >/dev/null
+waitms max_ms 40000 && ok "the minimum raised to 40 → prog:main.max_ms follows to 40000 live" || bad "{minimum 40} → prog:main.max_ms $(prog max_ms), want 40000"
+post /playlist/state "{\"videoPaths\":[\"$C1\",\"$C2\"],\"settings\":{\"order\":0,\"overrideGlobalSettings\":true,\"switchWhenVideoEnds\":true,\"intervalSeconds\":30,\"maxPlaySeconds\":2,\"separateSceneTiming\":true,\"switchScenesAfterSeconds\":1800}}" >/dev/null
+waitms max_ms 30000 && ok "a playlist's own {minimum 30, maximum 2} → prog:main.max_ms 30000 live" || bad "playlist {minimum 30, maximum 2} → prog:main.max_ms $(prog max_ms), want 30000"
+sleep 3.5   # a 2 or 3 s maximum that got through would have cut c1 (6 s) by now
+[ "$(cur path)" = "$C1" ] && [ "$(nsched)" = "$n_nm" ] && ok "…c1 still plays: no maximum below the minimum cut it" || bad "a too-short maximum switched: cur $(cur path), switches $n_nm → $(nsched)"
+post /playlist/state '{"settings":{"overrideGlobalSettings":false,"maxPlaySeconds":0,"intervalSeconds":600,"switchWhenVideoEnds":false}}' >/dev/null
+post /settings '{"GlobalMaxPlaySeconds":0,"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600}' >/dev/null
+post /stop '{}' >/dev/null; sleep 0.6
+
 echo "== a partial body sets \"Switch scenes after\" on a running advance-on-end rotation holding a still image (live)"
-# separate timing on, 0 = off → the image (it never ends) stays; {GlobalSwitchScenesAfterSeconds:2} → it moves on
+# separate timing on, 1800 s → the image (it never ends) stays; {GlobalSwitchScenesAfterSeconds:3} → it moves on
 I1=$T/i1.png; timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=320x180" -frames:v 1 "$I1"
 # an fps cap on (the parallel section left 98; 30 here explicitly): the player ignores it on a still image
 # (it once stalled the image unready — docs/TODO.md "An fps cap stalls a still image", fixed)
 post /settings '{"VideoFpsCap":30}' >/dev/null
-post /settings '{"GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":0}' >/dev/null
+post /settings '{"GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":1800}' >/dev/null
 post /playlist/play "{\"paths\":[\"$I1\",\"$C1\"],\"settings\":{\"Order\":0}}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$I1" ] && break; sleep 0.1; done
 sleep 2
-[ "$(cur path)" = "$I1" ] && ok "scenes after 0 = off: the image still shows after 2 s" || bad "scenes after 0 × image: cur $(cur path) after 2 s (want the image)"
+[ "$(cur path)" = "$I1" ] && ok "scenes after 1800 s: the image still shows after 2 s" || bad "scenes after 1800 s × image: cur $(cur path) after 2 s (want the image)"
 t_sc=$(date +%s%3N); post /settings '{"GlobalSwitchScenesAfterSeconds":3}' >/dev/null
 for _ in $(seq 1 50); do [ "$(cur path)" = "$C1" ] && break; sleep 0.1; done
 d_sc=$(( $(date +%s%3N) - t_sc ))

@@ -32,14 +32,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        the creator with browse-by-creator (opens Browse on them). Reuse #52's components; they sit below the scene
        properties (#54), with its stat pills: current subscribers and favourites (no views). Every Library item
        shows its size on disk. After #52.
-59. [ ] (owner) Play-time limits can't contradict: "Switch scenes and pictures after" never 0 in the backend either (the
-       UI already refuses it; drop the 0 = stay path, its adapter / merge test lines become the 1 s floor), and the
-       maximum play time can't be set below the minimum (it would always win for videos, and scenes use the minimum).
 60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
        makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
        case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
-61. [ ] (owner) Stay paused when switching still plays the transition: both sides are stills (A's frame, B's first), so
-       the effect runs on its own clock while the wallpaper clock stays paused. liascape-player only.
 62. [ ] (owner) Previews as two ordered lists, "On hover" and "Not hovered", each of video / GIF / image in the user's
        order (the first a wallpaper has wins; image is always there, so it ends the list). Replaces "Animate GIF
        previews", "Animate wallpapers without a GIF" and "Use the video instead of the GIF". Basic: a preset dropdown;

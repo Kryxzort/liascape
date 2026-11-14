@@ -90,9 +90,10 @@ you touch before changing a recipe, a source or the runtime.
 - Player pause: never write `player.paused` into each source's `paused`. `SourceHost` applies `node.paused ||
   player.paused`; the node's own `paused` stays what a `set` or the recipe put there, so a recipe-held source comes
   back held on resume. The `paused` mirror in `SourceHost::update` is suspended while the player is paused.
-- `Runtime::now` excises player-paused time; call `update_player_paused` before `now` is read in `tick`/
-  `begin_step`, and again in `sync_sources`, so a pause freezes the same tick. In stepped mode gate the virtual-time
-  advance on it too (mpv stays paused there).
+- `Runtime::now` excises player-paused time (except a still-frame switch's, `runtime-api.md` § Runtime loop) and
+  `Runtime::rotation_now` all of it; call `update_player_paused` before `now` is read in `tick`/`begin_step`, and
+  again in `sync_sources`, so a pause freezes the same tick. In stepped mode gate the media's virtual-time advance
+  on `player_paused`, never on `now` (mpv stays paused there).
 - `effective_paused` is a `sources` probe field only — never add it as a graph prop.
 
 ## Effects (`src/player/src/gfx/effects.rs`)

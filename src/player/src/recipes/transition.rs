@@ -192,6 +192,9 @@ pub enum TransitionEventKind {
         duration_ms: u32,
         /// [`TransitionReq::origin`].
         origin: String,
+        /// Requested in a user pause: the effect plays on the still frames
+        /// ([`Transitions::plays_on_still_frames`]).
+        still: bool,
     },
     #[serde(rename = "transition.started")]
     Started {
@@ -253,6 +256,8 @@ pub struct TransitionStatus {
     /// Sources this transition keeps paused on purpose: a pending B, held A's, a frozen
     /// B, snapshots, and its graves (released A's / ramped-out B's not destroyed yet).
     pub held: Vec<String>,
+    /// Requested in a user pause: plays on the still frames.
+    pub still: bool,
 }
 
 /// What the recipe changed on a source, for exact restoration (cancel/failure, or the
@@ -284,6 +289,9 @@ struct Side {
 
 struct Tr {
     corr: CorrId,
+    /// Requested in a user pause with `align: now`: its effect plays on the still frames
+    /// while every source stays paused ([`Transitions::plays_on_still_frames`]).
+    still: bool,
     method: Method,
     align: Align,
     effect_id: Option<String>,
@@ -565,6 +573,11 @@ fn b_has_audio(g: &Graph, id: &str) -> bool {
     crate::onset::has_audio(g, id)
 }
 
+/// The user paused the player (`player.paused`; a rule's hold is the runtime's, not the graph's).
+fn user_paused(g: &Graph) -> bool {
+    get_bool(g, "player", "paused")
+}
+
 /// Un-pause `id` and either hold its onset ramp (real audio) or start it at once (no
 /// audio to wait for) — the one seam every B-onset call site (full-live/reveal at
 /// `begin_running`, frozen at `handoff`, a `frozen` commit interrupt) goes through.
@@ -581,7 +594,9 @@ fn schedule_onset(
     curve: Curve,
     now: Duration,
 ) {
-    if b_has_audio(g, &id) {
+    // In a user pause B can't flow: the ramp lands at once and the pause gate holds B silent
+    // until the resume, which waits for B's audio itself (`Runtime`'s `PauseGate`).
+    if b_has_audio(g, &id) && !user_paused(g) {
         crate::onset::held(&id, slot, Some(tr.corr.clone()));
         tr.onset = Some(PendingOnset {
             id,
@@ -775,8 +790,12 @@ impl Transitions {
         // appears (a cut). `sides` is what's left after the supersede above, so a request that
         // replaced a still-opening first one is from nothing too; an A on any output keeps the effect.
         let effect_id = if lead.is_some() { req.effect_id } else { None };
+        // An `align: end` request made in a pause waits for A's end, which the pause holds
+        // back: it stays frozen with the player clock.
+        let still = user_paused(g) && req.align == Align::Now;
         let mut tr = Tr {
             corr: corr.clone(),
+            still,
             method: req.method,
             align: req.align,
             effect_id: effect_id.clone(),
@@ -839,6 +858,7 @@ impl Transitions {
                 effect_id,
                 duration_ms: req.duration_ms,
                 origin: req.origin,
+                still,
             },
         );
         self.active.push(tr);
@@ -955,6 +975,13 @@ impl Transitions {
             self.ended.len(),
             self.restore_onsets.len(),
         )
+    }
+
+    /// A transition requested in a user pause is in flight: the runtime runs the player
+    /// clock for it while the media stay paused, so the effect plays on A's paused frame
+    /// and B's first one and B is left paused on that frame (`Runtime::update_player_paused`).
+    pub fn plays_on_still_frames(&self) -> bool {
+        self.active.iter().any(|t| t.still)
     }
 
     /// Drain the event outbox.
@@ -1139,6 +1166,7 @@ impl Transitions {
                         .map(|gr| gr.id.clone()),
                 );
                 TransitionStatus {
+                    still: t.still,
                     corr: t.corr.clone(),
                     phase: t.phase,
                     method: t.method,

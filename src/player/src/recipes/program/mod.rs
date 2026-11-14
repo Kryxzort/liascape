@@ -236,10 +236,10 @@ impl ProgCfg {
     }
 }
 
-/// A rotation's play clock: the player clock's advance since the last tick
-/// (`Runtime::now` — monotonic, `CLOCK_MONOTONIC`-based, so it excludes suspend, and
-/// pause-excised). Play time and the countdown add exactly this; a wall-clock jump never
-/// reaches them.
+/// A rotation's play clock: the rotation clock's advance since the last tick
+/// (`Runtime::rotation_now` — monotonic, `CLOCK_MONOTONIC`-based, so it excludes suspend,
+/// and every paused interval excised, a still-frame effect's included). Play time and the
+/// countdown add exactly this; a wall-clock jump never reaches them.
 #[derive(Debug, Clone, Default)]
 pub struct PlayClock {
     last: Option<Duration>,
@@ -1358,18 +1358,15 @@ impl Programs {
         }
     }
 
-    /// `program.play {id, from: "start" | "resume" | "index", index?, keep_pause?}` — the
+    /// `program.play {id, from: "start" | "resume" | "index", index?}` — the
     /// playlist-start table (`resume::plan_start`). A missing `from` = `index` with an
     /// index, else `start`. `resume` while the same key's playlist plays → nothing switched
-    /// (`Some(reply)` = the verb's reply as is). `cut`: no effect (`keep_pause` while
-    /// paused; a session start).
-    #[allow(clippy::too_many_arguments)]
+    /// (`Some(reply)` = the verb's reply as is). The first item comes with its transition.
     pub fn play(
         &mut self,
         id: &str,
         from: Option<&str>,
         index: Option<usize>,
-        cut: bool,
         g: &Graph,
         defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
     ) -> Result<(Vec<ProgramAction>, Option<Value>), ApiError> {
@@ -1437,7 +1434,7 @@ impl Programs {
         p.failed.clear();
         p.playing_key = Some(p.cfg.key.clone());
         p.start_position = Some(plan.position);
-        let act = p.start(id, step, Reason::Play, Align::Now, cut, defaults_of);
+        let act = p.start(id, step, Reason::Play, Align::Now, false, defaults_of);
         if plan.resumed
             && let Some(pd) = p.pending.as_mut()
         {
@@ -1680,23 +1677,16 @@ impl Programs {
         Ok(p)
     }
 
-    /// `program.play|next|prev|random {id, index?, keep_pause?}`. `play` starts at
-    /// `index` (default 0); the user switches always go `align: now` with the program's
-    /// pick (a cut with `keep_pause` while the player is paused).
+    /// `program.next|prev|random {id}`: the user switches always go `align: now` with the
+    /// program's pick and its transition — made while the player is paused too, when the
+    /// effect plays on the still frames and the pause stays (`Transitions::plays_on_still_frames`).
     pub fn verb(
         &mut self,
         verb: &str,
         id: &str,
-        keep_pause: bool,
-        g: &Graph,
         now: Duration,
         defaults_of: &dyn Fn(&str) -> Option<Map<String, Value>>,
     ) -> Result<Vec<ProgramAction>, ApiError> {
-        let paused = matches!(
-            g.get(&PropPath("player.paused".into())),
-            Ok(PropValue::Bool(true))
-        );
-        let cut = keep_pause && paused;
         let p = self.get_nonempty(id)?;
         // A switch requested and not started: an armed one (`align: end`) is what `next`
         // takes (`AdvanceAndLaunch`'s pre-fetch); one on its way (`align: now`, e.g. the
@@ -1757,7 +1747,7 @@ impl Programs {
             step,
             reason,
             Align::Now,
-            cut,
+            false,
             defaults_of,
         )])
     }
@@ -1829,7 +1819,7 @@ impl Programs {
     }
 
     /// One tick, after `Transitions::tick`: the transitions' and sources' events, the
-    /// clocks (`now` = the player clock), the rules. `parked` = no output exists;
+    /// clocks (`now` = `Runtime::rotation_now`), the rules. `parked` = no output exists;
     /// `active` = every in-flight transition's corr; `held` = the clocks stand (a user pause or
     /// a rule's hold) — no rule starts a switch then ("a rotation never switches under a hold").
     #[allow(clippy::too_many_arguments)]

@@ -1,7 +1,8 @@
 //! A rotation's per-item play rules (pure): what a playing item plays before the program
 //! moves on, ported from `PlayerHelper`'s rotation arithmetic (`docs/player/adapter.md`
 //! § Rotation wiring). Every value is wall-clock ms on the
-//! player clock; **0 = off** everywhere.
+//! player clock; **0 = off** for the minimum and the maximum (`scenes_after_ms` is never 0:
+//! its prop's range starts at 1000).
 //!
 //! - `mode: timer` ("Switch when video ends" off): `interval_ms` is a plain countdown,
 //!   speed-scaled; nothing here applies but [`retime_remaining`].
@@ -35,7 +36,7 @@ pub struct ItemRule {
 }
 
 /// `PlayerHelper.ItemPlayRule` — the whole table: video `(min, max)`; separate scene timing
-/// on → scene / image `(after or NEVER, 0)`; off → scene `(min, 0)` or, with no minimum,
+/// on → scene / image `(after, 0)`; off → scene `(min, 0)` or, with no minimum,
 /// `(NEVER, max)`,
 /// image `(min, max)`.
 pub fn item_rule(
@@ -47,14 +48,7 @@ pub fn item_rule(
 ) -> ItemRule {
     let (min_ms, max_ms) = match kind {
         PlayKind::Video => (min_ms, max_ms),
-        _ if separate => (
-            if scenes_after_ms > 0 {
-                scenes_after_ms
-            } else {
-                NEVER_MS
-            },
-            0,
-        ),
+        _ if separate => (scenes_after_ms, 0),
         // a scene never ends: the one limit that is set moves it; both set → the minimum
         // (`docs/decisions.md` § A scene's minimum play time beats its maximum — the maximum
         // never cuts it short of a longer minimum); neither → it stays
@@ -136,7 +130,7 @@ mod tests {
             r(5000, 9000)
         );
         assert_eq!(item_rule(PlayKind::Video, 0, 0, true, 0), r(0, 0));
-        // separate on: scene / image (after or NEVER, 0)
+        // separate on: scene / image (after, 0)
         assert_eq!(
             item_rule(PlayKind::Scene, 5000, 9000, true, 3000),
             r(3000, 0)
@@ -146,12 +140,12 @@ mod tests {
             r(3000, 0)
         );
         assert_eq!(
-            item_rule(PlayKind::Scene, 5000, 9000, true, 0),
-            r(NEVER_MS, 0)
+            item_rule(PlayKind::Scene, 5000, 9000, true, 1000),
+            r(1000, 0)
         );
         assert_eq!(
-            item_rule(PlayKind::Image, 5000, 9000, true, 0),
-            r(NEVER_MS, 0)
+            item_rule(PlayKind::Image, 5000, 9000, true, 1000),
+            r(1000, 0)
         );
         // separate off: scene (min, 0) or (NEVER, max), image (min, max)
         assert_eq!(

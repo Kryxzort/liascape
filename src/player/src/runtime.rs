@@ -230,6 +230,31 @@ impl From<String> for ServeError {
     }
 }
 
+/// A clock with intervals cut out of the base clock: frozen, it stays where it was; thawed,
+/// it carries on from there — never jumps (the same algebra as [`crate::clock::OutputClock`],
+/// over a base time passed in).
+#[derive(Default)]
+struct Excised {
+    /// `Some(base time at the freeze)` while frozen.
+    frozen_at: Option<Duration>,
+    /// Total time excised across every completed freeze.
+    offset: Duration,
+}
+
+impl Excised {
+    fn set_frozen(&mut self, frozen: bool, base: Duration) {
+        if frozen {
+            self.frozen_at.get_or_insert(base);
+        } else if let Some(at) = self.frozen_at.take() {
+            self.offset += base.saturating_sub(at);
+        }
+    }
+
+    fn now(&self, base: Duration) -> Duration {
+        self.frozen_at.unwrap_or(base).saturating_sub(self.offset)
+    }
+}
+
 enum ClockKind {
     Real(MonoClock),
     Stepped(SteppedClock),
@@ -774,15 +799,13 @@ pub struct Runtime {
     fade_in: BTreeMap<String, FadeWait>,
     /// The last `player.paused` [`Runtime::sync_sources`] saw — mirrors
     /// the graph's `player.paused` so [`Runtime::now`] and `SourceHost` don't have to
-    /// read the graph on every call. `paused_at`/`pause_offset` excise paused time from
-    /// `now()` exactly like [`crate::clock::OutputClock`]'s pause/resume (same algebra,
-    /// inlined here rather than reused: this is one global pause, not a per-output clock
-    /// needing its own `Rc<dyn Clock>`).
+    /// read the graph on every call.
     pub(crate) player_paused: bool,
-    /// `Some(base time at pause)` while paused; `None` while running.
-    paused_at: Option<Duration>,
-    /// Total time excised so far across every completed pause/resume cycle.
-    pause_offset: Duration,
+    /// [`Runtime::now`]: frozen while paused, except while a switch made in a user pause
+    /// plays its effect on the still frames (`Transitions::plays_on_still_frames`).
+    play_clock: Excised,
+    /// [`Runtime::rotation_now`]: frozen whenever the player is paused, effects or not.
+    rotation_clock: Excised,
     /// Per-source `effective_gain_db` history, one entry per tick — what
     /// `probe::dropout::expected_envelope` weights decoded source audio by. Recorded on
     /// the log's real `t_mono_ms` clock (`log::mono_now()`, see `record_gain_history`) —
@@ -974,13 +997,21 @@ impl Runtime {
     }
 
     /// The player's own virtual time: [`ClockKind::now`], with every interval spent
-    /// `player.paused` excised — never just frozen-and-jumped. This is what the
-    /// Animator and `Transitions::tick` read, so a transition's progress, gain ramps,
-    /// `align:end` waits and handoff timers all stop and resume exactly where they were.
+    /// paused excised — never just frozen-and-jumped. This is what the Animator and
+    /// `Transitions::tick` read, so a transition's progress, gain ramps, `align:end` waits
+    /// and handoff timers all stop and resume exactly where they were. One exception: a
+    /// switch requested while the user paused plays its effect on the still frames
+    /// (`Transitions::plays_on_still_frames`), so this clock runs until it is done while
+    /// every source stays paused — unless a rule holds the player (cover, low VRAM).
     pub(crate) fn now(&self) -> Duration {
-        let base = self.clock.now();
-        let frozen = self.paused_at.unwrap_or(base);
-        frozen.saturating_sub(self.pause_offset)
+        self.play_clock.now(self.clock.now())
+    }
+
+    /// The rotations' clock (`Programs` play time and countdown): every interval spent
+    /// paused excised, a still-frame effect's included — the countdown stays paused through
+    /// a switch made in a pause. Guard: `tests/program.rs::paused_next_plays_its_effect_on_still_frames`.
+    pub(crate) fn rotation_now(&self) -> Duration {
+        self.rotation_clock.now(self.clock.now())
     }
 
     /// The **unpaused** base clock: what teardown ramps (`teardown_anim`), their
@@ -1046,12 +1077,13 @@ impl Runtime {
         self.pause_gates.len()
     }
 
-    /// Reacts to a `player.paused` change: freezes/unfreezes [`Runtime::now`]. Called at
-    /// the very top of [`Runtime::tick`]/`begin_step` — *before* `now` is read for
-    /// `run_anims`/`destroy_due` — so a pause applied this tick/step freezes it too,
-    /// never one tick later (the effective-pause push to every hosted source still
-    /// happens in [`Runtime::sync_sources`], which reads the now-current
-    /// `self.player_paused` this set). Cheap when nothing changed (one graph read).
+    /// Reacts to a `player.paused` change: freezes/unfreezes [`Runtime::now`] and
+    /// [`Runtime::rotation_now`]. Called at the very top of [`Runtime::tick`]/`begin_step` —
+    /// *before* `now` is read for `run_anims`/`destroy_due` — so a pause applied this
+    /// tick/step freezes it too, never one tick later (the effective-pause push to every
+    /// hosted source still happens in [`Runtime::sync_sources`], which reads the now-current
+    /// `self.player_paused` this set). Cheap when nothing changed (one graph read, a scan of
+    /// the in-flight transitions).
     fn update_player_paused(&mut self) {
         // The low-VRAM rule holds the player paused too, and the cover hold
         // (composed, never written to `player.paused` — the user's own pause is untouched and
@@ -1060,13 +1092,14 @@ impl Runtime {
             self.graph.get(&p("player.paused")),
             Ok(PropValue::Bool(true))
         ) || self.held();
+        let base = self.clock.now();
+        // A switch made in a user pause runs its effect on the still frames (no rule
+        // holding the player): only the play clock thaws for it, the media stay paused.
+        // Guard: `tests/api.rs::paused_switch_plays_its_effect_on_still_frames`.
+        let still_fx = now_paused && !self.held() && self.tr.plays_on_still_frames();
+        self.play_clock.set_frozen(now_paused && !still_fx, base);
+        self.rotation_clock.set_frozen(now_paused, base);
         if now_paused != self.player_paused {
-            let base = self.clock.now();
-            if now_paused {
-                self.paused_at.get_or_insert(base);
-            } else if let Some(at) = self.paused_at.take() {
-                self.pause_offset += base.saturating_sub(at);
-            }
             self.player_paused = now_paused;
             log::event(
                 "runtime",
@@ -1514,7 +1547,7 @@ impl Runtime {
         let mut tr_events = std::mem::take(&mut self.tr_backlog);
         tr_events.extend(self.tr.drain_events());
         self.record_dropout_windows(&tr_events);
-        self.tick_programs(&tr_events, &evs, now);
+        self.tick_programs(&tr_events, &evs, self.rotation_now());
         self.refresh_srcs();
         // Resolve any `AwaitingFlow` gate against this tick's events —
         // the other half runs earlier, from `sync_sources` (see its doc).
@@ -1649,7 +1682,7 @@ impl Runtime {
                             .start(req, &mut self.graph, &mut self.anim, now)
                             .map(|c| (c, None))
                     };
-                    let now = self.now();
+                    let now = self.rotation_now();
                     match res {
                         Ok((corr, parked_b)) => {
                             self.programs.on_requested(
@@ -4145,7 +4178,7 @@ impl Runtime {
                 .or_else(|| self.parked.as_ref().map(|pk| pk.id.clone()));
             let saved = snap.programs.iter().find(|x| x.id == def.id);
             self.programs.restore_rng(&def.id, saved.and_then(|s| s.rng));
-            let now = self.now();
+            let now = self.rotation_now();
             if let Some(last) = starting_over.get(&def.id) {
                 // a session start, start over: its order only, then a fresh start (a cut)
                 self.programs
@@ -5092,8 +5125,8 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         restart_event,
         fade_in: BTreeMap::new(),
         player_paused: false,
-        paused_at: None,
-        pause_offset: Duration::ZERO,
+        play_clock: Excised::default(),
+        rotation_clock: Excised::default(),
         gain_history: GainHistory::new(),
         scene_envelopes: dropout::SceneEnvelopes::new(),
         dropout_windows: PendingWindows::new(),

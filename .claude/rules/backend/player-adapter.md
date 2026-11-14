@@ -41,7 +41,7 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 ## Pause
 - The player owns pause (`player.paused`, kept in its snapshot). Keep no copy: `TogglePause` reads `get player.paused` and sets the opposite; R81 never re-asserts it.
 - A new session (`Apply`, `ApplyPlaylist`, cold `Launch`) queues `set player.paused false` (`QueueNewSession`); a rotation keeps the pause.
-- A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`). With the setting on: the pause stays and the switch is a cut.
+- A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`). With the setting on: the pause stays and the switch goes with its transition, which the player plays on the still frames (`.claude/rules/player/runtime-api.md` § Runtime loop); never send it as a cut. Legacy cuts. Guard: matrix `paused × cli:next-keep`.
 
 ## Reconnection (R81) and switches the player missed
 - `Restarted` (new compositor pid) and `Recovered` (breaker closed) both queue `ReapplyAll` — a Fresh resolver pass — fire-and-forget; never `Drain().Wait()` inside the client's callback.
@@ -62,10 +62,11 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 - Rotation per playlist = the globals, or its own when `OverrideGlobalSettings` (`PlayerHelper.EffectiveRotation`).
 - "Switch when video ends" OFF: `IntervalSeconds` is "Switch every", a plain timer (switches mid-video); the maximum doesn't apply.
 - ON: the same field is the "Minimum play time" and `MaxPlaySeconds` the maximum. Both wall-clock seconds, 0 = off strictly (minimum 0: switch at every end; maximum 0: never cut).
+- The maximum is 0 or at least the minimum (`AppSettings.RotationMax`, ON only): every settings / playlist save stores a smaller one as the minimum and `EffectiveRotation` reads it so, so a raised minimum carries the maximum up (never back down) and the program gets it live; the UI does the same as you type (`store` `maxOverMin`; a shorter maximum typed is a draft, leaving saves the minimum). Guards: `test-settings-merge.sh` § "0 (off) or at least the minimum", probe-settings `playtime:maxFloor:*`.
 - A video plays at least the minimum, then switches at its next end (`align:end`). A clip shorter than the minimum loops and advances at the end of the loop that reaches it, never mid-loop (`HoldForMinPlay`, turns `Loop` on while held).
-- The maximum switches now, mid-video, with the transition. For a video or still image a maximum below the minimum wins.
-- "Separate timing for scenes" ON: scenes AND still images switch after "Switch scenes after" (0 = they stay); the minimum/maximum apply to videos only.
-- Toggle OFF: a scene's minimum reached is its end; no minimum → the maximum moves it; neither → it stays. Both set → the minimum wins for a scene even when the maximum is shorter.
+- The maximum switches now, mid-video, with the transition.
+- "Separate timing for scenes" ON: scenes AND still images switch after "Switch scenes after", never 0 (`AppSettings.SceneTime`: 1 s floor; the player's `scenes_after_ms` range starts at 1000); the minimum/maximum apply to videos only.
+- Toggle OFF: a scene's minimum reached is its end; no minimum → the maximum moves it; neither → it stays. Both set → the minimum.
 - `PlayerHelper.ItemPlayRule(kind, min, max, separate, scenesAfter)` is the whole table. Guards: `rule.rs` `item_rule_table`, self-test `PlayLimitAssertions` / `ItemPlayRule`.
 - Play time counts wall clock (never speed-scaled), not while paused, resets on every switch (an aligned B from its effect's start), never on an edit.
 - A 1-item playlist never switches by itself (`CanRotate`), but takes a user next/random.

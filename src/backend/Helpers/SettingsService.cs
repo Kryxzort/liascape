@@ -43,6 +43,8 @@ public static class SettingsService
     // private: every write is a field-level Update or Patch (a whole copy loaded earlier reverts what changed since)
     private static void Save(AppSettings settings)
     {
+        // the caller's copy too: Patch's `Cur` drives the live apply, so the playing rotation gets the stored maximum
+        settings.NormalizeRotation();
         // atomic + 0600 from its creation (.claude/rules/backend/api.md § Security)
         AtomicFile.WritePrivate(ConfigPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
     }

@@ -3927,6 +3927,202 @@ fn cut_while_paused_swaps_at_once() {
     });
 }
 
+/// One item of [`paused_switch_plays_its_effect_on_still_frames`]: a video clip or a
+/// synthetic solid-colour scene, and the colour it shows.
+fn still_item(scene: bool, rgb: [u8; 3]) -> Value {
+    if scene {
+        let spec = SyntheticSpec {
+            pattern: Pattern::Solid,
+            rgb,
+            ..SyntheticSpec::default()
+        };
+        let dir = common::synthetic_scene(&format!("api-still-{}-{}-{}", rgb[0], rgb[1], rgb[2]), &spec);
+        json!({"kind": "scene", "path": s(&dir)})
+    } else {
+        let spec = ClipSpec::Solid {
+            rgb,
+            secs: 10.0,
+            tone_hz: 440.0,
+            tone_dbfs: -20.0,
+        };
+        let clip = ensure_clip(&format!("still_{}_{}_{}", rgb[0], rgb[1], rgb[2]), spec);
+        json!({"path": s(&clip), "loop": true})
+    }
+}
+
+/// `StayPausedWhenSwitching` (the backend leaves a user pause on for a next/prev/random): a
+/// switch requested while the user paused plays its effect exactly like an unpaused one — same
+/// effect, method and duration — on still frames: the effect's progress runs through to the
+/// handoff and `done`, the output shows a blend mid-way, A never moves off the frame it paused on,
+/// B never moves off its first frame, the player stays paused and B is left shown, paused, on that
+/// frame. A resume plays B on from there. V→V, V→S, S→S, S→V × full-live / reveal / frozen.
+#[test]
+fn paused_switch_plays_its_effect_on_still_frames() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    // consecutive items differ in colour; kinds give V→V, V→S, S→S, S→V per method
+    let palette: [(bool, [u8; 3]); 4] = [
+        (false, [0, 0, 255]),
+        (true, [0, 255, 0]),
+        (true, [255, 0, 255]),
+        (false, [255, 0, 0]),
+    ];
+    let first = still_item(false, [255, 0, 0]);
+    let mut a = create_src(&mut c, first);
+    let mut a_rgb = [255u8, 0, 0];
+    let mut a_scene = false;
+    show_all(&mut c, &a);
+    for _ in 0..20 {
+        c.step(16);
+    }
+    let cap = srv.path("still-mid.png");
+    for method in ["full-live", "reveal", "frozen"] {
+        for (b_scene, b_rgb) in palette {
+            let combo = format!(
+                "{} → {} {method}",
+                if a_scene { "S" } else { "V" },
+                if b_scene { "S" } else { "V" }
+            );
+            assert!(time_pos(&mut c, &a) > 0.1, "{combo}: A plays before the pause");
+            c.ok("set", json!({"path": "player.paused", "value": true}));
+            for _ in 0..3 {
+                c.step(16);
+            }
+            let a_tp = time_pos(&mut c, &a);
+            let to = still_item(b_scene, b_rgb);
+            let r = c.ok(
+                "transition",
+                json!({"outputs": "out:*", "to": to, "effect_id": "fade",
+                       "duration_ms": 400, "method": method}),
+            );
+            let corr = r["corr"].as_str().unwrap().to_string();
+            let b = r["to"].as_str().unwrap().to_string();
+            let mut progress: Vec<f64> = Vec::new();
+            let mut b_tp: Option<f64> = None;
+            let mut mid: Option<[u8; 4]> = None;
+            let mut seen = Vec::new();
+            for i in 0.. {
+                assert!(i < 400, "{combo}: no transition.done within 400 steps while paused; progress {progress:?}, saw {seen:?}");
+                c.step(16);
+                seen.extend(c.drain_events());
+                if seen.iter().any(|e| e["event"] == "transition.done" && e["corr"] == corr) {
+                    break;
+                }
+                assert!(bool_of(&mut c, "player.paused"), "{combo}: the pause stays");
+                if exists(&mut c, &a) {
+                    assert_eq!(time_pos(&mut c, &a), a_tp, "{combo}: A moved off its paused frame");
+                }
+                if bool_of(&mut c, &format!("{b}.ready")) {
+                    let t = time_pos(&mut c, &b);
+                    let t0 = *b_tp.get_or_insert(t);
+                    assert_eq!(t, t0, "{combo}: B moved off its first frame");
+                }
+                let shown = content(&mut c, "VIRTUAL-1");
+                if shown != a && shown != b {
+                    if let Some(p) = f64_of(&mut c, &format!("{shown}.progress")) {
+                        progress.push(p);
+                        if mid.is_none() && (0.35..=0.65).contains(&p) {
+                            c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&cap)}));
+                            mid = Some(png_pixel(&cap, 320, 180));
+                        }
+                    }
+                }
+            }
+            assert!(
+                seen.iter().any(|e| e["event"] == "transition.handoff" && e["corr"] == corr),
+                "{combo}: no handoff: {seen:?}"
+            );
+            let sched = seen
+                .iter()
+                .find(|e| e["event"] == "transition.scheduled" && e["corr"] == corr)
+                .unwrap();
+            assert_eq!(sched["still"], json!(true), "{combo}: {sched}");
+            assert!(
+                progress.iter().any(|p| *p > 0.1 && *p < 0.9),
+                "{combo}: the effect never ran mid-way: {progress:?}"
+            );
+            assert!(
+                progress.windows(2).all(|w| w[1] >= w[0]),
+                "{combo}: progress went back: {progress:?}"
+            );
+            let px = mid.unwrap_or_else(|| panic!("{combo}: never captured mid-effect: {progress:?}"));
+            let off = |rgb: [u8; 3]| (0..3).map(|k| px[k].abs_diff(rgb[k])).max().unwrap();
+            assert!(
+                off(a_rgb) > 40 && off(b_rgb) > 40,
+                "{combo}: mid-effect pixel {px:?} is not a blend of {a_rgb:?} and {b_rgb:?}"
+            );
+            // after: B shown, paused on its first frame
+            for _ in 0..3 {
+                c.step(16);
+            }
+            for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+                assert_eq!(content(&mut c, o), b, "{combo}: {o} shows B");
+            }
+            let b_first = b_tp.unwrap_or_else(|| panic!("{combo}: B never ready"));
+            assert_eq!(time_pos(&mut c, &b), b_first, "{combo}: B left its first frame");
+            assert!(b_first < 0.05, "{combo}: B's first frame is at {b_first}");
+            let p = c.ok("probe", json!({"name": "sources"}));
+            assert_eq!(probe_source(&p, &b)["effective_paused"], json!(true), "{combo}");
+            let live = c.ok("state", json!({}))["transitions"].clone();
+            assert_eq!(live, json!([]), "{combo}: still in flight");
+            // the resume plays B on from its first frame
+            c.ok("set", json!({"path": "player.paused", "value": false}));
+            for _ in 0..20 {
+                c.step(16);
+            }
+            let t = time_pos(&mut c, &b);
+            assert!(t > b_first + 0.15, "{combo}: B didn't play after the resume ({b_first} → {t})");
+            let st = c.ok("state", json!({}));
+            assert_eq!(st["graph"][&b]["gain_effective_db"], json!(0.0), "{combo}: {}", st["graph"][&b]);
+            (a, a_rgb, a_scene) = (b, b_rgb, b_scene);
+        }
+    }
+}
+
+/// A rule's hold (here the cover hold) keeps a paused switch's effect frozen like any other
+/// transition; once the hold lifts it plays on the still frames while the user pause stays.
+#[test]
+fn paused_switch_waits_out_a_cover_hold() {
+    let Some(srv) = Serve::start() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    c.ok("set", json!({"path": "player.pause_when_covered", "value": "maximized"}));
+    let a = create_src(&mut c, json!({"path": s(&ensure_clip("tr_red_10s", RED_10S)), "loop": true}));
+    show_all(&mut c, &a);
+    for _ in 0..10 {
+        c.step(16);
+    }
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    cover(&mut c, "*", "fullscreen");
+    let mut t = 0;
+    while !bool_of(&mut c, "player.cover_hold_active") {
+        assert!(t < 2000, "the hold never engaged");
+        c.step(20);
+        t += 20;
+    }
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&ensure_clip("tr_blue_10s", BLUE_10S)), "loop": true},
+               "effect_id": "fade", "duration_ms": 400, "method": "reveal"}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let mut seen = Vec::new();
+    for _ in 0..100 {
+        c.step(16);
+        seen.extend(c.drain_events());
+    }
+    assert!(
+        !seen.iter().any(|e| e["event"] == "transition.handoff" && e["corr"] == corr),
+        "the effect ran under the cover hold: {seen:?}"
+    );
+    cover(&mut c, "*", "none");
+    let evs = c.step_until_event(16, 200, "transition.done", &corr);
+    assert!(evs.iter().any(|e| e["event"] == "transition.handoff" && e["corr"] == corr));
+    assert!(bool_of(&mut c, "player.paused"), "the user pause stays");
+    assert_eq!(content(&mut c, "VIRTUAL-1"), r["to"].as_str().unwrap());
+}
+
 /// I2 (b): pause mid-gate, then a switch that fails / is cancelled / is superseded while
 /// paused — after the resume nothing that plays is left silent (no `anticlick` −96 on a
 /// playing source), and the current wallpaper is audible.

@@ -27,8 +27,10 @@ public static class PlaylistService
         catch { return null; }
     }
 
+    // Both saves normalize the rotation in the caller's copy too (SavePlaylistState applies it live from there).
     public static void SaveCurrentState(CustomPlaylist playlist)
     {
+        playlist.Settings?.NormalizeRotation();
         try { AtomicFile.WriteAllText(CurrentStatePath, JsonSerializer.Serialize(playlist, JsonOpts)); }
         catch { }
     }
@@ -48,6 +50,7 @@ public static class PlaylistService
     {
         Directory.CreateDirectory(PlaylistsPath);
         string path = Path.Combine(PlaylistsPath, Sanitize(name) + ".json");
+        playlist.Settings?.NormalizeRotation();
         AtomicFile.WriteAllText(path, JsonSerializer.Serialize(playlist, JsonOpts));
     }
 

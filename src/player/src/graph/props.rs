@@ -520,7 +520,17 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     "separate_scenes",
                     def(PropType::Bool, false, PropValue::Bool(true)),
                 ),
-                ("scenes_after_ms", ms(1_800_000.0)),
+                // never 0: a scene / picture under separate timing always moves on (the
+                // backend's `AppSettings.SceneTime`, 1 s up)
+                (
+                    "scenes_after_ms",
+                    ranged(
+                        PropType::F64,
+                        (1000.0, PROGRAM_MS_MAX),
+                        "1000–359999000",
+                        PropValue::F64(1_800_000.0),
+                    ),
+                ),
                 (
                     "transition",
                     def(PropType::Transition, false, PropValue::Map(transition)),
@@ -1038,6 +1048,19 @@ mod tests {
             PropValue::List(vec![0.0, 1.0]).to_json(),
             serde_json::json!([0.0, 1.0])
         );
+    }
+
+    #[test]
+    fn program_scenes_after_is_never_zero() {
+        // "Switch scenes and pictures after" has no off: 0 is out of range, 1 s is the floor
+        let v = |n: f64| validate_value(NodeKind::Program, "scenes_after_ms", &PropValue::F64(n), true);
+        assert!(v(0.0).is_err());
+        assert!(v(999.0).is_err());
+        assert!(v(1000.0).is_ok());
+        assert!(v(PROGRAM_MS_MAX).is_ok());
+        // the minimum and maximum keep 0 = off
+        let m = |p: &str| validate_value(NodeKind::Program, p, &PropValue::F64(0.0), true);
+        assert!(m("interval_ms").is_ok() && m("max_ms").is_ok());
     }
 
     #[test]

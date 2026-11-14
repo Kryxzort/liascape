@@ -67,11 +67,14 @@ transition or jumped a position would be as visible. So the player pause compose
 clock excises paused time (effects, ramps, `align: end` waits and rotations freeze), and a playing source with audio
 ramps out on its own `gain.pause` gate before mpv pauses and ramps back in once its audio flows. Teardown ramps and
 user-setting ramps run on the unpaused clock, so a destroy, `stop` or mute completes while paused. The cover hold and
-the low-VRAM hold are pauses of the same kind and never write `player.paused`; `stop` clears it. Guards:
+the low-VRAM hold are pauses of the same kind and never write `player.paused`; `stop` clears it. One deliberate
+exception keeps the picture coherent: a switch requested in a user pause runs its effect on the still frames (only
+the effect clock runs; every source stays paused, the rotations' clock stays frozen). Guards:
 `player_pause_freezes_full_live_transition`, `player_pause_freezes_frozen_hold`,
 `player_pause_freezes_align_end_wait`, `player_pause_ramps_a_plain_source`, `r93_destroy_mid_gate_never_leaks`,
 `stepped_player_pause_never_opens_a_gate`, `i2_switch_while_gated_never_leaves_a_playing_source_silent`,
-`setting_gain_ramp_lands_while_paused`, `cut_while_paused_swaps_at_once`.
+`setting_gain_ramp_lands_while_paused`, `cut_while_paused_swaps_at_once`,
+`paused_switch_plays_its_effect_on_still_frames`, `paused_switch_waits_out_a_cover_hold`.
 
 ## 8. No audio onset or offset without a ramp the listener can hear
 

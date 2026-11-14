@@ -80,6 +80,9 @@ for f in $FILES; do
     app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx)
       add "browse:" "$f (+ --probe probe-steam.js — ws:, side:copyIdPill, side:idPill:still; probe-settings.js copy:sidebarPill; probe-filters.js split:noWrap)" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
+    # the rotation's h/m/s fields (the maximum's floor at the minimum, drafts) and their hints
+    app/ui/src/components/PlayTimeInput.tsx|app/ui/src/components/rotHint.ts)
+      add "$SET|$PL|minPlay|maxPlay|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-settings.js playtime:)" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f (+ --probe probe-expert.js — the stepper: − / +, hold, wheel, keys, roll, look)" ;;
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;

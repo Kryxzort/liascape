@@ -12,14 +12,17 @@ public class PlaylistSettings
     // The rotation (gated by OverrideGlobalSettings; PlayerHelper § Rotation): SwitchWhenVideoEnds ("Switch when video
     // ends") off → IntervalSeconds is a plain timer ("Switch every"); on → IntervalSeconds is the minimum play time and
     // MaxPlaySeconds the maximum, and SeparateSceneTiming gives scenes + still images their own SwitchScenesAfterSeconds
-    // (wall-clock seconds, 0 = off). The defaults = the global ones (a video to its end, a scene / image 30 min).
+    // (wall-clock seconds; the minimum / maximum 0 = off, the maximum never under the minimum — NormalizeRotation on
+    // every save —, scenes-after at least 1). The defaults = the global ones (a video to its end, a scene / image 30 min).
     public int IntervalSeconds { get; set; } = 0;
     public bool SwitchWhenVideoEnds { get; set; } = true;
     private int _maxPlaySeconds = 0;
     public int MaxPlaySeconds { get => _maxPlaySeconds; set => _maxPlaySeconds = AppSettings.PlayLimit(value); }
     public bool SeparateSceneTiming { get; set; } = true;
     private int _switchScenesAfterSeconds = 1800;
-    public int SwitchScenesAfterSeconds { get => _switchScenesAfterSeconds; set => _switchScenesAfterSeconds = AppSettings.PlayLimit(value); }
+    public int SwitchScenesAfterSeconds { get => _switchScenesAfterSeconds; set => _switchScenesAfterSeconds = AppSettings.SceneTime(value); }
+    // PlaylistService's saves (AppSettings.RotationMax)
+    public void NormalizeRotation() => MaxPlaySeconds = AppSettings.RotationMax(SwitchWhenVideoEnds, IntervalSeconds, MaxPlaySeconds);
     // "When the playlist starts again" (gated by OverrideGlobalSettings like the rotation): start_over | resume
     private string _playlistStart = "start_over";
     public string PlaylistStart { get => _playlistStart; set => _playlistStart = AppSettings.PlaylistStartMode(value); }

@@ -864,6 +864,7 @@ mod tests {
             to: "bnew".into(),
             from: vec!["a".into()],
             held: vec!["bnew".into()],
+            still: false,
         };
         let s = cap(&g, &Animator::new(), &[tr]);
         assert_eq!(s.outputs["DP-1"].content.as_deref(), Some("bnew"));
@@ -899,6 +900,7 @@ mod tests {
             to: "bnew".into(),
             from: vec!["a".into()],
             held: vec!["bnew".into()],
+            still: false,
         };
         for phase in [Phase::Scheduled, Phase::WaitingReady, Phase::WaitingStart] {
             let s = cap(&g, &Animator::new(), &[tr(phase)]);

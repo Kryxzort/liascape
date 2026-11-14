@@ -47,7 +47,7 @@ public static class PlayerHelper
     // `_maxPlayMs` the maximum (wall-clock ms, 0 = off — the playlist's own when it overrides the globals, else the
     // global one: read from the config at a session's start / resume, live from /settings + /playlist/state), and
     // with `_separateScenes` ("Separate timing for scenes") a scene / still image switches after `_scenesAfterMs`
-    // instead (0 = off; same source, same live path — ItemPlayRule). The playing item's play time (wall-clock ms since
+    // instead (at least 1 s; same source, same live path — ItemPlayRule). The playing item's play time (wall-clock ms since
     // it became current, pauses excluded — the tick counts it; persisted in timed_state with the moment it was saved,
     // so a backend restart counts the time the player played on meanwhile) is what all of them are measured against.
     private static long _maxPlayMs;
@@ -1279,21 +1279,25 @@ public static class PlayerHelper
     //   at that loop's end, never mid-loop; a still image (it never ends) shows for it; a scene (it never ends either)
     //   switches once it's reached (the tick, align:now).
     // - maximum: once the playing item played that long the rotation advances now (the tick, align:now), even
-    //   mid-video; a cap beats the minimum (max < min → the max fires).
+    //   mid-video; never under the minimum (AppSettings.RotationMax, applied in EffectiveRotation).
     // A one-item session never switches to itself.
 
-    // A playlist's effective rotation: its own when it overrides the global one, else the globals'.
+    // A playlist's effective rotation: its own when it overrides the global one, else the globals'. The maximum comes
+    // normalized (never under the minimum) whatever the copy: a /playlist/play body or a hand-edited file reaches the
+    // rotation the way a save would have stored it.
     public static (int Interval, bool Advance, int Max, bool SeparateScenes, int ScenesAfter) EffectiveRotation(AppSettings s, PlaylistSettings? p) =>
         p?.OverrideGlobalSettings == true
-            ? (p.IntervalSeconds, p.SwitchWhenVideoEnds, p.MaxPlaySeconds, p.SeparateSceneTiming, p.SwitchScenesAfterSeconds)
-            : (s.GlobalIntervalSeconds, s.GlobalSwitchWhenVideoEnds, s.GlobalMaxPlaySeconds, s.GlobalSeparateSceneTiming, s.GlobalSwitchScenesAfterSeconds);
+            ? (p.IntervalSeconds, p.SwitchWhenVideoEnds, AppSettings.RotationMax(p.SwitchWhenVideoEnds, p.IntervalSeconds, p.MaxPlaySeconds),
+               p.SeparateSceneTiming, p.SwitchScenesAfterSeconds)
+            : (s.GlobalIntervalSeconds, s.GlobalSwitchWhenVideoEnds, AppSettings.RotationMax(s.GlobalSwitchWhenVideoEnds, s.GlobalIntervalSeconds, s.GlobalMaxPlaySeconds),
+               s.GlobalSeparateSceneTiming, s.GlobalSwitchScenesAfterSeconds);
 
     // A playlist's "When the playlist starts again" (§ Playlist start): its own under its override, else the global one.
     public static string EffectiveStart(AppSettings s, PlaylistSettings? p) =>
         p?.OverrideGlobalSettings == true ? p.PlaylistStart : s.GlobalPlaylistStart;
 
     // What a playing item plays under advance-on-end (docs/decisions.md § "Use one interval field: "Switch every" or
-    // "Minimum play time""; scenes may have timing of their own). (MinMs, MaxMs), wall-clock ms; 0 = off everywhere:
+    // "Minimum play time""; scenes may have timing of their own). (MinMs, MaxMs), wall-clock ms; the minimum / maximum 0 = off:
     // - MinMs: a VIDEO plays at least this long, then switches at its next end (0 → at its first end, however short);
     //   for an item that never ends (a still image, a scene) reaching it IS its end. NeverMs = it stays until a user
     //   switch (or the maximum, where one applies).
@@ -1301,7 +1305,7 @@ public static class PlayerHelper
     // Separate timing OFF: a scene uses whichever limit is set as its end, the minimum when both are (docs/decisions.md §
     // "A scene's minimum play time beats its maximum" — a shorter maximum doesn't cut it first); neither → it stays until a user switch. A still image
     // shows for the minimum (0 → it flashes by). ON: a scene AND a still image switch after "Switch scenes after"
-    // (0 → they stay) and the minimum / maximum don't apply to them — they have no end, so "at least … then at the next
+    // (never 0: AppSettings.SceneTime) and the minimum / maximum don't apply to them — they have no end, so "at least … then at the next
     // end" / "at most" mean nothing there; one number says it. A video is never touched by the scene timing.
     public enum PlayKind { Video, Image, Scene }
     public const long NeverMs = long.MaxValue / 4;   // never reached (and never overflows HoldForMinPlay's arithmetic)
@@ -1309,7 +1313,7 @@ public static class PlayerHelper
         IsScenePath(path) ? PlayKind.Scene : LiascapePlayerMedia.IsImagePath(path) ? PlayKind.Image : PlayKind.Video;
     public static (long MinMs, long MaxMs) ItemPlayRule(PlayKind kind, long minMs, long maxMs, bool separateScenes, long scenesAfterMs) =>
         kind == PlayKind.Video ? (Math.Max(0, minMs), Math.Max(0, maxMs))
-        : separateScenes ? (scenesAfterMs > 0 ? scenesAfterMs : NeverMs, 0)
+        : separateScenes ? (scenesAfterMs, 0)
         : kind == PlayKind.Scene ? (minMs > 0 ? (minMs, 0L) : (NeverMs, Math.Max(0, maxMs))) // the one set; both → the minimum
         : (Math.Max(0, minMs), Math.Max(0, maxMs));
 
@@ -1341,7 +1345,7 @@ public static class PlayerHelper
     {
         _maxPlayMs = AppSettings.PlayLimit(maxSeconds) * 1000L;
         _separateScenes = separateScenes;
-        _scenesAfterMs = AppSettings.PlayLimit(scenesAfterSeconds) * 1000L;
+        _scenesAfterMs = AppSettings.SceneTime(scenesAfterSeconds) * 1000L;
     }
 
     // /settings (the global one) and /playlist/state (a playlist's own): the effective maximum or scene timing changed
@@ -1440,14 +1444,15 @@ public static class PlayerHelper
         // no pre-launch crossover, no overlay, no IPC loadfile — for a scene too (`kind: scene`,
         // kind-agnostic in the player; no V→S lead, no SceneTransitionDelayMs). A scene that can't play
         // stops playback here, exactly like legacy with AllowScenes=false (the pickers never hand one over).
-        bool keepPause = _keepPauseNextSwitch; // a user switch staying paused: a cut (StayPausedWhenSwitching)
+        bool keepPause = _keepPauseNextSwitch; // a user switch staying paused (StayPausedWhenSwitching): legacy cuts
         _keepPauseNextSwitch = false;
         if (PlayerEngine.IsLiascapePlayer)
         {
             if (IsScenePath(path) && !PlayerEngine.ScenesPlayable(SettingsService.Load())) { KillCurrentProcess(); return; }
             var liascapeSettings = SettingsService.Load();
             var liascapeCfg = TransitionService.CurrentConfig();
-            LiascapePlayerMedia.QueueSwitch(path, liascapeSettings, liascapeCfg.Enabled && !keepPause ? liascapeCfg : null, alignEnd: false); // queued: we may hold _lock
+            // with its transition even while paused: the player plays it on the still frames and keeps the pause
+            LiascapePlayerMedia.QueueSwitch(path, liascapeSettings, liascapeCfg.Enabled ? liascapeCfg : null, alignEnd: false); // queued: we may hold _lock
             _currentSpeed = ReadSpeedOverride(path) ?? liascapeSettings.Speed;
             OnWallpaperChanged?.Invoke(path);
             return;
@@ -2779,10 +2784,10 @@ public static class PlayerHelper
     // ── Pause × a user switch (next / previous / random: keybind, CLI, /next /prev /random) ──────
     // StayPausedWhenSwitching off (default): a switch made while paused resumes playback first, so it
     // switches with its transition and plays — single and playlist alike (a paused playlist's tick
-    // doesn't hold the action until the resume). On: the
-    // pause stays — the switch is a cut (an effect can't run with playback stopped: liascape-player's clock
-    // is frozen) to the new wallpaper's first frame, paused, and a paused playlist's tick runs it at
-    // once (its countdown stays paused). A rotation never switches while paused.
+    // doesn't hold the action until the resume). On: the pause stays and the rotation's countdown with it.
+    // liascape-player plays the transition on the still frames (A's paused frame → B's first) and leaves B
+    // paused on its first frame (`Transitions::plays_on_still_frames`); legacy cuts to B's first frame, paused,
+    // its paused playlist's tick running the action at once. A rotation never switches while paused.
     private static bool _keepPauseNextSwitch; // consumed by the next SwitchToFile (and Apply)
 
     private static bool KeepsPause() => SettingsService.Load().StayPausedWhenSwitching && IsPausedNow();
@@ -2814,7 +2819,7 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Next(keep); // the player's program, never the pending file
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Next(); // the player's program, never the pending file
             else WritePendingAction("next");
             return;
         }
@@ -2831,7 +2836,7 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Prev(keep);
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Prev();
             else WritePendingAction("prev");
             return;
         }
@@ -3109,7 +3114,7 @@ public static class PlayerHelper
         bool keep = BeforeUserSwitch();
         if (IsTimedPlaylistActive())
         {
-            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Random(keep);
+            if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Random();
             else WritePendingAction("random");
             return;
         }

@@ -77,6 +77,18 @@ rewound if it ended because of it).
   after its remaining play time + `ALIGN_SLACK` (10 s), `transition.align_fallback`. An A `Error` counts as ended
   at once. The wait is on the player clock, so a pause freezes it.
 
+## A switch in a pause
+
+A request made while the user paused (`player.paused`) with `align: now` is `still` (`transition.scheduled
+{still}`, `state.transitions[].still`): while it is in flight `Runtime::now` runs although the player stays paused,
+so it plays exactly like an unpaused switch — same effect, method and duration — on still frames. Every source
+stays effectively paused (`SourceHost`: `node.paused || player.paused`): A holds the frame it paused on, B its first
+frame (a scene its first rendered one), B's onset ramp lands at once (no audio can flow; the pause gate holds B
+silent and its resume waits for B's audio), and B is left paused on that frame. Only the play clock thaws: the
+rotations' `Runtime::rotation_now` stays frozen, so a countdown doesn't move. A rule's hold (cover, low VRAM)
+freezes it as before, until the hold lifts. An `align: end` request in a pause waits for A's end, which the pause
+holds back, so it stays frozen. A resume mid-effect turns it into an ordinary running switch.
+
 ## Interrupt, cancel, failure
 
 `start` creates B first, then resolves every in-flight transition sharing an output: pre-Running → abort

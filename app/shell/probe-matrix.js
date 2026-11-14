@@ -415,7 +415,7 @@ const STATES = {
   // the scene playlist at s1 FOLLOWING the global rotation: advance-on-end, no minimum / maximum, "Separate timing for
   // scenes" off — nothing moves the scene (opt-in: the global scene-timing cell)
   sceneSGlobal: { optIn: true, exp: { paused: false }, roles: () => [SC[0], SC[1]], playlist: () => ({ paths: rot(SC_PL(), 1), settings: PS({ overrideGlobalSettings: false }) }),
-    async pre() { await scenesOn({ globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 0 }); },
+    async pre() { await scenesOn({ globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, globalSeparateSceneTiming: false, globalSwitchScenesAfterSeconds: 1800 }); },
     async enter(c) { c.playlist = true; c.fresh = true; await playFast(c, rot(SC_PL(), 1), PS({ overrideGlobalSettings: false })); } },
   // programs at the seams (opt-in; `prog`: afterControl also checks the player's program against /current
   // and the armed switch). All rotation runs inside the player's `prog:main`.
@@ -1053,16 +1053,24 @@ C["cli:volume-up:modalOpen"] = { states: ["single", "playlist"],
     return v;
   } };
 // user switches — paused: StayPausedWhenSwitching off (default) resumes and switches with the transition; on
-// (the `-keep` cells) stays paused and cuts to B's first frame
+// (the `-keep` cells) stays paused and plays the same transition on the still frames, to B's first frame, paused
 const stayed = (c, a) => (c.before.cur?.path && c.after.cur?.path === c.before.cur.path ? [`${a} stayed on ${TITLE(c.before.cur.path)}`] : []);
 function pausedSwitch(c) {
   if (!c.wasPaused || !c.before.cur?.path || c.after.cur?.path === c.before.cur.path) return [];
   const sched = c.evs.filter((e) => e.event === "transition.scheduled");
   const last = sched[sched.length - 1];
   if (!last) return ["no switch was requested"];
-  if (c.keep && last.effect_id != null) return [`a switch while paused that keeps the pause used ${last.effect_id}, not a cut`];
-  if (!c.keep && !c.noOutput && !c.cutsOk && last.effect_id == null) return ["a switch that resumes from a pause was a cut (transitions are on)"];
-  return [];
+  if (c.noOutput) return [];
+  if (!c.cutsOk && last.effect_id == null) return [c.keep ? "a switch that keeps the pause was a cut (transitions are on: it plays on the still frames)" : "a switch that resumes from a pause was a cut (transitions are on)"];
+  if (!c.keep) return [];
+  // kept paused: the effect ran to its end without a resume, and B waits, paused, on its first frame
+  const v = [];
+  if (last.still !== true) v.push(`the switch while paused wasn't on the still frames (transition.scheduled still=${last.still})`);
+  if (!c.evs.some((e) => e.event === "transition.handoff" && e.corr === last.corr)) v.push(`the switch while paused never reached its handoff (${last.corr}): the effect waited for a resume`);
+  const b = c.after.st.graph[last.to];
+  if (!b) v.push(`B ${last.to} is gone after the switch`);
+  else if (!(Number(b.time_pos) < 0.1)) v.push(`B ${TITLE(b.path)} at ${b.time_pos} s after a switch while paused, expected its first frame`);
+  return v;
 }
 // a fresh playlist session at its first item has nothing before it: previous leaves it — and an armed
 // aligned switch — alone (never relaunches the playing item or cancels the armed switch)
@@ -1085,7 +1093,7 @@ for (const [a, check] of Object.entries(SWITCHES)) {
   C[`cli:${a}`] = { switch: true, async run(c) { userSwitch(false)(c); c.cli = await cli(a); }, check };
   C[`cli:${a}-keep`] = { switch: true,
     async pre() { const s = await getSettings(); s.stayPausedWhenSwitching = true; await post("/settings", s); },
-    async run(c) { userSwitch(true)(c); if (c.wasPaused) c.noSettle = true; c.cli = await cli(a); },
+    async run(c) { userSwitch(true)(c); c.cli = await cli(a); },
     check: (c) => [...check(c), ...(c.after.s.stayPausedWhenSwitching ? [] : ["stayPausedWhenSwitching not set"])] };
 }
 action("stop", (c) => (c.after.cur?.path ? [`still playing ${TITLE(c.after.cur.path)} after stop`] : []), { switch: true, exp: { paused: false } });
@@ -3347,8 +3355,9 @@ for (const where of ["playlist", "global"]) C[`${where}:maxPlay`] = { states: [w
   } };
 // a global maximum on a playlist with its OWN rotation (no limits): nothing switches now
 C["global:maxPlay:own"] = { states: ["pending"],
-  // (the global maximum's row shows with the global advance-on-end; the playlist's own rotation doesn't read it)
-  async pre() { const s = await getSettings(); await post("/settings", { ...s, globalSwitchWhenVideoEnds: true }); },
+  // (the global maximum's row shows with the global advance-on-end; the playlist's own rotation doesn't read it; no
+  // global minimum, so a 2 s maximum is allowed — it is never under the minimum)
+  async pre() { const s = await getSettings(); await post("/settings", { ...s, globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0 }); },
   async run(c) {
     c.k4 = await k4LoopEnd(c, 4500); if (!c.k4) return;
     await ui(limitDrive("global", "maximum", 2)); c.tChange = Date.now();
@@ -3380,7 +3389,7 @@ C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
   } };
 
 // "Separate timing for scenes and pictures" (advance-on-end only; player-adapter.md § Rotation): on → a scene / still image switches
-// after "Switch scenes and pictures after" (0 = off), the minimum / maximum apply to videos only. Driven through the real UI while s1
+// after "Switch scenes and pictures after" (never 0), the minimum / maximum apply to videos only. Driven through the real UI while s1
 // plays: the toggle shows only under "Switch when video ends", the seconds field only while it's on; 4 s → s1 (playing
 // for a while already: its play time counts since it showed) moves on to s2 now, with its transition.
 const sceneTimingCheck = (c, savedOn, savedSecs) => {
@@ -3414,8 +3423,8 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 1500 && e.event === "transition.scheduled" && e.path === SC[1])), 9000, 100);
     await waitSettled(8000, SC[1]);
     c.saved = (await http("GET", "/playlist/state")).json?.settings;
-    // stop rotating before the checks: 0 = off → s2 (a scene) stays
-    await post("/playlist/state", { settings: { switchScenesAfterSeconds: 0 } }); await sleep(500);
+    // stop rotating before the checks: 30 min → s2 (a scene) stays
+    await post("/playlist/state", { settings: { switchScenesAfterSeconds: 1800 } }); await sleep(500);
   }, check(c) {
     const v = sceneTimingCheck(c, c.saved?.separateSceneTiming, c.saved?.switchScenesAfterSeconds);
     if (c.saved?.switchWhenVideoEnds !== true) v.push(`playlist switchWhenVideoEnds ${c.saved?.switchWhenVideoEnds}, expected true`);
@@ -3435,7 +3444,7 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 1500 && e.event === "transition.scheduled" && e.path === SC[1])), 9000, 100);
     await waitSettled(8000, SC[1]);
     c.savedS = await getSettings();
-    await post("/settings", { ...(await getSettings()), globalSwitchScenesAfterSeconds: 0 }); await sleep(500);
+    await post("/settings", { ...(await getSettings()), globalSwitchScenesAfterSeconds: 1800 }); await sleep(500);
   }, check(c) {
     const v = sceneTimingCheck(c, c.savedS?.globalSeparateSceneTiming, c.savedS?.globalSwitchScenesAfterSeconds);
     // the scene rule said plainly while the toggle is off (the one set, the minimum if both are — docs/decisions.md §
@@ -4370,8 +4379,7 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   if (K_.exp) Object.assign(c.exp, K_.exp);
   if (K_.flipPause) c.exp.paused = !c.exp.paused;
   if (K_.flipMute) c.exp.muted = !(c.exp.muted ?? false);
-  if (K_.switch && c.noSettle) { await sleep(1500); c.exp.settled = true; } // paused: the cut's ramps wait for the resume
-  else if (K_.switch) { await sleep(400); await waitSettled(); c.exp.settled = true; } else await sleep(800);
+  if (K_.switch) { await sleep(400); await waitSettled(); c.exp.settled = true; } else await sleep(800);
   // fuzz: an armed advance-on-end switch fired ON ITS OWN during the step — let it land, so the checks below see where
   // it went, not its middle (mid-effect /current is already the incoming side while the screen + UI still show A)
   if (fuzz && rotatedDuring(c.before, events.filter((e) => e._t >= t0))) await waitSettled();

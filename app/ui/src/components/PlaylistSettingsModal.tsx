@@ -14,9 +14,9 @@ import { HealthCtx, useFeatureWarnings } from "./featureHealth";
 // Playlist Settings overlay. Centered modal:
 // order (Sequential/Shuffle), auto-add-new-library-items (global), override-global, and (when
 // override) its own rotation: "Switch when video ends" off → "Switch every" (H-M-S); on → the same field as
-// "Minimum play time" + "Maximum play time" + "Separate timing for scenes" (→ "Switch scenes after"; player-adapter.md
-// § Rotation; every limit 0 = off), "When the playlist starts again" (start over | resume; beside the global one it
-// overrides) and its transitions.
+// "Minimum play time" + "Maximum play time" (0 = off, never under the minimum) + "Separate timing for scenes" (→ "Switch
+// scenes after", never 0; player-adapter.md § Rotation), "When the playlist starts again" (start over | resume; beside
+// the global one it overrides) and its transitions.
 export function PlaylistSettingsModal({
   open, ps, setPS, autoAdd, setAutoAdd, onClose,
 }: {
@@ -63,7 +63,7 @@ export function PlaylistSettingsModal({
                   value={ps.intervalSeconds ?? 0} onChange={(v) => setPS({ intervalSeconds: v })} />
                 {aoe && <>
                   <div className="field-label" title={ROT_HINT.max + (sep ? "" : ROT_HINT.maxScenes)}>MAXIMUM PLAY TIME</div>
-                  <PlayTimeInput label="Maximum play time" zeroText="off" disabled={!ovr}
+                  <PlayTimeInput label="Maximum play time" zeroText="off" min={ps.intervalSeconds ?? 0} orZero disabled={!ovr}
                     value={ps.maxPlaySeconds ?? 0} onChange={(v) => setPS({ maxPlaySeconds: v })} />
                   {!sep && <div className="shint" data-scene-rule>{ROT_HINT.sceneRule}</div>}
                   <label className="ck" title={ROT_HINT.separate}><input type="checkbox" disabled={!ovr} checked={sep}

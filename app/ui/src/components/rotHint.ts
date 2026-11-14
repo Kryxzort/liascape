@@ -1,4 +1,4 @@
-// the rotation rows' hints (Settings → Rotation and the playlist modal). Every limit: 0 = off. `min` / `max` get the
+// the rotation rows' hints (Settings → Rotation and the playlist modal). The minimum / maximum: 0 = off. `min` / `max` get the
 // scene clause only while "Separate timing for scenes" is off (on, scenes + still images have their own row).
 export const ROT_HINT = {
   every: "switches wallpapers in a playlist on a simple timer",

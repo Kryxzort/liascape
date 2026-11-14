@@ -49,6 +49,11 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   Guard: `tests/api.rs::setting_gain_ramp_lands_while_paused`.
 - A cut while paused swaps at once (an already-silent A's anticlick is set, not ramped on the frozen
   clock). Guard: `tests/api.rs::cut_while_paused_swaps_at_once`.
+- A transition requested in a user pause with `align: now` plays on still frames (`Tr::still`): thaw only
+  the play clock (`Runtime::now`) while `Transitions::plays_on_still_frames` and no rule holds the player;
+  never unpause a source for it. Programs read `Runtime::rotation_now`, frozen through it. Guards:
+  `tests/api.rs::paused_switch_plays_its_effect_on_still_frames`, `paused_switch_waits_out_a_cover_hold`,
+  `tests/program.rs::paused_next_plays_its_effect_on_still_frames`.
 - `stop` clears `player.paused` after retiring (a stop ends the session). On `quit`, if an mpv core is
   still being destroyed after the reaper wait, leave with `_exit(0)` after removing socket + lock, so
   libmpv/EGL destructors never run under the straggler. Guard: `tests/api.rs::sigterm_is_a_clean_exit`.
@@ -100,7 +105,7 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
 - Never run a gain animation shorter than 30 ms, whatever `duration_ms`. Guard: `tests/transition.rs::zero_duration_gains_still_ramp_30ms`.
 - Hold B's onset ramp until its `AudioFlowing` (≤ `ONSET_TIMEOUT`), started at the confirmation instant,
   never backdated; route every call site through `schedule_onset`. `b_has_audio` skips the wait for
-  color/image/snapshot or a muted B. A cut's B is never held.
+  color/image/snapshot or a muted B, and a user pause too (the pause gate holds B silent). A cut's B is never held.
 - Write `settle_until` with `.max()` downstream of a scheduled onset, never plain assignment, so a later
   recompute can't shorten a still-ramping onset (`commit_unseen` drops a pending onset instead).
 - `begin_running` force-starts another transition's pending onset on its A's, never `start` (a committed frozen B
@@ -136,8 +141,9 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   removal instead of dropping it: programs read those events on the next tick.
 - Commit a step at its `transition.started` (a `handoff` commits one whose `started` was missed); plan a
   step, never pre-fetch.
-- Drive play time and countdown from `Runtime::now` (pause-excised; play time wall-rate, countdown scaled
-  by the current source's `speed`); no rule starts a switch under a hold (user pause, VRAM, cover).
+- Drive play time and countdown from `Runtime::rotation_now` (every pause excised, a still-frame effect's
+  too; play time wall-rate, countdown scaled by the current source's `speed`); no rule starts a switch
+  under a hold (user pause, VRAM, cover).
   Guards: `tests/program.rs::cover_hold_freezes_a_program`, `live_max_edit_while_paused_waits_for_the_resume`.
 - Arm an `on_end` switch only after the current effect's handoff and never while parked: a request during a
   Running effect would commit it early.

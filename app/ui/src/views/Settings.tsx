@@ -331,7 +331,8 @@ export const Settings = memo(function Settings() {
 
   // the rotation: "Switch when video ends" off → the interval is "Switch every" (a plain timer); on → the SAME field
   // is "Minimum play time", with "Maximum play time" right below, then "Separate timing for scenes" (+ "Switch scenes
-  // after" while it's on) — player-adapter.md § Rotation. Every limit: 0 = off.
+  // after" while it's on) — player-adapter.md § Rotation. The minimum and maximum: 0 = off; the maximum is never under
+  // the minimum (the store raises it as the minimum passes it); "Switch scenes and pictures after" is never 0.
   const aoe = g("globalSwitchWhenVideoEnds", true);
   const sepScenes = g("globalSeparateSceneTiming", true);
 
@@ -424,7 +425,7 @@ export const Settings = memo(function Settings() {
           <Select value={g("pauseWhenCovered", "maximized")} onChange={(v) => set("pauseWhenCovered", v)}
             options={[{ value: "off", label: "Off" }, { value: "fullscreen", label: "A fullscreen window" }, { value: "maximized", label: "A fullscreen or maximized window" }]} /></Row>}
         <Row label="Playback speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
-        <Row label="Stay paused when switching" hint="by default, a paused wallpaper unpauses when you switch with a keybind or command. This keeps it paused." rk="stayPausedWhenSwitching">
+        <Row label="Stay paused when switching" hint="by default, a paused wallpaper unpauses when you switch with a keybind or command. This keeps it paused: the transition still plays, and the next wallpaper waits, paused, on its first frame." rk="stayPausedWhenSwitching">
           <input type="checkbox" checked={g("stayPausedWhenSwitching", false)} onChange={(e) => set("stayPausedWhenSwitching", e.target.checked)} /></Row>
         <Row label="Disable video cache" hint="reads videos straight from disk instead of buffering ahead" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>
         <Row label="Restart legacy player every (s)" hint="the legacy player (mpvpaper) leaks memory over time, and restarting it now and then keeps that in check. 0 means never." rk="restartMpvpaperEverySeconds"><NumInput min={0} max={3600} value={g("restartMpvpaperEverySeconds", 600)} onChange={(v) => set("restartMpvpaperEverySeconds", v)} /></Row>
@@ -437,7 +438,7 @@ export const Settings = memo(function Settings() {
           <Row label="Minimum play time" hint={ROT_HINT.min + (sepScenes ? "" : ROT_HINT.minScenes)} rk="globalIntervalSeconds">
             <PlayTimeInput label="Minimum play time" zeroText="off" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
           <Row label="Maximum play time" hint={ROT_HINT.max + (sepScenes ? "" : ROT_HINT.maxScenes)} rk="globalMaxPlaySeconds">
-            <PlayTimeInput label="Maximum play time" zeroText="off" value={g("globalMaxPlaySeconds", 0)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
+            <PlayTimeInput label="Maximum play time" zeroText="off" min={g("globalIntervalSeconds", 0)} orZero value={g("globalMaxPlaySeconds", 0)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
           <Row label="Separate timing for scenes and pictures" rk="globalSeparateSceneTiming">
             <input type="checkbox" checked={sepScenes} onChange={(e) => set("globalSeparateSceneTiming", e.target.checked)} /></Row>
           {sepScenes && <Row label="Switch scenes and pictures after" rk="globalSwitchScenesAfterSeconds">

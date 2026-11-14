@@ -291,10 +291,10 @@ public static class LiascapePlayerProgram
             _exists = true; // /current.timed at once; the events confirm (or LoadNow clears it on failure)
             _key = spec.Key;
         }
-        return LiascapePlayerMedia.QueueEssential(() => LoadNow(spec, from, index, keepPause, unpause: !keepPause));
+        return LiascapePlayerMedia.QueueEssential(() => LoadNow(spec, from, index, unpause: !keepPause));
     }
 
-    private static void LoadNow(Spec spec, string from, int index, bool keepPause, bool unpause)
+    private static void LoadNow(Spec spec, string from, int index, bool unpause)
     {
         var s = SettingsService.Load();
         if (LiascapePlayerMedia.Ready(s) is not { } client)
@@ -329,7 +329,7 @@ public static class LiascapePlayerProgram
             lock (_lock) { _sentItems = J(props.First(x => x.prop == "items").value); _sentDefaults = J(spec.Defaults); _known = true; _gen = client.Generation; }
             if (unpause)
                 client.TryCall("set", new Dictionary<string, object?> { ["path"] = "player.paused", ["value"] = false }, LiascapePlayerClient.QuickMs);
-            var args = new Dictionary<string, object?> { ["id"] = Id, ["from"] = from, ["keep_pause"] = keepPause };
+            var args = new Dictionary<string, object?> { ["id"] = Id, ["from"] = from };
             if (from == "index") args["index"] = Math.Max(0, index);
             var res = client.Call("program.play", args);
             LiascapePlayerClient.Log($"program: {(exists ? "reloaded" : "loaded")} {spec.Items.Count} items ({spec.Key}, {spec.Mode}, {spec.Order}), play {from}"
@@ -448,15 +448,17 @@ public static class LiascapePlayerProgram
     }
 
     // ---- user switches (thin verbs; essential — a keybind's intent) -------------------------------------------
-    public static void Next(bool keepPause) => Verb("next", keepPause);
-    public static void Prev(bool keepPause) => Verb("prev", keepPause);
-    public static void Random(bool keepPause) => Verb("random", keepPause);
+    // A pause stays as the caller left it (PlayerHelper.BeforeUserSwitch): in a pause the player plays the
+    // switch's transition on the still frames and B stays paused on its first frame.
+    public static void Next() => Verb("next");
+    public static void Prev() => Verb("prev");
+    public static void Random() => Verb("random");
 
-    private static void Verb(string verb, bool keepPause) => LiascapePlayerMedia.QueueEssential(() =>
+    private static void Verb(string verb) => LiascapePlayerMedia.QueueEssential(() =>
     {
         var client = C;
         if (!client.SocketExists) return;
-        var args = new Dictionary<string, object?> { ["id"] = Id, ["keep_pause"] = keepPause };
+        var args = new Dictionary<string, object?> { ["id"] = Id };
         try
         {
             var res = client.Call("program." + verb, args);
@@ -469,7 +471,7 @@ public static class LiascapePlayerProgram
             Spec? model; int at;
             lock (_lock) { model = _model; at = _paths?.IndexOf(_path ?? "") ?? -1; }
             if (model == null) { LiascapePlayerClient.Log($"program.{verb}: the player has no rotation"); lock (_lock) _exists = false; return; }
-            LoadNow(model, at >= 0 ? "index" : "start", Math.Max(0, at), keepPause: false, unpause: false);
+            LoadNow(model, at >= 0 ? "index" : "start", Math.Max(0, at), unpause: false);
             try { client.Call("program." + verb, args); } catch (LiascapePlayerException e2) { LiascapePlayerClient.Log($"program.{verb} failed — {e2}"); }
         }
         catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"program.{verb} failed — {e}"); }
@@ -654,7 +656,7 @@ public static class LiascapePlayerProgram
             int at = path != null ? model.Items.FindIndex(i => SamePath(i.Path, path)) : -1;
             LiascapePlayerClient.Log($"program: liascape-player has no rotation any more (restarted without its snapshot) — loading it again"
                 + (at >= 0 ? $" at {Path.GetFileName(path)}" : " from the start"));
-            LoadNow(model, at >= 0 ? "index" : "start", Math.Max(0, at), keepPause: false, unpause: false);
+            LoadNow(model, at >= 0 ? "index" : "start", Math.Max(0, at), unpause: false);
             return;
         }
         int sent = 0;

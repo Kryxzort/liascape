@@ -7,7 +7,7 @@ import { NumInput } from "./NumInput";
 // Enter clamps and saves), one per unit; the total is clamped to `max` (99:59:59, the backend's own clamp).
 export const MAX_PLAY_SECONDS = 359999;
 
-export function PlayTimeInput({ value, onChange, disabled, label, zeroText, min = 0, max = MAX_PLAY_SECONDS }: {
+export function PlayTimeInput({ value, onChange, disabled, label, zeroText, min = 0, orZero, max = MAX_PLAY_SECONDS }: {
   value: number; onChange: (v: number) => void; disabled?: boolean;
   /** the group's accessible name; each field gets "<label> hours|minutes|seconds" */
   label: string;
@@ -15,27 +15,35 @@ export function PlayTimeInput({ value, onChange, disabled, label, zeroText, min 
   zeroText?: string;
   /** the smallest total (e.g. 1 where 0 would mean "never") */
   min?: number;
+  /** 0 is allowed too ("off"): the total is 0 or at least `min` (the maximum over the minimum) */
+  orZero?: boolean;
   max?: number;
 }) {
   const v = Math.max(0, value | 0);
   // a total under `min` (minutes zeroed before the seconds go in) is a DRAFT: shown, never saved. Clamped to `min` it
   // would save 1 s and switch the wallpaper at once; dropped, the next field would rebuild from the saved value (0 m +
-  // 4 s → 30:04). The draft belongs to the value it was typed over (a new value drops it), and leaving the group drops it.
-  // Guard: probe-matrix playlist:sceneTiming / global:sceneTiming (h + m zeroed first)
+  // 4 s → 30:04). The draft belongs to the value it was typed over (a new value drops it). Leaving the group drops it,
+  // except under `orZero`: there it saves `min`, the nearest total allowed (a maximum typed under the minimum becomes
+  // the minimum, as a numeric field clamps on blur; nothing switches sooner than the minimum would).
+  // Guard: probe-matrix playlist:sceneTiming / global:sceneTiming (h + m zeroed first); probe-settings playtime:*
   const [draft, setDraft] = useState<{ t: number; over: number } | null>(null);
   const shown = draft && draft.over === v ? draft.t : v;
   const H = Math.floor(shown / 3600), M = Math.floor((shown % 3600) / 60), S = shown % 60;
   const set = (h: number, m: number, s: number) => {
     const t = Math.min(max, h * 3600 + m * 60 + s);
-    if (t >= min) { setDraft(null); onChange(t); } else setDraft({ t, over: v });
+    if (t >= min || (orZero && t === 0)) { setDraft(null); onChange(t); } else setDraft({ t, over: v });
   };
   return (
     <div className="hms" role="group" aria-label={label}
-      onBlur={(e) => { if (draft && !e.currentTarget.contains(e.relatedTarget as Node | null)) setDraft(null); }}>
+      onBlur={(e) => {
+        if (!draft || e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDraft(null);
+        if (orZero && draft.over === v && min !== v) onChange(min);
+      }}>
       <NumInput min={0} max={99} disabled={disabled} value={H} aria-label={`${label} hours`} onChange={(n) => set(n, M, S)} /><span>h</span>
       <NumInput min={0} max={59} disabled={disabled} value={M} aria-label={`${label} minutes`} onChange={(n) => set(H, n, S)} /><span>m</span>
       <NumInput min={0} max={59} disabled={disabled} value={S} aria-label={`${label} seconds`} onChange={(n) => set(H, M, n)} /><span>s</span>
-      {zeroText && v === 0 && <span className="playtime-zero">{zeroText}</span>}
+      {zeroText && shown === 0 && <span className="playtime-zero">{zeroText}</span>}
     </div>
   );
 }
