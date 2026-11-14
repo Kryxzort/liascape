@@ -46,6 +46,7 @@ export const Library = memo(function Library() {
   const addManyToPlaylist = useStore((s) => s.addManyToPlaylist);
   const removeManyFromPlaylist = useStore((s) => s.removeManyFromPlaylist);
   const deleteFromSource = useStore((s) => s.deleteFromSource);
+  const unsubscribeKeep = useStore((s) => s.unsubscribeKeepWorkshop);
   const openExternal = useStore((s) => s.openExternal);
   const libFocus = useStore((s) => s.libFocus);
   const focusLib = useStore((s) => s.focusLib);
@@ -115,13 +116,27 @@ export const Library = memo(function Library() {
     return () => { if (sel.size) refreshPlayingStatus(); }; // clear selection status on unmount/tab switch
   }, [sel]); // eslint-disable-line
 
-  // when AutoImport is on, deleting a workshop item = delete-from-source (else it's re-imported).
+  // With auto-import on, a subscribed Workshop item has no plain Delete (the import would bring it back): its Delete is
+  // Unsubscribe = Delete from source (undoable; Undo subscribes again), on the card's button, the Delete key and the
+  // sidebar alike; a mixed selection unsubscribes those and deletes the rest. The library's own copy of one ("Unsubscribe
+  // without deleting") deletes like any local item. Guard: probe-steam side:unsub:*
+  const unsubs = (i: LibraryItem) => autoImport && !!i.workshopId && !!i.subscribed;
   const doTrash = (list: LibraryItem[]) => {
-    const ws = list.filter((i) => i.workshopId);
-    if (autoImport && ws.length) deleteFromSource(ws);
-    const plain = autoImport ? list.filter((i) => !i.workshopId) : list;
+    const ws = list.filter(unsubs);
+    if (ws.length) deleteFromSource(ws);
+    const plain = list.filter((i) => !unsubs(i));
     if (plain.length) trashItems(plain);
     setSel(new Set());
+  };
+  // "Unsubscribe without deleting" (the Unsubscribe tile's right-click): each subscribed Workshop item becomes the library's
+  // own copy, then unsubscribes (POST /workshop/unsubscribe-keep, one at a time); the rest of a selection is left alone
+  const doKeep = async (list: LibraryItem[]) => {
+    const ws = [...new Map(list.filter(unsubs).map((i) => [i.workshopId!, i])).values()];
+    if (!ws.length) return;
+    setSel(new Set());
+    setStatus(`Keeping ${ws.length === 1 ? ws[0].title : `${ws.length} wallpapers`} in your library…`, false);
+    for (const i of ws) await unsubscribeKeep(i.workshopId!, i.title);
+    if (ws.length > 1) setStatus(`Unsubscribing ${ws.length} wallpapers — kept in your library`);
   };
 
   // card actions on a *selected* card repeat to the whole selection.
@@ -217,6 +232,7 @@ export const Library = memo(function Library() {
             selected={sel.has(it.videoPath)}
             focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
+            unsub={unsubs(it)}
             autoPlayGifs={autoPlayGifs}
             onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
@@ -225,17 +241,20 @@ export const Library = memo(function Library() {
     {col.panel.value && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
     {sideItem && (() => {
       const targets = targetsFor(sideItem);
+      const unsubN = targets.filter(unsubs).length;
       return (
         <SidePanel kind="library" id={sideItem.videoPath} order={filtered.findIndex((i) => i.videoPath === sideItem.videoPath)} card={`lib-${sideItem.videoPath}`} closing={shown.closing} title={sideItem.title}
           sub={<SelectionNote n={targets.length} />} onClose={() => focusLib(null)}>
           <LibrarySide item={sideItem} targets={targets}
             playing={sideItem.videoPath === playingPath} keepCurrent={keepCurrent}
+            unsubN={unsubN} deleteN={targets.length - unsubN}
             showDeleteFromSource={!!sideItem.workshopId && !autoImport}
             globalVolume={gVol} globalSpeed={gSpd}
             onPlay={() => applyItem(sideItem.videoPath)}
             onReveal={() => openExternal({ path: sideItem.videoPath, reveal: true, isScene: sideItem.isScene, workshopId: sideItem.workshopId, copiedSceneDir: sideItem.copiedSceneDir })}
             onTrash={() => { focusLib(null); doTrash(targets); }}
-            onDeleteSource={() => { focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }} />
+            onDeleteSource={() => { focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }}
+            onKeep={() => doKeep(targets)} />
         </SidePanel>
       );
     })()}

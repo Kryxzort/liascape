@@ -3,6 +3,7 @@ import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
 import { useStore } from "../store";
 import { shortDownloadStatus } from "./downloadStatus";
+import { isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions (docs/decisions.md § "Left click does the tab's main action, right click opens the item
@@ -18,6 +19,7 @@ export const Card = memo(function Card({
   onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void; onDownload: (w: Wallpaper) => void;
 }) {
   const [hover, setHover] = useState(false);
+  const sub = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
   const active = hover || (autoPlayGifs && !!w.animatedThumbnailUrl);
   // keep the gif mounted once activated → re-hover never restarts it (just unhides the live frame)
   const [mounted, setMounted] = useState(false);
@@ -61,15 +63,16 @@ export const Card = memo(function Card({
             `.dl-btn` — a hollow outline gets lost on bright thumbnails). A click on the card opens the sidebar. */}
         {/* not on a card the library already has: it would only apply the library's copy — double-click / Enter / the sidebar's Apply do that */}
         {!downloading && !inLibrary && (
-          <button className="dl-btn" title="Download & apply" onClick={(e) => { e.stopPropagation(); onDownload(w); }}
-            onDoubleClick={(e) => e.stopPropagation()}>
+          <button className="dl-btn" title={sub ? "Subscribe & apply" : "Download & apply"} data-dl-sub={sub || undefined}
+            onClick={(e) => { e.stopPropagation(); onDownload(w); }} onDoubleClick={(e) => e.stopPropagation()}>
             {/* two parts, so the arrow can drop into its tray on hover (components/iconMotion.ts). The arrow + tray span y 2.6–21.1
-                (strokes included): the viewBox is shifted so THEIR centre is the box centre, not the paths' grid's.
-                Guard: probe-steam look:dlCentre, probe-sidebar look:dlHover */}
+                (strokes included): the viewBox is shifted so THEIR centre is the box centre, not the paths' grid's. Subscribe
+                (components/subscribeMode.ts) draws the sidebar's cloud-download the same way: the cloud is the tray, the
+                arrow drops out of it. Guard: probe-steam look:dlCentre, steam:subMerge:labels, probe-sidebar look:dlHover */}
             <svg className="dl-glyph" viewBox="0 -0.15 24 24" fill="none" aria-hidden>
-              <path className="dl-arrow" d="M19 9h-4V3H9v6H5l7 7 7-7z"
+              <path className="dl-arrow" d={sub ? "M15.3 16.4h-2.2V11h-2.2v5.4H8.7l3.3 4.3z" : "M19 9h-4V3H9v6H5l7 7 7-7z"}
                 stroke="currentColor" strokeWidth="0.85" strokeLinejoin="round" strokeLinecap="round" />
-              <path className="dl-tray" d="M3.5 15.5v2.5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-2.5"
+              <path className="dl-tray" d={sub ? "M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284" : "M3.5 15.5v2.5a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-2.5"}
                 fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
             </svg>
           </button>

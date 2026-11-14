@@ -4,6 +4,7 @@ import {
   type LibraryOp, type CacheCleared, type WsList, type WsListSort, ApiError,
 } from "../api/client";
 import { eventsOpened } from "../api/events";
+import { isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
@@ -52,6 +53,13 @@ export const filterOf = (s: State, scope: FilterScope) => scope === "library" ? 
 // PERF: a library re-read (closing the item sidebar re-reads it, a sync, a WS reopen) keeps every item object whose content
 // didn't change — and the whole array when nothing did — so the grid's memo'd cards and the playlist bar's items don't all
 // re-render for a reload that changed nothing. Guard: probe-layout perf:sidebar (close).
+// "Unsubscribing X in 5 s — removed from your library; Undo keeps it": the wait is the backend's Undo window
+// (POST /workshop/unsubscribe, /workshop/delete-from-source → unsubscribeInMs). Guard: probe-steam side:unsub:names
+function unsubStatus(what: string, inMs: number | undefined, removed: boolean): string {
+  const when = inMs ? ` in ${Math.round(inMs / 1000)} s` : "";
+  return `Unsubscribing ${what}${when}${removed ? ` — removed from your library${inMs ? "; Undo keeps it" : ""}` : ""}`;
+}
+
 function keepSame(prev: LibraryItem[], next: LibraryItem[]): LibraryItem[] {
   const old = new Map(prev.map((i) => [i.videoPath, i]));
   let same = prev.length === next.length;
@@ -189,7 +197,7 @@ interface State {
   importFile(path: string, title: string): Promise<void>;
   // steam / workshop
   loadSteam(): Promise<void>; startQr(): Promise<void>; cancelQr(): Promise<void>; signoutSteam(): Promise<void>;
-  deleteFromSource(items: LibraryItem[]): Promise<void>; drain(): Promise<void>;
+  deleteFromSource(items: LibraryItem[]): Promise<void>;
   setQrPng(png: string): void; onSignedIn(s: State["steam"]): void;
   openPwLogin(): void; startPwLogin(username: string, password: string): Promise<void>; submitPwCode(code: string): Promise<void>;
   cancelPwLogin(): Promise<void>; onPwCode(p: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean }): void;
@@ -230,7 +238,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
   autoThrottleScenes: true, limitVramPerScene: false, sceneVramLimitMib: 1536, vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false, autoPlayVideoThumbs: false, preferVideoThumbs: false, videoPreviewQuality: "mid", glows: true, textShadow: false, morphs: true,
-  copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: false, sceneTransitionDelayMs: 1000, sceneMonitors: [],
+  copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   theme: "Catppuccin Mocha",
   // pause when covered, the playlist start, while parked
@@ -423,7 +431,9 @@ export const useStore = create<State>((set, get) => ({
       if ("skipped" in item && item.skipped) { get().setStatus(`Skipped: ${w.title}`); return; } // the Steam to-do's Skip / Stop
       if ("error" in item && item.error) { get().setError(`Download failed: ${item.error}`); return; }
       await get().loadLibrary();
-      get().setStatus(apply ? `Applied: ${w.title}` : `Downloaded: ${w.title}`);
+      // auto-import on + the "subscribe" mode: the download was the subscription (components/BrowseSide.tsx subIsDownload)
+      const sub = subscribeIsDownload(get().settings) && isWorkshopItem(w);
+      get().setStatus(apply ? `Applied: ${w.title}` : `${sub ? "Subscribed" : "Downloaded"}: ${w.title}`);
     } catch (e) {
       if (ctrl.signal.aborted) get().setStatus(`Cancelled: ${w.title}`);
       else get().setError(`Download failed: ${(e as Error).message}`); // error modal
@@ -585,13 +595,12 @@ export const useStore = create<State>((set, get) => ({
   async startQr() { set({ qrOpen: true, qrPng: null }); await api.qrStart(); },
   async cancelQr() { await api.qrCancel(); set({ qrOpen: false, qrPng: null }); },
   async signoutSteam() { await api.signout(); await get().loadSteam(); },
+  // the unsubscribe waits out the backend's Undo window (no drain from here: the backend starts it, the window closed or not)
   async deleteFromSource(items) {
     if (items.length === 0) return;
-    await api.deleteFromSource(items); await get().loadLibrary();
-    get().setStatus(`Unsubscribing ${items.length === 1 ? items[0].title : `${items.length} items`} — removed from your library`);
-    get().drain();
+    const r = await api.deleteFromSource(items); await get().loadLibrary();
+    get().setStatus(unsubStatus(items.length === 1 ? items[0].title : `${items.length} items`, r.unsubscribeInMs, true));
   },
-  async drain() { set({ unsub: { done: 0, total: 0, currentId: "", active: true } }); await api.drain(); },
   setQrPng(png) { set({ qrPng: png }); },
   onSignedIn(s) { set({ steam: s, qrOpen: false, qrPng: null, pwLogin: null }); get().setStatus("Signed in to Steam"); },
   openPwLogin() { set({ pwLogin: { step: "credentials", hint: null, retry: false, busy: false, error: null } }); },
@@ -651,7 +660,7 @@ export const useStore = create<State>((set, get) => ({
       const r = await api.workshopUnsubscribe(id, title);
       // an item in the library went to the trash like Delete from source — the library + the status bar's Undo follow
       if (r.inLibrary) await get().loadLibrary();
-      get().setStatus(r.inLibrary ? `Unsubscribing ${title} — removed from your library` : `Unsubscribing ${title}`);
+      get().setStatus(unsubStatus(title, r.unsubscribeInMs, r.inLibrary));
     } catch (e) { get().setStatus(`Unsubscribing failed: ${(e as Error).message}`); }
     get().bumpWsState();
   },

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace Liascape.Helpers;
@@ -72,6 +73,29 @@ public static class WorkshopUnsubQueue
         }
     }
 
+    // The Undo window: an id queued here reaches Steam only once its hold has passed (Web/SteamOps.DrainAfterUndoWindow); an
+    // Undo inside it pulls the id out of pending, so Steam is never told. In memory only: after a backend restart the next
+    // drain takes whatever it finds pending.
+    private static readonly Dictionary<string, DateTime> _holdUntil = new(StringComparer.Ordinal);
+
+    public static void Hold(IEnumerable<string> ids, TimeSpan d)
+    {
+        lock (_gate) { var until = DateTime.UtcNow + d; foreach (var id in ids) _holdUntil[id] = until; }
+    }
+
+    // an explicit drain (SteamOps.DrainNow) doesn't wait out the window
+    public static void ReleaseHolds() { lock (_gate) _holdUntil.Clear(); }
+
+    // the pending ids a drain may send now: past their Undo window
+    public static List<string> SnapshotDue()
+    {
+        lock (_gate)
+        {
+            var now = DateTime.UtcNow;
+            return Load().Pending.Where(id => !_holdUntil.TryGetValue(id, out var t) || t <= now).ToList();
+        }
+    }
+
     // Undo → pull ids out of pending (no unsubscribe ran for them).
     public static void RemovePending(IEnumerable<string> ids)
     {
@@ -106,6 +130,7 @@ public static class WorkshopUnsubQueue
         {
             var s = Load();
             bool done = s.Blocked.Contains(id) && !s.Pending.Contains(id);
+            _holdUntil.Remove(id);
             if (s.Pending.Remove(id) | s.Blocked.Remove(id)) Save(s);
             return done;
         }

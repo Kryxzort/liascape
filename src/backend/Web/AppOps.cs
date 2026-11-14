@@ -442,13 +442,16 @@ public static class AppOps
         if (startNow != PlayerHelper.EffectiveStart(g, prevP?.Settings)) LiascapePlayerProgram.SetStartMode(startNow);
     }
 
-    // Delete from source — enqueue the (durable) unsubscribe + soft-delete the entries.
+    // Delete from source — enqueue the (durable) unsubscribe + soft-delete the entries; the unsubscribe reaches Steam after its
+    // Undo window (SteamOps.DrainAfterUndoWindow).
     public static string DeleteFromSource(List<LibraryItem> items)
     {
-        var ids = items.Where(i => i.WorkshopId != null).Select(i => i.WorkshopId!).Distinct();
+        var ids = items.Where(i => i.WorkshopId != null).Select(i => i.WorkshopId!).Distinct().ToList();
         foreach (var i in items) if (i.WorkshopId != null) SteamTodo.RememberTitle(i.WorkshopId, i.Title); // its Steam to-do entry's name
         WorkshopUnsubQueue.AddPending(ids);
-        return Trash(items);
+        var batch = Trash(items);
+        if (ids.Count > 0) SteamOps.DrainAfterUndoWindow(ids);
+        return batch;
     }
 
     // Soft-delete to trash. The items leave the playlist too (an undo puts them back where they were) —

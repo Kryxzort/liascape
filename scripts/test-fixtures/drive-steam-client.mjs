@@ -316,6 +316,37 @@ out(ru.status === 200 && bu?.inLibrary === false && !fs.existsSync(`${T}/steamli
 out(st["760000002"]?.subscribed === false && st["760000002"].pending === null && st["760000002"].onDisk === true,
   "…state: not subscribed while its folder lingers (Steam deletes it later)", JSON.stringify(st["760000002"]));
 
+// The Undo window (SteamOps.UnsubUndoWindow, 5 s): a library item's Unsubscribe reaches Steam only after it. An Undo inside it
+// never touches Steam: no unsubscribe, no re-subscribe (the fake client's helpers.log gets no new line)
+const wid = "740000001", wSub = `${T}/steamlib/sub-${wid}`;
+ud = await undoDepth(); unsub.length = 0;
+let hw0 = helpersLog().length;
+ru = await post("/workshop/unsubscribe", { workshopId: wid, title: "ws-740000001" });
+bu = await ru.json().catch(() => null);
+await sleep(2000);
+const at2 = { sub: fs.existsSync(wSub), queued: (await queue()).includes(wid), inLib: !!(await item(wid)) };
+await post("/library/undo");
+await sleep(5000); // well past the window
+out(bu?.inLibrary === true && bu.unsubscribeInMs === 5000 && at2.sub && at2.queued && !at2.inLib && fs.existsSync(wSub) && !(await queue()).includes(wid)
+  && !!(await item(wid)) && helpersLog().length === hw0 && (await undoDepth()) === ud,
+  "Undo window: Undo 2 s after an Unsubscribe — back in the library, still subscribed, off the queue, Steam never asked",
+  `${JSON.stringify(bu)} at 2 s ${JSON.stringify(at2)} | now sub ${fs.existsSync(wSub)} queued ${(await queue()).includes(wid)} helpers +${helpersLog().length - hw0}`);
+// no Undo: nothing at ~3 s, the unsubscribe after the window (the delete-from-source route the Library uses: the same window)
+unsub.length = 0; hw0 = helpersLog().length;
+const tU = Date.now();
+await post("/workshop/delete-from-source", { items: [await item(wid)] });
+await sleep(3000);
+const at3 = { sub: fs.existsSync(wSub), helpers: helpersLog().length - hw0 };
+for (let i = 0; i < 150 && fs.existsSync(wSub); i++) await sleep(100);
+const tGone = Date.now() - tU;
+await unsubDone();
+out(at3.sub && at3.helpers === 0 && !fs.existsSync(wSub) && tGone >= 5000,
+  "Undo window: no Undo — still subscribed at 3 s, then unsubscribed through the Steam client after 5 s", `at 3 s ${JSON.stringify(at3)}, unsubscribed after ${tGone} ms`);
+await post("/library/undo");
+for (let i = 0; i < 100 && !fs.existsSync(wSub); i++) await sleep(100);
+out(!!(await item(wid)) && fs.existsSync(wSub), "…Undo after the window: back in the library and subscribed again", `in library ${!!(await item(wid))}, sub ${fs.existsSync(wSub)}`);
+await sleep(1500); // the re-subscribe's helper lets go
+
 // Unsubscribe of a library item = Delete from source: trashed + unsubscribed, undoable; Undo subscribes it again
 ud = await undoDepth();
 unsub.length = 0;
@@ -338,8 +369,8 @@ const kLink = kIt ? kIt.videoPath.replace(/\/[^/]*$/, "") : "", kSteam = `${T}/s
 const filesOf = (d) => (fs.existsSync(d) ? fs.readdirSync(d).sort().map((f) => `${f}:${fs.statSync(`${d}/${f}`).size}`).join(",") : null);
 const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
 const steamBefore = filesOf(kSteam);
-out(!!kIt && isLink(kLink) && /\/library\/local\/740000003$/.test(kLink) && fs.existsSync(`${T}/steamlib/sub-${kid}`) && !!steamBefore,
-  "unsubscribe-keep setup: a subscribed library item linked into Steam's folder (local/<id>)", `${kLink} link ${isLink(kLink)} files ${steamBefore}`);
+out(!!kIt && isLink(kLink) && /\/library\/local\/740000003$/.test(kLink) && fs.existsSync(`${T}/steamlib/sub-${kid}`) && !!steamBefore && kIt.subscribed === true,
+  "unsubscribe-keep setup: a subscribed library item linked into Steam's folder (local/<id>), /library says subscribed", `${kLink} link ${isLink(kLink)} files ${steamBefore} subscribed ${kIt?.subscribed}`);
 // the copy can't be made (its staging folder, under the library's trash, unwritable): an error, the link and the subscription
 // as they were, nothing queued, no file gone
 const trashDir = kLink.replace(/\/local\/[^/]*$/, "/.trash");
@@ -366,6 +397,8 @@ out(filesOf(kSteam) === steamBefore, "…Steam's own folder untouched by us (Ste
 out(!!kAfter && Math.abs(Date.parse(kAfter.addedAt) - Date.parse(kIt.addedAt)) < 1000, "…its date added kept (the copy's files are new)", `${kIt?.addedAt} → ${kAfter?.addedAt}`);
 st = await state([kid]);
 out(st[kid]?.subscribed === false && st[kid].inLibrary === true && st[kid].pending === null, "…state: not subscribed, still in the library", JSON.stringify(st[kid]));
+// the Library's Delete of it is a plain one from now on (views/Library.tsx doTrash reads /library `subscribed`)
+out(kAfter?.subscribed === false, "…/library: no longer subscribed (the library's own copy)", String(kAfter?.subscribed));
 // Steam removes its folder: the item stays and its file is still there; a library sync doesn't drop it
 fs.rmSync(kSteam, { recursive: true });
 await post("/library/sync");
@@ -380,12 +413,27 @@ out(rk.status === 200 && bk?.kept === 0 && filesOf(kLink) === steamBefore && !!(
 const rkb = await post("/workshop/unsubscribe-keep", { workshopId: "1;rm", title: "x" });
 out(rkb.status === 400, "unsubscribe-keep: a non-digit id → 400", String(rkb.status));
 
+// Subscribe the library's own copy again (the Library sidebar's Subscribe): with auto-import on, Steam's copy takes the own
+// copy's place at the same path once delivered — one library item, a link into Steam's folder again, subscribed
+// (WorkshopSubOps.AfterSubscribeAsync → LibraryService.RelinkOwnCopies)
+await post("/settings", { autoAddWeWallpapersToLibrary: true });
+const kBefore = await item(kid), wasOwn = !isLink(kLink) && fs.existsSync(kLink);
+rs = await post("/workshop/subscribe", { workshopId: kid, title: "ws-740000003" });
+bs = await rs.json().catch(() => null);
+for (let i = 0; i < 150 && !isLink(kLink); i++) await sleep(100);
+const kNow = (await lib()).filter((i) => i.workshopId === kid);
+out(wasOwn && rs.status === 200 && bs?.subscribed === true && !!kBefore && kBefore.subscribed === false && isLink(kLink) && kNow.length === 1
+  && kNow[0].videoPath === kBefore.videoPath && kNow[0].subscribed === true && fs.existsSync(kNow[0].videoPath),
+  "subscribing its own copy again (auto-import on): Steam's copy takes its place at the same path — one item, a link, subscribed",
+  `own before ${wasOwn} ${rs.status} ${JSON.stringify(bs)} | link ${isLink(kLink)} items ${JSON.stringify(kNow.map((i) => [i.videoPath, i.subscribed]))}`);
+await post("/settings", { autoAddWeWallpapersToLibrary: false });
+
 // "Open in the Steam app" (steampage): the toggle goes through the Steam to-do — never the Steam client
 await setMode("steampage");
 h0 = helpersLog().length; todo.length = 0;
 n0 = urls().length;
 ru = await post("/workshop/unsubscribe", { workshopId: "740000002", title: "ws-740000002" });
-t = await waitTodo((x) => x?.current?.id === "740000002");
+t = await waitTodo((x) => x?.current?.id === "740000002", 9000); // after the Undo window
 st = await state(["740000002"]);
 out(t?.action === "unsubscribe" && urls().slice(n0).includes("steam://url/CommunityFilePage/740000002") && st["740000002"]?.pending === "unsubscribe",
   "Unsubscribe (Open in the Steam app): a Steam to-do unsubscribe entry, its page opened, state pending unsubscribe", `${JSON.stringify(t)} | ${JSON.stringify(st["740000002"])}`);

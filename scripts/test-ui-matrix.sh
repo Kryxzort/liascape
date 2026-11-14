@@ -313,7 +313,8 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalSwitchWhenVideoEnds":false,"GlobalMaxPlaySeconds":0,
- "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"advanced","RestartMpvpaperEverySeconds":0}
+ "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"advanced","RestartMpvpaperEverySeconds":0,
+ "AutoAddWeWallpapersToLibrary":false}
 EOF
 
 # A private PulseAudio for the auto-mute cells: its own socket under $XDG_RUNTIME_DIR/pulse, ONE null sink (mx_null),

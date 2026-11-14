@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Monitor, Star, Users, HardDrive, User, ExternalLink, Download, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
+import { Monitor, Star, Users, HardDrive, User, ExternalLink, Download, CloudDownload, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
 import { useStore } from "../store";
 import { SubToggle } from "./SubToggle";
+import { isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
 import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
@@ -58,11 +59,16 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const globalVolume = useStore((s) => (s.settings?.volume as number) ?? 100);
   const wall = libItem?.volumeOverride ?? globalVolume;
   const downloading = progress !== undefined;
-  // a Workshop download's step in words (WS download-progress `status`) — e.g. "Not signed in to Steam here — click Subscribe in
-  // Steam, then it downloads by itself…" while it waits on the Steam app (WorkshopDownloader)
+  // a Workshop download's step in words (WS download-progress `status`) — e.g. "Click Subscribe in Steam, then it downloads by
+  // itself…" while it waits on the Steam app (WorkshopDownloader)
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
+  // auto-import on + the "subscribe" download mode: a subscription lands in the library anyway, so Download IS Subscribe —
+  // the buttons say so, and the subscription card shows only once subscribed (SubToggle only="subscribed"). The other modes
+  // (the Steam app / page, a steamcmd copy) keep Download and the card. Guard: probe-steam steam:subMerge:*
+  const subIsDownload = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
+  const GetIcon = subIsDownload ? CloudDownload : Download;
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
   const tags = sideTags(w.tags, { resolution: !!w.resolution });
   const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
@@ -103,13 +109,13 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             <button className="btn accent ico side-go" ref={magnetRef} onClick={() => onApplyLib(libItem.videoPath)}><Play size={15} fill="currentColor" /> Apply</button>
           ) : (
             <>
-              <button className="btn accent ico side-go" ref={magnetRef} onClick={() => onDownload(true)}><span className="side-dl-ico"><Download size={16} /></span> Download &amp; Apply</button>
-              <button className="btn ghost ico side-go" onClick={() => onDownload(false)}><span className="side-dl-ico"><Download size={15} /></span> Download</button>
+              <button className="btn accent ico side-go" data-side-get="apply" ref={magnetRef} onClick={() => onDownload(true)}><span className="side-dl-ico"><GetIcon size={16} /></span> {subIsDownload ? "Subscribe" : "Download"} &amp; Apply</button>
+              <button className="btn ghost ico side-go" data-side-get="only" onClick={() => onDownload(false)}><span className="side-dl-ico"><GetIcon size={15} /></span> {subIsDownload ? "Subscribe" : "Download"}</button>
             </>
           )}
         </div>
         {/* a Workshop item's subscription (Browse > Wallpaper Engine (Local) and (Workshop)) — Subscribe / Unsubscribe */}
-        {w.workshopId && <SubToggle id={w.workshopId} title={w.title} weLocal={!web} />}
+        {w.workshopId && <SubToggle id={w.workshopId} title={w.title} weLocal={!web} only={subIsDownload ? "subscribed" : undefined} likely={!!libItem} />}
         {w.description ? (
           <SideSection icon={<Info size={15} />} title="About">
             <p className="desc">{w.description}</p>

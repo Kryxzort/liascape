@@ -186,6 +186,11 @@ export interface LibraryItem {
   resolution: string | null; ageRating: string | null; youtubeUrl: string | null; pageUrl: string | null;
   authorName: string | null; description: string | null; fileSizeBytes: number | null;
   subscriptions: number | null; favorites: number | null; tags: string[] | null;
+  // API: GET /library only (WorkshopSubOps.MarkSubscribed): a Workshop item Steam keeps subscribed; false for the
+  // library's own copy ("Unsubscribe without deleting") and a copy Steam doesn't have; absent for a non-Workshop item
+  subscribed?: boolean | null;
+  // Steam's servers said there's no public item with its id (removed, private): nothing to subscribe to
+  offWorkshop?: boolean;
   // a scene's loudness under liascape-player (its current audio configuration): the applied LUFS, estimated (the
   // offline estimate — not played in this configuration yet) or measured (loudnessSeconds of audible play), the
   // estimate's confidence and, when low, its first note. null for a video / nothing known.
@@ -311,8 +316,9 @@ export const api = {
   steamLogin: (username: string, password: string) => jpost("/steam/login", { username, password }),
   steamLoginCode: (code: string) => jpost("/steam/login/code", { code }),
   steamLoginCancel: () => jpost("/steam/login/cancel"),
-  deleteFromSource: (items: LibraryItem[]) => jpost<{ batch: string }>("/workshop/delete-from-source", { items }),
-  drain: () => jpost("/workshop/drain"),
+  // API: the unsubscribe reaches Steam after `unsubscribeInMs` (the backend's Undo window, SteamOps.UnsubUndoWindow); an Undo
+  // before then keeps the subscription untouched
+  deleteFromSource: (items: LibraryItem[]) => jpost<{ batch: string; unsubscribeInMs?: number }>("/workshop/delete-from-source", { items }),
   workshopQueue: () => jget<{ pending: string[]; hasPending: boolean }>("/workshop/queue"),
   // API: "Open on Steam" → the Steam CLIENT (steam://url/CommunityFilePage/<id>, its own route — /open is http(s) only);
   // ok:false = the Steam app couldn't be opened → the caller falls back to the https page (openOnSteam below)
@@ -322,7 +328,7 @@ export const api = {
   workshopSubscribe: (workshopId: string, title: string) =>
     jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),
   workshopUnsubscribe: (workshopId: string, title: string) =>
-    jpost<{ inLibrary: boolean; batch: string | null }>("/workshop/unsubscribe", { workshopId, title }),
+    jpost<{ inLibrary: boolean; batch: string | null; unsubscribeInMs?: number }>("/workshop/unsubscribe", { workshopId, title }),
   // the Browse sidebar's creator, favourite and comments; favourite / post without a sign-in → ApiError.signIn
   workshopCreator: (id: string, owner?: string | null) =>
     jget<WsCreator>(`/workshop/creator?id=${encodeURIComponent(id)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}`),

@@ -86,10 +86,9 @@ of the allowed ages, which drops the few hundred items with no age tag; other gr
 `WorkshopTags.Build`.
 
 ### Offer four Workshop download modes, the user's choice — 2026-11-11
-`steamapp`, `steampage`, `subscribe` (default) and `steamcmd`. Owner: "should have 4 options not 3, the 4th being the one
-which opens the wallpaper in your app" — it replaced an automatic scheme where opening the page was only the sign-in's
-silent fallback. A mode never changes method on its own; the to-do's "Let the Steam app do all N" is the one explicit
-switch. `.claude/rules/backend/sources-steam.md` § Workshop downloads.
+`steamapp`, `steampage`, `subscribe` (default), `steamcmd`: the owner wanted a fourth that opens the item in the Steam app,
+before only the sign-in's silent fallback. No mode switches method by itself (`subscribe` without a usable sign-in fails,
+saying why: 2026-11-14); the to-do's "Let the Steam app do all N" is the one explicit switch. `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
 `libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a copy

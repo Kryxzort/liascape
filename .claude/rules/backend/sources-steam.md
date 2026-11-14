@@ -55,7 +55,7 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Log lines name the step, never the account name.
 
 ## Workshop downloads (`Helpers/WorkshopDownloader.cs`, `WorkshopDownloadMode`)
-- Modes: `steamapp` (the running Steam client through `Helpers/SteamClientUgc.cs`), `steampage` (always the item's page in the Steam app), `subscribe` (the sign-in; without a usable one it falls back to the page), `steamcmd`.
+- Modes: `steamapp` (the running Steam client through `Helpers/SteamClientUgc.cs`), `steampage` (always the item's page in the Steam app), `subscribe` (the sign-in; a download or Subscribe without a usable one fails with why and where to sign in, `WorkshopDownloader.SignInFailure`, never the page; the unsubscribe drain still opens pages), `steamcmd`. Guard: `test-steam-signin.sh` § 2.
 - `steamapp` never switches method: when the Steam client can't do it (download, Subscribe, unsubscribe drain, undo's re-subscribe) it fails with `SteamClientUgc.FailureMessage` and leaves unsubscribes queued. Only the to-do's "Let the Steam app do all N" is the user's explicit switch. Guard: `test-steam-signin.sh` § 3.
 - `SteamClientUgc` loads the Steam client's own `steamclient.so` in a short-lived child (`liascape-backend steam-ugc …`); never ship or load Valve's `libsteam_api.so`. One child at a time app-wide (`SteamClientUgc.Turn`); `ProbeAsync` is exempt.
 - Every Steam page the user must click goes through ONE app-wide queue, one page at a time: the Steam to-do (`Web/SteamTodo.cs`). Never open several pages at once or the subscriptions list.

@@ -50,11 +50,13 @@ public static class WorkshopDownloader
     /// A download's status while it waits for its page in the Steam to-do (Web/SteamTodo.cs) — the card says "In the Steam to-do".
     public const string InSteamTodo = "In the Steam to-do — its page opens in Steam when it's its turn…";
 
-    // Real Steam subscription. Signed in here: the community AJAX endpoint (the same call the website's Subscribe button
-    // makes). Not (no sign-in, or one Steam turned down — never a dead end for a user without a mobile guard): the item's
-    // page opens in the Steam app (steam://url/CommunityFilePage/<id>) and the user clicks Subscribe
-    // there — status says so and why. Either way Steam then syncs + auto-updates the item like any normal subscription,
-    // and the running Steam client downloads it to a workshop/content/431960 dir which we poll for.
+    // Real Steam subscription. "Subscribe with Steam login": the community AJAX endpoint (the same call the website's Subscribe
+    // button makes) with the sign-in; without a usable one (none, one Steam signed out or couldn't use, a subscribe Steam
+    // turned down) it FAILS with why and what to do (SignInFailure) — never the item's page instead: that is the "Open in the
+    // Steam app" mode's whole job, the user's pick (docs/decisions.md § "Offer four Workshop download modes, the user's
+    // choice"). "Open in the Steam app": the item's page (steam://url/CommunityFilePage/<id>) through the Steam to-do, the user
+    // clicks Subscribe there. Either way Steam then syncs + auto-updates the item like any normal subscription, and the running
+    // Steam client downloads it to a workshop/content/431960 dir which we poll for. Guard: test-steam-signin.sh § 2
     private static async Task<string> AcquireViaSubscribeAsync(
         string workshopId,
         string? title,
@@ -80,38 +82,48 @@ public static class WorkshopDownloader
             throw new InvalidOperationException("Steam installed it, but there's no video or scene in it — a web or application wallpaper can't play here.");
         }
 
-        string? why = null; // set = no usable sign-in: subscribe in the Steam app, and this is why
-        string? cookie = null;
+        string? why = null; // set = the item's page in the Steam app ("Open in the Steam app"), and this is why
         // "Open in the Steam app" (docs/decisions.md § "Offer four Workshop download modes, the user's choice"): always the
         // item's page in Steam — never the sign-in, even when there is one
         bool pageMode = settings.WorkshopDownloadMode == "steampage";
         if (pageMode) why = "Set to open items in the Steam app";
-        else try
+        else
         {
-            cookie = await SteamAuthService.GetCookieAsync(settings, ct);
-            if (string.IsNullOrWhiteSpace(cookie)) why = "Not signed in to Steam here";
-        }
-        catch (SteamSignInRejectedException) { why = "Steam signed this app out"; }
-        catch (Exception e) when (e is not OperationCanceledException)
-        { why = "The Steam sign-in couldn't be used"; Console.WriteLine($"workshop: {workshopId}: the sign-in failed ({e.Message}) — subscribing in the Steam app"); }
-
-        if (cookie != null)
-        {
+            string? failed = null, cookie = null;
             try
             {
-                progress?.Report((-1, "Subscribing on Steam…"));
-                await SubscribeAsync(workshopId, cookie, subscribe: true, ct);
+                cookie = await SteamAuthService.GetCookieAsync(settings, ct);
+                if (string.IsNullOrWhiteSpace(cookie)) failed = SignInFailure.NotSignedIn;
             }
-            // rate-limited: the Steam app's page is steamcommunity.com from this same connection — it would be refused too
-            catch (SteamRateLimitException) { throw; }
-            catch (InvalidOperationException e)
-            { why = "Steam turned down the subscribe request"; Console.WriteLine($"workshop: {workshopId}: {e.Message} — subscribing in the Steam app"); }
+            catch (SteamSignInRejectedException) { failed = SignInFailure.SignedOut; }
+            catch (Exception e) when (e is not OperationCanceledException)
+            { failed = SignInFailure.Unusable; Console.WriteLine($"workshop: {workshopId}: the sign-in failed ({e.Message})"); }
+            if (failed == null)
+            {
+                try
+                {
+                    progress?.Report((-1, "Subscribing on Steam…"));
+                    await SubscribeAsync(workshopId, cookie!, subscribe: true, ct);
+                }
+                catch (SteamRateLimitException) { throw; }
+                catch (InvalidOperationException e)
+                { failed = e.Message; } // Steam rejected it: its own words say what to do (SubscribeAsync)
+            }
+            // no usable sign-in, but Steam already has it on disk (subscribed earlier): nothing to subscribe, it imports
+            if (failed != null && alreadyHave)
+                foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
+                    if (IsWorkshopDirReady(dir)) { WorkshopUnsubQueue.Unblock(workshopId); return dir; }
+            if (failed != null)
+            {
+                Console.WriteLine($"workshop: {workshopId}: not subscribed — {failed}");
+                throw new InvalidOperationException(failed);
+            }
         }
         // Deliberately (re-)subscribing → unblock it (drop from pending + blocked).
         WorkshopUnsubQueue.Unblock(workshopId);
 
-        // no sign-in, but Steam already has it on disk (subscribed earlier, or a steamcmd copy): nothing to click
-        if (why != null && alreadyHave)
+        // "Open in the Steam app", but Steam already has it on disk (subscribed earlier): nothing to click
+        if (pageMode && alreadyHave)
             foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
                 if (IsWorkshopDirReady(dir)) return dir;
 
@@ -124,9 +136,8 @@ public static class WorkshopDownloader
         {
             todo = SteamTodo.EnqueueSubscribe(workshopId, title, hasDownload: true, out bool openFailed);
             if (openFailed)
-                throw new InvalidOperationException($"{why}, and the Steam app couldn't be opened (xdg-open steam://…). Sign in under Settings → Getting Workshop wallpapers, or open the item on Steam and subscribe there.");
-            waitingFor = pageMode ? "Click Subscribe in Steam, then it downloads by itself…"
-                                  : $"{why} — click Subscribe in Steam, then it downloads by itself…";
+                throw new InvalidOperationException($"The Steam app couldn't be opened (xdg-open steam://…). Start Steam, or pick another way to get Workshop wallpapers under {SignInFailure.Where}.");
+            waitingFor = "Click Subscribe in Steam, then it downloads by itself…";
             Console.WriteLine($"workshop: {workshopId}: {why} — in the Steam to-do, waiting for the download");
         }
 
@@ -182,12 +193,21 @@ public static class WorkshopDownloader
                     throw new TimeoutException(why == null
                         ? $"Subscribed to {workshopId} but Steam hasn't downloaded it yet. Make sure Steam is running and signed in."
                         : $"Steam didn't download {workshopId} within 10 minutes. Click Subscribe on the page Steam opened (Steam has to be " +
-                          "running and signed in), then download it again — or sign in under Settings → Getting Workshop wallpapers.");
+                          "running and signed in), then download it again.");
                 if (wake == null) await Task.Delay(pollMs, ct);
                 else await Task.WhenAny(Task.Delay(pollMs, ct), wake); // a Skip / its turn wakes it at once
             }
         }
         finally { if (entry != null) SteamTodo.Finish(entry, delivered); }
+    }
+
+    /// What a "Subscribe with Steam login" download / subscribe without a usable sign-in says: why, and what to do.
+    public static class SignInFailure
+    {
+        public const string Where = "Settings → Getting Workshop wallpapers";
+        public const string NotSignedIn = $"Not signed in to Steam. Sign in under {Where}.";
+        public const string SignedOut = $"Steam signed this app out. Sign in again under {Where}.";
+        public const string Unusable = $"The Steam sign-in couldn't be used. Sign in again under {Where}.";
     }
 
     public const string SteamDownloading = "Steam is downloading it…";
@@ -357,13 +377,17 @@ public static class WorkshopDownloader
             Console.WriteLine($"workshop: {workshopId}: the Steam app couldn't subscribe it — {r.Fallback}");
             return new(false, SteamClientUgc.FailureMessage(r.Fallback)); // a failure, never the sign-in / the to-do instead
         }
-        if (mode != "steampage" && SteamAuthService.HasUsableSignIn(settings))
+        // "Subscribe with Steam login" (and steamcmd, which isn't a subscription mode: an explicit Subscribe click takes the
+        // sign-in): without a usable sign-in it fails with why and what to do, never the page (AcquireViaSubscribeAsync)
+        if (mode != "steampage")
         {
+            string failed;
             try
             {
                 progress?.Report((-1, "Subscribing on Steam…"));
                 var cookie = await SteamAuthService.GetCookieAsync(settings, ct);
-                if (!string.IsNullOrWhiteSpace(cookie))
+                if (string.IsNullOrWhiteSpace(cookie)) failed = SignInFailure.NotSignedIn;
+                else
                 {
                     await SubscribeAsync(workshopId, cookie, subscribe: true, ct);
                     Console.WriteLine($"workshop: {workshopId}: subscribed with the sign-in (Subscribe, no download)");
@@ -372,7 +396,11 @@ public static class WorkshopDownloader
             }
             catch (SteamRateLimitException) { throw; }
             catch (OperationCanceledException) { throw; }
-            catch (Exception e) { Console.WriteLine($"workshop: {workshopId}: subscribing with the sign-in failed ({e.Message}) — the Steam to-do"); }
+            catch (SteamSignInRejectedException) { failed = SignInFailure.SignedOut; }
+            catch (InvalidOperationException e) { failed = e.Message; }
+            catch (Exception e) { failed = SignInFailure.Unusable; Console.WriteLine($"workshop: {workshopId}: the sign-in failed ({e.Message})"); }
+            Console.WriteLine($"workshop: {workshopId}: not subscribed — {failed}");
+            throw new InvalidOperationException(failed);
         }
         var todo = SteamTodo.EnqueueSubscribe(workshopId, title, hasDownload: false, out bool openFailed);
         if (openFailed)
@@ -426,7 +454,8 @@ public static class WorkshopDownloader
     {
         // ids whose unsubscribe already waits in the Steam to-do are the user's there (Next / Skip decide them)
         var inTodo = SteamTodo.QueuedUnsubscribes();
-        var pending = WorkshopUnsubQueue.SnapshotPending().FindAll(id => !inTodo.Contains(id));
+        // ids still in their Undo window wait for the drain at its end (SteamOps.DrainAfterUndoWindow)
+        var pending = WorkshopUnsubQueue.SnapshotDue().FindAll(id => !inTodo.Contains(id));
         if (pending.Count == 0) return new DrainResult();
         var undone = new System.Collections.Generic.List<string>(); // unsubscribed after an Undo restored them → re-subscribed at the end
         try { return await DrainCoreAsync(); }

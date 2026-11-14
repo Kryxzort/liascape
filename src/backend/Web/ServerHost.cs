@@ -32,7 +32,7 @@ public static class ServerHost
         "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0";
 
     // Order matches the UI's source pills. WE-local (index 3) is hidden when
-    // AutoAddWeWallpapersToLibrary is on (the trash button does delete-from-source instead).
+    // AutoAddWeWallpapersToLibrary is on (its items are the library's: a subscribed one's Delete is Unsubscribe).
     private static readonly IBgsProvider[] Providers =
     {
         new MotionBgsService(), new MoewallsService(), new DesktophutService(),
@@ -520,7 +520,7 @@ public static class ServerHost
         });
 
         // ---- library ----------------------------------------------------------------------
-        app.MapGet("/library", () => Results.Json(LibraryService.LoadAll()));
+        app.MapGet("/library", () => Results.Json(WorkshopSubOps.MarkSubscribed(LibraryService.LoadAll())));
         app.MapPost("/library/delete", (LibraryItem item) =>
         {
             LibraryService.Delete(item);
@@ -676,8 +676,9 @@ public static class ServerHost
             WorkshopDownloader.LaunchSteamCmdSignIn(exe, s.SteamUsername);
             return Results.Ok();
         });
-        app.MapPost("/workshop/delete-from-source", (TrashReq r) => Results.Json(new { batch = AppOps.DeleteFromSource(r.Items) }));
-        app.MapPost("/workshop/drain", () => { SteamOps.StartDrain(); return Results.Ok(); });
+        app.MapPost("/workshop/delete-from-source", (TrashReq r) => Results.Json(new { batch = AppOps.DeleteFromSource(r.Items),
+            unsubscribeInMs = (int)SteamOps.UnsubUndoWindow.TotalMilliseconds }));
+        app.MapPost("/workshop/drain", () => { SteamOps.DrainNow(); return Results.Ok(); });
         // "Open on Steam" → the item's page in the Steam CLIENT, not the browser — its
         // own route, never /open (http(s) only): a digits-only id becomes steam://url/CommunityFilePage/<id>, nothing else.
         // {ok: false} = the Steam app couldn't be opened → the UI opens the https page in the browser instead.

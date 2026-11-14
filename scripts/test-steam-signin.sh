@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Hermetic test of the Steam paths that need no Steam account (no dead end without a mobile guard: a password sign-in +
-# Workshop downloads through the Steam app when there's no usable sign-in):
+# Hermetic test of the Steam paths that need no Steam account (a password sign-in beside the QR; Workshop downloads through
+# the sign-in, the Steam app's page or the Steam client, each the user's pick, and each failing with its reason, never
+# switching to another):
 #  1. `liascape-backend steam-selftest` — the password sign-in's plumbing with a scripted sign-in in place of SteamKit2
 #     (email / authenticator / approve-in-the-app steps, a wrong code, cancel, replace, timeout, wrong password, Steam's
 #     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json) and the
@@ -9,14 +10,16 @@
 #     drain leaves the to-do's ids alone, WS steam-todo).
 #  2. A private backend whose PATH puts a stub `xdg-open` first (it only records the URL — the real Steam client is never
 #     started) and whose Workshop folder is a temp dir: POST /download of a Workshop item (no network: the result carries
-#     `trailerKnown`) with no sign-in, then with a sign-in Steam turned down → the item's page is "opened in Steam"
-#     (steam://url/CommunityFilePage/<id>), `download-progress` says why + "click Subscribe", the test then drops the item
-#     into the Workshop folder (like Steam would) and the download finishes into the library; an item already on disk →
-#     nothing opens; a download cancelled from the page stops waiting and imports nothing.
+#     `trailerKnown`) under "Subscribe with Steam login" with no sign-in, then with a sign-in Steam turned down → it FAILS
+#     with why and where to sign in, nothing opened in Steam, nothing in the to-do or the library (POST /workshop/subscribe
+#     the same); an item already on disk → imported, nothing opens. Under "Open in the Steam app" the item's page is
+#     "opened in Steam" (steam://url/CommunityFilePage/<id>), `download-progress` says "click Subscribe", the test then drops
+#     the item into the Workshop folder (like Steam would) and the download finishes into the library; a download cancelled
+#     from the page stops waiting and imports nothing.
 #  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
-#     released Steam + exited; Steam refusing → the old path (the item's page in the Steam app); a cancel → the helper
+#     released Steam + exited; Steam refusing → the download fails with the reason; a cancel → the helper
 #     releases Steam + exits, nothing imported. Then the Steam to-do (h.): a bulk download of 3 under "Open in the Steam app"
 #     opens only the first page, a delivered item 1 doesn't advance it, Next opens page 2, Skip page 3 and ends item 2's
 #     /download as skipped at once, Stop the rest; a bulk Delete from source (one page at a time, no page for an item with no
@@ -28,7 +31,8 @@
 #     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
 #     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one,
 #     and Unsubscribe without deleting (POST /workshop/unsubscribe-keep: the local/<id> link becomes the library's own copy at
-#     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing).
+#     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing; GET /library's
+#     `subscribed` true before, false after).
 #  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
 #     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), sign-out, and the
 #     keyring path against a STUB secret-tool (the value on stdin, never argv; a refused lookup → signed out, not asked
@@ -135,7 +139,27 @@ const download = (id, signal) => fetch(U + "/download", { method: "POST", header
 const lib = async () => (await (await fetch(U + "/library")).json());
 const inLib = async (id) => (await lib()).some((i) => i.workshopId === id);
 
-async function viaSteam(id, why, label) {
+const setMode = async (mode) => { await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workshopDownloadMode: mode }) }); };
+// "Subscribe with Steam login" without a usable sign-in: the download (and a plain Subscribe) FAILS with why + where to sign
+// in — never the item's page in the Steam app (that's "Open in the Steam app"'s job), nothing queued or imported
+async function noSignIn(id, why, label) {
+  const n0 = urls().length, t0 = todo.length;
+  const r = await Promise.race([download(id), sleep(15000).then(() => null)]);
+  const body = r ? await r.json().catch(() => null) : null;
+  await sleep(500);
+  const err = body?.error ?? "";
+  out(r && r.status >= 400 && err.includes(why) && err.includes("Settings → Getting Workshop wallpapers"),
+    `${label}: the download fails with why + where to sign in`, r ? `${r.status} ${JSON.stringify(body).slice(0, 200)}` : "timed out (waiting on a page?)");
+  out(urls().length === n0 && !todo.slice(t0).some((x) => x.current?.id === id) && !(await inLib(id)),
+    `${label}: nothing opened in Steam, nothing in the to-do, nothing imported`, `${urls().length - n0} opened, to-do ${JSON.stringify(todo.slice(t0).at(-1) ?? null)}`);
+  const rs = await fetch(U + "/workshop/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workshopId: id, title: `ws-${id}` }) });
+  const bs = await rs.json().catch(() => null);
+  await sleep(300);
+  out(rs.status >= 400 && (bs?.error ?? "").includes(why) && urls().length === n0, `${label}: Subscribe (the sidebar's) fails the same, nothing opened`, `${rs.status} ${JSON.stringify(bs).slice(0, 160)}`);
+}
+
+// "Open in the Steam app": the item's page in the Steam app, through the to-do
+async function viaSteam(id, label) {
   const n0 = urls().length;
   const p = download(id);
   let u = null;
@@ -143,7 +167,7 @@ async function viaSteam(id, why, label) {
   out(u === `steam://url/CommunityFilePage/${id}`, `${label}: the item's page opens in the Steam app`, u ?? "nothing opened");
   await sleep(300);
   const st = (status[pageUrl(id)] ?? []).join(" | ");
-  out(st.includes(why) && st.includes("click Subscribe"), `${label}: download-progress says why + "click Subscribe"`, st);
+  out(st.includes("Click Subscribe in Steam"), `${label}: download-progress says "Click Subscribe in Steam"`, st);
   // Steam's staging folder (<workshop>/downloads/431960/<id>; this test's content root is $T/ws/431960 → <workshop> = $T): the
   // card's "Steam is downloading…" phase, then "Steam is finishing…" once the files are in but not yet steady
   const stage = `${T}/downloads/431960/${id}`; fs.mkdirSync(stage, { recursive: true });
@@ -164,7 +188,7 @@ async function viaSteam(id, why, label) {
     `${label}: the Steam to-do (1 of 1, autoNext) finished by itself once Steam delivered — no Next`, JSON.stringify(mine.at(-1) ?? null));
 }
 
-await viaSteam("700000001", "Not signed in", "no sign-in");
+await noSignIn("700000001", "Not signed in to Steam", "no sign-in");
 // a sign-in Steam turned down (the flag the cookie mint sets): no request to Steam, straight to the app. The token sits in the
 // secret store's file fallback (no Secret Service here: steam-auth.json, 0600), the flag in settings.json (never printed)
 const sf = `${process.env.XDG_CONFIG_HOME}/liascape/settings.json`;
@@ -181,13 +205,17 @@ const gs = await (await fetch(U + "/settings")).text();
 out(!gs.includes(fakeJwt), "GET /settings carries no token");
 const bl = fs.readFileSync(`${T}/backend.log`, "utf8");
 out(bl.includes("secrets: file fallback") && !bl.includes(fakeJwt), "backend log: says which store, never the token");
-await viaSteam("700000002", "Steam signed this app out", "sign-in rejected");
+await noSignIn("700000002", "Steam signed this app out", "sign-in rejected");
 
-// already on disk, no usable sign-in: nothing to click
+// already on disk, no usable sign-in: nothing to subscribe — imported, nothing opened
 drop("700000003");
 let n0 = urls().length;
 let r = await download("700000003");
 out(r.status === 200 && urls().length === n0, "already on disk: imported, nothing opened in Steam", `${r.status}, ${urls().length - n0} opened`);
+
+// "Open in the Steam app": the page, then Steam's files finish the download
+await setMode("steampage");
+await viaSteam("700000006", "Open in the Steam app");
 
 // cancelled from the page (the UI's Cancel aborts the request): the wait stops, a later download of it by Steam imports nothing
 n0 = urls().length;
@@ -203,7 +231,7 @@ out(urls().length === n0 + 1 && !(await inLib("700000004")), "cancelled: its pag
 // would alternate between the two paths and never match twice. So: per path.
 const std = `${process.env.HOME}/.local/share/Steam/steamapps/workshop/content`;
 fs.mkdirSync(std, { recursive: true }); fs.symlinkSync(`${T}/ws/431960`, `${std}/431960`);
-await viaSteam("700000005", "Steam signed this app out", "Workshop folder reached through a symlink");
+await viaSteam("700000005", "Workshop folder reached through a symlink");
 ws.close();
 EOF
 (cd "$T" && U=$U T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 120 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
@@ -230,7 +258,7 @@ for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
 for _ in $(seq 1 50); do curl -sf -m 2 "$U3/health" >/dev/null && break; sleep 0.1; done
 cp "$ROOT/scripts/test-fixtures/drive-steam-client.mjs" "$T/drive3.mjs"
-(cd "$T" && U=$U3 T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 120 node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
+(cd "$T" && U=$U3 T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 300 node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
 sed 's/^/      /' "$T/drive3.log"
 p=$(grep -c '^PASS' "$T/drive3.log"); f=$(grep -c '^FAIL' "$T/drive3.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
@@ -201,6 +202,34 @@ public static class SteamOps
     }
 
     public static void SignOut() => SteamAuthService.SignOut();
+
+    // How long an Unsubscribe (the Library's, the Browse sidebar's) waits before it reaches Steam: its Undo window. An Undo
+    // inside it takes the id out of the queue, so Steam is never asked (nor asked to subscribe again: WorkshopUnsubQueue.Restore
+    // sees it still pending); after it, Undo re-subscribes as before. Another unsubscribe inside the window restarts the wait.
+    // Guard: test-steam-signin.sh § 3 i (the Undo window)
+    public static readonly TimeSpan UnsubUndoWindow = TimeSpan.FromSeconds(5);
+    static Timer? _undoWindowTimer;
+    static readonly object _undoWindowGate = new();
+
+    public static void DrainAfterUndoWindow(IEnumerable<string> ids)
+    {
+        WorkshopUnsubQueue.Hold(ids, UnsubUndoWindow);
+        // a little after the hold ends, so the drain finds it due
+        lock (_undoWindowGate)
+        {
+            _undoWindowTimer?.Dispose();
+            _undoWindowTimer = new Timer(_ => { if (WorkshopUnsubQueue.HasPending()) StartDrain(); }, null,
+                UnsubUndoWindow + TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    // drain now (POST /workshop/drain: the tests, a script; the UI never calls it): an explicit ask doesn't wait out the window
+    public static void DrainNow()
+    {
+        lock (_undoWindowGate) { _undoWindowTimer?.Dispose(); _undoWindowTimer = null; }
+        WorkshopUnsubQueue.ReleaseHolds();
+        StartDrain();
+    }
 
     // The drain modal is a view onto this; dismissing it doesn't stop the drain. One drain at a time. Without a usable
     // sign-in the drain opens the item (or the subscriptions list) in the Steam app instead — `openedInSteam` + `message`

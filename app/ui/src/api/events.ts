@@ -11,8 +11,8 @@ export type LiascapeEvent =
   // `toggle-pause` ran (AppOps): the wallpaper's own pause, for the in-app background (components/WallpaperBg.tsx)
   | { type: "pause-changed"; payload: { paused: boolean } }
   | { type: "toggle-loop-current"; payload: { keep: boolean; path: string | null; message: string } }
-  // `status`: a Workshop download's step in words ("Subscribing on Steam…", "Not signed in to Steam here — click Subscribe in
-  // Steam, then it downloads by itself…")
+  // `status`: a Workshop download's step in words ("Subscribing on Steam…", "Click Subscribe in Steam, then it downloads by
+  // itself…")
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean; status?: string } }
   // finished without a usable sign-in: `openedInSteam` items were opened in the Steam app and `message` says what to click
   | { type: "unsub-progress"; payload: { done: number; total: number; currentId: string; finished?: boolean; openedInSteam?: number; message?: string | null; error?: string } }

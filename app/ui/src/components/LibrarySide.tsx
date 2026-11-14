@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat } from "lucide-react";
 import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
@@ -9,7 +9,10 @@ import { usePreview, rangeFill, useOnline } from "./sidePreview";
 import { ScenePropsEditor } from "./ScenePropsEditor";
 import { scenePropsCache } from "./scenePropsCache";
 import { sideTags } from "./sideTags";
-import { useMotion } from "./motion";
+import { useMotion, FADE_MS } from "./motion";
+import { ContextMenu, type MenuAt } from "./ContextMenu";
+import { keepMenuItem, menuAt } from "./menuItems";
+import { SubToggle } from "./SubToggle";
 import { useLinger } from "../hooks/useLinger";
 import { WorkshopIdPill } from "./WorkshopIdPill";
 import { snapFlip, glideFlip } from "./flipGlide";
@@ -48,18 +51,19 @@ const CRASH_FLIP = ":scope > *, .side-sec[data-sec=\"playback\"] > *";
 // The Library sidebar's content (components/SidePanel.tsx is the shell): everything the per-card settings modal had —
 // volume / speed (drag-preview live, persist on release), the scene's properties, its loudness line, the crash
 // whitelist, the trailer (the picture's preview switch), Workshop / Steam — plus the old right-click menu's actions (Open in
-// file manager, Delete, Delete and unsubscribe) as tiles, Play (the picture itself — docs/decisions.md § "Make the sidebar's
+// file manager, Delete, Delete and unsubscribe; with auto-import on, Unsubscribe and its right-click keep) as tiles, Play (the picture itself — docs/decisions.md § "Make the sidebar's
 // picture the Play control") and the playlist toggle (in the head). Mounted per item (`key` = its path, SidePanel): its state is
 // that item's.
 // `item` is the store's live copy (a `library-item-changed` hands a new one — the values follow, nothing replays);
 // `targets` = the multi-selection it's part of (volume / speed / delete repeat to it), else [item].
 export function LibrarySide({
-  item, targets, playing, keepCurrent, showDeleteFromSource, globalVolume, globalSpeed,
-  onPlay, onReveal, onTrash, onDeleteSource,
+  item, targets, playing, keepCurrent, unsubN, deleteN, showDeleteFromSource, globalVolume, globalSpeed,
+  onPlay, onReveal, onTrash, onDeleteSource, onKeep,
 }: {
-  item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; showDeleteFromSource: boolean;
-  globalVolume: number; globalSpeed: number;
-  onPlay: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void;
+  // unsubN / deleteN: how many of the targets onTrash unsubscribes / deletes (views/Library.tsx doTrash)
+  item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; unsubN: number; deleteN: number;
+  showDeleteFromSource: boolean; globalVolume: number; globalSpeed: number;
+  onPlay: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void; onKeep: () => void;
 }) {
   // start from the item's real values — the first paint must not show a 0 volume / 1× speed placeholder
   const [vol, setVol] = useState(() => item.volumeOverride ?? globalVolume);
@@ -70,7 +74,6 @@ export function LibrarySide({
   const [dur, setDur] = useState("");
   const patchItem = useStore((s) => s.patchLibraryItem);
   const openOnSteam = useStore((s) => s.openOnSteam);
-  const unsubOnDelete = useStore((s) => !!s.settings?.autoAddWeWallpapersToLibrary) && !!item.workshopId;
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound, by design); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // Settings levels (settingsLevel.ts): the sidebar's rows follow the level like the Settings page's rows do
@@ -178,6 +181,20 @@ export function LibrarySide({
     api.libraryClearCrash(p).catch((e) => { patchItem(p, { hasCrashed: true }); useStore.getState().setError(`Couldn't clear the crash mark: ${(e as Error).message}`); });
   };
 
+  // the Unsubscribe tile's right-click menu; and when its kind changes under the open sidebar ("Unsubscribe without deleting"
+  // made the item a plain local one), the new tile cross-fades in (motion on: slides in a little)
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const dangerRef = useRef<HTMLButtonElement>(null);
+  const dangerKind = unsubN > 0 ? "unsubscribe" : "delete";
+  const shownKind = useRef(dangerKind);
+  useLayoutEffect(() => {
+    if (shownKind.current === dangerKind) return;
+    shownKind.current = dangerKind;
+    dangerRef.current?.animate(motion ? [{ opacity: 0, transform: "translateX(10px)" }, { opacity: 1, transform: "none" }] : [{ opacity: 0 }, { opacity: 1 }],
+      { duration: motion ? 220 : FADE_MS, easing: motion ? "cubic-bezier(.2, .9, .3, 1)" : "linear" });
+  }, [dangerKind, motion]);
+
   const stillSrc = item.thumbnailPath || item.animatedThumbnailPath;
   const baseSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
   const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath) : stillSrc ? still(stillSrc) : null;
@@ -236,16 +253,31 @@ export function LibrarySide({
           {item.workshopId ? (
             <button className="side-tile" data-open-steam onClick={() => openOnSteam(item.workshopId!)}><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</button>
           ) : steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
-          {/* a tile that unsubscribes says so in its words (views/Library.tsx doTrash: with auto-import on, Delete of a Workshop
-              item unsubscribes it too, or the next import brings it back). Guard: probe-steam side:deleteSource:names */}
-          <button className="side-tile danger" onClick={onTrash}
-            title={unsubOnDelete ? "Auto-import would bring it back, so this unsubscribes on Steam too; Undo subscribes it again" : undefined}>
-            <span className="side-tile-ico"><Trash2 size={15} /></span>{unsubOnDelete ? "Delete and unsubscribe" : "Delete"}</button>
+          {/* with auto-import on, a subscribed Workshop item's Delete is Unsubscribe (views/Library.tsx doTrash), named so and
+              with the Browse sidebar's Unsubscribe icon and right-click menu ("Unsubscribe without deleting"); a mixed selection
+              says what happens to each part. Guard: probe-steam side:unsub:*, side:deleteSource:names */}
+          {unsubN > 0 ? (
+            <button ref={dangerRef} className="side-tile danger" data-unsubscribe aria-haspopup="menu" onClick={onTrash}
+              onContextMenu={(e) => { e.preventDefault(); setMenu(menuAt(e)); }}
+              title={`Also removes ${unsubN > 1 ? "them" : "it"} from your library; right-click keeps ${unsubN > 1 ? "them" : "it"}. Undo subscribes again`}>
+              <span className="side-tile-ico"><CloudOff size={15} /></span>{deleteN ? `Unsubscribe ${unsubN}, delete ${deleteN}` : "Unsubscribe"}</button>
+          ) : (
+            <button ref={dangerRef} className="side-tile danger" onClick={onTrash}>
+              <span className="side-tile-ico"><Trash2 size={15} /></span>Delete</button>
+          )}
+          <ContextMenu at={menu} onClose={closeMenu} returnTo={dangerRef} label="Unsubscribe" items={[keepMenuItem(onKeep)]} />
           {showDeleteFromSource && (
             <button className="side-tile danger" data-delete-source title="Unsubscribes on Steam too; Undo subscribes it again" onClick={onDeleteSource}>
               <span className="side-tile-ico"><CloudOff size={15} /></span>Delete and unsubscribe</button>
           )}
         </div>
+        {/* a Workshop item the library holds unsubscribed (its own copy after "Unsubscribe without deleting", a steamcmd copy):
+            the Browse sidebar's subscription card, shown until it's subscribed (then the tile above is its Unsubscribe); with
+            auto-import on Steam's copy then takes the own copy's place (WorkshopSubOps.AfterSubscribeAsync). Not for an item
+            the Workshop no longer has. Guard: probe-steam side:resub:* */}
+        {item.workshopId && !item.offWorkshop && !multi && (
+          <SubToggle key={item.workshopId} id={item.workshopId} title={item.title} weLocal={false} only="unsubscribed" likely={!item.subscribed} />
+        )}
         <SideSection icon={<SlidersHorizontal size={15} />} title="Playback" data-sec="playback">
           {crash.value && (
             <label className={`inline side-wl${crash.closing ? " leaving" : ""}`}>

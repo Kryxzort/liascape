@@ -174,7 +174,9 @@ public class AppSettings
         set => _vramLowMode = value is "stop" or "pause" or "off" ? value : "stop";
     }
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
-    public bool AutoAddWeWallpapersToLibrary { get; set; } = false;
+    // on by default: Workshop subscriptions live in the library (the Library's Delete of one is Unsubscribe; the Browse
+    // sidebar's Download under the "subscribe" mode is Subscribe); a file that says false keeps false
+    public bool AutoAddWeWallpapersToLibrary { get; set; } = true;
     public bool IsPlaylistBarCollapsed { get; set; } = false;
     // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one click, Steam's
     // own progress; it FAILS when Steam can't be reached, never a fallback — WorkshopDownloader), "subscribe" (real

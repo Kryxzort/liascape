@@ -571,6 +571,7 @@ public static class LibraryService
             Resolution = m.Resolution ?? resolution, AgeRating = age ?? proj.Age, YoutubeUrl = m.YoutubeUrl, PageUrl = m.PageUrl,
             AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes,
             Subscriptions = m.Subscriptions, Favorites = m.Favorites, Tags = tags,
+            OffWorkshop = steamTags == null && m.TagsCheckedAt != null,
         };
     }
 
@@ -650,6 +651,7 @@ public static class LibraryService
         if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return added;
         var localDir = LibraryStore.SourceDir(LibraryStore.Local);
         Directory.CreateDirectory(localDir);
+        RelinkOwnCopies(workshopPath);
         var adds = new Dictionary<string, LibMeta>(); // applied under the index lock at the end
         var have = ExistingWorkshopIds();
         var blocked = WorkshopUnsubQueue.SnapshotBlockedSet();
@@ -693,6 +695,57 @@ public static class LibraryService
         if (adds.Count > 0)
             LibraryStore.UpdateIndex(LibraryStore.Local, idx => { foreach (var (id, m) in adds) idx[id] = m; return true; });
         return added;
+    }
+
+    // ---------- the library's own copy → Steam's folder again (subscribed again) ----------
+    // A `local/<id>` that is the library's own copy (KeepOwnCopy) of an item the user subscribed to again: once Steam's folder
+    // for it is whole and no unsubscribe of it is queued, the copy gives way to a link at the same path, so the library keeps
+    // ONE item (the playlist, the playing item and its settings keep pointing at it) and Steam keeps it up to date. The copy
+    // moves into the trash's staging (purged at start and close) and comes back if the link can't be made.
+    // Guard: test-steam-signin.sh § 3 i (subscribing the own copy again)
+    public static List<string> RelinkOwnCopies(string workshopPath, string? onlyId = null)
+    {
+        var swapped = new List<string>();
+        if (string.IsNullOrEmpty(workshopPath) || !Directory.Exists(workshopPath)) return swapped;
+        var localDir = LibraryStore.SourceDir(LibraryStore.Local);
+        if (!Directory.Exists(localDir)) return swapped;
+        var blocked = WorkshopUnsubQueue.SnapshotBlockedSet();
+        foreach (var own in SafeDirs(localDir).ToList())
+        {
+            var id = Path.GetFileName(own);
+            if ((onlyId != null && id != onlyId) || IsSymlink(own) || blocked.Contains(id)) continue;
+            var steam = Path.Combine(workshopPath, id);
+            if (!SteamCopyWhole(steam, id)) continue;
+            var stage = Path.Combine(TrashPath, "relink-" + Guid.NewGuid().ToString("N")[..8]);
+            try
+            {
+                Directory.CreateDirectory(TrashPath);
+                Directory.Move(own, stage);
+                try { File.CreateSymbolicLink(own, steam); }
+                catch { Directory.Move(stage, own); throw; }
+                TryDeleteDir(stage);
+                swapped.Add(id);
+                Console.WriteLine($"library: {id}: subscribed again — its own copy gave way to Steam's folder (same path)");
+            }
+            catch (Exception e) { Console.WriteLine($"library: {id}: couldn't hand its own copy back to Steam's folder: {e.Message}"); }
+        }
+        return swapped;
+    }
+
+    // is `local/<id>` the library's own copy (a folder, not a link into Steam's)?
+    public static bool IsOwnCopy(string id)
+    {
+        var p = Path.Combine(LibraryStore.SourceDir(LibraryStore.Local), id);
+        return Directory.Exists(p) && !IsSymlink(p);
+    }
+
+    // Steam's folder holds the item whole: its project.json and its media (or a scene). Steam moves a download in from its
+    // staging folder only at the end, so a folder here isn't half-written.
+    private static bool SteamCopyWhole(string dir, string id)
+    {
+        if (!Directory.Exists(dir) || !File.Exists(Path.Combine(dir, "project.json"))) return false;
+        if (IsSceneFolder(dir)) return true;
+        return ResolveItemMedia(dir, id) is { } media && File.Exists(media);
     }
 
     // workshop/ + local/ folder names = the set of workshop IDs already present
