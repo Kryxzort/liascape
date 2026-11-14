@@ -69,7 +69,13 @@ for f in $FILES; do
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
-    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f (+ --probe probe-cardpreview.js — the card preview)" ;;
+    app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f (+ --probe probe-cardpreview.js — the card preview; --probe probe-settings.js — its rows' own cells)" ;;
+    # copy feedback: Settings' Copy buttons and the Library sidebar's Workshop ID pill
+    app/ui/src/components/CopyButton.tsx|app/ui/src/hooks/useCopied.ts)
+      echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill)" >&2 ;;
+    # the Unsubscribe button's right-click menu (keep the files) and the menu itself
+    app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx)
+      echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, side:)" >&2 ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     app/ui/src/components/NumInput.tsx) add "$NUM|$SET" "$f (+ --probe probe-expert.js — the stepper: − / +, hold, wheel, keys, roll, look)" ;;
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
@@ -113,7 +119,7 @@ for f in $FILES; do
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts|app/ui/src/components/SortFilterButton.tsx|app/ui/src/hooks/filterMorph.ts)
       echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js; probe-layout.js resize:)" >&2 ;;
-    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js|app/shell/probe-icons.js|app/shell/probe-steam.js)
+    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js|app/shell/probe-icons.js|app/shell/probe-steam.js|app/shell/probe-settings.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CloudCheck, CloudOff, CloudDownload, LoaderCircle } from "lucide-react";
+import { CloudCheck, CloudOff, CloudDownload, LoaderCircle, Library as LibraryIcon } from "lucide-react";
 import { api, type WorkshopSubState } from "../api/client";
 import { useStore } from "../store";
 import { useMotion, FADE } from "./motion";
 import { magnetRef } from "./magnet";
+import { ContextMenu, type MenuAt } from "./ContextMenu";
 
 // The Browse sidebar's Subscribe / Unsubscribe toggle for a Workshop item ("Wallpaper Engine (Local)" and "Wallpaper Engine
 // (Workshop)" alike). State = POST /workshop/state (disk + the unsubscribe queue + the Steam to-do —
@@ -15,11 +16,24 @@ import { magnetRef } from "./magnet";
 // Steam deleted → the Browse list reloads (it leaves). Motion: the line + button swap slide in (transform + opacity), the
 // progress row eases in / out, the box glides to its new height (framer `layout`); under `no-motion` the swaps and the row
 // cross-fade in place (components/motion.ts FADE) and the height changes at once; no glow under `no-glow`.
+// A library item's Unsubscribe also has a right-click menu (components/ContextMenu.tsx) with "Unsubscribe without deleting"
+// (POST /workshop/unsubscribe-keep: the library keeps its copy, nothing is trashed); the plain click stays the one above.
+// Guard: probe-steam steam:subToggle:keepMenu, steam:subToggle:keepMenuOff
 export function SubToggle({ id, title, weLocal }: { id: string; title: string; weLocal: boolean }) {
   const tick = useStore((s) => s.wsStateTick);
   const prog = useStore((s) => s.subProgress[id]);
   const subscribe = useStore((s) => s.subscribeWorkshop);
   const unsubscribe = useStore((s) => s.unsubscribeWorkshop);
+  const unsubscribeKeep = useStore((s) => s.unsubscribeKeepWorkshop);
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const setBtn = useCallback((el: HTMLButtonElement | null) => {
+    btnRef.current = el; const off = magnetRef(el);
+    return () => { btnRef.current = null; off?.(); };
+  }, []);
+  // "Unsubscribe without deleting" running: the library's copy is being made before the unsubscribe
+  const [keeping, setKeeping] = useState(false);
   const motionOn = useMotion();
   const [st, setSt] = useState<WorkshopSubState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,7 +64,8 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
     unsubscribed: "Unsubscribed", "not-subscribed": "Not subscribed" }[state];
   const hint = state === "subscribing" ? (prog?.status && prog.status !== "Subscribing…" ? prog.status : "Steam takes it from here")
     : state === "unsubscribing" ? "Waiting for Steam"
-    : state === "subscribed" ? (st.inLibrary ? "Unsubscribing also removes it from your library" : "Steam keeps it up to date")
+    : keeping ? "Keeping a copy in your library…"
+    : state === "subscribed" ? (st.inLibrary ? "Also removes it from your library; right-click keeps it" : "Steam keeps it up to date")
     : state === "unsubscribed" ? "Steam removes its folder soon"
     : st.inLibrary ? "Subscribe to let Steam keep it up to date" : "Subscribe without adding it to your library";
   const icon = state === "subscribed" ? <CloudCheck size={16} /> : pending ? <LoaderCircle size={16} className="side-sub-spin" /> : <CloudOff size={16} />;
@@ -58,6 +73,18 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
     setBusy(true);
     try { if (st.subscribed) await unsubscribe(id, title); else await subscribe(id, title); }
     finally { setBusy(false); setReadTick((n) => n + 1); }
+  };
+  const keep = async () => {
+    setBusy(true); setKeeping(true);
+    try { await unsubscribeKeep(id, title); }
+    finally { setBusy(false); setKeeping(false); setReadTick((n) => n + 1); }
+  };
+  // a right-click (or the context-menu key: no pointer position, so under the button) on a library item's Unsubscribe
+  const onMenu = (e: MouseEvent<HTMLButtonElement>) => {
+    if (!st.subscribed || !st.inLibrary) return;
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu(e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : { x: r.left, y: r.bottom });
   };
   const slide = motionOn ? { initial: { opacity: 0, x: 14 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -14 },
     transition: { duration: 0.22, ease: [0.2, 0.9, 0.3, 1] as const } } : FADE;
@@ -72,8 +99,9 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
           </AnimatePresence>
         </span>
         {!pending && (
-          <button ref={magnetRef} className={`btn ico side-sub-btn ${st.subscribed ? "danger" : "accent"}`} data-side-sub-btn={st.subscribed ? "unsubscribe" : "subscribe"}
-            disabled={busy} onClick={click}>
+          <button ref={setBtn} className={`btn ico side-sub-btn ${st.subscribed ? "danger" : "accent"}`}
+            data-side-sub-btn={st.subscribed ? "unsubscribe" : "subscribe"} aria-haspopup={st.subscribed && st.inLibrary ? "menu" : undefined}
+            disabled={busy} onClick={click} onContextMenu={onMenu}>
             {st.subscribed ? <CloudOff size={14} /> : <CloudDownload size={14} />}{st.subscribed ? "Unsubscribe" : "Subscribe"}
           </button>
         )}
@@ -84,6 +112,8 @@ export function SubToggle({ id, title, weLocal }: { id: string; title: string; w
           <motion.span key={hint} className="side-sub-hint" data-side-sub-hint {...slide}>{hint}</motion.span>
         </AnimatePresence>
       </div>
+      <ContextMenu at={menu} onClose={closeMenu} returnTo={btnRef} label="Unsubscribe"
+        items={[{ key: "keep", label: "Unsubscribe without deleting", icon: <LibraryIcon size={14} />, onPick: keep }]} />
       <AnimatePresence initial={false}>
         {state === "subscribing" && prog && (
           <motion.div key="bar" className={`dl-bar side-sub-bar${pct == null ? " indet" : ""}`} data-side-sub-progress

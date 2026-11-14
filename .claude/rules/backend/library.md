@@ -20,6 +20,7 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 ## Layout and identity
 - Identity = the folder name: `<id>` for `workshop/` and `local/`, `<name>` for web sources and `imported/`.
 - `local/<id>` is a symlink into the user's Wallpaper Engine folder (Steam owns the bytes); `workshop/<id>` is an owned steamcmd copy.
+- "Unsubscribe without deleting" (`LibraryService.KeepOwnCopy`) turns a `local/<id>` link into an owned copy at the same path, copied through a staging folder under `.trash` and swapped in for the link before the unsubscribe is queued; never moved to `workshop/<id>`: the path is the item's identity (playlist, playing item, sidebar), and the reconcile of direct downloads would swap a `workshop/<id>` copy back to a link and delete it while Steam's folder still exists. So test "is it a link", never "is it under `local/`", for "Steam owns it" (legacy LWE then launches by path). Guard: `scripts/test-steam-signin.sh` § 3 i.
 - A scene's play path IS its folder (no `.scene` marker): `PlayerHelper.IsScenePath` = no media extension. Scene-ness on load: index `IsScene`, else `project.json` `type:"scene"`, else a `scene.pkg`.
 - Deleting a `local/<id>` item unlinks the symlink only; never delete inside the WE folder ourselves.
 

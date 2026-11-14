@@ -7,7 +7,7 @@
 //                        sidebar open it moves to the card; Escape closes it
 //   lib:reflow           a right-click on a card in a scrolled grid while the sidebar is closed: the docked sidebar re-fits the
 //                        grid's columns, the card stays in view near where it was (real input events)
-//   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete from source (a Workshop item)
+//   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete and unsubscribe (a Workshop item)
 //   lib:play             the picture is the Play control (no icon): a click applies the item, then the green frame — no
 //                        "Playing now" pill — and a Looping chip only while loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
@@ -289,9 +289,9 @@ app.whenReady().then(async () => {
       const opened = await js(`window.__opened`);
       const o = opened.find((x) => x.p === "/open");
       if (!o || !JSON.parse(o.body || "{}").reveal || JSON.parse(o.body || "{}").path !== K[2]) v.push(`Open in file manager sent ${JSON.stringify(opened)}`);
-      // a Workshop item (s1, auto-import off): Delete from source is there
+      // a Workshop item (s1, auto-import off): Delete and unsubscribe is there
       await page(`await m.openSide("s1"); await m.sleep(400);`);
-      if (!await page(`return !!m.sideBtn("Delete from source");`)) v.push("no Delete from source on the Workshop item s1");
+      if (!await page(`return !!m.sideBtn("Delete and unsubscribe");`)) v.push("no Delete and unsubscribe on the Workshop item s1");
       // Delete (k4) → gone from the library, the sidebar closes; Undo brings it back
       await page(`await m.openSide("k4"); await m.sleep(300); m.sideBtn("Delete")?.click();`);
       let gone = false; for (let i = 0; i < 40 && !gone; i++) { gone = !(await libItem(K[3])); if (!gone) await sleep(100); }

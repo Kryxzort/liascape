@@ -174,7 +174,7 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 ### Left click does the tab's main action, right click opens the item sidebar — 2026-11-14
 A plain click applies in the Library, opens the item to look over in Browse (double-click, Enter or the hover button
 downloads and applies; a library item's card has no button). A right-click opens the sidebar everywhere, applies nothing, keeps
-the selection; no context menus. Ctrl / Shift-click only select. A Library click opened it too before.
+the selection; no item menus. Ctrl / Shift-click only select. A Library click opened it too before.
 `.claude/rules/ui/design.md` § Interaction rules; probe-select `*:plainClick`, `modClick`, `rightClickSel`.
 
 ### Fade, never move, with motion off — 2026-11-12

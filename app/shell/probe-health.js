@@ -70,7 +70,7 @@ const ROWS = {
   scenes: ["Play scenes"],
   transitions: ["Transitions", "Transition style"],
   vram: ["Cap each scene's video memory", "When video memory runs low"],
-  "auto-mute": ["Hush when other audio plays"],
+  "auto-mute": ["Mute when other audio plays"],
   mpris: ["Only for media players"],
   ffmpeg: ["Even out loudness", "Animate wallpapers without a GIF"],
 };

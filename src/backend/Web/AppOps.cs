@@ -587,4 +587,38 @@ public static class AppOps
 
     public static int UndoDepth() { lock (_undoLock) return _undo.Count; }
     public static void PurgeTrash() => LibraryService.CleanTrash();
+
+    // ---- the thumbnail cache (Settings → Housekeeping) ----
+    // Only what is fetched or made again on demand: `workshop_previews` (the /still frames and the trimmed /anim GIFs, Browse
+    // and Library alike) and `we_thumbs` (the Workshop folder's preview pictures). Never the preview clips (`video_clips`,
+    // ClipStore), steamcmd downloads or state files. The Settings row names exactly these; keep its words in step.
+    private static readonly string[] ThumbCacheDirs = { "workshop_previews", "we_thumbs" };
+    private static IEnumerable<string> ThumbCacheFiles()
+    {
+        var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape");
+        foreach (var sub in ThumbCacheDirs)
+        {
+            var d = Path.Combine(baseDir, sub);
+            if (!Directory.Exists(d)) continue;
+            string[] files;
+            try { files = Directory.GetFiles(d); } catch { continue; }
+            foreach (var f in files) yield return f;
+        }
+    }
+
+    public static (long Bytes, int Count) ThumbCacheSize()
+    {
+        long bytes = 0; int count = 0;
+        foreach (var f in ThumbCacheFiles())
+            try { bytes += new FileInfo(f).Length; count++; } catch { }
+        return (bytes, count);
+    }
+
+    public static (long Freed, int Count) ClearThumbCache()
+    {
+        long freed = 0; int count = 0;
+        foreach (var f in ThumbCacheFiles())
+            try { long n = new FileInfo(f).Length; File.Delete(f); freed += n; count++; } catch { }
+        return (freed, count);
+    }
 }

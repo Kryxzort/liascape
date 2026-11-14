@@ -1541,9 +1541,10 @@ public static class PlayerHelper
                 }
                 // Folder-based scene: the item folder IS `path`. Launch a subscribed item by id (LWE's
                 // native lookup in the WE dir); an owned copy by directory path (copied scenes always
-                // launched from a path — SpawnLweProcesses' last arg accepts id OR dir).
+                // launched from a path — SpawnLweProcesses' last arg accepts id OR dir). A `local/<id>` that is no longer a
+                // link is the library's own copy (LibraryService.KeepOwnCopy): Steam's folder may be gone, so its path.
                 var loc = LibraryStore.Locate(path);
-                string lweArg = loc?.Source == LibraryStore.Local ? loc.Value.Key : path;
+                string lweArg = loc?.Source == LibraryStore.Local && LibraryService.IsSymlink(path) ? loc.Value.Key : path;
 
                 // Capture old processes before launching new ones.
                 var oldMpvProcs = MpvpaperProcs();

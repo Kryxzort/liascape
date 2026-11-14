@@ -2644,7 +2644,7 @@ async function amReady() {
   return waitFor(() => new Promise((res) => cp.execFile("pactl", ["list", "clients"], { timeout: 2000 }, (err, out) =>
     res(!err && (String(out).match(/application\.process\.binary = "pactl"/g) || []).length >= 2))), 5000, 100);
 }
-const amEnable = settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400);`);
+const amEnable = settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400);`);
 const amSkip = (c) => (PULSE ? false : (c.skip = "no private audio server (pulseaudio) for this stack"));
 const amReadyCheck = (c) => (c.ready ? [] : ["auto-mute's stream watch (pactl subscribe) never connected to the stack's audio server"]);
 // a stream plays: every live source mutes (ramped, while paused too); it ends: after the unmute delay (2 s) they unmute
@@ -2701,7 +2701,7 @@ C["autoMute:offWhileMuted"] = { states: ["single", "effect", "pending"], async r
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
-    const t = Date.now(); await ui(`m.setCheck(m.input("Hush when other audio plays"), false, "auto-mute");`);
+    const t = Date.now(); await ui(`m.setCheck(m.input("Mute when other audio plays"), false, "auto-mute");`);
     c.unmutedMs = (await waitFor(() => muteNow(false), 3000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
   }, check(c) {
     const v = [...amReadyCheck(c)];
@@ -2723,7 +2723,7 @@ C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(9000); const stop = sampler(c, 40); await sleep(2500); await stop();
     const t = Date.now(); await ui(`m.setValue(m.input("Ignore sounds below (dB)"), -70, "min level");`);
@@ -2740,7 +2740,7 @@ C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run
 // Mute after 1500 ms: not muted 0.8 s into a stream, muted by 4 s
 C["autoMute:delay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Fade out after (ms)"), 1500, "delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Fade out after (ms)"), 1500, "delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     const t0 = Date.now(); tone(6000); await sleep(800); c.early = await muteNow(true);
     c.mutedMs = (await waitFor(() => muteNow(true), 3500, 40)) ? Date.now() - t0 : null;
@@ -2755,7 +2755,7 @@ C["autoMute:delay"] = { states: ["single"], async run(c) {
 // Unmute after 4000 ms (default 2000): still muted 3 s after the stream ended, unmuted by 8 s
 C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Hush when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Come back after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Come back after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 4000, 40); // muted (under load the watch can take > 2 s)
     await stopTones(); const t1 = Date.now(); // the stream ends here

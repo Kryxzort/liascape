@@ -8,6 +8,7 @@ import { SubToggle } from "./SubToggle";
 import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
+import { useCopied } from "../hooks/useCopied";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -61,6 +62,9 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
+  // keyed by the ID copied, so another item's sidebar never shows "Copied"
+  const [copiedId, copy] = useCopied();
+  const idCopied = !!w.workshopId && copiedId === w.workshopId;
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
   const tags = sideTags(w.tags, { resolution: !!w.resolution });
   const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
@@ -117,7 +121,21 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             // the middle-click target: the page it came from, or a local folder
             <button className="side-tile" onClick={onOpenSource}>{web ? <><span className="side-tile-ico"><ExternalLink size={15} /></span>Open page</> : <><span className="side-tile-ico"><FolderFlap size={15} /></span>Open in file manager</>}</button>
           )}
-          {w.workshopId && <button className="side-tile" onClick={() => navigator.clipboard?.writeText(w.workshopId!)}><span className="side-tile-ico"><Copy size={15} /></span>Copy ID</button>}
+          {/* "Copy ID" turns into a green "Copied" (hooks/useCopied.ts, like the Library sidebar's ID pill): each pair of faces
+              shares one grid cell (index.css .xfade) and the tile its grid column, so nothing changes size; the hidden face is
+              aria-hidden, so the name is the shown words. Guard: probe-steam side:copyIdTile */}
+          {w.workshopId && (
+            <button className={`side-tile copy-tile${idCopied ? " done" : ""}`} data-copy-id data-copied={idCopied ? "" : undefined} onClick={() => copy(w.workshopId!)}>
+              <span className="side-tile-ico xfade">
+                <Copy size={15} data-off={idCopied ? "" : undefined} aria-hidden="true" />
+                <Check size={15} data-off={idCopied ? undefined : ""} aria-hidden="true" className={idCopied ? "ico-pop" : undefined} />
+              </span>
+              <span className="xfade">
+                <span data-off={idCopied ? "" : undefined} aria-hidden={idCopied}>Copy ID</span>
+                <span data-off={idCopied ? undefined : ""} aria-hidden={!idCopied}>Copied</span>
+              </span>
+            </button>
+          )}
         </div>
       </div>
     </>

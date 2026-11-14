@@ -11,6 +11,7 @@ import { scenePropsCache } from "./scenePropsCache";
 import { sideTags } from "./sideTags";
 import { useMotion } from "./motion";
 import { useLinger } from "../hooks/useLinger";
+import { useCopied } from "../hooks/useCopied";
 import { snapFlip, glideFlip } from "./flipGlide";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
@@ -47,7 +48,7 @@ const CRASH_FLIP = ":scope > *, .side-sec[data-sec=\"playback\"] > *";
 // The Library sidebar's content (components/SidePanel.tsx is the shell): everything the per-card settings modal had —
 // volume / speed (drag-preview live, persist on release), the scene's properties, its loudness line, the crash
 // whitelist, the trailer (the picture's preview switch), Workshop / Steam — plus the old right-click menu's actions (Open in
-// file manager, Delete, Delete from source) as tiles, Play (the picture itself — docs/decisions.md § "Make the sidebar's
+// file manager, Delete, Delete and unsubscribe) as tiles, Play (the picture itself — docs/decisions.md § "Make the sidebar's
 // picture the Play control") and the playlist toggle (in the head). Mounted per item (`key` = its path, SidePanel): its state is
 // that item's.
 // `item` is the store's live copy (a `library-item-changed` hands a new one — the values follow, nothing replays);
@@ -69,6 +70,7 @@ export function LibrarySide({
   const [dur, setDur] = useState("");
   const patchItem = useStore((s) => s.patchLibraryItem);
   const openOnSteam = useStore((s) => s.openOnSteam);
+  const unsubOnDelete = useStore((s) => !!s.settings?.autoAddWeWallpapersToLibrary) && !!item.workshopId;
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound, by design); legacy's LWE is 1×
   const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
   // Settings levels (settingsLevel.ts): the sidebar's rows follow the level like the Settings page's rows do
@@ -198,8 +200,7 @@ export function LibrarySide({
   const showLoud = !!loud && at("standard");
   const steam = item.pageUrl ?? (item.workshopId ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}` : null);
   // keyed by the ID copied, so switching items never carries "Copied" over
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  useEffect(() => { if (!copiedId) return; const t = setTimeout(() => setCopiedId(null), 1200); return () => clearTimeout(t); }, [copiedId]);
+  const [copiedId, copy] = useCopied();
   const copied = !!item.workshopId && copiedId === item.workshopId;
 
   return (
@@ -220,10 +221,16 @@ export function LibrarySide({
           {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
           {/* the Workshop ID: a pill that copies itself (a "Details" card for one property looks odd) */}
           {item.workshopId && at("standard") && (
-            <button className={`side-pill copy${copied ? " done" : ""}`} data-side-row="workshop-id" title="Copy the Workshop ID"
-              aria-label={`Workshop ID ${item.workshopId} — copy`}
-              onClick={() => { navigator.clipboard?.writeText(item.workshopId!); setCopiedId(item.workshopId!); }}>
-              {copied ? <Check size={13} className="ico-pop" /> : <Hash size={13} />} {copied ? "Copied" : item.workshopId}</button>
+            // both faces share one grid cell (index.css .xfade): the wider sets the pill's width in either state, so "Copied"
+            // never changes it and the row never re-wraps; the hidden face is aria-hidden and the name is the aria-label
+            // Guard: probe-steam side:idPill:still
+            <button className={`side-pill copy${copied ? " done" : ""}`} data-side-row="workshop-id" data-copied={copied ? "" : undefined}
+              title="Copy the Workshop ID" aria-label={`Workshop ID ${item.workshopId} — ${copied ? "copied" : "copy"}`}
+              onClick={() => copy(item.workshopId!)}>
+              <span className="xfade">
+                <span data-off={copied ? "" : undefined} aria-hidden={copied}><Hash size={13} /> {item.workshopId}</span>
+                <span data-off={copied ? undefined : ""} aria-hidden={!copied}><Check size={13} className={copied ? "ico-pop" : undefined} /> Copied</span>
+              </span></button>
           )}
         </div>
         {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
@@ -243,10 +250,14 @@ export function LibrarySide({
           {item.workshopId ? (
             <button className="side-tile" data-open-steam onClick={() => openOnSteam(item.workshopId!)}><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</button>
           ) : steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
-          <button className="side-tile danger" onClick={onTrash}><span className="side-tile-ico"><Trash2 size={15} /></span>Delete</button>
+          {/* a tile that unsubscribes says so in its words (views/Library.tsx doTrash: with auto-import on, Delete of a Workshop
+              item unsubscribes it too, or the next import brings it back). Guard: probe-steam side:deleteSource:names */}
+          <button className="side-tile danger" onClick={onTrash}
+            title={unsubOnDelete ? "Auto-import would bring it back, so this unsubscribes on Steam too; Undo subscribes it again" : undefined}>
+            <span className="side-tile-ico"><Trash2 size={15} /></span>{unsubOnDelete ? "Delete and unsubscribe" : "Delete"}</button>
           {showDeleteFromSource && (
-            <button className="side-tile danger" title="Unsubscribe on Steam and delete — Delete from source (unsubscribe)" onClick={onDeleteSource}>
-              <span className="side-tile-ico"><CloudOff size={15} /></span>Delete from source</button>
+            <button className="side-tile danger" data-delete-source title="Unsubscribes on Steam too; Undo subscribes it again" onClick={onDeleteSource}>
+              <span className="side-tile-ico"><CloudOff size={15} /></span>Delete and unsubscribe</button>
           )}
         </div>
         <SideSection icon={<SlidersHorizontal size={15} />} title="Playback" data-sec="playback">

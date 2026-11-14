@@ -130,4 +130,38 @@ public static class WorkshopSubOps
         SteamOps.StartDrain();
         return new { inLibrary = items.Count > 0, batch };
     }
+
+    // one keep at a time: two at once for one id would both copy its folder
+    static readonly SemaphoreSlim _keepGate = new(1, 1);
+
+    /// "Unsubscribe without deleting" (the Unsubscribe button's right-click menu): unsubscribes on Steam and KEEPS the library
+    /// copy. It never trashes or deletes a library item: a `local/<id>` link into Steam's folder (which Steam removes after the
+    /// unsubscribe) first becomes the library's own copy at the same path (LibraryService.KeepOwnCopy); an owned copy needs
+    /// nothing. Only then is the unsubscribe queued, so a copy that fails unsubscribes nothing. `{inLibrary, kept}` (kept = the
+    /// links turned into copies). Guard: scripts/test-steam-signin.sh § 3 i. (unsubscribe-keep)
+    public static async Task<object> UnsubscribeKeepAsync(string id, string? title)
+    {
+        await _keepGate.WaitAsync();
+        try
+        {
+            var items = LibraryService.LoadAll().Where(i => i.WorkshopId == id).ToList();
+            SteamTodo.RememberTitle(id, !string.IsNullOrWhiteSpace(title) ? title : items.FirstOrDefault()?.Title);
+            int kept = 0;
+            foreach (var it in items)
+            {
+                try { if (await Task.Run(() => LibraryService.KeepOwnCopy(it))) kept++; }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"workshop: {id}: unsubscribe without deleting — couldn't copy it into the library, nothing unsubscribed: {e.Message}");
+                    throw new InvalidOperationException($"couldn't keep a copy in your library ({e.Message})");
+                }
+            }
+            _subscribedHere.TryRemove(id, out _);
+            WorkshopUnsubQueue.AddPending([id]);
+            Console.WriteLine($"workshop: {id}: unsubscribe without deleting from the Browse sidebar — {items.Count} library item(s) kept ({kept} copied out of Steam's folder)");
+            SteamOps.StartDrain();
+            return new { inLibrary = items.Count > 0, kept };
+        }
+        finally { _keepGate.Release(); }
+    }
 }

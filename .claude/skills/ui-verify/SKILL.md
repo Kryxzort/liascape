@@ -10,7 +10,7 @@ drive the owner's running app. Run long jobs in the background and wait on their
 
 ## 1. Pick the run
 - Before a commit: `bash scripts/test-ui-matrix.sh --changed` (only the cells the change can affect; `scripts/matrix-cells-for.sh` explains the mapping).
-- One area: `bash scripts/test-ui-matrix.sh --probe probe-sidebar.js` (or `probe-layout.js`, `probe-plbar.js`, `probe-filters.js`, `probe-steam.js`, `probe-health.js`, `probe-expert.js`, `probe-plmenu.js`, `probe-preview.js`); `--only '<regex>'` narrows to cells.
+- One area: `bash scripts/test-ui-matrix.sh --probe probe-sidebar.js` (or `probe-layout.js`, `probe-plbar.js`, `probe-filters.js`, `probe-steam.js`, `probe-health.js`, `probe-expert.js`, `probe-plmenu.js`, `probe-preview.js`, `probe-settings.js`); `--only '<regex>'` narrows to cells.
 - Layout at many sizes: add `LIASCAPE_MATRIX_SCREEN=2560x1440`.
 - Before a merge or a release build: the full run (`--jobs 6` default; `--jobs 2` + `LIASCAPE_MATRIX_NICE=1` while the owner works).
 - Last line `MATRIX …`; results and screenshots in `$LIASCAPE_MATRIX_OUT` (default: a dir printed at the end).

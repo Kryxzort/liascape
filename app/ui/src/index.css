@@ -790,6 +790,28 @@ input[type=range]:focus-visible { outline: none; }
   color: var(--success); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto;
   box-shadow: inset 0 0 18px -10px var(--accent); }
 .kb { background: var(--bg-crust); padding: 3px 8px; border-radius: 6px; font: 12px ui-monospace, monospace; color: var(--subtext); }
+/* a content swap in place: every face in one grid cell, so the widest sets the size and nothing beside it moves when the
+   words change. The shown face rolls in as the other rolls out (the first face leaves upward, a later one waits below);
+   motion off, they only cross-fade. Guard: probe-settings copy:feedback, cache:size */
+.xfade { display: inline-grid; }
+.xfade > * { grid-area: 1 / 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  transition: opacity .18s ease, transform var(--spring-soft-dur) var(--spring-soft); }
+.xfade.end > * { justify-content: flex-end; }
+.xfade > [data-off] { opacity: 0; pointer-events: none; }
+.xfade > [data-off]:first-child { transform: translateY(-70%); }
+.xfade > [data-off]:not(:first-child) { transform: translateY(70%); }
+:root.no-motion .xfade > * { transform: none; transition: opacity var(--fade-dur) linear; }
+/* Copy (components/CopyButton.tsx): the faces roll inside the button; done, it reads green like the sidebar's ID pill */
+.copy-btn { overflow: hidden; }
+.copy-btn.done { color: var(--success); }
+.copy-btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+/* the Expert command blocks: Copy sits in the block's corner, the command's first line kept clear of it */
+.cmd-block { position: relative; }
+.cmd-block > .mpv { padding-right: 100px; }
+.cmd-block > .copy-btn { position: absolute; top: 8px; right: 8px; }
+/* Housekeeping → the thumbnail cache's size, then what a clear freed */
+.cache-note { font-size: 12px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.cache-note > [data-freed] { color: var(--success); }
 
 /* ---- steam QR modal ---- */
 .qr-modal { width: 340px; padding: 24px; text-align: center; }
@@ -965,6 +987,16 @@ input[type=range]:focus-visible { outline: none; }
   transition: background .12s; }
 .sel-opt:hover { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); }
 .sel-opt.on { background: var(--accent); color: var(--accent-fg); }
+/* a control's right-click menu (components/ContextMenu.tsx): the dropdown's list, grown out of the corner it opens at and
+   shrunk back into it on close; motion off, a fade in place. Guard: probe-steam steam:subToggle:keepMenu, keepMenuOff */
+.ctx-pop { animation: ctx-in .2s cubic-bezier(.2, .9, .3, 1) both; }
+.ctx-pop.closing { animation: ctx-out .12s ease-in forwards; pointer-events: none; }
+@keyframes ctx-in { from { opacity: 0; transform: scale(.92); } }
+@keyframes ctx-out { to { opacity: 0; transform: scale(.95); } }
+:root.no-motion .ctx-pop { animation: nm-in var(--fade-dur) linear both; }
+:root.no-motion .ctx-pop.closing { animation: nm-out var(--fade-dur) linear forwards; }
+.ctx-opt { display: flex; align-items: center; gap: 8px; }
+.ctx-opt svg { flex: none; color: var(--subtext); }
 
 /* ---- icons (lucide) + shared button states ---- */
 .ico { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -1245,8 +1277,9 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
 
 /* ---- Settings → Look & feel → "Text shadow" ON (<html class="text-shadow">, App.tsx) ----
-   Netflix's subtitle look on every letter: a soft black shadow hugging the glyphs, no offset (`#000 0 0 7px`, a fan
-   recreation's value; Netflix doesn't publish it). Set on body and inherited; Chromium's own sheet resets text-shadow on
+   A subtitle drop shadow on every letter: a crisp copy offset down-right, as if lit from the top-left
+   (`drop-shadow(2px 1.9px 1px)` written as a text-shadow, whose blur is 2σ to drop-shadow's σ: `2px 1.9px 2px`). A
+   text-shadow, not a filter on body: a filter would shadow every box and image too. Set on body and inherited; Chromium's own sheet resets text-shadow on
    buttons and fields, so they inherit it back. Not a glow: no-glow leaves it on. Guard: probe-layout look:textShadow */
 /* the halo is the theme's darkest colour rounded to black or white: black (`#000`) under a dark theme, white under a light
    one, whose letters are dark: a black shadow under them only smudges, a white one parts them from the wallpaper the same way */
@@ -1270,7 +1303,7 @@ input[type=range]:focus-visible { outline: none; }
   .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-msg, .st-name, .st-use,
   .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
   .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
-  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done) { text-shadow: none; }
+  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .copy-tile.done) { text-shadow: none; }
 /* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
    the same shadow as a filter instead, as bg-live does */
 :root.text-shadow .side-head-text { filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
@@ -1318,6 +1351,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel.closing, :root.no-motion .side-panel .side-content.side-exit { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .side-scrim.closing, :root.no-motion .side-panel .sm-full, :root.no-motion .side-panel .sm-anim,
 :root.no-motion .side-panel .side-vol-slide, :root.no-motion .side-panel .side-open { transition: opacity var(--fade-dur) linear !important; }
+/* the sidebar's copy controls (the ID pill, Copy ID): their faces still cross-fade. Guard: probe-steam side:idPill:still, side:copyIdTile */
+:root.no-motion .side-panel .xfade > * { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving,
 :root.no-motion .side-panel .side-wl.leaving { animation: nm-out var(--fade-dur) linear forwards !important; animation-delay: 0s !important; }
 :root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
@@ -1537,6 +1572,8 @@ button.side-pill.copy { cursor: pointer; font: inherit; font-size: 12px; font-we
   transition: border-color .15s, color .15s, box-shadow .2s; }
 button.side-pill.copy:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glow-sm); }
 button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--success); }
+/* its ID and "Copied" faces roll inside it (.xfade, one grid cell: the pill keeps its width). Guard: probe-steam side:idPill:still */
+button.side-pill.copy { overflow: hidden; }
 :root.no-glow button.side-pill.copy:hover { box-shadow: none; }
 /* the sidebar's own rhythm (.side-body > * + *: 12 px between sections), not .tags' 10 px; the pills' see-through fill and
    edge, a size smaller (the facts above, the tags under them). Guard: probe-sidebar look:sideRhythm */
@@ -1609,6 +1646,11 @@ button.side-pill.copy.done, button.side-pill.copy.done svg { color: var(--succes
 .side-tile-ico > svg { width: 16px; height: 16px; }
 /* a tile is a verb: its icon acts its meaning (iconMotion.ts / § icon motion) while the chip rises a little on the spring */
 .side-tile:hover .side-tile-ico { transform: translateY(-1px) scale(1.06); }
+/* the Browse sidebar's Copy ID (BrowseSide.tsx): its words roll (.xfade, left-aligned like every tile's label), its glyph only
+   cross-fades in the chip (the Check pops), done = green. Guard: probe-steam side:copyIdTile */
+.copy-tile .xfade > * { justify-content: flex-start; }
+.copy-tile .side-tile-ico.xfade > [data-off] { transform: none; }
+.copy-tile.done, .copy-tile.done .side-tile-ico { color: var(--success); }
 .side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
 .side-tile.danger .side-tile-ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent), 0 0 10px -3px var(--danger); }

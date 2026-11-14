@@ -123,6 +123,7 @@ interface State {
   setSubProgress(id: string, p: { value: number; status: string | null } | null): void;
   subscribeWorkshop(id: string, title: string): Promise<void>;
   unsubscribeWorkshop(id: string, title: string): Promise<void>;
+  unsubscribeKeepWorkshop(id: string, title: string): Promise<void>;
   // "Open on Steam": the item's page in the Steam app; its https page in the browser when that couldn't be opened
   openOnSteam(workshopId: string): Promise<void>;
   // shared
@@ -181,7 +182,7 @@ interface State {
   savePlaylistAs(name: string): Promise<void>; loadNamedPlaylist(name: string): Promise<void>;
   // settings
   setSetting(key: string, value: unknown): void; mergeSettings(p: Record<string, unknown>): void;
-  clearLibrary(): Promise<void>; clearCache(): Promise<void>;
+  clearLibrary(): Promise<void>; clearCache(): Promise<{ freedBytes: number; count: number } | null>;
   importFile(path: string, title: string): Promise<void>;
   // steam / workshop
   loadSteam(): Promise<void>; startQr(): Promise<void>; cancelQr(): Promise<void>; signoutSteam(): Promise<void>;
@@ -546,8 +547,8 @@ export const useStore = create<State>((set, get) => ({
   },
   async clearLibrary() { await api.libraryClear(); await get().loadLibrary(); get().setStatus("Library cleared"); },
   async clearCache() {
-    try { const r = await api.clearCache(); get().setStatus(`Cache cleared — freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB (${r.count} files)`); }
-    catch { get().setStatus("Failed to clear cache"); }
+    try { const r = await api.clearCache(); get().setStatus(`Cache cleared — freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB (${r.count} files)`); return r; }
+    catch { get().setStatus("Failed to clear cache"); return null; }
   },
   async importFile(path, title) {
     try { await api.importFile(path, title); await get().loadLibrary(); get().setStatus(`Imported: ${title}`); }
@@ -562,7 +563,7 @@ export const useStore = create<State>((set, get) => ({
   async deleteFromSource(items) {
     if (items.length === 0) return;
     await api.deleteFromSource(items); await get().loadLibrary();
-    get().setStatus(`Deleting ${items.length} from Steam`);
+    get().setStatus(`Unsubscribing ${items.length === 1 ? items[0].title : `${items.length} items`} — removed from your library`);
     get().drain();
   },
   async drain() { set({ unsub: { done: 0, total: 0, currentId: "", active: true } }); await api.drain(); },
@@ -627,6 +628,15 @@ export const useStore = create<State>((set, get) => ({
       // an item in the library went to the trash like Delete from source — the library + the status bar's Undo follow
       if (r.inLibrary) await get().loadLibrary();
       get().setStatus(r.inLibrary ? `Unsubscribing ${title} — removed from your library` : `Unsubscribing ${title}`);
+    } catch (e) { get().setStatus(`Unsubscribing failed: ${(e as Error).message}`); }
+    get().bumpWsState();
+  },
+  // "Unsubscribe without deleting": the library keeps its copy (the backend copies it out of Steam's folder first)
+  async unsubscribeKeepWorkshop(id, title) {
+    try {
+      const r = await api.workshopUnsubscribeKeep(id, title);
+      if (r.inLibrary) await get().loadLibrary();
+      get().setStatus(r.inLibrary ? `Unsubscribing ${title} — kept in your library` : `Unsubscribing ${title}`);
     } catch (e) { get().setStatus(`Unsubscribing failed: ${(e as Error).message}`); }
     get().bumpWsState();
   },

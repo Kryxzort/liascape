@@ -18,6 +18,7 @@ import { PlayTimeInput } from "../components/PlayTimeInput";
 import { ROT_HINT } from "../components/rotHint";
 import { WarnIcon } from "../components/FeatureWarn";
 import { HealthCtx, healthWarnings } from "../components/featureHealth";
+import { CopyButton } from "../components/CopyButton";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
@@ -65,6 +66,39 @@ function SceneLoudnessRow() {
           <button className="btn ghost" data-scene-loudness="estimate" title="estimate every scene not estimated yet for its current properties" onClick={() => start(false)}>Estimate</button>
           <button className="btn ghost" data-scene-loudness="recalculate" title="estimate every scene again" onClick={() => start(true)}>Recalculate all</button>
         </>}
+    </Row>
+  );
+}
+
+const fmtBytes = (b: number) => b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB`
+  : b >= 1 << 20 ? `${Math.round(b / (1 << 20))} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+
+// Settings → Housekeeping: the thumbnail cache. The words say what a clear deletes (AppOps.ThumbCacheFiles: the cards' saved
+// stills, GIF previews and Workshop folder pictures — never the preview clips); beside the button, its size on disk, then
+// what the clear freed (the two cross-fade in one cell, `.xfade`). Guard: probe-settings cache:size, cache:clear
+function ThumbCacheRow() {
+  const clearCache = useStore((s) => s.clearCache);
+  const [size, setSize] = useState<number | null>(null);
+  const [freed, setFreed] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.cacheSize().then((r) => { if (alive) setSize(r.bytes); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const clear = async () => {
+    setBusy(true);
+    const r = await clearCache();
+    setBusy(false);
+    if (r) setFreed(r.freedBytes); // the size keeps its words while it fades out
+  };
+  return (
+    <Row label="Clear thumbnails and GIF previews" hint="the copies saved on disk for the cards; they're fetched or made again as needed. Video preview clips aren't touched.">
+      <span className="xfade end cache-note" data-cache-note>
+        <span data-size data-off={size == null || freed != null ? "" : undefined}>{size == null ? "" : size > 0 ? fmtBytes(size) : "Empty"}</span>
+        <span data-freed data-off={freed == null ? "" : undefined}>{freed == null ? "" : freed > 0 ? `Freed ${fmtBytes(freed)}` : "Nothing to free"}</span>
+      </span>
+      <button className="btn ghost" data-cache-clear disabled={busy || size === 0 || freed != null} onClick={clear}>Clear Cache</button>
     </Row>
   );
 }
@@ -154,7 +188,6 @@ export const Settings = memo(function Settings() {
   const { g, set } = useS();
   const previewGlobal = useGlobalPreview();
   const clearLibrary = useStore((s) => s.clearLibrary);
-  const clearCache = useStore((s) => s.clearCache);
   const steam = useStore((s) => s.steam);
   const startQr = useStore((s) => s.startQr);
   const signoutSteam = useStore((s) => s.signoutSteam);
@@ -181,6 +214,8 @@ export const Settings = memo(function Settings() {
   // liascape-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
   // no scene-load lead (it switches when the scene's first frame is in), the fps applies live
   const liascapeActive = engine?.active === "liascape-player";
+  // legacy-only rows wait for the engine status (they'd show, then vanish, under liascape-player)
+  const legacyActive = engine?.active === "legacy";
 
   useEffect(() => {
     let alive = true;
@@ -321,7 +356,7 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Auto-mute" icon={<VolumeX size={15} />}>
-        <Row label="Hush when other audio plays" hint="the wallpaper goes quiet while music, videos or calls play, and comes back after" rk="autoMute"><input type="checkbox" checked={am} onChange={(e) => set("autoMute", e.target.checked)} /></Row>
+        <Row label="Mute when other audio plays" hint="the wallpaper goes quiet while music, videos or calls play, and comes back after" rk="autoMute"><input type="checkbox" checked={am} onChange={(e) => set("autoMute", e.target.checked)} /></Row>
         <Row label="Only for media players" hint="ignore notification blips and game sounds — only react to apps that show up as media players (MPRIS)" disabled={!am} rk="autoMuteOnlyIfMprisActive"><input type="checkbox" disabled={!am} checked={g("autoMuteOnlyIfMprisActive", false)} onChange={(e) => set("autoMuteOnlyIfMprisActive", e.target.checked)} /></Row>
         <Row label="Fade out after (ms)" hint="how long other audio has to play before the wallpaper steps aside" disabled={!am} rk="autoMuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoMuteDelayMs", 500)} onChange={(v) => set("autoMuteDelayMs", v)} /></Row>
         <Row label="Come back after (ms)" hint="how long things must stay quiet before the wallpaper's sound returns — a couple of seconds stops it flickering between songs" disabled={!am} rk="autoUnmuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoUnmuteDelayMs", 2000)} onChange={(v) => set("autoUnmuteDelayMs", v)} /></Row>
@@ -539,7 +574,9 @@ export const Settings = memo(function Settings() {
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
             options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
         </Row>
-        {g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live sync nudge" hint="Full-live only: shifts the outgoing video this many ms against the live one to cancel drift on your machine (negative = ahead). A slight rewind → raise it toward 0; a slight skip ahead → lower it. About −30 is typical." rk="fullLiveSyncOffsetMs">
+        {/* only the legacy transition helper reads it (TransitionService --lag-offset); hidden, the value stays saved.
+            Guard: probe-settings nudge:engine */}
+        {legacyActive && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live sync nudge" hint="Full-live only: shifts the outgoing video this many ms against the live one to cancel drift on your machine (negative = ahead). A slight rewind → raise it toward 0; a slight skip ahead → lower it. About −30 is typical." rk="fullLiveSyncOffsetMs">
           <NumInput min={-200} max={200} step={5} value={g("fullLiveSyncOffsetMs", -30)} onChange={(v) => set("fullLiveSyncOffsetMs", v)} /><span>ms</span>
         </Row>}
         <Row label="Volume keys change" hint="what the volume up / down shortcuts move — Auto: the playing wallpaper's own volume if it has one, else the global one; This wallpaper: always its own (gives it one); Global: always the global one (a wallpaper with its own volume stays put)" rk="volumeKeyTarget">
@@ -551,12 +588,12 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="mpv command (live)" icon={<Terminal size={15} />} lv="expert">
-        <pre className="mpv">{mpv || "…"}</pre>
+        <div className="cmd-block"><pre className="mpv">{mpv || "…"}</pre><CopyButton text={mpv} what="mpv command" /></div>
       </Section>
 
       <Section title="linux-wallpaperengine command (live)" icon={<Terminal size={15} />} lv="expert">
         <Help>The scene command, one line per monitor; each scene's Workshop ID goes on the end.</Help>
-        <pre className="mpv">{lwe || "…"}</pre>
+        <div className="cmd-block"><pre className="mpv">{lwe || "…"}</pre><CopyButton text={lwe} what="linux-wallpaperengine command" /></div>
       </Section>
 
       <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />} lv="standard">
@@ -564,17 +601,15 @@ export const Settings = memo(function Settings() {
         {actions.map((a) => (
           <Row key={a} label={a} hint={actionHint[a]}>
             <code className="kb">liascape {a.replace("volume-", "volume ")}</code>
-            <button className="mini" onClick={() => navigator.clipboard?.writeText(`liascape ${a.replace("volume-", "volume ")}`)}>copy</button>
+            <CopyButton text={`liascape ${a.replace("volume-", "volume ")}`} what={`liascape ${a.replace("volume-", "volume ")}`} />
           </Row>
         ))}
         <Row label="Autostart"><code className="kb">liascape restore</code>
-          <button className="mini" onClick={() => navigator.clipboard?.writeText("liascape restore")}>copy</button></Row>
+          <CopyButton text="liascape restore" what="liascape restore" /></Row>
       </Section>
 
       <Section title="Housekeeping" icon={<LibraryIcon size={15} />}>
-        <Row label="Clear thumbnail cache" hint="thumbnails and previews download again as needed">
-          <button className="btn ghost" onClick={() => clearCache()}>Clear Cache</button>
-        </Row>
+        <ThumbCacheRow />
         <Row label="Reset all settings" hint="every setting back to its default" lv="standard">
           <div className="hms">
             {wipeArm < 0 && <button className="btn danger" onClick={() => setWipeArm(3)}>Reset Settings</button>}

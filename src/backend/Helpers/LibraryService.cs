@@ -480,8 +480,11 @@ public static class LibraryService
                 var m = idx.GetValueOrDefault(key);
                 if ((m?.IsScene ?? false) || IsSceneFolder(itemDir))
                 {
+                    // the library's own copy of a scene: a `workshop/<id>` download, or a `local/<id>` that is no longer a link
+                    // (KeepOwnCopy) — Steam's folder for it may be gone
+                    bool owned = source == LibraryStore.Workshop || (source == LibraryStore.Local && !IsSymlink(itemDir));
                     items.Add(Build(itemDir, key, m, isScene: true, assetDir: itemDir, workshopId: key,
-                        copiedSceneDir: source == LibraryStore.Workshop ? itemDir : null));
+                        copiedSceneDir: owned ? itemDir : null));
                     continue;
                 }
                 var media = ResolveItemMedia(itemDir, key);
@@ -540,6 +543,7 @@ public static class LibraryService
         m ??= new LibMeta();
         string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
         DateTime added; try { var fi = new FileInfo(media); added = fi.CreationTime.Year <= 1970 ? fi.LastWriteTime : fi.CreationTime; } catch { added = DateTime.Now; }
+        if (m.AddedAt is long at) added = DateTimeOffset.FromUnixTimeSeconds(at).LocalDateTime;
         var loud = isScene || m.IsScene ? SceneLoudnessInfoOf(m) : default;
         // the index's (Steam's, saved at download or asked for an auto-imported item) win; until they're known the item's
         // own project.json speaks
@@ -761,6 +765,55 @@ public static class LibraryService
     }
 
     private sealed record TrashedEntry(string Source, string Key, bool IsScene, LibMeta Meta);
+
+    // Turns a `local/<id>` link into Steam's Workshop folder into the library's own copy of that folder, at the same path, so
+    // the item outlives the folder (Steam removes it after an unsubscribe: "Unsubscribe without deleting", Web/WorkshopSubOps.cs).
+    // The path stays: the playlist, the playing item, the sidebar and its settings keep pointing at it. The copy is made in a
+    // staging folder under the trash (purged at start and close, so a copy cut short leaves nothing), then swapped in for the
+    // link. Only the link is ever removed: nothing inside Steam's folder is touched. False = nothing to do (not a link: already
+    // the library's own); throws when the copy can't be made, the link left as it was.
+    // Guard: scripts/test-steam-signin.sh § 3 i. (unsubscribe-keep)
+    public static bool KeepOwnCopy(LibraryItem item)
+    {
+        if (LibraryStore.Locate(item.VideoPath) is not { } loc || loc.Source != LibraryStore.Local) return false;
+        var link = Path.Combine(LibraryStore.SourceDir(loc.Source), loc.Key);
+        if (!IsSymlink(link)) return false;
+        var target = Directory.ResolveLinkTarget(link, returnFinalTarget: true)?.FullName;
+        if (target == null || !Directory.Exists(target)) throw new IOException("its files are already gone from Steam's Workshop folder");
+        var stage = Path.Combine(TrashPath, "keep-" + Guid.NewGuid().ToString("N")[..8]);
+        try { CopyTree(target, stage); }
+        catch { TryDeleteDir(stage); throw; }
+        // the copy's files are new: its place in "date added" is the one it had through the link
+        if (item.AddedAt.Year > 1970) LibraryStore.SetMeta(item.VideoPath, m => m.AddedAt ??= new DateTimeOffset(item.AddedAt).ToUnixTimeSeconds());
+        // File.Delete on a link unlinks the link itself (never follows it)
+        File.Delete(link);
+        try { Directory.Move(stage, link); }
+        catch
+        {
+            try { if (!Directory.Exists(link) && !File.Exists(link)) File.CreateSymbolicLink(link, target); } catch { }
+            TryDeleteDir(stage);
+            throw;
+        }
+        return true;
+    }
+
+    // a folder's files by content, its sub-folders recursively; a linked sub-folder stays a link (following one could loop)
+    private static void CopyTree(string src, string dest)
+    {
+        Directory.CreateDirectory(dest);
+        foreach (var file in Directory.GetFiles(src))
+        {
+            var to = Path.Combine(dest, Path.GetFileName(file));
+            File.Copy(file, to);
+            File.SetLastWriteTimeUtc(to, File.GetLastWriteTimeUtc(file));
+        }
+        foreach (var dir in Directory.GetDirectories(src))
+        {
+            var to = Path.Combine(dest, Path.GetFileName(dir));
+            if (new DirectoryInfo(dir).LinkTarget is { } lt) File.CreateSymbolicLink(to, lt);
+            else CopyTree(dir, to);
+        }
+    }
 
     public static void RestoreBatch(string batchDir)
     {

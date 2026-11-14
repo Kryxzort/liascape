@@ -5,28 +5,10 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-42. [ ] (owner) Rename Settings → "Hush when other audio plays" to "Auto-mute" (the playful name reads as forced); keep the
-       hint plain. Settings search and any probe that looks the row up by label follow.
-43. [ ] (owner) Copy feedback everywhere it's missing: Settings → Keyboard shortcuts' copy buttons react when clicked (the
-       sidebar's copy pills already flip to "Copied" — match that); make the two Expert sections "mpv command (live)" and
-       "linux-wallpaperengine command (live)" copyable with the same control.
-44. [ ] (owner) The Library sidebar's Workshop ID pill can jump to another row when it turns into "Copied" (seen in a
-       scene's sidebar, full-screen window): the label change alters its width and the pill row re-wraps. Keep the
-       pill's width fixed across its states. Guard it with a probe.
-45. [ ] (owner) "Delete from source" says it also unsubscribes: its label or confirmation names the unsubscribe, so it's
-       never a surprise.
-46. [ ] (owner) The Browse sidebar's Unsubscribe button gets a right-click menu with "Unsubscribe without deleting" (today
-       unsubscribing a downloaded item also removes its files; this keeps them in the Library).
 47. [ ] (owner) A locate (crosshair) button on Browse too, like the Library's go-to-playing: it scrolls to and pulses the
        card whose sidebar is open (the selected card); disabled when none is.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
-48. [ ] Hide Settings → "Full-live sync nudge" unless the legacy engine runs: only the legacy transition helper reads
-       FullLiveSyncOffsetMs (TransitionService --lag-offset); under liascape-player it does nothing.
-49. [ ] Settings → "Clear thumbnail cache" says what it clears and how much: today it deletes only the Workshop browse
-       thumbnails and Wallpaper Engine thumbnails (~/.cache/liascape/workshop_previews, we_thumbs), not the preview
-       clips its hint implies ("thumbnails and previews"). Show the size it would free; decide (owner) whether clips
-       get their own clear.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

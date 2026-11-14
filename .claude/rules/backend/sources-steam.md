@@ -62,6 +62,7 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Poll every Workshop root for the media file, tracking stability PER PATH (Steam's folder may be reachable through a symlink); report phases, not a percent. Compare folders as real paths (`RealPath`).
 - `steamcmd` never stores the password; the one-time sign-in runs in a terminal with values as `$1..$3`.
 - Dedup on both `SourceId == PageUrl` and `WorkshopId`.
+- The Browse sidebar's Unsubscribe of a library item = Delete from source (trash + unsubscribe, undoable); its right-click "Unsubscribe without deleting" is its own route, `POST /workshop/unsubscribe-keep` (`WorkshopSubOps.UnsubscribeKeepAsync`), which never trashes or deletes: the library's copy is made first, and a failed copy unsubscribes nothing. Guard: `test-steam-signin.sh` § 3 i.
 - "Open on Steam" → `POST /steam/open-page` (`steam://url/CommunityFilePage/<digits>`); it is not a to-do entry.
 
 ## Verify

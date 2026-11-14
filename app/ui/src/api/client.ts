@@ -230,6 +230,8 @@ export const api = {
   lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
   importFile: (path: string, title: string) => jpost<LibraryItem>("/library/import", { path, title }),
   libraryClear: () => jpost("/library/clear"),
+  // API: the thumbnail cache (ServerHost /cache/size, /cache/clear — AppOps.ThumbCacheFiles says what's in it)
+  cacheSize: () => jget<{ bytes: number; count: number }>("/cache/size"),
   clearCache: () => jpost<{ freedBytes: number; count: number }>("/cache/clear"),
   themes: () => jget<Theme[]>("/themes"),
   library: () => jget<LibraryItem[]>("/library"),
@@ -299,6 +301,9 @@ export const api = {
     jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),
   workshopUnsubscribe: (workshopId: string, title: string) =>
     jpost<{ inLibrary: boolean; batch: string | null }>("/workshop/unsubscribe", { workshopId, title }),
+  // "Unsubscribe without deleting": its own route; the library copy is kept (kept = links turned into the library's own copy)
+  workshopUnsubscribeKeep: (workshopId: string, title: string) =>
+    jpost<{ inLibrary: boolean; kept: number }>("/workshop/unsubscribe-keep", { workshopId, title }),
   // API: the Steam to-do (the pages the user clicks in the Steam app, one at a time — .claude/rules/backend/sources-steam.md § Workshop downloads)
   steamTodo: () => jget<SteamTodo>("/steam-todo"),
   steamTodoAction: (a: "next" | "reopen" | "skip" | "stop" | "use-steam-app") => jpost<{ error?: string | null } | void>(`/steam-todo/${a}`),

@@ -26,7 +26,9 @@
 #     subscribe entry whose files weren't on disk when its page opened finishes by itself once Steam delivers (no Next); one
 #     whose folder was already there waits for Next. Then (i.) the Browse sidebar: POST /steam/open-page → steam://url/
 #     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
-#     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one.
+#     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one,
+#     and Unsubscribe without deleting (POST /workshop/unsubscribe-keep: the local/<id> link becomes the library's own copy at
+#     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing).
 #  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
 #     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), the migration of an
 #     older settings.json (and a failed store leaving it untouched), sign-out, and the keyring path against a STUB secret-tool

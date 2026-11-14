@@ -376,18 +376,15 @@ public static class ServerHost
                 catch { }
             return Results.Ok();
         });
-        // clear the re-downloadable preview caches only (NOT steamcmd downloads or state files)
+        // the thumbnail cache (what's in it: AppOps.ThumbCacheFiles): its size for the Settings row, and the clear
+        app.MapGet("/cache/size", () =>
+        {
+            var (bytes, count) = AppOps.ThumbCacheSize();
+            return Results.Json(new { bytes, count });
+        });
         app.MapPost("/cache/clear", () =>
         {
-            var baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape");
-            long freed = 0; int count = 0;
-            foreach (var sub in new[] { "workshop_previews", "we_thumbs" })
-            {
-                var d = Path.Combine(baseDir, sub);
-                if (!Directory.Exists(d)) continue;
-                foreach (var f in Directory.GetFiles(d))
-                    try { freed += new FileInfo(f).Length; File.Delete(f); count++; } catch { }
-            }
+            var (freed, count) = AppOps.ClearThumbCache();
             return Results.Json(new { freedBytes = freed, count });
         });
         // PATCH semantics: the body's keys over the saved settings, the rest kept (SettingsService.Patch —
@@ -687,6 +684,10 @@ public static class ServerHost
         app.MapPost("/workshop/unsubscribe", (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));
+        // "Unsubscribe without deleting": its own route, so nothing that deletes is on its path (WorkshopSubOps.UnsubscribeKeepAsync)
+        app.MapPost("/workshop/unsubscribe-keep", async (WorkshopIdReq r) =>
+            !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
+                : Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));
         // the Steam to-do (Web/SteamTodo.cs; .claude/rules/backend/sources-steam.md § Workshop downloads): the pages the user clicks in the Steam app, one at a time
         app.MapGet("/steam-todo", () => Results.Json(SteamTodo.Payload()));
         app.MapPost("/steam-todo/next", () => { SteamTodo.Next(); return Results.Ok(); });

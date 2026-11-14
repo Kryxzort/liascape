@@ -68,6 +68,10 @@ public sealed class LibMeta
     // Steam's Workshop tags: saved at a download, or asked once for an auto-imported item (Web/LibraryFactsOps); absent =
     // not known (a non-Workshop item, or not asked yet: the item's project.json speaks meanwhile).
     public string[]? Tags { get; set; }
+    // Unix seconds the item came into the library, saved only when its files were made again after that (a `local/<id>` link
+    // turned into the library's own copy: LibraryService.KeepOwnCopy), so it keeps its place in "date added"; absent = the
+    // media file's own date.
+    public long? AddedAt { get; set; }
 }
 
 // One audio configuration's loudness (LibMeta.SceneLoudness[fingerprint]).
