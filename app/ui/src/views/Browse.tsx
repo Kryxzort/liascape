@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { filterOf, useStore } from "../store";
 import { Card } from "../components/Card";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
@@ -13,6 +13,7 @@ import { useGridFit } from "../hooks/useGridFit";
 import { useKeptScroll } from "../hooks/useKeptScroll";
 import { useStableFn } from "../hooks/useStableFn";
 import { useMarquee } from "../hooks/useMarquee";
+import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper } from "../api/client";
@@ -99,6 +100,10 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const [kept, setKept] = useState<Wallpaper | null>(null);
   if (found && found !== kept) setKept(found); // follow during render
   const focusedW = found ?? (kept && kept.pageUrl === browseFocus ? kept : null);
+  // the top bar's locate button (components/LocateButton.tsx BrowseLocate) goes to the focused card only while the list
+  // shows it; before paint, so the button never shows a frame in the old state
+  const focusShown = found ? found.pageUrl : null;
+  useLayoutEffect(() => setBrowseFocusShown(focusShown), [focusShown]);
   const dlApply = (w: Wallpaper) => { const lib = libraryCopy(libItems, w); if (lib) applyItem(lib.videoPath); else download(activeSource, w, true); };
 
   // Ctrl+A select-all; the grid's keys (hooks/gridKeys.ts): arrows move the focus, Enter downloads & applies the focused
@@ -167,7 +172,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
 
   return (
     <>
-    <div className="scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+    <div className="scroll br-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
       <div className="grid">
           {sorted.map((w) => (

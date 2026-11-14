@@ -28,6 +28,18 @@
 //                         steps the focus on in view; a search, a filter or another source starts the list at its top, and
 //                         a switch away and back keeps it there; a jump to the list's end loads the next pages and stops
 //                         once real cards fill the view
+//   browse:locate         Browse's locate button (the top bar's crosshair) on the stubbed paged Workshop source, a card deep in
+//                         the list right-clicked (its sidebar open) and the grid back at its top: a real click glides the grid
+//                         (in-between frames) until that card sits mid-grid, from above and from below, and spotlights it in the
+//                         accent (the dim, the edge, three rippling rings, the glow, gone in 1–2 s); hovered, the crosshair
+//                         holds a quarter turn and glows; its fill is the Refresh chip's. Screenshots browse-locate-on-*.png
+//   browse:locate:noglow  Glow effects off: no glow layer, no hover glow, the hold and the rings stay; bg-live: the siblings'
+//                         fill. Screenshots browse-locate-noglow-*.png, browse-locate-bglive.png
+//   browse:locate:off|:reduced motion off / prefers-reduced-motion: the grid jumps to the card, the spotlight stands still and
+//                         fades in and out (opacity only), ~1.2 s
+//   browse:locate:disabled nothing selected: disabled, "No wallpaper selected", no hold on hover, a click does nothing; the
+//                         selected card dropped from the list by a search (its sidebar kept): disabled, "The selected
+//                         wallpaper isn't in this list"
 //   scroll:bound          booted straight into the Library (its items arrive after mount): .lib-scroll carries the smooth
 //                         scroll's wheel listener
 //   scroll:glide[:browse|:settings] a notched wheel tick (whole-pixel delta, not precise) glides: the page cancels it and
@@ -1236,6 +1248,211 @@ app.whenReady().then(async () => {
       }
       return v;
     });
+    // browse:locate* — Browse's locate button (components/LocateButton.tsx BrowseLocate) on the stubbed paged Workshop source:
+    // it glides the grid to the card whose sidebar is open and spotlights it in the accent; disabled with nothing selected or
+    // with the selected card out of the shown list; motion off / reduced it jumps and the spotlight only fades
+    const LOC_CELLS = ["browse:locate", "browse:locate:disabled", "browse:locate:noglow", "browse:locate:off", "browse:locate:reduced"];
+    if (!ONLY || LOC_CELLS.some((n) => ONLY.test(n))) {
+      makeBrowseThumbs();
+      await resize(1400, 900);
+      const srcs = (await http("GET", "/sources")).json;
+      const ws = srcs.find((s) => s.supportsTagFilter && s.available);
+      const ls0 = await js(`({ src: localStorage.getItem("liascape.activeSource"), bf: localStorage.getItem("liascape.browseFilter") })`);
+      const d = dbg(); await d.sendCommand("Page.enable");
+      const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: BR_STUB() });
+      const J = JSON.stringify;
+      const SC = `document.querySelector(".br-scroll")`;
+      const btn = () => page(`const b = document.querySelector('[data-go-playing="browse"]'); if (!b) return null; const r = b.getBoundingClientRect(), s = b.querySelector("svg");
+        return { dis: b.disabled, title: b.title, label: b.getAttribute("aria-label"), x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2),
+          rot: getComputedStyle(s).rotate, bs: getComputedStyle(b).boxShadow, f: getComputedStyle(s).filter, bg: getComputedStyle(b).backgroundColor, op: getComputedStyle(b).opacity,
+          sib: (() => { const x = document.querySelector(".topbar > .pills > .mini"); return x ? getComputedStyle(x).backgroundColor : null; })() };`);
+      const hoverBtn = async () => { const b = await btn(); win.webContents.sendInputEvent({ type: "mouseMove", x: b.x, y: b.y }); await sleep(700); const r = await btn(); win.webContents.sendInputEvent({ type: "mouseMove", x: 700, y: 880 }); await sleep(400); return r; };
+      const pressBtn = async () => { const b = await btn(); win.webContents.sendInputEvent({ type: "mouseMove", x: b.x, y: b.y }); await sleep(60); await clickAt(b); };
+      // the card LOC_PICK of the loaded list, brought into view and right-clicked (its sidebar opens); then the grid back at its top
+      const LOC_PICK = 70;
+      const focusCard = async () => {
+        const c = await page(`const sc = ${SC}; const cs = [...sc.querySelectorAll(".card:not(.skel-card)")]; const e = cs[${LOC_PICK}]; if (!e) return null;
+          e.scrollIntoView({ block: "center" }); await m.sleep(400); const b = e.querySelector(".thumb-wrap").getBoundingClientRect();
+          return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2), id: e.querySelector("[data-title]").dataset.title };`);
+        if (!c) return null;
+        win.webContents.sendInputEvent({ type: "mouseMove", x: c.x, y: c.y }); await sleep(100);
+        await clickAt(c, "right"); await sleep(900);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: 700, y: 880 }); await sleep(200);
+        const f = await page(`return ${SC}.querySelector(".card.focused [data-title]")?.dataset.title ?? null;`);
+        return f === c.id ? c.id : null;
+      };
+      const away = () => page(`const sc = ${SC}; sc.scrollTop = 0; await m.sleep(400); const e = sc.querySelector(".card.focused"), s = sc.getBoundingClientRect(), b = e?.getBoundingClientRect();
+        return { top: sc.scrollTop, offView: !!b && (b.top > s.bottom || b.bottom < s.top) };`);
+      // per frame from before the click: the grid's offset, the spotlight's layers (as probe-sidebar look:locator reads them)
+      const SAMPLE_LOC = (ms) => `(() => new Promise((res) => { const sc = ${SC}, t0 = performance.now();
+        const out = { tops: [], seen: null, edge: null, gone: null, dim: 0, rings: 0, scale: 1, glow: false, tone: false, still: false, outline: null, fo: [], np: [] };
+        const f = () => { const t = performance.now() - t0; out.tops.push(+sc.scrollTop.toFixed(1)); const fx = document.querySelector(".locate-fx");
+          if (fx) { if (out.seen == null) out.seen = Math.round(t); out.still = fx.classList.contains("still"); out.tone = out.tone || fx.classList.contains("lfx-focus");
+            const d = fx.querySelector(".lfx-dim"); if (d) out.dim = Math.max(out.dim, +getComputedStyle(d).opacity);
+            if (fx.querySelector(".lfx-edge") && out.edge == null) out.edge = Math.round(t);
+            const rs = [...fx.querySelectorAll(".lfx-ring")]; out.rings = Math.max(out.rings, rs.length);
+            for (const r of rs) { const tf = getComputedStyle(r).transform; if (tf && tf !== "none") { const mm = new DOMMatrix(tf); out.scale = Math.max(out.scale, mm.a, mm.d); } }
+            if (fx.querySelector(".lfx-glow")) out.glow = true;
+            out.fo.push(+(+getComputedStyle(fx).opacity).toFixed(3)); for (const p of ${MO.OPACITY_ONLY}(fx)) if (!out.np.includes(p)) out.np.push(p);
+            const el = document.querySelector(".locate-flash"); if (el) out.outline = getComputedStyle(el).outlineColor; }
+          else if (out.seen != null && out.gone == null) out.gone = Math.round(t);
+          if (t < ${ms}) requestAnimationFrame(f); else {
+            const e = sc.querySelector(".card.focused"), s = sc.getBoundingClientRect(), b = e?.getBoundingClientRect();
+            out.off = b ? +((b.top + b.height / 2) - (s.top + s.height / 2)).toFixed(1) : null; out.room = sc.scrollHeight - sc.clientHeight;
+            out.acc = (() => { const x = document.createElement("div"); x.style.color = "var(--accent)"; document.body.appendChild(x); const c = getComputedStyle(x).color; x.remove(); return c; })();
+            out.left = !!document.querySelector(".locate-fx, .locate-flash"); res(out); } };
+        requestAnimationFrame(f); }))()`;
+      // one locate: focused card off view at the grid's top, a real click on the button, shots mid-glide / mid-ripple / after
+      const locate = async (tag) => {
+        const a = await away();
+        if (!a.offView) return { err: `the focused card is in view at the grid's top — the glide proved nothing` };
+        const p = js(SAMPLE_LOC(2800));
+        await sleep(30); await pressBtn();
+        // the pointer off the button (onto the bar's empty middle), so the shots show it at rest
+        const tb = await page(`const r = document.querySelector(".topbar > .spacer").getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };`);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: tb.x, y: tb.y });
+        await sleep(110); await shot(`browse-locate-${tag}-glide`);
+        await sleep(800); await shot(`browse-locate-${tag}-ripple`);
+        await sleep(350); await shot(`browse-locate-${tag}-hold`);
+        const r = await p;
+        await shot(`browse-locate-${tag}-end`);
+        const t0 = r.tops[0], t1 = r.tops.at(-1);
+        r.mid = r.tops.filter((x) => x > Math.min(t0, t1) + 0.05 * Math.abs(t1 - t0) && x < Math.max(t0, t1) - 0.05 * Math.abs(t1 - t0)).length;
+        r.from = t0; r.to = t1; delete r.tops;
+        console.log(`        ${tag}: ${J({ ...r, fo: MO.brief(r.fo.map((x) => [0, x])) })}`);
+        return r;
+      };
+      // what every locate must show: the grid lands with the card centred, the accent spotlight came and went
+      const landed = (v, tag, r, { glow = true, motion = true } = {}) => {
+        if (r.err) { v.push(`${tag}: ${r.err}`); return; }
+        if (!(r.to > r.from + 200)) v.push(`${tag}: the grid didn't travel to the card (${r.from} → ${r.to} px)`);
+        else if (r.off == null || (Math.abs(r.off) > 2 && r.to < r.room - 1)) v.push(`${tag}: the card ended ${r.off} px off the grid's middle`);
+        if (r.seen == null) { v.push(`${tag}: no spotlight`); return; }
+        if (!r.tone) v.push(`${tag}: the spotlight isn't the focus tone (.lfx-focus)`);
+        if (r.outline !== r.acc) v.push(`${tag}: the card's outline is ${r.outline}, not the accent ${r.acc}`);
+        if (r.edge == null) v.push(`${tag}: the spotlight never revealed the card (no edge)`);
+        if (r.gone == null || r.left) v.push(`${tag}: the spotlight never went away`);
+        if (r.dim < 0.8) v.push(`${tag}: the rest never dimmed (${r.dim})`);
+        if (glow !== r.glow) v.push(`${tag}: glow layer ${r.glow}, want ${glow}`);
+        if (motion) {
+          if (r.mid < 3) v.push(`${tag}: the grid jumped (${r.mid} in-between frames, want ≥ 3)`);
+          if (r.rings < 3 || r.scale < 1.05) v.push(`${tag}: no rippling rings (${r.rings}, scale ${r.scale})`);
+          if (r.edge != null && r.gone != null && (r.gone - r.edge > 2000 || r.gone - r.edge < 1000)) v.push(`${tag}: shown ${r.gone - r.edge} ms after arrival (1–2 s)`);
+        } else {
+          if (r.mid > 1) v.push(`${tag}: the grid glided (${r.mid} in-between frames; motion off jumps)`);
+          if (!r.still || r.np.length || r.scale > 1.001) v.push(`${tag}: the spotlight moves (still ${r.still}, animates ${J(r.np)}, ring scale ${r.scale})`);
+          const fi = r.fo.findIndex((x) => x >= 0.95), fl = r.fo.findLastIndex((x) => x >= 0.95);
+          if (!r.fo.slice(0, Math.max(0, fi)).some((x) => x > 0.02 && x < 0.95)) v.push(`${tag}: it popped in (${J(r.fo.slice(0, 4))})`);
+          if (!r.fo.slice(fl + 1).some((x) => x > 0.02 && x < 0.95)) v.push(`${tag}: it popped out (${J(r.fo.slice(-4))})`);
+          if (r.edge != null && r.gone != null && (r.gone - r.edge > 1600 || r.gone - r.edge < 900)) v.push(`${tag}: shown ${r.gone - r.edge} ms (~1.2 s)`);
+        }
+      };
+      let ready = null;
+      try {
+        if (ws) {
+          await win.loadURL(withToken(U + "/"));
+          for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+          await js(PAGE); await reducedMotion(false);
+          await tab("Browse");
+          await page(`m.byText(".pill", ${J(ws.name)}).click();`);
+          for (let i = 0; i < 60 && !((await page(BR_AT))?.n >= BR_PER_PAGE); i++) await sleep(100);
+          for (let i = 0; i < 40 && (await page(BR_AT))?.n < 2 * BR_PER_PAGE + 10; i++) { await page(`const sc = ${SC}; sc.scrollTop = sc.scrollHeight;`); await sleep(300); }
+          ready = (await page(BR_AT))?.n > LOC_PICK + 10;
+        }
+        await cell("browse:locate", async () => {
+          if (!ready) return [`no stubbed Workshop list of > ${LOC_PICK + 10} cards (${ws ? "loaded too few" : "no Workshop source"}) — proved nothing`];
+          const v = [];
+          const id = await focusCard();
+          if (!id) return ["a right-click didn't focus the card — proved nothing"];
+          const b = await btn();
+          if (!b || b.dis) return [`with "${id}" selected the button is ${b ? "disabled" : "missing"}`];
+          if (b.label !== "Go to the selected wallpaper" || b.title !== "Show the selected wallpaper") v.push(`label "${b.label}", title "${b.title}"`);
+          // the crosshair's hold: a quarter turn while hovered, glowing like the Library's
+          const h = await hoverBtn();
+          if (h.rot !== "90deg") v.push(`hovered, the crosshair isn't held a quarter turn (rotate ${h.rot})`);
+          if (!/drop-shadow/.test(h.f) || h.bs === "none") v.push(`hovered, no glow (svg filter ${h.f}, box-shadow ${h.bs})`);
+          if (b.bg !== b.sib) v.push(`its fill ${b.bg} ≠ the Refresh chip's ${b.sib}`);
+          landed(v, "motion on", await locate("on"));
+          // the other way: from the list's end back up
+          await page(`const sc = ${SC}; sc.scrollTop = sc.scrollHeight; await m.sleep(500);`);
+          const p = js(SAMPLE_LOC(2400)); await sleep(30); await pressBtn(); const r = await p;
+          console.log(`        from below: ${r.tops[0]} → ${r.tops.at(-1)} px, card ${r.off} px off the middle`);
+          if (!(r.tops.at(-1) < r.tops[0] - 200) || Math.abs(r.off) > 2) v.push(`from below: ${r.tops[0]} → ${r.tops.at(-1)} px, the card ${r.off} px off the middle`);
+          return v;
+        });
+        await cell("browse:locate:noglow", async () => {
+          if (!ready) return ["no stubbed Workshop list — proved nothing"];
+          const v = [];
+          if (!(await page(`return !!${SC}.querySelector(".card.focused");`)) && !(await focusCard())) return ["no focused card — proved nothing"];
+          await page(`document.documentElement.classList.add("no-glow");`);
+          try {
+            const h = await hoverBtn();
+            if (h.rot !== "90deg") v.push(`no-glow: the crosshair's hold is gone (rotate ${h.rot})`);
+            if (h.f !== "none" || /rgba?\([^)]*\) 0px 0px [1-9]/.test(h.bs)) v.push(`no-glow: hovered it still glows (svg filter ${h.f}, box-shadow ${h.bs})`);
+            landed(v, "no-glow", await locate("noglow"), { glow: false });
+          } finally { await page(`document.documentElement.classList.remove("no-glow");`); }
+          // under the live wallpaper the chip keeps its siblings' fill
+          await page(`document.documentElement.classList.add("bg-live");`);
+          try {
+            const b = await btn(); await shot("browse-locate-bglive");
+            if (b.bg !== b.sib || +b.op < 0.99) v.push(`bg-live: fill ${b.bg} vs the Refresh chip's ${b.sib}, opacity ${b.op}`);
+          } finally { await page(`document.documentElement.classList.remove("bg-live");`); }
+          return v;
+        });
+        for (const mode of ["off", "reduced"]) {
+          await cell(`browse:locate:${mode}`, async () => {
+            if (!ready) return ["no stubbed Workshop list — proved nothing"];
+            const v = [];
+            try {
+              if (mode === "off") { await setMotion(false); await tab("Browse"); } else await reducedMotion(true);
+              await sleep(400);
+              if (!(await page(`return !!${SC}.querySelector(".card.focused");`)) && !(await focusCard())) return ["no focused card — proved nothing"];
+              const h = await hoverBtn();
+              // the hold stands still with motion off (index.css § icon motion, :root.no-motion)
+              if (h.rot !== "none" && h.rot !== "0deg") v.push(`motion ${mode}: hovered, the crosshair turns (${h.rot})`);
+              landed(v, `motion ${mode}`, await locate(mode), { motion: false });
+            } finally { if (mode === "off") { await setMotion(true); await tab("Browse"); } else await reducedMotion(false); }
+            return v;
+          });
+        }
+        await cell("browse:locate:disabled", async () => {
+          if (!ready) return ["no stubbed Workshop list — proved nothing"];
+          const v = [];
+          // nothing selected: disabled, says why, never holds or glows on hover, a click does nothing
+          win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" }); win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" }); await sleep(800);
+          const b = await btn();
+          if (!b?.dis || b.title !== "No wallpaper selected") v.push(`nothing selected: disabled ${b?.dis}, title "${b?.title}"`);
+          const h = await hoverBtn();
+          if (h.rot !== "none" && h.rot !== "0deg") v.push(`nothing selected: hovered, the crosshair turns (${h.rot})`);
+          await pressBtn(); await sleep(300);
+          if (await js(`!!document.querySelector(".locate-fx")`)) v.push("nothing selected: a click still spotlit something");
+          await shot("browse-locate-disabled");
+          // the selected card out of the shown list (a search replaced it; the sidebar keeps its copy): disabled, says why
+          const id = await focusCard();
+          if (!id) { v.push("couldn't focus a card for the search case — proved nothing"); return v; }
+          if ((await btn()).dis) v.push("a focused card in the list, yet the button is disabled");
+          await page(`const i = document.querySelector("input.search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, "probe"); i.dispatchEvent(new Event("input", { bubbles: true }));`);
+          await sleep(1800);
+          const s = await page(`return { side: !!document.querySelector('.side-panel[data-side="browse"]:not(.closing)'), inList: !!${SC}.querySelector(".card.focused") };`);
+          const b2 = await btn();
+          console.log(`        "${id}" after a search: ${J(s)}, button ${J({ dis: b2.dis, title: b2.title })}`);
+          if (s.inList) v.push(`the search kept "${id}" in the list — the out-of-list case proved nothing`);
+          else if (!b2.dis || b2.title !== "The selected wallpaper isn't in this list") v.push(`selected card out of the list: disabled ${b2.dis}, title "${b2.title}"`);
+          await shot("browse-locate-notInList");
+          await page(`const i = document.querySelector("input.search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ""); i.dispatchEvent(new Event("input", { bubbles: true }));`);
+          await sleep(1200);
+          return v;
+        });
+      } finally {
+        await setMotion(true); await reducedMotion(false);
+        await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+        await js(`(() => { const r = (k, x) => x == null ? localStorage.removeItem(k) : localStorage.setItem(k, x);
+          r("liascape.activeSource", ${J(ls0.src)}); r("liascape.browseFilter", ${J(ls0.bf)}); })()`);
+        await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+        await js(PAGE); await sleep(800);
+      }
+    }
     // An app, not a page: Ctrl+A (or a drag) highlights none of the chrome; what you type and the text worth copying stays
     // selectable. Reads what the user would see: the live selection's text after selectAll, and computed user-select.
     await cell("select:chrome", async () => {

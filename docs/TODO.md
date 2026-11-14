@@ -5,8 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-47. [ ] (owner) A locate (crosshair) button on Browse too, like the Library's go-to-playing: it scrolls to and pulses the
-       card whose sidebar is open (the selected card); disabled when none is.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the

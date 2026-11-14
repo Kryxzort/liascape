@@ -1,7 +1,7 @@
 import { Activity, memo, useCallback, useDeferredValue, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { LEVELS, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
-import { LocateFixed, Square, Undo2, Upload } from "lucide-react";
+import { Square, Undo2, Upload } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
 import { useStableFn } from "./hooks/useStableFn";
 import { useStore } from "./store";
@@ -21,6 +21,7 @@ import { Segmented } from "./components/Segmented";
 import LibraryOpsLine from "./components/LibraryOpsLine";
 import { TopbarStatus } from "./components/TopbarStatus";
 import { TopbarSearch } from "./components/TopbarSearch";
+import { BrowseLocate, LocateButton } from "./components/LocateButton";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
@@ -238,6 +239,8 @@ export default function App() {
         {/* Stop — red/danger with a soft glow */}
         {s.playingPath && <button className="btn danger ico glow-stop" aria-label="Stop" title={narrow ? "Stop" : undefined} onClick={() => s.stop()}><Square size={14} fill="currentColor" /><span className="tb-label">Stop</span></button>}
 
+        {/* "Go to selected": glides the grid to the card whose sidebar is open and rings it, like the Library's go to playing */}
+        {tab === "browse" && <BrowseLocate focus={s.browseFocus} motion={motion} />}
         {tab === "browse" && src?.supportsSearch && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
         {/* the filter panel's toggle + the sort, one split button (the Workshop's period is in its sort menu) */}
         {tab === "browse" && (
@@ -248,10 +251,9 @@ export default function App() {
         {tab === "library" && (
           <>
             {/* "Go to playing": glides the grid to the playing wallpaper's card and rings it */}
-            <button className="mini go-playing" data-go-playing="library" disabled={!s.playingPath}
+            <LocateButton target="library" label="Go to the playing wallpaper" disabled={!s.playingPath}
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
-              onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }}>
-              <LocateFixed size={16} /></button>
+              onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }} />
             <button className="btn ghost ico" aria-label="Import" title={narrow ? "Import" : undefined} onClick={() => importRef.current?.click()}><Upload size={14} /><span className="tb-label">Import</span></button>
             <input ref={importRef} type="file" accept=".mp4,.webm,.mov,.mkv,.avi,.gif,.png,.jpg,.jpeg,.webp"
               style={{ display: "none" }} onChange={onImportFile} />

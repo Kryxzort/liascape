@@ -82,13 +82,15 @@ export function visibleBox(el: HTMLElement, ancestors = clipAncestors(el), self 
   return b;
 }
 
-export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y", smooth: boolean): boolean {
+// `tone` = the spotlight's colour: "playing" (the playing green) or "focus" (the accent, for the selected card — Browse's).
+export type LocateTone = "playing" | "focus";
+export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y", smooth: boolean, tone: LocateTone = "playing"): boolean {
   const target = sc?.querySelector<HTMLElement>(selector);
   if (!sc || !target) return false;
   const TAU = 110, MAX_MS = 1500;
   let raf = 0, last = 0, t0 = 0, frames = 0, stopped = false;
   // the spotlight dims the window from the click on, its hole riding the target through the glide
-  const fx = locateFx(target, smooth);
+  const fx = locateFx(target, smooth, tone);
   const scAnc = clipAncestors(sc);
   const stop = () => {
     if (stopped) return;
@@ -114,7 +116,12 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
     const moved = Math.abs((axis === "y" ? sc.scrollTop : sc.scrollLeft) - cur);
     frames++;
     const done = smooth ? Math.abs(delta) < 0.75 || (frames > 2 && moved < 0.25) : frames >= 4;
-    if (done || t - t0 > MAX_MS) { stop(); fx.reveal(); return; }
+    if (done || t - t0 > MAX_MS) {
+      // the tail's steps shrink under what the scroller takes (it stalled ~3 px short of the middle): the last few px in
+      // one step, which the eye can't tell from the ease. Guard: probe-layout browse:locate
+      if (smooth && done && Math.abs(delta) >= 0.75) { if (axis === "y") sc.scrollTop = cur + delta; else sc.scrollLeft = cur + delta; }
+      stop(); fx.reveal(); return;
+    }
     raf = requestAnimationFrame(step);
   };
   sc.addEventListener("wheel", interrupt, { passive: true });
@@ -138,10 +145,11 @@ export function glideTo(sc: HTMLElement | null, selector: string, axis: "x" | "y
 // `cancel()` (the user wheels / presses mid-glide) fades the dim straight out.
 let fxCleanup: (() => void) | null = null;
 export const LOCATE_FX_MS = 1500, LOCATE_STATIC_MS = 1200, LOCATE_OUT_MS = 160;
-export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void; cancel: () => void } {
+export function locateFx(el: HTMLElement, motion: boolean, tone: LocateTone = "playing"): { reveal: () => void; cancel: () => void } {
   fxCleanup?.();
   const fx = document.createElement("div");
-  fx.className = `locate-fx${motion ? "" : " still"}`;
+  const toneCls = tone === "focus" ? "lfx-focus" : "";
+  fx.className = `locate-fx${motion ? "" : " still"}${toneCls ? ` ${toneCls}` : ""}`;
   fx.setAttribute("aria-hidden", "true");
   fx.style.setProperty("--r", getComputedStyle(el).borderRadius || "10px");
   // the dim, then a clip box holding the glow / edge / rings (added on arrival) — clipped to where the item is visible
@@ -171,7 +179,7 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
   };
   const tick = () => { if (!el.isConnected) { done(); return; } place(); raf = requestAnimationFrame(tick); };
   const done = () => {
-    phase = "gone"; cancelAnimationFrame(raf); clearTimeout(t); fx.remove(); el.classList.remove("locate-flash");
+    phase = "gone"; cancelAnimationFrame(raf); clearTimeout(t); fx.remove(); el.classList.remove("locate-flash", "lfx-focus");
     if (fxCleanup === done) fxCleanup = null;
   };
   const born = performance.now(), DIM_IN_MS = 180;
@@ -189,12 +197,12 @@ export function locateFx(el: HTMLElement, motion: boolean): { reveal: () => void
     dim.className = "lfx-dim";
     clip.insertAdjacentHTML("beforeend", `${glow ? `<div class="lfx-glow"></div>` : ""}<div class="lfx-edge"></div>` +
       (motion ? `<div class="lfx-ring"></div><div class="lfx-ring"></div><div class="lfx-ring"></div>` : `<div class="lfx-ring"></div>`));
-    el.classList.add("locate-flash");
+    el.classList.add("locate-flash"); if (toneCls) el.classList.add(toneCls);
     t = window.setTimeout(motion ? done : fadeOut, motion ? LOCATE_FX_MS : LOCATE_STATIC_MS);
   };
   // motion off: the whole layer fades, the outline (drawn over by the layer's edge) goes with it
   const fadeOut = () => {
-    clearTimeout(t); el.classList.remove("locate-flash"); fx.classList.add("out");
+    clearTimeout(t); el.classList.remove("locate-flash", "lfx-focus"); fx.classList.add("out");
     t = window.setTimeout(done, FADE_EXIT_MS);
   };
   const cancel = () => {

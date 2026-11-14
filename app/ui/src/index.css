@@ -613,6 +613,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    it fights that ring), not the accent (interaction) — docs/decisions.md § "Travel to the playing wallpaper once per
    session, spotlit in the playing green" */
 .locate-flash, .locate-fx { --lfx-c: var(--success); }
+/* Browse's locate finds the SELECTED card, which is ringed in the accent (`.card.focused`): its spotlight takes that colour,
+   a green one would fight the ring the same way */
+.locate-flash.lfx-focus, .locate-fx.lfx-focus { --lfx-c: var(--accent); }
 .locate-flash { outline: 2px solid var(--lfx-c); outline-offset: 0; }
 .locate-fx { position: fixed; left: 0; top: 0; z-index: 85; pointer-events: none; will-change: transform; }
 .locate-fx div { position: absolute; inset: 0; border-radius: var(--r, 10px); }

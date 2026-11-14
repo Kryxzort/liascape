@@ -103,7 +103,8 @@ for f in $FILES; do
     # the pixel-centre judge for round icon buttons: the probes that call it
     app/shell/pixel-centre.js) echo "  $f → nothing in the matrix (--probe probe-icons.js --only icon:centre, probe-sidebar.js --only look:iconCentre, probe-filters.js --only wf:emblem:centre)" >&2 ;;
     app/shell/motion-off.js) add "appear:morphs" "$f (+ --probe probe-sidebar.js motion:, probe-filters.js, probe-layout.js, probe-select.js, probe-steam.js, probe-expert.js, probe-cardpreview.js — their motion-off cells)" ;;
-    app/ui/src/hooks/travelToPlaying.ts) add "travel:" "$f" ;;
+    app/ui/src/hooks/travelToPlaying.ts|app/ui/src/components/LocateButton.tsx)
+      add "travel:" "$f (+ --probe probe-layout.js --only browse:locate — Browse's; probe-sidebar.js look:locator)" ;;
     # box selection in the Library / Browse grids: the selection cells + its own probe
     app/ui/src/hooks/useMarquee.ts) add "$CARD|browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-select.js)" ;;
     # the grids' column fit and the cards' stable handlers (a tab switch, a sidebar focus)
@@ -113,7 +114,7 @@ for f in $FILES; do
     # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
-    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts)
+    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
       add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
