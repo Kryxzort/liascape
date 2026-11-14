@@ -66,6 +66,24 @@ public static class SteamSelfTest
 
     private static void Check(bool ok, string what) { if (!ok) Fails.Add(what); else Console.WriteLine($"ok   {what}"); }
 
+    // "Download without subscribing"'s route (WorkshopDownloader.OneOffRouteOf): steamcmd only when found AND signed in;
+    // else no route and the reason names what's missing and where; the app's Steam sign-in alone is no route, and the reason
+    // says so
+    private static void OneOffRoutes()
+    {
+        foreach (bool signIn in new[] { false, true })
+        {
+            var r = WorkshopDownloader.OneOffRouteOf(steamCmdFound: true, steamCmdAccount: true, steamSignIn: signIn);
+            Check(r.Route == "steamcmd" && r.Missing == null, $"one-off route: steamcmd found + signed in → steamcmd (sign-in {signIn})");
+            r = WorkshopDownloader.OneOffRouteOf(false, true, signIn);
+            Check(r.Route == null && r.Missing!.StartsWith(signIn ? "Your Steam sign-in" : "Needs steamcmd:") && r.Missing.Contains("install it")
+                && r.Missing.Contains(WorkshopDownloader.SteamCmdWhere), $"one-off route: no steamcmd → none, \"{r.Missing}\"");
+            r = WorkshopDownloader.OneOffRouteOf(true, false, signIn);
+            Check(r.Route == null && r.Missing!.Contains("Needs steamcmd signed in") && r.Missing.Contains("Sign in")
+                && r.Missing.Contains("can't download files by itself") == signIn, $"one-off route: steamcmd not signed in → none, \"{r.Missing}\"");
+        }
+    }
+
     private static async Task<(string Type, JsonElement Payload)> NextEvent(string? type = null, int ms = 5000)
     {
         var until = DateTime.UtcNow.AddMilliseconds(ms);
@@ -129,6 +147,7 @@ public static class SteamSelfTest
     private static async Task RunAll()
     {
         Check(SecretStore.Backend == ExpectBackend, $"secrets: the {ExpectBackend} backend is in use ({SecretStore.Backend})");
+        OneOffRoutes();
         SteamOps.SignOut();
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000009));
         SettingsService.Update(s => { s.SteamId = 76561190000000009; s.SteamAccountName = "old"; s.SteamSignInRejected = true; });

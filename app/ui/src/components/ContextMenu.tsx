@@ -1,9 +1,10 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
 
-export interface MenuItem { key: string; label: string; icon?: ReactNode; onPick: () => void }
+// `disabled`: shown but inert (aria-disabled, still focusable so the keys reach it and the menu's `note` says why)
+export interface MenuItem { key: string; label: string; icon?: ReactNode; onPick: () => void; disabled?: boolean }
 export type MenuAt = { x: number; y: number };
 
 // how long a closing menu stays mounted for its exit (index.css `ctx-out`)
@@ -14,12 +15,15 @@ const CTX_OUT_MS = 130;
 // owns the keys). It opens away from the window's nearer edges (no measuring: the side of the window the pointer is on) and
 // grows out of that corner; the exit stays mounted (useLinger). Motion off: a fade in place. Keys: the first entry takes
 // focus, ↑ ↓ move, Escape / Tab close and hand focus back to `returnTo`. Portal'd to <body>, its events stopped in a
-// `display: contents` wrapper: React bubbles a portal's events through the tree it was declared in.
-// Guard: probe-steam steam:subToggle:keepMenu, steam:subToggle:keepMenuOff
-export function ContextMenu({ at, items, onClose, returnTo, label }: {
+// `display: contents` wrapper: React bubbles a portal's events through the tree it was declared in. `note`: a line of plain
+// text under the entries (why they are disabled), the menu's description; a click on a disabled entry keeps the menu open.
+// Guard: probe-steam steam:subToggle:keepMenu, steam:subToggle:keepMenuOff, side:oneOff:menu, side:oneOff:missing
+export function ContextMenu({ at, items, onClose, returnTo, label, note }: {
   at: MenuAt | null; items: MenuItem[]; onClose: () => void; returnTo?: { readonly current: HTMLElement | null }; label: string;
+  note?: string | null;
 }) {
   const motion = useMotion();
+  const noteId = useId();
   const shown = useLinger(at, CTX_OUT_MS, motion);
   const pop = useRef<HTMLDivElement>(null);
   const open = at != null;
@@ -57,13 +61,16 @@ export function ContextMenu({ at, items, onClose, returnTo, label }: {
   return createPortal(
     <div style={{ display: "contents" }} onClick={stop} onPointerDown={stop} onContextMenu={stop} onKeyDown={onKey}>
       {!shown.closing && <div className="sel-backdrop" onClick={() => dismiss(false)} onContextMenu={(e) => { e.preventDefault(); dismiss(false); }} />}
-      <div ref={pop} className={`sel-pop ctx-pop${shown.closing ? " closing" : ""}`} role="menu" aria-label={label} style={place} data-ctx-menu>
+      <div ref={pop} className={`sel-pop ctx-pop${shown.closing ? " closing" : ""}`} role="menu" aria-label={label} style={place} data-ctx-menu
+        aria-describedby={note ? noteId : undefined}>
         {items.map((it) => (
           <button key={it.key} type="button" role="menuitem" className="sel-opt ctx-opt" data-ctx-item={it.key}
-            disabled={shown.closing} onClick={() => { dismiss(true); it.onPick(); }}>
+            aria-disabled={it.disabled || undefined} disabled={shown.closing}
+            onClick={() => { if (it.disabled) return; dismiss(true); it.onPick(); }}>
             {it.icon}{it.label}
           </button>
         ))}
+        {note && <p id={noteId} className="ctx-note" data-ctx-note>{note}</p>}
       </div>
     </div>, document.body);
 }

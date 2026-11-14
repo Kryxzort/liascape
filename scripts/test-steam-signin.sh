@@ -15,7 +15,10 @@
 #     the same); an item already on disk → imported, nothing opens. Under "Open in the Steam app" the item's page is
 #     "opened in Steam" (steam://url/CommunityFilePage/<id>), `download-progress` says "click Subscribe", the test then drops
 #     the item into the Workshop folder (like Steam would) and the download finishes into the library; a download cancelled
-#     from the page stops waiting and imports nothing.
+#     from the page stops waiting and imports nothing. "Download without subscribing" (one-off: GET /workshop/one-off, POST
+#     /download {oneOff}) against a stub steamcmd: no steamcmd / not signed in → no route + the reason, the download fails
+#     with it; signed in → steamcmd fetches it into the library's own workshop/<id> copy, nothing subscribed, opened or
+#     queued in the to-do, a queued unsubscribe of it left queued.
 #  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
@@ -99,6 +102,25 @@ cat > "$T/bin/xdg-open" <<EOF
 printf '%s\n' "\$1" >> "$T/xdg-open.urls"
 EOF
 chmod +x "$T/bin/xdg-open"
+# "Download without subscribing" (§ 2, one-off): a stub steamcmd, named by its path in the settings, that records its
+# arguments and writes the item where steamcmd would (our steamcmd cache under the private HOME); a stub `which` hides any
+# steamcmd installed on this machine (WorkshopDownloader.FindSteamCmd's last look), so "no steamcmd" is this test's to set
+REALWHICH=$(command -v which || true)
+cat > "$T/bin/which" <<EOF
+#!/bin/sh
+[ "\$1" = steamcmd ] && exit 1
+[ -n "$REALWHICH" ] && exec "$REALWHICH" "\$@"
+exit 1
+EOF
+cat > "$T/steamcmd-stub" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$T/steamcmd.args"
+id=""; prev=""; for a in "\$@"; do [ "\$prev" = 431960 ] && id=\$a; prev=\$a; done
+d="\$HOME/.cache/liascape/steamcmd_workshop/steamapps/workshop/content/431960/\$id"
+mkdir -p "\$d" && cp "$T/clip.mp4" "\$d/v.mp4" && printf '{"type":"video","file":"v.mp4","title":"ws-%s"}' "\$id" > "\$d/project.json"
+echo "Success. Downloaded item \$id"
+EOF
+chmod +x "$T/bin/which" "$T/steamcmd-stub"
 export PATH=$T/bin:$PATH
 [ "$(command -v xdg-open)" = "$T/bin/xdg-open" ] || { bad "the stub xdg-open isn't first on PATH"; exit 1; }
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
@@ -212,6 +234,54 @@ drop("700000003");
 let n0 = urls().length;
 let r = await download("700000003");
 out(r.status === 200 && urls().length === n0, "already on disk: imported, nothing opened in Steam", `${r.status}, ${urls().length - n0} opened`);
+
+// "Download without subscribing" (POST /download {oneOff}; WorkshopDownloader.OneOffRouteFor / AcquireOneOffAsync): steamcmd
+// once it's found and signed in, else no route and the reason says what's missing; never a subscription, a page in Steam or
+// the to-do, whatever the download mode (here "Subscribe with Steam login" with a sign-in Steam turned down); the copy is
+// the library's own workshop/<id> folder, and a queued unsubscribe of it stays queued
+{
+  const json = { "Content-Type": "application/json" };
+  const setS = (patch) => fetch(U + "/settings", { method: "POST", headers: json, body: JSON.stringify(patch) });
+  const route = async () => { const r = await fetch(U + "/workshop/one-off"); return r.ok ? r.json() : { status: r.status }; };
+  const oneOff = (id) => fetch(U + "/download", { method: "POST", headers: json, body: JSON.stringify({ source: src, result: result(id), apply: false, oneOff: true }) });
+  const scArgs = () => (fs.existsSync(`${T}/steamcmd.args`) ? fs.readFileSync(`${T}/steamcmd.args`, "utf8").trim().split("\n").filter(Boolean) : []);
+  const WHERE = "Settings → Getting Workshop wallpapers → Download via steamcmd";
+  await setS({ steamCmdPath: "", steamUsername: "" });
+  let ro = await route();
+  out(ro.route === null && /^Needs steamcmd: install it/.test(ro.missing ?? "") && ro.missing.includes(WHERE),
+    "one-off: no steamcmd → no route, the reason says to install it and where to set it up", JSON.stringify(ro));
+  const n1 = urls().length, t1 = todo.length;
+  let r1 = await oneOff("700000007"), b1 = await r1.json().catch(() => null);
+  out(r1.status >= 400 && (b1?.error ?? "").startsWith("Needs steamcmd") && scArgs().length === 0 && urls().length === n1 && !(await inLib("700000007")),
+    "one-off without a route: fails with what's missing — nothing run, opened or imported", `${r1.status} ${JSON.stringify(b1).slice(0, 200)}`);
+  await setS({ steamCmdPath: `${T}/steamcmd-stub` });
+  ro = await route();
+  out(ro.route === null && /^Needs steamcmd signed in/.test(ro.missing ?? "") && ro.missing.includes("Sign in"), "one-off: steamcmd not signed in → no route, says so", JSON.stringify(ro));
+  await setS({ steamUsername: "probe-user" });
+  ro = await route();
+  out(ro.route === "steamcmd" && ro.missing == null, "one-off: steamcmd found + signed in → the steamcmd route", JSON.stringify(ro));
+  const uf = `${process.env.XDG_CONFIG_HOME}/liascape/workshop_unsub.json`;
+  fs.writeFileSync(uf, JSON.stringify({ Pending: [], Blocked: ["700000008"] }));
+  r1 = await oneOff("700000008"); b1 = await r1.json().catch(() => null);
+  out(r1.status === 200 && b1?.workshopId === "700000008", "one-off: downloads into the library", `${r1.status} ${JSON.stringify(b1).slice(0, 200)}`);
+  const args = scArgs().join(" | ");
+  out(/\+login probe-user .*\+workshop_download_item 431960 700000008/.test(args), "one-off: steamcmd fetched it (+login <account> … +workshop_download_item 431960 <id>)", args);
+  // (both below only mean something once the download went through)
+  const got = r1.status === 200;
+  out(got && urls().length === n1 && !todo.slice(t1).some((x) => x.current?.id === "700000008"), "one-off: nothing opened in Steam, nothing in the Steam to-do",
+    got ? `${urls().length - n1} opened` : "the download failed — proved nothing");
+  const dir = `${process.env.XDG_DATA_HOME}/liascape/library/workshop/700000008`;
+  out(fs.existsSync(dir) && !fs.lstatSync(dir).isSymbolicLink() && (b1?.videoPath ?? "").startsWith(dir + "/"),
+    "one-off: the library's own copy (library/workshop/<id>, a folder, not a link into a Steam folder)", b1?.videoPath);
+  const li = (await lib()).find((i) => i.workshopId === "700000008");
+  const st8 = (await (await fetch(U + "/workshop/state", { method: "POST", headers: json, body: JSON.stringify({ ids: ["700000008"] }) })).json())["700000008"];
+  out(li && li.subscribed !== true && st8 && st8.subscribed === false, "one-off: neither /library nor /workshop/state calls it subscribed",
+    JSON.stringify({ lib: li?.subscribed, state: st8 }));
+  const q = JSON.parse(fs.readFileSync(uf, "utf8"));
+  out(got && (q.Blocked ?? []).includes("700000008"), "one-off: a queued unsubscribe of it stays queued (never unblocked)",
+    got ? JSON.stringify(q) : "the download failed — proved nothing");
+  await setS({ steamCmdPath: "", steamUsername: "" });
+}
 
 // "Open in the Steam app": the page, then Steam's files finish the download
 await setMode("steampage");

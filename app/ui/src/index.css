@@ -1012,6 +1012,12 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .ctx-pop.closing { animation: nm-out var(--fade-dur) linear forwards; }
 .ctx-opt { display: flex; align-items: center; gap: 8px; }
 .ctx-opt svg { flex: none; color: var(--subtext); }
+/* an entry the menu can't do now (aria-disabled: still focusable, so the keys reach it) and the note under the entries
+   that says why. Guard: probe-steam side:oneOff:missing */
+.ctx-opt[aria-disabled="true"], .ctx-opt[aria-disabled="true"] svg { color: var(--muted); cursor: default; }
+.ctx-opt[aria-disabled="true"]:hover { background: none; }
+.ctx-note { margin: 2px 0 0; padding: 6px 10px 4px; max-width: 300px; white-space: normal; font-size: 11.5px; line-height: 1.35;
+  color: var(--subtext); border-top: 1px solid var(--surface0); }
 
 /* ---- icons (lucide) + shared button states ---- */
 .ico { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }

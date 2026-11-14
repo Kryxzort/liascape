@@ -239,8 +239,11 @@ public static class AppOps
         return 0;
     }
 
-    // Web-source download OR workshop acquire (subscribe/steamcmd) then import into the library.
-    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string thumbnailUrl, string sourceId, CancellationToken ct, string? animatedUrl = null)
+    // Web-source download OR workshop acquire (subscribe/steamcmd) then import into the library. `oneOff` (a Workshop item's
+    // "Download without subscribing"): WorkshopDownloader.AcquireOneOffAsync whatever the download mode, no subscription, and
+    // a queued unsubscribe of it stays queued (the copy is the library's own, not a subscription's).
+    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string thumbnailUrl, string sourceId, CancellationToken ct, string? animatedUrl = null,
+        bool oneOff = false)
     {
         var s = SettingsService.Load();
         var progress = new Progress<double>(v =>
@@ -253,9 +256,11 @@ public static class AppOps
             var ap = new Progress<(double, string)>(t =>
                 EventBus.Broadcast("download-progress", new { id = sourceId, value = Math.Max(0, t.Item1), status = t.Item2 }));
             string dir;
-            // the Browse sidebar's toggle says "Subscribing…" meanwhile (steamcmd: no subscription)
-            using (s.WorkshopDownloadMode != "steamcmd" ? WorkshopSubOps.Subscribing(detail.WorkshopId) : null)
-                dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
+            if (oneOff) dir = await WorkshopDownloader.AcquireOneOffAsync(detail.WorkshopId, s, ap, ct);
+            else
+                // the Browse sidebar's toggle says "Subscribing…" meanwhile (steamcmd: no subscription)
+                using (s.WorkshopDownloadMode != "steamcmd" ? WorkshopSubOps.Subscribing(detail.WorkshopId) : null)
+                    dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
             string url = dir;
             if (!detail.IsScene)
             {
@@ -272,7 +277,7 @@ public static class AppOps
         }
 
         var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim);
-        if (item.WorkshopId is string wid) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
+        if (item.WorkshopId is string wid && !oneOff) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
         SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
         LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
         EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });

@@ -211,7 +211,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     {sideW && (
       <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
         <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}
-          onDownload={(apply) => download(activeSource, sideW, apply)} onCancel={() => cancelDownload(sideW.pageUrl)}
+          onDownload={(apply, oneOff) => download(activeSource, sideW, apply, oneOff)} onCancel={() => cancelDownload(sideW.pageUrl)}
           onApplyLib={(p) => applyItem(p)} onShowInLibrary={onShowInLibrary}
           onOpenSource={() => sideW.pageUrl.startsWith("http") ? openExternal({ url: sideW.pageUrl })
             : openExternal({ path: sideW.pageUrl, reveal: true, isScene: sideW.isScene, workshopId: sideW.workshopId })} />

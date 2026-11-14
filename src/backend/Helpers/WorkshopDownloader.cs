@@ -44,6 +44,49 @@ public static class WorkshopDownloader
         return await AcquireViaSubscribeAsync(workshopId, title, settings, alreadyHave, progress, ct);
     }
 
+    /// How "Download without subscribing" would get an item: `Route` = "steamcmd", or null with `Missing` = what the user
+    /// lacks, in their words (the menu shows it on the disabled entry).
+    public sealed record OneOffRoute(string? Route, string? Missing);
+
+    public const string SteamCmdWhere = "Settings → Getting Workshop wallpapers → Download via steamcmd";
+
+    /// The way a one-off copy is fetched (the Browse sidebar's right-click "Download without subscribing"): steamcmd, once it
+    /// is found and has an account name (its one-time sign-in in a terminal caches the login; a stale cache fails the
+    /// download with steamcmd's own exit). Not the app's Steam sign-in over Steam's content servers: the depot key and the
+    /// manifest's request code need a Steam-client logon, and the sign-in is a website one (SteamAuthService: WebBrowser
+    /// refresh tokens, audience `web`), which a client logon doesn't accept — so the reason says so when that's all the user
+    /// has. Pure: the caller reads the disk, the settings and the secret store.
+    /// Guard: steam-selftest "one-off route", test-steam-signin.sh § 2 (one-off)
+    public static OneOffRoute OneOffRouteOf(bool steamCmdFound, bool steamCmdAccount, bool steamSignIn)
+    {
+        if (steamCmdFound && steamCmdAccount) return new("steamcmd", null);
+        string why = !steamCmdFound
+            ? $"Needs steamcmd: install it, then sign in to it under {SteamCmdWhere}."
+            : $"Needs steamcmd signed in: {SteamCmdWhere} → Sign in.";
+        return new(null, steamSignIn ? $"Your Steam sign-in can't download files by itself. {why}" : why);
+    }
+
+    public static OneOffRoute OneOffRouteFor(AppSettings s) => OneOffRouteOf(
+        FindSteamCmd(s.SteamCmdPath) != null, !string.IsNullOrWhiteSpace(s.SteamUsername), SteamAuthService.HasUsableSignIn(s));
+
+    /// "Download without subscribing": a one-off copy for the library, never a subscription (nothing is sent to Steam's
+    /// subscribe, no Steam to-do page, no unblock of a queued unsubscribe), so nothing ever updates it. Always a fresh fetch
+    /// into our steamcmd cache, never Steam's own folder for it (that is a subscription's, and may be on its way out), so the
+    /// library gets its own `workshop/<id>` copy. Without a route it fails with what's missing.
+    /// Guard: test-steam-signin.sh § 2 (one-off)
+    public static async Task<string> AcquireOneOffAsync(string workshopId, AppSettings settings,
+        IProgress<(double Progress, string Status)>? progress, CancellationToken ct)
+    {
+        var route = OneOffRouteFor(settings);
+        if (route.Route == null)
+        {
+            Console.WriteLine($"workshop: {workshopId}: no way to download it without subscribing — {route.Missing}");
+            throw new InvalidOperationException(route.Missing);
+        }
+        Console.WriteLine($"workshop: {workshopId}: downloading without subscribing (via {route.Route})");
+        return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
+    }
+
     /// The user skipped (or stopped) this item in the Steam to-do: its /download ends as skipped, not failed.
     public sealed class SkippedException(string workshopId) : Exception($"Skipped {workshopId} in the Steam to-do") { }
 
@@ -612,11 +655,11 @@ public static class WorkshopDownloader
         string? steamcmdPath = FindSteamCmd(settings.SteamCmdPath);
         if (string.IsNullOrEmpty(steamcmdPath))
             throw new InvalidOperationException(
-                "steamcmd not found. Install it or set the path in Settings → Sources.");
+                $"steamcmd not found. Install it, or set its path under {SteamCmdWhere}.");
 
         if (string.IsNullOrEmpty(settings.SteamUsername))
             throw new InvalidOperationException(
-                "Steam username not set. Configure it in Settings → Sources.");
+                $"steamcmd isn't signed in: {SteamCmdWhere} → Sign in.");
 
         string installDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -665,7 +708,7 @@ public static class WorkshopDownloader
         if (proc.ExitCode != 0)
             throw new InvalidOperationException(
                 $"steamcmd exited with code {proc.ExitCode}. " +
-                "You may need to sign in again via Settings → Sources → Sign in to Steam.");
+                $"You may need to sign in to it again: {SteamCmdWhere} → Sign in.");
 
         string itemDir = Path.Combine(SteamCmdWorkshopContentDir, workshopId);
         if (!IsWorkshopDirReady(itemDir))

@@ -73,8 +73,8 @@ for f in $FILES; do
     # copy feedback: Settings' Copy buttons and the Library sidebar's Workshop ID pill
     app/ui/src/components/CopyButton.tsx|app/ui/src/hooks/useCopied.ts)
       echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill; probe-sidebar.js side:titleCopy; probe-steam.js ws:creatorCopy)" >&2 ;;
-    # the Unsubscribe button's right-click menu (keep the files) and the menu itself
-    app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx)
+    # the controls' right-click menus (Unsubscribe → keep the files, Download → without subscribing) and the menu itself
+    app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx|app/ui/src/components/menuItems.tsx)
       echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, side:)" >&2 ;;
     # the Browse sidebar's creator / favourite / comments, the Workshop's list pills and the shared Workshop ID pill
     app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx)
@@ -118,7 +118,7 @@ for f in $FILES; do
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
-      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
+      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:; --probe probe-filters.js — the Workshop filter column; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts|app/ui/src/components/SortFilterButton.tsx|app/ui/src/hooks/filterMorph.ts)

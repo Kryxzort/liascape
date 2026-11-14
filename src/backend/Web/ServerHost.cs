@@ -590,7 +590,7 @@ public static class ServerHost
             if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
             var detail = await Providers[r.Source].GetDetailAsync(r.Result);
             LibraryItem item;
-            try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl); }
+            try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl, r.OneOff); }
             // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (.claude/rules/backend/sources-steam.md § Workshop downloads)
             catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
             if (r.Apply) { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
@@ -689,6 +689,9 @@ public static class ServerHost
             Console.WriteLine($"workshop: {r.WorkshopId}: Open on Steam — {(ok ? "opened its page in the Steam app" : "the Steam app couldn't be opened")}");
             return Results.Json(new { ok });
         });
+        // how "Download without subscribing" (POST /download {oneOff}) would get an item: {route: "steamcmd" | null, missing}
+        // (WorkshopDownloader.OneOffRouteFor) — the Browse sidebar's right-click menu asks as it opens. Local only: no Steam request
+        app.MapGet("/workshop/one-off", () => Results.Json(WorkshopDownloader.OneOffRouteFor(SettingsService.Load())));
         // the Browse sidebar's Subscribe / Unsubscribe toggle (Web/WorkshopSubOps.cs)
         app.MapPost("/workshop/state", (IdsReq r) => Results.Json(WorkshopSubOps.State(r.Ids ?? [])));
         app.MapPost("/workshop/subscribe", async (WorkshopIdReq r) =>
@@ -1012,7 +1015,8 @@ public static class ServerHost
         public override string ToString() => nameof(LoginReq);
     }
     public record CodeReq(string? Code);
-    public record DownloadReq(int Source, WallpaperResult Result, bool Apply);
+    // OneOff: a Workshop item's "Download without subscribing" (AppOps.DownloadAsync)
+    public record DownloadReq(int Source, WallpaperResult Result, bool Apply, bool OneOff = false);
     public record SavePlaylistReq(string Name, CustomPlaylist Playlist);
     public record NameReq(string Name);
     public record PlayReq(List<string> Paths, PlaylistSettings? Settings);

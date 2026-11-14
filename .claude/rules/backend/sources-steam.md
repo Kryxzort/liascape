@@ -66,6 +66,7 @@ choices here: `docs/decisions.md` § Steam & sources.
 - `steamcmd` never stores the password; the one-time sign-in runs in a terminal with values as `$1..$3`.
 - Dedup on both `SourceId == PageUrl` and `WorkshopId`.
 - The Browse sidebar's Unsubscribe of a library item = Delete from source (trash + unsubscribe, undoable); its right-click "Unsubscribe without deleting" is its own route, `POST /workshop/unsubscribe-keep` (`WorkshopSubOps.UnsubscribeKeepAsync`), which never trashes or deletes: the library's copy is made first, and a failed copy unsubscribes nothing. Guard: `test-steam-signin.sh` § 3 i.
+- "Download without subscribing" (the Browse sidebar's download buttons' right-click; `POST /download {oneOff}` → `WorkshopDownloader.AcquireOneOffAsync`) makes the library's own `workshop/<id>` copy whatever the mode: never a subscribe call, a Steam to-do page or an `Unblock`. Its route (`OneOffRouteFor`, `GET /workshop/one-off`, asked before the menu opens) is steamcmd once found and given an account, else none and the reason says what's missing. Not the sign-in over Steam's content servers: those need a Steam-client logon and the sign-in's tokens are WebBrowser ones. Guard: `test-steam-signin.sh` § 2 (one-off), steam-selftest "one-off route", probe-steam `side:oneOff:*`.
 - "Open on Steam" → `POST /steam/open-page` (`steam://url/CommunityFilePage/<digits>`); it is not a to-do entry.
 
 ## Workshop community: favourites, comments, creators (`Helpers/SteamCommunity.cs`, `Web/WorkshopSocialOps.cs`)

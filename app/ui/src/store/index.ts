@@ -174,7 +174,8 @@ interface State {
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   // the Library sidebar's "Scene properties" folded: one remembered choice for every scene, never per item (ScenePropsEditor)
   scenePropsFolded: boolean; setScenePropsFolded(v: boolean): void;
-  download(source: number, w: Wallpaper, apply: boolean): Promise<void>;
+  // oneOff: a Workshop item's "Download without subscribing" (components/BrowseSide.tsx's right-click menu)
+  download(source: number, w: Wallpaper, apply: boolean, oneOff?: boolean): Promise<void>;
   cancelDownload(id: string): void;
   setDownload(id: string, v: number, status?: string): void;
   stop(): Promise<void>; resetAllSettings(): void;
@@ -423,16 +424,16 @@ export const useStore = create<State>((set, get) => ({
       if (gen === browseGen) get().setStatus(e instanceof Error ? e.message : String(e), true); // e.g. Steam's cooldown
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
-  async download(source, w, apply) {
+  async download(source, w, apply, oneOff = false) {
     const ctrl = new AbortController(); dlCtrls[w.pageUrl] = ctrl;
     set({ downloads: { ...get().downloads, [w.pageUrl]: 0 } });
     try {
-      const item = await api.download(source, w, apply, ctrl.signal);
+      const item = await api.download(source, w, apply, ctrl.signal, oneOff);
       if ("skipped" in item && item.skipped) { get().setStatus(`Skipped: ${w.title}`); return; } // the Steam to-do's Skip / Stop
       if ("error" in item && item.error) { get().setError(`Download failed: ${item.error}`); return; }
       await get().loadLibrary();
       // auto-import on + the "subscribe" mode: the download was the subscription (components/BrowseSide.tsx subIsDownload)
-      const sub = subscribeIsDownload(get().settings) && isWorkshopItem(w);
+      const sub = !oneOff && subscribeIsDownload(get().settings) && isWorkshopItem(w);
       get().setStatus(apply ? `Applied: ${w.title}` : `${sub ? "Subscribed" : "Downloaded"}: ${w.title}`);
     } catch (e) {
       if (ctrl.signal.aborted) get().setStatus(`Cancelled: ${w.title}`);

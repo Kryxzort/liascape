@@ -63,6 +63,16 @@
 //                         status says "kept in your library"; the left-click still posts /workshop/unsubscribe; no menu for an
 //                         item not in the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
 //   steam:subToggle:keepMenuOff  motion off: the menu fades in and out in place (motion-off.js)
+//   side:oneOff:menu      the Browse sidebar's Download and "Download & Apply" (and, merged, "Subscribe"): a real right-click
+//                         opens a menu at the pointer ("Download without subscribing", "… & apply"; the first focused, grows
+//                         in per frame, no request); picking each → ONE POST /download {oneOff: true, apply} and the menu fades
+//                         out while the download shows; the left-click still posts a plain download (oneOff false); the route
+//                         is asked as the pointer reaches the button; a WE-local item's Download has no menu; no-glow + bg-live
+//                         (own fill, no glow). Shots steam-oneoff*.png
+//   side:oneOff:missing   no route (GET /workshop/one-off {route: null, missing}): both entries shown disabled (aria-disabled,
+//                         muted), the note says what's missing; a click on one posts nothing and keeps the menu open; Escape
+//                         closes it. Shot steam-oneoff-missing.png
+//   side:oneOff:menuOff   motion off: the menu fades in and out in place (motion-off.js)
 //   side:unsub:names      auto-import on: a subscribed Workshop item's Library tiles have no Delete but "Unsubscribe" (the cloud-off
 //                         icon, a tooltip naming the right-click and Undo); the card's button is named Unsubscribe; the library's
 //                         own copy and a plain item keep Delete; the tile and the card's button post /workshop/delete-from-source for
@@ -158,6 +168,8 @@ const STUB = `(() => {
       const r = (window.__replies || {})[p];
       return r ? res(r.body, r.status) : res(null);
     }
+    // "Download without subscribing"'s route (side:oneOff:*): window.__oneOff, else steamcmd ready; every ask recorded
+    if (p === "/workshop/one-off") { (st.oneOffAsks ??= []).push(performance.now()); return res(window.__oneOff ?? { route: "steamcmd", missing: null }); }
     // the Steam to-do: idle at load, every button's POST recorded (steam:todo)
     if (p === "/steam-todo") return res({ finished: true });
     if (p.startsWith("/steam-todo/") && m === "POST") { st.calls.push({ p, body: null }); return res(p.endsWith("use-steam-app") ? { error: null } : null); }
@@ -1248,6 +1260,153 @@ app.whenReady().then(async () => {
       await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
       const b = await btnBox();
       if (!b) { await setSettings({ morphs: true }); return ["no Unsubscribe button"]; }
+      await mvTo(b.x, b.y, 300);
+      let smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
+      await clickAt(b.x, b.y, "right");
+      const sIn = await smp;
+      smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
+      await key("Escape");
+      const sOut = await smp;
+      console.log(`        motion off: in ${MO.brief(sIn.menu)} / out ${MO.brief(sOut.menu)}`);
+      v.push(...MO.judge("motion off: the menu appearing", sIn.menu, { appear: true }), ...MO.judge("motion off: the menu leaving", sOut.menu, { leave: true }));
+      await setSettings({ morphs: true });
+      return v;
+    });
+    // ---- "Download without subscribing": the Browse sidebar's download / subscribe buttons' right-click menu
+    // (components/BrowseSide.tsx, menuItems.tsx oneOffMenuItems). /download is held by the stub; /workshop/one-off answers
+    // window.__oneOff
+    const getBox = (k) => js(`(() => { const r = document.querySelector("${SIDE} [data-side-get=${k}]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+    const ctxItems = () => page(`const m = document.querySelector(${J(MENU)}); if (!m) return null;
+      return { items: [...m.querySelectorAll("[role=menuitem]")].map((b) => ({ key: b.dataset.ctxItem, text: b.textContent.trim(), off: b.getAttribute("aria-disabled") === "true",
+        color: getComputedStyle(b).color })), note: m.querySelector("[data-ctx-note]")?.textContent ?? null, described: m.getAttribute("aria-describedby"),
+        focus: document.activeElement?.dataset?.ctxItem ?? null, label: m.getAttribute("aria-label"), titles: m.querySelectorAll("[title]").length,
+        bg: getComputedStyle(m).backgroundColor, shadow: getComputedStyle(m).boxShadow, closing: m.classList.contains("closing") };`);
+    const pickAt = (key) => js(`(() => { const r = document.querySelector("[data-ctx-item=${key}]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+    const heldDl = () => js(`window.__st.dl ? { body: window.__st.dl.body, aborted: window.__st.dl.aborted } : null`);
+    const cancelDl = async () => { await page(`document.querySelector("${SIDE} [data-side-download] button")?.click();`); await sleep(400); };
+    const ONE_OFF_ITEMS = [["oneoff", "Download without subscribing"], ["oneoff-apply", "Download without subscribing & apply"]];
+    await cell("side:oneOff:menu", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, workshopDownloadMode: "subscribe" });
+      await browseWs();
+      await openSide(0);
+      for (const [btn, apply] of [["only", false], ["apply", true]]) {
+        const b = await getBox(btn);
+        if (!b) return [...v, `no [data-side-get=${btn}] button in the Browse sidebar`];
+        const asks0 = (await js(`window.__st.oneOffAsks?.length ?? 0`));
+        await mvTo(b.x, b.y, 250);
+        if ((await js(`window.__st.oneOffAsks?.length ?? 0`)) === asks0 && btn === "only") v.push("the route wasn't asked as the pointer reached the button");
+        await js(`window.__st.dl = null; true`);
+        const grow = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { out.push(document.querySelector(${J(MENU)})?.getBoundingClientRect().width ?? null);
+          if (performance.now() - t0 < 400) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
+        await sleep(20);
+        await clickAt(b.x, b.y, "right");
+        if (btn === "only") { await sleep(70); await shot("oneoff-opening"); }
+        const ws = await grow;
+        const m = await ctxItems();
+        console.log(`        ${btn}: ${J(m)}`);
+        if (!m) { v.push(`no menu after a right-click on [data-side-get=${btn}]`); continue; }
+        if (J(m.items.map((x) => [x.key, x.text])) !== J(ONE_OFF_ITEMS)) v.push(`${btn}: menu items ${J(m.items)}`);
+        if (m.items.some((x) => x.off) || m.note) v.push(`${btn}: with a route, an entry is disabled or a note shows (${J(m)})`);
+        if (m.focus !== "oneoff") v.push(`${btn}: the first entry isn't focused (${m.focus})`);
+        if (m.titles) v.push(`${btn}: ${m.titles} tooltip(s) in the menu`);
+        if (between(ws, 1) < 2) v.push(`${btn}: the menu didn't grow in (widths ${J(ws.slice(0, 10))})`);
+        if (await heldDl()) v.push(`${btn}: the right-click itself posted /download`);
+        if (btn === "only") { await sleep(250); await shot("oneoff"); }
+        // pick the entry that matches the button: ONE /download {oneOff: true, apply}; the menu fades out over the download
+        const key = apply ? "oneoff-apply" : "oneoff";
+        const it = await pickAt(key);
+        const fade = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { const e = document.querySelector(${J(MENU)}); out.push(e ? +getComputedStyle(e).opacity : null);
+          if (performance.now() - t0 < 400) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
+        await sleep(20);
+        await clickAt(it.x, it.y);
+        const ops = await fade;
+        const dl = await waitFor(heldDl, 2000);
+        if (!dl || dl.body.oneOff !== true || dl.body.apply !== apply || dl.body.result?.workshopId !== "930000") v.push(`${btn}: picking "${key}" posted ${J(dl?.body ?? null)}`);
+        if (between(ops, 0.05) < 1 || ops.at(-1) != null) v.push(`${btn}: the menu didn't fade out (opacity per frame ${J(ops.slice(0, 12))})`);
+        if (!(await js(`!!document.querySelector("${SIDE} [data-side-download]")`))) v.push(`${btn}: the sidebar doesn't show the download`);
+        await cancelDl();
+      }
+      // the left-click is still the plain download / subscription
+      await js(`window.__st.dl = null; true`);
+      await page(`document.querySelector("${SIDE} [data-side-get=only]")?.click();`);
+      const plain = await waitFor(heldDl, 2000);
+      if (!plain || plain.body.oneOff !== false || plain.body.apply !== false) v.push(`a left-click on Download posted ${J(plain?.body ?? null)}`);
+      await cancelDl();
+      // merged (auto-import on + "subscribe"): "Subscribe" has the same menu
+      await setSettings({ autoAddWeWallpapersToLibrary: true });
+      await browseWs(); await openSide(0);
+      let b = await getBox("only");
+      const label = await js(`document.querySelector("${SIDE} [data-side-get=only]")?.textContent.trim() ?? null`);
+      await clickAt(b.x, b.y, "right"); await sleep(350);
+      let m = await ctxItems();
+      if (label !== "Subscribe" || !m || J(m.items.map((x) => x.key)) !== J(ONE_OFF_ITEMS.map((x) => x[0]))) v.push(`merged: "${label}" right-click menu ${J(m)}`);
+      await key("Escape"); await sleep(300);
+      if (!(await js(`document.activeElement?.dataset?.sideGet === "only"`))) v.push("after Escape the focus isn't back on the button");
+      await setSettings({ autoAddWeWallpapersToLibrary: false });
+      // no-glow + bg-live: the menu keeps its own fill and loses its glow
+      await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+      await browseWs(); await openSide(0);
+      b = await getBox("only"); await mvTo(b.x, b.y, 200); await clickAt(b.x, b.y, "right"); await sleep(350);
+      m = await ctxItems();
+      const html = await js(`document.documentElement.className`);
+      console.log(`        no-glow + bg-live: ${J({ html, bg: m?.bg, shadow: m?.shadow })}`);
+      if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
+      if (!m || /rgba\(0, 0, 0, 0\)|transparent/.test(m.bg)) v.push(`bg-live: the menu has no fill of its own (${m?.bg})`);
+      if (m && (m.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((c) => !/rgba\(0, 0, 0/.test(c))) v.push(`no-glow: the menu still glows (${m.shadow})`);
+      await shot("oneoff-live");
+      await key("Escape"); await sleep(250);
+      await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+      // a WE-local item (on disk already: its Download imports it) has no menu
+      await js(`localStorage.setItem("__probe_we_local", "1"); true`);
+      await load(SIGNED_OUT);
+      const local = (await http("GET", "/sources")).json.find((x) => /Local/i.test(x.name) && !x.supportsTagFilter)?.name;
+      await tab("Browse");
+      await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await openSide(0);
+      b = await getBox("only");
+      if (!b) v.push("a WE-local item's sidebar has no Download — proved nothing");
+      else { await clickAt(b.x, b.y, "right"); await sleep(350); if (await ctxItems()) { v.push("a WE-local item's Download has the menu"); await key("Escape"); } }
+      await js(`localStorage.removeItem("__probe_we_local"); true`);
+      return v;
+    });
+    await cell("side:oneOff:missing", async () => {
+      const v = [];
+      const MISSING = "Needs steamcmd: install it, then sign in to it under Settings → Getting Workshop wallpapers → Download via steamcmd.";
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false });
+      await browseWs();
+      await js(`window.__oneOff = { route: null, missing: ${J(MISSING)} }; true`);
+      await openSide(0);
+      const b = await getBox("only");
+      await mvTo(b.x, b.y, 200);
+      await clickAt(b.x, b.y, "right"); await sleep(350);
+      const m = await ctxItems();
+      console.log(`        ${J(m)}`);
+      if (!m) return ["no menu without a route (it should say what's missing)"];
+      if (J(m.items.map((x) => [x.key, x.text])) !== J(ONE_OFF_ITEMS) || m.items.some((x) => !x.off)) v.push(`entries ${J(m.items)} (want both, disabled)`);
+      if (m.note !== MISSING) v.push(`the note says "${m.note}"`);
+      if (!m.described) v.push("the menu isn't described by its note");
+      const textColor = await js(`getComputedStyle(document.querySelector(".side-title, h2") ?? document.body).color`);
+      if (m.items.some((x) => x.color === textColor)) v.push(`a disabled entry has the text colour (${m.items.map((x) => x.color)})`);
+      if (m.focus !== "oneoff") v.push(`the first entry isn't focused (${m.focus}): the keys must reach a disabled menu`);
+      await shot("oneoff-missing");
+      await js(`window.__st.dl = null; true`);
+      const it = await pickAt("oneoff");
+      await clickAt(it.x, it.y); await sleep(400);
+      if (await heldDl()) v.push("a click on a disabled entry posted /download");
+      if (!(await ctxItems()) || (await ctxItems()).closing) v.push("a click on a disabled entry closed the menu");
+      await key("Escape"); await sleep(300);
+      if (await ctxItems()) v.push("Escape didn't close the menu");
+      await js(`window.__oneOff = null; true`);
+      return v;
+    });
+    await cell("side:oneOff:menuOff", async () => {
+      const v = [];
+      await setSettings({ morphs: false, autoAddWeWallpapersToLibrary: false });
+      await browseWs(); await openSide(0);
+      const b = await getBox("only");
+      if (!b) { await setSettings({ morphs: true }); return ["no Download button"]; }
       await mvTo(b.x, b.y, 300);
       let smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
       await clickAt(b.x, b.y, "right");

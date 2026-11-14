@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Monitor, Star, Users, HardDrive, User, ExternalLink, Download, CloudDownload, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
-import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type Wallpaper } from "../api/client";
+import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type OneOffRoute, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
 import { useStore } from "../store";
@@ -11,6 +11,11 @@ import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
 import { WorkshopIdPill } from "./WorkshopIdPill";
 import { CommentsSection, CreatorRow, FavoriteTile } from "./WorkshopSocial";
+import { ContextMenu, type MenuAt } from "./ContextMenu";
+import { menuAt, oneOffMenuItems } from "./menuItems";
+
+// how long an asked "Download without subscribing" route stays good (a settings change in another window moves it)
+const ONE_OFF_FRESH_MS = 5000;
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -30,7 +35,7 @@ const fmtSize = (b: number | null) => {
 // library copy (Apply) and can be shown there. Mounted per item (keyed by its page URL in SidePanel).
 export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel, onApplyLib, onShowInLibrary, onOpenSource }: {
   w: Wallpaper; source: number; libItem: LibraryItem | null; progress: number | undefined;
-  onDownload: (apply: boolean) => void; onCancel: () => void; onApplyLib: (path: string) => void; onShowInLibrary: (path: string) => void;
+  onDownload: (apply: boolean, oneOff?: boolean) => void; onCancel: () => void; onApplyLib: (path: string) => void; onShowInLibrary: (path: string) => void;
   onOpenSource: () => void;
 }) {
   const [detail, setDetail] = useState<{ full: string | null; yt: string | null } | null>(null);
@@ -69,6 +74,33 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   // (the Steam app / page, a steamcmd copy) keep Download and the card. Guard: probe-steam steam:subMerge:*
   const subIsDownload = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
   const GetIcon = subIsDownload ? CloudDownload : Download;
+  // A Workshop item's download / subscribe buttons have a right-click menu (components/ContextMenu.tsx): "Download without
+  // subscribing" (+ "& apply"), a one-off copy that is never a subscription (menuItems.tsx oneOffMenuItems). How it would be
+  // fetched (GET /workshop/one-off) is asked as the pointer reaches a button, so the menu opens with its answer: without a
+  // way, both entries are disabled and its note says what's missing. Guard: probe-steam side:oneOff:menu, side:oneOff:missing
+  const oneOffable = isWorkshopItem(w);
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const [oneOff, setOneOff] = useState<OneOffRoute | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const menuFrom = useRef<HTMLButtonElement | null>(null);
+  const asked = useRef<{ at: number; p: Promise<OneOffRoute> } | null>(null);
+  const askOneOff = () => {
+    if (asked.current && Date.now() - asked.current.at < ONE_OFF_FRESH_MS) return asked.current.p;
+    const p = api.workshopOneOff().catch((): OneOffRoute => ({ route: null, missing: "Couldn't check how to download it here. Try again." }));
+    asked.current = { at: Date.now(), p };
+    return p;
+  };
+  const getMenu = oneOffable ? {
+    "aria-haspopup": "menu" as const,
+    onPointerEnter: () => { void askOneOff(); },
+    onContextMenu: (e: MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      const at = menuAt(e);
+      menuFrom.current = e.currentTarget;
+      void askOneOff().then((r) => { setOneOff(r); setMenu(at); });
+    },
+  } : {};
+  const missing = oneOff?.route ? null : oneOff?.missing ?? null;
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
   const tags = sideTags(w.tags, { resolution: !!w.resolution });
   const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
@@ -109,11 +141,14 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             <button className="btn accent ico side-go" ref={magnetRef} onClick={() => onApplyLib(libItem.videoPath)}><Play size={15} fill="currentColor" /> Apply</button>
           ) : (
             <>
-              <button className="btn accent ico side-go" data-side-get="apply" ref={magnetRef} onClick={() => onDownload(true)}><span className="side-dl-ico"><GetIcon size={16} /></span> {subIsDownload ? "Subscribe" : "Download"} &amp; Apply</button>
-              <button className="btn ghost ico side-go" data-side-get="only" onClick={() => onDownload(false)}><span className="side-dl-ico"><GetIcon size={15} /></span> {subIsDownload ? "Subscribe" : "Download"}</button>
+              <button className="btn accent ico side-go" data-side-get="apply" ref={magnetRef} onClick={() => onDownload(true)} {...getMenu}><span className="side-dl-ico"><GetIcon size={16} /></span> {subIsDownload ? "Subscribe" : "Download"} &amp; Apply</button>
+              <button className="btn ghost ico side-go" data-side-get="only" onClick={() => onDownload(false)} {...getMenu}><span className="side-dl-ico"><GetIcon size={15} /></span> {subIsDownload ? "Subscribe" : "Download"}</button>
             </>
           )}
         </div>
+        {/* outside the buttons' branch: a pick starts the download, and the menu still fades out once they're gone */}
+        {oneOffable && <ContextMenu at={menu} onClose={closeMenu} returnTo={menuFrom} label="Download" note={missing}
+          items={oneOffMenuItems((apply) => onDownload(apply, true), missing)} />}
         {/* a Workshop item's subscription (Browse > Wallpaper Engine (Local) and (Workshop)) — Subscribe / Unsubscribe */}
         {w.workshopId && <SubToggle id={w.workshopId} title={w.title} weLocal={!web} only={subIsDownload ? "subscribed" : undefined} likely={!!libItem} />}
         {w.description ? (

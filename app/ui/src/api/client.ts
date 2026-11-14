@@ -108,6 +108,7 @@ async function apiError(path: string, r: Response): Promise<ApiError> {
 // already has the current one (its download finished) — still the user's Next; `message` = the Steam app couldn't be opened /
 // reached; `busy` = "Let the Steam app do all N" is asking Steam.
 // POST /workshop/state: a Workshop item's subscription as the Browse sidebar shows it (disk + the unsubscribe queue + the to-do)
+export type OneOffRoute = { route: "steamcmd" | null; missing: string | null };
 export type WorkshopSubState = { subscribed: boolean; pending: "subscribe" | "unsubscribe" | null; inLibrary: boolean; onDisk: boolean };
 export const steamPageUrl = (workshopId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`;
 export type SteamTodo =
@@ -288,9 +289,11 @@ export const api = {
   undo: () => jpost<{ ok: boolean; count: number; title: string | null }>("/library/undo"),
   undoDepth: () => jget<{ depth: number }>("/library/undo-depth"),
   libraryOps: () => jget<{ ops: LibraryOp[] }>("/library/ops").then((r) => r.ops),
-  download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal) =>
+  // API: `oneOff` = a Workshop item's "Download without subscribing" (a one-off copy, never a subscription; the backend's
+  // WorkshopDownloader.AcquireOneOffAsync)
+  download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal, oneOff = false) =>
     // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure
-    jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string }>("/download", { source, result, apply }, signal),
+    jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string }>("/download", { source, result, apply, oneOff }, signal),
   steamcmdSignin: () => jpost("/steam/steamcmd-signin"),
   transitions: () => jget<TransitionEffect[]>("/transitions"),
   // cache-bust frag/vert: the GLSL is regenerated during dev, and a stale Electron HTTP-cache
@@ -325,6 +328,8 @@ export const api = {
   openSteamPage: (workshopId: string) => jpost<{ ok: boolean }>("/steam/open-page", { workshopId }),
   // API: the Browse sidebar's subscription toggle (Web/WorkshopSubOps.cs) — state from disk + the queue + the to-do only
   workshopState: (ids: string[]) => jpost<Record<string, WorkshopSubState>>("/workshop/state", { ids }),
+  // API: how "Download without subscribing" would get an item: steamcmd, or none + what the user is missing (in their words)
+  workshopOneOff: () => jget<OneOffRoute>("/workshop/one-off"),
   workshopSubscribe: (workshopId: string, title: string) =>
     jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),
   workshopUnsubscribe: (workshopId: string, title: string) =>
