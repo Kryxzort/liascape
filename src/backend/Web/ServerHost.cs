@@ -779,7 +779,10 @@ public static class ServerHost
             playing = PlayerHelper.IsPlaying,
             timed = PlayerHelper.IsTimedPlaylistActive(),
             position = PlayerHelper.QueryTimePos(), // live mpv time-pos → sync the in-app preview
-            keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape loop-current`: the rotation holds what plays
+            keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape toggle-loop-current`: the rotation holds what plays
+            // the user's pause (`player.paused` / mpv `pause`; never "pause behind windows", a per-output clock): the in-app
+            // background (WallpaperBg) holds still with the wallpaper
+            paused = PlayerHelper.IsPlaying && PlayerHelper.IsPausedNow(),
         }));
 
         // ---- image proxy + local media ----------------------------------------------------

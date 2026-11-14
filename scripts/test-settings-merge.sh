@@ -83,6 +83,10 @@ clip "$C1" testsrc2 440 6; clip "$C2" smptebars 550 6
 # Non-default values everywhere, so a reset to a C# default shows; LweSilent = the removed setting, still
 # in older files; the Steam fields are dummies (still never printed — the real file holds a real token).
 SJ=$XDG_CONFIG_HOME/liascape/settings.json
+# the Steam tokens live in steam-auth.json (Helpers/SecretStore.cs, LIASCAPE_SECRETS=file), seeded there: settings.json
+# never held them since the pre-release cleanup (no migration from it)
+mkdir -p "$XDG_CONFIG_HOME/liascape"
+(umask 077; printf '%s' '{"steam-refresh-token":"test-refresh-token","steam-access-token":"test-access-token"}' > "$XDG_CONFIG_HOME/liascape/steam-auth.json")
 cat > "$SJ" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
  "DemuxerMaxMib":32,"DemuxerMaxBackMib":8,"LweSilent":true,"LweVolume":55,
@@ -91,7 +95,7 @@ cat > "$SJ" <<EOF
  "GlobalIntervalSeconds":600,"GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
  "TransitionMethod":"full-live","AdvancedSettings":true,"ResumeFromLast":false,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
- "AllowScenes":true,"WorkshopDownloadMode":"steamcmd","SteamRefreshToken":"test-refresh-token","SteamAccessToken":"test-access-token",
+ "AllowScenes":true,"WorkshopDownloadMode":"steamcmd",
  "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd"}
 EOF
 
@@ -160,8 +164,8 @@ snap s1
 [ "$(f .theme s1)" = '"Nord"' ] && ok "theme → Nord" || bad "theme → $(f .theme s1)"
 c=$(changed s0 s1 '["theme"]')
 [ -z "$c" ] && ok "a partial body: no other field changed" || bad "a partial body reset $(echo "$c" | tr ',' '\n' | wc -l) other fields: $c"
-tokens_kept && ok "the Steam tokens survived — moved from settings.json into steam-auth.json (0600)" \
-  || bad "the Steam tokens weren't moved intact into steam-auth.json"
+tokens_kept && ok "the Steam tokens survived in steam-auth.json (0600), none in settings.json" \
+  || bad "the Steam tokens in steam-auth.json changed (or leaked into settings.json)"
 [ "$(disk 'has("LweSilent")')" = false ] && ok "the save dropped LweSilent from settings.json" || bad "settings.json still has LweSilent after a save"
 [ "$(disk '[has("GlobalWaitForVideoEnd"), has("PlaylistWaitForVideoEnd"), has("GlobalMinPlaySeconds")] | any')" = false ] \
   && ok "the save dropped the removed rotation keys from settings.json" || bad "settings.json still has a removed rotation key after a save"

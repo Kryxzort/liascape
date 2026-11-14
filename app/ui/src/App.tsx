@@ -101,7 +101,8 @@ export default function App() {
     }
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
-    else if (e.type === "loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
+    else if (e.type === "pause-changed") useStore.getState().setWallpaperPaused(e.payload.paused);
+    else if (e.type === "toggle-loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     else if (e.type === "steam-qr-error") s.setStatus("Steam: " + e.payload.message);

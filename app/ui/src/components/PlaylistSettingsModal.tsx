@@ -67,10 +67,10 @@ export function PlaylistSettingsModal({
                     value={ps.maxPlaySeconds ?? 0} onChange={(v) => setPS({ maxPlaySeconds: v })} />
                   {!sep && <div className="shint" data-scene-rule>{ROT_HINT.sceneRule}</div>}
                   <label className="ck" title={ROT_HINT.separate}><input type="checkbox" disabled={!ovr} checked={sep}
-                    onChange={(e) => setPS({ separateSceneTiming: e.target.checked })} /> Separate timing for scenes</label>
+                    onChange={(e) => setPS({ separateSceneTiming: e.target.checked })} /> Separate timing for scenes and pictures</label>
                   {sep && <>
-                    <div className="field-label" title={ROT_HINT.scenesAfter}>SWITCH SCENES AFTER</div>
-                    <PlayTimeInput label="Switch scenes after" zeroText="off" disabled={!ovr}
+                    <div className="field-label" title={ROT_HINT.scenesAfter}>SWITCH SCENES AND PICTURES AFTER</div>
+                    <PlayTimeInput label="Switch scenes and pictures after" min={1} disabled={!ovr}
                       value={ps.switchScenesAfterSeconds ?? 1800} onChange={(v) => setPS({ switchScenesAfterSeconds: v })} />
                   </>}
                 </>}

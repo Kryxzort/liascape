@@ -9,7 +9,7 @@
 //                        grid's columns, the card stays in view near where it was (real input events)
 //   lib:fourOptions      the sidebar's Open in file manager (stubbed /open), Delete (+ Undo), Delete and unsubscribe (a Workshop item)
 //   lib:play             the picture is the Play control (no icon): a click applies the item, then the green frame — no
-//                        "Playing now" pill — and a Looping chip only while loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
+//                        "Playing now" pill — and a Looping chip only while toggle-loop-current is on; no playlist toggle in the head; the head's playlist toggle adds / removes it (the Play / In playlist row is gone)
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
 //                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; the first preview
 //                        ever opens muted; the trailer (stubbed) remembers the shared mute + level
@@ -527,7 +527,7 @@ app.whenReady().then(async () => {
       if (cur !== K[2]) v.push(`a click on the picture didn't play k3 (/current ${T(cur)})`);
       let r2 = null;
       // playing → the green frame only (no "Playing now" pill — the card and the frame say it);
-      // "looping this one" is a hero chip, shown only while loop-current is on
+      // "looping this one" is a hero chip, shown only while toggle-loop-current is on
       for (let i = 0; i < 30; i++) { r2 = await page(`const s = m.side(); const f = s.querySelector(".side-stage");
           return { play: !!s.querySelector("[data-side-play]"), frame: !!f?.matches(".is-playing[data-side-playing]"),
             pill: !!s.querySelector("[data-side-media] .side-badge, [data-side-media] [data-side-playing]") || /Playing now/.test(s.querySelector("[data-side-media]")?.textContent ?? ""),
@@ -535,17 +535,17 @@ app.whenReady().then(async () => {
       if (!r2.frame) v.push(`playing: the picture's frame isn't marked playing (${JSON.stringify(r2)})`);
       if (r2.pill) v.push(`playing: a "Playing now" pill is back on the picture (${JSON.stringify(r2)})`);
       if (r2.looping) v.push("playing (not looping): a Looping chip shows");
-      // loop-current on → the chip shows; off again → gone. Only a rotating playlist can loop-current (a lone wallpaper
+      // toggle-loop-current on → the chip shows; off again → gone. Only a rotating playlist can toggle-loop-current (a lone wallpaper
       // already stays: the backend answers "no playlist is rotating" and keeps nothing) → k3 first in a playlist
       await post("/playlist/play", { paths: [K[2], K[0]] });
       for (let i = 0; i < 50 && (await current()) !== K[2]; i++) await sleep(100);
       await sleep(800);
-      await post("/action", { name: "loop-current" });
+      await post("/action", { name: "toggle-loop-current" });
       let lp = null; for (let i = 0; i < 30 && !(lp = await page(`return !!m.side().querySelector("[data-side-looping]");`)); i++) await sleep(100);
-      await post("/action", { name: "loop-current" });
-      if (!lp) v.push("loop-current on: no Looping chip in the sidebar's hero");
+      await post("/action", { name: "toggle-loop-current" });
+      if (!lp) v.push("toggle-loop-current on: no Looping chip in the sidebar's hero");
       let gone = false; for (let i = 0; i < 30 && !(gone = await page(`return !m.side().querySelector("[data-side-looping]");`)); i++) await sleep(100);
-      if (!gone) v.push("loop-current off again: the Looping chip stays");
+      if (!gone) v.push("toggle-loop-current off again: the Looping chip stays");
       await post("/apply", { path: K[2] }); await sleep(800); // back to a lone wallpaper for the cells after
       if (r2.play) v.push("playing: the Play overlay is still there");
       // the title takes the head's width (only close beside it)

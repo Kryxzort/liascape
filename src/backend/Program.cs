@@ -19,7 +19,7 @@ sealed class Program
           play | stop | toggle-play
           toggle-pause | toggle-mute
           volume up | volume down   ±5 (the global volume or the playing wallpaper's — Settings)
-          loop-current              keep playing the current wallpaper (no rotation, it loops) — again: rotate on
+          toggle-loop-current       keep playing the current wallpaper (no rotation, it loops) — again: rotate on
           kill                      stop the wallpaper without asking a running app
           ctl <verb> ['<json>']     the running player's control socket (state, logs, probe, …)
           serve                     the app's backend (the app starts it itself)

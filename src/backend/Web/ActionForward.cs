@@ -45,7 +45,7 @@ public static class ActionForward
                 Console.Error.WriteLine($"liascape {action}: slow — /health {healthMs} ms, /action {sw.ElapsedMilliseconds - healthMs} ms (process up {(DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0} ms)");
             if (r.IsSuccessStatusCode)
             {
-                // what the action has to say (loop-current) → `message` with code 0: the CLI prints it
+                // what the action has to say (toggle-loop-current) → `message` with code 0: the CLI prints it
                 try
                 {
                     using var ok = JsonDocument.Parse(r.Content.ReadAsStringAsync().GetAwaiter().GetResult());

@@ -544,7 +544,7 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     "key",
                     def(PropType::Str, false, PropValue::Str(String::new())),
                 ),
-                // "keep playing this one" (`liascape loop-current`): no rotation
+                // "keep playing this one" (`liascape toggle-loop-current`): no rotation
                 // away from the current item (no timer, end, maximum or scene-time switch; it loops)
                 // until it is set false again — a user switch still moves, and the keep holds that item
                 ("keep", def(PropType::Bool, false, PropValue::Bool(false))),

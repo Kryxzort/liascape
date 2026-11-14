@@ -7,8 +7,10 @@ export type LiascapeEvent =
   | { type: "scene-crashed"; payload: { path: string } }
   | { type: "scene-vram-stopped"; payload: { path: string; usedMib: number; limitMib: number; message: string } }
   | { type: "timed-stopped"; payload: null }
-  // `liascape loop-current` toggled "keep playing this one" (the rotation holds what plays)
-  | { type: "loop-current"; payload: { keep: boolean; path: string | null; message: string } }
+  // `liascape toggle-loop-current` toggled "keep playing this one" (the rotation holds what plays)
+  // `toggle-pause` ran (AppOps): the wallpaper's own pause, for the in-app background (components/WallpaperBg.tsx)
+  | { type: "pause-changed"; payload: { paused: boolean } }
+  | { type: "toggle-loop-current"; payload: { keep: boolean; path: string | null; message: string } }
   // `status`: a Workshop download's step in words ("Subscribing on Steam…", "Not signed in to Steam here — click Subscribe in
   // Steam, then it downloads by itself…")
   | { type: "download-progress"; payload: { id: string; value: number; done?: boolean; status?: string } }

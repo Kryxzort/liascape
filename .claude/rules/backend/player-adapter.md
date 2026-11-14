@@ -71,7 +71,7 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 - A 1-item playlist never switches by itself (`CanRotate`), but takes a user next/random.
 - Live edits (`/settings` for a playlist following globals, `/playlist/state` diffed prev → now) never reset the countdown or play time; a new minimum re-arms the armed end switch to the same B; a transition change re-arms it (`RearmAlignedSwitch`).
 - B becomes the session's current item when its effect STARTS (`transition.started`), not at the handoff.
-- "Keep playing this one" (`liascape loop-current`) toggles `prog:main.keep`; it lives in the player only (kept across player restarts, never carried by `Reapply`); a Play / play-from clears it.
+- "Keep playing this one" (`liascape toggle-loop-current`) toggles `prog:main.keep`; it lives in the player only (kept across player restarts, never carried by `Reapply`); a Play / play-from clears it.
 - Removed and gone: "Wait for video to end after interval", `GlobalMinPlaySeconds`, `ResumeFromLast`. Old files' keys load as unknown ones; no in-app migration.
 
 ## Program wiring (liascape-player)

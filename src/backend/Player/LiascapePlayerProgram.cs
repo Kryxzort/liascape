@@ -419,7 +419,7 @@ public static class LiascapePlayerProgram
         return false;
     }
 
-    // ---- keep ("keep playing this one" — `liascape loop-current`) -----------------------------------------------
+    // ---- keep ("keep playing this one" — `liascape toggle-loop-current`) -----------------------------------------------
     // The program's `keep` prop: no rotation away from the current item (it loops) until lifted. It lives in the player
     // (program.json — a player restart keeps it; a backend restart never touches it: Props/Reapply don't carry it); a
     // Play of a playlist (LoadNow) lifts it. Toggled ESSENTIAL (ordered after any switch queued before the keybind) and

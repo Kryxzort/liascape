@@ -792,7 +792,7 @@ input[type=range]:focus-visible { outline: none; }
   border-radius: 8px; padding: 12px; font: 12px/1.5 ui-monospace, monospace;
   color: var(--success); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto;
   box-shadow: inset 0 0 18px -10px var(--accent); }
-.kb { background: var(--bg-crust); padding: 3px 8px; border-radius: 6px; font: 12px ui-monospace, monospace; color: var(--subtext); }
+.kb { background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent); border: 1px solid var(--surface0); padding: 2px 8px; border-radius: 6px; font: 12px ui-monospace, monospace; color: var(--subtext); }
 /* a content swap in place: every face in one grid cell, so the widest sets the size and nothing beside it moves when the
    words change. The shown face rolls in as the other rolls out (the first face leaves upward, a later one waits below);
    motion off, they only cross-fade. Guard: probe-settings copy:feedback, cache:clear:* */
@@ -1140,11 +1140,13 @@ input[type=range]:focus-visible { outline: none; }
 .btn.danger.glow-stop:hover { background: var(--danger-bg); box-shadow: 0 0 18px -2px var(--danger); }
 
 /* debug HUD (?debug / LIASCAPE_DEBUG=1) */
-.dbg-hud { position: fixed; top: 6px; right: 6px; z-index: 9999; pointer-events: none;
-  font: 10px/1.3 ui-monospace, monospace; color: #b9f; background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent);
-  border: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);
-  border-radius: 6px; padding: 2px 6px; text-align: right; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
-.dbg-hud b { color: #cfe; font-weight: 700; }
+/* the app's own look: the palette's text tokens, the accent for the readings, a .kb-like panel (no hard-coded hues
+   that ignore the theme) */
+.dbg-hud { position: fixed; top: 8px; right: 8px; z-index: 9999; pointer-events: none;
+  font: 11px/1.45 ui-monospace, monospace; font-variant-numeric: tabular-nums; color: var(--subtext);
+  background: color-mix(in srgb, var(--bg-crust) var(--tr-strong), transparent);
+  border: 1px solid var(--surface0); border-radius: 8px; padding: 4px 9px; text-align: right; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+.dbg-hud b { color: var(--accent); font-weight: 700; }
 .dbg-hud b.bad { color: var(--danger); }
 
 /* ---- Transition picker ---------------------------------------------------- */

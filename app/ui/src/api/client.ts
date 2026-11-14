@@ -348,5 +348,5 @@ export const api = {
   prev: () => jpost("/prev"),
   random: () => jpost("/random"),
   pause: () => jpost("/pause"),
-  current: () => jget<{ path: string | null; sceneId: string | null; playing: boolean; timed: boolean; position: number | null; keep?: boolean }>("/current"),
+  current: () => jget<{ path: string | null; sceneId: string | null; playing: boolean; timed: boolean; position: number | null; keep?: boolean; paused?: boolean }>("/current"),
 };

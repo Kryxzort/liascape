@@ -308,14 +308,15 @@ export const Settings = memo(function Settings() {
   // legacy-only rows wait for the engine status (they'd show, then vanish, under liascape-player)
   const legacyActive = engine?.active === "legacy";
 
+  // the command previews read the SAVED settings back: refetch once each save has landed (store.settingsSaves). A fixed
+  // delay would race the 250 ms debounced save and read the file from before the change. Guard: probe-settings preview:monitors
+  const settingsSaves = useStore((s) => s.settingsSaves);
   useEffect(() => {
     let alive = true;
-    const t = setTimeout(() => {
-      api.mpvPreview().then((x) => alive && setMpv(x));
-      api.lwePreview().then((x) => alive && setLwe(x));
-    }, 200);
-    return () => { alive = false; clearTimeout(t); };
-  }, [g("noAudio", false), g("disableCache", false), g("volume", 100), g("speed", 1), g("hwDec", "auto"), g("videoScale", "fill"), g("demuxerMaxMib", 20), g("demuxerMaxBackMib", 5), JSON.stringify(g("sceneMonitors", []))]); // eslint-disable-line
+    api.mpvPreview().then((x) => alive && setMpv(x));
+    api.lwePreview().then((x) => alive && setLwe(x));
+    return () => { alive = false; };
+  }, [settingsSaves]);
 
   useEffect(() => {
     if (clearArm <= 0) return;
@@ -396,11 +397,7 @@ export const Settings = memo(function Settings() {
   };
 
   const actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
-    "next", "previous", "random", "volume-up", "volume-down", "loop-current"];
-  // what a shortcut does, where the name doesn't say it
-  const actionHint: Record<string, string> = {
-    "loop-current": "keeps playing the current wallpaper and stops the playlist rotating. Run it again to rotate on (liascape-player).",
-  };
+    "next", "previous", "random", "volume-up", "volume-down", "toggle-loop-current"];
 
   // Global transition config (the fallback used when a playlist doesn't override). The picker speaks
   // the per-playlist field names, so adapt to/from the global* keys.
@@ -437,9 +434,9 @@ export const Settings = memo(function Settings() {
         <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}%`} disabled={mute} rk="volume">
           <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} /></Row>
         <Row label="Mute wallpapers" rk="noAudio"><input type="checkbox" checked={mute} onChange={(e) => set("noAudio", e.target.checked)} /></Row>
-        <Row label="Even out loudness" hint={"keeps every wallpaper at about the same loudness, so switching never blasts your ears. Your volume still applies on top." + (liascapeActive ? " Scenes fine-tune their level over their first minute." : "")} disabled={mute} rk="normalizeAudio">
+        <Row label="Audio normalization" hint="keeps wallpapers at about the same loudness" disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
-        {!mute && g("normalizeAudio", false) && <Row label="Loudness target" hint="how loud the evened-out level is. −14 is what Spotify and YouTube aim for, lower is quieter." rk="normalizeTargetLufs">
+        {!mute && g("normalizeAudio", false) && <Row label="Loudness target" hint="how loud to even the audio out. −14 is the standard, lower is quieter." rk="normalizeTargetLufs">
           <Combo value={g("normalizeTargetLufs", -14) as number} min={-70} max={0} step={1}
             onChange={(v) => set("normalizeTargetLufs", v)}
             options={[{ value: -11, label: "Loud (−11)" }, { value: -14, label: "Streaming (−14)" }, { value: -19, label: "Quiet (−19)" }, { value: -23, label: "Broadcast (−23)" }]} /><span>LUFS</span></Row>}
@@ -447,10 +444,10 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Auto-mute" icon={<VolumeX size={15} />}>
-        <Row label="Mute when other audio plays" hint="the wallpaper goes quiet while music, videos or calls play, then comes back" rk="autoMute"><input type="checkbox" checked={am} onChange={(e) => set("autoMute", e.target.checked)} /></Row>
-        <Row label="Only for media players" hint="ignores notification blips and game sounds, and only reacts to media players (MPRIS)" disabled={!am} rk="autoMuteOnlyIfMprisActive"><input type="checkbox" disabled={!am} checked={g("autoMuteOnlyIfMprisActive", false)} onChange={(e) => set("autoMuteOnlyIfMprisActive", e.target.checked)} /></Row>
+        <Row label="Mute when other apps play audio" rk="autoMute"><input type="checkbox" checked={am} onChange={(e) => set("autoMute", e.target.checked)} /></Row>
+        <Row label="Only mute for media players" hint="only ones that support MPRIS (Spotify, Strawberry, browsers, VLC…)" disabled={!am} rk="autoMuteOnlyIfMprisActive"><input type="checkbox" disabled={!am} checked={g("autoMuteOnlyIfMprisActive", false)} onChange={(e) => set("autoMuteOnlyIfMprisActive", e.target.checked)} /></Row>
         <Row label="Fade out after (ms)" hint="how long other audio has to play before the wallpaper goes quiet" disabled={!am} rk="autoMuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoMuteDelayMs", 500)} onChange={(v) => set("autoMuteDelayMs", v)} /></Row>
-        <Row label="Come back after (ms)" hint="how long things must stay quiet before the wallpaper's sound returns. A couple of seconds stops it flickering between songs." disabled={!am} rk="autoUnmuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoUnmuteDelayMs", 2000)} onChange={(v) => set("autoUnmuteDelayMs", v)} /></Row>
+        <Row label="Come back after (ms)" hint="how long things must stay quiet before the wallpaper's sound returns" disabled={!am} rk="autoUnmuteDelayMs"><NumInput disabled={!am} min={0} max={30000} value={g("autoUnmuteDelayMs", 2000)} onChange={(v) => set("autoUnmuteDelayMs", v)} /></Row>
         <Row label="Ignore sounds below (dB)" disabled={!am} rk="autoMuteMinLevelDb"><NumInput disabled={!am} min={-80} max={0} value={g("autoMuteMinLevelDb", -70)} onChange={(v) => set("autoMuteMinLevelDb", v)} /></Row>
       </Section>
 
@@ -459,7 +456,7 @@ export const Settings = memo(function Settings() {
           <Select value={g("pauseWhenCovered", "maximized")} onChange={(v) => set("pauseWhenCovered", v)}
             options={[{ value: "off", label: "Off" }, { value: "fullscreen", label: "A fullscreen window" }, { value: "maximized", label: "A fullscreen or maximized window" }]} /></Row>}
         <Row label="Playback speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
-        <Row label="Stay paused when switching" hint="next, previous or random while paused. On, it stays paused and cuts straight to the new wallpaper. Off, it plays again with its transition." rk="stayPausedWhenSwitching">
+        <Row label="Stay paused when switching" hint="by default, a paused wallpaper unpauses when you switch with a keybind or command. This keeps it paused." rk="stayPausedWhenSwitching">
           <input type="checkbox" checked={g("stayPausedWhenSwitching", false)} onChange={(e) => set("stayPausedWhenSwitching", e.target.checked)} /></Row>
         <Row label="Disable video cache" hint="reads videos straight from disk instead of buffering ahead" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>
         <Row label="Restart legacy player every (s)" hint="the legacy player (mpvpaper) leaks memory over time, and restarting it now and then keeps that in check. 0 means never." rk="restartMpvpaperEverySeconds"><NumInput min={0} max={3600} value={g("restartMpvpaperEverySeconds", 600)} onChange={(v) => set("restartMpvpaperEverySeconds", v)} /></Row>
@@ -473,10 +470,10 @@ export const Settings = memo(function Settings() {
             <PlayTimeInput label="Minimum play time" zeroText="off" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>
           <Row label="Maximum play time" hint={ROT_HINT.max + (sepScenes ? "" : ROT_HINT.maxScenes)} rk="globalMaxPlaySeconds">
             <PlayTimeInput label="Maximum play time" zeroText="off" value={g("globalMaxPlaySeconds", 0)} onChange={(v) => set("globalMaxPlaySeconds", v)} /></Row>
-          <Row label="Separate timing for scenes" hint={sepScenes ? ROT_HINT.separate : `${ROT_HINT.sceneRule} ${ROT_HINT.separateOff}`} rk="globalSeparateSceneTiming">
+          <Row label="Separate timing for scenes and pictures" rk="globalSeparateSceneTiming">
             <input type="checkbox" checked={sepScenes} onChange={(e) => set("globalSeparateSceneTiming", e.target.checked)} /></Row>
-          {sepScenes && <Row label="Switch scenes after" hint={ROT_HINT.scenesAfter} rk="globalSwitchScenesAfterSeconds">
-            <PlayTimeInput label="Switch scenes after" zeroText="off" value={g("globalSwitchScenesAfterSeconds", 1800)} onChange={(v) => set("globalSwitchScenesAfterSeconds", v)} /></Row>}
+          {sepScenes && <Row label="Switch scenes and pictures after" rk="globalSwitchScenesAfterSeconds">
+            <PlayTimeInput label="Switch scenes and pictures after" min={1} value={g("globalSwitchScenesAfterSeconds", 1800)} onChange={(v) => set("globalSwitchScenesAfterSeconds", v)} /></Row>}
         </> : <Row label="Switch every" hint={ROT_HINT.every} rk="globalIntervalSeconds">
           <PlayTimeInput label="Switch every" value={g("globalIntervalSeconds", 0)} onChange={(v) => set("globalIntervalSeconds", v)} /></Row>}
         <Row label="Transitions" rk="globalTransitionEnabled">
@@ -539,17 +536,17 @@ export const Settings = memo(function Settings() {
           <Select value={g("thumbnailAspect", "1:1")} onChange={(v) => set("thumbnailAspect", v)}
             options={[{ value: "1:1", label: "Square (1:1)" }, { value: "16:9", label: "Widescreen (16:9)" }]} />
         </Row>
-        <Row label="Glow effects" hint="the soft accent glow on hovered, active and playing things. Off keeps everything readable, just without the glow." rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
-        <Row label="Text shadow" hint="a shadow under every letter, like film subtitles, so text stays readable over a bright wallpaper" rk="textShadow"><input type="checkbox" checked={g("textShadow", false)} onChange={(e) => set("textShadow", e.target.checked)} /></Row>
+        <Row label="Glow effects" hint="the soft accent glow on hovered, active and playing things" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
+        <Row label="Text shadow" hint="a drop shadow on text, so it stays easy to read on busy backgrounds" rk="textShadow"><input type="checkbox" checked={g("textShadow", false)} onChange={(e) => set("textShadow", e.target.checked)} /></Row>
         <Row label="Smooth window animations" hint="the slides, zooms and morphs all over the app. Off, nothing moves and things fade in and out instead." rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>
-        <Row label="Animate GIF previews" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
-        <Row label="Animate wallpapers without a GIF" hint="wallpapers with no GIF preview play a silent clip of their own video, without hovering" rk="autoPlayVideoThumbs"><input type="checkbox" checked={g("autoPlayVideoThumbs", false)} onChange={(e) => set("autoPlayVideoThumbs", e.target.checked)} /></Row>
-        <Row label="Use the video instead of the GIF" hint="a wallpaper with a GIF preview shows a short clip of its own video instead, on hover (always while the setting above is on)" rk="preferVideoThumbs"><input type="checkbox" checked={g("preferVideoThumbs", false)} onChange={(e) => set("preferVideoThumbs", e.target.checked)} /></Row>
-        <Row label="Video preview quality" hint="sharper, smoother clips use more disk space and CPU" rk="videoPreviewQuality">
+        <Row label="Animate GIF previews" hint="off, GIFs show their first frame" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
+        <Row label="Animate wallpapers without a GIF" hint="plays the video for wallpapers without an animated GIF" rk="autoPlayVideoThumbs"><input type="checkbox" checked={g("autoPlayVideoThumbs", false)} onChange={(e) => set("autoPlayVideoThumbs", e.target.checked)} /></Row>
+        <Row label="Use the video instead of the GIF" hint="plays the video for wallpapers that have a GIF" rk="preferVideoThumbs"><input type="checkbox" checked={g("preferVideoThumbs", false)} onChange={(e) => set("preferVideoThumbs", e.target.checked)} /></Row>
+        <Row label="Video preview quality" hint="scales with card size. Higher quality gives sharper, smoother clips but uses more storage and processing." rk="videoPreviewQuality">
           <Segmented<ClipQuality> label="Video preview quality" value={g<ClipQuality>("videoPreviewQuality", "mid")} onChange={(v) => set("videoPreviewQuality", v)}
             options={(["low", "mid", "high"] as const).map((v) => ({ value: v, label: QUALITY_LABEL[v] }))} /></Row>
         </div>
-        <Row label="Wallpaper behind every tab" hint="shows the live wallpaper behind Browse and Library too, peeking through between the cards" rk="liveWallpaperBehindAllTabs"><input type="checkbox" checked={g("liveWallpaperBehindAllTabs", false)} onChange={(e) => set("liveWallpaperBehindAllTabs", e.target.checked)} /></Row>
+        <Row label="Wallpaper behind every tab" hint="shows the live wallpaper behind Browse and Library too" rk="liveWallpaperBehindAllTabs"><input type="checkbox" checked={g("liveWallpaperBehindAllTabs", false)} onChange={(e) => set("liveWallpaperBehindAllTabs", e.target.checked)} /></Row>
       </Section>
       </CardPreview>
 
@@ -569,10 +566,9 @@ export const Settings = memo(function Settings() {
 
       {g("allowScenes", false) && (
         <Section title="Scene monitors" icon={<MonitorSmartphone size={15} />} lv="standard">
-          <Help>The monitors scenes play on, each with its frame rate limit (Wallpaper Engine's default is 15; like there, a scene
-            runs at it even above the monitor's refresh rate).{detected.length > 0
-            ? <> Found: {detected.map((d) => <code key={d.name} className="kb">{d.name} {d.refreshHz}Hz{d.primary ? " ★" : ""}</code>)} — type or pick below.</>
-            : <> None found automatically; on Hyprland, <code className="kb">hyprctl monitors</code> lists their names.</>}</Help>
+          <Help>The monitors scenes play on, each with its frame rate limit.{detected.length > 0
+            ? <> Found: {detected.map((d) => <code key={d.name} className="kb">{d.name} {d.refreshHz}Hz{d.primary ? " ★" : ""}</code>)}. Type or pick below.</>
+            : <> None found automatically. On Hyprland, <code className="kb">hyprctl monitors</code> lists their names.</>}</Help>
           <datalist id="liascape-monitors">{detected.map((d) => <option key={d.name} value={d.name} />)}</datalist>
           {monitors.map((m, i) => (
             <Row key={i} label={`Monitor ${i + 1}`} lv="standard">
@@ -580,7 +576,7 @@ export const Settings = memo(function Settings() {
                 <input className="text mon-name" list="liascape-monitors" placeholder="e.g. DP-1" value={m.name}
                   onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                 <NumInput min={1} max={480} value={m.fps}
-                  onChange={(v) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: v } : x))} /><span>{liascapeActive ? "fps (live)" : "fps"}</span>
+                  onChange={(v) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: v } : x))} /><span>fps</span>
                 {/* primary is one-of-N (exactly one monitor) → radio, like the Workshop download mode section;
                     legacy only (LWE's audio-owning instance) — liascape-player runs one worker for every output */}
                 {!liascapeActive && <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
@@ -600,17 +596,16 @@ export const Settings = memo(function Settings() {
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
         {/* four ways, one radio group (docs/decisions.md § "Offer four Workshop download modes, the user's choice") — each
             route its own radio, never a switch inside another or a silent fallback */}
-        <Row label="Use the Steam app" hint="one click with real progress. Steam shows you as playing Wallpaper Engine for those seconds." wk="workshopDownloadMode">
+        <Row label="Use the Steam app" hint="like Wallpaper Engine does it. Cleanest, but needs Wallpaper Engine. You get a live progress bar, but Steam shows you as playing Wallpaper Engine for a few seconds while it downloads." wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
-        <Row label="Open in the Steam app" hint="opens the wallpaper's page in Steam. Click Subscribe there and it downloads.">
+        <Row label="Open in the Steam app" hint="opens the wallpaper's page in Steam. You subscribe there and it downloads here.">
           <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>
-        <Row label="Subscribe with your Steam sign-in" hint="subscribes from here. Sign in once with a QR code or a password.">
+        <Row label="Subscribe with Steam login" hint="another way to subscribe from the app, but you log in to Steam here">
           <input type="radio" data-wsmode="subscribe" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
-        <Row label="Download via steamcmd" hint="a one-off copy, no syncing" wk="workshopDownloadMode">
+        <Row label="Download via steamcmd" hint="just downloads the wallpaper without subscribing, so no updates. Needs steamcmd set up." wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamcmd" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "steamapp" && (
-          <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated —
-            nothing to sign in to here. If Steam can't be reached, it says so — it never switches to another way by itself.</Help>
+          <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated.</Help>
         )}
         {mode === "subscribe"
           /* Signing in is optional: without a usable
@@ -624,21 +619,20 @@ export const Settings = memo(function Settings() {
                     {steam?.signedIn
                       /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) —
                          else the row says "Signed in as …" while every download fails */
-                      ? <span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out — sign in again. Until then, downloads open in the Steam app.</span>
-                      : <span className="shint">Not signed in — until you are, downloads open in the Steam app, where you click Subscribe.</span>}
+                      ? <span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out. Sign in again.</span>
+                      : <span className="shint">Not signed in.</span>}
                     <span className="steam-row-btns">
                       <button className="btn accent" onClick={startQr} data-steam-signin="qr">Sign in with QR</button>
                       <button className="btn ghost" onClick={openPwLogin} data-steam-signin="password">Sign in with password</button>
                     </span></div>}
             </Row>
           : mode === "steamcmd" && <>
-              <Help>Downloads a one-off copy with steamcmd — no subscription. Needs steamcmd and a one-time sign-in.</Help>
               <Row label="steamcmd path" hint="leave blank to find it automatically" wk="steamCmdPath">
                 <input className="text" placeholder="/usr/bin/steamcmd" value={g("steamCmdPath", "")} onChange={(e) => set("steamCmdPath", e.target.value)} />
                 <button className="btn ghost ico" onClick={() => pickInto("steamCmdPath", "file")}><FolderFlap size={14} /> Browse</button>
               </Row>
               <Row label="Steam username"><input className="text" value={g("steamUsername", "")} onChange={(e) => set("steamUsername", e.target.value)} /></Row>
-              <Row label="One-time sign-in" hint="opens a terminal, and steamcmd remembers you after"><button className="btn accent" onClick={steamcmdSignin}>Sign in (one-time)</button></Row>
+              <Row label="Sign in" hint="opens a terminal, and steamcmd remembers you after"><button className="btn accent" onClick={steamcmdSignin}>Sign in</button></Row>
             </>}
       </Section>
 
@@ -660,16 +654,16 @@ export const Settings = memo(function Settings() {
               options={[{ value: "legacy", label: "Legacy" }, { value: "liascape-player", label: "liascape-player (experimental)" }]} />
           </Row>;
         })()}
-        <Row label="Transition style" hint="how a switch animates. Reveal: the old one freezes while the new one plays (recommended). Frozen: both hold still. Full-live: both keep playing (heavy at 4K). Warp-style effects use Frozen under Reveal." rk="transitionMethod">
+        <Row label="Transition style" hint="how transitions play. Reveal: the old one freezes on its last frame and the new one plays live (like Wallpaper Engine). Frozen: both hold still during the transition, the old one on its last frame and the new one on its first. Full-live: both keep playing (heavy at 4K)." rk="transitionMethod">
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
             options={[{ value: "reveal", label: "Reveal (live B)" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
         </Row>
         {/* only the legacy transition helper reads it (TransitionService --lag-offset); hidden, the value stays saved.
             Guard: probe-settings nudge:engine */}
-        {legacyActive && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live sync nudge" hint="Full-live only. Shifts the outgoing video this many ms against the live one to cancel drift (negative is ahead). A slight rewind means raise it toward 0, a slight skip ahead means lower it. About −30 is typical." rk="fullLiveSyncOffsetMs">
+        {legacyActive && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live sync nudge" hint="Legacy player, Full-live only. Shifts the outgoing video this many ms against the live one to cancel drift (negative is ahead). A slight rewind means raise it toward 0, a slight skip ahead means lower it. About −30 is typical." rk="fullLiveSyncOffsetMs">
           <NumInput min={-200} max={200} step={5} value={g("fullLiveSyncOffsetMs", -30)} onChange={(v) => set("fullLiveSyncOffsetMs", v)} /><span>ms</span>
         </Row>}
-        <Row label="Volume keys change" hint="what the volume shortcuts change. Auto: the playing wallpaper's own volume if it has one, else the global one. This wallpaper: always its own. Global: always the global one." rk="volumeKeyTarget">
+        <Row label="Volume keys change" hint="what the volume keybinds change. Auto: the playing wallpaper's own volume if it differs, else the global one. This wallpaper: always that wallpaper's. Global: always the global one." rk="volumeKeyTarget">
           <Select value={g("volumeKeyTarget", "auto")} onChange={(v) => set("volumeKeyTarget", v)}
             options={[{ value: "auto", label: "Auto" }, { value: "item", label: "This wallpaper" }, { value: "global", label: "Global" }]} />
         </Row>
@@ -677,11 +671,11 @@ export const Settings = memo(function Settings() {
         {g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics readout" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
       </Section>
 
-      <Section title="mpv command (live)" icon={<Terminal size={15} />} lv="expert">
+      <Section title="mpv command" icon={<Terminal size={15} />} lv="expert">
         <div className="cmd-block"><pre className="mpv">{mpv || "…"}</pre><CopyButton text={mpv} what="mpv command" /></div>
       </Section>
 
-      <Section title="linux-wallpaperengine command (live)" icon={<Terminal size={15} />} lv="expert">
+      <Section title="linux-wallpaperengine command" icon={<Terminal size={15} />} lv="expert">
         <Help>The scene command, one line per monitor; each scene's Workshop ID goes on the end.</Help>
         <div className="cmd-block"><pre className="mpv">{lwe || "…"}</pre><CopyButton text={lwe} what="linux-wallpaperengine command" /></div>
       </Section>
@@ -689,7 +683,7 @@ export const Settings = memo(function Settings() {
       <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />} lv="standard">
         <Help>Bind these commands to keys in your compositor's config.</Help>
         {actions.map((a) => (
-          <Row key={a} label={a} hint={actionHint[a]}>
+          <Row key={a} label={a}>
             <code className="kb">liascape {a.replace("volume-", "volume ")}</code>
             <CopyButton text={`liascape ${a.replace("volume-", "volume ")}`} what={`liascape ${a.replace("volume-", "volume ")}`} />
           </Row>

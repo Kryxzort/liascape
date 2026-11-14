@@ -124,8 +124,13 @@ interface State {
   openOnSteam(workshopId: string): Promise<void>;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
-  // `liascape loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS loop-current)
+  // bumped when a settings save has reached the backend: what reads the saved file back (Settings → the mpv / LWE
+  // command previews) refetches on it, never on a timer that can beat the debounced save
+  settingsSaves: number;
+  // `liascape toggle-loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS toggle-loop-current)
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
+  // the wallpaper is paused by the user (/current.paused, WS pause-changed): the in-app background holds still with it
+  wallpaperPaused: boolean; setWallpaperPaused: (p: boolean) => void;
   // statusPlaying: `status` is the persistent now-playing line (refreshPlayingStatus), not a message (setStatus) — the top
   // bar's slot lets a running library operation show over the first, never over the second (components/TopbarStatus.tsx)
   status: string; statusPlaying: boolean; error: string | null;
@@ -278,7 +283,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, sceneLoudness: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
-  themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, status: "", statusPlaying: true, error: null,
+  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, wallpaperPaused: false, status: "", statusPlaying: true, error: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -522,7 +527,7 @@ export const useStore = create<State>((set, get) => ({
     const seen = playingEvents;
     const r = await api.playPlaylist(playlist, playlistSettings);
     if (r.message) { get().setStatus(r.message); return; }   // error/interval messages
-    set({ keepCurrent: false }); // a Play starts the rotation: loop-current's keep ends (LiascapePlayerProgram.LoadNow)
+    set({ keepCurrent: false }); // a Play starts the rotation: toggle-loop-current's keep ends (LiascapePlayerProgram.LoadNow)
     await markPlayingAfterPlay(get, set, seen);
   },
   async playFrom(index) {
@@ -562,7 +567,7 @@ export const useStore = create<State>((set, get) => ({
     set({ settings: s });
     clearTimeout(settingsTimer); settingsSavePending = true;
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
-    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).catch(() => {}); }, 250);
+    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).then(() => set({ settingsSaves: get().settingsSaves + 1 })).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
     if (get().playingPath && ["volume", "noAudio", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
@@ -682,6 +687,7 @@ export const useStore = create<State>((set, get) => ({
     set({ settings: s }); api.saveSettings(s).catch(() => {});
   },
   setKeepCurrent(k) { set({ keepCurrent: k }); get().refreshPlayingStatus(); },
+  setWallpaperPaused(p) { if (get().wallpaperPaused !== p) set({ wallpaperPaused: p }); },
   setPlaying(p) { playingEvents++; set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
   // `hold`: a notice the now-playing line mustn't replace before its 5 s are up (the switch it caused lands right after it)
@@ -725,7 +731,7 @@ function buildPlayingStatus(get: () => State): string {
         + (sepScenes ? (scenesAfter > 0 ? `, scenes after ${fmtInterval(scenesAfter)}` : ", scenes stay") : "")
       : `${pl.length} wallpapers, every ${fmtInterval(interval)}`;
     if (shuffle) desc += " (shuffled)";
-    if (st.keepCurrent) desc += ", looping this one (loop-current)";
+    if (st.keepCurrent) desc += ", looping this one (toggle-loop-current)";
     if (cur) desc += ` → ${cur}`;
     parts.push(desc);
   } else if (cur) {

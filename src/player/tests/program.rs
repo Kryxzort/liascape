@@ -2905,7 +2905,7 @@ fn start_setting_change_never_jumps_the_current_play() {
 }
 
 // ---------------------------------------------------------------- keep: loop the current
-// wallpaper until lifted (`liascape loop-current`)
+// wallpaper until lifted (`liascape toggle-loop-current`)
 
 #[test]
 fn keep_holds_the_current_item_and_loops_it() {

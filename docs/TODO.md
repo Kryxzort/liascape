@@ -41,12 +41,23 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        hover / focus, reusing CopyButton / useCopied (design.md § Reuse first), "Copied" feedback like the ID pill.
        Browse cards show 2 title lines like Library cards (`.title` is 1 line today; the card keeps its
        aspect-ratio height, so the grid doesn't reflow). After #52 (it adds the creator and edits the Browse sidebar).
+59. [ ] (owner) Play-time limits can't contradict: "Switch scenes and pictures after" never 0 in the backend either (the
+       UI already refuses it; drop the 0 = stay path, its adapter / merge test lines become the 1 s floor), and the
+       maximum play time can't be set below the minimum (it would always win for videos, and scenes use the minimum).
+60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
+       makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
+       case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
+61. [ ] (owner) Stay paused when switching still plays the transition: both sides are stills (A's frame, B's first), so
+       the effect runs on its own clock while the wallpaper clock stays paused. liascape-player only.
+62. [ ] (owner) Previews as two ordered lists, "On hover" and "Not hovered", each of video / GIF / image in the user's
+       order (the first a wallpaper has wins; image is always there, so it ends the list). Replaces "Animate GIF
+       previews", "Animate wallpapers without a GIF" and "Use the video instead of the GIF". Basic: a preset dropdown;
+       Standard: the ordering.
+63. [ ] (owner) Video memory: measure the library's scene VRAM (the player's readout) and round the per-scene cap's
+       default from it (1 or 2 GiB); add a "stop and show nothing" choice beside Stop's last frame.
 57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
        time, nudge:engine finds no nudge row right after switching to legacy, cache:clear:reduced starts on an already
        emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.
-58. [ ] probe-filters `lib:interplay`: hiding one Library card re-renders 61 components (budget 60; 30 lucide icons, 5
-       filter groups among them). It failed the same before the 2026-11-14 UI batch: find what re-renders without
-       need (the filter column's groups re-render on a card hide) and bring it back under the budget.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the

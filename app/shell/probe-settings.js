@@ -1,11 +1,13 @@
 // Settings rows probe — `scripts/test-ui-matrix.sh --probe probe-settings.js` (the matrix's hermetic stack: private backend
 // + headless liascape-player + this tree's UI; its HOME is the stack's, so the cache fixtures below never touch a real one).
-//   rename:autoMute   Sound → the auto-mute switch is the row "Mute when other audio plays" under the "Auto-mute" heading (no "Hush when other audio plays"), it saves autoMute
+//   rename:autoMute   Sound → the auto-mute switch is the row "Mute when other apps play audio" under the "Auto-mute" heading (no "Mute when other audio plays"), it saves autoMute
 //   copy:feedback     Keyboard shortcuts' Copy turns into a green "Copied" and settles back to "Copy" (hooks/useCopied.ts, the
 //                     sidebar pill's timing): the two faces roll (motion on) or only cross-fade (motion off, prefers-reduced-motion),
 //                     the button keeps its width and the command beside it never moves
-//   copy:commands     what lands on the clipboard: a shortcut's command, Autostart's, and (Expert) the whole "mpv command (live)"
-//                     and "linux-wallpaperengine command (live)" blocks
+//   copy:commands     what lands on the clipboard: a shortcut's command, Autostart's, and (Expert) the whole "mpv command"
+//                     and "linux-wallpaperengine command" blocks
+//   preview:monitors  removing a scene monitor drops it from the linux-wallpaperengine command (the preview used to read
+//                     the settings file before the debounced save landed, so it showed the old list)
 //   copy:sidebarPill  the Library sidebar's Workshop ID pill, which shares the feedback (hooks/useCopied.ts), still flips and copies
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
@@ -221,17 +223,17 @@ app.whenReady().then(async () => {
     await setSettings({ SettingsLevel: "standard", Morphs: true, Glows: true });
     await load();
 
-    await cell("rename:autoMute — the row is \"Mute when other audio plays\" and still switches autoMute", async () => {
+    await cell("rename:autoMute — the row is \"Mute when other apps play audio\" and still switches autoMute", async () => {
       const v = [];
       await setSettings({ SettingsLevel: "basic", AutoMute: false }); await load();
-      if (await has("Hush when other audio plays")) v.push('the old label "Hush when other audio plays" is still a row');
-      const r = await js(`const r = window.__x.row("Mute when other audio plays"); if (!r) return null;
+      if (await has("Mute when other audio plays")) v.push('the old label "Mute when other audio plays" is still a row');
+      const r = await js(`const r = window.__x.row("Mute when other apps play audio"); if (!r) return null;
         return { section: r.closest(".ssection")?.querySelector("h3")?.textContent.trim(), box: !!r.querySelector("input[type=checkbox]"), toggle: r.hasAttribute("data-row-toggle"),
           hint: r.querySelector(".shint")?.textContent ?? "" }`);
-      if (!r) return [...v, 'no row labelled "Mute when other audio plays" at Basic'];
+      if (!r) return [...v, 'no row labelled "Mute when other apps play audio" at Basic'];
       if (!r.box || !r.toggle) v.push(`the row isn't a whole-row checkbox (${J(r)})`);
       if (!/^Auto-mute$/i.test(r.section ?? "")) v.push(`it sits in section ${J(r.section)}, want Auto-mute`);
-      const p = await js(`return await window.__x.show(window.__x.row("Mute when other audio plays").querySelector(".slabel"))`);
+      const p = await js(`return await window.__x.show(window.__x.row("Mute when other apps play audio").querySelector(".slabel"))`);
       await clickAt(p.x, p.y);
       if (!(await waitFor(async () => (await field("autoMute")) === true, 4000))) v.push(`a click on the row didn't save autoMute (${await field("autoMute")})`);
       await setSettings({ AutoMute: false, SettingsLevel: "standard" });
@@ -273,8 +275,8 @@ app.whenReady().then(async () => {
       const want = [
         ["volume-up shortcut", '[data-copy="liascape volume up"]', "liascape volume up"],
         ["Autostart", '[data-copy="liascape restore"]', "liascape restore"],
-        ["mpv command (live)", '[data-copy="mpv command"]', blocks["mpv command (live)"]],
-        ["linux-wallpaperengine command (live)", '[data-copy="linux-wallpaperengine command"]', blocks["linux-wallpaperengine command (live)"]],
+        ["mpv command", '[data-copy="mpv command"]', blocks["mpv command"]],
+        ["linux-wallpaperengine command", '[data-copy="linux-wallpaperengine command"]', blocks["linux-wallpaperengine command"]],
       ];
       for (const [what, sel, text] of want) {
         if (!text || text === "…") { v.push(`${what}: nothing to copy (${J(text)}) — proved nothing`); continue; }
@@ -294,6 +296,21 @@ app.whenReady().then(async () => {
       if (lap.length !== 2) v.push(`${lap.length} command blocks with a Copy button, want 2`);
       for (const d of lap) if (d > 0) v.push(`a block's Copy button covers ${d} px of its command's lines`);
       await setSettings({ SettingsLevel: "standard" });
+      return v;
+    });
+
+    await cell("preview:monitors — removing a scene monitor drops it from the linux-wallpaperengine command (it read the old file)", async () => {
+      const v = [];
+      await setSettings({ SettingsLevel: "expert", AllowScenes: true, SceneMonitors: [{ Name: "PRB-A", Fps: 15, IsPrimary: true }, { Name: "PRB-B", Fps: 15, IsPrimary: false }] });
+      await load();
+      const lwe = () => js(`return [...document.querySelectorAll(".settings .ssection")].find((s) => s.querySelector("h3")?.textContent.trim() === "linux-wallpaperengine command")?.querySelector("pre.mpv")?.textContent ?? null`);
+      if (!(await waitFor(async () => /PRB-B/.test((await lwe()) ?? ""), 6000))) v.push(`before: the command doesn't list PRB-B (${J(await lwe())})`);
+      const p = await js(`const b = [...document.querySelectorAll('[aria-label="Remove monitor"]')].pop(); return b ? await window.__x.show(b) : null`);
+      if (!p) return [...v, "no Remove monitor button"];
+      await clickAt(p.x, p.y);
+      if (!(await waitFor(async () => { const s = (await lwe()) ?? ""; return /PRB-A/.test(s) && !/PRB-B/.test(s); }, 4000)))
+        v.push(`after removing PRB-B the command still reads ${J(await lwe())}`);
+      await setSettings({ SceneMonitors: [], AllowScenes: false, SettingsLevel: "standard" });
       return v;
     });
 

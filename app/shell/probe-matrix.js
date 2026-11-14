@@ -1875,10 +1875,10 @@ const NORM_STATES = ["single", "playlist", "effect", "pending", "paused", "pause
 const normOn = async (target) => { const s = await getSettings(); s.normalizeAudio = true; if (target !== undefined) s.normalizeTargetLufs = target; await post("/settings", s); };
 const normMeasured = (c) => (c.measured ? [] : ["the clips were never measured (normalization's background backfill, 30 s)"]);
 C["set:normalizeOn"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); },
-  async run() { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Audio normalization"), true, "Audio normalization");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === true ? [] : ["normalizeAudio not saved on"])] };
 C["set:normalizeOff"] = { states: NORM_STATES, async pre(c) { c.measured = await measureAll(); await normOn(); },
-  async run() { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), false, "Even out loudness");`)); await sleep(900); },
+  async run() { await ui(settingsTab(`m.setCheck(m.input("Audio normalization"), false, "Audio normalization");`)); await sleep(900); },
   check: (c) => [...normMeasured(c), ...(c.after.s.normalizeAudio === false ? [] : ["normalizeAudio not saved off"])] };
 // the target's preset (−14 → −19): every live measured source re-targets
 C["set:normalizeTarget"] = { states: ["single", "effect", "pending", "paused"], async pre(c) { c.measured = await measureAll(); await normOn(-14); },
@@ -1888,13 +1888,13 @@ C["set:normalizeTarget"] = { states: ["single", "effect", "pending", "paused"], 
 // loudnorm once it's measured (not only at its next switch)
 C["set:normalizeFresh"] = { states: ["single", "playlist", "effect"], async pre() { unmeasureAll(); },
   async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`));
+    await ui(settingsTab(`m.setCheck(m.input("Audio normalization"), true, "Audio normalization");`));
     c.measured = await waitFor(() => K.every((p) => measured(readIndex(), p)), 30000, 200);
     await sleep(1500);
   }, check: (c) => normMeasured(c) };
 // on, then next: B comes up normalized (its own measurement)
 C["seq:set:normalizeOn+next"] = { states: ["single", "playlist", "effect", "pending"], switch: true, async pre(c) { c.measured = await measureAll(); },
-  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Even out loudness"), true, "Even out loudness");`)); await sleep(900); await cliStep(c, "next"); },
+  async run(c) { await ui(settingsTab(`m.setCheck(m.input("Audio normalization"), true, "Audio normalization");`)); await sleep(900); await cliStep(c, "next"); },
   check: (c) => [...normMeasured(c), ...stayed(c, "next")] };
 // normalization on; Mute audio on → next (B starts with no audio: no filter) → Mute audio off: B's audio comes back
 // normalized — not only at its next switch
@@ -2643,7 +2643,7 @@ async function amReady() {
   return waitFor(() => new Promise((res) => cp.execFile("pactl", ["list", "clients"], { timeout: 2000 }, (err, out) =>
     res(!err && (String(out).match(/application\.process\.binary = "pactl"/g) || []).length >= 2))), 5000, 100);
 }
-const amEnable = settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400);`);
+const amEnable = settingsTab(`m.setCheck(m.input("Mute when other apps play audio"), true, "auto-mute"); await m.sleep(400);`);
 const amSkip = (c) => (PULSE ? false : (c.skip = "no private audio server (pulseaudio) for this stack"));
 const amReadyCheck = (c) => (c.ready ? [] : ["auto-mute's stream watch (pactl subscribe) never connected to the stack's audio server"]);
 // a stream plays: every live source mutes (ramped, while paused too); it ends: after the unmute delay (2 s) they unmute
@@ -2700,7 +2700,7 @@ C["autoMute:offWhileMuted"] = { states: ["single", "effect", "pending"], async r
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 3000, 40);
-    const t = Date.now(); await ui(`m.setCheck(m.input("Mute when other audio plays"), false, "auto-mute");`);
+    const t = Date.now(); await ui(`m.setCheck(m.input("Mute when other apps play audio"), false, "auto-mute");`);
     c.unmutedMs = (await waitFor(() => muteNow(false), 3000, 40)) ? Date.now() - t : null; c.duringTone = tones.size > 0;
   }, check(c) {
     const v = [...amReadyCheck(c)];
@@ -2722,7 +2722,7 @@ C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Mute when other apps play audio"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(9000); const stop = sampler(c, 40); await sleep(2500); await stop();
     const t = Date.now(); await ui(`m.setValue(m.input("Ignore sounds below (dB)"), -70, "min level");`);
@@ -2739,7 +2739,7 @@ C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run
 // Mute after 1500 ms: not muted 0.8 s into a stream, muted by 4 s
 C["autoMute:delay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Fade out after (ms)"), 1500, "delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Mute when other apps play audio"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Fade out after (ms)"), 1500, "delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     const t0 = Date.now(); tone(6000); await sleep(800); c.early = await muteNow(true);
     c.mutedMs = (await waitFor(() => muteNow(true), 3500, 40)) ? Date.now() - t0 : null;
@@ -2754,7 +2754,7 @@ C["autoMute:delay"] = { states: ["single"], async run(c) {
 // Unmute after 4000 ms (default 2000): still muted 3 s after the stream ended, unmuted by 8 s
 C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
-    await ui(settingsTab(`m.setCheck(m.input("Mute when other audio plays"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Come back after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
+    await ui(settingsTab(`m.setCheck(m.input("Mute when other apps play audio"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Come back after (ms)"), 4000, "unmute delay"); await m.sleep(400);`));
     await sleep(500); c.ready = await amReady();
     tone(10000); c.muted1 = await waitFor(() => muteNow(true), 4000, 40); // muted (under load the watch can take > 2 s)
     await stopTones(); const t1 = Date.now(); // the stream ends here
@@ -3094,6 +3094,24 @@ for (const [combo, st] of [["v→s", "sceneV"], ["s→s", "sceneS"], ["s→v", "
     } };
 }
 
+// the in-app background (Settings, components/WallpaperBg.tsx) holds still while the wallpaper is paused. WS
+// pause-changed reaches it at once; /current.paused on its poll is the backstop
+C["pause:appBg"] = { states: ["single"], flipPause: true, async run(c) {
+    const bg = `const v = document.querySelector("video.settings-bg"); return v ? { paused: v.paused, t: v.currentTime } : null;`;
+    await ui(settingsTab(`await m.sleep(300);`));
+    c.b0 = await ui(bg); await sleep(400); c.b1 = await ui(bg);
+    const t = Date.now(); c.cli = await cli("toggle-pause");
+    c.held = await waitFor(async () => (await ui(bg))?.paused === true, 1500, 50); c.ms = Date.now() - t;
+    c.a0 = await ui(bg); await sleep(500); c.a1 = await ui(bg);
+  }, check(c) {
+    const v = [];
+    if (!c.b0) return ["no background video on Settings"];
+    if (c.b0.paused || c.b1?.t === c.b0.t) v.push(`the background wasn't playing before the pause (${JSON.stringify([c.b0, c.b1])}): proves nothing`);
+    if (!c.held) v.push(`the background still plays 1.5 s after toggle-pause (${JSON.stringify(c.a0)})`);
+    else if (c.a1?.t !== c.a0?.t) v.push(`the paused background's time moved: ${c.a0?.t} → ${c.a1?.t}`);
+    return v;
+  } };
+
 // pause a scene: the player pauses (the oracle), the scene's frames stop (the worker latches nothing, its clock stands
 // still, the picture is identical 500 ms apart) and its sound is gated out (gain.pause −96)
 C["pause:scene"] = { states: ["scene"], flipPause: true, async run(c) {
@@ -3361,8 +3379,8 @@ C["playlist:sceneInterval"] = { states: ["sceneS"], async run(c) {
     return v;
   } };
 
-// "Separate timing for scenes" (advance-on-end only; player-adapter.md § Rotation): on → a scene / still image switches
-// after "Switch scenes after" (0 = off), the minimum / maximum apply to videos only. Driven through the real UI while s1
+// "Separate timing for scenes and pictures" (advance-on-end only; player-adapter.md § Rotation): on → a scene / still image switches
+// after "Switch scenes and pictures after" (0 = off), the minimum / maximum apply to videos only. Driven through the real UI while s1
 // plays: the toggle shows only under "Switch when video ends", the seconds field only while it's on; 4 s → s1 (playing
 // for a while already: its play time counts since it showed) moves on to s2 now, with its transition.
 const sceneTimingCheck = (c, savedOn, savedSecs) => {
@@ -3370,7 +3388,7 @@ const sceneTimingCheck = (c, savedOn, savedSecs) => {
   if (savedOn !== true || savedSecs !== 4) v.push(`separate timing ${savedOn} / switch scenes after ${savedSecs} after the UI change, expected true / 4`);
   const early = c.evs.filter((e) => e.event === "transition.scheduled" && e._t < c.tChange - 300);
   if (early.length) v.push(`a switch before the scene timing was set (to ${early.map((e) => TITLE(e.path))}) — nothing should move s1 then`);
-  if (!c.sw) v.push("no switch off s1 within 9 s of \"Switch scenes after\" 4 s");
+  if (!c.sw) v.push("no switch off s1 within 9 s of \"Switch scenes and pictures after\" 4 s");
   else {
     if (c.sw.align === "end") v.push("the scene's switch was align:end (a scene never ends — it must switch now)");
     if (c.sw.effect_id == null) v.push("the scene's switch was a cut (transitions are on)");
@@ -3378,6 +3396,8 @@ const sceneTimingCheck = (c, savedOn, savedSecs) => {
   if (c.after.cur?.path !== SC[1]) v.push(`/current ${TITLE(c.after.cur?.path)}, expected s2 (the playlist bar's next after s1)`);
   return v;
 };
+// h + m zeroed BEFORE the seconds: the in-between 0 s total is a draft (PlayTimeInput min 1), never saved; an early
+// switch here = it was saved as 1 s
 const sceneSecsTo4 = (group) => `const iv = ${group}.querySelectorAll("input"); m.setValue(iv[0], 0, "h"); m.setValue(iv[1], 0, "m"); await m.sleep(200);
   m.setValue(iv[2], 4, "s"); iv[2].dispatchEvent(new FocusEvent("focusout", { bubbles: true }));`;
 const plLabels = `[...document.querySelectorAll(".pl-modal .field-label, .pl-modal label.ck")].map((e) => e.textContent.trim())`;
@@ -3386,9 +3406,9 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     // the seconds field; 4 s
     await ui(plOpen); c.lab0 = await js(plLabels);
     await ui(`m.setCheck(m.plCheck("Switch when video ends"), true, "advance"); await m.sleep(400);`); c.lab1 = await js(plLabels);
-    await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), false, "separate off"); await m.sleep(300);`);
+    await ui(`m.setCheck(m.plCheck("Separate timing for scenes and pictures"), false, "separate off"); await m.sleep(300);`);
     c.rule1 = await ui(`return document.querySelector(".pl-modal [data-scene-rule]")?.textContent ?? "";`);
-    await ui(`m.setCheck(m.plCheck("Separate timing for scenes"), true, "separate"); await m.sleep(300);
+    await ui(`m.setCheck(m.plCheck("Separate timing for scenes and pictures"), true, "separate"); await m.sleep(300);
       ${sceneSecsTo4(`document.querySelectorAll(".pl-modal .hms")[2]`)} ${plClose}`);
     c.tChange = Date.now();
     await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 1500 && e.event === "transition.scheduled" && e.path === SC[1])), 9000, 100);
@@ -3400,17 +3420,17 @@ C["playlist:sceneTiming"] = { states: ["sceneS"], async run(c) {
     const v = sceneTimingCheck(c, c.saved?.separateSceneTiming, c.saved?.switchScenesAfterSeconds);
     if (c.saved?.switchWhenVideoEnds !== true) v.push(`playlist switchWhenVideoEnds ${c.saved?.switchWhenVideoEnds}, expected true`);
     if (c.lab0?.some((l) => /separate timing|switch scenes after/i.test(l))) v.push(`scene timing shown with "Switch when video ends" off: ${JSON.stringify(c.lab0)}`);
-    if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.rule1 ?? "")) v.push(`the playlist modal (scene timing off) doesn't state the scene rule: ${JSON.stringify(c.rule1)}`);
-    if (!c.lab1?.includes("Separate timing for scenes") || !c.lab1?.includes("SWITCH SCENES AFTER")) v.push(`modal after advance on: ${JSON.stringify(c.lab1)} — expected "Separate timing for scenes" + "SWITCH SCENES AFTER"`);
+    if (!/switch at the minimum, or at the maximum if the minimum is off/.test(c.rule1 ?? "")) v.push(`the playlist modal (scene timing off) doesn't state the scene rule: ${JSON.stringify(c.rule1)}`);
+    if (!c.lab1?.includes("Separate timing for scenes and pictures") || !c.lab1?.includes("SWITCH SCENES AND PICTURES AFTER")) v.push(`modal after advance on: ${JSON.stringify(c.lab1)} — expected "Separate timing for scenes and pictures" + "SWITCH SCENES AND PICTURES AFTER"`);
     return v;
   } };
 C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     // the globals: advance on, no limits, toggle off → s1 stays; the toggle row shows, the seconds row doesn't; on → it
     // does; 4 s
     await ui(settingsTab(`await m.sleep(200);`)); c.rows0 = await js(rowLabels);
-    c.hint0 = await ui(`return m.row("Separate timing for scenes")?.querySelector(".shint")?.textContent ?? "";`);
-    await ui(`m.setCheck(m.input("Separate timing for scenes"), true, "separate"); await m.sleep(500);`); c.rows1 = await js(rowLabels);
-    await ui(sceneSecsTo4(`m.row("Switch scenes after")`));
+    c.hint0 = await ui(`return m.row("Separate timing for scenes and pictures")?.querySelector(".shint")?.textContent ?? "";`);
+    await ui(`m.setCheck(m.input("Separate timing for scenes and pictures"), true, "separate"); await m.sleep(500);`); c.rows1 = await js(rowLabels);
+    await ui(sceneSecsTo4(`m.row("Switch scenes and pictures after")`));
     c.tChange = Date.now();
     await waitFor(async () => (c.sw = events.find((e) => e._t >= c.tChange - 1500 && e.event === "transition.scheduled" && e.path === SC[1])), 9000, 100);
     await waitSettled(8000, SC[1]);
@@ -3420,9 +3440,9 @@ C["global:sceneTiming"] = { states: ["sceneSGlobal"], async run(c) {
     const v = sceneTimingCheck(c, c.savedS?.globalSeparateSceneTiming, c.savedS?.globalSwitchScenesAfterSeconds);
     // the scene rule said plainly while the toggle is off (the one set, the minimum if both are — docs/decisions.md §
     // "A scene's minimum play time beats its maximum")
-    if (!/switch at the minimum — or at the maximum if the minimum is off/.test(c.hint0 ?? "")) v.push(`"Separate timing for scenes" (off) hint doesn't state the scene rule: ${JSON.stringify(c.hint0)}`);
-    if (!c.rows0?.includes("Separate timing for scenes") || c.rows0?.includes("Switch scenes after")) v.push(`rotation rows with the toggle off: ${JSON.stringify(c.rows0)} — expected the toggle, no "Switch scenes after"`);
-    if (!c.rows1?.includes("Switch scenes after")) v.push(`rotation rows with the toggle on: ${JSON.stringify(c.rows1)} — expected "Switch scenes after"`);
+    if (c.hint0) v.push(`"Separate timing for scenes and pictures" has a hint (the owner wants none): ${JSON.stringify(c.hint0)}`);
+    if (!c.rows0?.includes("Separate timing for scenes and pictures") || c.rows0?.includes("Switch scenes and pictures after")) v.push(`rotation rows with the toggle off: ${JSON.stringify(c.rows0)} — expected the toggle, no "Switch scenes and pictures after"`);
+    if (!c.rows1?.includes("Switch scenes and pictures after")) v.push(`rotation rows with the toggle on: ${JSON.stringify(c.rows1)} — expected "Switch scenes and pictures after"`);
     return v;
   } };
 
@@ -4215,7 +4235,7 @@ C["cli:next:backendDown"] = { states: ["playlist"], switch: true, async run(c) {
     return v;
   } };
 
-// `liascape loop-current` (a keybind toggle that loops the current wallpaper): a 3 s timed playlist;
+// `liascape toggle-loop-current` (a keybind toggle that loops the current wallpaper): a 3 s timed playlist;
 // the keybind → prog:main.keep, no switch for 7 s, the topbar says so, /current.keep; again → the rotation resumes (a switch
 // within ~4.5 s); with the backend stopped (the app closed) the CLI toggles it on the player itself and the new backend
 // reports it; a Play of the playlist lifts it.
@@ -4223,7 +4243,7 @@ C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
     const ps = (await http("GET", "/playlist/state")).json;
     await post("/playlist/state", { videoPaths: ps.videoPaths, settings: { ...ps.settings, intervalSeconds: 3 }, name: ps.name });
     await sleep(400);
-    c.on = await cliStep(c, "loop-current"); c.tOn = Date.now();
+    c.on = await cliStep(c, "toggle-loop-current"); c.tOn = Date.now();
     c.keep1 = await pget("prog:main.keep"); c.cur1 = await curPath();
     c.status1 = await ui(`await m.sleep(300); return document.querySelector(".topbar .status")?.textContent ?? "";`);
     c.curKeep = (await http("GET", "/current")).json?.keep;
@@ -4231,7 +4251,7 @@ C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
     c.switchesKept = events.filter((e) => e._t >= c.tOn && e.event === "transition.scheduled").length;
     { const st = await ctl.call("state"); const lay = Object.entries(st.graph).find(([id]) => id.startsWith("lay:") && id.endsWith(":main"))?.[1];
       c.loop = lay?.content ? st.graph[lay.content]?.loop : undefined; }
-    c.off = await cliStep(c, "loop-current"); c.tOff = Date.now();
+    c.off = await cliStep(c, "toggle-loop-current"); c.tOff = Date.now();
     c.keep2 = await pget("prog:main.keep");
     c.status2 = await ui(`await m.sleep(300); return document.querySelector(".topbar .status")?.textContent ?? "";`);
     c.resumed = await waitFor(() => events.some((e) => e._t >= c.tOff && e.event === "transition.scheduled"), 5500, 100);
@@ -4239,7 +4259,7 @@ C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
     // the app closed: the one-shot CLI reaches the player itself; the next backend reads it from there
     await win.loadURL("about:blank");
     await stopBackend(3000); c.down = !procAlive(backendPid);
-    c.closed = await cli("loop-current");
+    c.closed = await cli("toggle-loop-current");
     c.keep3 = await pget("prog:main.keep");
     c.up = await startBackend(); await loadUi(); await sleep(500);
     c.curKeep3 = (await http("GET", "/current")).json?.keep;
@@ -4251,18 +4271,18 @@ C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
     await post("/playlist/state", { videoPaths: ps.videoPaths, settings: ps.settings, name: ps.name });
   }, check(c) {
     const v = [];
-    if (c.on?.code !== 0 || !/Looping .* the playlist stays on it/.test(c.on?.out ?? "")) v.push(`loop-current (on): exit ${c.on?.code}, said ${JSON.stringify(c.on?.out)}`);
-    if (c.keep1 !== true) v.push(`prog:main.keep after loop-current: ${c.keep1}, expected true`);
+    if (c.on?.code !== 0 || !/Looping .* the playlist stays on it/.test(c.on?.out ?? "")) v.push(`toggle-loop-current (on): exit ${c.on?.code}, said ${JSON.stringify(c.on?.out)}`);
+    if (c.keep1 !== true) v.push(`prog:main.keep after toggle-loop-current: ${c.keep1}, expected true`);
     if (c.curKeep !== true) v.push(`/current.keep ${c.curKeep}, expected true`);
-    if (!/^Looping /.test(c.status1 ?? "")) v.push(`topbar after loop-current: ${JSON.stringify(c.status1)}`);
+    if (!/^Looping /.test(c.status1 ?? "")) v.push(`topbar after toggle-loop-current: ${JSON.stringify(c.status1)}`);
     if (c.switchesKept) v.push(`${c.switchesKept} switch(es) within 7 s under the keep (3 s interval) — it must stay on ${TITLE(c.cur1)}`);
     if (c.loop !== true) v.push(`the kept video's loop ${c.loop}, expected true`);
-    if (c.off?.code !== 0 || !/Rotation resumed/.test(c.off?.out ?? "")) v.push(`loop-current (off): exit ${c.off?.code}, said ${JSON.stringify(c.off?.out)}`);
-    if (c.keep2 !== false) v.push(`prog:main.keep after the 2nd loop-current: ${c.keep2}, expected false`);
-    if (!/^Rotation resumed/.test(c.status2 ?? "")) v.push(`topbar after the 2nd loop-current: ${JSON.stringify(c.status2)}`);
+    if (c.off?.code !== 0 || !/Rotation resumed/.test(c.off?.out ?? "")) v.push(`toggle-loop-current (off): exit ${c.off?.code}, said ${JSON.stringify(c.off?.out)}`);
+    if (c.keep2 !== false) v.push(`prog:main.keep after the 2nd toggle-loop-current: ${c.keep2}, expected false`);
+    if (!/^Rotation resumed/.test(c.status2 ?? "")) v.push(`topbar after the 2nd toggle-loop-current: ${JSON.stringify(c.status2)}`);
     if (!c.resumed) v.push("no switch within 5.5 s of lifting the keep (3 s interval)");
     if (!c.down) v.push("the backend didn't stop (the fixture failed)");
-    if (c.closed?.code !== 0 || c.keep3 !== true) v.push(`loop-current with the app closed: exit ${c.closed?.code} (${JSON.stringify(c.closed?.out)}), prog:main.keep ${c.keep3}`);
+    if (c.closed?.code !== 0 || c.keep3 !== true) v.push(`toggle-loop-current with the app closed: exit ${c.closed?.code} (${JSON.stringify(c.closed?.out)}), prog:main.keep ${c.keep3}`);
     if (!c.up) v.push("the restarted backend didn't answer /health");
     if (c.curKeep3 !== true) v.push(`the new backend's /current.keep ${c.curKeep3}, expected true (the player kept it)`);
     if (!/looping this one/.test(c.status3 ?? "")) v.push(`the reopened page's status line doesn't say it loops: ${JSON.stringify(c.status3)}`);
@@ -4482,7 +4502,7 @@ const FUZZ_RULES = [
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
   [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
-  // Settings → "Mute wallpapers" on disables the Volume slider and "Even out loudness" (and hides the target): their drive
+  // Settings → "Mute wallpapers" on disables the Volume slider and "Audio normalization" (and hides the target): their drive
   // would click a disabled input
   [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
   [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^playlistBarVol:/, { when: offGlobal(42) }],
