@@ -2957,7 +2957,18 @@ public static class PlayerHelper
     // PlayerEngine changed (/settings), live: stop the OLD engine's media, then replay on the new one —
     // a running timed playlist resumes at the item it was on (timed_state.json), else LastSession.
     // Nothing playing → nothing started. Unchanged engine → just refresh the cached engine/binary.
+    // One switch at a time, each on the settings saved NOW: two quick changes (legacy, then back within a second) ran
+    // side by side, the second saw liascape-player still cached and returned, and the first then cached legacy over it,
+    // so legacy ran while the setting said liascape-player. Guard: scripts/test-engine-heal.sh (quick switch back)
+    private static readonly SemaphoreSlim _engineSwitch = new(1, 1);
     public static void SwitchEngineLive(AppSettings prev, AppSettings cur)
+    {
+        _engineSwitch.Wait();
+        try { SwitchEngineNow(SettingsService.Load()); }
+        finally { _engineSwitch.Release(); }
+    }
+
+    private static void SwitchEngineNow(AppSettings cur)
     {
         bool wasPlayer = PlayerEngine.IsLiascapePlayer;          // what actually runs (cached since serve start)
         bool nowPlayer = PlayerEngine.WouldBeLiascapePlayer(cur);

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Liascape.Helpers;
 using Liascape.Models;
 
@@ -157,12 +159,36 @@ public static class PlayerEngine
         return null;
     }
 
+    // The setting asks for liascape-player but its binary wasn't there when that was decided (serve started mid-rebuild,
+    // a boot before the store path existed): legacy runs meanwhile. Once the binary
+    // resolves (every GET /player-engine re-resolves it; Settings asks every 15 s), switch by itself, the same way a
+    // selection does (PlayerHelper.SwitchEngineLive: the session replays on liascape-player). One switch at a time.
+    // Guard: scripts/test-engine-heal.sh
+    private static int _healing;
+    private static bool HealIfFound(AppSettings s, string? bin)
+    {
+        if (bin == null || !Wants(s) || IsLiascapePlayer) return false;
+        if (Interlocked.Exchange(ref _healing, 1) == 0)
+            Task.Run(() =>
+            {
+                try
+                {
+                    LiascapePlayerClient.Log("PlayerEngine=liascape-player and it is available, legacy runs → switching");
+                    PlayerHelper.SwitchEngineLive(SettingsService.Load(), SettingsService.Load());
+                }
+                catch (Exception e) { LiascapePlayerClient.Log($"switching to liascape-player failed: {e.Message}"); }
+                finally { Interlocked.Exchange(ref _healing, 0); }
+            });
+        return true;
+    }
+
     // GET /player-engine: what the setting asks for, what runs, whether liascape-player can run (+ why not).
     public static object Status()
     {
         var s = SettingsService.Load();
         lock (_lock) { _binResolved = false; }
         var bin = ResolveBinary();
+        bool healing = HealIfFound(s, bin);
         return new
         {
             engine = Wants(s) ? LiascapePlayer : Legacy,
@@ -173,7 +199,7 @@ public static class PlayerEngine
             scenes = SceneStatus(s),
             vram = VramStatus(s),
             reason = bin == null ? UnavailableReason
-                : Wants(s) && !IsLiascapePlayer ? "liascape-player was not found when it was selected — select it again to switch now"
+                : healing ? "switching to liascape-player…"
                 : LiascapePlayerClient.Shared.LastError,
         };
     }
