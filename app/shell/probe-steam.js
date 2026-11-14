@@ -71,6 +71,11 @@
 //   ws:creator[Off]       the creator row (avatar from the media origin + name, asked once with the item's owner); a click lists
 //                         their items (/browse list creator): the creator's pill slides in (per frame; Off: fades), the search
 //                         goes, the sort is the list's, the sidebar closes; × back (the pill leaves); no-glow + bg-live
+//   ws:creatorCopy[Off]   the creator's name: its Copy appears at the end of the "Made by" line, clear of the name, on the row's
+//                         hover (rises in; Off: fades); a click copies the (long) name ("Copied"), lists nothing; a drag selects the
+//                         name; no-glow, bg-live
+//   side:browseTitle      the Browse sidebar's long title: folded, a click unfolds it, another folds it; its Copy copies it whole
+//   look:browseTitles     a Browse card's long title: two lines, clamped; every card keeps its box (the grid as with short titles)
 //   ws:favorite[Off]      the favourite tile: read state, a click POSTs, "Favourited" rolls in (Off: fades), the star fills and pops
 //                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; signed
 //                         out "Sign in to favourite", inert; no-glow + bg-live
@@ -182,7 +187,9 @@ const STUB = `(() => {
       // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
       if (b.list) { if (b.list.kind === "favorites" && !(window.__ws ??= {}).signedIn) return res({ error: "Sign in to Steam to see your Workshop favourites", signIn: true }, 403);
         return res(b.page > 1 ? [] : items.slice(0, 3)); }
-      if (b.filter) return res(b.page > 1 ? [] : items);
+      // a long first title (side:browseTitle, look:browseTitles)
+      const long = localStorage.getItem("__probe_long_title");
+      if (b.filter) return res(b.page > 1 ? [] : long ? items.map((x, i) => (i === 0 ? { ...x, title: long } : x)) : items);
       // a fake Wallpaper Engine (Local) folder (steam:subToggle): local page paths + Workshop ids
       if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
         pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
@@ -1388,6 +1395,145 @@ app.whenReady().then(async () => {
         return v;
       });
     }
+
+    // ws:creatorCopy[Off] — the creator's name copies: hidden at rest, its Copy (the row's sibling) appears on the row's hover
+    // at the end of the "Made by" line, clear of the name (on: rises in per frame; Off: fades in place); a real click puts the (long) name on the
+    // clipboard and reads "Copied", asking for no list and leaving the sidebar open; a drag across the name selects it and
+    // lists nothing. On: no glow under no-glow, a fill of its own under bg-live. Shots steam-ws-creatorcopy*.png
+    for (const motion of [true, false]) {
+      await cell(`ws:creatorCopy${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        // a name long enough to run under where the Copy floats
+        const NM = "Probe Creator With A Rather Long Steam Name";
+        await browseWs(); await W({ avatar: libThumb, creator: { steamId: "76561190000000007", name: NM, avatar: libThumb } }); await mvTo(3, 3); await openSide(0);
+        const ROW = `${SIDE} [data-ws-creator]`, CP = `${SIDE} .ws-creator-row > .side-copy`, NAME = `${ROW} [data-ws-creator-name]`, BY = `${ROW} .ws-creator-by`;
+        if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
+        await sleep(300);
+        const geo = () => js(`(() => { const c = document.querySelector(${J(CP)}), n = document.querySelector(${J(NAME)}), r = document.querySelector(${J(ROW)}); if (!c || !n) return null;
+          const R = (e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+          // the name's letters: a Range's box (the line box is taller than the glyphs)
+          const rg = document.createRange(); rg.selectNodeContents(n); const gl = R(rg);
+          return { c: R(c), n: R(n), gl, by: R(document.querySelector(${J(BY)})), row: R(r), op: +getComputedStyle(c).opacity, copied: c.hasAttribute("data-copied"), label: c.getAttribute("aria-label") }; })()`);
+        const g0 = await geo();
+        if (!g0) return ["no Copy beside the creator's name"];
+        if (g0.op > 0.02) v.push(`at rest the creator's Copy shows (opacity ${g0.op})`);
+        const smp = js(MO.SAMPLE({ c: CP }, 600)); await sleep(40);
+        await mvTo(g0.row.x + 50, g0.row.y + g0.row.h / 2);
+        await sleep(motion ? 110 : 50); await shot(`ws-creatorcopy-in${motion ? "" : "-off"}`);
+        const fr = (await smp).c;
+        if (motion) {
+          const ops = fr.map((f) => f[1]).filter((x) => x != null), ys = fr.filter((f) => f[1] != null && f[1] > 0.02).map((f) => f[3]);
+          if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`the Copy popped in (opacities ${J(ops.slice(0, 8))})`);
+          if (!(ys.length > 2 && Math.max(...ys) - Math.min(...ys) > 1)) v.push(`the Copy didn't rise in (y ${J(ys.slice(0, 8))})`);
+        } else v.push(...MO.judge("motion off: the creator's Copy appearing", fr, { appear: true }));
+        const g1 = await geo();
+        if (g1.op < 0.95) v.push(`hovering the row, the Copy is at opacity ${g1.op}`);
+        const br = g1.by.x + g1.by.w, bc = g1.by.y + g1.by.h / 2, cr = g1.c.x + g1.c.w, cc = g1.c.y + g1.c.h / 2;
+        if (Math.abs(cr - br) > 1.5 || cc < g1.by.y || cc > g1.by.y + g1.by.h) v.push(`the Copy isn't on the end of the "Made by" line (Copy right ${cr.toFixed(1)} / centre ${cc.toFixed(1)}, line ${br.toFixed(1)} / ${bc.toFixed(1)})`);
+        // "Ink" of the name's letters: the Range box spans the font's ascent; its upper ~15 % holds no glyph
+        const inkTop = g1.gl.y + g1.gl.h * 0.15;
+        if (g1.c.x > g1.gl.x + g1.gl.w) v.push(`the name ends before the Copy (x ${(g1.gl.x + g1.gl.w).toFixed(1)} < ${g1.c.x.toFixed(1)}) — its letters can't be covered: proved nothing`);
+        else if (g1.c.y + g1.c.h > inkTop) v.push(`the Copy covers the name's letters (its bottom ${(g1.c.y + g1.c.h).toFixed(1)}, the letters from ${inkTop.toFixed(1)}, x to ${(g1.gl.x + g1.gl.w).toFixed(1)})`);
+        if (g1.c.x + g1.c.w > g1.row.x + g1.row.w || g1.c.y < g1.row.y || g1.c.y + g1.c.h > g1.row.y + g1.row.h) v.push(`the Copy sticks out of the row (${J(g1.c)} vs ${J(g1.row)})`);
+        if (motion) {
+          await mvTo(cr - g1.c.w / 2, cc, 350);
+          const lk = await js(`(async () => { const c = document.querySelector(${J(CP)}), root = document.documentElement, s = (ms) => new Promise((r) => setTimeout(r, ms));
+            const g = getComputedStyle(c).boxShadow; root.classList.add("no-glow"); await s(250); const ng = getComputedStyle(c).boxShadow; root.classList.remove("no-glow");
+            root.classList.add("bg-live"); await s(250); const bg = getComputedStyle(c).backgroundColor; return { g, ng, bg }; })()`);
+          await shot("ws-creatorcopy-bglive"); await js(`document.documentElement.classList.remove("bg-live"); true`);
+          console.log(`        ${J(lk)}`);
+          if (!/rgb/.test(lk.g)) v.push(`the hovered Copy doesn't glow (${lk.g})`);
+          if (/rgb/.test(lk.ng) && !/rgba\(0, 0, 0/.test(lk.ng)) v.push(`no-glow: the hovered Copy glows (${lk.ng})`);
+          const a = /\/\s*([\d.]+)\s*\)/.exec(lk.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(lk.bg)?.[1] ?? "1";
+          if (+a < 0.8) v.push(`bg-live: the Copy's fill is too see-through over the name (${lk.bg})`);
+        }
+        // a real click on it
+        const nb = (await browses()).length;
+        clipboard.writeText("");
+        await clickAt(cr - g1.c.w / 2, cc); await sleep(150);
+        if (motion) await shot("ws-creatorcopy-copied");
+        const g2 = await geo();
+        if (clipboard.readText() !== NM) v.push(`the clipboard holds ${J(clipboard.readText())}, want ${J(NM)}`);
+        if (!g2?.copied) v.push("the Copy didn't turn into \"Copied\"");
+        await sleep(400);
+        if ((await browses()).slice(nb).some((b) => b.list)) v.push("the Copy's click listed the creator's wallpapers");
+        if (!(await js(`!!document.querySelector(${J(SIDE)})`))) v.push("the Copy's click closed the sidebar");
+        // a drag across the name selects it, lists nothing
+        await js(`getSelection().removeAllRanges(); true`);
+        const y = g2.n.y + g2.n.h / 2;
+        send({ type: "mouseDown", x: Math.round(g2.n.x + 1), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
+        for (let i = 1; i <= 6; i++) { send({ type: "mouseMove", x: Math.round(g2.n.x + 1 + i * 14), y: Math.round(y), button: "left" }); await sleep(20); }
+        send({ type: "mouseUp", x: Math.round(g2.n.x + 85), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(500);
+        const sel = await js(`getSelection().toString()`);
+        console.log(`        dragged: ${J(sel)}`);
+        if (sel.trim().length < 3 || !NM.startsWith(sel.trim())) v.push(`a drag across the name selected ${J(sel)}`);
+        if ((await browses()).slice(nb).some((b) => b.list)) v.push("the drag across the name listed the creator's wallpapers");
+        await js(`getSelection().removeAllRanges(); true`); await mvTo(3, 3);
+        await setSettings({ morphs: true });
+        return v;
+      });
+    }
+
+    // Browse's long titles: the first Workshop item named far past two lines (the page's stub, __probe_long_title)
+    const LONG_T = "An extremely long Workshop wallpaper title that goes on well past the two lines a card and the sidebar's head show";
+    const withLongBrowse = async (fn) => {
+      await js(`localStorage.setItem("__probe_long_title", ${J(LONG_T)}); true`);
+      try { return await fn(); } finally { await js(`localStorage.removeItem("__probe_long_title"); true`).catch(() => {}); await mvTo(3, 3); }
+    };
+    // side:browseTitle — the Browse sidebar's title: folded (a button, aria-expanded false, two lines), a real click unfolds it to
+    // the whole title and another folds it; its Copy, hovered and clicked, puts the whole title on the clipboard. Shot steam-browsetitle-open.png
+    await cell("side:browseTitle", async () => withLongBrowse(async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs(); await openSide(0);
+      const T0 = `${SIDE} [data-side-title]`;
+      const st = () => js(`(() => { const t = document.querySelector(${J(T0)}); if (!t) return null; const r = t.getBoundingClientRect(), h = t.closest("h2").getBoundingClientRect(), c = t.closest(".side-title").querySelector(".side-copy");
+        const cr = c?.getBoundingClientRect(); return { x: r.x, y: r.y, hh: h.height, lh: parseFloat(getComputedStyle(t).lineHeight), exp: t.getAttribute("aria-expanded"), text: t.textContent,
+          c: cr ? { x: cr.x + cr.width / 2, y: cr.y + cr.height / 2 } : null, copied: !!c?.hasAttribute("data-copied") }; })()`);
+      const s0 = await st();
+      if (!s0) return ["no Browse sidebar title"];
+      if (s0.text !== LONG_T) return [`the sidebar shows ${J(s0.text)} — proved nothing`];
+      if (s0.exp !== "false" || Math.abs(s0.hh - 2 * s0.lh) > 1) v.push(`folded: ${J(s0)}`);
+      await clickAt(s0.x + 30, s0.y + 8); await sleep(700); await shot("browsetitle-open");
+      const s1 = await st();
+      if (s1.exp !== "true" || s1.hh < 3 * s1.lh) v.push(`a click didn't unfold it: ${J({ exp: s1.exp, hh: s1.hh })}`);
+      await clickAt(s1.x + 30, s1.y + 8); await sleep(800);
+      const s2 = await st();
+      if (s2.exp !== "false" || Math.abs(s2.hh - 2 * s2.lh) > 1) v.push(`another click didn't fold it: ${J({ exp: s2.exp, hh: s2.hh })}`);
+      await mvTo(s2.x + 40, s2.y + 10, 350);
+      const s3 = await st();
+      clipboard.writeText("");
+      await clickAt(s3.c.x, s3.c.y); await sleep(200);
+      if (clipboard.readText() !== LONG_T) v.push(`the title's Copy put ${J(clipboard.readText().slice(0, 50))} on the clipboard`);
+      if (!(await st()).copied) v.push("the title's Copy didn't read \"Copied\"");
+      return v;
+    }));
+
+    // look:browseTitles — a Browse card shows its title on two lines like a Library card (clamped, the rest hidden), and a
+    // long title moves nothing: every card keeps its box (its height from the thumbnail's aspect-ratio), the grid the same as
+    // with short titles. Shot steam-browse-titles.png
+    await cell("look:browseTitles", async () => {
+      const v = [];
+      const grid = () => js(`(() => { const cs = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)")];
+        return cs.map((c) => { const r = c.getBoundingClientRect(), s = c.querySelector(".lib-title span"); const lh = s ? parseFloat(getComputedStyle(s).lineHeight) : 0;
+          return { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1), lines: s ? Math.round(s.clientHeight / lh) : 0,
+            clamped: s ? s.scrollHeight > s.clientHeight + 1 : false, title: s?.textContent ?? null }; }); })()`);
+      await setSettings({ morphs: true }); await browseWs(); await sleep(500);
+      const short = await grid();
+      const long = await withLongBrowse(async () => { await browseWs(); await sleep(500); await shot("browse-titles"); return grid(); });
+      if (!long.length || long[0].title !== LONG_T) return [`the first card reads ${J(long[0]?.title)} — proved nothing`];
+      console.log(`        long card: ${J(long[0])}; short: ${J(short[0])}`);
+      if (long[0].lines !== 2 || !long[0].clamped) v.push(`the long title shows ${long[0].lines} line(s) (clamped ${long[0].clamped}), want 2, clamped`);
+      if (short.length !== long.length) v.push(`${short.length} cards with short titles, ${long.length} with the long one`);
+      for (let i = 0; i < Math.min(short.length, long.length); i++) {
+        const a = short[i], b = long[i];
+        if (Math.abs(a.x - b.x) > 0.5 || Math.abs(a.y - b.y) > 0.5 || Math.abs(a.w - b.w) > 0.5 || Math.abs(a.h - b.h) > 0.5) { v.push(`card ${i} moved or resized with the long title (${J(a)} → ${J(b)})`); break; }
+      }
+      const hs = long.map((c) => c.h);
+      if (Math.max(...hs) - Math.min(...hs) > 0.5) v.push(`the cards' heights differ (${J([...new Set(hs)])})`);
+      return v;
+    });
 
     // the favourite: a toggle tile — signed in it reads the state (once the sidebar settles), a click favourites (POST), the star
     // fills and pops once (never on mount), the words roll and the tile keeps its box; Steam refusing puts it back with the reason;

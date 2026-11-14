@@ -42,7 +42,7 @@ html, body, #root { margin: 0; height: 100%; }
 /* An app, not a page: a drag or Ctrl+A never highlights the chrome (tabs, pills, buttons, labels). Text worth copying opts
    back in: what you type, the sidebar's title / author / values, error messages. Guard: probe-layout select:chrome. */
 body { user-select: none; -webkit-user-select: none; }
-:is(input, textarea, [contenteditable="true"], .side-head-text, .side-val, .err-text, .pw-err) { user-select: text; -webkit-user-select: text; }
+:is(input, textarea, [contenteditable="true"], .side-head-text, .side-val, .ws-creator-name, .err-text, .pw-err) { user-select: text; -webkit-user-select: text; }
 body {
   /* Inter 14. */
   background: radial-gradient(120% 120% at 50% 0%, var(--bg-mantle), var(--bg-base) 60%);
@@ -294,7 +294,6 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 700;
   padding: 3px 6px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff;
 }
-.title { padding: 8px 10px; font-size: 12.5px; color: var(--subtext); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 
 /* Playing card border = green; gentle green glow pulse. */
@@ -436,7 +435,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* crashed warn — bottom-left, above the title bar (avoids the toggle/SCENE corners) */
 .warn { position: absolute; left: 6px; bottom: 50px; color: var(--danger); display: grid; place-items: center;
   filter: drop-shadow(0 0 4px var(--danger)); }
-/* bottom title bar (#66000000), 2-line clamp, centered white */
+/* bottom title bar (#66000000), 2-line clamp, centered white: the Library's and Browse's cards (Card.tsx) alike; inside the
+   thumbnail, so a title's length never changes the card's height (its aspect-ratio). Guard: probe-steam look:browseTitles */
 .lib-title { position: absolute; left: 0; right: 0; bottom: 0; height: 44px; padding: 4px 6px;
   background: rgba(0,0,0,.4); color: #fff; display: flex; align-items: center; justify-content: center;
   text-align: center; pointer-events: none; }
@@ -1372,6 +1372,9 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel .side-vol-slide, :root.no-motion .side-panel .side-open { transition: opacity var(--fade-dur) linear !important; }
 /* the sidebar's two-faced controls (the ID pill, the favourite): their faces still cross-fade. Guard: probe-steam side:idPill:still, ws:favoriteOff */
 :root.no-motion .side-panel .xfade > * { transition: opacity var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-title-ghost { animation: nm-out var(--fade-dur) linear forwards !important; }
+:root.no-motion .side-panel .side-title-ghost.late { animation-delay: var(--fade-dur) !important; }
+:root.no-motion .side-panel .side-copy { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving,
 :root.no-motion .side-panel .side-wl.leaving { animation: nm-out var(--fade-dur) linear forwards !important; animation-delay: 0s !important; }
 :root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
@@ -1458,8 +1461,32 @@ input[type=range]:focus-visible { outline: none; }
 .side-head::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 0; height: 1px; pointer-events: none;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 60%, transparent), transparent 85%); }
 .side-head-text { flex: 1; min-width: 0; padding-top: 3px; }
-.side-head h2 { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: .1px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+/* the title (components/SideTitle.tsx): two lines at most until a click unfolds it. The h2 is the clip the morph scales (its
+   words ride along unscaled inside), folded two of its lines tall; the words carry the clamp's ellipsis only once folded and
+   landed. Guard: probe-sidebar side:titleFold:<on|off|reduced> */
+.side-title { position: relative; font-size: 18px; font-weight: 800; letter-spacing: .1px; line-height: 1.25; }
+.side-head h2 { margin: 0; font: inherit; letter-spacing: inherit; overflow: hidden; overflow-wrap: anywhere; }
+.side-title:not(.open) > h2 { max-height: 2lh; }
+.side-title-txt { display: block; }
+.side-title-txt.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.side-title-txt[role=button] { cursor: pointer; }
+/* the title as it was, fading out in place over the new one, inside the clip (SideTitle.tsx ghost); `.late` waits for the new
+   one to fade in under it */
+.side-head h2 { position: relative; }
+.side-head h2, .side-title-txt { transform-origin: 50% 0; } /* the morph scales the clip from its top, its words back */
+.side-title-ghost { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; user-select: none;
+  animation: nm-out var(--fade-dur) linear forwards; }
+.side-title-ghost.late { animation-delay: var(--fade-dur); }
+/* Copy for the title and the creator's name (components/CopyButton.tsx): floats over the end of the title's last line / of the
+   creator's "Made by" line, shown while the text is hovered or the keyboard is on it, rising in a little (motion off: a
+   fade); a fuller fill than .mini's so the words under it don't show through. Guard: probe-sidebar side:titleCopy, probe-steam ws:creatorCopy */
+.side-copy { position: absolute; z-index: 1; height: 22px; padding: 0 7px; font-size: 11.5px; user-select: none; -webkit-user-select: none;
+  background: color-mix(in srgb, var(--surface0) var(--tr-strong), transparent); opacity: 0; translate: 0 4px; pointer-events: none;
+  transition: opacity .15s ease, translate var(--spring-soft-dur) var(--spring-soft), color .12s, box-shadow .2s; }
+.side-title > .side-copy { right: 0; bottom: 0; }
+:is(.side-title:hover, .side-title:has(:focus-visible), .ws-creator-row:hover, .ws-creator-row:has(:focus-visible)) > .side-copy {
+  opacity: 1; translate: none; pointer-events: auto; }
+:root.no-motion .side-copy { translate: none; transition: opacity var(--fade-dur) linear, color .12s, box-shadow .2s; }
 .side-sub { display: block; margin-top: 3px; }
 .side-head-tools { display: flex; gap: 6px; }
 .side-head-tools:empty { display: none; }
@@ -1701,6 +1728,12 @@ button.side-pill.copy { overflow: hidden; }
 .ws-creator-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .ws-creator-by { font-size: 10.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--subtext); }
 .ws-creator-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
+/* the name's Copy (.side-copy) is the row's sibling (a button can't hold another), placed by anchor at the end of the short
+   "Made by" line above the name, so it covers none of the name (in a narrow panel it may cover the caption's end); a little
+   smaller and raised a little, so it stays clear of the name's letters */
+.ws-creator-by { anchor-name: --ws-by; }
+.ws-creator-row { position: relative; anchor-scope: --ws-by; }
+.ws-creator-row > .side-copy { position-anchor: --ws-by; right: anchor(right); top: anchor(center); height: 20px; margin-top: -12px; font-size: 11px; }
 .ws-creator.loading .ws-creator-name { opacity: .4; }
 .ws-creator-go { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--accent); }
 .ws-creator:disabled .ws-creator-go { visibility: hidden; }

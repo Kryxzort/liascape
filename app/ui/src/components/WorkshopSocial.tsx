@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { ArrowRight, LoaderCircle, MessageSquare, RotateCcw, Send, Star, User } from "lucide-react";
 import { api, thumb, ApiError, type WsComment, type WsCreator } from "../api/client";
 import { useStore } from "../store";
+import { CopyButton } from "./CopyButton";
 
 // The Browse sidebar's Workshop community pieces (BrowseSide.tsx): the creator, the favourite toggle and the comment thread
 // (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in and say
@@ -38,7 +39,8 @@ export function Avatar({ src, size }: { src: string | null | undefined; size: nu
 }
 
 // The creator: their avatar and name; a click lists every Wallpaper Engine item they made in Browse (store setWsList —
-// a source pill of its own, components/SourcePills.tsx). Guard: probe-steam ws:creator
+// a source pill of its own, components/SourcePills.tsx). The name can be selected, and copied by the Copy that floats at the
+// end of the "Made by" line while the row is hovered or holds the keyboard focus. Guard: probe-steam ws:creator, ws:creatorCopy
 export function CreatorRow({ workshopId, authorId }: { workshopId: string; authorId: string | null | undefined }) {
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCreator | null>(() => creators.get(workshopId) ?? null);
@@ -55,16 +57,26 @@ export function CreatorRow({ workshopId, authorId }: { workshopId: string; autho
   // nothing to say who made it (the creator unknown and unreadable): no row
   if (failed && !id) return null;
   const name = c?.name ?? (c || failed ? "Steam creator" : null);
+  // the name is selectable: a drag that selected some of it isn't a click on the row
+  const go = (e: MouseEvent<HTMLButtonElement>) => {
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) return;
+    if (id) setWsList({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null });
+  };
   return (
-    <button type="button" className={`ws-creator${name ? "" : " loading"}`} data-ws-creator={c ? "known" : failed ? "unknown" : "loading"}
-      disabled={!id} onClick={() => id && setWsList({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null })}>
-      <Avatar src={c?.avatar} size={30} />
-      <span className="ws-creator-text">
-        <span className="ws-creator-by">Made by</span>
-        <span className="ws-creator-name" data-ws-creator-name>{name ?? "…"}</span>
-      </span>
-      <span className="ws-creator-go">All their wallpapers <ArrowRight size={14} /></span>
-    </button>
+    <div className="ws-creator-row">
+      <button type="button" className={`ws-creator${name ? "" : " loading"}`} data-ws-creator={c ? "known" : failed ? "unknown" : "loading"}
+        disabled={!id} onClick={go}>
+        <Avatar src={c?.avatar} size={30} />
+        <span className="ws-creator-text">
+          <span className="ws-creator-by">Made by</span>
+          <span className="ws-creator-name" data-ws-creator-name>{name ?? "…"}</span>
+        </span>
+        <span className="ws-creator-go">All their wallpapers <ArrowRight size={14} /></span>
+      </button>
+      {/* only Steam's own name: "Steam creator" stands in for one it couldn't read */}
+      {c?.name && <CopyButton text={c.name} what="creator's name" className="side-copy" />}
+    </div>
   );
 }
 

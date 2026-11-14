@@ -72,7 +72,7 @@ for f in $FILES; do
     app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f (+ --probe probe-cardpreview.js — the card preview; --probe probe-settings.js — its rows' own cells)" ;;
     # copy feedback: Settings' Copy buttons and the Library sidebar's Workshop ID pill
     app/ui/src/components/CopyButton.tsx|app/ui/src/hooks/useCopied.ts)
-      echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill)" >&2 ;;
+      echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill; probe-sidebar.js side:titleCopy; probe-steam.js ws:creatorCopy)" >&2 ;;
     # the Unsubscribe button's right-click menu (keep the files) and the menu itself
     app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx)
       echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, side:)" >&2 ;;
@@ -84,8 +84,8 @@ for f in $FILES; do
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
     # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe
-    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
-      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre; probe-layout.js perf:sidebar)" ;;
+    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/SideTitle.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
+      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre / side:title*; probe-steam.js side:browseTitle; probe-layout.js perf:sidebar)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts|app/ui/src/hooks/useBarFold.ts)
       add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:, scroll:, look:plFold, perf:tabs, perf:plFold, perf:dockRepaint)" ;;
     # the segmented control: the playlist modal's order / start switches, the sidebar's preview strip (the level picker is in App.tsx)

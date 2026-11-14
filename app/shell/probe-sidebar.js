@@ -63,6 +63,13 @@
 //   lib:propsFoldKeep    one remembered fold for every scene: folded on s1 → s2 opens folded, a reload keeps it, opened on s2 → s1 open
 //   lib:propsCount       the header counts the shown properties, following s1's condition live (clock off → · 2); s2's group
 //                        heading, label and condition-hidden slider don't count; read late, the header never moves once shown
+//   side:titleFold:on|off|reduced  a long title (k3 renamed) is a folded button, two lines tall; real clicks unfold it and fold it
+//                        back (per frame): on, the box morphs, the words ride unstretched, the scroller and the head's line glide;
+//                        off / reduced, sizes change at once and the old title cross-fades into the new. Shots side-title-*.png
+//   side:titlePlain      a title that fits in two lines is plain text: no button, no Tab stop, a click changes nothing
+//   side:titleFoldKeys   Enter unfolds the focused title, Space folds it; nothing applies; a switch away and back starts it folded
+//   side:titleCopy       the title's Copy rises in over its last line's end on hover; a click copies the whole title ("Copied",
+//                        still folded); Tab reaches it; a drag selects words without unfolding; no-glow, bg-live. Shots side-titlecopy-*.png
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
 //   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
 //   browse:dblclick      a double-click downloads & applies
@@ -1937,6 +1944,229 @@ app.whenReady().then(async () => {
       await setMotion(true);
       return v;
     });
+
+    // ---- the sidebar's title (components/SideTitle.tsx): a long one unfolds and folds back, it and its words copy ----
+    // k3 renamed to a title far past two lines (the stack's own index.json; put back after)
+    const LONG = "An extremely long wallpaper title that keeps going well past the two lines the sidebar's head shows, so it has to unfold";
+    const withLongTitle = async (fn) => {
+      const INDEX = path.join(path.dirname(path.dirname(K[2])), "index.json"), idx0 = fs.readFileSync(INDEX, "utf8");
+      const idx = JSON.parse(idx0), key = path.basename(path.dirname(K[2]));
+      if (!idx[key]) throw new Error(`no index entry ${key} for k3`);
+      idx[key] = { ...idx[key], title: LONG };
+      fs.writeFileSync(INDEX + ".pb", JSON.stringify(idx)); fs.renameSync(INDEX + ".pb", INDEX);
+      try {
+        await loadUi();
+        if (!await page(`return !!m.card(${JSON.stringify(LONG)});`)) throw new Error("the library shows no card with the long title — proved nothing");
+        return await fn();
+      } finally { fs.writeFileSync(INDEX + ".pb", idx0); fs.renameSync(INDEX + ".pb", INDEX); await mv(5, 5); await loadUi(); }
+    };
+    const titleState = () => page(`const s = m.side(), t = s?.querySelector("[data-side-title]"), h = t?.closest("h2"); if (!t) return null;
+      const r = t.getBoundingClientRect(), hr = h.getBoundingClientRect(), c = s.querySelector(".side-title > .side-copy");
+      return { x: r.x, y: r.y, w: r.width, hx: hr.x, hy: hr.y, hh: +hr.height.toFixed(1), th: t.offsetHeight, state: t.dataset.sideTitle, role: t.getAttribute("role"),
+        tab: t.getAttribute("tabindex"), exp: t.getAttribute("aria-expanded"), clamp: t.classList.contains("clamp"), title: h.getAttribute("title"),
+        lh: parseFloat(getComputedStyle(t).lineHeight), text: t.textContent, copy: c ? { r: m.rect(c), op: +getComputedStyle(c).opacity, copied: c.hasAttribute("data-copied") } : null };`);
+    // every frame for `ms`: the title's clip (the h2's box as drawn), its words' drawn height over their laid-out one (1 =
+    // unstretched) and opacity, the scroller's top, the head's line's offset (its ::after transform), the motion-off ghost's
+    // opacity, and the properties any running animation in the panel animates
+    const TITLE_SAMPLE = (ms) => `(() => new Promise((res) => { const out = [], props = new Set(); const t0 = performance.now();
+      const f = () => { const p = document.querySelector(".side-panel:not(.closing)"), t = p?.querySelector("[data-side-title]");
+        if (t) { const h = t.closest("h2"), sc = p.querySelector(".side-scroll"), hd = p.querySelector(".side-head"), g = p.querySelector(".side-title-ghost");
+          for (const a of p.getAnimations({ subtree: true })) for (const k of a.effect?.getKeyframes?.() ?? []) for (const q of Object.keys(k)) if (!["offset", "easing", "composite", "computedOffset"].includes(q)) props.add(q);
+          let op = 1; for (let e = t; e && e.nodeType === 1; e = e.parentElement) op *= +getComputedStyle(e).opacity;
+          const tf = getComputedStyle(hd, "::after").transform, line = tf === "none" ? 0 : new DOMMatrix(tf).m42;
+          out.push({ t: Math.round(performance.now() - t0), hh: +h.getBoundingClientRect().height.toFixed(1), sr: +(t.getBoundingClientRect().height / t.offsetHeight).toFixed(3),
+            op: +op.toFixed(3), sy: +sc.getBoundingClientRect().y.toFixed(1), line: +line.toFixed(1), g: g ? +getComputedStyle(g).opacity : null,
+            gy: g ? +g.getBoundingClientRect().y.toFixed(1) : null, gb: g ? +(h.contains(g) ? Math.min(g.getBoundingClientRect().bottom, h.getBoundingClientRect().bottom) : g.getBoundingClientRect().bottom).toFixed(1) : null,
+            ty: +t.getBoundingClientRect().y.toFixed(1) }); }
+        if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); else res({ out, props: [...props] }); };
+      requestAnimationFrame(f); }))()`;
+    function judgeTitle(dir, mode, f, props) {
+      const v = [], on = mode === "on";
+      if (f.length < 5) return [`${dir}: ${f.length} frames sampled — proved nothing`];
+      const hs = f.map((x) => x.hh), d = hs[hs.length - 1] - hs[0];
+      if (dir === "fold" ? d > -20 : d < 20) return [`${dir}: the title went ${hs[0]} → ${hs[hs.length - 1]} px — nothing ${dir}ed (proved nothing)`];
+      const hb = between(hs), sys = f.map((x) => x.sy), sb = between(sys), lines = f.map((x) => x.line);
+      console.log(`        ${dir} (${mode}): ${f.length} frames, box ${hs[0]} → ${hs[hs.length - 1]} (${hb} between), scroller ${sys[0]} → ${sys[sys.length - 1]} (${sb} between), `
+        + `line offsets ${lines.filter((x) => Math.abs(x) > 1).length} frames, words ${MO.brief(f.map((x) => [x.t, x.op]))}, ghost ${MO.brief(f.map((x) => [x.t, x.g]))}`);
+      if (Math.abs((sys[sys.length - 1] - sys[0]) - d) > 1.5) v.push(`${dir}: the scroller moved ${(sys[sys.length - 1] - sys[0]).toFixed(1)} px, the title ${d.toFixed(1)} px`);
+      if (on) {
+        if (hb < 3) v.push(`${dir}: the title's box jumped ${hs[0]} → ${hs[hs.length - 1]} (${hb} frames between) — it should morph`);
+        if (sb < 3) v.push(`${dir}: the scroller jumped ${sys[0]} → ${sys[sys.length - 1]} (${sb} frames between) — it should glide with the title`);
+        if (lines.filter((x) => Math.abs(x) > 1).length < 3) v.push(`${dir}: the head's line jumped (offsets ${JSON.stringify(lines.slice(0, 6))}) — it should glide`);
+        const st = f.map((x) => x.sr).filter((x) => Math.abs(x - 1) > 0.02);
+        if (st.length) v.push(`${dir}: the words stretched with the box in ${st.length} frames (drawn / laid-out height ${JSON.stringify(st.slice(0, 4))})`);
+        if (f.some((x) => x.op < 0.99)) v.push(`${dir}: the words faded (opacity ${Math.min(...f.map((x) => x.op))}) — motion on, the box's clip reveals them`);
+        const tys = f.map((x) => x.ty); if (spread(tys) > 0.75) v.push(`${dir}: the title's first line moved (y ${Math.min(...tys)}–${Math.max(...tys)})`);
+      } else {
+        if (hb > 0) v.push(`motion ${mode}, ${dir}: the title's box morphed (${hb} frames between) — it should change at once`);
+        if (sb > 0) v.push(`motion ${mode}, ${dir}: the scroller glided (${sb} frames between) — it should move at once`);
+        if (lines.some((x) => Math.abs(x) > 0.5)) v.push(`motion ${mode}, ${dir}: the head's line glided`);
+        const ops = f.map((x) => x.op), gs = f.map((x) => x.g);
+        // unfolding, the new title fades in (under the old one); folding, the old one starts whole over the new, so nothing
+        // shows the swap until it fades
+        if (dir === "unfold" && !ops.some((o) => o > 0.02 && o < 0.95)) v.push(`motion ${mode}, unfold: the new title popped in — no in-between opacity frame`);
+        const g0 = gs.find((x) => x != null);
+        if (dir === "fold" && !(g0 >= 0.95)) v.push(`motion ${mode}, fold: the old title didn't cover the swap (its first opacity ${g0})`);
+        if (!gs.some((o) => o != null && o > 0.02 && o < 0.95)) v.push(`motion ${mode}, ${dir}: the old title popped out — no in-between ghost opacity (${JSON.stringify(gs.filter((x) => x != null).slice(0, 6))})`);
+        if (gs[gs.length - 1] != null) v.push(`motion ${mode}, ${dir}: the old title's ghost is still there at the end`);
+        const gys = f.map((x) => x.gy).filter((x) => x != null), tys = f.map((x) => x.ty);
+        if (gys.length && (spread(gys) > 0.75 || Math.abs(gys[0] - tys[tys.length - 1]) > 0.75)) v.push(`motion ${mode}, ${dir}: the ghost isn't over the title, still (y ${JSON.stringify(gys.slice(0, 4))} vs ${tys[tys.length - 1]})`);
+        if (spread(tys) > 0.75) v.push(`motion ${mode}, ${dir}: the title moved (y ${Math.min(...tys)}–${Math.max(...tys)})`);
+        // the lines both titles show never dim: unfolding, the old one stays whole until the new one has faded in
+        if (dir === "unfold") { const dim = f.filter((x) => x.op < 0.95 && !(x.g >= 0.95)); if (dim.length) v.push(`motion ${mode}, unfold: the shared lines dimmed in ${dim.length} frames (words ${dim[0].op}, ghost ${dim[0].g})`); }
+        // folding, the hidden lines fade where they were, never over what sits below (it moves up once they're gone)
+        else { const lap = f.filter((x) => x.g != null && x.g > 0.02 && x.gb > x.sy + 0.5); if (lap.length) v.push(`motion ${mode}, fold: the fading lines lay over the content in ${lap.length} frames (their bottom ${lap[0].gb}, the scroller's top ${lap[0].sy})`); }
+      }
+      const bad = props.filter((p) => (on ? /^(height|width|top|left|right|bottom|margin|padding|max-height|min-height)/.test(p) : p !== "opacity"));
+      if (bad.length) v.push(`motion ${mode}, ${dir}: animates ${JSON.stringify(bad)}${on ? " (a layout property)" : " (only opacity may change)"}`);
+      return v;
+    }
+
+    // side:titleFold:<on|off|reduced> — k3's long title, clamped to two lines, is a button (aria-expanded false, no tooltip);
+    // a real click unfolds it to the whole title and another folds it back, sampled per frame: motion on, the title's box morphs
+    // through in-between heights with its words unstretched and unfaded, the scroller and the head's line glide the same
+    // distance; off / reduced, the box and the scroller change at once and the old title cross-fades into the new in place
+    // (opacity only). Folded again: the clamp's ellipsis back, two lines tall. On: the open title under bg-live keeps its
+    // drop-shadow wrapper. Screenshots side-title-<mode>-<unfold|fold>-mid.png, side-title-<mode>-open.png, side-title-bglive.png
+    for (const mode of ["on", "off", "reduced"]) await cell(`side:titleFold:${mode}`, async () => withLongTitle(async () => {
+      const v = [], J = JSON.stringify;
+      try {
+        if (mode === "off") await setMotion(false);
+        if (mode === "reduced") await reducedMotion(true);
+        await page(`await m.closeAll(); await m.openSide(${J(LONG)}); await m.sleep(400);`);
+        const s0 = await titleState();
+        console.log(`        folded: ${J({ ...s0, text: undefined, copy: undefined })}`);
+        if (!s0) return ["no sidebar title — proved nothing"];
+        if (s0.state !== "folded" || s0.role !== "button" || s0.exp !== "false" || s0.tab !== "0") v.push(`the clamped title isn't a folded button (${J(s0)})`);
+        if (!s0.clamp || Math.abs(s0.hh - 2 * s0.lh) > 1) v.push(`folded, the title is ${s0.hh} px (clamp ${s0.clamp}), want two lines (${2 * s0.lh})`);
+        if (s0.title) v.push(`the title still has a tooltip (${J(s0.title)}): the click shows it whole`);
+        if (s0.text !== LONG) v.push(`the title reads ${J(s0.text)}`);
+        for (const dir of ["unfold", "fold"]) {
+          const samp = js(TITLE_SAMPLE(900));
+          await sleep(40); await clickAt(s0.x + 30, s0.y + 8);
+          await sleep(mode === "on" ? 110 : 45); await shot(`title-${mode}-${dir}-mid`);
+          const fr = await samp;
+          await sleep(300);
+          const st = await titleState();
+          if (dir === "unfold") {
+            await shot(`title-${mode}-open`);
+            if (st.exp !== "true" || st.state !== "open" || st.clamp || Math.abs(st.hh - st.th) > 1 || st.th < 4 * st.lh) v.push(`after the unfold: ${J({ ...st, text: undefined })}`);
+            if (mode === "on") {
+              await mv(5, 5, 200);
+              const live = await page(`const root = document.documentElement, had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(80);
+                const f = getComputedStyle(m.side().querySelector(".side-head-text")).filter; return { f, had };`);
+              await shot("title-bglive");
+              if (!live.had) await page(`document.documentElement.classList.remove("bg-live");`);
+              if (!/drop-shadow/.test(live.f)) v.push(`bg-live: the open title lost its drop-shadow wrapper (${live.f})`);
+            }
+          } else if (st.exp !== "false" || st.state !== "folded" || !st.clamp || Math.abs(st.hh - 2 * st.lh) > 1) v.push(`after the fold: ${J({ ...st, text: undefined })}`);
+          v.push(...judgeTitle(dir, mode, fr.out, fr.props));
+        }
+      } finally {
+        if (mode === "off") await setMotion(true);
+        if (mode === "reduced") await reducedMotion(false);
+      }
+      return v;
+    }));
+
+    // side:titlePlain — a title that fits in two lines (k2) is plain text: no button, no Tab stop, a click changes nothing
+    await cell("side:titlePlain", async () => {
+      const v = [], J = JSON.stringify;
+      await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(400);`);
+      const s0 = await titleState();
+      if (s0.state !== "plain" || s0.role || s0.tab != null || s0.exp != null) v.push(`k2's title: ${J({ ...s0, text: undefined })}`);
+      await clickAt(s0.x + 5, s0.y + 8); await sleep(600);
+      const s1 = await titleState();
+      if (s1.hh !== s0.hh || s1.state !== "plain") v.push(`a click on a plain title changed it (${s0.hh} → ${s1.hh}, ${s1.state})`);
+      return v;
+    });
+
+    // side:titleFoldKeys — the folded title takes the focus; Enter unfolds it, Space folds it (real key events): nothing
+    // applies, the sidebar stays on it; a switch to another item and back starts it folded
+    await cell("side:titleFoldKeys", async () => withLongTitle(async () => {
+      const v = [], J = JSON.stringify;
+      await page(`await m.closeAll(); await m.openSide(${J(LONG)}); await m.sleep(400);`);
+      const cur0 = await current();
+      await page(`m.side().querySelector("[data-side-title]").focus();`);
+      if (!await page(`return document.activeElement?.matches("[data-side-title]") ?? false;`)) return ["the title can't take the focus"];
+      for (const [key, want] of [["Return", "true"], ["Space", "false"]]) {
+        send({ type: "keyDown", keyCode: key }); if (key === "Return") send({ type: "char", keyCode: "\r" }); await sleep(30); send({ type: "keyUp", keyCode: key });
+        await sleep(800);
+        const st = await titleState();
+        console.log(`        ${key}: aria-expanded ${st?.exp}, sidebar on ${(await page(`return m.sideTitle();`))?.slice(0, 20)}`);
+        if (st?.exp !== want) v.push(`${key === "Return" ? "Enter" : "Space"} on the title: aria-expanded ${st?.exp}, want ${want}`);
+      }
+      if (await page(`return m.sideTitle();`) !== LONG) v.push("the keys moved or closed the sidebar");
+      await sleep(300);
+      if ((await current()) !== cur0) v.push(`a key applied a wallpaper (${T(cur0)} → ${T(await current())})`);
+      // unfolded, a switch away and back: folded again
+      await page(`m.side().querySelector("[data-side-title]").click(); await m.sleep(700); m.ctx(m.thumb("k2")); await m.sleep(700); m.ctx(m.thumb(${J(LONG)})); await m.sleep(800);`);
+      const back = await titleState();
+      if (back.exp !== "false" || !back.clamp) v.push(`back on the long title after a switch it's ${back.state} (clamp ${back.clamp})`);
+      return v;
+    }));
+
+    // side:titleCopy — the title's Copy: hidden at rest, it rises in (per frame) over the end of the title's last line while the
+    // title is hovered; a real click copies the WHOLE title (clipboard) and flips to "Copied" without unfolding it; Tab from the
+    // title reaches it and shows it; a drag across the words selects them and doesn't unfold; no-glow: no hover glow; bg-live:
+    // a fill of its own. Screenshots side-titlecopy-*.png
+    await cell("side:titleCopy", async () => withLongTitle(async () => {
+      const v = [], J = JSON.stringify;
+      const { clipboard } = require("electron");
+      await mv(5, 5, 200);
+      await page(`await m.closeAll(); await m.openSide(${J(LONG)}); await m.sleep(400);`);
+      const s0 = await titleState();
+      if (!s0.copy) return ["no Copy on the sidebar's title"];
+      if (s0.copy.op > 0.02) v.push(`at rest the title's Copy shows (opacity ${s0.copy.op})`);
+      const CP = ".side-panel:not(.closing) .side-title > .side-copy";
+      const samp = js(MO.SAMPLE({ c: CP }, 600));
+      await sleep(40); await mv(s0.x + 40, s0.y + 10); await sleep(120); await shot("titlecopy-in");
+      const fr = (await samp).c;
+      const ops = fr.map((f) => f[1]).filter((x) => x != null), ys = fr.filter((f) => f[1] != null && f[1] > 0.02).map((f) => f[3]);
+      if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`the Copy popped in on hover (opacities ${J(ops.slice(0, 8))})`);
+      if (!(ys.length > 2 && spread(ys) > 1)) v.push(`the Copy didn't rise in (y ${J(ys.slice(0, 8))})`);
+      const s1 = await titleState();
+      if (s1.copy.op < 0.95) v.push(`hovering the title, its Copy is at opacity ${s1.copy.op}`);
+      const c = s1.copy.r, hr = { r: s1.hx + s1.w, b: s1.hy + s1.hh };
+      if (Math.abs(c.x + c.w - hr.r) > 1.5 || Math.abs(c.y + c.h - hr.b) > 1.5) v.push(`the Copy isn't over the end of the last line (its box ${J(c)}, the title ends ${J(hr)})`);
+      // hover glow / no-glow / bg-live
+      await mv(c.x + c.w / 2, c.y + c.h / 2, 350);
+      const lk = await page(`const c = document.querySelector(${J(CP)}), root = document.documentElement; const g = getComputedStyle(c).boxShadow;
+        root.classList.add("no-glow"); await m.sleep(250); const ng = getComputedStyle(c).boxShadow; root.classList.remove("no-glow");
+        root.classList.add("bg-live"); await m.sleep(250); const bg = getComputedStyle(c).backgroundColor; return { g, ng, bg };`);
+      await shot("titlecopy-bglive"); await page(`document.documentElement.classList.remove("bg-live");`);
+      console.log(`        ${J(lk)}`);
+      if (!/rgb/.test(lk.g)) v.push(`the hovered Copy doesn't glow (${lk.g})`);
+      if (/rgb/.test(lk.ng) && !/rgba\(0, 0, 0/.test(lk.ng)) v.push(`no-glow: the hovered Copy glows (${lk.ng})`);
+      const a = /\/\s*([\d.]+)\s*\)/.exec(lk.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(lk.bg)?.[1] ?? "1";
+      if (+a < 0.8) v.push(`bg-live: the Copy's fill is too see-through over the words (${lk.bg})`);
+      // a real click: the whole title on the clipboard, "Copied", still folded
+      clipboard.writeText("");
+      await clickAt(c.x + c.w / 2, c.y + c.h / 2); await sleep(150); await shot("titlecopy-copied");
+      const s2 = await titleState();
+      if (clipboard.readText() !== LONG) v.push(`the clipboard holds ${J(clipboard.readText().slice(0, 60))}, want the whole title`);
+      if (!s2.copy.copied) v.push("the Copy didn't turn into \"Copied\"");
+      if (s2.exp !== "false") v.push("copying unfolded the title");
+      // the keyboard: Tab from the title reaches the Copy and shows it
+      await mv(5, 5, 400);
+      await page(`m.side().querySelector("[data-side-title]").focus();`);
+      send({ type: "keyDown", keyCode: "Tab" }); send({ type: "keyUp", keyCode: "Tab" }); await sleep(400);
+      const kb = await page(`const a = document.activeElement; return { copy: !!a?.matches(${J(CP)}), op: +getComputedStyle(document.querySelector(${J(CP)})).opacity };`);
+      if (!kb.copy || kb.op < 0.95) v.push(`Tab from the title: ${J(kb)} (want the Copy focused and shown)`);
+      await shot("titlecopy-kbd");
+      // a drag across the words selects them; it isn't a click that unfolds
+      await page(`getSelection().removeAllRanges(); document.activeElement?.blur();`);
+      const y = s0.y + s0.lh / 2;
+      send({ type: "mouseDown", x: Math.round(s0.x + 3), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
+      for (let i = 1; i <= 6; i++) { send({ type: "mouseMove", x: Math.round(s0.x + 3 + i * 25), y: Math.round(y), button: "left" }); await sleep(20); }
+      send({ type: "mouseUp", x: Math.round(s0.x + 153), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(500);
+      const sel = await page(`return getSelection().toString();`), s3 = await titleState();
+      console.log(`        dragged: ${J(sel)}`);
+      if (sel.length < 4 || !LONG.startsWith(sel.trim().slice(0, 4))) v.push(`a drag across the title selected ${J(sel)}`);
+      if (s3.exp !== "false") v.push("the drag that selected words unfolded the title");
+      await page(`getSelection().removeAllRanges();`);
+      return v;
+    }));
 
     // ---- Browse: a local Wallpaper Engine folder: we1 (not in the library) + 900000001 (= s1's Workshop id: in the library)
     const we = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-side");

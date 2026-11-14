@@ -35,12 +35,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        the creator with browse-by-creator (opens Browse on them). Reuse #52's components; they sit below the scene
        properties (#54), with its stat pills: current subscribers and favourites (no views). Every Library item
        shows its size on disk. After #52.
-56. [ ] (owner) Long titles and copying text. The sidebar heading (components/SidePanel.tsx h2, clamped to 2 lines)
-       unfolds to the full title on a click and folds back on another (a morph; motion off: a fade). The title and
-       the creator's name (#52) can be copied on both tabs: selectable text plus a small copy control that shows on
-       hover / focus, reusing CopyButton / useCopied (design.md § Reuse first), "Copied" feedback like the ID pill.
-       Browse cards show 2 title lines like Library cards (`.title` is 1 line today; the card keeps its
-       aspect-ratio height, so the grid doesn't reflow). After #52 (it adds the creator and edits the Browse sidebar).
 59. [ ] (owner) Play-time limits can't contradict: "Switch scenes and pictures after" never 0 in the backend either (the
        UI already refuses it; drop the 0 = stay path, its adapter / merge test lines become the 1 s floor), and the
        maximum play time can't be set below the minimum (it would always win for videos, and scenes use the minimum).

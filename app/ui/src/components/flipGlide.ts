@@ -40,6 +40,14 @@ export function softSpring() {
   return fn;
 }
 
+// one element (or one of its pseudo-elements, which a FLIP can't track) gliding back from `dy` px above its new place, on the
+// same spring as glideFlip
+export function glideY(el: Element, dy: number, pseudoElement?: string) {
+  if (Math.abs(dy) < 0.5) return;
+  const { e, ms } = spring();
+  el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: ms, easing: e, pseudoElement });
+}
+
 export function glideFlip(before: FlipSnap | null, root: Element | null, sel: string) {
   if (!before || !root) return;
   const { e, ms } = spring();

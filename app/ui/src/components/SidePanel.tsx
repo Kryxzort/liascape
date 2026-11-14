@@ -4,6 +4,7 @@ import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX,
 import { captureSource, sourceEl, useMotion, FADE_EXIT_MS } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
+import { SideTitle } from "./SideTitle";
 import { type PreviewKind, useStore } from "../store";
 import { useStableFn } from "../hooks/useStableFn";
 import { api } from "../api/client";
@@ -94,7 +95,7 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
       <aside ref={ref} className={`side-panel${closing ? " closing" : ""}`} data-side={kind} data-side-id={id}>
         <div className="side-head">
           <div className="side-head-text">
-            <h2 title={title}>{title}</h2>
+            <SideTitle id={id} title={title} panel={ref} />
             {sub}
           </div>
           <div className="side-head-tools" ref={setSlot} />
