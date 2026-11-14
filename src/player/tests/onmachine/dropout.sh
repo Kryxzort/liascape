@@ -143,6 +143,8 @@ export XDG_RUNTIME_DIR=$TMP/run XDG_STATE_HOME=$TMP/state
 # NVIDIA's shader cache too: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one (the player
 # creates and fills it), and unset the driver falls back to ~/.cache/nvidia.
 export __GL_SHADER_DISK_CACHE_PATH=$TMP/nv-shader-cache
+# and LWE's shader text cache, which defaults to the user's ~/.cache/liascape
+export LIASCAPE_SCENE_SHADER_CACHE_DIR=$TMP/lwe-shaders
 mkdir -p "$XDG_RUNTIME_DIR" "$XDG_STATE_HOME"
 chmod 700 "$XDG_RUNTIME_DIR"
 SERVE_PID=

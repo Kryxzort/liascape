@@ -1,7 +1,7 @@
 From 2c423e89dd52a249dfccafcf10fc28bfe7ce5d96 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 02:05:03 +0530
-Subject: [PATCH 124/128] render: a full-screen layer covers the screen
+Subject: [PATCH 124/130] render: a full-screen layer covers the screen
  whatever the camera's zoom
 
 A full-screen layer (models/util/fullscreenlayer.json) drew its last pass through the scene's view, zoom and camera

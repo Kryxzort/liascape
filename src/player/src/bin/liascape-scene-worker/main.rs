@@ -690,8 +690,11 @@ impl Renderer {
             Err(e) => return self.fatal(e),
         };
         self.log(format!(
-            "lwe: loaded + built {} in {} ms: native {}x{}, audio streams {}, audio input {}",
+            "lwe: loaded {} in {:.0} ms, built in {:.0} ms ({} ms in all): native {}x{}, audio \
+             streams {}, audio input {}",
             s.path,
+            scene.load_ms,
+            scene.build_ms,
             t.elapsed().as_millis(),
             scene.native.0,
             scene.native.1,

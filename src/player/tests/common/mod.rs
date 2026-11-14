@@ -64,8 +64,11 @@ pub fn process_shader_cache_dir() -> PathBuf {
 /// no context yet: the only point where changing the environment is sound) every suite that
 /// includes this module moves its own variable off the caller's cache. Created up front, so
 /// the in-process driver caches as it would on a desktop, and removed at exit
-/// ([`PROCESS_SHADER_CACHE_CLEANUP`]). Guard `tests/api.rs`
-/// `spawned_serve_never_inherits_the_shader_cache_path`.
+/// ([`PROCESS_SHADER_CACHE_CLEANUP`]). LWE's shader text cache
+/// ([`shader_cache::LWE_DIR_ENV`]) moves into the same folder: every player and worker a suite
+/// spawns inherits it, and its default is the user's `~/.cache/liascape`. Guards `tests/api.rs`
+/// `spawned_serve_never_inherits_the_shader_cache_path`,
+/// `tests/scene.rs` `real_workers_keep_the_shader_cache_in_the_tests_dir`.
 #[used]
 #[unsafe(link_section = ".init_array")]
 static PROCESS_SHADER_CACHE: extern "C" fn() = private_process_shader_cache;
@@ -81,7 +84,10 @@ extern "C" fn private_process_shader_cache() {
     let dir = process_shader_cache_dir();
     let _ = std::fs::create_dir_all(&dir);
     // SAFETY: `.init_array` runs before `main`, with no other thread to read the environment.
-    unsafe { std::env::set_var(shader_cache::PATH_ENV, &dir) };
+    unsafe {
+        std::env::set_var(shader_cache::PATH_ENV, &dir);
+        std::env::set_var(shader_cache::LWE_DIR_ENV, dir.join("lwe"));
+    }
 }
 
 extern "C" fn remove_process_shader_cache() {

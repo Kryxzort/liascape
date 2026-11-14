@@ -1,4 +1,5 @@
-//! NVIDIA's GL shader disk cache directory ([`ensure`]).
+//! NVIDIA's GL shader disk cache directory ([`ensure`]), and where the scene worker's LWE core
+//! keeps its shader text work ([`lwe_dir`]).
 //!
 //! The NVIDIA driver keeps compiled shaders in `__GL_SHADER_DISK_CACHE_PATH` when it is set,
 //! but only if that directory already exists: it never creates it, and when it's missing every
@@ -36,6 +37,47 @@ use crate::log::{self, Level};
 pub const PATH_ENV: &str = "__GL_SHADER_DISK_CACHE_PATH";
 /// NVIDIA's cache switch: `0` turns the disk cache off.
 pub const ENABLE_ENV: &str = "__GL_SHADER_DISK_CACHE";
+
+/// Overrides [`lwe_dir`]; empty = no cache. Tests point it into their temp dirs (`tests/common`).
+pub const LWE_DIR_ENV: &str = "LIASCAPE_SCENE_SHADER_CACHE_DIR";
+
+/// Where the scene worker's LWE core keeps its shader text work (WE's text passes, glslang +
+/// SPIRV-Cross), so a scene's next load skips it (`wp_config_set_shader_cache_dir`,
+/// `docs/player/modules/scene-lwe-core.md` § Shader cache): `env` ([`LWE_DIR_ENV`]'s value) when
+/// set, else `$XDG_CACHE_HOME/liascape/lwe-shaders`, else `$HOME/.cache/liascape/lwe-shaders`.
+pub fn lwe_dir(
+    env: Option<&OsStr>,
+    xdg_cache: Option<&OsStr>,
+    home: Option<&OsStr>,
+) -> Option<PathBuf> {
+    if let Some(d) = env {
+        return (!d.is_empty()).then(|| PathBuf::from(d));
+    }
+    xdg_cache
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home.filter(|h| !h.is_empty())
+                .map(|h| Path::new(h).join(".cache"))
+        })
+        .map(|d| d.join("liascape/lwe-shaders"))
+}
+
+/// [`lwe_dir`] with this process's environment, created owner-only if missing (a planted entry
+/// would be GLSL the driver compiles); `None` = no cache.
+pub fn lwe_dir_from_env() -> Option<PathBuf> {
+    let dir = lwe_dir(
+        std::env::var_os(LWE_DIR_ENV).as_deref(),
+        std::env::var_os("XDG_CACHE_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .ok()?;
+    Some(dir)
+}
 
 /// What [`ensure`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,6 +216,25 @@ mod tests {
         );
         assert_eq!(mode(&dir), 0o750, "an existing dir's mode is the user's");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn lwe_dir_follows_the_override_then_xdg_then_home() {
+        let s = |v: &'static str| Some(OsStr::new(v));
+        assert_eq!(
+            lwe_dir(s("/t/lwe"), s("/x"), s("/h")),
+            Some(PathBuf::from("/t/lwe"))
+        );
+        assert_eq!(lwe_dir(s(""), s("/x"), s("/h")), None, "empty = no cache");
+        assert_eq!(
+            lwe_dir(None, s("/x"), s("/h")),
+            Some(PathBuf::from("/x/liascape/lwe-shaders"))
+        );
+        assert_eq!(
+            lwe_dir(None, s(""), s("/h")),
+            Some(PathBuf::from("/h/.cache/liascape/lwe-shaders"))
+        );
+        assert_eq!(lwe_dir(None, None, None), None);
     }
 
     #[test]

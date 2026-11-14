@@ -1,7 +1,7 @@
 From a01f6f1755ea19758d0a7f147c3ce317e0e680d8 Mon Sep 17 00:00:00 2001
 From: Liang Jun Chen <151501304+senti0726@users.noreply.github.com>
 Date: Wed, 28 Oct 2026 10:30:34 +0800
-Subject: [PATCH 012/128] fix: accept scalar values where a vector is expected
+Subject: [PATCH 012/130] fix: accept scalar values where a vector is expected
  (#652)
 
 * fix: accept scalar values where a vector is expected

@@ -81,6 +81,10 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   change, so no fingerprint continues a measurement of the old sound. Guard:
   `fingerprint_carries_the_sound_semantics`.
 - Stop pulling audio before `wp_context_destroy`.
+- Give LWE the shader text cache dir `gfx::shader_cache::lwe_dir` (`wp_config_set_shader_cache_dir`,
+  `docs/player/modules/scene-lwe-core.md` § Shader cache); keep it out of the user's cache in tests (`tests/common`
+  sets `LIASCAPE_SCENE_SHADER_CACHE_DIR`) and on-machine scripts (their private dir). Guards:
+  `tests/scene.rs::real_workers_keep_the_shader_cache_in_the_tests_dir`, `host_api_test` `shader_cache_reuses_text_work`.
 
 ## Frame transport (`gfx/dmabuf.rs`, `worker/dmabuf.rs`, `sources/scene.rs`)
 - Latch only the newest frame whose acquire fence already polls readable; release older queued frames

@@ -1,7 +1,7 @@
 From bf7deb277f39ed4470e21054f39d732759ba26c3 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 02:13:12 +0530
-Subject: [PATCH 125/128] render: a text layer with effects draws its glyphs
+Subject: [PATCH 125/130] render: a text layer with effects draws its glyphs
  into its picture as WE's font pass
 
 WE draws a text layer that has effects in two steps: its font pass puts the glyphs (colour, coverage x alpha) into

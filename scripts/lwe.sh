@@ -192,12 +192,17 @@ cmd_test() {
     mkdir -p "$ROOT/build"
     c++ -std=c++20 -O1 -g -Wall "$PATCH_DIR/tests/host_api_test.cpp" \
         -I"$CORE/include" -L"$CORE/lib" -llinux-wallpaperengine-core -Wl,-rpath,"$CORE/lib" \
-        $(pkg-config --cflags --libs sdl2 egl) -o "$out"
-    local empty rc=0
+        $(pkg-config --cflags --libs sdl2 egl liblz4) -o "$out"
+    local empty nv rc=0
     empty="$(mktemp -d)"
+    # NVIDIA's shader cache of the test's own: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one, and
+    # unset the driver falls back to ~/.cache/nvidia
+    nv="$(mktemp -d)"
     # LIASCAPE_WE_ASSETS_DIR (WE's assets/, proprietary) enables the audio-mix test; SKIPped without
-    SDL_AUDIODRIVER=dummy "$out" "$PATCH_DIR/tests/fixtures" "$empty" ${LIASCAPE_WE_ASSETS_DIR:+"$LIASCAPE_WE_ASSETS_DIR"} || rc=$?
+    SDL_AUDIODRIVER=dummy __GL_SHADER_DISK_CACHE_PATH="$nv" \
+        "$out" "$PATCH_DIR/tests/fixtures" "$empty" ${LIASCAPE_WE_ASSETS_DIR:+"$LIASCAPE_WE_ASSETS_DIR"} || rc=$?
     rmdir "$empty"
+    rm -rf "$nv"
     return "$rc"
 }
 

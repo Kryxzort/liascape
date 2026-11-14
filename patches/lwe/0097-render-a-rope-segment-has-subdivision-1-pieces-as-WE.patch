@@ -1,7 +1,7 @@
 From be51bf784a92e71d2373ed9b2f3360a816c75889 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 5 Nov 2026 02:04:01 +0530
-Subject: [PATCH 097/128] render: a rope segment has subdivision + 1 pieces, as
+Subject: [PATCH 097/130] render: a rope segment has subdivision + 1 pieces, as
  WE's
 
 WE sets TRAILSUBDIVISION to the renderer's `subdivision` (GH 0x1401fffb0; defaults 4 for rope, 1

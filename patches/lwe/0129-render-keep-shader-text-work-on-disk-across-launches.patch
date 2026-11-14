@@ -1,0 +1,695 @@
+From 1c9648c4172bdaf43039b921bb04917a4fc79564 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 08:17:01 +0530
+Subject: [PATCH 129/130] render: keep shader text work on disk across launches
+
+Every load of a scene redid all of its shader text work, though a scene feeds it the same texts at every launch and
+many times within one build (3042492564 builds 253 programs from 68 distinct shader pairs): each unit's WE text
+passes (ShaderUnit::compile) and each pair's translation by glslang + SPIRV-Cross (GLSLContext::toGlsl). Of
+3042492564's warm build (~1.0 s) they took ~0.33 s and ~0.44 s.
+
+wp_config_set_shader_cache_dir names a directory where both keep their results: one file per result,
+`<hash>.unit` / `<hash>.glsl`, named after an FNV-1a hash of its kind and key texts and holding the core's ELF build
+id, the kind, every key and every value, LZ4-compressed. A `glsl` key is toGlsl's two input texts; a `unit` key is
+everything compile reads (the unit's type and file, its preprocessed text and extensions, its override / pass /
+discovered combos, and the linked unit's preprocessed text and combos). A hit needs the build id, the kind and
+every key byte-equal, so another build of the core, a hash collision or a torn or corrupt file reads as a miss: the
+work is done again and the file rewritten. Entries are written to a temporary file and renamed into place. The
+build id stands for the code that turns keys into values (the text passes, glslang, SPIRV-Cross, their options);
+the core now links with --build-id=sha1, since the Nix toolchain adds none, and a core without one caches nothing.
+While the health report or a capture (the shader sweep) is on, reads are skipped: their records come from the work
+itself. A failed translation is never stored. The unit's preprocessing (includes, uniforms, texture formats) still
+runs at every load: it resolves textures and builds the pass's parameters. Unset, nothing changes.
+
+Measured on a private headless liascape-player, apply to first frame (scene_load.py), 3042492564: warm 1240 ms
+-> 528 ms (text passes 325 -> 102, translation 438 -> 7); first launch with empty caches 1596 -> 1132. 33 library
+scenes, cache off vs on: warm build 17.8 s -> 10.8 s in all (median scene 187 -> 131 ms). Same output: the GL
+text of every program (1720 in the 33 scenes) hashed identical in every load that finished, three per scene with
+the cache off and three with it on. About 8 KB an entry; 3042492564's 206 entries take 1.6 MB.
+
+Origin: ours
+Why: docs/TODO.md (scene wallpapers load radically faster; the shader text work gets the same inputs at every launch)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01THaJ7t24KARpRjSyjTokdT
+---
+ include/linux-wallpaperengine/configuration.h |  13 +
+ src/core/CMakeLists.txt                       |   5 +-
+ src/core/WallpaperEngine/Configuration.h      |   2 +
+ .../Render/Objects/Effects/CPass.cpp          |   7 +-
+ .../Render/Shaders/GLSLContext.cpp            |  24 +-
+ .../Render/Shaders/GLSLContext.h              |  13 +-
+ .../WallpaperEngine/Render/Shaders/Shader.cpp |   5 +
+ .../WallpaperEngine/Render/Shaders/Shader.h   |   2 +
+ .../Render/Shaders/ShaderCache.cpp            | 266 ++++++++++++++++++
+ .../Render/Shaders/ShaderCache.h              |  33 +++
+ .../Render/Shaders/ShaderUnit.cpp             |  48 +++-
+ .../Render/Shaders/ShaderUnit.h               |   9 +
+ src/core/frontends/configuration.cpp          |  10 +
+ 13 files changed, 428 insertions(+), 9 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Render/Shaders/ShaderCache.cpp
+ create mode 100644 src/core/WallpaperEngine/Render/Shaders/ShaderCache.h
+
+diff --git a/include/linux-wallpaperengine/configuration.h b/include/linux-wallpaperengine/configuration.h
+index c4e4be2..9df5a25 100644
+--- a/include/linux-wallpaperengine/configuration.h
++++ b/include/linux-wallpaperengine/configuration.h
+@@ -98,6 +98,19 @@ WPENGINE_API bool wp_config_set_backgrounds_dir (wp_configuration* config, const
+  */
+ WPENGINE_API bool wp_config_set_storage_dir (wp_configuration* config, const char* dir);
+ 
++/**
++ * Where shader text work persists across launches: each WE shader unit's text passes and each vertex + fragment
++ * pair's translation to the driver's GLSL (glslang + SPIRV-Cross) are done once and read back from here the next
++ * time (and by the next pass of the same build that asks for the same), one file per result, checked against the
++ * core's build id and every input text. Unset: every load does all of it
++ *
++ * @param config
++ * @param dir An existing, writable directory the host keeps for this cache
++ *
++ * @return true if the directory was set (it exists), false otherwise
++ */
++WPENGINE_API bool wp_config_set_shader_cache_dir (wp_configuration* config, const char* dir);
++
+ /**
+  * Updates the steam directory for this configuration.
+  *
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index edbb379..6051cce 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -38,6 +38,7 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+     WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+     WallpaperEngine/Render/Shaders/GLSLContext.cpp
++    WallpaperEngine/Render/Shaders/ShaderCache.cpp
+ 
+     WallpaperEngine/Render/Helpers/ContextAware.cpp
+ 
+@@ -188,9 +189,11 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
+ target_compile_definitions(${TARGET_NAME}-object PRIVATE WPENGINE_BUILD)
+ target_compile_definitions(${TARGET_NAME} PUBLIC ERRORONLY=${ERRORONLY})
+ 
++# --build-id: the shader cache keys its entries on it (Render/Shaders/ShaderCache.h); not every toolchain adds one
+ target_link_options(${TARGET_NAME} PRIVATE
+     "-Wl,--exclude-libs,ALL"
+-    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/version.lds")
++    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/version.lds"
++    "-Wl,--build-id=sha1")
+ 
+ 
+ set_target_properties(${TARGET_NAME} PROPERTIES
+diff --git a/src/core/WallpaperEngine/Configuration.h b/src/core/WallpaperEngine/Configuration.h
+index 371b23e..7ebdf6a 100644
+--- a/src/core/WallpaperEngine/Configuration.h
++++ b/src/core/WallpaperEngine/Configuration.h
+@@ -53,6 +53,8 @@ public:
+     bool disableParallax;
+     /** where scripts' localStorage persists (wp_config_set_storage_dir); unset: in memory only */
+     std::optional<std::filesystem::path> storageDir;
++    /** where shader text work persists across launches (wp_config_set_shader_cache_dir); unset: not kept */
++    std::optional<std::filesystem::path> shaderCacheDir;
+     int web_fps;
+ 
+     bool baseOnly;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index f92ef0c..70743ce 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -828,10 +828,13 @@ void CPass::setupShaders () {
+ 	[this] (int index, const std::string& defaultName) { return this->shaderFormatOf (index, defaultName); }
+     );
+ 
++    this->m_shader->setCacheDir (this->getContext ().getContext ().config.shaderCacheDir);
++
+     // WPENGINE_HEALTH: a compile error names the shader
+     const WallpaperEngine::Health::Scope healthShader ("shader", shaderName);
+-    const auto [vertex, fragment]
+-	= Shaders::GLSLContext::get ().toGlsl (this->m_shader->vertex (), this->m_shader->fragment ());
++    const auto [vertex, fragment] = Shaders::GLSLContext::get ().toGlsl (
++	this->m_shader->vertex (), this->m_shader->fragment (), this->getContext ().getContext ().config.shaderCacheDir
++    );
+ 
+     // compile the shaders
+     const GLuint vertexShaderID = compileShader (vertex.c_str (), GL_VERTEX_SHADER);
+diff --git a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+index 5dc728b..557fe3e 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.cpp
+@@ -1,4 +1,5 @@
+ #include "GLSLContext.h"
++#include "ShaderCache.h"
+ #include "WEShaderRules.h"
+ #include "WallpaperEngine/Health.h"
+ #include "WallpaperEngine/Logging/Log.h"
+@@ -706,9 +707,9 @@ std::unique_ptr<glslang::TShader> parseUnit (EShLanguage stage, std::string& sou
+ 	}
+     }
+ }
+-} // namespace
+ 
+-std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vertexIn, const std::string& fragmentIn) {
++/** toGlsl without its cache */
++std::pair<std::string, std::string> translate (const std::string& vertexIn, const std::string& fragmentIn) {
+     std::string vertex = dropUnmatchedEndifs (spliceLines (vertexIn));
+     std::string fragment = dropUnmatchedEndifs (spliceLines (fragmentIn));
+     if (WallpaperEngine::Health::enabled () && (vertex.size () != vertexIn.size () || fragment.size () != fragmentIn.size ())
+@@ -756,5 +757,24 @@ std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vert
+     return { vertexCompiler.compile () + "#if 0\n" + vertex + "\n#endif",
+ 	     fragmentCompiler.compile () + "#if 0\n" + fragment + "\n#endif" };
+ }
++} // namespace
++
++std::pair<std::string, std::string> GLSLContext::toGlsl (
++    const std::string& vertexIn, const std::string& fragmentIn, const std::optional<std::filesystem::path>& cacheDir
++) {
++    // the health report and the shader sweep's capture read what the compile itself reports (its rewrites, its
++    // errors), which a stored result would skip
++    if (cacheDir.has_value () && !WallpaperEngine::Health::enabled ()) {
++	if (auto stored = ShaderCache::load (*cacheDir, "glsl", { vertexIn, fragmentIn }); stored && stored->size () == 2) {
++	    return { std::move ((*stored)[0]), std::move ((*stored)[1]) };
++	}
++    }
++    auto results = translate (vertexIn, fragmentIn);
++    // a failed translation ({"", ""}) is done again: its errors are logged each time
++    if (cacheDir.has_value () && !results.first.empty () && !results.second.empty ()) {
++	ShaderCache::store (*cacheDir, "glsl", { vertexIn, fragmentIn }, { results.first, results.second });
++    }
++    return results;
++}
+ 
+ std::unique_ptr<GLSLContext> GLSLContext::sInstance = nullptr;
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.h b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.h
+index 2189fb3..a141051 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/GLSLContext.h
++++ b/src/core/WallpaperEngine/Render/Shaders/GLSLContext.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
++#include <filesystem>
+ #include <memory>
++#include <optional>
+ #include <ostream>
+ #include <sstream>
+ #include <string>
+@@ -17,7 +19,16 @@ public:
+     GLSLContext ();
+     ~GLSLContext ();
+ 
+-    [[nodiscard]] std::pair<std::string, std::string> toGlsl (const std::string& vertex, const std::string& fragment);
++    /**
++     * The GLSL 330 the driver compiles for a WE vertex + fragment pair ({"", ""} when it doesn't build). With
++     * `cacheDir`, a result stored there by an earlier call with the same texts is used as it is
++     * (ShaderCache.h), and a new one is stored; not while the health report or a capture is on, whose records come
++     * from the compile itself
++     */
++    [[nodiscard]] std::pair<std::string, std::string> toGlsl (
++	const std::string& vertex, const std::string& fragment,
++	const std::optional<std::filesystem::path>& cacheDir = std::nullopt
++    );
+ 
+     [[nodiscard]] static GLSLContext& get ();
+ 
+diff --git a/src/core/WallpaperEngine/Render/Shaders/Shader.cpp b/src/core/WallpaperEngine/Render/Shaders/Shader.cpp
+index 2493181..59f5ad2 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/Shader.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/Shader.cpp
+@@ -40,6 +40,11 @@ const std::string& Shader::vertex () { return this->m_vertex.compile (); }
+ 
+ const std::string& Shader::fragment () { return this->m_fragment.compile (); }
+ 
++void Shader::setCacheDir (const std::optional<std::filesystem::path>& dir) {
++    this->m_vertex.setCacheDir (dir);
++    this->m_fragment.setCacheDir (dir);
++}
++
+ const ShaderUnit& Shader::getVertex () const { return this->m_vertex; }
+ 
+ const ShaderUnit& Shader::getFragment () const { return this->m_fragment; }
+diff --git a/src/core/WallpaperEngine/Render/Shaders/Shader.h b/src/core/WallpaperEngine/Render/Shaders/Shader.h
+index 8cb990e..85b8b1c 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/Shader.h
++++ b/src/core/WallpaperEngine/Render/Shaders/Shader.h
+@@ -52,6 +52,8 @@ public:
+      * @return The fragment's shader code for OpenGL to use
+      */
+     const std::string& fragment ();
++    /** Where both units keep their text passes' results across launches (ShaderCache.h); call before vertex/fragment */
++    void setCacheDir (const std::optional<std::filesystem::path>& dir);
+     /**
+      * @return The vertex shader unit
+      */
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderCache.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderCache.cpp
+new file mode 100644
+index 0000000..77516f2
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderCache.cpp
+@@ -0,0 +1,266 @@
++#include "ShaderCache.h"
++
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++
++#include <elf.h>
++#include <fcntl.h>
++#include <link.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include <lz4.h>
++
++namespace WallpaperEngine::Render::Shaders::ShaderCache {
++namespace {
++// the last byte is the entry format's version: bump it when the layout below changes
++constexpr char MAGIC[8] = { 'W', 'P', 'G', 'L', 'S', 'L', '\0', '2' };
++// all of an entry's texts together; past this it is no shader work: refused rather than allocated
++constexpr uint64_t MAX_TOTAL = 256ull << 20;
++constexpr uint32_t MAX_TEXTS = 16;
++
++/** Followed by u32 sizes[keys + values], the build id, the kind, then the LZ4 block of the keys and values in order */
++struct Header {
++    char magic[8];
++    uint32_t idSize;
++    uint32_t kindSize;
++    uint32_t keys;
++    uint32_t values;
++    uint32_t packed;
++};
++
++struct Search {
++    uintptr_t address;
++    std::string id;
++};
++
++/** dl_iterate_phdr's visitor: the build id note of the module holding `address` */
++int visit (dl_phdr_info* info, size_t, void* data) {
++    auto* search = static_cast<Search*> (data);
++    bool holds = false;
++    for (int i = 0; i < info->dlpi_phnum && !holds; i++) {
++	const auto& ph = info->dlpi_phdr[i];
++	const uintptr_t start = info->dlpi_addr + ph.p_vaddr;
++	holds = ph.p_type == PT_LOAD && search->address >= start && search->address < start + ph.p_memsz;
++    }
++    if (!holds) {
++	return 0;
++    }
++    for (int i = 0; i < info->dlpi_phnum; i++) {
++	const auto& ph = info->dlpi_phdr[i];
++	if (ph.p_type != PT_NOTE) {
++	    continue;
++	}
++	const uintptr_t align = ph.p_align == 8 ? 8 : 4;
++	const auto pad = [align] (uintptr_t n) { return (n + align - 1) & ~(align - 1); };
++	const char* p = reinterpret_cast<const char*> (info->dlpi_addr + ph.p_vaddr);
++	const char* end = p + ph.p_memsz;
++	while (p + sizeof (ElfW (Nhdr)) <= end) {
++	    const auto* note = reinterpret_cast<const ElfW (Nhdr)*> (p);
++	    const char* name = p + sizeof (ElfW (Nhdr));
++	    const char* desc = name + pad (note->n_namesz);
++	    const char* next = desc + pad (note->n_descsz);
++	    if (next > end) {
++		break;
++	    }
++	    if (note->n_type == NT_GNU_BUILD_ID && note->n_namesz == 4 && std::memcmp (name, "GNU", 4) == 0) {
++		static const char* digits = "0123456789abcdef";
++		for (uint32_t b = 0; b < note->n_descsz; b++) {
++		    const auto byte = static_cast<unsigned char> (desc[b]);
++		    search->id += digits[byte >> 4];
++		    search->id += digits[byte & 15];
++		}
++		return 1;
++	    }
++	    p = next;
++	}
++    }
++    return 1;
++}
++
++/** FNV-1a: only names the file; a hit is decided by comparing the texts themselves */
++uint64_t fnv (uint64_t hash, const void* data, size_t size) {
++    const auto* bytes = static_cast<const unsigned char*> (data);
++    for (size_t i = 0; i < size; i++) {
++	hash = (hash ^ bytes[i]) * 0x100000001b3ull;
++    }
++    return hash;
++}
++
++std::filesystem::path entryPath (
++    const std::filesystem::path& dir, const std::string& id, const std::string& kind, const Texts& keys
++) {
++    uint64_t hash = 0xcbf29ce484222325ull;
++    for (const auto* text : { &id, &kind }) {
++	const uint64_t size = text->size ();
++	hash = fnv (fnv (hash, &size, sizeof (size)), text->data (), text->size ());
++    }
++    for (const auto& key : keys) {
++	const uint64_t size = key.size ();
++	hash = fnv (fnv (hash, &size, sizeof (size)), key.data (), key.size ());
++    }
++    char name[24];
++    snprintf (name, sizeof (name), "%016llx.", static_cast<unsigned long long> (hash));
++    return dir / (name + kind);
++}
++
++bool readAll (int fd, char* data, size_t size) {
++    while (size > 0) {
++	const ssize_t n = ::read (fd, data, size);
++	if (n <= 0) {
++	    return false;
++	}
++	data += n;
++	size -= static_cast<size_t> (n);
++    }
++    return true;
++}
++
++bool writeAll (int fd, const char* data, size_t size) {
++    while (size > 0) {
++	const ssize_t n = ::write (fd, data, size);
++	if (n <= 0) {
++	    return false;
++	}
++	data += n;
++	size -= static_cast<size_t> (n);
++    }
++    return true;
++}
++} // namespace
++
++const std::string& buildId () noexcept {
++    static const std::string id = [] {
++	Search search { reinterpret_cast<uintptr_t> (&visit), "" };
++	dl_iterate_phdr (visit, &search);
++	return search.id;
++    }();
++    return id;
++}
++
++std::optional<Texts> load (const std::filesystem::path& dir, const std::string& kind, const Texts& keys) noexcept try {
++    const auto& id = buildId ();
++    if (id.empty ()) {
++	return std::nullopt;
++    }
++    const int fd = ::open (entryPath (dir, id, kind, keys).c_str (), O_RDONLY | O_CLOEXEC);
++    if (fd < 0) {
++	return std::nullopt;
++    }
++    struct stat st {};
++    std::string file;
++    const bool read = ::fstat (fd, &st) == 0 && st.st_size >= static_cast<off_t> (sizeof (Header))
++	&& static_cast<uint64_t> (st.st_size) < 2 * MAX_TOTAL
++	&& (file.resize (static_cast<size_t> (st.st_size)), readAll (fd, file.data (), file.size ()));
++    ::close (fd);
++    if (!read) {
++	return std::nullopt;
++    }
++    Header header;
++    std::memcpy (&header, file.data (), sizeof (header));
++    if (std::memcmp (header.magic, MAGIC, sizeof (MAGIC)) != 0 || header.keys != keys.size ()
++	|| header.values == 0 || header.values > MAX_TEXTS || header.idSize != id.size () || header.kindSize != kind.size ()) {
++	return std::nullopt;
++    }
++    const size_t count = header.keys + header.values;
++    const size_t textsAt = sizeof (header) + count * sizeof (uint32_t);
++    const size_t packedAt = textsAt + id.size () + kind.size ();
++    if (file.size () < packedAt || header.packed != file.size () - packedAt
++	|| file.compare (textsAt, id.size (), id) != 0 || file.compare (textsAt + id.size (), kind.size (), kind) != 0) {
++	return std::nullopt;
++    }
++    std::vector<uint32_t> sizes (count);
++    std::memcpy (sizes.data (), file.data () + sizeof (header), count * sizeof (uint32_t));
++    uint64_t total = 0;
++    for (size_t i = 0; i < count; i++) {
++	total += sizes[i];
++	if (i < keys.size () && sizes[i] != keys[i].size ()) {
++	    return std::nullopt;
++	}
++    }
++    if (total > MAX_TOTAL) {
++	return std::nullopt;
++    }
++    std::string plain (total, '\0');
++    const int unpacked = LZ4_decompress_safe (
++	file.data () + packedAt, plain.data (), static_cast<int> (header.packed), static_cast<int> (total)
++    );
++    if (unpacked < 0 || static_cast<uint64_t> (unpacked) != total) {
++	return std::nullopt;
++    }
++    size_t at = 0;
++    for (const auto& key : keys) {
++	if (plain.compare (at, key.size (), key) != 0) {
++	    return std::nullopt;
++	}
++	at += key.size ();
++    }
++    Texts values;
++    for (size_t i = keys.size (); i < count; at += sizes[i], i++) {
++	values.push_back (plain.substr (at, sizes[i]));
++    }
++    return values;
++} catch (...) {
++    return std::nullopt;
++}
++
++void store (const std::filesystem::path& dir, const std::string& kind, const Texts& keys, const Texts& values) noexcept try {
++    const auto& id = buildId ();
++    if (id.empty () || values.empty () || keys.size () + values.size () > MAX_TEXTS) {
++	return;
++    }
++    std::string plain;
++    std::vector<uint32_t> sizes;
++    for (const auto* texts : { &keys, &values }) {
++	for (const auto& text : *texts) {
++	    if (plain.size () + text.size () > MAX_TOTAL) {
++		return;
++	    }
++	    plain += text;
++	    sizes.push_back (static_cast<uint32_t> (text.size ()));
++	}
++    }
++    const int bound = LZ4_compressBound (static_cast<int> (plain.size ()));
++    if (bound <= 0) {
++	return;
++    }
++    const size_t packedAt = sizeof (Header) + sizes.size () * sizeof (uint32_t) + id.size () + kind.size ();
++    std::string file (packedAt + static_cast<size_t> (bound), '\0');
++    const int packed = LZ4_compress_default (plain.data (), file.data () + packedAt, static_cast<int> (plain.size ()), bound);
++    if (packed <= 0) {
++	return;
++    }
++    Header header {};
++    std::memcpy (header.magic, MAGIC, sizeof (MAGIC));
++    header.idSize = static_cast<uint32_t> (id.size ());
++    header.kindSize = static_cast<uint32_t> (kind.size ());
++    header.keys = static_cast<uint32_t> (keys.size ());
++    header.values = static_cast<uint32_t> (values.size ());
++    header.packed = static_cast<uint32_t> (packed);
++    char* out = file.data ();
++    std::memcpy (out, &header, sizeof (header));
++    out += sizeof (header);
++    std::memcpy (out, sizes.data (), sizes.size () * sizeof (uint32_t));
++    out += sizes.size () * sizeof (uint32_t);
++    std::memcpy (out, id.data (), id.size ());
++    std::memcpy (out + id.size (), kind.data (), kind.size ());
++    file.resize (packedAt + static_cast<size_t> (packed));
++
++    // a name no other writer uses (workers of other scenes may store the same entry at once); the rename makes the
++    // entry appear whole or not at all
++    static std::atomic<unsigned> serial { 0 };
++    const auto path = entryPath (dir, id, kind, keys);
++    const auto temporary = path.string () + "." + std::to_string (::getpid ()) + "." + std::to_string (serial++) + ".tmp";
++    const int fd = ::open (temporary.c_str (), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
++    if (fd < 0) {
++	return;
++    }
++    const bool written = writeAll (fd, file.data (), file.size ());
++    if (::close (fd) != 0 || !written || ::rename (temporary.c_str (), path.c_str ()) != 0) {
++	::unlink (temporary.c_str ());
++    }
++} catch (...) {
++}
++} // namespace WallpaperEngine::Render::Shaders::ShaderCache
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderCache.h b/src/core/WallpaperEngine/Render/Shaders/ShaderCache.h
+new file mode 100644
+index 0000000..80b52c0
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderCache.h
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include <filesystem>
++#include <optional>
++#include <string>
++#include <vector>
++
++/**
++ * Shader text work kept on disk across launches (wp_config_set_shader_cache_dir): the results of a pure function of
++ * texts, stored under the texts it was given.
++ *
++ * Two kinds use it, both of which a scene repeats at every launch and many times within one build (one effect
++ * shader serves many passes): "unit", ShaderUnit::compile's WE text passes (keys: everything compile reads), and
++ * "glsl", GLSLContext::toGlsl's glslang + SPIRV-Cross translation (keys: its two input texts). One file per entry,
++ * `<hash>.<kind>`, named after a hash of the kind and keys; it holds the core's build id, the kind, every key and
++ * every value, LZ4-compressed. A hit needs the build id, the kind and every key byte-equal, so another build of the
++ * core (whose code is what turns the keys into the values), a hash collision or a torn or corrupt file reads as a
++ * miss: the work is done again and the file rewritten. Entries are written to a temporary file and renamed into
++ * place, so a reader never sees a partial one. A core without an ELF build id caches nothing: there would be nothing
++ * to tell its results from another build's.
++ */
++namespace WallpaperEngine::Render::Shaders::ShaderCache {
++using Texts = std::vector<std::string>;
++
++/** The values stored in `dir` for `kind` and these keys, if a valid entry is there */
++[[nodiscard]] std::optional<Texts> load (const std::filesystem::path& dir, const std::string& kind, const Texts& keys) noexcept;
++
++/** Stores `values` for `kind` and these keys in `dir`; a failure leaves the cache as it was */
++void store (const std::filesystem::path& dir, const std::string& kind, const Texts& keys, const Texts& values) noexcept;
++
++/** The core's ELF build id as hex, "" when it has none (then nothing is cached) */
++[[nodiscard]] const std::string& buildId () noexcept;
++} // namespace WallpaperEngine::Render::Shaders::ShaderCache
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+index be5e75d..8a93f5e 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.cpp
+@@ -12,6 +12,7 @@
+ #include <utility>
+ 
+ #include "GLSLContext.h"
++#include "ShaderCache.h"
+ #include "WEShaderRules.h"
+ #include "WallpaperEngine/Assets/AssetLoadException.h"
+ #include "WallpaperEngine/Render/Shaders/Variables/ShaderVariable.h"
+@@ -959,11 +960,55 @@ void ShaderUnit::linkToUnit (const ShaderUnit* unit) { this->m_link = unit; }
+ 
+ const ShaderUnit* ShaderUnit::getLinkedUnit () const { return this->m_link; }
+ 
++void ShaderUnit::setCacheDir (const std::optional<std::filesystem::path>& dir) { this->m_cacheDir = dir; }
++
++std::vector<std::string> ShaderUnit::cacheKey () const {
++    const auto combos = [] (const ComboMap& map) {
++	std::string out;
++	for (const auto& [name, value] : map) {
++	    out += std::to_string (name.size ()) + ":" + name + "=" + std::to_string (value) + "\n";
++	}
++	return out;
++    };
++    const ShaderUnit* link = this->m_link;
++    return {
++	(this->m_type == GLSLContext::UnitType_Fragment ? "fragment\n" : "vertex\n") + this->m_file,
++	this->m_preprocessed,
++	this->m_extensions,
++	combos (this->m_overrideCombos),
++	combos (this->m_combos),
++	combos (this->m_discoveredCombos),
++	link != nullptr ? "linked\n" + link->m_preprocessed : std::string (),
++	link != nullptr ? combos (link->getCombos ()) : std::string (),
++	link != nullptr ? combos (link->getDiscoveredCombos ()) : std::string (),
++    };
++}
++
+ const std::string& ShaderUnit::compile () {
+     if (!this->m_final.empty ()) {
+ 	return this->m_final;
+     }
++    // the text passes are a pure function of cacheKey's texts; the health report and the shader sweep's capture read
++    // the records the passes themselves report, which a stored result would skip
++    std::vector<std::string> key;
++    if (this->m_cacheDir.has_value ()) {
++	key = this->cacheKey ();
++	if (!WallpaperEngine::Health::enabled ()) {
++	    if (auto stored = ShaderCache::load (*this->m_cacheDir, "unit", key);
++		stored && stored->size () == 1 && !(*stored)[0].empty ()) {
++		this->m_final = std::move ((*stored)[0]);
++		return this->m_final;
++	    }
++	}
++    }
++    this->runTextPasses ();
++    if (this->m_cacheDir.has_value ()) {
++	ShaderCache::store (*this->m_cacheDir, "unit", key, { this->m_final });
++    }
++    return this->m_final;
++}
+ 
++void ShaderUnit::runTextPasses () {
+     this->m_final = SHADER_HEADER (this->m_file);
+ 
+     if (this->m_type == GLSLContext::UnitType_Fragment) {
+@@ -1057,9 +1102,6 @@ const std::string& ShaderUnit::compile () {
+     if (!this->m_extensions.empty ()) {
+ 	this->m_final.insert (this->m_final.find ('\n') + 1, this->m_extensions);
+     }
+-
+-    // the pass itself handles shader compilation, the unit doesn't have enough information for this step
+-    return this->m_final;
+ }
+ 
+ const std::vector<Variables::ShaderVariable*>& ShaderUnit::getParameters () const { return this->m_parameters; }
+diff --git a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+index 2c5662a..6e9f73a 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
++++ b/src/core/WallpaperEngine/Render/Shaders/ShaderUnit.h
+@@ -1,8 +1,10 @@
+ #pragma once
+ 
++#include <filesystem>
+ #include <functional>
+ #include <map>
+ #include <memory>
++#include <optional>
+ #include <string>
+ 
+ #include "GLSLContext.h"
+@@ -49,6 +51,8 @@ public:
+      * @param unit
+      */
+     void linkToUnit (const ShaderUnit* unit);
++    /** Where compile keeps its result across launches (ShaderCache.h, kind "unit"); none by default */
++    void setCacheDir (const std::optional<std::filesystem::path>& dir);
+     /**
+      * @return The shader unit linked to this unit (if any)
+      */
+@@ -83,6 +87,10 @@ protected:
+      * and lays the ground for the actual code to be ready
+      */
+     void preprocess ();
++    /** WE's text passes, into m_final */
++    void runTextPasses ();
++    /** Everything the text passes read: the shader cache's key for their result */
++    [[nodiscard]] std::vector<std::string> cacheKey () const;
+ 
+ private:
+     /**
+@@ -168,6 +176,7 @@ private:
+     std::string m_final;
+     /** `#extension` lines the unit needs (after `#version`) */
+     std::string m_extensions;
++    std::optional<std::filesystem::path> m_cacheDir;
+     /**
+      * The parameters the shader needs
+      */
+diff --git a/src/core/frontends/configuration.cpp b/src/core/frontends/configuration.cpp
+index 36ffaac..fb5b033 100644
+--- a/src/core/frontends/configuration.cpp
++++ b/src/core/frontends/configuration.cpp
+@@ -62,6 +62,16 @@ WPENGINE_API bool wp_config_set_storage_dir (wp_configuration* config, const cha
+     WPENGINE_CONFIG_API_END (false);
+ }
+ 
++WPENGINE_API bool wp_config_set_shader_cache_dir (wp_configuration* config, const char* dir) {
++    WPENGINE_CONFIG_API_BEGIN
++    if (dir == nullptr || !std::filesystem::is_directory (dir)) {
++	return false;
++    }
++    static_cast<WallpaperEngine::Configuration*> (config)->shaderCacheDir = std::filesystem::path (dir);
++    return true;
++    WPENGINE_CONFIG_API_END (false);
++}
++
+ WPENGINE_API bool wp_config_set_steam_dir (wp_configuration* config, const char* dir) {
+     WPENGINE_CONFIG_API_BEGIN
+     return static_cast<WallpaperEngine::Configuration*> (config)->setSteamDir (dir);

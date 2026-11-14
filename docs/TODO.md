@@ -5,6 +5,14 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
+48. [ ] (owner) Scene wallpapers load radically faster — the rest. The shader cache (fork 0129) took 3042492564's warm
+       apply → first frame from ~1.24 s to ~0.53 s; what is left (`src/player/tests/onmachine/scene_load.py`): the worker's
+       exec + EGL setup before its Hello (~0.1–0.16 s on every apply, most of a small scene's load: a pre-spawned
+       spare worker with its context ready would hide it — owner's call, it costs an idle process and context), texture
+       uploads after the pool's decode (~0.1 s), the units' preprocessing (~0.1 s: it resolves textures and builds
+       parameters, so it isn't cached), and a first-ever load's NVIDIA compiles (~0.28 s, then its disk cache). A
+       video texture's first decoded frame isn't part of the first frame: 3426575339 (all video) is still black 1 s
+       after it in 2 of 51 loads.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
@@ -38,9 +46,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `programs.sh crash`), and the owner's calls in § 5 (count frozen onsets? start-up seam? Phase 4 vs 5?).
       Fixed on the way: the battery's late-B "handoff" check (the test) and the dropout probe's ended-A snapshot
       (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
-- [ ] What's left of a big scene's build with the disk cache working: the WE shader text passes (~0.37 s) and glslang +
-      SPIRV-Cross (~0.25 s) of 3042492564's ~1.3 s, the same inputs at every launch. A cache of `toGlsl`'s output across
-      launches, keyed by its input text, is the candidate; decide before building it.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 

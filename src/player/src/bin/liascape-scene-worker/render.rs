@@ -35,6 +35,10 @@ pub struct LweScene {
     pub wants_audio_input: bool,
     /// The scene plays sound (LWE built ≥ 1 audio stream).
     pub has_audio: bool,
+    /// Wall time of the context + project load and of the renderer build with its first frame
+    /// (the worker's log line: `src/player/tests/onmachine/scene_load.py` splits a load with them).
+    pub load_ms: f64,
+    pub build_ms: f64,
     gl_errors: u32,
 }
 
@@ -93,12 +97,15 @@ impl LweScene {
             .steam_dir
             .map(|s| s.join("steamapps/workshop/content").join(assets::WE_APP_ID))
             .filter(|b| b.is_dir());
+        let t0 = std::time::Instant::now();
         let mut scene = lwe::Scene::load_in(o.dir, assets_dir, backgrounds.as_deref())
             .map_err(|e| format!("{e} (a truncated scene.pkg or an unsupported project)"))?;
         for (name, value) in o.properties {
             on_prop(name, scene.set_property(name, value));
         }
         scene.hint_screen(o.screen.0, o.screen.1);
+        let load_ms = t0.elapsed().as_secs_f64() * 1e3;
+        let t1 = std::time::Instant::now();
         let scratch = gfx.tex(1, 1);
         let scratch_fbo = gfx.fbo(&scratch);
         let (w, h) = scene.first_render(scratch_fbo.id.0.get()).map_err(|e| {
@@ -107,9 +114,12 @@ impl LweScene {
                 assets_dir.display()
             )
         })?;
+        let build_ms = t1.elapsed().as_secs_f64() * 1e3;
         let tex = gfx.tex(w, h);
         let fbo = gfx.fbo(&tex);
         Ok(LweScene {
+            load_ms,
+            build_ms,
             has_audio: scene.audio_streams() > 0,
             wants_audio_input: wants_audio_input(o.dir),
             scene,

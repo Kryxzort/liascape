@@ -43,7 +43,7 @@ RT=$SCRATCH/run
 STATE=$SCRATCH/state
 # NVIDIA's shader cache too: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one (the player
 # creates and fills it), and unset the driver falls back to ~/.cache/nvidia.
-NVCACHE=$SCRATCH/nv-shader-cache
+NVCACHE=$SCRATCH/nv-shader-cache  # LWE's shader text cache goes beside it (its default is ~/.cache/liascape)
 mkdir -m 700 "$RT" "$STATE"
 REAL_RT=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 WL=${WAYLAND_DISPLAY:-wayland-1}
@@ -68,7 +68,7 @@ WSNORM='{ws: ([.[] | {id, monitor}] | sort_by(.id))}'
 # liascape-player with its private runtime dir; the real compositor through an absolute socket.
 lp() {
     env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$STATE" WAYLAND_DISPLAY="$WL" \
-        __GL_SHADER_DISK_CACHE_PATH="$NVCACHE" "$BIN" "$@"
+        __GL_SHADER_DISK_CACHE_PATH="$NVCACHE" LIASCAPE_SCENE_SHADER_CACHE_DIR="$SCRATCH/lwe-shaders" "$BIN" "$@"
 }
 ctl() { lp ctl --timeout-ms 8000 "$@"; }
 
@@ -301,7 +301,7 @@ wait_ready() { # <source id>
 # handler (systemd-coredump → the desktop's crash notification) — `prlimit` execs, so $!
 # stays the supervisor's pid.
 prlimit --core=1:1 env -u LD_LIBRARY_PATH XDG_RUNTIME_DIR="$RT" XDG_STATE_HOME="$STATE" \
-    WAYLAND_DISPLAY="$WL" __GL_SHADER_DISK_CACHE_PATH="$NVCACHE" "$BIN" serve --ao null --log-level debug >"$SCRATCH/serve.log" 2>&1 &
+    WAYLAND_DISPLAY="$WL" __GL_SHADER_DISK_CACHE_PATH="$NVCACHE" LIASCAPE_SCENE_SHADER_CACHE_DIR="$SCRATCH/lwe-shaders" "$BIN" serve --ao null --log-level debug >"$SCRATCH/serve.log" 2>&1 &
 SERVE_PID=$!
 for _ in $(seq 1 100); do
     [[ -S $RT/liascape/liascape-player.sock ]] && break

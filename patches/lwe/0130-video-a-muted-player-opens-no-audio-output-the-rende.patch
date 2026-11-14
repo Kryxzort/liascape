@@ -1,0 +1,151 @@
+From e4b565e6a0e83b776077f5a1ee2d4729bedcc2dd Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 09:31:17 +0530
+Subject: [PATCH 130/130] video: a muted player opens no audio output, the
+ render thread never waits on mpv
+
+A video texture's first draw could stall for 20-30 s. GLPlayer::render read the frame size with mpv_get_property
+("dwidth" / "dheight") on every MPV_EVENT_VIDEO_RECONFIG, and a get takes mpv's dispatch lock, which waits for
+mpv's core thread. Every video texture plays muted, yet selected an audio track, so its core thread opened an
+audio output; one that can't connect (PipeWire answering "Host is down") hung in its cleanup
+(ao_init -> uninit -> pw_thread_loop_stop -> pthread_join) for 20-30 s, and the render thread waited the whole
+time: gdb on a stalled liascape-scene-worker loading 2883756643 (8 video textures) showed exactly these two
+stacks. It struck 3 of 15 loads of that scene on a private headless player with the shader cache on, 6 of 18
+with the timing build's mpv logs on, and the pinned core too: one boot load sat 32 s, was declared hung and
+killed. Which load hits it is timing: the get only blocks when it lands while an AO is cleaning up.
+
+A muted player now starts with aid=no, so it opens no audio output at all (a muted one makes no sound anyway;
+clearMuted selects a track again), and render () takes the frame size from mpv_observe_property's
+MPV_EVENT_PROPERTY_CHANGE events instead of a blocking get, resizing the output texture when it changes. With
+PipeWire running, a scene no longer opens a silent PipeWire stream for every video texture.
+
+Measured, same player, 2883756643: 36 loads (12 cold, 12 warm, 12 with the files dropped from the page cache)
+all reached their first frame in 3.6-4.4 s, no stall, no hang, no restart (before: 20-38 s in 3 of 15); the
+first draw's median 200-260 ms -> 46-88 ms. The 13 library scenes with video textures, three loads each with
+this core and with the pinned one: every load reached its first frame (at most 5.0 s). The GL text of every
+program (849 in the 13 scenes) hashed identical with the shader cache off and on, and in all 36 loads of
+2883756643, and the same as without this change in the 5 scenes checked before it. 3426575339 draws nothing but video: its
+picture was on screen 1 s after the first frame in 49 of 51 loads, against 11 of 27 with the pinned core.
+
+Origin: ours
+Why: docs/TODO.md (scene wallpapers load radically faster; 2883756643's first draw stalled 20-30 s)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01THaJ7t24KARpRjSyjTokdT
+---
+ .../VideoPlayback/MPV/GLPlayer.cpp            | 42 ++++++++++++++-----
+ .../VideoPlayback/MPV/GLPlayer.h              |  3 ++
+ 2 files changed, 34 insertions(+), 11 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+index 3cc41bd..4bb0a00 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+@@ -10,6 +10,12 @@
+ 
+ using namespace WallpaperEngine::VideoPlayback::MPV;
+ 
++namespace {
++// mpv_observe_property's reply_userdata for the display size
++constexpr uint64_t kObserveWidth = 1;
++constexpr uint64_t kObserveHeight = 2;
++} // namespace
++
+ void* get_proc_address (void* ctx, const char* name) {
+     const auto gl_proc_address = static_cast<GLPlayer*> (ctx)->getContext ().getContext ().gl_proc_address;
+ 
+@@ -98,6 +104,8 @@ void GLPlayer::clearMuted () {
+ 
+     if (this->m_handle) {
+ 	mpv_set_property_string (this->m_handle, "mute", "no");
++	// a player started muted has no audio track (init); sound needs one
++	mpv_set_property_string (this->m_handle, "aid", "auto");
+     }
+ }
+ 
+@@ -198,7 +206,9 @@ void GLPlayer::render () const {
+ 	const_cast<GLPlayer*> (this)->seek (*this->m_pendingSeek);
+     }
+ 
+-    // read all the events available
++    // read all the events available. The frame size comes from observed properties, never mpv_get_property: a get
++    // waits for mpv's core thread, which can be busy for seconds (an audio output that won't open), and this is the
++    // render thread
+     while (true) {
+ 	const mpv_event* event = mpv_wait_event (this->m_handle, 0);
+ 
+@@ -206,26 +216,29 @@ void GLPlayer::render () const {
+ 	    break;
+ 	}
+ 
+-	if (event->event_id != MPV_EVENT_VIDEO_RECONFIG) {
++	if (event->event_id != MPV_EVENT_PROPERTY_CHANGE) {
+ 	    continue;
+ 	}
+ 
+-	int64_t width, height;
++	const auto* property = static_cast<const mpv_event_property*> (event->data);
+ 
+-	if (mpv_get_property (this->m_handle, "dwidth", MPV_FORMAT_INT64, &width) < 0) {
++	if (property->format != MPV_FORMAT_INT64) {
+ 	    continue;
+ 	}
+ 
+-	if (mpv_get_property (this->m_handle, "dheight", MPV_FORMAT_INT64, &height) < 0) {
+-	    continue;
+-	}
++	const int64_t value = *static_cast<const int64_t*> (property->data);
+ 
+-	if (width < 0 || height < 0) {
+-	    continue;
++	if (event->reply_userdata == kObserveWidth) {
++	    this->m_videoWidth = value;
++	} else if (event->reply_userdata == kObserveHeight) {
++	    this->m_videoHeight = value;
+ 	}
++    }
+ 
+-	this->m_width = width;
+-	this->m_height = height;
++    if (this->m_videoWidth > 0 && this->m_videoHeight > 0
++	&& (this->m_videoWidth != this->m_width || this->m_videoHeight != this->m_height)) {
++	this->m_width = this->m_videoWidth;
++	this->m_height = this->m_videoHeight;
+ 	// reconfigure the texture
+ 	glBindTexture (GL_TEXTURE_2D, this->m_outputTexture);
+ 	glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, this->m_width, this->m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+@@ -300,6 +313,10 @@ void GLPlayer::init () {
+     mpv_set_option_string (this->m_handle, "vo", "libmpv");
+     mpv_set_option_string (this->m_handle, "profile", "fast");
+     mpv_set_option_string (this->m_handle, "untimed", this->m_untimed ? "yes" : "no");
++    // a muted player (every video texture) selects no audio track, so it never opens an audio output: one that can't
++    // connect (no PipeWire) can hold mpv's core thread for 20-30 s in its cleanup, and a muted one makes no sound
++    // anyway. clearMuted selects one
++    mpv_set_option_string (this->m_handle, "aid", this->m_muted ? "no" : "auto");
+ 
+     if (mpv_initialize (this->m_handle) < 0) {
+ 	sLog.exception ("Could not initialize mpv context");
+@@ -313,6 +330,9 @@ void GLPlayer::init () {
+     mpv_set_property (this->m_handle, "speed", MPV_FORMAT_DOUBLE, &this->m_rate);
+     mpv_set_property (this->m_handle, "volume", MPV_FORMAT_DOUBLE, &this->m_volume);
+ 
++    mpv_observe_property (this->m_handle, kObserveWidth, "dwidth", MPV_FORMAT_INT64);
++    mpv_observe_property (this->m_handle, kObserveHeight, "dheight", MPV_FORMAT_INT64);
++
+     // initialize gl context for mpv
+     mpv_opengl_init_params gl_init_params { get_proc_address, this };
+     mpv_render_param params[] { { MPV_RENDER_PARAM_API_TYPE, const_cast<char*> (MPV_RENDER_API_TYPE_OPENGL) },
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
+index addcc26..02e81c0 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
+@@ -82,6 +82,9 @@ protected:
+     GLuint m_fbo = GL_NONE;
+     mutable int64_t m_width;
+     mutable int64_t m_height;
++    /** mpv's display size as its property-change events report it (render () reads no property: see there) */
++    mutable int64_t m_videoWidth = 0;
++    mutable int64_t m_videoHeight = 0;
+     mpv_handle* m_handle = nullptr;
+     mpv_render_context* m_renderContext = nullptr;
+     double m_volume = 0.0f;

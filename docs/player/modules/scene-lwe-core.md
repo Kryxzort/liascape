@@ -39,6 +39,9 @@ and `patches/lwe/tests/host_api_test.cpp` stays C++.
   random file per start, `loop`/`random`/`single` modes, `volume²` live from user properties, the schedule on the
   host's render time (so it follows the worker's clock, speed and pause). `WPENGINE_SOUND_SEED` makes picks
   deterministic. The offline estimate models the same rules ([scene-loudness.md](scene-loudness.md)).
+- **Video textures** play in libmpv (`GLPlayer`), muted with no audio track (`aid=no`), so they open no audio
+  output: one that can't connect holds mpv's core thread 20–30 s in its cleanup. The render thread takes the frame
+  size from observed properties and never calls `mpv_get_property` while drawing, since a get waits for that thread.
 - **Scripts.** Property scripts and SceneScript run in LWE's QuickJS. Wallpaper Engine's own JS classes are read at
   run time from the assets dir (`scripts/jsclasses/`, `scripts/jsmodules/`) and must never be copied into the repo
   or the fork.
@@ -58,6 +61,29 @@ fatal `load failed`. Then load (NULL → `load failed`, a truncated `scene.pkg` 
 LWE (its final quad sets `glViewport(0,0,sceneW,sceneH)`), the ring at `cover_size`, then `Ready {native,
 has_audio, wants_audio_input}`. Each frame renders into the native FBO and `glBlitFramebuffer`s into the slot (scissor
 off first — LWE leaves its state), no flip, alpha forced to 1. Every failure is fatal: no restart, no crash record.
+
+The worker's log tail says where a load went: `lwe: loaded <dir> in A ms, built in B ms` (A = context + project
+load, B = the renderer build with its first frame). `src/player/tests/onmachine/scene_load.py` times a whole apply
+(create → `worker.spawned` → the worker's Hello → `source.ready`) on a private headless player, cold, warm and
+after-a-boot.
+
+## Shader cache
+
+`wp_config_set_shader_cache_dir` (fork patch) keeps the core's shader text work across launches: each shader unit's
+WE text passes (`ShaderUnit::compile`, kind `unit`) and each vertex + fragment pair's translation to GLSL 330 by
+glslang + SPIRV-Cross (`toGlsl`, kind `glsl`). Both are pure functions of their input texts, and a scene repeats both
+at every launch and many times within one build (one effect shader serves many passes: 253 programs, 68 distinct, in
+3042492564). The worker points it at `$XDG_CACHE_HOME/liascape/lwe-shaders` (`gfx::shader_cache::lwe_dir`;
+`LIASCAPE_SCENE_SHADER_CACHE_DIR` overrides, empty = off; tests point it into their temp dirs). One LZ4 file per
+entry, `<hash>.<kind>`, holding the core's ELF build id (the core links with `--build-id`), every key text and every
+value: a hit needs all of them byte-equal, so another core build, a hash collision or a torn or corrupt file is a
+miss that redoes the work and rewrites the entry. A `unit` key is everything `compile` reads (the preprocessed text,
+the three combo maps, the linked unit's text and combos), so the combos and defines are part of it. Writes go to a
+temporary file renamed into place. While the health report (or the shader sweep's capture) is on, reads are
+skipped: its records come from the work itself. The unit's preprocessing (includes, uniform parsing, texture
+formats) still runs at every load: it resolves textures and builds the pass's parameters. NVIDIA's own disk cache
+(`gfx/shader_cache.rs`) covers the GL compile of the same text. About 8 KB an entry; the whole library's 3426
+distinct pairs come to tens of MB.
 
 Without WE's `assets/` only a scene of a clear colour builds (`patches/lwe/tests/fixtures/min-scene`, the hermetic
 real-LWE fixture); anything with an image, particle or effect needs `assets/shaders`. `fail-scene` (an object whose

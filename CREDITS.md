@@ -160,3 +160,5 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0126-render-a-constant-takes-the-declaration-its-pass-com.patch` | render: a constant takes the declaration its pass compiles | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0127-render-run-the-shader-text-passes-regexes-only-where.patch` | render: run the shader text passes' regexes only where they can match | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0128-render-decode-a-wallpaper-s-JPEG-PNG-textures-on-oth.patch` | render: decode a wallpaper's JPEG / PNG textures on other threads while it builds | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0129-render-keep-shader-text-work-on-disk-across-launches.patch` | render: keep shader text work on disk across launches | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0130-video-a-muted-player-opens-no-audio-output-the-rende.patch` | video: a muted player opens no audio output, the render thread never waits on mpv | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

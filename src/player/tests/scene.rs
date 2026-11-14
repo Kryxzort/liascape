@@ -1651,6 +1651,87 @@ fn min_scene_renders_through_the_worker() {
     }
 }
 
+/// Set in the child [`real_workers_keep_the_shader_cache_in_the_tests_dir`] re-runs this binary
+/// as: only then does [`lwe_cache_guard_child`] do anything.
+const LWE_CACHE_GUARD_ENV: &str = "LIASCAPE_TEST_LWE_CACHE_GUARD";
+
+/// A test's scene workers keep LWE's shader text cache in the test's temp dir, never in the
+/// user's `$XDG_CACHE_HOME/liascape/lwe-shaders`: re-runs this binary with `XDG_CACHE_HOME`
+/// naming a sentinel and `LIASCAPE_SCENE_SHADER_CACHE_DIR` unset, and loads `min-scene` through
+/// the real worker there. The worker creates the cache folder it resolves at every load, so an
+/// inherited default would appear in the sentinel.
+#[test]
+fn real_workers_keep_the_shader_cache_in_the_tests_dir() {
+    if !worker_has_lwe() {
+        println!("SKIP: liascape-scene-worker built without LWE");
+        return;
+    }
+    let root = crash_dir("lweguard");
+    let sentinel = root.join("callers-xdg-cache");
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "lwe_cache_guard_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(LWE_CACHE_GUARD_ENV, "1")
+        .env("XDG_CACHE_HOME", &sentinel)
+        .env_remove(liascape_player::gfx::shader_cache::LWE_DIR_ENV)
+        .output()
+        .expect("re-run this test binary");
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !sentinel.exists(),
+        "a test's worker put its shader text cache under the caller's XDG_CACHE_HOME\n{text}"
+    );
+    assert!(out.status.success(), "{text}");
+    // the child skips where no GPU can load a scene (the nix build sandbox): nothing was proved either way
+    if !text.contains("LWE_CACHE_GUARD_LOADED") && text.contains("SKIP:") {
+        println!("SKIP: the child couldn't load a real scene here\n{text}");
+        return;
+    }
+    assert!(
+        text.contains("LWE_CACHE_GUARD_LOADED"),
+        "the child never loaded a real scene: proved nothing\n{text}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// [`real_workers_keep_the_shader_cache_in_the_tests_dir`]'s child: a real-LWE load the way
+/// every test makes one; its worker must have made the cache folder the suite gave it.
+#[test]
+fn lwe_cache_guard_child() {
+    if std::env::var_os(LWE_CACHE_GUARD_ENV).is_none() {
+        return;
+    }
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    let assets = empty_dir("lweguard");
+    let mut src = open_real(
+        &gfx,
+        "lweguard",
+        &lwe_fixture("min-scene"),
+        Some(&assets),
+        |_| {},
+    );
+    assert!(
+        pump(&gfx, &mut src, Duration::from_secs(10), |s| s.is_ready()
+            || s.error().is_some()),
+        "never ready"
+    );
+    assert!(src.error().is_none(), "{:?}", src.error());
+    let own = PathBuf::from(
+        std::env::var_os(liascape_player::gfx::shader_cache::LWE_DIR_ENV)
+            .expect("tests/common sets it"),
+    );
+    assert!(own.is_dir(), "the worker didn't create its own {own:?}");
+    println!("LWE_CACHE_GUARD_LOADED");
+}
+
 /// A scene whose renderer build fails (`fail-scene`: an object with a missing parent — the
 /// same outcome as WE's assets missing) is a fatal error: no restart, no crash record, the
 /// worker idles until stopped and then exits on its own (never a SIGSEGV loop, `docs/player/spikes/lwe-core.md` §4.4).

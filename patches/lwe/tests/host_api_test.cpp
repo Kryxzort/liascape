@@ -20,13 +20,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <initializer_list>
+#include <map>
 #include <sstream>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <dirent.h>
 #include <functional>
+#include <lz4.h>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -893,6 +897,8 @@ struct ScriptRig {
     wp_mouse_input* mouse = nullptr;
     /** localStorage's directory (B10), none by default */
     std::string storage;
+    /** the shader cache's directory, none by default */
+    std::string shaderCache;
     /** called once the project loaded, before its first frame (B10: what a host reports before the scene exists) */
     std::function<void (wp_project*)> loaded;
     /** the scene's size (B4's text scenes are bigger) */
@@ -908,6 +914,9 @@ struct ScriptRig {
         }
         wp_config_set_audio_output (cfg, &kStereo48k);
         if (!storage.empty () && !wp_config_set_storage_dir (cfg, storage.c_str ())) {
+            return false;
+        }
+        if (!shaderCache.empty () && !wp_config_set_shader_cache_dir (cfg, shaderCache.c_str ())) {
             return false;
         }
         ctx = wp_context_create (cfg);
@@ -2917,6 +2926,202 @@ static bool shaders_compile_like_hlsl () {
     read_pixel (rig.fbo, 16, 16, px);
     printf ("    the layer's centre: %d %d %d\n", px[0], px[1], px[2]);
     CHECK (near (px[0], 255, 3) && near (px[1], 127.5, 3) && px[2] < 4, "want 255 128 0, got %d %d %d", px[0], px[1], px[2]);
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The shader cache (wp_config_set_shader_cache_dir, the core's Render/Shaders/ShaderCache.h)
+
+// an entry: its build id, kind, keys and values
+struct CacheEntry {
+    std::string id, kind;
+    std::vector<std::string> keys, values;
+};
+
+static const std::string kCacheMagic ("WPGLSL\0" "2", 8);
+
+// the magic; u32 idSize, kindSize, keys, values, packed; u32 sizes[keys + values]; the build id; the kind; the LZ4
+// block of the keys and values in order
+static bool read_entry (const std::string& path, CacheEntry& entry) {
+    const std::string file = read_file (path);
+    uint32_t head[5];
+    if (file.size () < 8 + sizeof (head) || file.compare (0, 8, kCacheMagic) != 0) {
+        return false;
+    }
+    memcpy (head, file.data () + 8, sizeof (head));
+    const size_t count = size_t (head[2]) + head[3];
+    std::vector<uint32_t> sizes (count);
+    const size_t textsAt = 8 + sizeof (head) + count * 4;
+    if (count > 16 || file.size () != textsAt + head[0] + head[1] + head[4]) {
+        return false;
+    }
+    memcpy (sizes.data (), file.data () + 8 + sizeof (head), count * 4);
+    entry.id = file.substr (textsAt, head[0]);
+    entry.kind = file.substr (textsAt + head[0], head[1]);
+    size_t total = 0;
+    for (const auto size : sizes) {
+        total += size;
+    }
+    std::string plain (total, '\0');
+    if (LZ4_decompress_safe (file.data () + textsAt + head[0] + head[1], plain.data (), int (head[4]), int (total)) != int (total)) {
+        return false;
+    }
+    entry.keys.clear ();
+    entry.values.clear ();
+    for (size_t i = 0, at = 0; i < count; at += sizes[i], i++) {
+        (i < head[2] ? entry.keys : entry.values).push_back (plain.substr (at, sizes[i]));
+    }
+    return true;
+}
+
+static bool write_entry (const std::string& path, const CacheEntry& entry) {
+    std::string plain;
+    std::vector<uint32_t> sizes;
+    for (const auto* texts : { &entry.keys, &entry.values }) {
+        for (const auto& text : *texts) {
+            plain += text;
+            sizes.push_back (uint32_t (text.size ()));
+        }
+    }
+    std::string packed (size_t (LZ4_compressBound (int (plain.size ()))), '\0');
+    packed.resize (size_t (LZ4_compress_default (plain.data (), packed.data (), int (plain.size ()), int (packed.size ()))));
+    const uint32_t head[5] = { uint32_t (entry.id.size ()), uint32_t (entry.kind.size ()), uint32_t (entry.keys.size ()),
+                               uint32_t (entry.values.size ()), uint32_t (packed.size ()) };
+    return write_file (path, kCacheMagic + std::string (reinterpret_cast<const char*> (head), sizeof (head))
+                                 + std::string (reinterpret_cast<const char*> (sizes.data ()), sizes.size () * 4) + entry.id
+                                 + entry.kind + packed);
+}
+
+// the cache dir's file names, sorted
+static std::vector<std::string> dir_files (const std::string& dir) {
+    std::vector<std::string> out;
+    if (DIR* d = opendir (dir.c_str ())) {
+        while (const dirent* e = readdir (d)) {
+            if (e->d_name[0] != '.') {
+                out.emplace_back (e->d_name);
+            }
+        }
+        closedir (d);
+    }
+    std::sort (out.begin (), out.end ());
+    return out;
+}
+
+// A build stores its shader text work, one `<hash>.unit` per shader unit's text passes and one `<hash>.glsl` per
+// translated pair, nothing else left behind; the next build uses what is stored as it is (the layer's translation
+// rewritten to draw blue draws blue; its fragment unit's text rewritten to draw green draws green); the health report
+// bypasses it (its records come from the work itself) and still stores; and an entry for other keys (a hash
+// collision), from another build of the core or torn is a miss: done again and rewritten. Draws 255 128 0 otherwise
+static bool shader_cache_reuses_text_work () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    char tmpl[] = "/tmp/lwe-shader-cache.XXXXXX";
+    const char* made = mkdtemp (tmpl);
+    CHECK (made != nullptr, "mkdtemp");
+    const std::string cache = made;
+    const std::string dir = script_scene (b9_object (1, 16));
+    const std::string marker = "vec4(1.0, 0.5, 0.0, 1.0)";
+    b9_layer (dir, "", "gl_FragColor = " + marker + ";");
+    // a fresh load + build with the cache; the layer's centre
+    const auto centre = [&] (bool last = false) {
+        std::array<int, 3> rgb = { -1, -1, -1 };
+        ScriptRig rig;
+        rig.shaderCache = cache;
+        if (rig.open (dir)) {
+            rig.step ();
+            unsigned char px[4] = { 0, 0, 0, 0 };
+            read_pixel (rig.fbo, 16, 16, px);
+            rgb = { px[0], px[1], px[2] };
+        }
+        if (!last) {
+            rig.dir.clear (); // the scene is built again
+        }
+        printf ("    the layer's centre: %d %d %d\n", rgb[0], rgb[1], rgb[2]);
+        return rgb;
+    };
+    const auto drawn = [] (const std::array<int, 3>& rgb, int r, int g, int b) {
+        return near (rgb[0], r) && near (rgb[1], g) && near (rgb[2], b);
+    };
+
+    auto rgb = centre ();
+    CHECK (drawn (rgb, 255, 128, 0), "cold cache: want 255 128 0");
+    const auto names = dir_files (cache);
+    std::string glsl, unit, id;
+    std::map<std::string, CacheEntry> stored;
+    for (const auto& name : names) {
+        CHECK (name.size () == 21 && (name.ends_with (".glsl") || name.ends_with (".unit")), "a stray file in the cache: %s",
+               name.c_str ());
+        CacheEntry entry;
+        CHECK (read_entry (cache + "/" + name, entry), "%s doesn't read back", name.c_str ());
+        CHECK (!entry.id.empty () && (id.empty () || entry.id == id), "%s: build id '%s'", name.c_str (), entry.id.c_str ());
+        CHECK (name.ends_with ("." + entry.kind), "%s holds kind %s", name.c_str (), entry.kind.c_str ());
+        id = entry.id;
+        const bool layer = std::any_of (entry.keys.begin (), entry.keys.end (),
+                                        [&] (const std::string& key) { return key.find (marker) != std::string::npos; });
+        if (layer && entry.kind == "glsl") {
+            glsl = name;
+        }
+        // the fragment unit's own text (a vertex unit's key holds its linked fragment's too)
+        if (layer && entry.kind == "unit" && entry.keys[0].starts_with ("fragment\n")) {
+            unit = name;
+        }
+        stored[name] = entry;
+    }
+    printf ("    %zu entries, build id %s\n", names.size (), id.c_str ());
+    CHECK (!glsl.empty () && !unit.empty (), "no entry holds the layer's translation (%s) or fragment unit (%s)", glsl.c_str (),
+           unit.c_str ());
+
+    // a hit uses the stored text as it is
+    CacheEntry poisoned = stored[glsl];
+    poisoned.values[1] = "#version 330\nout vec4 colour;\nvoid main () { colour = vec4 (0.0, 0.0, 1.0, 1.0); }\n";
+    CHECK (write_entry (cache + "/" + glsl, poisoned), "rewrite %s", glsl.c_str ());
+    CHECK (drawn (centre (), 0, 0, 255), "the stored translation wasn't used: want 0 0 255");
+
+    // the health report does the work (and stores what it did)
+    const std::string health = cache + ".health.jsonl";
+    setenv ("WPENGINE_HEALTH", health.c_str (), 1);
+    rgb = centre ();
+    unsetenv ("WPENGINE_HEALTH");
+    unlink (health.c_str ());
+    CHECK (drawn (rgb, 255, 128, 0), "with the health report on: want 255 128 0");
+    CacheEntry back;
+    CHECK (read_entry (cache + "/" + glsl, back) && back.values == stored[glsl].values, "the health run didn't store its result");
+
+    // stored for other keys of the same length: a miss
+    poisoned.keys[1].back () = poisoned.keys[1].back () == '\n' ? ' ' : '\n';
+    CHECK (write_entry (cache + "/" + glsl, poisoned), "rewrite %s", glsl.c_str ());
+    CHECK (drawn (centre (), 255, 128, 0), "an entry for other keys was used: want 255 128 0");
+
+    // another build of the core, or torn: a miss, and rewritten
+    for (const auto& [name, entry] : stored) {
+        CacheEntry other = entry;
+        other.values.back () += "\n#error a stored value must not be used\n";
+        if (name == glsl || name == unit) {
+            CHECK (write_entry (cache + "/" + name, other), "rewrite %s", name.c_str ());
+            const std::string whole = read_file (cache + "/" + name);
+            CHECK (write_file (cache + "/" + name, whole.substr (0, whole.size () / 2)), "tear %s", name.c_str ());
+        } else {
+            other.id[0] = other.id[0] == '0' ? '1' : '0';
+            CHECK (write_entry (cache + "/" + name, other), "rewrite %s", name.c_str ());
+        }
+    }
+    CHECK (drawn (centre (), 255, 128, 0), "a torn entry or another build's was used: want 255 128 0");
+    CHECK (dir_files (cache) == names, "the cache's files changed");
+    for (const auto& [name, entry] : stored) {
+        CHECK (read_entry (cache + "/" + name, back) && back.id == id && back.values == entry.values, "%s wasn't rewritten",
+               name.c_str ());
+    }
+
+    // the text passes' stored result is used as it is: the layer's fragment unit rewritten to draw green
+    poisoned = stored[unit];
+    poisoned.values[0] = "#version 330\nout vec4 out_FragColor;\nvoid main () { out_FragColor = vec4 (0.0, 1.0, 0.0, 1.0); }\n";
+    CHECK (write_entry (cache + "/" + unit, poisoned), "rewrite %s", unit.c_str ());
+    CHECK (drawn (centre (true), 0, 255, 0), "the stored text passes weren't used: want 0 255 0");
+    for (const auto& name : dir_files (cache)) {
+        unlink ((cache + "/" + name).c_str ());
+    }
+    rmdir (cache.c_str ());
     return true;
 }
 
@@ -7679,6 +7884,7 @@ int main (int argc, char** argv) {
     run ("particle_pointer_is_y_down", particle_pointer_is_y_down);
     run ("script_angles_are_degrees", script_angles_are_degrees);
     run ("shaders_compile_like_hlsl", shaders_compile_like_hlsl);
+    run ("shader_cache_reuses_text_work", shader_cache_reuses_text_work);
     run ("shaders_include_in_place", shaders_include_in_place);
     run ("fragment_varying_takes_vertex_type", fragment_varying_takes_vertex_type);
     run ("hlsl_conversions_compile", hlsl_conversions_compile);

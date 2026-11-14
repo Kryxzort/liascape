@@ -153,6 +153,8 @@ run_all() {
     # NVIDIA's shader cache too: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one (the player
     # creates and fills it), and unset the driver falls back to ~/.cache/nvidia.
     export __GL_SHADER_DISK_CACHE_PATH=$priv/nv-shader-cache
+    # and LWE's shader text cache, which defaults to the user's ~/.cache/liascape
+    export LIASCAPE_SCENE_SHADER_CACHE_DIR=$priv/lwe-shaders
     export PULSE_SERVER=unix:$priv/run/no-pulse DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent
     unset WAYLAND_DISPLAY DISPLAY WPENGINE_HEALTH
 

@@ -1,7 +1,7 @@
 From 65ec57400cded152334dbcb23aed86d53099b0f3 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 00:10:56 +0530
-Subject: [PATCH 122/128] render: a world-placed layer's effects draw into the
+Subject: [PATCH 122/130] render: a world-placed layer's effects draw into the
  world depth tested
 
 A layer with effects draws its material into an FBO, then its effects, and the last effect's pass draws the result

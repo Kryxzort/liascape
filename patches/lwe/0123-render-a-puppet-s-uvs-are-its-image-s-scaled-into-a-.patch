@@ -1,7 +1,7 @@
 From e6211c0c874eaa238e221d1e6250b55aa3b3fcf0 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Wed, 11 Nov 2026 01:58:13 +0530
-Subject: [PATCH 123/128] render: a puppet's uvs are its image's, scaled into a
+Subject: [PATCH 123/130] render: a puppet's uvs are its image's, scaled into a
  padded texture
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

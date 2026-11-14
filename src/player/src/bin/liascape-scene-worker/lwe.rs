@@ -50,6 +50,7 @@ unsafe extern "C" {
     fn wp_config_set_assets_dir(config: *mut c_void, dir: *const c_char) -> bool;
     fn wp_config_set_backgrounds_dir(config: *mut c_void, dir: *const c_char) -> bool;
     fn wp_config_set_storage_dir(config: *mut c_void, dir: *const c_char) -> bool;
+    fn wp_config_set_shader_cache_dir(config: *mut c_void, dir: *const c_char) -> bool;
     fn wp_config_set_audio_output(config: *mut c_void, output: *const WpAudioOutput);
     fn wp_context_create(config: *const c_void) -> *mut c_void;
     fn wp_context_destroy(context: *mut c_void);
@@ -245,6 +246,12 @@ impl Scene {
                 && let Ok(cd) = CString::new(d.as_os_str().as_encoded_bytes())
             {
                 wp_config_set_storage_dir(config, cd.as_ptr());
+            }
+            // LWE's shader text work, kept for the next load
+            if let Some(d) = liascape_player::gfx::shader_cache::lwe_dir_from_env()
+                && let Ok(cd) = CString::new(d.as_os_str().as_encoded_bytes())
+            {
+                wp_config_set_shader_cache_dir(config, cd.as_ptr());
             }
             let out = WpAudioOutput {
                 sample_rate: SAMPLE_RATE,

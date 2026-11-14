@@ -1,7 +1,7 @@
 From 6acc7f37f0017673458b1b5298cd8fbed41114e8 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 13 Nov 2026 13:24:55 +0530
-Subject: [PATCH 128/128] render: decode a wallpaper's JPEG / PNG textures on
+Subject: [PATCH 128/130] render: decode a wallpaper's JPEG / PNG textures on
  other threads while it builds
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
