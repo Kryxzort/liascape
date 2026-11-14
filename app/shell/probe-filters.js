@@ -23,7 +23,6 @@
 //                     the radiogroups' aria-labels
 //   wf:collapse       a group's head collapses / expands it, remembered over a reload
 //   wf:clearAll       Clear all → nothing on, include / exclude [] POSTed, the button disabled
-//   wf:migrate        an old saved filter (type / ageRating / resolution / genres / features) → all includes, once; sort kept
 //   wf:library       the "In my library" row: ✓ = only the owned card, ✕ = all but it, no /browse request for it, never POSTed;
 //                    no download button on the owned card
 //   panel:head        the panel's head: a plain "Filters" title (no button, no pill), Clear all, a close ×; no ghost copy
@@ -470,32 +469,6 @@ app.whenReady().then(async () => {
       if (!b || b.filter.include.length || b.filter.exclude.length) v.push(`the POST after Clear all: ${J(b?.filter)}`);
       return v;
     });
-
-    await cell("wf:migrate", async () => {
-      const v = [];
-      const old = { sort: "toprated", trendDays: 30, type: "Scene", ageRating: "Everyone", resolution: "1920 x 1080", genres: ["Anime", "Nature"], features: ["HDR"] };
-      await loadUi(`localStorage.setItem("liascape.browseFilter", ${J(J(old))}); true`);
-      await toWorkshop();
-      const want = ["Scene", "Everyone", "1920 x 1080", "Anime", "Nature", "HDR"];
-      const r = await page(`return { inc: [...m.qa('.wf-col .wf-row[data-state="inc"]')].map((x) => x.dataset.wfTag),
-        exc: m.qa('.wf-col .wf-row[data-state="exc"]').length, saved: JSON.parse(localStorage.getItem("liascape.browseFilter")), last: m.last(),
-        sort: m.q("[data-sortsplit] .ss-sort .sel-val")?.textContent };`);
-      // HDR sits in Features — collapsed or not, its count says it
-      const visible = want.filter((t) => t !== "HDR" || r.inc.includes("HDR"));
-      for (const t of visible) if (!r.inc.includes(t)) v.push(`${t} isn't included after the migration`);
-      if (r.exc) v.push(`${r.exc} excluded rows after the migration`);
-      if (!r.last || !sameSet(r.last.filter.include, want) || r.last.filter.exclude.length) v.push(`the POST: ${J(r.last?.filter)}`);
-      if (r.last?.filter.sort !== "toprated" || r.last?.filter.trendDays !== 30) v.push(`sort ${r.last?.filter.sort} / ${r.last?.filter.trendDays} not kept`);
-      if (r.sort !== "Top Rated") v.push(`the split's sort shows "${r.sort}"`);
-      if (!r.saved || "genres" in r.saved || "type" in r.saved || !sameSet(r.saved.include ?? [], want)) v.push(`saved after the migration: ${J(r.saved)}`);
-      // once: a reload reads the new shape as it is (an exclude added after the migration stays)
-      await page(`m.seg("Anime", "exc").click(); await m.sleep(500);`);
-      await loadUi(); await toWorkshop();
-      if ((await page(`return m.st("Anime");`)) !== "exc") v.push("after the migration + an edit + a reload Anime isn't excluded (migrated again?)");
-      await page(`m.q("[data-wf-clear]").click(); await m.sleep(500);`);
-      return v;
-    });
-
     await cell("wf:library", async () => {
       // "In my library" (show only / hide what the library already has) + no download button on an owned card
       const v = [];

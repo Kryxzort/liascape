@@ -594,11 +594,15 @@ public static class AppOps
     // backend's own under ~/.cache/liascape (ServerHost.PreviewCacheDir, WallpaperEngineScraper.GifThumbCacheDir,
     // ClipStore.Dir), the player's under $XDG_CACHE_HOME/liascape (else ~/.cache/liascape). A clear deletes only the
     // regular files directly in a category's folder (never a symlink, a subfolder or the folder itself, and never a
-    // folder that is itself a link), so logs, settings, the library, history-*, src, we-ref and anything else beside them
-    // are out of its reach. `Busy` names the files a writer is still making: they are neither counted nor deleted, so a
+    // folder that is itself a link), and `Only` narrows a folder other files share (the logs sit beside settings-free
+    // dev folders: history-*, src, we-ref), so nothing else there is in its reach. `Busy` names the files a writer is still making: they are neither counted nor deleted, so a
     // clear mid-write never breaks the writer (each writes a temporary name and renames it into place). The ids are the
     // UI's (Settings.tsx CACHE_LINES). Guard: scripts/test-cache-clear.sh; probe-settings cache:*
-    public sealed record CacheCategory(string Id, Func<string> Dir, Func<string, bool> Busy);
+    public sealed record CacheCategory(string Id, Func<string> Dir, Func<string, bool> Busy, Func<string, bool>? Only = null);
+    // a log's name: `<name>.log` (being written: emptied in place, its writer appends on) or a rotated `<name>.log.<n>` (deleted)
+    private static bool IsLog(string f) { var n = Path.GetFileName(f); int i = n.LastIndexOf(".log", StringComparison.Ordinal);
+        return i > 0 && (i + 4 == n.Length || (n[i + 4] == '.' && n.Length > i + 5 && n[(i + 5)..].All(char.IsAsciiDigit))); }
+    private static bool IsCurrentLog(string f) => f.EndsWith(".log", StringComparison.Ordinal);
     private static string HomeCache => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape");
     private static string PlayerCache => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } x ? x
@@ -620,9 +624,10 @@ public static class AppOps
         // the LWE core's shader text work (`<hash>.<kind>`, written as `….<pid>.<n>.tmp`): a missing entry is a miss that
         // redoes the work (docs/player/modules/scene-lwe-core.md § Shader cache)
         new("shaders", () => Path.Combine(PlayerCache, "lwe-shaders"), f => f.EndsWith(".tmp", StringComparison.Ordinal)),
+        // the app's debug logs, directly in ~/.cache/liascape: every writer appends (the player's serve log too:
+        // LiascapePlayerClient.Spawn), so a current log is emptied in place and its writer carries on at the new end
+        new("logs", () => HomeCache, _ => false, IsLog),
     ];
-    // what an id-less clear (an older page's single "Clear Cache" row) and the top-level size of `GET /cache/size` cover
-    public static readonly string[] LegacyCacheIds = ["thumbs", "we-thumbs"];
     public static CacheCategory? CacheCategoryOf(string id) => Array.Find(CacheCategories, c => c.Id == id);
 
     // the files a clear of `c` would delete now: regular files directly in its folder, not busy. A clip item's `.src` (its
@@ -633,7 +638,7 @@ public static class AppOps
         try { if (!d.Exists || d.LinkTarget != null) return []; } catch { return []; }
         FileInfo[] all;
         try { all = d.GetFiles(); } catch { return []; }
-        var files = all.Where(f => (f.Attributes & FileAttributes.ReparsePoint) == 0 && !c.Busy(f.FullName)).ToList();
+        var files = all.Where(f => (f.Attributes & FileAttributes.ReparsePoint) == 0 && !c.Busy(f.FullName) && (c.Only?.Invoke(f.FullName) ?? true)).ToList();
         if (c.Id == "clips")
         {
             var encoding = all.Where(f => c.Busy(f.FullName)).Select(f => f.Name.Split('_')[0]).ToHashSet();
@@ -661,7 +666,15 @@ public static class AppOps
             {
                 long freed = 0; int count = 0;
                 foreach (var f in CacheFiles(c))
-                    try { long n = f.Length; f.Delete(); freed += n; count++; } catch { }
+                    try
+                    {
+                        long n = f.Length;
+                        if (c.Id == "logs" && IsCurrentLog(f.FullName))
+                            using (var s = new FileStream(f.FullName, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) s.SetLength(0);
+                        else f.Delete();
+                        freed += n; count++;
+                    }
+                    catch { }
                 return new CacheCleared(c.Id, freed, count, SizeOf(c).Bytes);
             }).ToList();
     }

@@ -171,20 +171,23 @@ const cell = async (name, fn) => {
 // the cache fixtures: in the stack's own HOME (the backend sizes and clears ~/.cache/liascape/<dir>; the stack's
 // XDG_CACHE_HOME is ~/.cache, so the player's caches sit there too). No lwe-shaders: its line must read "Empty".
 const CACHE = path.join(E.HOME, ".cache", "liascape");
-const CACHE_DIRS = { thumbs: "workshop_previews", "we-thumbs": "we_thumbs", clips: "video_clips", "scene-loudness": "scene-loudness", "media-art": "media-art", shaders: "lwe-shaders" };
+const CACHE_DIRS = { thumbs: "workshop_previews", "we-thumbs": "we_thumbs", clips: "video_clips", "scene-loudness": "scene-loudness", "media-art": "media-art", shaders: "lwe-shaders", logs: "" };
 const CACHE_LABEL = { thumbs: "Card stills and GIF previews", "we-thumbs": "Workshop folder thumbnails", clips: "Video preview clips",
-  "scene-loudness": "Scene sound measurements", "media-art": "Album art", shaders: "Scene shader cache" };
+  "scene-loudness": "Scene sound measurements", "media-art": "Album art", shaders: "Scene shader cache", logs: "Logs" };
 const FIX = [["thumbs", "probe-still.jpg", 16 << 20], ["thumbs", "probe-anim.gif", 8 << 20], ["we-thumbs", "probe-we.jpg", 3 << 20],
-  ["clips", "probe-clip.mp4", 12 << 20], ["scene-loudness", "00000000000000aa.json", 2 << 20], ["media-art", "00000000000000cc", 5 << 20]];
+  ["clips", "probe-clip.mp4", 12 << 20], ["scene-loudness", "00000000000000aa.json", 2 << 20], ["media-art", "00000000000000cc", 5 << 20],
+  ["logs", "probe.log", 1 << 20], ["logs", "probe.log.1", 1 << 20]];
 // beside the caches: never cleared
-const BYSTANDERS = ["probe-bystander.log", "history-probe/h.json", "src/probe.c", "we-ref/probe.txt"];
+const BYSTANDERS = ["probe-bystander.txt", "history-probe/h.json", "src/probe.c", "we-ref/probe.txt"];
 function writeFixtures() {
   for (const [id, n, size] of FIX) { const d = path.join(CACHE, CACHE_DIRS[id]); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, n), Buffer.alloc(size, 7)); }
   for (const f of BYSTANDERS) { fs.mkdirSync(path.dirname(path.join(CACHE, f)), { recursive: true }); fs.writeFileSync(path.join(CACHE, f), "keep"); }
 }
 // what a clear of `id` would free now: the regular files directly in its folder, no writer's temporaries (AppOps.CacheFiles)
 const BUSY = /\.(tmp\d*|part)$|\.tmp\.jpg$|\.src\.gif$/;
-const dirBytes = (id) => { const d = path.join(CACHE, CACHE_DIRS[id]); try { return fs.readdirSync(d, { withFileTypes: true }).filter((x) => x.isFile() && !BUSY.test(x.name)).reduce((s, x) => s + fs.statSync(path.join(d, x.name)).size, 0); } catch { return 0; } };
+// the logs sit in the cache's root: only `*.log` / `*.log.<n>` count (AppOps IsLog)
+const LOG_RE = /\.log(\.\d+)?$/;
+const dirBytes = (id) => { const d = path.join(CACHE, CACHE_DIRS[id]); try { return fs.readdirSync(d, { withFileTypes: true }).filter((x) => x.isFile() && !BUSY.test(x.name) && (id !== "logs" || LOG_RE.test(x.name))).reduce((s, x) => s + fs.statSync(path.join(d, x.name)).size, 0); } catch { return 0; } };
 // Settings.tsx fmtBytes / sizeText
 const fmtBytes = (b) => b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} GB` : b >= 2 ** 20 ? `${Math.round(b / 2 ** 20)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
 const sizeText = (b) => (b > 0 ? fmtBytes(b) : "Empty");
@@ -407,6 +410,8 @@ app.whenReady().then(async () => {
       const api = (await http("GET", "/cache/size")).json;
       for (const id of ids) {
         const want = dirBytes(id), shown = await shownSize(id);
+        // the stack's own logs grow while the cell runs: the logs line only has to read a size, and /cache/size list it
+        if (id === "logs") { if (!/^(\d+(\.\d)? (KB|MB|GB)|Empty)$/.test(shown ?? "")) v.push(`logs: the size reads ${J(shown)}`); if (!api?.categories?.some((c) => c.id === "logs")) v.push("/cache/size has no logs"); continue; }
         if (shown !== sizeText(want)) v.push(`${id}: the size reads ${J(shown)}, want ${J(sizeText(want))} (${CACHE_DIRS[id]})`);
         const a = api?.categories?.find((c) => c.id === id);
         if (a?.bytes !== want) v.push(`/cache/size ${id}: ${J(a)}, want bytes ${want}`);
@@ -442,7 +447,7 @@ app.whenReady().then(async () => {
           await load();
           const noMotion = await js(`return document.documentElement.classList.contains("no-motion")`);
           if (noMotion !== (mode !== "on")) return [`:root.no-motion is ${noMotion} under motion ${mode} — proved nothing`];
-          const pick = ["thumbs", "clips", "media-art"], keep = ["we-thumbs", "scene-loudness"];
+          const pick = ["thumbs", "clips", "media-art"], keep = ["we-thumbs", "scene-loudness", "logs"];
           await setTicks(pick);
           const before = Object.fromEntries(Object.keys(CACHE_DIRS).map((id) => [id, dirBytes(id)]));
           for (const id of pick) if (!before[id]) return [`${id} holds nothing before the clear — proved nothing`];
@@ -455,7 +460,7 @@ app.whenReady().then(async () => {
           const fr = await samp;
           // the files
           for (const [id, n] of FIX) {
-            const there = fs.existsSync(path.join(CACHE, CACHE_DIRS[id], n));
+            const f = path.join(CACHE, CACHE_DIRS[id], n), there = fs.existsSync(f) && (id !== "logs" || fs.statSync(f).size > 0); // a cleared current log stays, emptied
             if (pick.includes(id) && there) v.push(`${CACHE_DIRS[id]}/${n} survived the clear`);
             if (keep.includes(id) && !there) v.push(`${CACHE_DIRS[id]}/${n} was deleted though ${id} wasn't ticked`);
           }

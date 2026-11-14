@@ -1379,7 +1379,7 @@ public static class PlayerHelper
 
     // the play time loaded from timed_state: + the time since it was saved unless paused (never negative)
     public static long PlayedAfterLoad(long savedPlayedMs, long savedAtMs, bool paused, long nowMs) =>
-        Math.Max(0, savedPlayedMs) + (paused || savedAtMs <= 0 ? 0 : Math.Max(0, nowMs - savedAtMs));
+        Math.Max(0, savedPlayedMs) + (paused ? 0 : Math.Max(0, nowMs - savedAtMs));
 
     // liascape-player DoVideoEndWait, before it requests the aligned switch: wait while A's current loop doesn't reach the
     // minimum. True = request it now; false = this wait was cancelled. Polls A's remaining time ≤ 1 s apart and right

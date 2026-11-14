@@ -30,9 +30,9 @@
 #     and Unsubscribe without deleting (POST /workshop/unsubscribe-keep: the local/<id> link becomes the library's own copy at
 #     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing).
 #  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
-#     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), the migration of an
-#     older settings.json (and a failed store leaving it untouched), sign-out, and the keyring path against a STUB secret-tool
-#     (the value on stdin, never argv; a refused lookup → signed out, not asked again); § 2 the migration in a running backend.
+#     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), sign-out, and the
+#     keyring path against a STUB secret-tool (the value on stdin, never argv; a refused lookup → signed out, not asked
+#     again); § 2 a token in the running backend's store is read, never shown.
 #  4. The selftest again against a PRIVATE Secret Service: dbus-run-session + gnome-keyring-daemon in the test's HOME /
 #     XDG_RUNTIME_DIR (skipped when either is missing). The session's bus and keyring are never reached (DBUS_SESSION_BUS_ADDRESS
 #     is a dead path everywhere else).
@@ -165,27 +165,22 @@ async function viaSteam(id, why, label) {
 }
 
 await viaSteam("700000001", "Not signed in", "no sign-in");
-// a sign-in Steam turned down (the flag the cookie mint sets): no request to Steam, straight to the app — written the way
-// an OLDER build wrote it (the token in settings.json, temp + rename), the settings themselves never printed: the running
-// backend moves it into its secret store (no keyring here → steam-auth.json, 0600) and out of settings.json
+// a sign-in Steam turned down (the flag the cookie mint sets): no request to Steam, straight to the app. The token sits in the
+// secret store's file fallback (no Secret Service here: steam-auth.json, 0600), the flag in settings.json (never printed)
 const sf = `${process.env.XDG_CONFIG_HOME}/liascape/settings.json`;
-const s = JSON.parse(fs.readFileSync(sf, "utf8"));
+const af = `${process.env.XDG_CONFIG_HOME}/liascape/steam-auth.json`;
 const fakeJwt = "e30." + Buffer.from(JSON.stringify({ sub: "76561190000000001", exp: Math.floor(Date.now() / 1000) + 9e6 })).toString("base64url") + ".c2ln";
-Object.assign(s, { SteamRefreshToken: fakeJwt, SteamId: 76561190000000001, SteamAccountName: "fake", SteamSignInRejected: true });
+fs.writeFileSync(af, JSON.stringify({ "steam-refresh-token": fakeJwt }), { mode: 0o600 });
+const s = JSON.parse(fs.readFileSync(sf, "utf8"));
+Object.assign(s, { SteamId: 76561190000000001, SteamAccountName: "fake", SteamSignInRejected: true });
 fs.writeFileSync(sf + ".t", JSON.stringify(s)); fs.renameSync(sf + ".t", sf);
 const st = await (await fetch(U + "/steam/status")).json();
 out(st.signedIn && st.rejected, "/steam/status: signedIn + rejected");
-const af = `${process.env.XDG_CONFIG_HOME}/liascape/steam-auth.json`;
-const sNow = fs.readFileSync(sf, "utf8");
-out(!sNow.includes(fakeJwt) && !sNow.includes("SteamRefreshToken") && JSON.parse(sNow).SteamSignInRejected === true,
-  "migration in a running backend: settings.json lost the token (the rest kept)");
-out(fs.existsSync(af) && (fs.statSync(af).mode & 0o777) === 0o600 && fs.readFileSync(af, "utf8").includes(fakeJwt),
-  "migration: the token is in steam-auth.json, 0600 (no Secret Service here)");
+out(!fs.readFileSync(sf, "utf8").includes(fakeJwt), "settings.json never holds the token");
 const gs = await (await fetch(U + "/settings")).text();
 out(!gs.includes(fakeJwt), "GET /settings carries no token");
 const bl = fs.readFileSync(`${T}/backend.log`, "utf8");
-out(bl.includes("secrets: file fallback") && bl.includes("secrets: moved the Steam sign-in out of settings.json") && !bl.includes(fakeJwt),
-  "backend log: says which store + the move, never the token");
+out(bl.includes("secrets: file fallback") && !bl.includes(fakeJwt), "backend log: says which store, never the token");
 await viaSteam("700000002", "Steam signed this app out", "sign-in rejected");
 
 // already on disk, no usable sign-in: nothing to click

@@ -70,8 +70,6 @@ public static class ServerHost
             !string.IsNullOrEmpty(uiDir) && Directory.Exists(uiDir) ? new(Path.GetFullPath(uiDir)) : null;
         ApiSecurity.InitToken();
         ApiSecurity.InitOrigins(servesUi: uiFiles != null);
-        // an older settings.json's Steam secrets → the keyring / steam-auth.json (off the startup path: a keyring may prompt)
-        _ = Task.Run(() => { try { SecretStore.MigrateNow(); } catch (Exception e) { Console.WriteLine($"secrets: migration failed ({e.GetType().Name})"); } });
         app.Use((ctx, next) => ApiSecurity.Guard(ctx, () => next(ctx), uiFiles));
         // An endpoint that THROWS must still answer as itself (else the UI shows only "Failed to fetch"). Unhandled, Kestrel
         // answers a bare 500 with the response's headers reset — CORS's
@@ -360,7 +358,7 @@ public static class ServerHost
 
         // ---- settings / themes ------------------------------------------------------------
         // the Steam sign-in's secrets never leave the backend (the UI needs none of them: /steam/status says what it shows)
-        app.MapGet("/settings", () => Results.Json(SettingsService.Redacted(SettingsService.Load())));
+        app.MapGet("/settings", () => Results.Json(SettingsService.Load()));
         app.MapGet("/monitors", async () => Results.Json(await MonitorDetector.DetectAsync()));
 
         // DIAGNOSTIC: the renderer posts a heartbeat (+ long-task events) here; appended to a capped log
@@ -387,17 +385,14 @@ public static class ServerHost
             return Results.Ok();
         });
         // the caches Settings → Housekeeping can clear (AppOps.CacheCategories): each one's size, and a clear of the ones named
-        // ({ids: [...]} → what each freed and still holds; an unknown or no id → 400, nothing deleted). An id-less body is an
-        // older page's single row: the thumbnail categories (AppOps.LegacyCacheIds), answered with its totals too.
+        // ({ids: [...]} → what each freed and still holds; an unknown or no id → 400, nothing deleted).
         app.MapGet("/cache/size", () =>
         {
-            var cats = AppOps.CacheCategories.Select(AppOps.SizeOf).ToList();
-            var legacy = cats.Where(c => AppOps.LegacyCacheIds.Contains(c.Id)).ToList();
-            return Results.Json(new { categories = cats, bytes = legacy.Sum(c => c.Bytes), count = legacy.Sum(c => c.Count) });
+            return Results.Json(new { categories = AppOps.CacheCategories.Select(AppOps.SizeOf).ToList() });
         });
         app.MapPost("/cache/clear", (CacheClearReq? r) =>
         {
-            var ids = r?.Ids ?? AppOps.LegacyCacheIds.ToList();
+            var ids = r?.Ids ?? [];
             if (ids.Count == 0) return Results.Json(new { error = "ids: name at least one cache" }, statusCode: 400);
             var unknown = ids.Where(id => AppOps.CacheCategoryOf(id) == null).ToList();
             if (unknown.Count > 0) return Results.Json(new { error = $"unknown cache: {string.Join(", ", unknown)}" }, statusCode: 400);

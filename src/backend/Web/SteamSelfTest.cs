@@ -254,39 +254,25 @@ public static class SteamSelfTest
         else Check(!Text(SecretStore.FallbackPath).Contains(token), $"{label}: the token is in the keyring, not the file fallback");
     }
 
-    // settings.json written the way an older build left it (temp + rename, like SettingsService)
-    private static void WriteSettingsRaw(string json)
-    {
-        File.WriteAllText(SettingsFile + ".t", json);
-        File.Move(SettingsFile + ".t", SettingsFile, overwrite: true);
-    }
-
     private static async Task SecretTests()
     {
         string home = Environment.GetEnvironmentVariable("HOME")!;
         const string Rt = "FAKE-RT-eyJzdWIiOiI3NjU2MTE5MDAwMDAwMDAwMSJ9", At = "FAKE-AT-76561190000000001%7C%7Cabc", Ls = "FAKE-LS-pasted-cookie";
         SecretValues.AddRange([Rt, At, Ls]);
-        string Seeded(int volume) => $"{{\"Volume\":{volume},\"SteamId\":76561190000000001,\"SteamAccountName\":\"migrated\","
-            + $"\"SteamRefreshToken\":\"{Rt}\",\"SteamAccessToken\":\"{At}\",\"SteamLoginSecure\":\"{Ls}\"}}";
         bool NoneIn(string text) => !text.Contains(Rt) && !text.Contains(At) && !text.Contains(Ls);
 
-        // migration: an older settings.json's secrets move into the store, then leave settings.json; the rest stays
+        // stored: the three secrets live in the store, never in settings.json or GET /settings
         SteamOps.SignOut();
-        WriteSettingsRaw(Seeded(37));
-        await Task.Delay(20);
+        SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamAccountName = "stored"; });
+        SecretStore.Set(SecretStore.RefreshToken, Rt); SecretStore.Set(SecretStore.AccessToken, At); SecretStore.Set(SecretStore.LoginSecure, Ls);
         Check(SecretStore.Get(SecretStore.RefreshToken) == Rt && SecretStore.Get(SecretStore.AccessToken) == At && SecretStore.Get(SecretStore.LoginSecure) == Ls,
-            "migration: the three secrets from settings.json are in the store");
-        var st = Text(SettingsFile);
-        var s = SettingsService.Load();
-        Check(NoneIn(st) && !st.Contains("SteamRefreshToken") && !st.Contains("SteamLoginSecure"), "migration: settings.json no longer holds them (nor their keys)");
-        Check(s.Volume == 37 && s.SteamAccountName == "migrated" && s.SteamId == 76561190000000001, "migration: the other settings are untouched");
-        Check(SteamAuthService.HasRefreshToken() && SteamOps.Status().ToString()!.Contains("signedIn = True"), "migration: /steam/status says signed in");
+            "stored: the three secrets read back from the store");
+        Check(NoneIn(Text(SettingsFile)), "stored: settings.json holds none of them");
+        Check(SteamAuthService.HasRefreshToken() && SteamOps.Status().ToString()!.Contains("signedIn = True"), "stored: /steam/status says signed in");
         if (ExpectBackend == "file")
-            Check(Text(SecretStore.FallbackPath).Contains(Rt), "migration: …into the file fallback");
-        SecretStore.MigrateNow();
-        Check(SecretStore.Get(SecretStore.RefreshToken) == Rt, "migration: idempotent (a second pass changes nothing)");
-        var api = System.Text.Json.JsonSerializer.Serialize(SettingsService.Redacted(SettingsService.Load()));
-        Check(NoneIn(api), "GET /settings (Redacted) carries none of them");
+            Check(Text(SecretStore.FallbackPath).Contains(Rt), "stored: …in the file fallback");
+        var api = System.Text.Json.JsonSerializer.Serialize(SettingsService.Load());
+        Check(NoneIn(api), "GET /settings carries none of them");
 
         // sign-out removes them from the store (the cache too: a fresh process view)
         SteamOps.SignOut();
@@ -295,20 +281,6 @@ public static class SteamSelfTest
             "sign-out: every secret is gone from the store");
         Check(NoneIn(Text(SecretStore.FallbackPath)) && NoneIn(Text(SettingsFile)), "sign-out: none left in the file fallback or settings.json");
         Check(!SteamAuthService.HasUsableSignIn(SettingsService.Load()), "sign-out: no usable sign-in");
-
-        if (ExpectBackend == "file")
-        {
-            // a store that fails leaves settings.json untouched (the fallback path is a directory here → its write fails)
-            Directory.CreateDirectory(SecretStore.FallbackPath);
-            WriteSettingsRaw(Seeded(38));
-            SecretStore.ResetForTest();
-            Check(SecretStore.Get(SecretStore.RefreshToken) == null, "failed store: reads as signed out, no crash");
-            Check(Text(SettingsFile).Contains(Rt) && Text(SettingsFile).Contains(Ls), "failed store: settings.json keeps the secrets (nothing lost)");
-            Directory.Delete(SecretStore.FallbackPath);
-            SecretStore.MigrateNow();
-            Check(SecretStore.Get(SecretStore.RefreshToken) == Rt && NoneIn(Text(SettingsFile)), "failed store: the next pass moves them");
-            SteamOps.SignOut();
-        }
 
         StubKeyringTests(home);
         SecretStore.ResetForTest();

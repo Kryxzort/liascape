@@ -6,9 +6,10 @@
 #  refuse: an unknown id (alone or beside a known one), an empty list or a wrong body → 400 and nothing deleted; no token → 401
 #  clear:  {ids} deletes exactly those categories' clearable files and answers what each freed and still holds; every other
 #          category, the temporaries, symlinks (and what they point at), subfolders, a clip item's `.src` while one of its
-#          clips is still encoding, and everything beside the caches (logs, history-*, src, we-ref, settings, the library)
-#          stay byte for byte
-#  legacy: an id-less clear (an older page's single row) clears the two thumbnail categories, with its old totals
+#          clips is still encoding, and everything beside the caches (history-*, src, we-ref, settings, the library)
+#          stay byte for byte; an id-less body is a 400 like an empty list
+#  logs:   the logs category empties a current `*.log` in place (a writer appending to it carries on at the new end) and
+#          deletes a rotated `*.log.<n>`; nothing else in the cache root is touched
 #  link:   a category folder that is itself a symlink is never followed: size 0, nothing deleted behind it
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
 # Never touches ~/.cache/liascape, ~/.config/liascape or the real library; everything it started is stopped on exit.
@@ -81,6 +82,7 @@ links() { ln -s "$OUT/target.bin" "${DIR[$1]}/link.jpg"; mk "${DIR[$1]}/sub/inne
 for c in "${!DIR[@]}"; do [ "$c" = clips ] || links "$c"; done
 for f in "$BC/liascape-player-serve.log" "$BC/freeze.log" "$BC/history-backup/h.json" "$BC/src/x.c" "$BC/we-ref/r.txt" \
   "$BC/playlist.txt" "$PC/steam-cooldown.json" "$PC/other/o.bin" "$H/.local/share/liascape/library/imported/v/v.mp4"; do mk "$f" 2222; KEEP+=("$f"); done
+mk "$BC/freeze.log.1" 3333; KEEP+=("$BC/freeze.log.1")   # a rotated log: kept until the logs category is cleared
 KEEP+=("$OUT/target.bin")
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"legacy","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}
@@ -124,16 +126,15 @@ cat_size() { echo "$1" | jq -r --arg c "$2" '.categories[]? | select(.id == $c) 
 
 echo "== size: every category's clearable bytes, each under its writer's root"
 S=$(sizes)
-check "/cache/size lists the six categories" "$(echo "$S" | jq -c '[.categories[]?.id] | sort')" '["clips","media-art","scene-loudness","shaders","thumbs","we-thumbs"]'
+check "/cache/size lists the seven categories" "$(echo "$S" | jq -c '[.categories[]?.id] | sort')" '["clips","logs","media-art","scene-loudness","shaders","thumbs","we-thumbs"]'
 for c in $ALL; do check "…$c: ${W0[$c]% *} bytes in ${W0[$c]#* } files (no temporaries, links or subfolders)" "$(cat_size "$S" "$c")" "${W0[$c]}"; done
-check "…the top-level totals are the two thumbnail categories (an older page's row)" "$(echo "$S" | jq -c '[.bytes, .count]')" \
-  "[$(( ${W0[thumbs]% *} + ${W0[we-thumbs]% *} )),$(( ${W0[thumbs]#* } + ${W0[we-thumbs]#* } ))]"
 
 echo "== refuse: bad requests delete nothing"
-check "an unknown id → 400" "$(postc /cache/clear '{"ids":["logs"]}')" 400
-check "…the answer names it" "$(jq -r .error "$T/body")" "unknown cache: logs"
+check "an unknown id → 400" "$(postc /cache/clear '{"ids":["nope"]}')" 400
+check "…the answer names it" "$(jq -r .error "$T/body")" "unknown cache: nope"
 check "an unknown id beside a known one → 400" "$(postc /cache/clear '{"ids":["thumbs","../../.config"]}')" 400
 check "an empty list → 400" "$(postc /cache/clear '{"ids":[]}')" 400
+check "no ids at all → 400" "$(api -o /dev/null -w '%{http_code}' -X POST "$U/cache/clear")" 400
 check "a list of the wrong type → 400" "$(postc /cache/clear '{"ids":"thumbs"}')" 400
 check "no token → 401" "$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' "$U/cache/clear" -d '{"ids":["thumbs"]}')" 401
 check "a foreign Origin → 403" "$(api -o /dev/null -w '%{http_code}' -X POST -H 'Origin: http://evil.example' "$U/cache/clear" -d '{"ids":["thumbs"]}')" 403
@@ -152,12 +153,18 @@ check "…temporaries, links, subfolders, the encoding clip's .src and everythin
 S=$(sizes)
 check "/cache/size now reads clips and scene-loudness empty" "$(cat_size "$S" clips) / $(cat_size "$S" scene-loudness)" "0 0 / 0 0"
 
-echo "== legacy: an id-less clear is the old row's"
-check "POST /cache/clear without a body → 200" "$(api -o "$T/body" -w '%{http_code}' -X POST "$U/cache/clear")" 200
-check "…its old totals: the two thumbnail categories" "$(jq -c '[.freedBytes, .count]' "$T/body")" \
-  "[$(( ${W0[thumbs]% *} + ${W0[we-thumbs]% *} )),$(( ${W0[thumbs]#* } + ${W0[we-thumbs]#* } ))]"
-check "…thumbs and we-thumbs gone, media-art and shaders kept" "$(present thumbs) $(present we-thumbs) $(present media-art) $(present shaders)" "0 0 1 2"
-check "…nothing else touched" "$(sums)" "$KEEPSUM"
+echo "== logs: current logs emptied in place, rotated ones deleted"
+L="$BC/liascape-player-serve.log"
+exec 3>>"$L"; printf 'before\n' >&3          # a writer appending, like the player's serve log
+KEEPNOLOG=(); for f in "${KEEP[@]}"; do case "$f" in *.log|*.log.[0-9]*) ;; *) KEEPNOLOG+=("$f") ;; esac; done
+sumsnl() { for f in "${KEEPNOLOG[@]}"; do if [ -L "$f" ]; then printf 'L %s %s\n' "$f" "$(readlink "$f")"; else sha256sum "$f" 2>/dev/null || echo "MISSING $f"; fi; done; }
+NL0=$(sumsnl)
+check "{ids: [logs]} → 200" "$(postc /cache/clear '{"ids":["logs"]}')" 200
+check "…the current logs are still there, empty" "$(stat -c %s "$L" "$BC/freeze.log" | tr '\n' ' ')" "0 0 "
+check "…the rotated log is gone" "$([ -e "$BC/freeze.log.1" ] && echo there || echo gone)" gone
+printf 'after\n' >&3; exec 3>&-
+check "…the writer carries on at the new end (no hole)" "$(cat "$L")" "after"
+check "…nothing else in the cache root or beside it touched" "$(sumsnl)" "$NL0"
 
 echo "== link: a category folder that is a symlink is never followed"
 mkdir -p "$OUT/art"; mk "$OUT/art/precious.bin" 4321; PS=$(sha256sum "$OUT/art/precious.bin")

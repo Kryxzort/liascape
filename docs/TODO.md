@@ -44,6 +44,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
        time, nudge:engine finds no nudge row right after switching to legacy, cache:clear:reduced starts on an already
        emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.
+58. [ ] probe-filters `lib:interplay`: hiding one Library card re-renders 61 components (budget 60; 30 lucide icons, 5
+       filter groups among them). It failed the same before the 2026-11-14 UI batch: find what re-renders without
+       need (the filter column's groups re-render on a card hide) and bring it back under the budget.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the

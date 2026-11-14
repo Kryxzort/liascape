@@ -27,33 +27,23 @@ const LS = {
   set(k: string, v: unknown) { try { localStorage.setItem("liascape." + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
 
-// the saved Workshop filter: include / exclude tag sets (the filter column). An older saved filter's one-of picks (type /
-// ageRating / resolution, the genre / feature chips) all become includes, once (the
-// migrated filter is written back). Anything malformed -> the default.
+// the saved Workshop filter: include / exclude tag sets (the filter column). Anything malformed -> the default.
 export type TagState = "inc" | "exc" | null;
 // The filter column's three homes, each with its own filter (saved under its own key): the Workshop's goes to the backend,
 // the local Wallpaper Engine folder's and the Library's filter what the page already holds (workshopFilter.ts localMatcher)
 export type FilterScope = "workshop" | "weLocal" | "library";
 export const FILTER_KEY: Record<FilterScope, string> = { workshop: "browseFilter", weLocal: "weLocalFilter", library: "libFilter" };
-type OldFilter = Partial<WorkshopFilter> & { type?: string; ageRating?: string; resolution?: string; genres?: string[]; features?: string[] };
 export function loadBrowseFilter(key = FILTER_KEY.workshop): WorkshopFilter {
-  const raw = LS.get<OldFilter | null>(key, null);
+  const raw = LS.get<Partial<WorkshopFilter> | null>(key, null);
   if (!raw || typeof raw !== "object") return { ...DEFAULT_FILTER };
   const strs = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === "string" && x !== "") : []);
   const sort = typeof raw.sort === "string" && raw.sort ? raw.sort : DEFAULT_FILTER.sort;
   const trendDays = typeof raw.trendDays === "number" && raw.trendDays > 0 ? raw.trendDays : DEFAULT_FILTER.trendDays;
   const featureMatch = raw.featureMatch === "any" ? "any" : "all";
   const genreMatch = raw.genreMatch === "all" ? "all" : "any";
-  if (Array.isArray(raw.include) || Array.isArray(raw.exclude)) {
-    const include = [...new Set(strs(raw.include))];
-    const exclude = [...new Set(strs(raw.exclude))].filter((t) => !include.includes(t)); // include XOR exclude
-    return { sort, trendDays, include, exclude, featureMatch, genreMatch };
-  }
-  const include = [...new Set([raw.type, raw.ageRating, raw.resolution, ...strs(raw.genres), ...strs(raw.features)]
-    .filter((x): x is string => typeof x === "string" && x !== ""))];
-  const f: WorkshopFilter = { sort, trendDays, include, exclude: [], featureMatch, genreMatch };
-  LS.set(key, f);
-  return f;
+  const include = [...new Set(strs(raw.include))];
+  const exclude = [...new Set(strs(raw.exclude))].filter((t) => !include.includes(t)); // include XOR exclude
+  return { sort, trendDays, include, exclude, featureMatch, genreMatch };
 }
 export const filterOf = (s: State, scope: FilterScope) => scope === "library" ? s.libFilter : scope === "weLocal" ? s.weFilter : s.browseFilter;
 

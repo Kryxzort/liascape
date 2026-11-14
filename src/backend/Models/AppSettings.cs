@@ -186,14 +186,6 @@ public class AppSettings
     // The Steam sign-in's SECRETS (refresh token, cached web cookie, pasted steamLoginSecure) live in Helpers/SecretStore.cs —
     // the system keyring, else ~/.config/liascape/steam-auth.json (docs/decisions.md § "Keep Steam tokens in the system
     // keyring, a 0600 file as fallback").
-    // These three only read an older settings.json (same JSON keys); SecretStore moves their values out and nulls them,
-    // and a null is never written. Nothing else reads them.
-    [JsonPropertyName("SteamRefreshToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacySteamRefreshToken { get; set; }
-    [JsonPropertyName("SteamAccessToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacySteamAccessToken { get; set; }
-    [JsonPropertyName("SteamLoginSecure"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacySteamLoginSecure { get; set; }
     public ulong SteamId { get; set; } = 0;
     public string SteamAccountName { get; set; } = "";
     // Steam refused the stored refresh token (finalizelogin AccessDenied — signed out on Steam's side: a password change, "sign

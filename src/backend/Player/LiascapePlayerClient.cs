@@ -797,11 +797,14 @@ public sealed class LiascapePlayerClient
     {
         var outLog = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "liascape", "liascape-player-serve.log");
         Directory.CreateDirectory(Path.GetDirectoryName(outLog)!);
+        // one log per run (the previous one kept as .1), appended to: a clear of the logs (Settings, AppOps "logs") empties
+        // it in place and the player writes on at the new end
+        try { if (File.Exists(outLog)) File.Move(outLog, outLog + ".1", true); } catch { }
         var psi = new ProcessStartInfo("setsid") { UseShellExecute = false };
         foreach (var a in UserScope.Prefix("liascape-player", Log)) psi.ArgumentList.Add(a);
         psi.ArgumentList.Add("sh");
         psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >\"$LIASCAPE_SERVE_LOG\" 2>&1");
+        psi.ArgumentList.Add("exec \"$0\" \"$@\" </dev/null >>\"$LIASCAPE_SERVE_LOG\" 2>&1");
         psi.ArgumentList.Add(bin);
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["LIASCAPE_SERVE_LOG"] = outLog;

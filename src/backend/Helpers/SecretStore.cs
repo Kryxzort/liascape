@@ -17,8 +17,6 @@ namespace Liascape.Helpers;
 //    under its own flock. Never settings.json.
 //  - A lookup that fails / is denied (a dismissed unlock prompt) reads as absent (signed out) and the keyring is left alone for
 //    10 min, so a locked keyring never prompts in a loop; a store that fails falls back to the file.
-//  - Migration: an older settings.json still holding them (AppSettings.Legacy*) → moved here, then nulled there (a field-level
-//    SettingsService.Update); a failed store leaves settings.json untouched. Re-checked whenever settings.json changes.
 // Never logs a value. `LIASCAPE_SECRETS=file` forces the fallback.
 public static class SecretStore
 {
@@ -35,7 +33,6 @@ public static class SecretStore
     private static string? _tool;
     private static DateTime _keyringQuietUntil;
     private static readonly Dictionary<string, (string? Value, DateTime Until)> Cache = new();
-    private static (DateTime, long) _settingsSeen;
     private static readonly object Gate = new();
 
     // "keyring" | "file" — which one this process uses (detected on first use)
@@ -45,7 +42,6 @@ public static class SecretStore
     {
         lock (Gate)
         {
-            MigrateIfNeeded();
             if (Detect() == Kind.Keyring && DateTime.UtcNow >= _keyringQuietUntil)
             {
                 if (Cache.TryGetValue(name, out var c) && DateTime.UtcNow < c.Until) return c.Value;
@@ -74,21 +70,18 @@ public static class SecretStore
     {
         lock (Gate)
         {
-            MigrateIfNeeded();
             return SetInner(name, value);
         }
     }
 
-    public static void Delete(string name) { lock (Gate) { MigrateIfNeeded(); DeleteInner(name); } }
+    public static void Delete(string name) { lock (Gate) DeleteInner(name); }
 
     // every secret (sign-out)
-    public static void Clear() { lock (Gate) { MigrateIfNeeded(); foreach (var n in Names) DeleteInner(n); } }
+    public static void Clear() { lock (Gate) { foreach (var n in Names) DeleteInner(n); } }
 
-    // serve's startup: an older settings.json is cleaned even when nothing asks for a secret
-    public static void MigrateNow() { lock (Gate) MigrateIfNeeded(); }
 
-    // the self-test: forget the detection, the cache and the migration mark (a new environment / file under test)
-    internal static void ResetForTest() { lock (Gate) { _kind = Kind.Unknown; _tool = null; _keyringQuietUntil = default; Cache.Clear(); _settingsSeen = default; } }
+    // the self-test: forget the detection, and the cache (a new environment under test)
+    internal static void ResetForTest() { lock (Gate) { _kind = Kind.Unknown; _tool = null; _keyringQuietUntil = default; Cache.Clear(); } }
 
     private static bool SetInner(string name, string? value)
     {
@@ -117,40 +110,6 @@ public static class SecretStore
         _keyringQuietUntil = DateTime.UtcNow.AddMinutes(10);
         Cache.Clear();
         Console.WriteLine($"secrets: {why} — signed out as far as this app can tell; not asking the keyring again for 10 min");
-    }
-
-    // ---- migration out of settings.json ----
-
-    private static void MigrateIfNeeded()
-    {
-        var fi = new FileInfo(SettingsService.FilePath);
-        if (!fi.Exists) return;
-        var key = (fi.LastWriteTimeUtc, fi.Length);
-        if (key == _settingsSeen) return;
-        _settingsSeen = key;
-        var s = SettingsService.Load();
-        var found = new List<(string Name, string Value)>();
-        if (!string.IsNullOrEmpty(s.LegacySteamRefreshToken)) found.Add((RefreshToken, s.LegacySteamRefreshToken));
-        if (!string.IsNullOrEmpty(s.LegacySteamAccessToken)) found.Add((AccessToken, s.LegacySteamAccessToken));
-        if (!string.IsNullOrEmpty(s.LegacySteamLoginSecure)) found.Add((LoginSecure, s.LegacySteamLoginSecure));
-        if (found.Count == 0) return;
-        foreach (var (n, v) in found)
-            if (!SetInner(n, v))
-            {
-                Console.WriteLine("secrets: couldn't move the Steam sign-in out of settings.json — left there for now");
-                _settingsSeen = default; // try again next time
-                return;
-            }
-        // only what was moved (a value changed meanwhile by another writer stays for the next pass)
-        string? rt = Find(RefreshToken), at = Find(AccessToken), ls = Find(LoginSecure);
-        SettingsService.Update(x =>
-        {
-            if (rt != null && x.LegacySteamRefreshToken == rt) x.LegacySteamRefreshToken = null;
-            if (at != null && x.LegacySteamAccessToken == at) x.LegacySteamAccessToken = null;
-            if (ls != null && x.LegacySteamLoginSecure == ls) x.LegacySteamLoginSecure = null;
-        });
-        Console.WriteLine($"secrets: moved the Steam sign-in out of settings.json into {(Detect() == Kind.Keyring ? "the Secret Service" : "the file fallback")}");
-        string? Find(string n) => found.FirstOrDefault(f => f.Name == n).Value;
     }
 
     // ---- which backend ----

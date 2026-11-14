@@ -145,7 +145,7 @@ public static class ClipStore
     //                              better clip the library keeps): the stored full one when it is that quality, else a
     //                              SHORT_SECONDS sample made on the request, in seconds; the full clip still queues as above
     //   ?path=&v=               →  that clip's bytes (one capped range per request)
-    //   ?path=                  →  the bytes of the clip a mid-quality 320 px box would get (older pages, curl)
+    //   ?path=&w=&h=[&q=]       →  the bytes of the clip `info` would name
     // Every parameter is checked here; only numbers from these tables reach ffmpeg's arguments.
     public static async Task<IResult> Handle(HttpContext ctx, string? path)
     {
@@ -163,16 +163,12 @@ public static class ClipStore
             return Bytes(ctx.Request, file);
         }
         bool info = qs["info"].FirstOrDefault() == "1";
-        int w = 320, h = 320, q = 1;
-        if (info || qs.ContainsKey("w") || qs.ContainsKey("h") || qs.ContainsKey("q"))
-        {
-            if (!int.TryParse(qs["w"].FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out w)
-                || !int.TryParse(qs["h"].FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out h))
-                return Results.Json(new { error = "w and h: the box in device pixels" }, statusCode: 400);
-            q = ParseQuality(qs["q"].FirstOrDefault());
-            if (q < 0) return Results.Json(new { error = "q: low, mid or high" }, statusCode: 400);
-            w = Math.Clamp(w, 16, 8192); h = Math.Clamp(h, 16, 8192);
-        }
+        if (!int.TryParse(qs["w"].FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out int w)
+            || !int.TryParse(qs["h"].FirstOrDefault(), NumberStyles.None, CultureInfo.InvariantCulture, out int h))
+            return Results.Json(new { error = "w and h: the box in device pixels" }, statusCode: 400);
+        int q = qs["q"].FirstOrDefault() is string qn ? ParseQuality(qn) : 1; // no q: mid
+        if (q < 0) return Results.Json(new { error = "q: low, mid or high" }, statusCode: 400);
+        w = Math.Clamp(w, 16, 8192); h = Math.Clamp(h, 16, 8192);
         var r = await Info(path!, w, h, q, qs["exact"].FirstOrDefault() == "1");
         // q: the quality the named clip was made at (a higher one than asked can serve; a lower one while pending is being raised)
         if (info) return Results.Json(new { v = r.V, full = r.Full, pending = r.Pending, q = r.V == null ? null : QUALITY[r.Q].Name });

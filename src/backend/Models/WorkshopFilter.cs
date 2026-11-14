@@ -6,8 +6,6 @@ namespace Liascape.Models;
 
 // The Workshop Browse filter (POST /browse `filter`). `Include` / `Exclude` are Steam tags; how they combine (OR within a
 // group, AND across groups, the age rule) is Helpers/WorkshopTags' job, so every client gets the same semantics.
-// The single-pick fields (Type, AgeRating, Resolution, Genres, Features) are an older filter bar's: still
-// accepted, and when Include AND Exclude are both empty each value becomes one included tag (Effective).
 public class WorkshopFilter
 {
     public string Sort { get; set; } = "trend";
@@ -25,24 +23,13 @@ public class WorkshopFilter
     public string GenreMatch { get; set; } = "any";
     public bool GenresAll => string.Equals(GenreMatch?.Trim(), "all", StringComparison.OrdinalIgnoreCase);
 
-    // legacy
-    public HashSet<string> Genres { get; set; } = [];
-    public HashSet<string> Features { get; set; } = [];
-    public string Type { get; set; } = "";
-    public string AgeRating { get; set; } = "";
-    public string Resolution { get; set; } = "";
-
-    // (included, excluded) tags: Include/Exclude, or the legacy fields mapped into included when both are empty.
+    // (included, excluded) tags, cleaned.
     public (List<string> Include, List<string> Exclude) Effective()
     {
         static List<string> Clean(IEnumerable<string>? tags) =>
             // "@…" = the UI's own pseudo-tags (Browse's "In my library", filtered client-side) — never Steam's
             (tags ?? []).Where((t) => !string.IsNullOrWhiteSpace(t) && !t.TrimStart().StartsWith('@')).Select((t) => t.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var inc = Clean(Include);
-        var exc = Clean(Exclude);
-        if (inc.Count == 0 && exc.Count == 0)
-            inc = Clean(new[] { Type, AgeRating, Resolution }.Concat(Genres ?? []).Concat(Features ?? []));
-        return (inc, exc);
+        return (Clean(Include), Clean(Exclude));
     }
 
     // value identity — the Workshop service drops its prefetched page only when this changes (every /browse re-sends the

@@ -43,24 +43,11 @@ public static class SettingsService
     // private: every write is a field-level Update or Patch (a whole copy loaded earlier reverts what changed since)
     private static void Save(AppSettings settings)
     {
-        // the Steam sign-in's old fields: an empty one is never written again (a non-empty one only until SecretStore moves it out)
-        if (settings.LegacySteamRefreshToken == "") settings.LegacySteamRefreshToken = null;
-        if (settings.LegacySteamAccessToken == "") settings.LegacySteamAccessToken = null;
-        if (settings.LegacySteamLoginSecure == "") settings.LegacySteamLoginSecure = null;
         // atomic + 0600 from its creation (.claude/rules/backend/api.md § Security)
         AtomicFile.WritePrivate(ConfigPath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    public static string FilePath => ConfigPath; // SecretStore watches it for an older build's secrets
-
-    // GET /settings: a copy without the Steam sign-in's secrets. They live in SecretStore now (the keyring, else
-    // steam-auth.json); only an old settings.json not yet migrated still has them (the Legacy* fields) — never shown.
-    public static AppSettings Redacted(AppSettings s)
-    {
-        var c = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(s))!;
-        c.LegacySteamRefreshToken = null; c.LegacySteamAccessToken = null; c.LegacySteamLoginSecure = null;
-        return c;
-    }
+    public static string FilePath => ConfigPath;
 
     // POST /settings has PATCH semantics. Bound as the whole AppSettings, a partial body
     // ({"Volume": 50} from an agent) would reset every field it left out to its C# default —
@@ -121,9 +108,6 @@ public static class SettingsService
             var s = Merge(prev, body);
             s.LastSession = prev.LastSession;
             s.SteamId = prev.SteamId;
-            s.LegacySteamRefreshToken = prev.LegacySteamRefreshToken; // (not yet moved out by SecretStore)
-            s.LegacySteamAccessToken = prev.LegacySteamAccessToken;
-            s.LegacySteamLoginSecure = prev.LegacySteamLoginSecure;
             s.SteamAccountName = prev.SteamAccountName;
             s.SteamSignInRejected = prev.SteamSignInRejected;
             Save(s);

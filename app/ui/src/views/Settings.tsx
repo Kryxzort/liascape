@@ -87,6 +87,7 @@ const CACHE_LINES: { id: string; label: string; hint: string }[] = [
   { id: "scene-loudness", label: "Scene sound measurements", hint: "each scene's sounds get measured again next time. The volumes already set stay." },
   { id: "media-art", label: "Album art", hint: "the cover art scenes show for what's playing. It's fetched again when needed." },
   { id: "shaders", label: "Scene shader cache", hint: "the shader work scenes save between loads. Each scene loads slower once while it's redone." },
+  { id: "logs", label: "Logs", hint: "the app's debug logs, only needed when reporting a problem" },
 ];
 const CACHE_DEFAULT_TICKS = ["thumbs", "we-thumbs"];
 const SIZE_EASE_MS = 700;
@@ -172,7 +173,7 @@ function CachePicker() {
   };
   return (
     <div className="cache-pick" data-cache-pick>
-      <Row label="Clear cached files" hint="copies the app can make again. Logs, settings and your library are never touched.">{null}</Row>
+      <Row label="Clear cached files" hint="files the app can make again. Your settings and library are never touched.">{null}</Row>
       {lines.map((l) => (
         <label key={l.id} className="srow toggle cache-line" data-cache-line={l.id}>
           <div className="slabel">

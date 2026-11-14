@@ -245,7 +245,6 @@ public static class LiascapePlayerSelfTest
         // the play time loaded from timed_state: + the time since its save (the player played on), unless paused
         foreach (var (saved, at, paused, now, want) in new[] {
                  (2000L, 10_000L, false, 13_000L, 5000L), (2000L, 10_000L, true, 13_000L, 2000L),
-                 (2000L, 0L, false, 13_000L, 2000L),     // an older state file: no save time
                  (2000L, 14_000L, false, 13_000L, 2000L), // a clock step back: never negative
                  (-7L, 10_000L, false, 10_000L, 0L) })
             if (PlayerHelper.PlayedAfterLoad(saved, at, paused, now) != want) fails.Add($"PlayedAfterLoad({saved}, saved at {at}, paused {paused}, now {now}) = {PlayerHelper.PlayedAfterLoad(saved, at, paused, now)}, want {want}");
