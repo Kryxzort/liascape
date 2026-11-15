@@ -36,11 +36,18 @@ namespace Liascape.Web;
 //      is the cost, and parallel reads would only make it seek between them. Cached per file (`frameSizeOf` = its size +
 //      mtime), so only a new or changed file is read again. LibraryService.Build shows it bucketed into the Workshop's
 //      resolution tags.
+//   4. Every item's size on disk (the sidebar's size pill): the bytes of the files in its folder, measured at the folder's
+//      real path (a `local/<id>` link at Steam's folder), never through a link inside it (a link may point anywhere: outside
+//      the item, or back at a file already counted), a hard-linked file once. Cached per item with its folder's state
+//      (`diskBytesOf` = the real path + the newest write time of the folder and its direct entries — where Steam's updates and
+//      our own writes land), so only a new, moved or changed item is measured again: one directory read per item otherwise.
+//      Measured here, never on a request: the sidebar shows the cached number, or none yet.
 // Single-flight: a kick while a pass runs makes it run once more after (a new arrival during a pass isn't missed). Kicked
 // after the startup WE sync, /library/sync, an import and a download. Trailer finds → WS `library-item-changed
-// {path, youtubeUrl}`; saved tags / sizes → `library-synced` (the Library re-reads). Adapter log: `library-facts: …`.
+// {path, youtubeUrl}`; saved tags / sizes / sizes on disk → `library-synced` (the Library re-reads). Adapter log: `library-facts: …`.
 // While a pass works, its phase and count → LibraryOps "facts" (the top bar's progress line).
-// Guard: scripts/test-library-facts.sh; matrix probe-filters lib:steamTags
+// Guard: scripts/test-library-facts.sh; matrix probe-filters lib:steamTags; size on disk: test-library-facts.sh § 7,
+// probe-steam lib:ws:size
 public static class LibraryFactsOps
 {
     private const int MaxFailsInARow = 3, RecheckDays = 30, FlushEvery = 50, ProbeTimeoutMs = 15_000;
@@ -115,6 +122,7 @@ public static class LibraryFactsOps
 
     private static async Task PassAsync(string why)
     {
+        DiskSizePass(why); // local and quick: first, so a new arrival's size shows before Steam answers
         await SteamPassAsync(why).ConfigureAwait(false);
         await FrameSizePassAsync(why).ConfigureAwait(false);
     }
@@ -196,6 +204,108 @@ public static class LibraryFactsOps
             else none++;
         }
         Console.WriteLine($"library-facts: trailer pages finished — {found} found, {none} without, {fails} couldn't be checked");
+    }
+
+    // ---- sizes on disk ----
+
+    private static void DiskSizePass(string why)
+    {
+        var todo = new List<(Entry E, string Root, string Stamp)>();
+        foreach (var e in Snapshot())
+        {
+            if (DiskStampOf(Path.Combine(LibraryStore.SourceDir(e.Source), e.Key)) is not var (root, stamp) || e.Meta?.DiskBytesOf == stamp) continue;
+            todo.Add((e, root, stamp));
+        }
+        if (todo.Count == 0) return;
+        var sw = Stopwatch.StartNew();
+        int at = 0, unknown = 0;
+        var changes = new List<(Entry, Action<LibMeta>)>();
+        void Flush()
+        {
+            if (changes.Count == 0) return;
+            Save(changes);
+            changes.Clear();
+            EventBus.Broadcast("library-synced", new { count = 0 });
+        }
+        foreach (var (e, root, stamp) in todo)
+        {
+            LibraryOps.Set("facts", "disk", at++, todo.Count);
+            if (BytesUnder(root) is not long bytes) { unknown++; continue; } // gone meanwhile, unreadable: nothing stored
+            changes.Add((e, (m) => { m.DiskBytes = bytes; m.DiskBytesOf = stamp; }));
+            if (changes.Count >= FlushEvery) Flush();
+        }
+        Flush();
+        Console.WriteLine($"library-facts: sizes on disk of {todo.Count - unknown} item(s) measured in {sw.ElapsedMilliseconds} ms ({why})"
+            + (unknown > 0 ? $"; {unknown} couldn't be measured — asked again next time" : ""));
+    }
+
+    // the folder's real path (through the item's own link) and "<real path>|<newest write ticks of it and its direct entries>";
+    // null = no such folder
+    private static (string Root, string Stamp)? DiskStampOf(string dir)
+    {
+        try
+        {
+            var root = Directory.ResolveLinkTarget(dir, returnFinalTarget: true)?.FullName ?? Path.GetFullPath(dir);
+            var di = new DirectoryInfo(root);
+            if (!di.Exists) return null;
+            long newest = di.LastWriteTimeUtc.Ticks;
+            foreach (var x in di.EnumerateFileSystemInfos("*", Shallow)) newest = Math.Max(newest, x.LastWriteTimeUtc.Ticks);
+            return (root, $"{root}|{newest}");
+        }
+        catch { return null; }
+    }
+
+    private static readonly EnumerationOptions Shallow = new() { IgnoreInaccessible = true, AttributesToSkip = 0, RecurseSubdirectories = false, ReturnSpecialDirectories = false };
+
+    // The bytes of the regular files under `root`, never through a symbolic link (FileAttributes.ReparsePoint on Unix), each
+    // (device, inode) of a hard-linked file once. null = `root` couldn't be read.
+    private static long? BytesUnder(string root)
+    {
+        long total = 0;
+        var seen = new HashSet<(uint, uint, ulong)>();
+        var dirs = new Stack<DirectoryInfo>();
+        dirs.Push(new DirectoryInfo(root));
+        bool first = true;
+        while (dirs.Count > 0)
+        {
+            var d = dirs.Pop();
+            IEnumerable<FileSystemInfo> entries;
+            try { entries = d.EnumerateFileSystemInfos("*", Shallow).ToList(); }
+            catch { if (first) return null; continue; } // a subfolder that went or can't be read counts nothing
+            first = false;
+            foreach (var x in entries)
+            {
+                if ((x.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if (x is DirectoryInfo sub) { dirs.Push(sub); continue; }
+                if (StatOf(x.FullName) is { } st)
+                {
+                    if (!st.Regular) continue;
+                    if (st.Links > 1 && !seen.Add((st.DevMajor, st.DevMinor, st.Ino))) continue;
+                    total += st.Size;
+                }
+                else { try { total += ((FileInfo)x).Length; } catch { } }
+            }
+        }
+        return total;
+    }
+
+    // lstat's fields the size needs, through statx (its struct is the same on every architecture, unlike stat's)
+    private readonly record struct Stat(bool Regular, uint Links, uint DevMajor, uint DevMinor, ulong Ino, long Size);
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int statx(int dirfd, string path, int flags, uint mask, byte[] buf);
+    private const int AtFdCwd = -100, AtSymlinkNoFollow = 0x100;
+    private const uint StatxType = 0x1, StatxNlink = 0x4, StatxIno = 0x100, StatxSize = 0x200;
+    private static bool _noStatx;
+    private static Stat? StatOf(string path)
+    {
+        if (_noStatx) return null;
+        var b = new byte[256];
+        try { if (statx(AtFdCwd, path, AtSymlinkNoFollow, StatxType | StatxNlink | StatxIno | StatxSize, b) != 0) return null; }
+        catch (EntryPointNotFoundException) { _noStatx = true; return null; } // a libc without statx: sizes without the hard-link check
+        // struct statx: u32 mask @0, u32 nlink @16, u16 mode @28, u64 ino @32, u64 size @40, u32 dev_major @136, dev_minor @140
+        ushort mode = BitConverter.ToUInt16(b, 28);
+        return new Stat((mode & 0xF000) == 0x8000, BitConverter.ToUInt32(b, 16), BitConverter.ToUInt32(b, 136), BitConverter.ToUInt32(b, 140),
+            BitConverter.ToUInt64(b, 32), (long)BitConverter.ToUInt64(b, 40));
     }
 
     // ---- frame sizes ----

@@ -16,6 +16,8 @@ import { SubToggle } from "./SubToggle";
 import { useLinger } from "../hooks/useLinger";
 import { WorkshopIdPill } from "./WorkshopIdPill";
 import { snapFlip, glideFlip } from "./flipGlide";
+import { CommentsSection, CreatorRow, FavoriteTile, WorkshopStats } from "./WorkshopSocial";
+import { SizePill } from "./sidePills";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -57,13 +59,16 @@ const CRASH_FLIP = ":scope > *, .side-sec[data-sec=\"playback\"] > *";
 // `item` is the store's live copy (a `library-item-changed` hands a new one — the values follow, nothing replays);
 // `targets` = the multi-selection it's part of (volume / speed / delete repeat to it), else [item].
 export function LibrarySide({
-  item, targets, playing, keepCurrent, unsubN, deleteN, showDeleteFromSource, globalVolume, globalSpeed,
-  onPlay, onReveal, onTrash, onDeleteSource, onKeep,
+  item, targets, playing, keepCurrent, unsubN, deleteN, unsubOff, showDeleteFromSource, globalVolume, globalSpeed,
+  onPlay, onReveal, onTrash, onDeleteSource, onKeep, onShowInBrowse,
 }: {
-  // unsubN / deleteN: how many of the targets onTrash unsubscribes / deletes (views/Library.tsx doTrash)
-  item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; unsubN: number; deleteN: number;
+  // unsubN / deleteN: how many of the targets onTrash unsubscribes / deletes (views/Library.tsx doTrash); unsubOff: why they
+  // can't unsubscribe now (signed out), else null
+  item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; unsubN: number; deleteN: number; unsubOff: string | null;
   showDeleteFromSource: boolean; globalVolume: number; globalSpeed: number;
   onPlay: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void; onKeep: () => void;
+  // the Browse tab (the creator row's click lists their wallpapers there)
+  onShowInBrowse: () => void;
 }) {
   // start from the item's real values — the first paint must not show a 0 volume / 1× speed placeholder
   const [vol, setVol] = useState(() => item.volumeOverride ?? globalVolume);
@@ -215,6 +220,7 @@ export function LibrarySide({
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
   const showLoud = !!loud && at("standard");
+  const workshop = item.workshopId && !item.offWorkshop && !multi ? item.workshopId : null;
   const steam = item.pageUrl ?? (item.workshopId ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}` : null);
 
   return (
@@ -235,6 +241,9 @@ export function LibrarySide({
           {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
           {/* the Workshop ID: a pill that copies itself (a "Details" card for one property looks odd) */}
           {item.workshopId && at("standard") && <WorkshopIdPill id={item.workshopId} />}
+          {/* its files on this disk, Workshop or not (measured in the background, Web/LibraryFactsOps.cs: none until then; last,
+              so a late one moves no chip). Guard: probe-steam lib:ws:size, test-library-facts.sh § 7 */}
+          <SizePill bytes={item.diskBytes} title="Size on disk" />
         </div>
         {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
         {/* the crash mark, as a notice block of the body (the tiles' material, a danger stripe) with its own Clear */}
@@ -255,19 +264,28 @@ export function LibrarySide({
           ) : steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
           {/* with auto-import on, a subscribed Workshop item's Delete is Unsubscribe (views/Library.tsx doTrash), named so and
               with the Browse sidebar's Unsubscribe icon and right-click menu ("Unsubscribe without deleting"); a mixed selection
-              says what happens to each part. Guard: probe-steam side:unsub:*, side:deleteSource:names */}
+              says what happens to each part. Signed out (unsubOff) the Unsubscribe tiles and the right-click entry are disabled with
+              the reason (the tooltip, the menu's note), and a mixed selection's own items get a Delete tile of their own.
+              Guard: probe-steam side:unsub:*, side:unsub:signedOut, side:deleteSource:names */}
           {unsubN > 0 ? (
-            <button ref={dangerRef} className="side-tile danger" data-unsubscribe aria-haspopup="menu" onClick={onTrash}
-              onContextMenu={(e) => { e.preventDefault(); setMenu(menuAt(e)); }}
-              title={`Also removes ${unsubN > 1 ? "them" : "it"} from your library; right-click keeps ${unsubN > 1 ? "them" : "it"}. Undo subscribes again`}>
-              <span className="side-tile-ico"><CloudOff size={15} /></span>{deleteN ? `Unsubscribe ${unsubN}, delete ${deleteN}` : "Unsubscribe"}</button>
+            <button ref={dangerRef} className="side-tile danger" data-unsubscribe aria-haspopup="menu" aria-disabled={unsubOff ? true : undefined}
+              onClick={unsubOff ? undefined : onTrash} onContextMenu={(e) => { e.preventDefault(); setMenu(menuAt(e)); }}
+              title={unsubOff ?? `Also removes ${unsubN > 1 ? "them" : "it"} from your library; right-click keeps ${unsubN > 1 ? "them" : "it"}. Undo subscribes again`}>
+              <span className="side-tile-ico"><CloudOff size={15} /></span>
+              {deleteN ? (unsubOff ? `Unsubscribe ${unsubN}` : `Unsubscribe ${unsubN}, delete ${deleteN}`) : "Unsubscribe"}</button>
           ) : (
             <button ref={dangerRef} className="side-tile danger" onClick={onTrash}>
               <span className="side-tile-ico"><Trash2 size={15} /></span>Delete</button>
           )}
-          <ContextMenu at={menu} onClose={closeMenu} returnTo={dangerRef} label="Unsubscribe" items={[keepMenuItem(onKeep)]} />
+          {unsubN > 0 && deleteN > 0 && unsubOff && (
+            <button className="side-tile danger" data-delete-rest onClick={onTrash}>
+              <span className="side-tile-ico"><Trash2 size={15} /></span>{`Delete ${deleteN}`}</button>
+          )}
+          <ContextMenu at={menu} onClose={closeMenu} returnTo={dangerRef} label="Unsubscribe"
+            items={[{ ...keepMenuItem(onKeep), disabled: !!unsubOff }]} note={unsubOff} />
           {showDeleteFromSource && (
-            <button className="side-tile danger" data-delete-source title="Unsubscribes on Steam too; Undo subscribes it again" onClick={onDeleteSource}>
+            <button className="side-tile danger" data-delete-source aria-disabled={unsubOff ? true : undefined}
+              title={unsubOff ?? "Unsubscribes on Steam too; Undo subscribes it again"} onClick={unsubOff ? undefined : onDeleteSource}>
               <span className="side-tile-ico"><CloudOff size={15} /></span>Delete and unsubscribe</button>
           )}
         </div>
@@ -303,6 +321,18 @@ export function LibrarySide({
         </SideSection>
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
         {sceneProps && <ScenePropsEditor key={p} path={p} onReady={() => setReady(true)} />}
+        {/* a Workshop item's community, after everything about playing it: the Browse sidebar's own pieces
+            (components/WorkshopSocial.tsx) — Steam's current counts, who made it (a click lists all their wallpapers in Browse),
+            the favourite and the comments (read once in view). Not for an item the Workshop no longer has, nor a
+            multi-selection (each item has its own). Guard: probe-steam lib:ws:* */}
+        {workshop && (
+          <>
+            <WorkshopStats workshopId={workshop} />
+            <CreatorRow workshopId={workshop} authorId={null} onListed={onShowInBrowse} />
+            <div className="side-tiles"><FavoriteTile workshopId={workshop} /></div>
+            <CommentsSection workshopId={workshop} authorId={null} />
+          </>
+        )}
       </div>
     </>
   );

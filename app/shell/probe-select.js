@@ -450,7 +450,7 @@ app.whenReady().then(async () => {
   };
   try {
     makeThumbs();
-    await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, autoPlayGifs: false });
+    await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, previewNotHovered: ["image", "gif", "video"] });
     const srcs = (await http("GET", "/sources")).json;
     const wsName = srcs.find((s) => s.supportsTagFilter)?.name;
     if (!wsName) throw new Error("no Workshop source (supportsTagFilter) in /sources");

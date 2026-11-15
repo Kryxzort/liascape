@@ -219,6 +219,16 @@ const PAGE = `window.__mx = {
   row(label) { return [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === label); },
   input(label, sel = "input") { return this.row(label)?.querySelector(sel); },
   async select(label, opt) { this.click(this.row(label)?.querySelector(".sel"), "select " + label); await this.sleep(200); this.click(this.byText(".sel-pop .sel-opt", opt), opt); },
+  // an ordered list's items, top first (components/OrderList.tsx), and putting it in an order with its move buttons
+  ord(label) { return this.row(label)?.querySelector(".ord")?.dataset.ord?.split(",") ?? null; },
+  async order(label, want) {
+    for (let n = 0; n < 12; n++) {
+      const cur = this.ord(label); if (!cur) throw new Error("not found: order " + label);
+      if (cur.join() === want.join()) return;
+      this.click(this.row(label).querySelector('[data-ord-id="' + want.find((k, j) => cur[j] !== k) + '"] [data-ord-move="up"]'), "move up in " + label);
+      await this.sleep(60);
+    }
+  },
   // the item sidebar (WE-style): focus a card without applying it
   // (a right-click), its volume (0) / speed (1) sliders and resets, its close
   side() { return document.querySelector(".side-panel:not(.closing)"); },
@@ -1943,7 +1953,7 @@ const APPEAR = {
   "appear:theme": { states: ["idle", "single", "effect", "pending", "paused", "pausedEffect", "muted"], drive: (c) => `await m.select("Theme", ${JSON.stringify(c.theme)});`, saved: (c) => c.after.s.theme === c.theme },
   "appear:aspect": { drive: () => `await m.select("Thumbnail shape", "Widescreen (16:9)");`, saved: (c) => c.after.s.thumbnailAspect === "16:9" },
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
-  "appear:gifs": { drive: () => `m.setCheck(m.input("Animate GIF previews"), true, "gifs");`, saved: (c) => c.after.s.autoPlayGifs === true },
+  "appear:gifs": { drive: () => `await m.select("Card previews", "Always animate");`, saved: (c) => c.after.s.previewNotHovered?.[0] === "gif" },
   "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Wallpaper behind every tab"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
   // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under liascape-player —
   // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
@@ -1962,7 +1972,7 @@ for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effe
     await ui(a.drive(c)); await sleep(a.ms ?? 1200); await stop();
   }, check: (c) => [...(a.saved(c) ? [] : [`the ${k} change wasn't saved`]), ...untouched(c)] };
 
-// --- Settings → Appearance → "Glow effects" / "Smooth window animations" / "Animate wallpapers without a GIF": UI-only toggles. Each cell
+// --- Settings → Appearance → "Glow effects" / "Smooth window animations" / "Card previews": UI-only settings. Each cell
 // turns its toggle through the real Settings row and reads what the page does, on and off (a precondition: the effect IS
 // there with the toggle on, or the off reading proves nothing), and again after a reload of the page.
 const GLOW_JS = String.raw`window.__glow = {
@@ -2120,10 +2130,11 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Animate wallpapers without a GIF": library cards and playlist-bar items with no GIF (their own video stands in) (k2..k4 here: no gif; k1 has a
-// gif) play it without a hover — EVERY one on screen, no cap (components/autoplay.ts): the cards and the playlist bar
-// (k1..k4) hold 6 of them, more than the old cap of 4. Gated: off screen (scrolled away, the Library behind another tab),
-// the window unfocused (`appActive`) — none. Off (the default): none plays by itself.
+// "Card previews" → "Always animate" ("Not hovered": GIF, video, still image): library cards and playlist-bar items with no GIF
+// play their own video without a hover (k2..k4 here: no gif; k1 has a gif, which plays instead) — EVERY one on screen, no cap
+// (components/autoplay.ts): the cards and the playlist bar (k1..k4) hold 6 of them, more than the old cap of 4. Gated: off
+// screen (scrolled away, the Library behind another tab), the window unfocused (`appActive`) — none. The default ("Animate
+// on hover", the still image first): none plays by itself.
 const VT_COUNT = String.raw`(() => { const m = window.__mx;
   const onScreen = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth; };
   const els = [...m.cards().map((c) => [c.querySelector(".lib-title")?.dataset.title, c.querySelector(".thumb-wrap")]), ...m.barItems().map((e) => [e.dataset.title, e])];
@@ -2143,8 +2154,8 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
   async run(c) {
     c.off = await vtSettle((r) => r.total === 0, 1500);
     await sleep(600); c.off = await js(VT_COUNT);                 // the default: nothing plays by itself
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Animate wallpapers without a GIF"), true, "Animate wallpapers without a GIF"); await m.sleep(300);`);
-    c.saved = await waitFor(async () => (await getSettings()).autoPlayVideoThumbs === true, 4000, 100);
+    await ui(`m.tab("Settings"); await m.sleep(400); await m.select("Card previews", "Always animate"); await m.sleep(300);`);
+    c.saved = await waitFor(async () => JSON.stringify((await getSettings()).previewNotHovered) === JSON.stringify(["gif", "video", "image"]), 4000, 100);
     await ui(`m.tab("Library"); await m.sleep(400);`);
     c.on = await vtSettle(vtAll, 8000);
     await sleep(700); c.on2 = await js(VT_COUNT);                 // and they stay playing
@@ -2173,17 +2184,17 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
     c.shownAgain = await vtSettle(vtAll, 6000);
     await loadUi(); await sleep(600);
     c.reloaded = await vtSettle(vtAll, 8000);
-    await ui(`m.tab("Settings"); await m.sleep(400); m.setCheck(m.input("Animate wallpapers without a GIF"), false, "Animate wallpapers without a GIF"); await m.sleep(300);`);
+    await ui(`m.tab("Settings"); await m.sleep(400); await m.select("Card previews", "Animate on hover"); await m.sleep(300);`);
     await ui(`m.tab("Library"); await m.sleep(300);`);
     c.offAgain = await vtSettle((r) => r.total === 0, 3000);
   }, check(c) {
     const v = [], J = JSON.stringify;
     const every = (n, r) => { if (!vtAll(r)) v.push(`${n}: expected all ${r.eligible} on-screen video previews playing, ${r.total} mounted, ${r.playing} playing ${J(r)}`); };
     if (c.off.total) v.push(`off (the default): ${c.off.total} preview videos mounted without a hover`);
-    if (!c.saved) v.push("turning Animate wallpapers without a GIF on wasn't saved");
+    if (!c.saved) v.push("choosing Always animate wasn't saved (previewNotHovered gif, video, image)");
     if (c.on.eligible <= 4) v.push(`on: only ${c.on.eligible} video previews on screen — more than 4 are needed to show there is no cap: proved nothing`);
     every("on", c.on); every("on, a moment later", c.on2);
-    if (c.on.k1.some((x) => x.video)) v.push("on: the gif item (k1) got a video — Use the video instead of the GIF is off, its gif is its preview");
+    if (c.on.k1.some((x) => x.video)) v.push("on: the gif item (k1) got a video — Not hovered has the GIF before the video, its gif is its preview");
     if (c.away.cards) v.push(`on, cards scrolled off screen: ${c.away.cards} card videos still mounted ${J(c.away)}`);
     every("on, cards scrolled off screen (the playlist bar's)", c.away);
     if (!c.left.n) v.push("on: no card videos to scroll away — the release check proved nothing");
@@ -2200,53 +2211,78 @@ C["appear:videoThumbs"] = { states: ["single"], noSwitch: true,
     return v;
   } };
 
-// "Use the video instead of the GIF": k1 has a gif AND its own video. Off (the default): the gif is its preview — on hover and under
-// "Animate GIF previews" — never the video. On: the video wins — on hover (on top of the gif, which keeps running beneath
-// when GIFs animate in bulk, so it never restarts) and under "Animate wallpapers without a GIF" without a hover (then no gif: one
-// picture, one decode). Every combination of the three toggles, each turned through its Settings row (they apply live).
-const k1Want = (gifs, vids, prefer, hover) => prefer
-  ? { video: hover || vids, gif: gifs && !vids }
-  : { video: false, gif: hover || gifs };
-const k1Is = (x, w) => !!x && x.video === w.video && x.gif === w.gif && (!w.video || (x.playing && x.videoOnTop));
-C["appear:videoOverGif"] = { states: ["single"], noSwitch: true, async run(c) {
-    c.row = await ui(`m.tab("Settings"); await m.sleep(400); const i = m.input("Use the video instead of the GIF"); if (!i) return false; m.setCheck(i, true, "Use the video instead of the GIF"); return true;`);
-    c.savedRow = c.row && await waitFor(async () => (await getSettings()).preferVideoThumbs === true, 4000, 100);
-    await ui(`m.tab("Library"); await m.sleep(400);`);
+// "On hover" / "Not hovered" (components/mediaAssets.ts): every card and playlist-bar item shows the first kind it has in
+// the list for its state, and "Still image" ends a list. k1 has a GIF and its own video, k2 only its video, s1 (a scene)
+// neither. Each pair of orders is set through the Settings lists (they apply live); then every place of k1 / k2 / s1 is read
+// unhovered, and each one's card hovered. Unhovered a video is a clip and no gif shows with it (one picture, one decode);
+// hovered it is the real file, on top, with a gif that plays unhovered still running beneath (it never restarts).
+const PO_HAS = { k1: { video: true, gif: true }, k2: { video: true, gif: false }, s1: { video: false, gif: false } };
+const poFirst = (order, t) => order.find((k) => k === "image" || PO_HAS[t][k]);
+const PO_STATE = String.raw`(() => { const m = window.__mx;
+  const one = (e) => { const v = e.querySelector("video.thumb.anim"), g = [...e.querySelectorAll("img.thumb.anim")].find((i) => getComputedStyle(i).visibility !== "hidden");
+    return { video: !!v, playing: !!v && !v.paused && v.readyState >= 2, real: !!v && (v.getAttribute("src") || "").includes("/media?"), gif: !!g,
+      videoOnTop: !!v && (!g || !!(g.compareDocumentPosition(v) & Node.DOCUMENT_POSITION_FOLLOWING)) }; };
+  const out = {};
+  for (const t of ["k1", "k2", "s1"]) out[t] = [m.card(t)?.querySelector(".thumb-wrap"), ...m.barItems().filter((e) => e.dataset.title === t)].filter(Boolean).map(one);
+  return out; })()`;
+const poIs = (x, want, hovered, idle) => !!x && (want === "video" ? x.playing && x.videoOnTop && x.real === hovered && x.gif === (hovered && idle === "gif")
+  : want === "gif" ? x.gif && !x.video : !x.gif && !x.video);
+const PO_COMBOS = [
+  [["gif", "video", "image"], ["image", "gif", "video"]], // the defaults ("Animate on hover")
+  [["video", "gif", "image"], ["gif", "video", "image"]],
+  [["gif", "video", "image"], ["video", "gif", "image"]],
+  [["image", "video", "gif"], ["video", "image", "gif"]],
+  [["video", "image", "gif"], ["gif", "image", "video"]],
+];
+C["appear:previewOrder"] = { states: ["single"], noSwitch: true,
+  async pre() { await post("/playlist/state", { videoPaths: [K[0], K[1]], settings: PS(), name: null }); },
+  async run(c) {
     const send = (e) => win.webContents.sendInputEvent(e);
     c.combos = [];
-    for (const gifs of [false, true]) for (const vids of [false, true]) for (const prefer of [false, true]) {
-      await ui(`m.tab("Settings"); await m.sleep(300); m.setCheck(m.input("Animate GIF previews"), ${gifs}, "gifs"); m.setCheck(m.input("Animate wallpapers without a GIF"), ${vids}, "video previews");
-        const p = m.input("Use the video instead of the GIF"); if (p) m.setCheck(p, ${prefer}, "prefer"); m.tab("Library"); await m.sleep(300);`);
-      const idle = k1Want(gifs, vids, prefer, false), hov = k1Want(gifs, vids, prefer, true);
-      // both of k1's places (its card, its playlist-bar item) without a hover
-      const r = await vtSettle((x) => x.k1.length === 2 && x.k1.every((y) => k1Is(y, idle)), 6000);
-      // the pointer on k1's card
-      const pt = await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
-      let h = null;
-      if (pt) {
+    for (const [hov, idle] of PO_COMBOS) {
+      // the Settings page is built on each visit: wait for its rows
+      await ui(`m.tab("Settings"); for (let i = 0; i < 50 && !m.row("On hover"); i++) await m.sleep(100);
+        await m.order("On hover", ${JSON.stringify(hov)}); await m.order("Not hovered", ${JSON.stringify(idle)});
+        await m.sleep(300); m.tab("Library"); await m.sleep(300);`);
+      const saved = await waitFor(async () => { const s = await getSettings(); return JSON.stringify([s.previewOnHover, s.previewNotHovered]) === JSON.stringify([hov, idle]); }, 4000, 100);
+      const want = (t) => poFirst(idle, t);
+      let r = null;
+      await waitFor(async () => { r = await js(PO_STATE); return Object.keys(PO_HAS).every((t) => r[t].length && r[t].every((x) => poIs(x, want(t), false))); }, 8000, 150);
+      const hovered = {};
+      for (const t of Object.keys(PO_HAS)) {
+        const pt = await ui(`const e = m.card(${JSON.stringify(t)})?.querySelector(".thumb-wrap"); if (!e) return null; e.scrollIntoView({ block: "nearest" }); await m.sleep(100); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
+        if (!pt) { hovered[t] = null; continue; }
         send({ type: "mouseMove", x: pt.x - 3, y: pt.y }); await sleep(60); send({ type: "mouseMove", x: pt.x, y: pt.y });
-        h = (await vtSettle((x) => k1Is(x.k1[0], hov), 5000)).k1[0];
-        send({ type: "mouseMove", x: 700, y: 4 }); await sleep(250);
+        const wh = poFirst(hov, t);
+        let h = null;
+        await waitFor(async () => { h = (await js(PO_STATE))[t][0]; return poIs(h, wh, true, want(t)); }, 5000, 120);
+        hovered[t] = { want: wh, got: h };
+        send({ type: "mouseMove", x: 700, y: 4 }); await sleep(300);
       }
-      c.combos.push({ gifs, vids, prefer, idle, hov, got: r.k1, gotHover: h, k1Card: !!pt });
+      c.combos.push({ hov, idle, saved, got: r, hovered });
     }
+    await ui(`m.tab("Settings"); for (let i = 0; i < 50 && !m.row("Card previews"); i++) await m.sleep(100);
+      await m.select("Card previews", "Animate on hover"); await m.sleep(300); m.tab("Library");`);
   }, check(c) {
     const v = [], J = JSON.stringify;
-    if (!c.row) v.push("no \"Use the video instead of the GIF\" row in Settings");
-    else if (!c.savedRow) v.push("turning Use the video instead of the GIF on wasn't saved (preferVideoThumbs !== true)");
     for (const x of c.combos) {
-      const n = `gifs ${x.gifs ? "on" : "off"}, video previews ${x.vids ? "on" : "off"}, prefer video ${x.prefer ? "on" : "off"}`;
-      if (!x.k1Card) { v.push(`${n}: no k1 card to hover`); continue; }
-      if (x.got.length !== 2) v.push(`${n}: k1 is in ${x.got.length} places on screen, expected its card and its playlist-bar item`);
-      x.got.forEach((y, i) => { if (!k1Is(y, x.idle)) v.push(`${n}, k1's ${i ? "bar item" : "card"}: expected ${J(x.idle)}, got ${J(y)}`); });
-      if (!k1Is(x.gotHover, x.hov)) v.push(`${n}, k1's card hovered: expected ${J(x.hov)}${x.hov.video ? " (playing, on top)" : ""}, got ${J(x.gotHover)}`);
+      const n = `On hover ${x.hov.join(">")}, Not hovered ${x.idle.join(">")}`;
+      if (!x.saved) v.push(`${n}: the lists' order wasn't saved`);
+      for (const t of Object.keys(PO_HAS)) {
+        const places = x.got?.[t] ?? [], want = poFirst(x.idle, t);
+        if (places.length < (t === "s1" ? 1 : 2)) v.push(`${n}: ${t} is in ${places.length} places on screen (want its card${t === "s1" ? "" : " and its playlist-bar item"})`);
+        places.forEach((y, i) => { if (!poIs(y, want, false)) v.push(`${n}, ${t}'s ${i ? "bar item" : "card"} unhovered: want its ${want}, got ${J(y)}`); });
+        const h = x.hovered[t];
+        if (!h) v.push(`${n}: no ${t} card to hover`);
+        else if (!poIs(h.got, h.want, true, want)) v.push(`${n}, ${t}'s card hovered: want its ${h.want}${h.want === "video" ? " (the real file, on top)" : ""}, got ${J(h.got)}`);
+      }
     }
     return v;
   } };
 
 // The preview clips (Web/ClipStore.cs, components/clipSource.ts, components/PreviewPlayer.tsx). k1..k4 are 320×180, as
 // narrow as any clip, so these cells import a 1280×720 video of their own (deleted again at the end, which deletes its
-// clips too) and play it under "Animate wallpapers without a GIF" in its card and its playlist-bar item.
+// clips too) and play it unhovered ("Not hovered": GIF, video, still image) in its card and its playlist-bar item.
 const CLIP_DIR = path.join(E.HOME || "", ".cache", "liascape", "video_clips");
 const clipFiles = () => { try { return fs.readdirSync(CLIP_DIR).filter((f) => f.endsWith(".mp4")); } catch { return []; } };
 async function clipFixture(title, secs = 30) {
@@ -2339,7 +2375,7 @@ C["clip:size"] = { states: ["single"], noSwitch: true,
     c.p = await clipFixture("clipSz", 20);
     if (!c.p) return;
     await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
-    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "low" });
+    await post("/settings", { ...(await getSettings()), previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "low" });
   },
   async run(c) {
     if (!c.p) return;
@@ -2408,7 +2444,7 @@ C["clip:shortToFull"] = { states: ["single"], noSwitch: true,
     c.p = await clipFixture("clipSF", 30);
     if (!c.p) return;
     await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
-    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "mid" });
+    await post("/settings", { ...(await getSettings()), previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "mid" });
   },
   async run(c) {
     if (!c.p) return;
@@ -2425,15 +2461,15 @@ C["clip:shortToFull"] = { states: ["single"], noSwitch: true,
   } };
 
 // A hover hands the playing clip over to the wallpaper's own file at the same moment (only the hovered card loads one), and
-// the clip takes back over on the way out, the real file released; without "Animate wallpapers without a GIF" a hover
-// plays the real file straight away.
+// the clip takes back over on the way out, the real file released; with nothing playing unhovered ("Not hovered": the still
+// image first) a hover plays the real file straight away.
 C["clip:hoverHandoff"] = { states: ["single"], noSwitch: true,
   // imported before the page loads (it reads the library at start)
   async pre(c) {
     c.p = await clipFixture("clipHv", 30);
     if (!c.p) return;
     await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
-    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "mid" });
+    await post("/settings", { ...(await getSettings()), previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "mid" });
   },
   async run(c) {
     if (!c.p) return;
@@ -2452,8 +2488,8 @@ C["clip:hoverHandoff"] = { states: ["single"], noSwitch: true,
       c.unhover = await out;
       c.left = await js(`[...document.querySelectorAll("video")].filter((x) => (x.getAttribute("src") || "").includes("/media?")).length`);
       fs.writeFileSync(path.join(OUT, "clip-hoverHandoff.json"), JSON.stringify({ hover: clipSwap(c.hover, isClip, (k) => k === "real"), unhover: clipSwap(c.unhover, (k) => k === "real", isClip) }));
-      // the setting off: a hover plays the real file at once
-      await ui(`m.tab("Settings"); ${ROW("Animate wallpapers without a GIF")} m.setCheck(row?.querySelector("input"), false, "Animate wallpapers without a GIF"); m.tab("Library"); await m.sleep(400);`);
+      // nothing unhovered: a hover plays the real file at once
+      await ui(`m.tab("Settings"); ${ROW("Not hovered")} await m.order("Not hovered", ["image", "gif", "video"]); await m.sleep(300); m.tab("Library"); await m.sleep(400);`);
       const pt2 = await ui(`const e = m.card("clipHv")?.querySelector(".thumb-wrap"); const b = e.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };`);
       send({ type: "mouseMove", x: pt2.x - 3, y: pt2.y }); await sleep(50); send({ type: "mouseMove", x: pt2.x, y: pt2.y });
       c.plain = (await js(CLIP_SAMPLE("clipHv", 2500))).filter((x) => x.k);
@@ -2488,7 +2524,7 @@ C["clip:hoverHandoffNoMotion"] = { states: ["single"], noSwitch: true,
     c.p = await clipFixture("clipHvOff", 30);
     if (!c.p) return;
     await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
-    await post("/settings", { ...(await getSettings()), autoPlayVideoThumbs: true, videoPreviewQuality: "mid", morphs: false });
+    await post("/settings", { ...(await getSettings()), previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "mid", morphs: false });
   },
   async run(c) {
     if (!c.p) return;
@@ -2532,7 +2568,7 @@ C["clip:hoverHandoffNoMotion"] = { states: ["single"], noSwitch: true,
 
 // A gif preview that goes out of sight and comes back goes on from a later frame, never from frame 0 and never fetched
 // again, even after a garbage collection while it was away (components/MotionThumb.tsx keepHidden): k1's card on an
-// unhover + re-hover, and under "Animate GIF previews" scrolled away and back, the window inactive and active again, and
+// unhover + re-hover, and playing unhovered ("Not hovered": GIF first) scrolled away and back, the window inactive and active again, and
 // another tab and back. Out of sight, Chromium decodes none of its frames (counted in a trace: the gating that keeps a
 // backgrounded window's gifs from draining the decode threads). k1.gif (test-ui-matrix.sh) codes its frame index in its
 // colour: r = 40 + 4·i, g = 200 − 3·i, b = 90, 48 frames at 8 fps.
@@ -2590,9 +2626,9 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
     c.playing = await decodesDuring(1500); // the counter's own check: an animating gif decodes ~12 frames in 1.5 s
     c.hover = await round(away, hover);
     await away();
-    await ui(`m.tab("Settings"); for (let i = 0; i < 40 && !m.input("Animate GIF previews"); i++) await m.sleep(100);
-      m.setCheck(m.input("Animate GIF previews"), true, "gifs"); await m.sleep(300); m.tab("Library"); await m.sleep(400);`);
-    c.saved = await waitFor(async () => (await getSettings()).autoPlayGifs === true, 4000, 100);
+    await ui(`m.tab("Settings"); for (let i = 0; i < 40 && !m.row("Not hovered"); i++) await m.sleep(100);
+      await m.order("Not hovered", ["gif", "image", "video"]); await m.sleep(300); m.tab("Library"); await m.sleep(400);`);
+    c.saved = await waitFor(async () => (await getSettings()).previewNotHovered?.[0] === "gif", 4000, 100);
     c.scroll = await round(
       () => ui(`const g = document.querySelector(".card.lib").parentElement; const sp = document.createElement("div"); sp.id = "mx-spacer"; sp.style.height = "4000px"; g.before(sp); await m.sleep(100);`),
       () => ui(`document.getElementById("mx-spacer")?.remove(); await m.sleep(50);`));
@@ -2604,7 +2640,7 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
     const v = [], J = JSON.stringify;
     if (!c.card) return ["no k1 card on screen"];
     if (!(c.playing >= 6)) v.push(`k1 hovered: the trace counted ${c.playing} gif decodes in 1.5 s (≥ 6 expected at 8 fps) — the hidden counts prove nothing`);
-    if (!c.saved) v.push("turning Animate GIF previews on wasn't saved");
+    if (!c.saved) v.push("putting GIF first in Not hovered wasn't saved");
     for (const [n, r] of [["unhover → re-hover", c.hover], ["scrolled away → back", c.scroll], ["window inactive → active", c.blur], ["another tab → back", c.tab]]) {
       if (!r) { v.push(`${n}: never ran`); continue; }
       if (!(r.before >= 6)) { v.push(`${n}: k1 never played into frames 6-18 before going out of sight (${J(r)}) — proved nothing`); continue; }
@@ -4405,7 +4441,10 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
     if (e.event === "transition.scheduled" && K_.noSwitch) v.push(`a switch was requested (${TITLE(e.path)})`);
   }
   const asset = /\/(media|img|anim|assets|transitions)\b|favicon|icons\.svg/;
-  for (const r of httpLog.slice(h0)) if (r.status >= 400 && r.status !== 409 && !asset.test(r.url)) v.push(`HTTP ${r.status} ${r.method} ${r.url.replace(U, "")}`);
+  // the item sidebar's Workshop lookups answer 404 for an id Steam has no public item for — every fixture's made-up id, so
+  // the sidebar shows none of them; any other status from them is still a failure
+  const noSuchItem = /\/workshop\/(comments|creator|counts)\?/;
+  for (const r of httpLog.slice(h0)) if (r.status >= 400 && r.status !== 409 && !asset.test(r.url) && !(r.status === 404 && noSuchItem.test(r.url))) v.push(`HTTP ${r.status} ${r.method} ${r.url.replace(U, "")}`);
   if (c.exp.settled && !c.noOutput) {
     const p = await ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); } return m.playing();`).catch(() => null);
     const cur = c.after.cur?.path ? TITLE(c.after.cur.path) : null;

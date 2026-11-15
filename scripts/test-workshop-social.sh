@@ -8,6 +8,9 @@
 #     without one asked of the client protocol); the favourite state "signed out" with no request; favourite and post → 403
 #     {signIn} with nothing sent; the comment thread (newest first, paged, total) as plain text — no script, no handler, an
 #     entity decoded once, a line break kept, an emoticon by name — sent without any cookie; the favourites list → 403 {signIn}.
+#  1b. an item's counts (/workshop/counts, the Library sidebar's stat pills): Steam's CURRENT subscriber / favourite counts
+#     from the client protocol (not the lifetime ones); one GetDetails per item however many asks (the counts and the creator
+#     at once, again later); no such item → 404, a bad id → 400, Steam unreachable → 502 and asked again once it answers.
 #  2. a creator's items (/browse `list`): the client protocol's user files, the CURRENT subscriber / favourite counts (not the
 #     lifetime ones), web / application items left out, paged 100 at a time to the end, top rated → Steam's "score" order,
 #     the filter's tags matched.
@@ -76,7 +79,9 @@ const item = (i, extra = {}) => ({ publishedfileid: String(3200000000 + i), titl
   creator: OWNER, file_size: 1000 + i, time_updated: 1780000000 - i, subscriptions: 692, lifetime_subscriptions: 876, favorited: 34,
   lifetime_favorited: 35, views: 100, score: i / 1000,
   tags: [i < 10 ? "Web" : i < 20 ? "Application" : i % 2 ? "Scene" : "Video", ...(i % 3 === 0 ? ["Anime"] : []), "1920 x 1080"], ...extra });
-const fx = { "3000000001": { tags: ["Video"], creator: OWNER }, "3000000002": { tags: ["Video"], creator: OWNER },
+const counts = { subscriptions: 692, lifetime_subscriptions: 876, favorited: 34, lifetime_favorited: 35 };
+const fx = { "3000000001": { tags: ["Video"], creator: OWNER, ...counts }, "3000000002": { tags: ["Video"], creator: OWNER },
+  "3000000003": { tags: ["Video"], creator: OWNER, ...counts }, "3000000004": { tags: ["Video"], creator: OWNER, ...counts },
   "@userfiles": { [`${OWNER}:myfiles`]: Array.from({ length: 130 }, (_, i) => item(i)),
                   [`${ME}:myfavorites`]: [item(500, { title: "fav-a" }), item(501, { title: "fav-b" })] } };
 require("fs").writeFileSync(process.env.T + "/steam-cm.json", JSON.stringify(fx));'
@@ -120,6 +125,27 @@ r = await get(`/workshop/creator?id=3000000002`);
 out(r.status === 200 && r.json?.steamId === OWNER && !!r.json?.name, "creator of an item without one: asked of the client protocol (the fixture)", J(r));
 let reqs = await since(n0);
 out(reqs.filter((x) => x.path === `/profiles/${OWNER}/`).length === 1, "creator: the profile read once per run", J(reqs.map((x) => x.path)));
+
+// ---- 1b. an item's counts ----
+const cmAsks = (id) => (fs.readFileSync(`${T}/backend.log`, "utf8").match(new RegExp(`GetDetails of [0-9]+ id\\(s\\).*fixture: [0-9,]*\\b${id}\\b`, "g")) ?? []).length;
+r = await get(`/workshop/counts?id=${ITEM}`);
+out(r.status === 200 && r.json?.subscriptions === 692 && r.json?.favorites === 34, "counts: the CURRENT subscribers and favourites (692 / 34), never the lifetime ones (876 / 35)", J(r));
+r = await get(`/workshop/counts?id=${ITEM}`);
+const rc = await get(`/workshop/creator?id=${ITEM}`);
+out(r.status === 200 && rc.status === 200 && rc.json?.steamId === OWNER && cmAsks(ITEM) === 1, "counts asked again + the creator without an owner: still one GetDetails of the item", J({ asks: cmAsks(ITEM), rc }));
+r = await get(`/workshop/counts?id=3000000002`);
+out(r.status === 200 && cmAsks("3000000002") === 1, "counts of an item whose creator was asked of the client protocol: no second GetDetails", J({ r, asks: cmAsks("3000000002") }));
+const both = await Promise.all([get(`/workshop/counts?id=3000000003`), get(`/workshop/creator?id=3000000003`)]);
+out(both.every((x) => x.status === 200) && cmAsks("3000000003") === 1, "the counts and the creator asked at once: one GetDetails", J({ both, asks: cmAsks("3000000003") }));
+r = await get(`/workshop/counts?id=3000000099`);
+const rb = await get(`/workshop/counts?id=12ab`);
+out(r.status === 404 && rb.status === 400, "counts: no such public item → 404, a non-digit id → 400", J([r, rb]));
+fs.renameSync(`${T}/steam-cm.json`, `${T}/steam-cm.off`);
+r = await get(`/workshop/counts?id=3000000004`);
+fs.renameSync(`${T}/steam-cm.off`, `${T}/steam-cm.json`);
+const r4 = await get(`/workshop/counts?id=3000000004`);
+out(r.status === 502 && r4.status === 200 && r4.json?.subscriptions === 692, "counts with Steam unreachable → 502, not kept: asked again once it answers", J([r, r4]));
+
 n0 = (await fakeLog()).length;
 r = await get(`/workshop/favorite?id=${ITEM}`);
 out(r.status === 200 && r.json?.signedIn === false && r.json?.favorited === null && (await since(n0)).length === 0, "favourite state signed out: no sign-in, nothing sent", J(r));

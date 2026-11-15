@@ -434,9 +434,11 @@ h0 = helpersLog().length; todo.length = 0;
 n0 = urls().length;
 ru = await post("/workshop/unsubscribe", { workshopId: "740000002", title: "ws-740000002" });
 t = await waitTodo((x) => x?.current?.id === "740000002", 9000); // after the Undo window
+// the page opens through a detached xdg-open (WorkshopDownloader.OpenInSteamApp): its stub may write after the to-do's event
+for (let i = 0; i < 30 && !urls().slice(n0).includes("steam://url/CommunityFilePage/740000002"); i++) await sleep(100);
 st = await state(["740000002"]);
 out(t?.action === "unsubscribe" && urls().slice(n0).includes("steam://url/CommunityFilePage/740000002") && st["740000002"]?.pending === "unsubscribe",
-  "Unsubscribe (Open in the Steam app): a Steam to-do unsubscribe entry, its page opened, state pending unsubscribe", `${JSON.stringify(t)} | ${JSON.stringify(st["740000002"])}`);
+  "Unsubscribe (Open in the Steam app): a Steam to-do unsubscribe entry, its page opened, state pending unsubscribe", `${JSON.stringify(t)} | ${JSON.stringify(st["740000002"])} | opened ${JSON.stringify(urls().slice(n0))}`);
 await post("/steam-todo/next");
 t = await waitTodo((x) => x?.finished);
 st = await state(["740000002"]);

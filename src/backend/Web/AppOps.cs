@@ -562,7 +562,47 @@ public static class AppOps
             if (_undo.Count == 0) return new(false, 0, null);
             batch = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
         }
-        LibraryService.RestoreBatch(batch.BatchDir);
+        RestoreUndo(batch, whole: true);
+        return new(true, batch.Items.Count, batch.Items.Count > 0 ? batch.Items[0].Title : null);
+    }
+
+    // Unsubscribes the app won't send (signed out, or Steam turned the sign-in down, before the drain sent them): dropped the way
+    // their Undo would be, but only theirs. Each item of a Delete from source holding one comes back (library, playlist place;
+    // the rest of its batch stays undoable), and every id leaves the queue, so it stays subscribed (an "Unsubscribe without
+    // deleting" copy gives way to Steam's link again on the next sync). Returns how many library items came back.
+    // Guard: steam-selftest "sign-out in the Undo window", "unsub, signed out"
+    public static int DropUnsubscribes(IReadOnlyCollection<string> ids)
+    {
+        if (ids.Count == 0) return 0;
+        var set = ids.ToHashSet(StringComparer.Ordinal);
+        bool Dropped(LibraryItem i) => i.WorkshopId is string w && set.Contains(w);
+        var back = new List<(UndoBatch Part, bool Whole)>();
+        lock (_undoLock)
+            for (int k = _undo.Count - 1; k >= 0; k--)
+            {
+                var b = _undo[k];
+                if (!b.Items.Any(Dropped)) continue;
+                var keep = b.Items.Where(i => !Dropped(i)).ToList();
+                var goes = b.Items.Where(Dropped).Select(i => i.VideoPath).ToHashSet();
+                back.Add((new UndoBatch(b.BatchDir, b.Items.Where(Dropped).ToList(), b.FromPlaylist.Where(x => goes.Contains(x.Path)).ToList()), keep.Count == 0));
+                if (keep.Count == 0) _undo.RemoveAt(k);
+                else _undo[k] = b with { Items = keep, FromPlaylist = b.FromPlaylist.Where(x => !goes.Contains(x.Path)).ToList() };
+            }
+        foreach (var (part, whole) in back) RestoreUndo(part, whole);
+        foreach (var id in set) { WorkshopUnsubQueue.Restore(id); SteamTodo.DropUnsubscribe(id); }
+        EventBus.Broadcast("library-synced", new { count = 0 }); // the library and the Undo button follow
+        return back.Sum(x => x.Part.Items.Count);
+    }
+
+    // puts a trash batch's items back (`whole` = the batch; else only `batch.Items`, the rest stays in the trash)
+    private static void RestoreUndo(UndoBatch batch, bool whole)
+    {
+        if (whole) LibraryService.RestoreBatch(batch.BatchDir);
+        else
+        {
+            var keys = batch.Items.Select(i => LibraryStore.Locate(i.VideoPath)).OfType<(string Source, string Key)>().ToHashSet();
+            LibraryService.RestoreBatch(batch.BatchDir, (src, key) => keys.Contains((src, key)));
+        }
         // back into the playlist where they were (live — a running rotation picks them up again)
         if (batch.FromPlaylist.Count > 0 && PlaylistService.LoadCurrentState() is { } pl)
         {
@@ -593,7 +633,6 @@ public static class AppOps
                 }
                 catch (Exception e) { Console.WriteLine($"workshop: re-subscribing after undo failed: {e.Message}"); }
             });
-        return new(true, batch.Items.Count, batch.Items.Count > 0 ? batch.Items[0].Title : null);
     }
 
     public static int UndoDepth() { lock (_undoLock) return _undo.Count; }

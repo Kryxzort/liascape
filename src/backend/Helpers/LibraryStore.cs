@@ -58,6 +58,12 @@ public sealed class LibMeta
     // shows it bucketed (WorkshopTags.ResolutionTagOf).
     public string? FrameSize { get; set; }
     public string? FrameSizeOf { get; set; }
+    // The item's size on disk: the bytes of every file in its folder (a `local/<id>` link measured at Steam's folder it points
+    // to, nothing outside it followed, a hard-linked file once) and the folder state it was measured at (DiskBytesOf = its
+    // real path + the newest write time of the folder and its direct entries: a moved link or a changed file is measured
+    // again). Measured in the background (Web/LibraryFactsOps), never on a request.
+    public long? DiskBytes { get; set; }
+    public string? DiskBytesOf { get; set; }
     public string? PageUrl { get; set; }
     public string? AuthorName { get; set; }
     public string? Description { get; set; }

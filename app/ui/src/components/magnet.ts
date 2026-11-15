@@ -49,7 +49,7 @@ function move(e: PointerEvent) {
     if (!r?.width) { set(el, m, 0, 0); continue; }
     const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right), dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
     const dist = Math.hypot(dx, dy);
-    if (dist >= REACH || (el as HTMLButtonElement).disabled) { set(el, m, 0, 0); continue; }
+    if (dist >= REACH || (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") { set(el, m, 0, 0); continue; }
     const fall = 1 - dist / REACH;
     const nx = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (r.width / 2 + REACH)));
     const ny = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / (r.height / 2 + REACH)));

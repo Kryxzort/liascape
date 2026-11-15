@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
+using Liascape.Models;
 using SteamKit2;
 
 namespace Liascape.Web;
@@ -15,8 +16,9 @@ namespace Liascape.Web;
 // hidden `liascape-backend steam-selftest` (PASS/FAIL, exit 1 on a failure): the password sign-in's plumbing — SteamOps'
 // endpoints' calls, the WS events, the code steps, errors, cancel, the rate-limit hold, what gets saved, and that the
 // password shows up NOWHERE (events, console) — with a scripted sign-in in place of SteamKit2 (never a real Steam account),
-// plus the no-sign-in unsubscribe (WorkshopDownloader.DrainUnsubQueueAsync → the Steam to-do, one page at a time, Next / Open
-// again / Skip / Stop) with a stub `xdg-open` that only records the URL. Needs a private HOME under /tmp (it writes settings.json, workshop_unsub.json and fake Steam folders there).
+// plus unsubscribes and the sign-in (WorkshopDownloader.UnsubscribeBlocked per mode; signed out one in its Undo window or due is
+// dropped like its Undo, never a page; "Open in the Steam app" → the Steam to-do, one page at a time, Next / Open again / Skip /
+// Stop) with a stub `xdg-open` that only records the URL. Needs a private HOME under /tmp (it writes settings.json, workshop_unsub.json and fake Steam folders there).
 public static class SteamSelfTest
 {
     private const string Password = "pw-SELFTEST-c0rrect-h0rse";
@@ -92,6 +94,7 @@ public static class SteamSelfTest
             while (Events.TryDequeue(out var e))
             {
                 if (!e.Type.StartsWith("steam-") && !e.Type.StartsWith("unsub-")) continue;
+                if (e.Type == "steam-status" && type != "steam-status") continue; // every sign-out sends one (SteamOps.SignInLost)
                 using var d = JsonDocument.Parse(e.Json);
                 var p = d.RootElement.GetProperty("payload").Clone();
                 if (type == null || e.Type == type) return (e.Type, p);
@@ -375,7 +378,9 @@ public static class SteamSelfTest
         }
     }
 
-    // The no-sign-in unsubscribe: every id into the Steam to-do, one page at a time (stub xdg-open records the URL).
+    // Unsubscribes and the sign-in: signed out the app stays disconnected from Steam for unsubscribes (WorkshopDownloader.
+    // UnsubscribeBlocked): an unsubscribe due or still in its Undo window is dropped like its Undo, never a page, never queued.
+    // "Open in the Steam app" unsubscribes through each item's page, one at a time (stub xdg-open records the URL).
     private static async Task DrainTests()
     {
         string home = Environment.GetEnvironmentVariable("HOME")!;
@@ -407,12 +412,17 @@ public static class SteamSelfTest
         bool Blocked(string id) => WorkshopUnsubQueue.SnapshotBlockedSet().Contains(id);
         Todo();
 
+        UnsubAllowed();
+        await UnsubDropped(Urls, Pending, Blocked);
+
+        // "Open in the Steam app" (its whole job is pages: WorkshopDownloader.PageUnsubscribes), signed out: the item's page opens
         SteamOps.SignOut();
+        SettingsService.Update(x => x.WorkshopDownloadMode = "steampage");
         WorkshopUnsubQueue.AddPending(["800000001"]);
         var r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
         var urls = await Urls(1);
-        Check(urls.LastOrDefault() == "steam://url/CommunityFilePage/800000001", $"unsub, signed out, 1 item: its page opens in Steam ({string.Join(" ", urls)})");
-        Check(r.OpenedInSteam == 1 && (r.Message ?? "").Contains("Not signed in") && (r.Message ?? "").Contains("Unsubscribe"), $"…the message says why + what to click ({r.Message})");
+        Check(urls.LastOrDefault() == "steam://url/CommunityFilePage/800000001", $"unsub, Open in the Steam app, signed out, 1 item: its page opens in Steam ({string.Join(" ", urls)})");
+        Check(r.OpenedInSteam == 1 && (r.Message ?? "").Contains("Set to open items in the Steam app") && (r.Message ?? "").Contains("Unsubscribe"), $"…the message says why + what to click ({r.Message})");
         var tp = Todo();
         Check(Str(tp ?? default, "action") == "unsubscribe" && I(tp, "index") == 1 && I(tp, "total") == 1 && CurId(tp) == "800000001",
             $"…WS steam-todo: unsubscribe 1 of 1, the item ({Show(tp)})");
@@ -422,17 +432,17 @@ public static class SteamSelfTest
         Check(!Pending("800000001") && Blocked("800000001") && tp is { } f1 && f1.TryGetProperty("finished", out _), $"Next: pending → blocked, the to-do finished ({Show(tp)})");
 
         // three Steam has (+1 it hasn't — an owned steamcmd-style copy, never a subscription: no page, blocked at once): one page at
-        // a time, Next / Open again / Skip / Stop
+        // a time, Next / Open again / Skip / Stop. Signed in, the mode still opens pages (it never switches to the sign-in)
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000001));
-        SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamSignInRejected = true; });
+        SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamSignInRejected = false; });
         WorkshopUnsubQueue.AddPending(["800000002", "800000099", "800000003", "800000004"]);
         r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
         urls = await Urls(2);
         await Task.Delay(200);
         urls = await Urls(0);
         Check(urls.Count == 2 && urls[^1] == "steam://url/CommunityFilePage/800000002",
-            $"unsub, sign-in rejected, 3 items Steam has: only the first page opens — never the subscriptions list ({string.Join(" ", urls)})");
-        Check(r.OpenedInSteam == 3 && (r.Message ?? "").Contains("signed this app out") && (r.Message ?? "").Contains("one at a time"), $"…3 in the to-do, the message says why ({r.Message})");
+            $"unsub, Open in the Steam app, signed in, 3 items Steam has: only the first page opens — never the subscriptions list ({string.Join(" ", urls)})");
+        Check(r.OpenedInSteam == 3 && (r.Message ?? "").Contains("Set to open items in the Steam app") && (r.Message ?? "").Contains("one at a time"), $"…3 in the to-do, the message says why ({r.Message})");
         Check(!Pending("800000099") && Blocked("800000099"), "…the one Steam doesn't have (no Steam folder): no entry, no page, blocked at once");
         tp = Todo();
         Check(I(tp, "index") == 1 && I(tp, "total") == 3 && I(tp, "remaining") == 3, $"…WS steam-todo: 1 of 3 ({Show(tp)})");
@@ -464,5 +474,134 @@ public static class SteamSelfTest
         await Task.Delay(300);
         Check(r.OpenedInSteam == 0 && r.Message == null && (await Urls(0)).Count == 5 && Todo() == null, "unsub of an item Steam doesn't have: nothing opens, no to-do, no message");
         SteamOps.SignOut();
+        SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
+    }
+
+    // WorkshopDownloader.UnsubscribeBlocked, per mode × sign-in: "Use the Steam app" (the running client is its sign-in) and
+    // "Open in the Steam app" (pages) always may; the sign-in's and steamcmd's modes only with a usable sign-in
+    private static void UnsubAllowed()
+    {
+        foreach (var (state, setUp) in new (string, Action)[]
+        {
+            ("signed out", () => SteamOps.SignOut()),
+            ("signed in", () => { SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000001)); SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamSignInRejected = false; }); }),
+            ("sign-in rejected", () => SettingsService.Update(x => x.SteamSignInRejected = true)),
+        })
+        {
+            setUp();
+            bool usable = state == "signed in";
+            foreach (var mode in new[] { "steamapp", "steampage", "subscribe", "steamcmd" })
+            {
+                SettingsService.Update(x => x.WorkshopDownloadMode = mode);
+                var why = WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load());
+                bool may = mode is "steamapp" || (mode is "steampage" && WorkshopDownloader.PageUnsubscribes) || usable;
+                Check(may ? why == null : why == "Sign in to Steam to unsubscribe", $"unsub allowed: {mode}, {state} → {(may ? "yes" : "no")} ({why ?? "null"})");
+            }
+        }
+        SteamOps.SignOut();
+        SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
+    }
+
+    // A Workshop item in the library (+ its Steam folder), as auto-import would have it; a plain imported one beside it
+    private static LibraryItem LibItem(string key, string? workshopId)
+    {
+        string source = workshopId != null ? LibraryStore.Workshop : LibraryStore.Imported;
+        string dir = Path.Combine(LibraryStore.SourceDir(source), key);
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, key + ".mp4"), [0, 0, 0, 0]);
+        LibraryStore.UpdateIndex(source, idx => { idx[key] = new LibMeta { Title = "selftest " + key, WorkshopId = workshopId }; return true; });
+        return LibraryService.LoadAll().First(i => i.VideoPath.StartsWith(dir + "/", StringComparison.Ordinal));
+    }
+    private static bool InLibrary(string key) => LibraryService.LoadAll().Any(i => Path.GetFileName(Path.GetDirectoryName(i.VideoPath)) == key);
+
+    // the latest WS unsub-progress message since the last call (other events are dropped here)
+    private static async Task<string?> UnsubMessage(int ms = 1500)
+    {
+        string? msg = null;
+        for (var until = DateTime.UtcNow.AddMilliseconds(ms); DateTime.UtcNow < until && msg == null; await Task.Delay(30))
+            while (Events.TryDequeue(out var e))
+                if (e.Type == "unsub-progress")
+                {
+                    using var d = JsonDocument.Parse(e.Json);
+                    if (d.RootElement.GetProperty("payload").TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String) msg = m.GetString();
+                }
+        return msg;
+    }
+
+    // Signed out, nothing reaches Steam for an unsubscribe and nothing waits for a later sign-in: one still inside its Undo
+    // window when the sign-in ends (signed out here, or Steam turning it down) and one due when no usable sign-in is there are
+    // dropped like their Undo — the item back in the library, off the queue (still subscribed), no page, no to-do entry.
+    private static async Task UnsubDropped(Func<int, Task<List<string>>> urls, Func<string, bool> pending, Func<string, bool> blocked)
+    {
+        SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
+        string steamWs = Path.Combine(Environment.GetEnvironmentVariable("HOME")!, ".local/share/Steam/steamapps/workshop/content/431960");
+        int opened0 = (await urls(0)).Count;
+        async Task<bool> NothingOpened() => SteamTodo.QueuedUnsubscribes().Count == 0 && (await urls(0)).Count == opened0;
+        void SignIn() { SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000001)); SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamSignInRejected = false; }); }
+        await UnsubMessage(0);
+
+        // sign-out inside the Undo window
+        foreach (var id in new[] { "800000011", "800000012", "800000013", "800000014" }) Directory.CreateDirectory(Path.Combine(steamWs, id));
+        SignIn();
+        var w1 = LibItem("800000011", "800000011");
+        int depth0 = AppOps.UndoDepth();
+        AppOps.DeleteFromSource([w1]);
+        Check(!InLibrary("800000011") && pending("800000011") && AppOps.UndoDepth() == depth0 + 1, "sign-out in the Undo window: (set-up) Delete from source trashed it and queued the unsubscribe");
+        SteamOps.SignOut();
+        var msg = await UnsubMessage();
+        Check(InLibrary("800000011") && !pending("800000011") && !blocked("800000011") && AppOps.UndoDepth() == depth0,
+            "sign-out in the Undo window: the unsubscribe is dropped like its Undo — back in the library, off the queue, no undo batch left");
+        Check(msg != null && msg.Contains("back in your library") && msg.Contains("Sign in to Steam to unsubscribe") && await NothingOpened(),
+            $"…the status says so, nothing opened in Steam, no to-do entry ({msg})");
+
+        // Steam turning the sign-in down inside the window (what SteamAuthService does when it can't make the cookie)
+        SignIn();
+        var w2 = LibItem("800000012", "800000012");
+        AppOps.DeleteFromSource([w2]);
+        SettingsService.Update(x => x.SteamSignInRejected = true);
+        SteamOps.SignInLost();
+        msg = await UnsubMessage();
+        Check(InLibrary("800000012") && !pending("800000012") && !blocked("800000012") && msg != null && await NothingOpened(),
+            $"sign-in rejected in the Undo window: dropped like its Undo, back in the library, nothing opened ({msg})");
+        // the window's end (its timer) finds nothing to send
+        await Task.Delay(SteamOps.UnsubUndoWindow + TimeSpan.FromMilliseconds(600));
+        Check(!pending("800000011") && !pending("800000012") && await NothingOpened(), "…and the Undo window's end sends nothing");
+
+        // "Use the Steam app" keeps its unsubscribe through a sign-out (the running client is its sign-in)
+        SignIn();
+        SettingsService.Update(x => x.WorkshopDownloadMode = "steamapp");
+        WorkshopUnsubQueue.AddPending(["800000015"]);
+        WorkshopUnsubQueue.Hold(["800000015"], TimeSpan.FromSeconds(30));
+        SteamOps.SignOut();
+        Check(pending("800000015"), "sign-out in the Undo window, Use the Steam app: the unsubscribe stays (the Steam client does it)");
+        WorkshopUnsubQueue.Restore("800000015");
+        SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
+
+        // due with no sign-in (queued before a restart, say): dropped by the drain, the item back, no page; only its own item of a
+        // batch comes back (a plain item deleted with it stays undoable)
+        SteamOps.SignOut();
+        var w3 = LibItem("800000013", "800000013");
+        var plain = LibItem("selftest-plain", null);
+        WorkshopUnsubQueue.AddPending(["800000013"]);
+        AppOps.Trash([w3, plain]);
+        depth0 = AppOps.UndoDepth();
+        var r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
+        Check(r.OpenedInSteam == 0 && (r.Message ?? "").Contains("Sign in to Steam to unsubscribe") && await NothingOpened(),
+            $"unsub, signed out: nothing opens in Steam, no to-do entry, the message says to sign in ({r.Message})");
+        Check(InLibrary("800000013") && !pending("800000013") && !blocked("800000013"), "…dropped like its Undo: back in the library, off the queue (still subscribed)");
+        Check(!InLibrary("selftest-plain") && AppOps.UndoDepth() == depth0, "…only its own item came back: the plain one deleted with it stays in the trash, still undoable");
+        AppOps.Undo();
+        Check(InLibrary("selftest-plain"), "…and Undo brings that one back");
+
+        // a sign-in Steam turned down: the same, for an id the library doesn't hold (the Browse sidebar's Unsubscribe)
+        SignIn();
+        SettingsService.Update(x => x.SteamSignInRejected = true);
+        WorkshopUnsubQueue.AddPending(["800000014"]);
+        r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
+        Check(r.OpenedInSteam == 0 && (r.Message ?? "").Contains("stays subscribed") && (r.Message ?? "").Contains("Sign in to Steam to unsubscribe")
+            && !pending("800000014") && !blocked("800000014") && await NothingOpened(),
+            $"unsub, sign-in rejected: nothing opens, off the queue, it stays subscribed ({r.Message})");
+        SteamOps.SignOut();
+        await UnsubMessage(0);
     }
 }

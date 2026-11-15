@@ -16,6 +16,10 @@
 #  4. a new arrival (/library/sync) → one GetDetails of only its id.
 #  5. Steam unreachable (no fixture file) + a new arrival → nothing stored for it; once Steam answers, it is asked again.
 #  6. a replaced file is read again.
+#  7. sizes on disk: a `local/<id>` link measured at Steam's folder (not the link); an imported item with a hard link (counted
+#     once) and links inside it (to a big file and a big folder outside it, to a file of its own: none followed); measured
+#     once (the restart measures nothing), again after a change (6's replaced file, a new file in a subfolder: only that item);
+#     GET /library only reads the cache.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-library-facts.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -124,6 +128,17 @@ mkdir -p "$LIB/imported/irot" "$LIB/imported/ipng"
 vid "$T/rot0.mp4" 1920x1080 && ffmpeg -nostdin -loglevel error -y -display_rotation 90 -i "$T/rot0.mp4" -c copy "$LIB/imported/irot/irot.mp4"
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=2560x1440" -frames:v 1 "$LIB/imported/ipng/ipng.png"
 IDX=$(jq -c '.irot = {title: "irot"} | .ipng = {title: "ipng"}' <<< "$IDX")
+# isz (§ 7): its video + data/a.bin (1000 bytes) + a hard link to it + links that must not be followed: to a 3 MB file and a
+# folder holding one outside the item, and to its own a.bin
+mkdir -p "$LIB/imported/isz/data" "$T/outside/dir"
+vid "$LIB/imported/isz/isz.mp4" 320x180
+head -c 1000 /dev/urandom > "$LIB/imported/isz/data/a.bin"
+ln "$LIB/imported/isz/data/a.bin" "$LIB/imported/isz/data/a-hard.bin"
+head -c 3000000 /dev/zero > "$T/outside/big.bin"; cp "$T/outside/big.bin" "$T/outside/dir/big2.bin"
+ln -s "$T/outside/big.bin" "$LIB/imported/isz/big-link.bin"
+ln -s "$T/outside/dir" "$LIB/imported/isz/dir-link"
+ln -s data/a.bin "$LIB/imported/isz/a-link.bin"
+IDX=$(jq -c '.isz = {title: "isz"}' <<< "$IDX")
 printf '%s' "$IDX" > "$LIB/imported/index.json"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"legacy","WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
@@ -182,6 +197,7 @@ start run2
 sleep 6
 check "no GetDetails request" "$(asks)" 0
 check "no file read" "$(grep -c 'library-facts: frame sizes of' "$LOG")" 0
+check "no size on disk measured" "$(grep -c 'library-facts: sizes on disk of' "$LOG")" 0
 check "/library still has 910000001's tags" "$(tags 910000001)" '["Video","Everyone","3840 x 2160","Anime","Audio responsive"]'
 
 echo "== 4. a new arrival"
@@ -215,6 +231,24 @@ n=$(grep -c 'library-facts: frame sizes of' "$LOG")
 api -X POST "$U/library/sync" -d '{}' >/dev/null || bad "POST /library/sync"
 waitlog "library-facts: frame sizes of" $((n + 1)) 30 || bad "the replaced file wasn't read again"
 check "isd → 1280 x 720 now" "$(item isd | jq -c '[(.tags | index("1280 x 720") != null), (.tags | index("Standard Definition")), .resolution]')" '[true,null,"1280 x 720"]'
+
+echo "== 7. sizes on disk"
+bytes() { find "$@" -type f -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }'; } # find never follows a link
+check "910000001 (a local/<id> link): Steam's folder's bytes" "$(item 910000001 | jq .diskBytes)" "$(bytes "$WE/910000001")"
+check "isz: its video + a.bin once (hard link, links to outside and to itself not followed)" "$(item isz | jq .diskBytes)" "$(( $(stat -c %s "$LIB/imported/isz/isz.mp4") + 1000 ))"
+check "…cached with its folder's real path and state" "$(jq -c --arg p "$LIB/imported/isz|" '.isz.diskBytesOf | startswith($p)' "$LIB/imported/index.json")" true
+check "910000001's cache names Steam's folder" "$(jq -c --arg p "$WE/910000001|" '.["910000001"].diskBytesOf | startswith($p)' "$LIB/local/index.json")" true
+# a new file in a subfolder: GET /library still answers the cached number (nothing measured on a request) until a pass
+old=$(item isz | jq .diskBytes); [[ $old =~ ^[0-9]+$ ]] || { bad "isz has no size to compare with"; old=0; }
+head -c 5000 /dev/zero > "$LIB/imported/isz/data/new.bin"
+check "a new file: /library still says the cached size" "$(item isz | jq .diskBytes)" "$old"
+n=$(grep -c 'library-facts: sizes on disk of' "$LOG")
+api -X POST "$U/library/sync" -d '{}' >/dev/null || bad "POST /library/sync"
+waitlog "library-facts: sizes on disk of" $((n + 1)) 30 || bad "the changed folder wasn't measured again"
+check "…the next pass measures it again (+5000)" "$(item isz | jq .diskBytes)" "$((old + 5000))"
+check "…and only it" "$(grep 'library-facts: sizes on disk of' "$LOG" | tail -1 | grep -o 'of [0-9]* item')" "of 1 item"
+check "isd: measured again after 6's replaced file" "$(item isd | jq .diskBytes)" "$(bytes "$LIB/imported/isd")"
+check "every item has its size" "$(lib | jq '[.[] | select(.diskBytes == null)] | length')" 0
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

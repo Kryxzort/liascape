@@ -16,7 +16,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace Liascape.Web;
 
-// The video preview clips (`GET /clip`): what "Animate wallpapers without a GIF" plays on every card on screen
+// The video preview clips (`GET /clip`): what every card on screen plays unhovered when "Not hovered" reaches its video
 // (app/ui/src/components/clipSource.ts). A full-size <video> per card can't: it keeps one of Chromium's 6 connections to
 // the media origin while it plays and decodes 1080p-4K frames for a box a few hundred pixels wide
 // (docs/decisions.md § "Play every on-screen video preview, each as a small clip").

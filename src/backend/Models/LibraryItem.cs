@@ -38,6 +38,8 @@ public class LibraryItem
     public string? AuthorName { get; init; }
     public string? Description { get; init; }
     public long? FileSizeBytes { get; init; }
+    // its size on disk (LibMeta.DiskBytes); null = not measured yet
+    public long? DiskBytes { get; init; }
     public long? Subscriptions { get; init; }
     public long? Favorites { get; init; }
     public string[]? Tags { get; init; }

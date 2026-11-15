@@ -233,7 +233,7 @@ public static class ServerHost
         try { File.Move(tmp, outPath, true); } catch { try { await File.WriteAllBytesAsync(outPath, data); File.Delete(tmp); } catch { } }
     }
 
-    // A non-black/white STILL for the card thumbnail (so AutoPlayGifs-off doesn't show the gif's
+    // A non-black/white STILL for the card thumbnail (so a card whose gif isn't playing doesn't show the gif's
     // black frame-0). First frame with YAVG 30–225, else frame 1, else frame 0.
     private static void ExtractStill(string gifPath, string outJpg, int width = 0)
     {
@@ -676,8 +676,14 @@ public static class ServerHost
             WorkshopDownloader.LaunchSteamCmdSignIn(exe, s.SteamUsername);
             return Results.Ok();
         });
-        app.MapPost("/workshop/delete-from-source", (TrashReq r) => Results.Json(new { batch = AppOps.DeleteFromSource(r.Items),
-            unsubscribeInMs = (int)SteamOps.UnsubUndoWindow.TotalMilliseconds }));
+        // an unsubscribe the download mode can't do now (signed out: WorkshopDownloader.UnsubscribeBlocked) → 400 {error} before
+        // anything is trashed, copied or queued, so the CLI / API can't get round the UI's disabled Unsubscribe.
+        // Guard: test-steam-signin.sh § 2 (unsubscribe refused)
+        static IResult? NoUnsubscribe() => WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load()) is { } why
+            ? Results.Json(new { error = why }, statusCode: 400) : null;
+        app.MapPost("/workshop/delete-from-source", (TrashReq r) =>
+            (r.Items.Any(i => i.WorkshopId != null) ? NoUnsubscribe() : null)
+            ?? Results.Json(new { batch = AppOps.DeleteFromSource(r.Items), unsubscribeInMs = (int)SteamOps.UnsubUndoWindow.TotalMilliseconds }));
         app.MapPost("/workshop/drain", () => { SteamOps.DrainNow(); return Results.Ok(); });
         // "Open on Steam" → the item's page in the Steam CLIENT, not the browser — its
         // own route, never /open (http(s) only): a digits-only id becomes steam://url/CommunityFilePage/<id>, nothing else.
@@ -699,7 +705,7 @@ public static class ServerHost
                 : Results.Json(await WorkshopSubOps.SubscribeAsync(r.WorkshopId!, r.Title)));
         app.MapPost("/workshop/unsubscribe", (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
-                : Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));
+                : NoUnsubscribe() ?? Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));
         // "Unsubscribe without deleting": its own route, so nothing that deletes is on its path (WorkshopSubOps.UnsubscribeKeepAsync)
         // the Browse sidebar's creator, favourite and comments (Web/WorkshopSocialOps.cs over Helpers/SteamCommunity.cs)
         app.MapGet("/workshop/creator", (string? id, string? owner, HttpContext ctx) => WorkshopSocialOps.CreatorAsync(id, owner, ctx.RequestAborted));
@@ -708,9 +714,11 @@ public static class ServerHost
         app.MapGet("/workshop/comments", (string? id, string? owner, int? start, int? count, HttpContext ctx) =>
             WorkshopSocialOps.CommentsAsync(id, owner, start ?? 0, count ?? 10, ctx.RequestAborted));
         app.MapPost("/workshop/comment", (CommentReq r, HttpContext ctx) => WorkshopSocialOps.PostCommentAsync(r.WorkshopId, r.Owner, r.Text, r.Count ?? 10, ctx.RequestAborted));
+        // the Library sidebar's stat pills: Steam's current subscriber / favourite counts (the client protocol, not the community site)
+        app.MapGet("/workshop/counts", (string? id, HttpContext ctx) => WorkshopSocialOps.CountsAsync(id, ctx.RequestAborted));
         app.MapPost("/workshop/unsubscribe-keep", async (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
-                : Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));
+                : NoUnsubscribe() ?? Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));
         // the Steam to-do (Web/SteamTodo.cs; .claude/rules/backend/sources-steam.md § Workshop downloads): the pages the user clicks in the Steam app, one at a time
         app.MapGet("/steam-todo", () => Results.Json(SteamTodo.Payload()));
         app.MapPost("/steam-todo/next", () => { SteamTodo.Next(); return Results.Ok(); });
@@ -910,7 +918,7 @@ public static class ServerHost
             catch { return Results.StatusCode(502); }
         });
 
-        // Static thumbnail for an animated gif/webp preview: a non-black/white still, so AutoPlayGifs-off /
+        // Static thumbnail for an animated gif/webp preview: a non-black/white still, so a gif not playing /
         // the loop-gap shows a real frame, not the gif's black frame-0 — and so a gif used as a *static*
         // thumbnail (library items whose only
         // sibling image is the preview gif) doesn't animate on its own. `u` = remote URL OR local path.

@@ -164,7 +164,7 @@ public static class FeatureHealth
         var ff = new[] { "ffmpeg", "ffprobe" }.Where(t => !i.OnPath(t)).ToArray();
         f.Add(new("ffmpeg", "ffmpeg", ff.Length == 0,
             ff.Length == 0 ? null : $"{string.Join(" and ", ff)} not found in PATH — loudness can't be measured (Even out loudness), and imports, thumbnails, video previews and video durations fail",
-            ["normalizeAudio", "autoPlayVideoThumbs"]));
+            ["normalizeAudio", "previewNotHovered"]));
         f.Add(new("steamcmd", "steamcmd", i.SteamCmdFound,
             i.SteamCmdFound ? null : "steamcmd not found (set its path, or install it) — \"Download via steamcmd\" can't download",
             ["workshopDownloadMode", "steamCmdPath"]));

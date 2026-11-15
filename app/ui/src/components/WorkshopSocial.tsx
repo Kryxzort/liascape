@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { ArrowRight, LoaderCircle, MessageSquare, RotateCcw, Send, Star, User } from "lucide-react";
-import { api, thumb, ApiError, type WsComment, type WsCreator } from "../api/client";
+import { api, thumb, ApiError, type WsComment, type WsCounts, type WsCreator } from "../api/client";
 import { useStore } from "../store";
 import { CopyButton } from "./CopyButton";
+import { StatPills } from "./sidePills";
 
-// The Browse sidebar's Workshop community pieces (BrowseSide.tsx): the creator, the favourite toggle and the comment thread
-// (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in and say
+// The item sidebars' Workshop community pieces (BrowseSide.tsx, and LibrarySide.tsx for a Workshop item): the creator, the
+// favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in and say
 // "Sign in to …" without it. A failed read is a quiet line in place, never a crash or a status-bar error. Steam limits its
 // community site per IP (every call is spaced and stops during its cooldown — Helpers/SteamGate.cs), so the sidebar asks
 // only for what the user looks at: the creator and the favourite once the sidebar has stayed on an item for SETTLE_MS (a
@@ -16,6 +17,7 @@ const SETTLE_MS = 350;
 const PAGE = 10;
 const creators = new Map<string, WsCreator>(); // per Workshop item
 const favorites = new Map<string, boolean>(); // per Workshop item, signed in
+const counts = new Map<string, WsCounts>(); // per Workshop item
 
 function useSettled(key: string) {
   const [settled, setSettled] = useState<string | null>(null);
@@ -39,9 +41,10 @@ export function Avatar({ src, size }: { src: string | null | undefined; size: nu
 }
 
 // The creator: their avatar and name; a click lists every Wallpaper Engine item they made in Browse (store setWsList —
-// a source pill of its own, components/SourcePills.tsx). The name can be selected, and copied by the Copy that floats at the
-// end of the "Made by" line while the row is hovered or holds the keyboard focus. Guard: probe-steam ws:creator, ws:creatorCopy
-export function CreatorRow({ workshopId, authorId }: { workshopId: string; authorId: string | null | undefined }) {
+// a source pill of its own, components/SourcePills.tsx), and `onListed` takes the user there from another tab (the Library
+// sidebar). The name can be selected, and copied by the Copy that floats at the end of the "Made by" line while the row is
+// hovered or holds the keyboard focus. Guard: probe-steam ws:creator, ws:creatorCopy, lib:ws:creator
+export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: string; authorId: string | null | undefined; onListed?: () => void }) {
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCreator | null>(() => creators.get(workshopId) ?? null);
   const [failed, setFailed] = useState(false);
@@ -61,7 +64,9 @@ export function CreatorRow({ workshopId, authorId }: { workshopId: string; autho
   const go = (e: MouseEvent<HTMLButtonElement>) => {
     const sel = getSelection();
     if (sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) return;
-    if (id) setWsList({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null });
+    if (!id) return;
+    setWsList({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null });
+    onListed?.();
   };
   return (
     <div className="ws-creator-row">
@@ -126,6 +131,30 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
         ))}
       </span>
     </button>
+  );
+}
+
+// The Library sidebar's stat pills: Steam's current subscribers and favourites (a Browse result carries its own, shown in its
+// hero), asked once the sidebar settles (GET /workshop/counts, Steam's client protocol) and kept for the session. The row is
+// held while they're asked, its pills unseen, so they fade in where they stay (motion on: rising a little) and nothing after
+// them moves; no answer (Steam unreachable) → no row. Guard: probe-steam lib:ws:counts, lib:ws:countsOff
+export function WorkshopStats({ workshopId }: { workshopId: string }) {
+  const settled = useSettled(workshopId);
+  const [c, setC] = useState<WsCounts | null>(() => counts.get(workshopId) ?? null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!settled || counts.has(workshopId)) return;
+    let alive = true;
+    api.workshopCounts(workshopId).then((r) => { counts.set(workshopId, r); if (alive) setC(r); })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; };
+  }, [settled, workshopId]);
+  if (failed && !c) return null;
+  // the held row's stand-ins: the widths of numbers like Steam's, so the real ones land about where they show
+  return (
+    <div className="side-hero ws-stats" data-ws-stats={c ? "known" : "loading"} aria-hidden={!c || undefined}>
+      <StatPills subscriptions={c?.subscriptions ?? 1000} favorites={c?.favorites ?? 100} />
+    </div>
   );
 }
 

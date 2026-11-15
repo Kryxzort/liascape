@@ -487,12 +487,39 @@ public static class WorkshopDownloader
     /// What a drain did beyond the queue: how many items it opened in the Steam app, and what the user should hear.
     public sealed record DrainResult(int OpenedInSteam = 0, string? Message = null);
 
+    /// "Open in the Steam app" unsubscribes through each item's page in the Steam app (the Steam to-do), signed in or not: pages
+    /// are that mode's whole job. False = that mode needs the sign-in to unsubscribe, like "Subscribe with Steam login" and
+    /// steamcmd, and then unsubscribes with it. Guard: steam-selftest "unsub allowed"
+    public static readonly bool PageUnsubscribes = true;
+    public const string UnsubSignIn = "Sign in to Steam to unsubscribe";
+
+    /// Why an Unsubscribe can't happen now, else null. Without a usable sign-in the app stays disconnected from Steam for
+    /// unsubscribes: nothing queued for later, no Steam page, no Steam client. "Use the Steam app" counts the running client
+    /// as its sign-in. The endpoints refuse with it (400) and the UI mirrors it (components/subscribeMode.ts unsubBlocked).
+    /// Guard: steam-selftest "unsub allowed", test-steam-signin.sh § 2 (unsubscribe refused), probe-steam side:unsub:signedOut
+    public static string? UnsubscribeBlocked(AppSettings s) =>
+        s.WorkshopDownloadMode == "steamapp" || (s.WorkshopDownloadMode == "steampage" && PageUnsubscribes)
+            || SteamAuthService.HasUsableSignIn(s) ? null : UnsubSignIn;
+
+    /// what the status bar says when unsubscribes were dropped for want of a sign-in (`back` = library items that came back)
+    public static string DroppedMessage(int ids, int back) =>
+        $"Not unsubscribed{(back > 0 ? $": {(back == 1 ? "it's" : "they're")} back in your library" : ids == 1 ? ": it stays subscribed" : ": they stay subscribed")}. {UnsubSignIn}.";
+
+    // A due unsubscribe the drain can't send (no usable sign-in, or Steam turned it down mid-drain): dropped like its Undo,
+    // never left queued for a later sign-in and never a page. Guard: steam-selftest "unsub, signed out", "unsub, sign-in rejected"
+    private static DrainResult Dropped(System.Collections.Generic.List<string> ids, string why)
+    {
+        int back = AppOps.DropUnsubscribes(ids);
+        Console.WriteLine($"workshop: unsubscribe {string.Join(", ", ids)}: {why} — not sent, dropped");
+        return new DrainResult(0, DroppedMessage(ids.Count, back));
+    }
+
     /// Drains the unsubscribe queue: for each pending id, unsubscribe → mark blocked. We do NOT delete
     /// the workshop folder — Steam removes it (folder + acf entry) on its next sync, avoiding a stale
     /// acf/folder mismatch. `blocked` keeps AutoImport from re-importing the lingering folder until
     /// Steam cleans it. Throttled; on failure the id stays pending to retry. Reports (done,total,id).
-    /// Without a usable sign-in (none, or one Steam turned down) the unsubscribing is the user's, in the Steam app:
-    /// <see cref="UnsubscribeInSteamApp"/> — the result's Message says what to click.
+    /// "Open in the Steam app" leaves the unsubscribing to the user, in the Steam app: <see cref="UnsubscribeInSteamApp"/> — the
+    /// result's Message says what to click. Without a usable sign-in otherwise nothing is sent: <see cref="Dropped"/>.
     public static async Task<DrainResult> DrainUnsubQueueAsync(AppSettings settings, IProgress<(int Done, int Total, string CurrentId)>? progress, CancellationToken ct)
     {
         // ids whose unsubscribe already waits in the Steam to-do are the user's there (Next / Skip decide them)
@@ -533,8 +560,9 @@ public static class WorkshopDownloader
                 ? SteamClientUgc.FailureMessage(fallback) + " The unsubscribe stays queued."
                 : $"Steam didn't confirm unsubscribing {pending.Count} item{(pending.Count == 1 ? "" : "s")} — they stay queued; try again.");
         }
-        if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
-        if (!SteamAuthService.HasUsableSignIn(settings)) return UnsubscribeInSteamApp(settings, pending, Why(settings));
+        if (settings.WorkshopDownloadMode == "steampage" && PageUnsubscribes) return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
+        if (!SteamAuthService.HasUsableSignIn(settings))
+            return Dropped(pending, settings.SteamSignInRejected ? "Steam turned the sign-in down" : "not signed in to Steam");
         int total = pending.Count, done = 0;
         for (int i = 0; i < pending.Count; i++)
         {
@@ -548,8 +576,8 @@ public static class WorkshopDownloader
             }
             catch (SteamSignInRejectedException)
             {
-                // Steam ended the sign-in mid-drain: the rest goes to the Steam app
-                return UnsubscribeInSteamApp(settings, pending.GetRange(i, pending.Count - i), "Steam signed this app out");
+                // Steam ended the sign-in mid-drain: the rest isn't sent (the ones done before it stay done)
+                return Dropped(pending.GetRange(i, pending.Count - i), "Steam turned the sign-in down");
             }
             catch (SteamRateLimitException)
             {
@@ -613,10 +641,7 @@ public static class WorkshopDownloader
             : $"Undone — to keep them subscribed, click Subscribe on each of the {toPage.Count} pages the Steam to-do opens (any that say Subscribed are set).";
     }
 
-    private static string Why(AppSettings s) =>
-        s.SteamSignInRejected && SteamAuthService.HasRefreshToken() ? "Steam signed this app out" : "Not signed in to Steam here";
-
-    /// The no-sign-in unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each
+    /// "Open in the Steam app"'s unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each
     /// one's page opens in the Steam app, one at a time, for the user to click Unsubscribe, then Next (never the subscriptions
     /// list of hundreds of items). Only those: the unsubscribe queue holds items deleted from the LIBRARY, and a library
     /// Workshop item is either a `local/<id>` link into Steam's folder (a subscription — its folder exists) or an owned

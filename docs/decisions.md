@@ -86,9 +86,10 @@ of the allowed ages, which drops the few hundred items with no age tag; other gr
 `WorkshopTags.Build`.
 
 ### Offer four Workshop download modes, the user's choice — 2026-11-11
-`steamapp`, `steampage`, `subscribe` (default), `steamcmd`: the owner wanted a fourth that opens the item in the Steam app,
-before only the sign-in's silent fallback. No mode switches method by itself (`subscribe` without a usable sign-in fails,
-saying why: 2026-11-14); the to-do's "Let the Steam app do all N" is the one explicit switch. `.claude/rules/backend/sources-steam.md`.
+`steamapp`, `steampage`, `subscribe` (default), `steamcmd`: the owner wanted a fourth that opens the item in the Steam app.
+No mode switches method by itself (`subscribe` signed out fails, saying why); the to-do's "Let the Steam app do all N" is
+the one explicit switch. Signed out nothing unsubscribes (owner, 2026-11-14: the app stays disconnected): no page, nothing
+queued; `steamapp`'s client is its sign-in. `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
 `libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a copy
@@ -107,9 +108,8 @@ on a large item. The poll reports "Steam is downloading it…" / "Steam is finis
 `steamapp` has Steam's real byte counts. `Helpers/WorkshopDownloader.cs`.
 
 ### Open an unsubscribe page only for items in a Steam Workshop folder — 2026-11-11
-The unsubscribe queue holds items deleted from the library: a `local/<id>` link is a subscription, an owned
-`workshop/<id>` copy is a steamcmd download and never one. Ids without a folder are blocked at once, no page.
-`WorkshopDownloader.UnsubscribeInSteamApp`; `.claude/rules/backend/sources-steam.md` § Workshop downloads.
+"Open in the Steam app"'s unsubscribe: a `local/<id>` link is a subscription, an owned `workshop/<id>` copy (steamcmd)
+never one, so ids without a folder are blocked at once, no page. `WorkshopDownloader.UnsubscribeInSteamApp`.
 
 ### Offer a password sign-in beside the QR — 2026-11-11
 Owner: "is it a dead end for users without mobile guard?" The QR sign-in needs the Steam mobile app; he chose both a
@@ -154,6 +154,10 @@ once by a script. `AppSettings` carries no legacy branches. `.claude/rules/backe
 
 ## Settings & state
 
+### Order card previews in two lists, not toggles — 2026-11-15
+"On hover" / "Not hovered" each order video / GIF / still image; a card shows the first it has. They replaced three
+toggles that couldn't say every order; Basic picks a preset. Guard: matrix `appear:previewOrder`.
+
 ### Use four settings levels, Standard by default, and never reset a hidden value — 2026-11-06
 Owner: "the forever final 4 levels" — Basic · Standard · Advanced · Expert, replacing the "Advanced settings" and "Show
 expert options" toggles. A hidden changed value gets the "tucked away" note with Show; a bulk reset was rejected because
@@ -196,15 +200,12 @@ renderer CPU of Chromium's gif animation (67–74 % vs 35 % of a core), ~400 MB 
 there. Guard: matrix `appear:gifResume`; `.claude/rules/ui/design.md` § Performance.
 
 ### Play every on-screen video preview, each as a small clip — 2026-11-12
-"Animate wallpapers without a GIF" has no cap (it was 4): every video preview on screen plays a clip the backend makes
-(`/clip`, `Web/ClipStore.cs`), never the wallpaper's own file — a full-size `<video>` keeps one of Chromium's 6
-connections while it plays (uncapped, 12 of 24 never loaded). Owner's terms: no storage options; one clip per item, as
-wide as its widest card needs (box × dpr × "Video preview quality", source shape, the card crops it), up to 5 min (a 10 s
-stand-in first), kept while the item is in the library; re-made for a wider box, shrunk when 2× too wide in idle time.
-The whole library follows the quality, down too (Low = disk and decode savings), once it settles (4 s) and Settings is
-left, not only cards as they show. A hover hands over to the real file and back at the same moment, as every clip swap does
-(`components/PreviewPlayer.tsx`), never at a loop boundary. Guard: matrix `appear:videoThumbs`, `clip:*`;
-`scripts/test-clip-sweep.sh`.
+Video previews have no cap: every one on screen plays a clip the backend makes (`/clip`, `Web/ClipStore.cs`), never the
+wallpaper's own file (a full-size `<video>` keeps one of Chromium's 6 connections while it plays). Owner's terms: no
+storage options; one clip per item, as wide as its widest card needs (box × dpr × "Video preview quality"), up to 5 min,
+kept while the item is in the library; re-made for a wider box, shrunk when 2× too wide in idle time. The whole library
+follows the quality, down too, once it settles (4 s) and Settings is left. A hover hands over to the real file and back
+at once (`components/PreviewPlayer.tsx`). Guard: matrix `appear:videoThumbs`, `clip:*`; `scripts/test-clip-sweep.sh`.
 
 ### Keep the Library page mounted across tab switches; don't virtualise the grid — 2026-11-12
 The Library page and the playlist bar stay mounted once shown (React `<Activity>`, hidden = display none); Browse and

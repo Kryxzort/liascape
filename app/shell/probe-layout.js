@@ -1032,7 +1032,7 @@ app.whenReady().then(async () => {
     // pixels change) and stand still with motion off / reduced motion.
     await cell("perf:skeleton", async () => {
       const v = [];
-      await setSettings({ morphs: true, autoPlayVideoThumbs: false, liveWallpaperBehindAllTabs: false });
+      await setSettings({ morphs: true, previewNotHovered: ["image", "gif", "video"], liveWallpaperBehindAllTabs: false });
       const d = dbg(); await d.sendCommand("Page.enable");
       const hang = `(() => { const f = window.fetch; window.fetch = (u, o) => {
         const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
@@ -1697,7 +1697,7 @@ app.whenReady().then(async () => {
       const vids = lib.filter((i) => !i.isScene).map((i) => i.videoPath);
       if (vids.length < DOCK_PLAYLIST) return [`only ${vids.length} library videos — the cell proves nothing`];
       await post("/playlist/state", { videoPaths: vids.slice(0, DOCK_PLAYLIST), settings: null, name: null });
-      await setSettings({ autoPlayVideoThumbs: true, liveWallpaperBehindAllTabs: true, isPlaylistBarCollapsed: false });
+      await setSettings({ previewNotHovered: ["gif", "video", "image"], liveWallpaperBehindAllTabs: true, isPlaylistBarCollapsed: false });
       await post("/apply", { path: vids[2] });
       for (let i = 0; i < 60 && (await http("GET", "/current")).json?.path !== vids[2]; i++) await sleep(250);
       await win.loadURL(withToken(U + "/")); // the open page doesn't see a /settings POST
@@ -1781,7 +1781,7 @@ app.whenReady().then(async () => {
     // ---- the grid's column fit (hooks/useGridFit.ts) ----
     for (const [name, aspect] of [["grid:boot", "1:1"], ["grid:boot:wide", "16:9"]]) await cell(name, async () => {
       const v = [];
-      await setSettings({ thumbnailAspect: aspect, cardSize: "Medium", autoPlayVideoThumbs: false, liveWallpaperBehindAllTabs: false });
+      await setSettings({ thumbnailAspect: aspect, cardSize: "Medium", previewNotHovered: ["image", "gif", "video"], liveWallpaperBehindAllTabs: false });
       await perfSetup();
       await resize(1400, 900);
       const d = dbg(); await d.sendCommand("Page.enable");

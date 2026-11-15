@@ -155,7 +155,12 @@ public static class WorkshopSubOps
             {
                 var s = SettingsService.Load();
                 if (!s.AutoAddWeWallpapersToLibrary) return;
-                if (LibraryService.RelinkOwnCopies(s.WorkshopFolder, id).Count > 0) { EventBus.Broadcast("library-synced", new { count = 0 }); return; }
+                if (LibraryService.RelinkOwnCopies(s.WorkshopFolder, id).Count > 0)
+                {
+                    EventBus.Broadcast("library-synced", new { count = 0 });
+                    LibraryFactsOps.Kick("relink"); // its size on disk, now Steam's folder's
+                    return;
+                }
                 await Task.Delay(WorkshopDownloader.PollMs);
             }
         }
@@ -205,6 +210,7 @@ public static class WorkshopSubOps
             WorkshopUnsubQueue.AddPending([id]);
             Console.WriteLine($"workshop: {id}: unsubscribe without deleting from the Browse sidebar — {items.Count} library item(s) kept ({kept} copied out of Steam's folder)");
             SteamOps.StartDrain();
+            if (kept > 0) LibraryFactsOps.Kick("own copy"); // its size on disk, now the copy's
             return new { inLibrary = items.Count > 0, kept };
         }
         finally { _keepGate.Release(); }

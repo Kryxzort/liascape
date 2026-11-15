@@ -9,6 +9,7 @@ import { glideY } from "./flipGlide";
 import { magnetRef } from "./magnet";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { keepMenuItem, menuAt } from "./menuItems";
+import { unsubBlocked } from "./subscribeMode";
 
 // how long a leaving card stays mounted (its fade out: enterLeave)
 const SUB_OUT_MS = 200;
@@ -68,6 +69,9 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
   const subscribe = useStore((s) => s.subscribeWorkshop);
   const unsubscribe = useStore((s) => s.unsubscribeWorkshop);
   const unsubscribeKeep = useStore((s) => s.unsubscribeKeepWorkshop);
+  // signed out the Unsubscribe is disabled: its sub-line and tooltip say why, its right-click entry too (the menu's note).
+  // Guard: probe-steam steam:subToggle:signedOut
+  const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -135,16 +139,20 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
   const hint = state === "subscribing" ? (prog?.status && prog.status !== "Subscribing…" ? prog.status : "Steam takes it from here")
     : state === "unsubscribing" ? "Waiting for Steam"
     : keeping ? "Keeping a copy in your library…"
+    : state === "subscribed" && unsubOff ? unsubOff
     : state === "subscribed" ? (st.inLibrary ? "Also removes it from your library; right-click keeps it" : "Steam keeps it up to date")
     : state === "unsubscribed" ? "Steam removes its folder soon"
     : st.inLibrary ? "Subscribe to let Steam keep it up to date" : "Subscribe without adding it to your library";
   const icon = state === "subscribed" ? <CloudCheck size={16} /> : pending ? <LoaderCircle size={16} className="side-sub-spin" /> : <CloudOff size={16} />;
+  const off = st.subscribed && !!unsubOff;
   const click = async () => {
+    if (off) return;
     setBusy(true);
     try { if (st.subscribed) await unsubscribe(id, title); else await subscribe(id, title); }
     finally { setBusy(false); setReadTick((n) => n + 1); }
   };
   const keep = async () => {
+    if (off) return;
     setBusy(true); setKeeping(true);
     try { await unsubscribeKeep(id, title); }
     finally { setBusy(false); setKeeping(false); setReadTick((n) => n + 1); }
@@ -171,6 +179,7 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
         {!pending && (
           <button ref={setBtn} className={`btn ico side-sub-btn ${st.subscribed ? "danger" : "accent"}`}
             data-side-sub-btn={st.subscribed ? "unsubscribe" : "subscribe"} aria-haspopup={st.subscribed && st.inLibrary ? "menu" : undefined}
+            aria-disabled={off || undefined}
             disabled={busy || shown.closing} onClick={click} onContextMenu={onMenu}>
             {st.subscribed ? <CloudOff size={14} /> : <CloudDownload size={14} />}{st.subscribed ? "Unsubscribe" : "Subscribe"}
           </button>
@@ -183,7 +192,7 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
         </AnimatePresence>
       </div>
       <ContextMenu at={menu} onClose={closeMenu} returnTo={btnRef} label="Unsubscribe"
-        items={[keepMenuItem(keep)]} />
+        items={[{ ...keepMenuItem(keep), disabled: off }]} note={off ? unsubOff : null} />
       <AnimatePresence initial={false}>
         {state === "subscribing" && prog && (
           <motion.div key="bar" className={`dl-bar side-sub-bar${pct == null ? " indet" : ""}`} data-side-sub-progress

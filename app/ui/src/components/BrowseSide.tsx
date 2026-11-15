@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { Monitor, Star, Users, HardDrive, User, ExternalLink, Download, CloudDownload, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
+import { Monitor, User, ExternalLink, Download, CloudDownload, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type OneOffRoute, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
@@ -11,6 +11,7 @@ import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
 import { WorkshopIdPill } from "./WorkshopIdPill";
 import { CommentsSection, CreatorRow, FavoriteTile } from "./WorkshopSocial";
+import { SizePill, StatPills } from "./sidePills";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { menuAt, oneOffMenuItems } from "./menuItems";
 
@@ -18,14 +19,6 @@ import { menuAt, oneOffMenuItems } from "./menuItems";
 const ONE_OFF_FRESH_MS = 5000;
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
-
-const fmt = (n: number | null) => (n == null ? null : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-const fmtSize = (b: number | null) => {
-  if (b == null) return null;
-  if (b >= 1 << 30) return `${(b / (1 << 30)).toFixed(1)} GB`;
-  if (b >= 1 << 20) return `${(b / (1 << 20)).toFixed(0)} MB`;
-  return `${(b / 1024).toFixed(0)} KB`;
-};
 
 // The Browse sidebar's content (components/SidePanel.tsx is the shell) — what the preview modal had: the picture (the
 // card's still → the full-res preview, `api.detail`, fading in once loaded → the gif, the card's own /anim URL), the
@@ -118,12 +111,9 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
           )}
           {w.isScene && <span className="side-chip accent">SCENE</span>}
           {w.resolution && <span className="side-pill"><Monitor size={13} /> {w.resolution}</span>}
-          {/* Steam's current counts (the backend reads `subscriptions` / `favorited`, never the lifetime ones — Guard:
-              test-workshop-social.sh); the star is the favourite's everywhere (the Favourite tile below), the people the
-              subscribers'. Guard: probe-steam ws:counts */}
-          {fmt(w.subscriptions) && <span className="side-pill" title="Subscribers" data-side-stat="subscribers"><Users size={13} /> {fmt(w.subscriptions)}</span>}
-          {fmt(w.favorites) && <span className="side-pill" title="Favourites" data-side-stat="favorites"><Star size={13} /> {fmt(w.favorites)}</span>}
-          {fmtSize(w.fileSizeBytes) && <span className="side-pill" title="Size"><HardDrive size={13} /> {fmtSize(w.fileSizeBytes)}</span>}
+          {/* Steam's current counts, the Library sidebar's own pills (components/sidePills.tsx). Guard: probe-steam ws:counts */}
+          <StatPills subscriptions={w.subscriptions} favorites={w.favorites} />
+          <SizePill bytes={w.fileSizeBytes} title="Size" />
           {w.authorName && !w.workshopId && <span className="side-pill" title="Author"><User size={13} /> {w.authorName}</span>}
           {w.workshopId && <WorkshopIdPill id={w.workshopId} />}
         </div>

@@ -297,6 +297,7 @@ public static class SteamAuthService
                 SettingsService.Update(s => s.SteamSignInRejected = true);
                 SecretStore.Delete(SecretStore.AccessToken);
                 Console.WriteLine("steam: Steam turned down the saved sign-in — the user has to sign in again");
+                Liascape.Web.SteamOps.SignInLost();
                 throw;
             }
             SecretStore.Set(SecretStore.AccessToken, cookie); // full steamLoginSecure value (steamid||webtoken)

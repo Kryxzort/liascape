@@ -202,6 +202,27 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .seg.row { border-radius: 999px; background: color-mix(in srgb, var(--surface0) var(--tr), transparent); }
 .seg.row :is(.seg-opt, .seg-ghost) { padding: 5px 13px; font-size: 13px; }
 
+/* ---- an ordered list the user arranges (components/OrderList.tsx: Settings → "On hover" / "Not hovered") ----
+   Each item a chip like the dropdowns' (`.sel`): grip, place, name, move buttons. Dragged it lifts (glow), the others glide
+   aside on the soft spring (dnd-kit's transition, set in the component); the items past the list's end (`data-unreached`)
+   fade back. Guard: probe-cardpreview cardpv:orderCtl. */
+.ord { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: 196px; }
+.ord-item { position: relative; display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 7px; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
+  cursor: grab; touch-action: none; user-select: none; transition: border-color .15s, box-shadow .2s, opacity .2s; }
+.ord-item:hover { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.ord-item.dragging { z-index: 1; cursor: grabbing; border-color: var(--accent); box-shadow: var(--glow); }
+.ord-item[data-unreached] { opacity: .45; }
+.ord-item[data-unreached]:hover, .ord-item[data-unreached].dragging { opacity: .8; }
+.ord-grip { flex: none; color: var(--subtext); }
+.ord-n { flex: none; width: 1.1em; text-align: center; font-size: 11px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ord-label { flex: 1; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+.ord-label > svg { flex: none; color: var(--subtext); }
+.ord-mv { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px;
+  color: var(--subtext); cursor: pointer; transition: color .15s, background .15s, box-shadow .2s; }
+.ord-mv:hover:not(:disabled) { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: var(--glow-sm); }
+.ord-mv:disabled { opacity: .3; cursor: default; }
+
 /* ---- grid ---- */
 /* position: relative so the scroll box (its scrollbar included) paints in the positioned layer, after the fixed live
    wallpaper (video.settings-bg, z-index 0, under bg-live): a non-positioned scroller paints before it, so its scrollbar sat
@@ -448,6 +469,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); transition: opacity .12s, color .15s, filter .2s; }
 .card.lib:hover .del { opacity: 1; }
 .del:hover { color: var(--danger); filter: drop-shadow(0 0 5px var(--danger)); }
+/* an Unsubscribe that can't happen now (signed out): dim, never the danger glow; a click only says why. Guard: probe-steam side:unsub:signedOut */
+.card.lib:hover .del[aria-disabled="true"] { opacity: .45; }
+.del[aria-disabled="true"]:hover { color: #fff; filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); cursor: default; }
 /* ring/check playlist-toggle — transparent, currentColor accent → accent-hover */
 .pl-toggle { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; padding: 0;
   display: grid; place-items: center; background: transparent; color: var(--accent); opacity: 0;
@@ -1033,21 +1057,21 @@ input[type=range]:focus-visible { outline: none; }
 /* the parts move in the icon's own 24-unit grid (iconMotion.ts recipes and the holds below) */
 :where(svg.lucide) > * { transform-box: view-box; transform-origin: 12px 12px; transition: transform var(--spring-dur) var(--spring); }
 /* object: an icon with no verb of its own tilts while its button is hovered (iconMotion.ts marks the acting ones data-act) */
-:where(button, a):hover:not(:disabled, .seg-opt, .ns-btn, .wf-seg) svg.lucide:not(.lucide-x, .lucide-trash-2, .lucide-folder-flap,
+:where(button, a):hover:not(:disabled, [aria-disabled="true"], .seg-opt, .ns-btn, .wf-seg) svg.lucide:not(.lucide-x, .lucide-trash-2, .lucide-folder-flap,
   .lucide-locate-fixed, .lucide-chevron-down, .lucide-chevron-right, .lucide-chevron-left, .lucide-check, .lucide-loader-circle, [data-act], .wf-gico > *, .side-sec-ico > *) {
   transform: rotate(-8deg) scale(1.08); }
 /* hold: the trash lid lifts, hinged at its left end; the folder's flap falls open from its bottom edge; X turns a quarter;
    the crosshair turns a quarter. Leaving closes them on the same spring. */
 :where(svg.lucide-trash-2) > :nth-child(n+4) { transform-origin: 4px 6px; }
-:where(button, a):hover:not(:disabled) svg.lucide-trash-2 > :nth-child(n+4) { transform: translateY(-1.5px) rotate(-18deg); }
+:where(button, a):hover:not(:disabled, [aria-disabled="true"]) svg.lucide-trash-2 > :nth-child(n+4) { transform: translateY(-1.5px) rotate(-18deg); }
 :where(svg.lucide-folder-flap) > :nth-child(2) { transform-origin: 2px 20px; }
-:where(button, a):hover:not(:disabled) svg.lucide-folder-flap > :nth-child(2) { transform: skewX(-18deg) scaleX(.86); }
-:where(button, a):hover:not(:disabled, .wf-seg) svg.lucide-x { rotate: 90deg; }
-:where(button, a):hover:not(:disabled) svg.lucide-locate-fixed { rotate: 90deg; transition-timing-function: var(--spring-soft); }
+:where(button, a):hover:not(:disabled, [aria-disabled="true"]) svg.lucide-folder-flap > :nth-child(2) { transform: skewX(-18deg) scaleX(.86); }
+:where(button, a):hover:not(:disabled, [aria-disabled="true"], .wf-seg) svg.lucide-x { rotate: 90deg; }
+:where(button, a):hover:not(:disabled, [aria-disabled="true"]) svg.lucide-locate-fixed { rotate: 90deg; transition-timing-function: var(--spring-soft); }
 /* the small cross and dot of sparkles pop from their own centres (iconMotion.ts) */
 :where(svg.lucide-sparkles) > :nth-child(n+2) { transform-box: fill-box; transform-origin: center; }
 /* press: every icon button squeezes its icon, and springs back on release */
-:where(button, a):active:not(:disabled, .seg-opt, .ns-btn) svg.lucide { scale: .82; transition-duration: var(--press-dur);
+:where(button, a):active:not(:disabled, [aria-disabled="true"], .seg-opt, .ns-btn) svg.lucide { scale: .82; transition-duration: var(--press-dur);
   transition-timing-function: cubic-bezier(.3, 0, .6, 1); }
 /* toggle: the new state pops once when the user changes it (a fresh mount of `.ico-pop`; components/PlaylistToggle.tsx's
    pop-on / pop-off — two names, so each change restarts it) */
@@ -1286,6 +1310,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-glow { opacity: 0 !important; }
 :root.no-glow .side-sec-ico, :root.no-glow .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 :root.no-glow .side-tile.danger .side-tile-ico { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
+:root.no-glow .side-tile.danger:is(:disabled, [aria-disabled="true"]) .side-tile-ico { box-shadow: none; }
 :root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 :root.no-glow .side-open:hover { box-shadow: none; }
@@ -1300,6 +1325,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
 :root.no-glow :is(.ss-filter, .ss-filter.on, .ss-filter:hover, .ss-n) { box-shadow: none; }
 :root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
+:root.no-glow :is(.ord-item:hover, .ord-item.dragging, .ord-mv:hover) { box-shadow: none; }
 
 /* ---- Settings → Look & feel → "Text shadow" ON (<html class="text-shadow">, App.tsx) ----
    A subtitle drop shadow on every letter: a crisp copy offset down-right, as if lit from the top-left
@@ -1321,7 +1347,7 @@ input[type=range]:focus-visible { outline: none; }
    that colours text so or glows it (index.css) keeps its own look */
 :root.text-shadow :is(.badge, .btn.accent, .btn.danger, .card-pv-cap[data-making] > span, .card-pv-h, .check, .dbg-hud b.bad, .del:hover, .dl,
   .dl-btn:hover, .dl-glyph, .err-modal h2, .go-playing:hover:not(:disabled), .health-sum-head, .hms span.s-warn-text, .mini.on, .mpv,
-  .ns-btn:not(:disabled):hover, .pill.active, .pl-name.sel, .pl-remove:hover, .pl-toggle, .play-btn, .pw-err, .pw-wait, .s-expert,
+  .ns-btn:not(:disabled):hover, .ord-n, .pill.active, .pl-name.sel, .pl-remove:hover, .pl-toggle, .play-btn, .pw-err, .pw-wait, .s-expert,
   .s-reset:hover, .s-warn, .s-warn-text, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
   .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title, .side-sub-ico.subscribed, .side-sub-ico.subscribing,
   .side-sub-ico.unsubscribing, .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
@@ -1358,6 +1384,8 @@ input[type=range]:focus-visible { outline: none; }
 @keyframes nm-in { from { opacity: 0; } }
 @keyframes nm-out { to { opacity: 0; } }
 :root.no-motion .tab-pill, :root.no-motion .seg-hl { transition: none; }
+/* an ordered list's items take their new places at once; the dimming of the unreached ones fades */
+:root.no-motion .ord-item { transition: border-color .15s, box-shadow .2s, opacity var(--fade-dur) linear !important; }
 /* the page of the tab switched to fades in where it is */
 :root.no-motion .app[data-tab-dir] > .scroll { animation: nm-in var(--fade-dur) linear; }
 /* the filter panel and its scrim fade in and out, a group's rows fade in, the count fades in on a change and out at 0 */
@@ -1390,6 +1418,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel .ws-c { animation: nm-in var(--fade-dur) linear both !important; }
 :root.no-motion .side-panel :is(.ws-avatar > img, .ws-creator-name) { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .ws-creator { transform: none !important; }
+:root.no-motion .side-hero > [data-side-row="size"]:last-child { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .ws-stats > .side-pill { transform: none !important; transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .ws-pill-pair { animation: nm-in var(--fade-dur) linear both; }
 :root.no-motion .ws-pill-pair.closing { animation: nm-out var(--fade-dur) linear forwards; }
 /* the Settings card preview fades in and out in place, its caption fades each new text in (the busy breathing stands still) */
@@ -1673,9 +1703,12 @@ button.side-pill.copy { overflow: hidden; }
 .side-sub-hint { font-size: 11.5px; color: var(--subtext); line-height: 1.3; }
 .side-sub-btn { flex: none; padding: 6px 11px; font-size: 12.5px; border-radius: 9px;
   transition: transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
-.side-sub-btn:hover:not(:disabled) { transform: translateY(-1px); }
-.side-sub-btn:active:not(:disabled) { transform: scale(.97); transition-duration: .08s; }
-.side-sub-btn:disabled { opacity: .6; cursor: default; }
+.side-sub-btn:hover:not(:disabled, [aria-disabled="true"]) { transform: translateY(-1px); }
+.side-sub-btn:active:not(:disabled, [aria-disabled="true"]) { transform: scale(.97); transition-duration: .08s; }
+.side-sub-btn:is(:disabled, [aria-disabled="true"]) { opacity: .6; cursor: default; }
+/* signed out (aria-disabled, its right-click menu kept): no hover fill or glow. Guard: probe-steam steam:subToggle:signedOut */
+.side-sub-btn.danger[aria-disabled="true"]:hover { background: transparent; box-shadow: none; }
+:root.bg-live .side-sub-btn.danger[aria-disabled="true"]:hover { background: color-mix(in srgb, var(--bg-crust) 70%, transparent); }
 .side-sub-bar { transform-origin: 0 50%; height: 3px; }
 :root.no-glow .side-sub-ico.subscribed { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent); }
 :root.no-glow .side-sub-ico.subscribing, :root.no-glow .side-sub-ico.unsubscribing { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
@@ -1713,9 +1746,6 @@ button.side-pill.copy { overflow: hidden; }
 .fav-tile.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--surface1)); }
 .fav-tile.on .side-tile-ico { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .fav-tile[data-ws-fav=loading] .side-tile-ico { opacity: .55; }
-.fav-tile:disabled { cursor: default; color: var(--subtext); }
-.fav-tile:disabled:hover { transform: none; border-color: var(--surface1); background: color-mix(in srgb, var(--bg-crust) 50%, transparent); box-shadow: none; }
-.fav-tile:disabled .side-tile-ico { color: var(--subtext); background: color-mix(in srgb, var(--surface0) 70%, transparent); box-shadow: none; transform: none; }
 /* a Steam avatar: the person glyph until the picture has loaded, then the picture fades in over it */
 .ws-avatar { position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 50%; overflow: hidden;
   color: var(--subtext); background: color-mix(in srgb, var(--surface0) 80%, transparent); box-shadow: inset 0 0 0 1px var(--surface1); }
@@ -1743,6 +1773,13 @@ button.side-pill.copy { overflow: hidden; }
 .ws-creator.loading .ws-creator-name { opacity: .4; }
 .ws-creator-go { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--accent); }
 .ws-creator:disabled .ws-creator-go { visibility: hidden; }
+/* the Library sidebar's size on disk, measured in the background: a late one fades in at the hero row's end (LibrarySide.tsx) */
+.side-hero > [data-side-row="size"]:last-child { animation: side-pill-in .28s ease-out; }
+@keyframes side-pill-in { from { opacity: 0; transform: translateY(4px); } }
+/* COOL: the Library sidebar's stat pills (WorkshopSocial.tsx WorkshopStats): held unseen while Steam is asked, then they fade
+   in where they stay, rising a little (motion off: only the fade, under the no-motion block). Guard: probe-steam lib:ws:counts */
+.ws-stats > .side-pill { transition: opacity .28s ease-out, transform var(--spring-soft-dur) var(--spring-soft); }
+.ws-stats[data-ws-stats="loading"] > .side-pill { opacity: 0; transform: translateY(5px); }
 /* the comment thread (a .side-sec): each comment an avatar + its head (name, the creator's mark, when) + its plain text; they
    rise in as a page lands, a posted one drops in on top. Guard: probe-steam ws:comments */
 .ws-count { margin-left: auto; font-size: 11px; font-weight: 800; letter-spacing: 0; color: var(--subtext); padding: 1px 8px; border-radius: 999px;
@@ -1790,6 +1827,12 @@ button.side-pill.copy { overflow: hidden; }
 .side-tile.danger:hover { border-color: var(--danger);
   background: linear-gradient(color-mix(in srgb, var(--danger) 14%, transparent), color-mix(in srgb, var(--danger) 14%, transparent)),
     color-mix(in srgb, var(--bg-crust) 50%, transparent); box-shadow: 0 6px 16px rgba(0,0,0,.3), 0 0 12px -3px var(--danger); }
+/* a tile that can't act now (signed out: the favourite, Unsubscribe): quiet and inert, danger or not; `aria-disabled` keeps a
+   tile focusable with its right-click menu (whose note says why). Guard: probe-steam ws:favorite, side:unsub:signedOut */
+.side-tile:is(:disabled, [aria-disabled="true"]) { cursor: default; color: var(--subtext); }
+.side-tile:is(:disabled, [aria-disabled="true"]):is(:hover, :active, .danger) { transform: none; border-color: var(--surface1);
+  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); box-shadow: none; }
+.side-tile:is(:disabled, [aria-disabled="true"]) .side-tile-ico { color: var(--subtext); background: color-mix(in srgb, var(--surface0) 70%, transparent); box-shadow: none; transform: none; }
 /* section cards — the Settings page's .ssection in the sidebar's size */
 .side-sec { position: relative; overflow: hidden; padding: 12px 14px 8px; border-radius: 13px;
   background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);

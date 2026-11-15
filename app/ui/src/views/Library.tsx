@@ -17,6 +17,7 @@ import { useMarquee } from "../hooks/useMarquee";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
+import { unsubBlocked } from "../components/subscribeMode";
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -34,7 +35,8 @@ function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
 
 // PERF: memo'd so App's re-renders (status/modal/etc.) don't cascade into the 300-card grid;
 // Library re-renders only when its own store selectors change.
-export const Library = memo(function Library() {
+// PERF: memo'd (App passes a stable onShowInBrowse) — App's re-renders don't reach the grid
+export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrowse: () => void }) {
   const items = useStore((s) => s.libraryItems);
   const libQuery = useStore((s) => s.libQuery);
   const libSort = useStore((s) => s.libSort);
@@ -57,8 +59,8 @@ export const Library = memo(function Library() {
   const setStatus = useStore((s) => s.setStatus);
   const refreshPlayingStatus = useStore((s) => s.refreshPlayingStatus);
   const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
-  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
-  const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
+  // why Unsubscribe can't happen now (signed out), else null: every Unsubscribe here shows it disabled
+  const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
@@ -120,19 +122,26 @@ export const Library = memo(function Library() {
   // Unsubscribe = Delete from source (undoable; Undo subscribes again), on the card's button, the Delete key and the
   // sidebar alike; a mixed selection unsubscribes those and deletes the rest. The library's own copy of one ("Unsubscribe
   // without deleting") deletes like any local item. Guard: probe-steam side:unsub:*
+  // Signed out (unsubOff) those Workshop items stay, nothing queued, and the status bar says why; the rest of a selection still
+  // deletes. Guard: probe-steam side:unsub:signedOut
   const unsubs = (i: LibraryItem) => autoImport && !!i.workshopId && !!i.subscribed;
   const doTrash = (list: LibraryItem[]) => {
     const ws = list.filter(unsubs);
-    if (ws.length) deleteFromSource(ws);
+    if (ws.length && !unsubOff) deleteFromSource(ws);
     const plain = list.filter((i) => !unsubs(i));
-    if (plain.length) trashItems(plain);
+    const deleted = plain.length ? trashItems(plain) : Promise.resolve();
+    if (ws.length && unsubOff) {
+      const name = (l: LibraryItem[], other: string) => (l.length === 1 ? l[0].title : `${other}${l.length} wallpapers`);
+      // held: clearing the selection re-shows the playing line right after (the effect on `sel` below)
+      deleted.then(() => setStatus(plain.length ? `Deleted ${name(plain, "")}. ${unsubOff} ${name(ws, "the other ")}` : unsubOff, true, true));
+    }
     setSel(new Set());
   };
   // "Unsubscribe without deleting" (the Unsubscribe tile's right-click): each subscribed Workshop item becomes the library's
   // own copy, then unsubscribes (POST /workshop/unsubscribe-keep, one at a time); the rest of a selection is left alone
   const doKeep = async (list: LibraryItem[]) => {
     const ws = [...new Map(list.filter(unsubs).map((i) => [i.workshopId!, i])).values()];
-    if (!ws.length) return;
+    if (!ws.length || unsubOff) return;
     setSel(new Set());
     setStatus(`Keeping ${ws.length === 1 ? ws[0].title : `${ws.length} wallpapers`} in your library…`, false);
     for (const i of ws) await unsubscribeKeep(i.workshopId!, i.title);
@@ -232,8 +241,7 @@ export const Library = memo(function Library() {
             selected={sel.has(it.videoPath)}
             focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
-            unsub={unsubs(it)}
-            autoPlayGifs={autoPlayGifs}
+            unsub={unsubs(it)} unsubOff={unsubs(it) && !!unsubOff}
             onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
       </div>
@@ -247,13 +255,14 @@ export const Library = memo(function Library() {
           sub={<SelectionNote n={targets.length} />} onClose={() => focusLib(null)}>
           <LibrarySide item={sideItem} targets={targets}
             playing={sideItem.videoPath === playingPath} keepCurrent={keepCurrent}
-            unsubN={unsubN} deleteN={targets.length - unsubN}
+            unsubN={unsubN} deleteN={targets.length - unsubN} unsubOff={unsubOff}
             showDeleteFromSource={!!sideItem.workshopId && !autoImport}
             globalVolume={gVol} globalSpeed={gSpd}
             onPlay={() => applyItem(sideItem.videoPath)}
             onReveal={() => openExternal({ path: sideItem.videoPath, reveal: true, isScene: sideItem.isScene, workshopId: sideItem.workshopId, copiedSceneDir: sideItem.copiedSceneDir })}
             onTrash={() => { focusLib(null); doTrash(targets); }}
-            onDeleteSource={() => { focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }}
+            onDeleteSource={() => { if (unsubOff) return; focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }}
+            onShowInBrowse={onShowInBrowse}
             onKeep={() => doKeep(targets)} />
         </SidePanel>
       );

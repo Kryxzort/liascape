@@ -35,6 +35,7 @@ and § Settings & state.
 ## Settings page
 - `views/Settings.tsx` reads `GET /player-engine` and `/health/features`; liascape-player-only rows (`liascapeActive`) and legacy-only rows hide per engine; the control of a broken feature stays usable with a `WarnIcon`.
 - Settings levels live in `src/settingsLevel.ts`; the backend never reads `settingsLevel`, and a hidden changed value shows the "tucked away" note, never a reset.
+- Card previews: `previewOnHover` / `previewNotHovered` (Standard rows "On hover" / "Not hovered") are orders of `video` / `gif` / `image`; Basic's "Card previews" picks a pair from `PREVIEW_PRESETS` (`components/mediaAssets.ts`) and reads "Custom" when none matches by what each list reaches (up to `image`); orders a preset names are never "tucked away". Guard: probe-cardpreview `cardpv:preset`.
 - Rotation rows: one interval field labelled "Switch every" (timer) or "Minimum play time" (advance-on-end), durations through `components/PlayTimeInput.tsx`. Semantics: `.claude/rules/backend/player-adapter.md` § Rotation.
 
 ## Workshop filter

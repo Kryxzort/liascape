@@ -25,8 +25,8 @@ namespace Liascape.Helpers;
 //     30 items a page, AND-only tags) — that stays only as the fallback (SteamWorkshopService).
 // Both return null when Steam's servers can't be reached / refuse (the caller falls back to page reading).
 // LIASCAPE_STEAM_CM_FIXTURE=<file.json> (tests): GetDetailsAsync answers from that file instead of Steam — `{"<id>": {"tags":
-// [...], "youtube": "<id>"|null}}`, an id not in it = no such public item, no file = Steam unreachable; each request is
-// logged with its ids.
+// [...], "youtube": "<id>"|null, "creator", "subscriptions", "favorited"}}` (the last three optional), an id not in it = no
+// such public item, no file = Steam unreachable; each request is logged with its ids.
 public static class SteamWorkshopDetails
 {
     public const uint AppId = 431960;
@@ -36,9 +36,10 @@ public static class SteamWorkshopDetails
     private const int DetailsBatch = 1000, BatchGapMs = 1000, RequestTimeoutSeconds = 20;
 
     // per item: Found = Steam answered for it (result 1); Youtube = its first YouTube preview id (null = none); Tags = its
-    // Workshop tags, Steam's names; Creator = its creator's Steam ID (0 = unknown). An item Steam couldn't answer for
-    // (removed, private: result ≠ 1) is Found=false, no tags.
-    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0);
+    // Workshop tags, Steam's names; Creator = its creator's Steam ID (0 = unknown); Subscriptions / Favorites = Steam's
+    // CURRENT counts (`subscriptions` / `favorited`, never the lifetime ones, which also count everyone who has left). An
+    // item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false, no tags.
+    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0, long Subscriptions = 0, long Favorites = 0);
 
     private static string? Fixture => Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE") is { Length: > 0 } f ? f : null;
 
@@ -61,7 +62,8 @@ public static class SteamWorkshopDetails
                 var resp = await pub.GetDetails(req); // an AsyncJob (no ConfigureAwait)
                 if (resp.Result != EResult.OK) return null;
                 return resp.Body.publishedfiledetails.ToDictionary((d) => d.publishedfileid, (d) => d.result == (int)EResult.OK
-                    ? new Details(true, YoutubeOf(d), d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).Distinct().ToArray(), d.creator)
+                    ? new Details(true, YoutubeOf(d), d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).Distinct().ToArray(), d.creator,
+                        d.subscriptions, d.favorited)
                     : new Details(false, null, []));
             }, TimeSpan.FromSeconds(RequestTimeoutSeconds), ct).ConfigureAwait(false);
             Console.WriteLine(got == null ? $"steam-cm: GetDetails of {batch.Count} id(s) — no answer"
@@ -84,7 +86,9 @@ public static class SteamWorkshopDetails
                         e.TryGetProperty("youtube", out var y) && y.ValueKind == System.Text.Json.JsonValueKind.String ? y.GetString() : null,
                         e.TryGetProperty("tags", out var ts) && ts.ValueKind == System.Text.Json.JsonValueKind.Array
                             ? ts.EnumerateArray().Select((t) => t.GetString() ?? "").Where((t) => t.Length > 0).ToArray() : [],
-                        e.TryGetProperty("creator", out var cr) && ulong.TryParse(cr.ToString(), out var crId) ? crId : 0)
+                        e.TryGetProperty("creator", out var cr) && ulong.TryParse(cr.ToString(), out var crId) ? crId : 0,
+                        e.TryGetProperty("subscriptions", out var su) && su.TryGetInt64(out var suN) ? suN : 0,
+                        e.TryGetProperty("favorited", out var fa) && fa.TryGetInt64(out var faN) ? faN : 0)
                     : new Details(false, null, []));
         }
         catch { return null; } // no fixture file = Steam unreachable

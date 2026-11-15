@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { api, type LibraryOp } from "../api/client";
 import { DEBUG_ON } from "./debugFlag";
+import { DEFAULT_NOT_HOVERED } from "../components/mediaAssets";
 
 interface Metrics { fps: number; low1: number; low01: number; ms: number; vis: number; cards: number; anim: number; heap: number; longs: number; }
 const ZERO: Metrics = { fps: 0, low1: 0, low01: 0, ms: 0, vis: 0, cards: 0, anim: 0, heap: 0, longs: 0 };
@@ -106,7 +107,8 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
       source: (i: number) => { S().setSource(i); return "source=" + i; },
       cardsize: (x: string) => { S().setSetting("cardSize", x); return "cardSize=" + x; },
       aspect: (x: string) => { S().setSetting("thumbnailAspect", x); return "aspect=" + x; },
-      gifs: (on: boolean) => { S().setSetting("autoPlayGifs", on); return "autoPlayGifs=" + on; },
+      // every card's gif plays unhovered (Settings → "Not hovered": GIF first), or nothing does (the default)
+      gifs: (on: boolean) => { S().setSetting("previewNotHovered", on ? ["gif", "image", "video"] : DEFAULT_NOT_HOVERED); return "gifs=" + on; },
       active: (v: boolean) => { useStore.setState({ appActive: v }); return "appActive=" + v; }, // FREEZE FIX test hook
       // the library's background operations as the backend's library-ops event would set them (several at once without
       // running them: probe-libops libops:combined); the next real event replaces them

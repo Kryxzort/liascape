@@ -31,6 +31,8 @@ export type LiascapeEvent =
   | { type: "playlist-changed"; payload: { client: string | null } }
   | { type: "steam-qr"; payload: { png: string } }
   | { type: "steam-signed-in"; payload: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } }
+  // the sign-in ended (signed out, or Steam turned it down): /steam/status's shape (SteamOps.SignInLost)
+  | { type: "steam-status"; payload: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean; pageUnsubscribes?: boolean } }
   | { type: "steam-qr-error"; payload: { message: string } }
   | { type: "steam-qr-cancelled"; payload: null }
   // the password sign-in (SteamOps): what Steam wants next — `email` (hint = the address's domain), `device` (the mobile

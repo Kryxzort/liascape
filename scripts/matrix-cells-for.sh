@@ -55,7 +55,7 @@ for f in $FILES; do
     app/ui/src/components/TopbarSearch.tsx|app/ui/src/hooks/useTopbarCompact.ts)
       add "browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-filters.js search: split:; --probe probe-layout.js resize:)" ;;
     # the library's Steam tags / trailers / frame sizes: the filter column's data
-    src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:'; its progress: --probe probe-libops.js)" >&2 ;;
+    src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:'; the size on disk: --probe probe-steam.js --only lib:ws:size; its progress: --probe probe-libops.js)" >&2 ;;
     scripts/agent-window.sh|scripts/bench-live-ui.mjs|app/shell/cdp.js|app/shell/drive.js) echo "  $f → nothing (the agent window and its drivers — run: bash scripts/agent-window.sh up)" >&2 ;;
     src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
@@ -74,11 +74,12 @@ for f in $FILES; do
     app/ui/src/components/CopyButton.tsx|app/ui/src/hooks/useCopied.ts)
       echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill; probe-sidebar.js side:titleCopy; probe-steam.js ws:creatorCopy)" >&2 ;;
     # the controls' right-click menus (Unsubscribe → keep the files, Download → without subscribing) and the menu itself
-    app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx|app/ui/src/components/menuItems.tsx)
-      echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, side:)" >&2 ;;
-    # the Browse sidebar's creator / favourite / comments, the Workshop's list pills and the shared Workshop ID pill
-    app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx)
-      add "browse:" "$f (+ --probe probe-steam.js — ws:, side:copyIdPill, side:idPill:still; probe-settings.js copy:sidebarPill; probe-filters.js split:noWrap)" ;;
+    app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx|app/ui/src/components/menuItems.tsx|app/ui/src/components/subscribeMode.ts)
+      echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, steam:subMerge:, side:)" >&2 ;;
+    # the item sidebars' creator / favourite / comments / counts and number pills, the Workshop's list pills and the shared
+    # Workshop ID pill
+    app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx|app/ui/src/components/sidePills.tsx|app/ui/src/components/sideFormat.ts)
+      add "browse:" "$f (+ --probe probe-steam.js — ws:, lib:ws:, side:copyIdPill, side:idPill:still; probe-settings.js copy:sidebarPill; probe-filters.js split:noWrap)" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     # the rotation's h/m/s fields (the maximum's floor at the minimum, drafts) and their hints
     app/ui/src/components/PlayTimeInput.tsx|app/ui/src/components/rotHint.ts)
@@ -88,7 +89,7 @@ for f in $FILES; do
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
     # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe
     app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/SideTitle.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
-      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre / side:title*; probe-steam.js side:browseTitle; probe-layout.js perf:sidebar)" ;;
+      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre / side:title*; probe-steam.js side:browseTitle, lib:ws:; probe-layout.js perf:sidebar)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts|app/ui/src/hooks/useBarFold.ts)
       add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:, scroll:, look:plFold, perf:tabs, perf:plFold, perf:dockRepaint)" ;;
     # the segmented control: the playlist modal's order / start switches, the sidebar's preview strip (the level picker is in App.tsx)
@@ -97,7 +98,10 @@ for f in $FILES; do
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart|plTr|travel:|global:sceneTiming|playlist:sceneTiming" "$f" ;;
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
-    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs)" ;;
+    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:|appear|clip:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs)" ;;
+    # what a card shows hovered and not ("On hover" / "Not hovered"), the list control that orders them, the on-screen gating
+    app/ui/src/components/mediaAssets.ts|app/ui/src/components/autoplay.ts|app/ui/src/components/OrderList.tsx)
+      add "appear|clip:|$CARD" "$f (+ --probe probe-cardpreview.js — cardpv:preset, cardpv:order, cardpv:orderCtl)" ;;
     # the preview clips: the backend's store, the card's clip and its hand-overs
     app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f (+ --probe probe-cardpreview.js; ClipStore: bash scripts/test-clip-sweep.sh, --probe probe-libops.js)" ;;
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)

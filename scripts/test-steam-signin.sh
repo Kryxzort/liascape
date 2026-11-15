@@ -4,10 +4,12 @@
 # switching to another):
 #  1. `liascape-backend steam-selftest` — the password sign-in's plumbing with a scripted sign-in in place of SteamKit2
 #     (email / authenticator / approve-in-the-app steps, a wrong code, cancel, replace, timeout, wrong password, Steam's
-#     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json) and the
-#     no-sign-in unsubscribe through the Steam to-do (Web/SteamTodo.cs: one page at a time — never the subscriptions list —,
-#     pending until Next → blocked, Open again, Skip / Stop → kept subscribed, an item Steam doesn't have → no page, a second
-#     drain leaves the to-do's ids alone, WS steam-todo).
+#     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json); who may
+#     unsubscribe per mode and sign-in; signed out an unsubscribe in its Undo window (a sign-out, Steam turning the sign-in
+#     down) or due is dropped like its Undo (the item back, still subscribed, no page, no to-do); and "Open in the Steam app"'s
+#     unsubscribe through the Steam to-do (Web/SteamTodo.cs: one page at a time — never the subscriptions list —, pending
+#     until Next → blocked, Open again, Skip / Stop → kept subscribed, an item Steam doesn't have → no page, a second drain
+#     leaves the to-do's ids alone, WS steam-todo).
 #  2. A private backend whose PATH puts a stub `xdg-open` first (it only records the URL — the real Steam client is never
 #     started) and whose Workshop folder is a temp dir: POST /download of a Workshop item (no network: the result carries
 #     `trailerKnown`) under "Subscribe with Steam login" with no sign-in, then with a sign-in Steam turned down → it FAILS
@@ -18,7 +20,8 @@
 #     from the page stops waiting and imports nothing. "Download without subscribing" (one-off: GET /workshop/one-off, POST
 #     /download {oneOff}) against a stub steamcmd: no steamcmd / not signed in → no route + the reason, the download fails
 #     with it; signed in → steamcmd fetches it into the library's own workshop/<id> copy, nothing subscribed, opened or
-#     queued in the to-do, a queued unsubscribe of it left queued.
+#     queued in the to-do, a queued unsubscribe of it left queued. Without a usable sign-in the unsubscribe endpoints refuse (400
+#     + "Sign in to Steam to unsubscribe") under "Subscribe with Steam login" and steamcmd: nothing queued, trashed or opened.
 #  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
@@ -234,6 +237,27 @@ drop("700000003");
 let n0 = urls().length;
 let r = await download("700000003");
 out(r.status === 200 && urls().length === n0, "already on disk: imported, nothing opened in Steam", `${r.status}, ${urls().length - n0} opened`);
+
+// unsubscribe refused: without a usable sign-in (here one Steam turned down) the app stays disconnected from Steam for
+// unsubscribes in the sign-in's and steamcmd's modes — every unsubscribe endpoint answers 400 with the reason before anything is
+// trashed, copied or queued, and nothing opens in Steam (WorkshopDownloader.UnsubscribeBlocked; the CLI / API can't get round
+// the UI's disabled Unsubscribe)
+for (const mode of ["subscribe", "steamcmd"]) {
+  await setMode(mode);
+  const it = (await lib()).find((i) => i.workshopId === "700000003");
+  const post = (p, b) => fetch(U + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+  n0 = urls().length;
+  const got = [];
+  for (const [p, b] of [["/workshop/unsubscribe", { workshopId: "700000003", title: "ws" }], ["/workshop/unsubscribe-keep", { workshopId: "700000003", title: "ws" }],
+    ["/workshop/delete-from-source", { items: [it] }]]) {
+    const rr = await post(p, b); got.push(`${p} ${rr.status} ${(await rr.json().catch(() => ({}))).error ?? ""}`);
+  }
+  await sleep(300);
+  const q = await (await fetch(U + "/workshop/queue")).json();
+  out(!!it && got.every((g) => / 400 Sign in to Steam to unsubscribe$/.test(g)) && q.pending.length === 0 && urls().length === n0 && (await inLib("700000003")),
+    `unsubscribe refused (${mode}, sign-in rejected): each endpoint 400 + the reason, nothing queued, trashed or opened`, `${got.join(" | ")} | pending [${q.pending}]`);
+}
+await setMode("subscribe");
 
 // "Download without subscribing" (POST /download {oneOff}; WorkshopDownloader.OneOffRouteFor / AcquireOneOffAsync): steamcmd
 // once it's found and signed in, else no route and the reason says what's missing; never a subscription, a page in Steam or

@@ -83,6 +83,16 @@ public static class WorkshopUnsubQueue
         lock (_gate) { var until = DateTime.UtcNow + d; foreach (var id in ids) _holdUntil[id] = until; }
     }
 
+    // the pending ids still inside their Undo window (Web/SteamOps.DropHeldUnsubscribes: a sign-out drops them)
+    public static List<string> SnapshotHeld()
+    {
+        lock (_gate)
+        {
+            var now = DateTime.UtcNow;
+            return Load().Pending.Where(id => _holdUntil.TryGetValue(id, out var t) && t > now).ToList();
+        }
+    }
+
     // an explicit drain (SteamOps.DrainNow) doesn't wait out the window
     public static void ReleaseHolds() { lock (_gate) _holdUntil.Clear(); }
 

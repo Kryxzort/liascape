@@ -95,7 +95,7 @@ cat > "$SJ" <<EOF
  "GlobalIntervalSeconds":600,"GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
  "TransitionMethod":"full-live","AdvancedSettings":true,"ResumeFromLast":false,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
- "AllowScenes":true,"WorkshopDownloadMode":"steamcmd",
+ "AllowScenes":true,"WorkshopDownloadMode":"steamcmd","AutoPlayGifs":true,"AutoPlayVideoThumbs":true,"PreferVideoThumbs":true,
  "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd"}
 EOF
 
@@ -130,9 +130,8 @@ same() {   # $1 before, $2 after, $3 = JSON array of the fields that should chan
 }
 
 # UI toggles (key:default, camelCase as GET /settings spells them): a file without the key loads the default, a
-# partial body sets/keeps it. Glow effects / Text shadow / Morph animations / Play video previews / Prefer video previews (Settings → Look & feel), Import new Workshop wallpapers.
-UI_TOGGLES=("glows:true" "textShadow:false" "morphs:true" "autoPlayVideoThumbs:false" "preferVideoThumbs:false"
-  "autoAddWeWallpapersToLibrary:true")
+# partial body sets/keeps it. Glow effects / Text shadow / Smooth window animations (Settings → Look & feel), Import new Workshop wallpapers.
+UI_TOGGLES=("glows:true" "textShadow:false" "morphs:true" "autoAddWeWallpapersToLibrary:true")
 echo "== a settings.json that still carries the removed LweSilent loads"
 snap s0
 [ "$(f .volume s0)" = 80 ] && [ "$(f .theme s0)" = '"Catppuccin Latte"' ] && [ "$(f '.sceneMonitors|length' s0)" = 2 ] \
@@ -158,6 +157,14 @@ snap s0
   && ok "a file without the Task 10 keys: pauseWhenCovered maximized, globalPlaylistStart start_over, rotateWhileParked true, settingsLevel standard" \
   || bad "Task 10 defaults after loading an old file: $(f '[.pauseWhenCovered, .globalPlaylistStart, .rotateWhileParked, .settingsLevel]' s0)"
 [ "$(f 'has("resumeFromLast")' s0)" = false ] && ok "GET /settings has no resumeFromLast (the old file's key is an unknown one)" || bad "GET /settings still has resumeFromLast"
+# the card previews are two orders ("On hover" / "Not hovered"): the three toggles they replaced are unknown keys, no
+# migration — a file with them loads the orders' defaults (what plays by default, nothing unhovered, the GIF first on hover)
+[ "$(f '[has("autoPlayGifs"), has("autoPlayVideoThumbs"), has("preferVideoThumbs")] | any' s0)" = false ] \
+  && ok "GET /settings has no autoPlayGifs / autoPlayVideoThumbs / preferVideoThumbs (replaced by the preview orders)" \
+  || bad "GET /settings still has a replaced preview toggle: $(f '[has("autoPlayGifs"), has("autoPlayVideoThumbs"), has("preferVideoThumbs")]' s0)"
+[ "$(f '[.previewOnHover, .previewNotHovered]' s0)" = '[["gif","video","image"],["image","gif","video"]]' ] \
+  && ok "a file with the old toggles on: previewOnHover gif,video,image and previewNotHovered image,gif,video (the defaults)" \
+  || bad "preview orders after loading an old file: $(f '[.previewOnHover, .previewNotHovered]' s0)"
 
 echo "== a partial body changes only its own fields (nothing playing)"
 post /settings '{"Theme":"Nord"}' >/dev/null && ok "POST {\"Theme\":\"Nord\"} → 200" || bad "POST {\"Theme\":\"Nord\"} failed"
@@ -171,6 +178,10 @@ tokens_kept && ok "the Steam tokens survived in steam-auth.json (0600), none in 
 [ "$(disk '[has("GlobalWaitForVideoEnd"), has("PlaylistWaitForVideoEnd"), has("GlobalMinPlaySeconds")] | any')" = false ] \
   && ok "the save dropped the removed rotation keys from settings.json" || bad "settings.json still has a removed rotation key after a save"
 [ "$(disk 'has("ResumeFromLast")')" = false ] && ok "the save dropped ResumeFromLast from settings.json" || bad "settings.json still has ResumeFromLast after a save"
+[ "$(disk '[has("AutoPlayGifs"), has("AutoPlayVideoThumbs"), has("PreferVideoThumbs")] | any')" = false ] \
+  && ok "the save dropped AutoPlayGifs / AutoPlayVideoThumbs / PreferVideoThumbs from settings.json" || bad "settings.json still has a replaced preview toggle after a save"
+[ "$(disk '[.PreviewOnHover, .PreviewNotHovered] == [["gif","video","image"],["image","gif","video"]]')" = true ] \
+  && ok "…and wrote the preview orders with their defaults" || bad "settings.json preview orders after the save: $(disk '[.PreviewOnHover, .PreviewNotHovered]' | tr -d '\n ')"
 [ "$(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .SettingsLevel] == ["maximized","start_over",true,"standard"]')" = true ] \
   && ok "…and wrote the Task 10 keys with their defaults" || bad "settings.json after the save: $(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .SettingsLevel]' | tr -d '\n ')"
 if [ "$(engine)" != liascape-player ]; then
@@ -260,6 +271,28 @@ for spec in "${UI_TOGGLES[@]}"; do
   code_=$(code /settings "{\"$K\":\"yes\"}"); [ "$code_" = 400 ] && ok "{$K:\"yes\"} → 400" || bad "{$K:\"yes\"} → $code_"
   snap u4; [ "$(f ".$k" u4)" = "$def" ] && ok "…and $k stays $def" || bad "$k after the rejected body: $(f ".$k" u4)"
 done
+
+echo "== the preview orders: a partial body sets one list, any list stores as the three kinds once each, a non-list is a 400"
+snap o0
+post /settings '{"PreviewNotHovered":["video","gif","image"]}' >/dev/null; snap o1
+[ "$(f .previewNotHovered o1)" = '["video","gif","image"]' ] && ok "{PreviewNotHovered:[video,gif,image]} → stored" || bad "PreviewNotHovered → $(f .previewNotHovered o1)"
+same o0 o1 '["previewNotHovered"]' "{PreviewNotHovered:[…]}"
+[ "$(disk '.PreviewNotHovered == ["video","gif","image"]')" = true ] && ok "PreviewNotHovered written to settings.json" || bad "settings.json PreviewNotHovered → $(disk '.PreviewNotHovered' | tr -d '\n ')"
+post /settings '{"theme":"Nord"}' >/dev/null; snap o2
+[ "$(f .previewNotHovered o2)" = '["video","gif","image"]' ] && ok "an unrelated partial body keeps previewNotHovered" || bad "an unrelated partial body changed previewNotHovered to $(f .previewNotHovered o2)"
+for c in '["IMAGE","Gif"]|["image","gif","video"]|upper case, missing video (appended last: unreachable)' \
+         '["gif","gif","sparkle","video"]|["gif","video","image"]|a repeat and an unknown kind dropped' \
+         '[]|["image","gif","video"]|empty: the default order'; do
+  body=${c%%|*}; rest=${c#*|}; want=${rest%%|*}; what=${rest#*|}
+  post /settings "{\"previewNotHovered\":$body}" >/dev/null; snap o3
+  [ "$(f .previewNotHovered o3)" = "$want" ] && ok "{previewNotHovered:$body} → $want ($what)" || bad "{previewNotHovered:$body} → $(f .previewNotHovered o3), want $want ($what)"
+done
+post /settings '{"previewOnHover":["video","image","gif"]}' >/dev/null; snap o4
+[ "$(f .previewOnHover o4)" = '["video","image","gif"]' ] && ok "{previewOnHover:[video,image,gif]} (camelCase) → stored" || bad "previewOnHover → $(f .previewOnHover o4)"
+code_=$(code /settings '{"PreviewOnHover":"video"}'); [ "$code_" = 400 ] && ok "{PreviewOnHover:\"video\"} → 400" || bad "{PreviewOnHover:\"video\"} → $code_"
+snap o5; [ "$(f .previewOnHover o5)" = '["video","image","gif"]' ] && ok "…and previewOnHover stays as it was" || bad "previewOnHover after the rejected body: $(f .previewOnHover o5)"
+post /settings '{"PreviewOnHover":["gif","video","image"],"PreviewNotHovered":["image","gif","video"]}' >/dev/null; snap o6
+same o0 o6 '["theme"]' "the preview orders back to the defaults"
 
 echo "== a bad value is a 400 and saves nothing"
 for body in '{"Volume":"loud"}' '{"Volume":null,"Theme":"Bad"}' '{"SceneMonitors":5}' '[1,2]' '"x"'; do

@@ -1,12 +1,11 @@
 import { useEffect, useState, type RefObject } from "react";
-import { useStore } from "../store";
 
-// Settings → Look & feel → "Animate wallpapers without a GIF": a library card / playlist-bar item whose preview is a VIDEO
-// (components/mediaAssets.ts previewVideo) plays it without a hover (components/MotionThumb.tsx; a hover hands it over to
-// the real file). Every such item ON SCREEN plays, no cap; what keeps it bounded is that nothing else does:
+// Settings → Look & feel → "Not hovered" reaching "video" for an item (components/mediaAssets.ts usePreviewKinds): a library
+// card / playlist-bar item plays its video without a hover (components/MotionThumb.tsx; a hover hands it over to the real
+// file). Every such item ON SCREEN plays, no cap; what keeps it bounded is that nothing else does:
 //   - only an item on screen plays (one shared IntersectionObserver; scrolled away, or its page hidden behind another
 //     tab, = the <video> unmounts and its decoder goes),
-//   - none while the window is backgrounded or unfocused (`appActive`).
+//   - none while the window is backgrounded or unfocused (`appActive`: mediaAssets.ts useIdleOrder reaches only "image" then).
 // Each plays a clip sized to its card (components/clipSource.ts), not the wallpaper's file, but still has a decoder of its
 // own: the cost grows with how many are on screen and with "Video preview quality". Guard: matrix appear:videoThumbs.
 type Seen = (on: boolean) => void;
@@ -23,12 +22,10 @@ function unobserve(el: Element) {
   io?.unobserve(el);
 }
 
-// true while this element should play its video preview. `eligible`: the item has a video preview and nothing else
+// true while this element should play its video preview. `want`: unhovered, the item shows its video and nothing else
 // already plays it (not being dragged).
-export function useAutoplayVideo(ref: RefObject<Element | null>, eligible: boolean): boolean {
-  const on = useStore((s) => !!s.settings?.autoPlayVideoThumbs && s.appActive);
+export function useAutoplayVideo(ref: RefObject<Element | null>, want: boolean): boolean {
   const [visible, setVisible] = useState(false);
-  const want = on && eligible;
   useEffect(() => {
     const el = ref.current;
     if (!want || !el) return;

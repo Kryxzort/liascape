@@ -1,4 +1,4 @@
-// Verify animated library previews: hover renders an animated layer; AutoPlayGifs bulk-plays gif assets.
+// Verify animated library previews: hover renders an animated layer; "Card previews" → "Always animate" bulk-plays gif assets.
 const { app, BrowserWindow } = require("electron");
 const { withToken } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const url = process.argv[2];
@@ -26,22 +26,19 @@ app.whenReady().then(async () => {
     return a ? a.tagName : null;
   })()`);
 
-  // B. enable AutoPlayGifs → gif-asset cards animate in bulk (count onscreen animated <img>)
-  await js(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Settings')?.click()`); await wait(800);
-  out.toggledOn = await js(`(() => {
-    const sec=[...document.querySelectorAll('.ssection')].find(s=>/Appearance/.test(s.querySelector('h3')?.textContent||''));
-    const cb=[...(sec?.querySelectorAll('.srow')||[])].find(r=>/Autoplay GIF/.test(r.textContent||''))?.querySelector('input[type=checkbox]');
-    if(!cb) return false; if(!cb.checked) cb.click(); return true;
+  // B. "Card previews" → "Always animate" (Settings → Look & feel) → gif-asset cards animate in bulk (count onscreen animated <img>)
+  const preset = (name) => js(`(async () => {
+    const row=[...document.querySelectorAll('.settings .srow')].find(r=>r.querySelector('.slabel-row')?.firstChild?.textContent?.trim()==='Card previews');
+    const sel=row?.querySelector('.sel'); if(!sel) return false; sel.click(); await new Promise(r=>setTimeout(r,250));
+    const o=[...document.querySelectorAll('.sel-pop .sel-opt')].find(e=>e.textContent.trim()===${JSON.stringify(name)}); if(!o) return false; o.click(); return true;
   })()`);
+  await js(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Settings')?.click()`); await wait(800);
+  out.toggledOn = await preset("Always animate");
   await js(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Library')?.click()`); await wait(1500);
   out.bulkAnimImgs = await js(`document.querySelectorAll('.card.lib img.thumb.anim').length`);
-  // revert the toggle (leave settings as found = off)
+  // put the default back ("Animate on hover")
   await js(`[...document.querySelectorAll('.tab')].find(b=>b.textContent==='Settings')?.click()`); await wait(700);
-  await js(`(() => {
-    const sec=[...document.querySelectorAll('.ssection')].find(s=>/Appearance/.test(s.querySelector('h3')?.textContent||''));
-    const cb=[...(sec?.querySelectorAll('.srow')||[])].find(r=>/Autoplay GIF/.test(r.textContent||''))?.querySelector('input[type=checkbox]');
-    if(cb&&cb.checked) cb.click();
-  })()`); await wait(500);
+  await preset("Animate on hover"); await wait(500);
 
   console.log("PROBE_GIF " + JSON.stringify(out));
   app.quit();

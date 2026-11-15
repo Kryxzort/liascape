@@ -3,7 +3,7 @@ import { motion as fm } from "framer-motion";
 import { clipQualities, type ClipQualityInfo, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
 import { LibraryCard } from "./LibraryCard";
-import { hasGifAsset, previewVideo, useVideoOverGif, VIDEO_RE } from "./mediaAssets";
+import { hasGifAsset, previewVideo, VIDEO_RE } from "./mediaAssets";
 import { ClipExact, QUALITY_LABEL, useClipMaking, useClipQuality } from "./clipSource";
 import { useMotion } from "./motion";
 import { useLinger } from "../hooks/useLinger";
@@ -11,7 +11,7 @@ import { gridCardWidth } from "../hooks/useGridFit";
 
 // Settings → Look & feel: a live preview of the Library's cards beside the card settings (views/Settings.tsx wraps that
 // section in it). Real library items through the real LibraryCard, with the props the grid gives it (Library.tsx), so it
-// can't drift from the grid: shape, size, the GIF / video toggles, video quality, glow and motion all show through the
+// can't drift from the grid: shape, size, the preview orders, video quality, glow and motion all show through the
 // card's own code. It's a picture of the grid, not a second grid: hovering plays like a library card (the clip → real file
 // hand-over included), and no click, double-click, right-click or key on it applies, plays or opens anything. Its video
 // cards play the CHOSEN quality (ClipExact: a short sample of it, made in seconds), never the better clip the library keeps.
@@ -32,8 +32,8 @@ const noop = () => {};
 // others to make two
 function pickItems(items: LibraryItem[]): LibraryItem[] {
   const ok = items.filter((i) => !i.hasCrashed);
-  const gifOnly = ok.find((i) => hasGifAsset(i) && previewVideo(i, true) === null);
-  const videoOnly = ok.find((i) => !hasGifAsset(i) && previewVideo(i, false) !== null);
+  const gifOnly = ok.find((i) => hasGifAsset(i) && previewVideo(i) === null);
+  const videoOnly = ok.find((i) => !hasGifAsset(i) && previewVideo(i) !== null);
   const both = ok.find((i) => hasGifAsset(i) && !i.isScene && VIDEO_RE.test(i.videoPath));
   const picks = [gifOnly, videoOnly, both].filter((i): i is LibraryItem => !!i);
   for (const i of ok) { if (picks.length >= 2) break; if (!picks.includes(i)) picks.push(i); }
@@ -54,11 +54,8 @@ export function CardPreview({ scrollRef, rowsRef, children }: {
   const picks = useMemo(() => pickItems(items), [items]);
   const playingPath = useStore((s) => s.playingPath);
   const playlist = useStore((s) => s.playlist);
-  // the grid's own gating (Library.tsx): gifs animate only while the window is active
-  const autoPlayGifs = useStore((s) => !!s.settings?.autoPlayGifs && s.appActive);
   const size = useStore((s) => s.settings?.cardSize as string | undefined);
   const shape = useStore((s) => s.settings?.thumbnailAspect);
-  const overGif = useVideoOverGif();
   const q = useClipQuality();
   const motion = useMotion();
   const has = picks.length > 0;
@@ -107,7 +104,7 @@ export function CardPreview({ scrollRef, rowsRef, children }: {
     for (const b of cardsRef.current?.querySelectorAll("button") ?? []) { b.inert = true; b.tabIndex = -1; }
   });
 
-  const making = useClipMaking(mounted ? picks.map((i) => previewVideo(i, overGif)).filter((p): p is string => !!p) : [], q);
+  const making = useClipMaking(mounted ? picks.map((i) => previewVideo(i)).filter((p): p is string => !!p) : [], q);
   const [qinfo, setQinfo] = useState<ClipQualityInfo[] | null>(null);
   // read when the preview shows and again once a clip is made (the store's median moved)
   useEffect(() => {
@@ -161,9 +158,9 @@ export function CardPreview({ scrollRef, rowsRef, children }: {
               // `layout` only when the node is made, so the key remounts the slot when it flips (with the cards' own
               // first mount, so they aren't built twice). Guard: probe-cardpreview cardpv:motion, probe-layout perf:tabs.
               <fm.div key={`${it.videoPath}|${layoutOn}`} className="card-pv-slot" layout={layoutOn} transition={{ duration: 0.34, ease: [0.2, 0.8, 0.3, 1] }}
-                style={{ width: cw }} data-pv-kind={hasGifAsset(it) ? (previewVideo(it, true) ? "both" : "gif") : "video"}>
+                style={{ width: cw }} data-pv-kind={hasGifAsset(it) ? (previewVideo(it) ? "both" : "gif") : "video"}>
                 {mounted && <LibraryCard item={it} playing={it.videoPath === playingPath} selected={false} focused={false}
-                  inPlaylist={playlist.includes(it.videoPath)} autoPlayGifs={autoPlayGifs}
+                  inPlaylist={playlist.includes(it.videoPath)}
                   onClick={noop} onTrash={noop} onToggle={noop} onContextFocus={noop} />}
               </fm.div>
             ))}

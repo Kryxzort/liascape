@@ -31,7 +31,7 @@ export const withToken = (url: string) => (TOKEN ? `${url}${url.includes("?") ? 
 export const img = (u: string, referer?: string) =>
   withToken(`${MEDIA}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
 export const media = (path: string) => withToken(`${MEDIA}/media?path=${encodeURIComponent(path)}`);
-// API: the preview clips of a local video (/clip, the backend's Web/ClipStore.cs): what "Animate wallpapers without a GIF" plays
+// API: the preview clips of a local video (/clip, the backend's Web/ClipStore.cs): what a card plays unhovered ("Not hovered")
 // (components/clipSource.ts). clipInfo names the clip to play now for a box of w × h device pixels at a quality (`v`, an
 // immutable file), the quality it was made at (`q`) and whether a better one is being made (`pending`: ask again); clipFile is
 // that clip's bytes.
@@ -66,7 +66,7 @@ export const clipSweepHold = (hold: boolean) =>
 // without a black seam. Other local formats (animated webp) loop fine raw → /media.
 export const anim = (u: string) =>
   /^https?:/i.test(u) || /\.gif$/i.test(u) ? withToken(`${MEDIA}/anim?u=${encodeURIComponent(u)}`) : media(u);
-// static thumbnail for an animated preview: a non-black/white extracted frame (so AutoPlayGifs-off
+// static thumbnail for an animated preview: a non-black/white extracted frame (so a gif not playing
 // doesn't show the gif's black frame-0, AND so a gif used as a static thumbnail doesn't self-animate).
 // Remote URLs and local gif/webp → /still (ffmpeg extract); plain local images → /media as-is.
 // w = decode-to-size width. A SIZED request (card layer) always routes through /still so even big
@@ -153,6 +153,7 @@ export type WsListSort = "lastupdated" | "toprated";
 export type WsCreator = { steamId: string; name: string | null; avatar: string | null };
 export type WsComment = { id: string; author: string; authorId: string | null; avatar: string | null; time: number; text: string };
 export type WsComments = { signedIn: boolean; owner: string; total: number; start: number; comments: WsComment[] };
+export type WsCounts = { subscriptions: number; favorites: number };
 export interface Source {
   index: number; name: string; supportsSearch: boolean; supportsPagination: boolean;
   supportsSorting: boolean; supportsTagFilter: boolean; pageSizeHint: number; available: boolean;
@@ -187,6 +188,8 @@ export interface LibraryItem {
   resolution: string | null; ageRating: string | null; youtubeUrl: string | null; pageUrl: string | null;
   authorName: string | null; description: string | null; fileSizeBytes: number | null;
   subscriptions: number | null; favorites: number | null; tags: string[] | null;
+  // API: its size on disk, measured in the background (Web/LibraryFactsOps.cs); null = not measured yet
+  diskBytes?: number | null;
   // API: GET /library only (WorkshopSubOps.MarkSubscribed): a Workshop item Steam keeps subscribed; false for the
   // library's own copy ("Unsubscribe without deleting") and a copy Steam doesn't have; absent for a non-Workshop item
   subscribed?: boolean | null;
@@ -311,7 +314,7 @@ export const api = {
     jpost<{ message: string }>("/playlist/play", { paths, settings }),
   playFrom: (paths: string[], startIndex: number, settings: PlaylistSettings) =>
     jpost<{ message: string }>("/playlist/play-from", { paths, startIndex, settings }),
-  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string }>("/steam/status"),
+  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean; pageUnsubscribes?: boolean }>("/steam/status"),
   qrStart: () => jpost("/steam/qr/start"),
   qrCancel: () => jpost("/steam/qr/cancel"),
   signout: () => jpost("/steam/signout"),
@@ -344,6 +347,8 @@ export const api = {
     jget<WsComments>(`/workshop/comments?id=${encodeURIComponent(id)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}&start=${start}&count=${count}`),
   workshopPostComment: (workshopId: string, owner: string | null | undefined, text: string, count: number) =>
     jpost<WsComments>("/workshop/comment", { workshopId, owner, text, count }),
+  // API: Steam's current counts of one item (the Library sidebar; a Browse result carries its own)
+  workshopCounts: (id: string) => jget<WsCounts>(`/workshop/counts?id=${encodeURIComponent(id)}`),
   // "Unsubscribe without deleting": its own route; the library copy is kept (kept = links turned into the library's own copy)
   workshopUnsubscribeKeep: (workshopId: string, title: string) =>
     jpost<{ inLibrary: boolean; kept: number }>("/workshop/unsubscribe-keep", { workshopId, title }),

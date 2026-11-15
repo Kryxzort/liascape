@@ -8,14 +8,41 @@ using Microsoft.AspNetCore.Http;
 
 namespace Liascape.Web;
 
-// The Browse sidebar's Workshop community pieces — the creator (name + avatar), the favourite toggle, the comment thread —
-// behind thin endpoints (ServerHost): the calls are Helpers/SteamCommunity.cs'. Reading works signed out; favouriting and
-// posting need the sign-in (403 {error, signIn: true}, the UI's "Sign in to …"). Steam's cooldown → 429 (the error middleware),
-// Steam unreachable or refusing → 502 {error}: the sidebar shows a quiet line, never a crash.
+// The Workshop community pieces of the Browse and Library sidebars — the creator (name + avatar), the favourite toggle, the
+// comment thread, the item's current counts — behind thin endpoints (ServerHost): the calls are Helpers/SteamCommunity.cs'.
+// Reading works signed out; favouriting and posting need the sign-in (403 {error, signIn: true}, the UI's "Sign in to …").
+// Steam's cooldown → 429 (the error middleware), Steam unreachable or refusing → 502 {error}: the sidebar shows a quiet line,
+// never a crash.
 public static class WorkshopSocialOps
 {
     // an item's creator for this run (the comment thread is addressed by it; an item never changes creator)
     static readonly ConcurrentDictionary<string, string> _owners = new();
+    // An item's details from Steam's client protocol (its creator, its counts) — one GetDetails per item however many asks
+    // land together (the Library sidebar asks for the creator and the counts at once), kept DetailsFreshFor: the counts are
+    // "current", and Steam's servers aren't the rate-limited community site, so a reopened sidebar a while later asks again.
+    // A failed ask is dropped at once (asked again next time; SteamAnonymous waits out its own retry gap).
+    // Guard: scripts/test-workshop-social.sh § counts
+    static readonly TimeSpan DetailsFreshFor = TimeSpan.FromMinutes(15);
+    // Lazy: ConcurrentDictionary may run a value factory on two racing threads (keeping one result); only the stored entry's
+    // ask is ever started
+    static readonly ConcurrentDictionary<ulong, (DateTime At, Lazy<Task<SteamWorkshopDetails.Details?>> Task)> _details = new();
+
+    static async Task<SteamWorkshopDetails.Details?> DetailsAsync(ulong id, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var e = _details.AddOrUpdate(id, (_) => (now, new(() => Ask(id))), (_, old) => now - old.At < DetailsFreshFor ? old : (now, new(() => Ask(id))));
+        // the ask itself isn't the request's: a closed sidebar mustn't cancel the answer another one is waiting for
+        var d = await e.Task.Value.WaitAsync(ct).ConfigureAwait(false);
+        if (d == null) _details.TryRemove(new(id, e));
+        return d;
+    }
+
+    static async Task<SteamWorkshopDetails.Details?> Ask(ulong id)
+    {
+        var got = await SteamWorkshopDetails.GetDetailsAsync([id]).ConfigureAwait(false);
+        // Steam answered and has no such public item: a real answer (kept); unreachable: null (not kept)
+        return got == null ? null : got.TryGetValue(id, out var d) ? d : new SteamWorkshopDetails.Details(false, null, []);
+    }
 
     static IResult Fail(Exception e) => e switch
     {
@@ -32,9 +59,25 @@ public static class WorkshopSocialOps
         if (SteamCommunity.ValidSteamId(hint)) return _owners[workshopId] = hint!;
         if (_owners.TryGetValue(workshopId, out var o)) return o;
         if (!ulong.TryParse(workshopId, out var n)) return null;
-        var got = await SteamWorkshopDetails.GetDetailsAsync([n], ct).ConfigureAwait(false);
-        if (got == null || !got.TryGetValue(n, out var d) || !d.Found || d.Creator == 0) return null;
+        if (await DetailsAsync(n, ct).ConfigureAwait(false) is not { Found: true, Creator: > 0 } d) return null;
         return _owners[workshopId] = d.Creator.ToString();
+    }
+
+    /// GET /workshop/counts?id= → {subscriptions, favorites}: Steam's current counts (the Library sidebar's stat pills; a Browse
+    /// result carries its own). 404 = Steam has no public item with that id; 502 = Steam's servers couldn't be asked.
+    public static async Task<IResult> CountsAsync(string? id, CancellationToken ct)
+    {
+        if (!WorkshopSubOps.ValidId(id) || !ulong.TryParse(id, out var n)) return Results.BadRequest(new { error = "id must be digits" });
+        try
+        {
+            return await DetailsAsync(n, ct).ConfigureAwait(false) switch
+            {
+                null => Results.Json(new { error = "Couldn't reach Steam" }, statusCode: 502),
+                { Found: false } => Results.Json(new { error = "Steam has no public item with this id" }, statusCode: 404),
+                var d => Results.Json(new { subscriptions = d.Value.Subscriptions, favorites = d.Value.Favorites }),
+            };
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
     }
 
     /// GET /workshop/creator?id=&owner= → {steamId, name, avatar}; name / avatar null when the profile couldn't be read.

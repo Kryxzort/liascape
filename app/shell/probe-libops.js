@@ -164,7 +164,7 @@ app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
   win.focus();
   try {
-    await http("POST", "/settings", { settingsLevel: "advanced", autoPlayVideoThumbs: true, videoPreviewQuality: "high", glows: true, morphs: true, liveWallpaperBehindAllTabs: false });
+    await http("POST", "/settings", { settingsLevel: "advanced", previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "high", glows: true, morphs: true, liveWallpaperBehindAllTabs: false });
     const paths = await fixtures("high");
     await loadLibrary();
     await opsIdle();

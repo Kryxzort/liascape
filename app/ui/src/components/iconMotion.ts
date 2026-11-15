@@ -78,6 +78,9 @@ const RECIPES: Record<string, Part[]> = {
   "lucide-locate-fixed": [dip(":scope > circle:nth-child(6)", 0.25, "scale(1.7)", 700)],
   // direction: one nudge along it (the comment box's Post sends it up and away)
   "lucide-arrow-right": [nudge("translateX(3px)")],
+  // a list's move buttons (components/OrderList.tsx): a nudge the way the item goes
+  "lucide-arrow-up": [nudge("translateY(-3px)")],
+  "lucide-arrow-down": [nudge("translateY(3px)")],
   "lucide-send": [nudge("translate(2.5px, -2.5px)")],
   // sort (the top bar's, components/SortFilterButton.tsx): the arrow dips once down its shaft; as it lands the bars, pulled
   // in from their left ends, settle back out one after another, the widest first
@@ -135,7 +138,8 @@ export function installIconMotion() {
   installed = true;
   document.addEventListener("pointerover", (e) => {
     const host = (e.target as Element | null)?.closest?.("button, a");
-    if (!host || host.matches(SKIP) || (host as HTMLButtonElement).disabled) return;
+    // a control that can't act now (disabled, or aria-disabled: one that keeps its right-click menu) plays nothing
+    if (!host || host.matches(SKIP) || (host as HTMLButtonElement).disabled || host.getAttribute("aria-disabled") === "true") return;
     const from = e.relatedTarget as Node | null;
     if (from && host.contains(from)) return; // moving inside the button
     act(host, !document.documentElement.classList.contains("no-motion"));

@@ -18,7 +18,7 @@ import { SavePlaylistModal } from "./SavePlaylistModal";
 import { LoadPlaylistModal } from "./LoadPlaylistModal";
 import { PlaylistSettingsModal } from "./PlaylistSettingsModal";
 import { MotionThumb } from "./MotionThumb";
-import { hasGifAsset, hasVideoPreview, useVideoOverGif } from "./mediaAssets";
+import { usePreviewKinds } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 import { useTravelToPlaying, glideTo } from "../hooks/travelToPlaying";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -59,8 +59,6 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
   const removeFromPlaylist = useStore((s) => s.removeFromPlaylist);
   const playFrom = useStore((s) => s.playFrom);
   const focusLib = useStore((s) => s.focusLib);
-  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
-  const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
   const glows = useStore((s) => s.settings?.glows !== false); // Settings → "Glow effects": off = no hover-glow layer
   // COOL: the hover glow can't escape the x-scrolling row (overflow clips it vertically). Render it as
   // a position:fixed layer portal'd to <body> at the item's box → it floats OVER the playlist bar chrome with
@@ -93,10 +91,10 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
     return () => { cancelAnimationFrame(raf); row?.removeEventListener("dockframe", write); };
   }, [hover]);
   const onEnter = () => hv.set(path);
-  const autoGif = !!item && autoPlayGifs && hasGifAsset(item);
-  const videoOverGif = useVideoOverGif();
-  // "Animate wallpapers without a GIF": an item in view with no GIF plays a clip of its own video without a hover (components/autoplay.ts)
-  const autoVideo = useAutoplayVideo(boxRef, !!item && !isDragging && hasVideoPreview(item, videoOverGif));
+  // what it shows hovered and not (Settings → "On hover" / "Not hovered"; nothing plays by itself while the window is
+  // inactive, mediaAssets.ts useIdleOrder); unhovered showing its video, in view it plays a clip of it (components/autoplay.ts)
+  const { hoverKind, idleKind } = usePreviewKinds(item);
+  const autoVideo = useAutoplayVideo(boxRef, !isDragging && idleKind === "video");
   // while dragging, the visible copy is the DragOverlay (portal'd above all UI); hide the in-place
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
@@ -108,7 +106,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
       // click does the tab's main action, right click opens the item sidebar" — the sidebar has the playlist toggle, Open in
       // file manager, Delete)
       onContextMenu={(e) => { e.preventDefault(); focusLib(path); revealCard(`lib-${path}`); }}>
-      {item && <MotionThumb item={item} hover={hover} autoGif={autoGif} autoVideo={autoVideo} videoOverGif={videoOverGif} />}
+      {item && <MotionThumb item={item} hover={hover} hoverKind={hoverKind} idleKind={idleKind} autoVideo={autoVideo} />}
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" aria-label="Remove from playlist"
@@ -123,7 +121,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
 function PlItemOverlay({ item }: { item?: LibraryItem }) {
   return (
     <div className="pl-item dragging" style={{ cursor: "grabbing", boxShadow: "0 12px 28px rgba(0,0,0,.5)", transform: "scale(1.05)" }}>
-      {item && <MotionThumb item={item} hover={false} autoGif={false} />}
+      {item && <MotionThumb item={item} hover={false} hoverKind="image" idleKind="image" />}
       <div className="pl-title">{item?.title ?? ""}</div>
     </div>
   );

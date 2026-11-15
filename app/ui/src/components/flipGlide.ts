@@ -25,6 +25,9 @@ function spring() {
   return tok;
 }
 
+// the soft spring as a CSS timing (`--spring-soft`) and its length in ms: a glide that CSS runs (a sortable's transition)
+export const softSpringCss = () => spring();
+
 // the same soft spring as an easing function of progress (framer's `ease`), for a framer `layout` morph that has to move
 // as one with a glide: `--spring-soft` is a `linear()` of evenly spaced stops (index.css :root), read piecewise
 let fn: { ease: (t: number) => number; ms: number } | null = null;

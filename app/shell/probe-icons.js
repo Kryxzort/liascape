@@ -7,7 +7,8 @@
 //                       through ≥ 3 in-between frames, overshoots its rest (a spring) and settles back to rest. Names: download
 //                       (Browse sidebar), card-download (a Browse card's own button: the arrow into its tray), external-link
 //                       + copy (the sidebar's tiles), cloud-download (Subscribe), refresh (Browse top bar),
-//                       upload (Import), save + sliders + play (the playlist bar), sparkles (Settings → Transitions…), arrow-right
+//                       upload (Import), save + sliders + play (the playlist bar), sparkles (Settings → Transitions…), arrow-up + arrow-down (a
+//                       Settings order list's move buttons), arrow-right
 //                       + skip-forward + stop (the Steam to-do), sort (the Library top bar's split: the arrow dips, the bars
 //                       settle; its <svg> no longer tilts as an object). Frames: <OUT>/icons-<name>-f<i>.png
 //   icon:hold:<name>    trash (a Library card's delete: the lid), folder (the playlist bar's Load: the flap), x (the sidebar's
@@ -312,6 +313,11 @@ app.whenReady().then(async () => {
       return v;
     });
     await act("sparkles", async () => { await tab("Settings"); await sleep(600); }, `[...document.querySelectorAll(".settings .btn")].find((b) => b.querySelector(".lucide-sparkles"))`, ":scope svg.lucide-sparkles > :nth-child(1)");
+    // the card preview orders' move buttons (Settings → Look & feel → "On hover", components/OrderList.tsx): Video sits second
+    // there by default, so both of its buttons are enabled
+    const ordBtn = (dir) => `document.querySelector('.settings .ord [data-ord-id="video"] [data-ord-move="${dir}"]')`;
+    await act("arrow-up", async () => { await tab("Settings"); await sleep(600); }, ordBtn("up"), null);
+    await act("arrow-down", async () => { await tab("Settings"); await sleep(600); }, ordBtn("down"), null);
     await act("arrow-right", async () => { await lib(); await steamTodo(); }, `document.querySelector("[data-st=next]")`, null);
     await act("skip-forward", steamTodo, `document.querySelector("[data-st=skip]")`, ":scope svg.lucide-skip-forward > :nth-child(2)");
     await act("stop", steamTodo, `document.querySelector("[data-st=stop]")`, null);

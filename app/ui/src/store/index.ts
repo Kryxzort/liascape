@@ -108,7 +108,8 @@ interface State {
   // playlist
   playlist: string[]; playlistSettings: PlaylistSettings; playlistName: string | null; playlistNames: string[];
   // steam / workshop
-  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string } | null;
+  // usable / pageUnsubscribes: what the Unsubscribe controls follow (components/subscribeMode.ts unsubBlocked)
+  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean; pageUnsubscribes?: boolean } | null;
   qrOpen: boolean; qrPng: string | null;
   // the password sign-in modal (SteamPasswordModal): which step Steam is at (WS steam-login-code), busy while a request /
   // Steam's answer is pending, the inline error. The password itself is never in the store — the modal's own field only.
@@ -243,7 +244,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 500, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
   autoThrottleScenes: true, limitVramPerScene: false, sceneVramLimitMib: 1536, vramLowMode: "stop",
-  thumbnailAspect: "1:1", cardSize: "Medium", autoPlayGifs: false, autoPlayVideoThumbs: false, preferVideoThumbs: false, videoPreviewQuality: "mid", glows: true, textShadow: false, morphs: true,
+  thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", glows: true, textShadow: false, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
   theme: "Catppuccin Mocha",

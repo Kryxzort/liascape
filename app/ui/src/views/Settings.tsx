@@ -2,6 +2,7 @@ import { isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState
 import {
   X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
+  Film, ImagePlay, Image as ImageIcon,
 } from "lucide-react";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
 import { api, type FeatureHealth, type ClipQuality } from "../api/client";
@@ -9,6 +10,8 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Segmented } from "../components/Segmented";
 import { CardPreview } from "../components/CardPreview";
+import { OrderList, type OrderItem } from "../components/OrderList";
+import { DEFAULT_NOT_HOVERED, DEFAULT_ON_HOVER, PREVIEW_KEYS, PREVIEW_PRESETS, presetOf, previewOrder, reach } from "../components/mediaAssets";
 import { QUALITY_LABEL } from "../components/clipSource";
 import { Combo } from "../components/Combo";
 import { NumInput } from "../components/NumInput";
@@ -215,10 +218,45 @@ function Section({ title, icon, lv, children }: { title: string; icon?: React.Re
     </div>
   );
 }
-// settings changed from their defaults whose rows the current level hides (they keep working) — the note at the top
+// settings changed from their defaults whose rows the current level hides (they keep working) — the note at the top. The
+// preview orders are tucked away only when no preset names them: a preset shows on Basic's "Card previews".
 const hiddenChanged = (settings: Record<string, unknown>, level: Level) =>
   Object.entries(LEVEL_OF_KEY).filter(([k, lv]) => rank(lv) > rank(level)
-    && settings[k] !== undefined && JSON.stringify(settings[k]) !== JSON.stringify(SETTINGS_DEFAULTS[k])).map(([k, lv]) => ({ k, lv }));
+    && settings[k] !== undefined && JSON.stringify(settings[k]) !== JSON.stringify(SETTINGS_DEFAULTS[k])
+    && !(PREVIEW_KEYS.includes(k) && presetOf(settings))).map(([k, lv]) => ({ k, lv }));
+
+// Look & feel → what a card shows hovered and not (components/mediaAssets.ts): Basic picks a named pair ("Card previews"),
+// Standard and up also order each list. The preset reads "Custom" when the lists match none. Guard: probe-cardpreview
+// cardpv:preset, cardpv:order.
+const THUMB_ITEMS: OrderItem[] = [
+  { id: "video", label: "Video", icon: <Film size={14} /> },
+  { id: "gif", label: "GIF", icon: <ImagePlay size={14} /> },
+  { id: "image", label: "Still image", icon: <ImageIcon size={14} /> },
+];
+function CardPreviewRows({ level }: { level: Level }) {
+  const { settings, set } = useS();
+  const hover = previewOrder(settings.previewOnHover, DEFAULT_ON_HOVER), idle = previewOrder(settings.previewNotHovered, DEFAULT_NOT_HOVERED);
+  const preset = presetOf(settings);
+  const isDefault = reach(hover).join() === reach(DEFAULT_ON_HOVER).join() && reach(idle).join() === reach(DEFAULT_NOT_HOVERED).join();
+  const pick = (v: string) => { const p = PREVIEW_PRESETS.find((x) => x.value === v); if (p) { set("previewOnHover", p.hover); set("previewNotHovered", p.idle); } };
+  const custom = rank(level) < rank("standard") ? "your own order, set at the Standard level." : "your own order, set in the two lists below.";
+  return (
+    <>
+      {/* ffmpeg makes the clips "Not hovered" plays: its warning shows here too, where Basic sees it */}
+      <Row label="Card previews" hint={preset?.hint ?? custom} wk="previewNotHovered" lv="basic" deviated={!isDefault}
+        onReset={() => pick("hover")}>
+        <Select value={preset?.value ?? "custom"} onChange={pick}
+          options={[...PREVIEW_PRESETS.map((p) => ({ value: p.value, label: p.label })), ...(preset ? [] : [{ value: "custom", label: "Custom" }])]} />
+      </Row>
+      <Row label="On hover" hint="a hovered card shows the first of these it has. Every card has a still image, so nothing below it shows." rk="previewOnHover">
+        <OrderList label="On hover" items={THUMB_ITEMS} order={hover} endAt="image" onChange={(o) => set("previewOnHover", o)} />
+      </Row>
+      <Row label="Not hovered" hint="every other card on screen shows the first of these it has. Nothing below the still image shows." rk="previewNotHovered">
+        <OrderList label="Not hovered" items={THUMB_ITEMS} order={idle} endAt="image" onChange={(o) => set("previewNotHovered", o)} />
+      </Row>
+    </>
+  );
+}
 const Help = ({ children }: { children: React.ReactNode }) => <p className="help">{children}</p>;
 
 // COOL: the global Volume/Speed sliders drag-preview LIVE like the per-wallpaper modal's: a throttled
@@ -508,9 +546,7 @@ export const Settings = memo(function Settings() {
         <Row label="Glow effects" hint="the soft accent glow on hovered, active and playing things" rk="glows"><input type="checkbox" checked={g("glows", true)} onChange={(e) => set("glows", e.target.checked)} /></Row>
         <Row label="Text shadow" hint="a drop shadow on text, so it stays easy to read on busy backgrounds" rk="textShadow"><input type="checkbox" checked={g("textShadow", false)} onChange={(e) => set("textShadow", e.target.checked)} /></Row>
         <Row label="Smooth window animations" hint="the slides, zooms and morphs all over the app. Off, nothing moves and things fade in and out instead." rk="morphs"><input type="checkbox" checked={g("morphs", true)} onChange={(e) => set("morphs", e.target.checked)} /></Row>
-        <Row label="Animate GIF previews" hint="off, GIFs show their first frame" rk="autoPlayGifs"><input type="checkbox" checked={g("autoPlayGifs", false)} onChange={(e) => set("autoPlayGifs", e.target.checked)} /></Row>
-        <Row label="Animate wallpapers without a GIF" hint="plays the video for wallpapers without an animated GIF" rk="autoPlayVideoThumbs"><input type="checkbox" checked={g("autoPlayVideoThumbs", false)} onChange={(e) => set("autoPlayVideoThumbs", e.target.checked)} /></Row>
-        <Row label="Use the video instead of the GIF" hint="plays the video for wallpapers that have a GIF" rk="preferVideoThumbs"><input type="checkbox" checked={g("preferVideoThumbs", false)} onChange={(e) => set("preferVideoThumbs", e.target.checked)} /></Row>
+        <CardPreviewRows level={level} />
         <Row label="Video preview quality" hint="scales with card size. Higher quality gives sharper, smoother clips but uses more storage and processing." rk="videoPreviewQuality">
           <Segmented<ClipQuality> label="Video preview quality" value={g<ClipQuality>("videoPreviewQuality", "mid")} onChange={(v) => set("videoPreviewQuality", v)}
             options={(["low", "mid", "high"] as const).map((v) => ({ value: v, label: QUALITY_LABEL[v] }))} /></Row>

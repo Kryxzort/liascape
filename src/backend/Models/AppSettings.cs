@@ -53,9 +53,19 @@ public class AppSettings
     public bool AutoMuteOnlyIfMprisActive { get; set; } = false;
     public string ThumbnailAspect { get; set; } = "1:1";
     public string CardSize { get; set; } = "Medium";
-    public bool AutoPlayGifs { get; set; } = false;
-    public bool AutoPlayVideoThumbs { get; set; } = false;   // UI: library/playlist video previews play without a hover (every one on screen — components/autoplay.ts)
-    public bool PreferVideoThumbs { get; set; } = false;     // UI: an item with a gif AND its own video previews with the video (components/mediaAssets.ts previewVideo)
+    // UI: Settings → "On hover" / "Not hovered": the order of video / gif / image a card tries, hovered and not (the first one an
+    // item has shows; components/mediaAssets.ts). Kept to the three kinds once each, in the order given, the missing ones after
+    // in the default's order: an unknown or repeated kind is dropped, so any list loads as a whole order.
+    private List<string> _previewOnHover = ["gif", "video", "image"];
+    public List<string> PreviewOnHover { get => _previewOnHover; set => _previewOnHover = PreviewOrder(value, ["gif", "video", "image"]); }
+    private List<string> _previewNotHovered = ["image", "gif", "video"];
+    public List<string> PreviewNotHovered { get => _previewNotHovered; set => _previewNotHovered = PreviewOrder(value, ["image", "gif", "video"]); }
+    public static List<string> PreviewOrder(IEnumerable<string?>? order, string[] def)
+    {
+        var got = (order ?? []).Select(k => k?.Trim().ToLowerInvariant()).Where(k => k is "video" or "gif" or "image").Distinct().Select(k => k!).ToList();
+        got.AddRange(def.Where(k => !got.Contains(k)));
+        return got;
+    }
     // UI: "Video preview quality" — low | mid (default) | high: the clips' size factor, fps and CRF (components/clipSource.ts,
     // Web/ClipStore.cs). An unknown value reads as the default.
     private string _videoPreviewQuality = "mid";

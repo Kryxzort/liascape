@@ -4,9 +4,14 @@
 //   cardpv:present     only while the card rows are on screen; real library cards (one video-only, one with a gif + video)
 //   cardpv:shape       "Thumbnail shape" 1:1 / 16:9 → the cards' shape, live
 //   cardpv:size        "Card size" → the cards' width, live, Medium = the Library grid's own card width
-//   cardpv:gif         "Animate GIF previews" → the gif card animates / stops
-//   cardpv:video       "Animate wallpapers without a GIF" → the video card plays its clip / stops
-//   cardpv:overGif     "Use the video instead of the GIF" → the gif + video card plays its video
+//   cardpv:preset      Basic: "Card previews" (a preset dropdown, no lists) sets both orders, live on the cards; a hidden
+//                      order a preset names isn't "tucked away"; Standard: the two lists show, an order no preset has
+//                      reads "Custom" (Basic too, and then it is tucked away), a preset picked again puts the lists back
+//   cardpv:order       "On hover" / "Not hovered": for several orders, what the video-only and the gif + video card show
+//                      unhovered and hovered (the first one each card has; nothing after "Still image")
+//   cardpv:orderCtl    the lists' control: the move buttons by keyboard (focus stays on a usable button), a drag, the dimmed
+//                      unreachable items; motion on: the items glide; motion off: they jump (no in-between frame), only the
+//                      dimming fades; no-glow: no glow on a hovered item; bg-live: a translucent item
 //   cardpv:quality     "Video preview quality" → the preview plays exactly the chosen quality: a High sample within 3 s of
 //                      choosing it (not the full-length re-encode), a Low clip after High (other fps and size than High's,
 //                      before the library's clip follows the choice); the caption says "making the High preview…", then the
@@ -30,6 +35,9 @@ const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const OUT = E.LIASCAPE_OUT;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// the preview orders' defaults (app/ui/src/components/mediaAssets.ts), and "Always animate": every card plays its GIF, else its
+// video, unhovered — what the cells below play their clips under
+const ON_HOVER = ["gif", "video", "image"], NOT_HOVERED = ["image", "gif", "video"], ALWAYS = ["gif", "video", "image"];
 app.setPath("userData", path.join(OUT, "electron-user-data"));
 // a page replaced under the probe leaves its promises pending: the whole run has a ceiling (.claude/rules/testing.md)
 setTimeout(() => { console.log("ERROR probe-cardpreview: overall timeout"); app.exit(2); }, 12 * 60 * 1000).unref();
@@ -75,6 +83,19 @@ const HELPERS = `
       this.row(label)?.querySelector(".sel")?.click(); await this.sleep(250);
       [...document.querySelectorAll(".sel-pop .sel-opt")].find((e) => e.textContent.trim() === opt)?.click(); await this.sleep(400);
     },
+    // an order list's items, top first (components/OrderList.tsx data-ord), and putting it in an order by its move buttons
+    ord(label) { return this.row(label)?.querySelector(".ord")?.dataset.ord?.split(",") ?? null; },
+    async order(label, want) {
+      for (let n = 0; n < 12; n++) {
+        const cur = this.ord(label); if (!cur) return false;
+        if (cur.join() === want.join()) { await this.sleep(350); return true; }
+        const id = want.find((k, j) => cur[j] !== k);
+        this.row(label).querySelector('[data-ord-id="' + id + '"] [data-ord-move="up"]')?.click();
+        await this.sleep(80);
+      }
+      return false;
+    },
+    selVal(label) { return this.row(label)?.querySelector(".sel .sel-val")?.textContent?.trim() ?? null; },
     async seg(label, opt) { [...(this.row(label)?.querySelectorAll(".seg-opt") ?? [])].find((b) => b.textContent.trim() === opt)?.click(); await this.sleep(350); },
     layers(kind) {
       const c = this.card(kind); if (!c) return null;
@@ -129,8 +150,8 @@ app.whenReady().then(async () => {
   win.focus();
   try {
     // Advanced: "Wallpaper behind every tab" (bg-live) is an Advanced row
-    await http("POST", "/settings", { SettingsLevel: "advanced", ThumbnailAspect: "1:1", CardSize: "Medium", AutoPlayGifs: false,
-      AutoPlayVideoThumbs: false, PreferVideoThumbs: false, VideoPreviewQuality: "mid", Glows: true, Morphs: true, LiveWallpaperBehindAllTabs: false });
+    await http("POST", "/settings", { SettingsLevel: "advanced", ThumbnailAspect: "1:1", CardSize: "Medium",
+      PreviewOnHover: ON_HOVER, PreviewNotHovered: NOT_HOVERED, VideoPreviewQuality: "mid", Glows: true, Morphs: true, LiveWallpaperBehindAllTabs: false });
     await loadSettings();
 
     await cell("cardpv:present — only while the card rows are on screen; real library cards", async () => {
@@ -189,49 +210,195 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("cardpv:gif — Animate GIF previews animates the gif card live", async () => {
-      const v = [];
-      if (!(await needCards(v, "gif"))) return v;
-      const off = await pv(`return p.layers("both")`);
-      await pv(`await p.check("Animate GIF previews", true); return true`);
-      const onOk = await waitFor(async () => (await pv(`return p.layers("both")?.gif`)) === true, 3000);
-      await pv(`await p.check("Animate GIF previews", false); return true`);
-      const offOk = await waitFor(async () => (await pv(`return p.layers("both")?.gif`)) === false, 3000);
-      if (off?.gif) v.push("off: the gif card animates already");
-      if (!onOk) v.push(`on: the gif card never showed its gif ${JSON.stringify(await pv(`return p.layers("both")`))}`);
-      if (!offOk) v.push("turned off again: the gif still shows");
+    // what a card shows for an order (app/ui/src/components/mediaAssets.ts firstPreview): the first kind it has, "image" ends it
+    const HAS = { video: { video: true, gif: false }, both: { video: true, gif: true } };
+    const first = (order, kind) => order.find((k) => k === "image" || HAS[kind][k]);
+    // its layers match: video = a video playing (a clip unhovered, the real file hovered), gif = the gif and no video, image = neither
+    const shows = (l, want, hovered) => !!l && (want === "video" ? l.playing && l.src.includes(hovered ? "/media?" : "/clip?")
+      : want === "gif" ? l.gif && !l.video : !l.gif && !l.video);
+    const hoverCard = async (kind) => { const b = await pv(`return p.box(p.card(${JSON.stringify(kind)})?.querySelector(".thumb-wrap"))`); if (b) await move(b.x, b.y); return !!b; };
+    const unhover = () => move(5, 5);
+
+    await cell("cardpv:preset — Basic's Card previews sets both orders live; Standard shows the lists, and an order no preset has reads Custom", async () => {
+      const v = [], J = JSON.stringify;
+      const orders = async () => { const s = (await http("GET", "/settings")).json || {}; return [s.previewOnHover, s.previewNotHovered]; };
+      const reachOf = (o) => (o || []).slice(0, (o || []).indexOf("image") + 1).join(",");
+      // through the top bar's level picker (a body posted behind the page's back loses to the page's next whole-settings save)
+      const level = async (lv) => { await pv(`document.querySelector('[data-settings-level] [data-level="${lv}"]')?.click(); await p.sleep(300); return true`);
+        return waitFor(async () => (await pv(`return !!p.row("On hover")`)) === (lv !== "basic"), 4000); };
+      if (!(await needCards(v, "preset"))) return v;
+      if (!(await level("basic"))) v.push("Basic: the On hover / Not hovered rows still show");
+      const basic = await pv(`return { preset: !!p.row("Card previews"), val: p.selVal("Card previews"), lists: !!p.row("On hover") || !!p.row("Not hovered") }`);
+      if (!basic.preset) return [...v, "Basic: no Card previews row"];
+      if (basic.lists) v.push("Basic: the order lists show (they're Standard rows)");
+      if (basic.val !== "Animate on hover") v.push(`Basic, the defaults: the preset reads ${J(basic.val)}, want "Animate on hover"`);
+      // the "tucked away" count at Basic (the probe's own Advanced choices hide there too): a preset adds nothing to it
+      const tucked = () => pv(`return +(document.querySelector("[data-hidden-changed]")?.dataset.hiddenChanged ?? 0)`);
+      const base = await tucked();
+      // each preset: both orders saved, the cards follow at once, nothing tucked away
+      const PRE = { "Never animate": [NOT_HOVERED, NOT_HOVERED], "Always animate": [ALWAYS, ALWAYS],
+        "Always animate, video first": [["video", "gif", "image"], ["video", "gif", "image"]], "Animate on hover": [ON_HOVER, NOT_HOVERED] };
+      for (const [name, [hov, idle]] of Object.entries(PRE)) {
+        await pv(`await p.toRows(); await p.select("Card previews", ${J(name)}); await p.toRows(); return true`);
+        const saved = await waitFor(async () => { const [h, i] = await orders(); return reachOf(h) === reachOf(hov) && reachOf(i) === reachOf(idle); }, 4000);
+        if (!saved) v.push(`Basic, "${name}": saved ${J(await orders())}, want ${J([hov, idle])}`);
+        for (const kind of ["video", "both"]) {
+          const want = first(idle, kind);
+          if (!(await waitFor(async () => shows(await pv(`return p.layers(${J(kind)})`), want, false), want === "video" ? 15000 : 4000, 200)))
+            v.push(`Basic, "${name}": the ${kind} card shows ${J(await pv(`return p.layers(${J(kind)})`))}, want its ${want}`);
+        }
+        const n = await tucked();
+        if (n !== base) v.push(`Basic, "${name}": ${n} settings tucked away, ${base} with the defaults — a preset's orders show on Basic, they aren't tucked away`);
+        const val = await pv(`return p.selVal("Card previews")`);
+        if (val !== name) v.push(`Basic, "${name}" picked: the preset reads ${J(val)}`);
+      }
+      // Standard: the lists; an order no preset has → Custom (its hint names the lists); back at Basic it's Custom and tucked away
+      if (!(await level("standard"))) v.push("Standard: no On hover / Not hovered rows");
+      await pv(`await p.toRows(); return true`);
+      const lists = await pv(`return [p.ord("On hover"), p.ord("Not hovered")]`);
+      if (J(lists) !== J([ON_HOVER, NOT_HOVERED])) v.push(`Standard, the defaults: the lists read ${J(lists)}, want ${J([ON_HOVER, NOT_HOVERED])}`);
+      await pv(`await p.order("Not hovered", ["video", "image", "gif"]); return true`);
+      const custom = await waitFor(async () => (await pv(`return p.selVal("Card previews")`)) === "Custom", 3000);
+      const hint = await pv(`return p.row("Card previews")?.querySelector(".shint")?.textContent ?? ""`);
+      if (!custom) v.push(`Not hovered video, image: the preset reads ${J(await pv(`return p.selVal("Card previews")`))}, want "Custom"`);
+      if (!/lists below/.test(hint)) v.push(`Custom at Standard: hint ${J(hint)} doesn't point at the lists`);
+      if (!(await waitFor(async () => J((await orders())[1]) === J(["video", "image", "gif"]), 3000))) v.push(`the list's order wasn't saved: ${J(await orders())}`);
+      await level("basic");
+      const b2 = await pv(`return { val: p.selVal("Card previews") }`), n2 = await tucked();
+      if (b2.val !== "Custom") v.push(`Basic with a custom order: the preset reads ${J(b2.val)}, want "Custom"`);
+      // Not hovered differs from its default, On hover doesn't: one more setting tucked away
+      if (n2 !== base + 1) v.push(`Basic with a custom Not hovered: ${n2} settings tucked away, want ${base + 1} (the hidden list that holds it)`);
+      // a preset picked from Custom puts both lists back, and Custom leaves the choices
+      await pv(`await p.toRows(); await p.select("Card previews", "Animate on hover"); return true`);
+      const back = await waitFor(async () => { const [h, i] = await orders(); return J(h) === J(ON_HOVER) && J(i) === J(NOT_HOVERED); }, 4000);
+      if (!back) v.push(`"Animate on hover" picked from Custom: saved ${J(await orders())}`);
+      await pv(`p.row("Card previews")?.querySelector(".sel")?.click(); await p.sleep(250); return true`);
+      const opts = await pv(`const o = [...document.querySelectorAll(".sel-pop .sel-opt")].map((e) => e.textContent.trim()); document.querySelector(".sel-backdrop")?.click(); await p.sleep(200); return o`);
+      if (opts.includes("Custom")) v.push(`a preset chosen: the choices still offer Custom ${J(opts)}`);
+      if (J(opts) !== J(["Never animate", "Animate on hover", "Always animate", "Always animate, video first"])) v.push(`the presets offered: ${J(opts)}`);
+      await level("advanced");
       return v;
     });
 
-    await cell("cardpv:video — Animate wallpapers without a GIF plays the video card's clip live", async () => {
-      const v = [];
-      if (!(await needCards(v, "video"))) return v;
-      const off = await pv(`return p.layers("video")`);
-      await pv(`await p.check("Animate wallpapers without a GIF", true); return true`);
-      const onOk = await waitFor(async () => { const l = await pv(`return p.layers("video")`); return l?.playing && l.src.includes("/clip?"); }, 15000, 200);
-      const on = await pv(`return p.layers("video")`);
-      await pv(`await p.check("Animate wallpapers without a GIF", false); return true`);
-      const offOk = await waitFor(async () => (await pv(`return p.layers("video")?.video`)) === false, 3000);
-      if (off?.video) v.push("off: the video card plays by itself already");
-      if (!onOk) v.push(`on: the video card never played a clip ${JSON.stringify(on)}`);
-      if (!offOk) v.push("turned off again: the video still plays");
+    await cell("cardpv:order — On hover / Not hovered: each card shows the first kind it has, hovered and not", async () => {
+      const v = [], J = JSON.stringify;
+      if (!(await needCards(v, "order"))) return v;
+      const COMBOS = [
+        [["video", "gif", "image"], ["gif", "video", "image"]],
+        [["gif", "video", "image"], ["video", "gif", "image"]],
+        [["image", "video", "gif"], ["video", "image", "gif"]],
+        [["video", "image", "gif"], ["gif", "image", "video"]],
+        [ON_HOVER, NOT_HOVERED],
+      ];
+      let hovered = 0;
+      for (const [hov, idle] of COMBOS) {
+        const n = `On hover ${hov.join(">")}, Not hovered ${idle.join(">")}`;
+        await pv(`await p.toRows(); await p.order("On hover", ${J(hov)}); await p.order("Not hovered", ${J(idle)}); return true`);
+        for (const kind of ["video", "both"]) {
+          const wi = first(idle, kind), wh = first(hov, kind);
+          if (!(await waitFor(async () => shows(await pv(`return p.layers(${J(kind)})`), wi, false), wi === "video" ? 15000 : 4000, 200)))
+            v.push(`${n}: the ${kind} card unhovered shows ${J(await pv(`return p.layers(${J(kind)})`))}, want its ${wi}`);
+          if (!(await hoverCard(kind))) { v.push(`${n}: no ${kind} card to hover`); continue; }
+          const ok = await waitFor(async () => shows(await pv(`return p.layers(${J(kind)})`), wh, true), 6000, 150);
+          if (ok) hovered++;
+          else v.push(`${n}: the ${kind} card hovered shows ${J(await pv(`return p.layers(${J(kind)})`))}, want its ${wh}`);
+          await unhover(); await sleep(300);
+        }
+      }
+      await pv(`await p.order("On hover", ${J(ON_HOVER)}); await p.order("Not hovered", ${J(NOT_HOVERED)}); return true`);
+      if (!hovered) v.push("no hover showed what it should — proved nothing");
       return v;
     });
 
-    await cell("cardpv:overGif — Use the video instead of the GIF plays the gif + video card's video", async () => {
-      const v = [];
-      if (!(await needCards(v, "overGif"))) return v;
-      await pv(`await p.check("Animate wallpapers without a GIF", true); await p.check("Animate GIF previews", true); return true`);
-      const before = await waitFor(async () => (await pv(`return p.layers("both")`))?.gif === true, 4000);
-      await pv(`await p.check("Use the video instead of the GIF", true); return true`);
-      const okOn = await waitFor(async () => { const l = await pv(`return p.layers("both")`); return l?.playing && !l.gif; }, 15000, 200);
-      const on = await pv(`return p.layers("both")`);
-      await pv(`await p.check("Use the video instead of the GIF", false); return true`);
-      const okOff = await waitFor(async () => { const l = await pv(`return p.layers("both")`); return l?.gif && !l.video; }, 4000);
-      await pv(`await p.check("Animate GIF previews", false); await p.check("Animate wallpapers without a GIF", false); return true`);
-      if (!before) v.push("both previews on, video-over-gif off: the gif card doesn't show its gif");
-      if (!okOn) v.push(`video over gif on: the card doesn't play its video in place of the gif ${JSON.stringify(on)}`);
-      if (!okOff) v.push(`video over gif off: the gif didn't come back ${JSON.stringify(await pv(`return p.layers("both")`))}`);
+    await cell("cardpv:orderCtl — the lists' move buttons (keyboard), drag, unreachable items; motion on glides, off jumps; no-glow; bg-live", async () => {
+      const v = [], J = JSON.stringify;
+      if (!(await needCards(v, "orderCtl"))) return v;
+      const list = (label) => `p.row(${J(label)})?.querySelector(".ord")`;
+      const item = (label, id) => `${list(label)}?.querySelector('[data-ord-id="${id}"]')`;
+      // per-frame top of each item (relative to the list, in list order) while `act` runs
+      const sampled = (label, act, ms = 700) => pv(`const l = ${list(label)}; const kids = [...l.children]; const s = []; let run = true;
+        const tick = () => { if (!run) return; const lt = l.getBoundingClientRect().top; s.push(kids.map((c) => +(c.getBoundingClientRect().top - lt).toFixed(1))); requestAnimationFrame(tick); };
+        requestAnimationFrame(tick); ${act}; await p.sleep(${ms}); run = false; return s`);
+      // frames where an item sits strictly between its first and last place: a glide passes through them, a jump never
+      const between = (frames) => {
+        if (frames.length < 2) return 0;
+        const a = frames[0], b = frames[frames.length - 1];
+        return frames.filter((f) => f.some((y, i) => Math.min(a[i], b[i]) + 1 < y && y < Math.max(a[i], b[i]) - 1)).length;
+      };
+      const drag = async (fromId, toId, edge) => {
+        const f = await pv(`return p.box(${item("Not hovered", fromId)}?.querySelector(".ord-label"))`), t = await pv(`return p.box(${item("Not hovered", toId)})`);
+        const y1 = Math.round(edge === "top" ? t.t + 2 : t.b - 2);
+        await move(f.x, f.y); win.webContents.sendInputEvent({ type: "mouseDown", x: f.x, y: f.y, button: "left", clickCount: 1 });
+        for (let i = 1; i <= 12; i++) { win.webContents.sendInputEvent({ type: "mouseMove", x: f.x, y: Math.round(f.y + (y1 - f.y) * i / 12), button: "left", modifiers: ["leftButtonDown"] }); await sleep(30); }
+        await sleep(150);
+        return async () => { win.webContents.sendInputEvent({ type: "mouseUp", x: f.x, y: y1, button: "left", clickCount: 1 }); await sleep(50); };
+      };
+      await pv(`await p.toRows(); await p.order("Not hovered", ${J(NOT_HOVERED)}); ${list("Not hovered")}.scrollIntoView({ block: "center" }); await p.sleep(400); return true`);
+      // unreachable: everything below "Still image" is dimmed
+      const dim = await pv(`return [...${list("Not hovered")}.children].map((c) => ({ id: c.dataset.ordId, un: c.hasAttribute("data-unreached"), op: +getComputedStyle(c).opacity }))`);
+      if (J(dim.map((d) => d.un)) !== J([false, true, true])) v.push(`image first: unreached marks ${J(dim)}, want the two below it`);
+      if (dim.slice(1).some((d) => d.op > 0.6)) v.push(`image first: the unreachable items aren't dimmed ${J(dim)}`);
+      // keyboard: GIF's "up" focused as by Tab, Enter: GIF goes to the top, gliding; focus moves to its "down" (its "up" is disabled there)
+      await pv(`document.documentElement.classList.add("kbd-nav"); ${item("Not hovered", "gif")}.querySelector('[data-ord-move="up"]').focus(); return true`);
+      const glideP = sampled("Not hovered", "", 700);
+      win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" }); win.webContents.sendInputEvent({ type: "char", keyCode: "\r" }); win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+      const glide = await glideP;
+      const k1 = await pv(`return { ord: p.ord("Not hovered"), focus: document.activeElement?.closest(".ord-item")?.dataset.ordId ?? null, btn: document.activeElement?.dataset.ordMove ?? null }`);
+      if (J(k1.ord) !== J(["gif", "image", "video"])) v.push(`Enter on GIF's up: ${J(k1.ord)}, want gif,image,video`);
+      if (k1.focus !== "gif" || k1.btn !== "down") v.push(`GIF at the top: focus on ${J(k1)}, want GIF's down button (up is disabled there)`);
+      if (!between(glide)) v.push(`motion on: no in-between frame while GIF moved up (${glide.length} frames ${J(glide.slice(0, 6))})`);
+      const unr = await pv(`return [...${list("Not hovered")}.children].map((c) => c.hasAttribute("data-unreached"))`);
+      if (J(unr) !== J([false, false, true])) v.push(`gif, image, video: unreached marks ${J(unr)}, want only video's`);
+      await shot("order-moved");
+      // drag (motion on): "Video" (last) above "GIF" (first); the others glide aside
+      const dragOnP = sampled("Not hovered", "", 1300);
+      const dropOn = await drag("video", "gif", "top");
+      await shot("order-drag");
+      await dropOn();
+      const dragOn = await dragOnP; await move(5, 5); await sleep(400);
+      const dragged = await pv(`return p.ord("Not hovered")`);
+      if (J(dragged) !== J(["video", "gif", "image"])) v.push(`Video dragged above GIF: ${J(dragged)}, want video,gif,image`);
+      if (!between(dragOn.map((f) => f.slice(0, 2)))) v.push(`motion on, a drag: the others never glided aside (${J(dragOn.slice(0, 8))})`);
+      if (!(await waitFor(async () => J((await http("GET", "/settings")).json?.previewNotHovered) === J(["video", "gif", "image"]), 3000))) v.push("the dragged order wasn't saved");
+      // no-glow: a hovered item has no glow; with it, it glows
+      const hoverShadow = async () => {
+        const b = await pv(`return p.box(${item("Not hovered", "image")})`); await move(b.x, b.y); await sleep(350);
+        const sh = await pv(`return getComputedStyle(${item("Not hovered", "image")}).boxShadow`); await move(5, 5); await sleep(200); return sh;
+      };
+      const glowOn = await hoverShadow();
+      await pv(`await p.check("Glow effects", false); ${list("Not hovered")}.scrollIntoView({ block: "center" }); await p.sleep(300); return true`);
+      const glowOff = await hoverShadow();
+      await pv(`await p.check("Glow effects", true); return true`);
+      if (!glowOn || glowOn === "none") v.push(`glow on: a hovered item has no glow (${glowOn}), the no-glow check proves nothing`);
+      if (glowOff && glowOff !== "none") v.push(`no-glow: a hovered item still glows (${glowOff})`);
+      // bg-live: the item's fill is translucent
+      await pv(`await p.check("Wallpaper behind every tab", true); ${list("Not hovered")}.scrollIntoView({ block: "center" }); await p.sleep(400); return true`);
+      const bl = await pv(`return { live: document.documentElement.classList.contains("bg-live"), bg: getComputedStyle(${item("Not hovered", "gif")}).backgroundColor }`);
+      await shot("order-bglive");
+      await pv(`await p.check("Wallpaper behind every tab", false); return true`);
+      const alpha = +(/rgba?\([^)]*,\s*([0-9.]+)\)$/.exec(bl.bg)?.[1] ?? /\/\s*([0-9.]+)\s*\)$/.exec(bl.bg)?.[1] ?? 1);
+      if (!bl.live) v.push("bg-live: Wallpaper behind every tab didn't set bg-live, proved nothing");
+      else if (!(alpha < 1)) v.push(`bg-live: the item's fill is opaque (${bl.bg})`);
+      // motion off: a button move jumps (no in-between frame), the item's transition never moves it
+      await pv(`await p.check("Smooth window animations", false); ${list("Not hovered")}.scrollIntoView({ block: "center" }); await p.sleep(300); return true`);
+      const off = await sampled("Not hovered", `${item("Not hovered", "image")}.querySelector('[data-ord-move="up"]').click()`, 500);
+      const tr = await pv(`const c = getComputedStyle(${item("Not hovered", "image")}); return { p: c.transitionProperty, d: c.transitionDuration }`);
+      const offOrd = await pv(`return p.ord("Not hovered")`);
+      await shot("order-motionoff");
+      // a drag with motion off: "Video" (top) dragged below "Still image"; the others jump aside, no in-between frame
+      const dragOffP = sampled("Not hovered", "", 1300);
+      const dropOff = await drag("video", "image", "bottom");
+      await dropOff();
+      const dOff = await dragOffP; await move(5, 5); await sleep(300);
+      const offDragOrd = await pv(`return p.ord("Not hovered")`);
+      await pv(`await p.check("Smooth window animations", true); await p.order("Not hovered", ${J(NOT_HOVERED)}); return true`);
+      if (J(offOrd) !== J(["video", "image", "gif"])) v.push(`motion off, Still image's up: ${J(offOrd)}, want video,image,gif`);
+      if (between(off)) v.push(`motion off: ${between(off)} in-between frames while Still image moved up (want a jump) ${J(off.slice(0, 6))}`);
+      if (/transform|translate|all/.test(tr.p)) v.push(`motion off: the item's transition moves it (${J(tr)})`);
+      if (J(offDragOrd) !== J(["image", "video", "gif"])) v.push(`motion off, Video dragged below Still image: ${J(offDragOrd)}, want image,video,gif`);
+      const others = dOff.map((f) => f.slice(1));
+      if (!others.some((f) => J(f) !== J(others[0]))) v.push("motion off, a drag: nothing moved aside, proved nothing");
+      else if (between(others)) v.push(`motion off, a drag: the others glided (${between(others)} in-between frames ${J(others.slice(0, 8))})`);
       return v;
     });
 
@@ -241,7 +408,7 @@ app.whenReady().then(async () => {
       const qs = (await http("GET", "/clip/qualities")).json?.qualities ?? [];
       const hi = qs.find((x) => x.name === "high"), mid = qs.find((x) => x.name === "mid");
       if (!hi || !mid) return [`GET /clip/qualities: ${J(qs)}`];
-      await pv(`await p.check("Animate wallpapers without a GIF", true); return true`);
+      await pv(`await p.order("Not hovered", ${JSON.stringify(ALWAYS)}); return true`);
       // the library's full Mid clip first, as on a user's machine: a quality change then has a stored clip to differ from
       const midFull = await waitFor(async () => /_1_full$/.test((await clipStem("video")) || ""), 30000, 300);
       const capMid = await pv(`return p.caption()`);
@@ -269,7 +436,7 @@ app.whenReady().then(async () => {
       await pv(`await p.seg("Video preview quality", "Low"); return true`);
       const lowOk = await waitFor(async () => qOf(await clipStem("video")) === "0" && (await pv(`return p.layers("video")?.playing`)), 10000, 100);
       const loFacts = clipFacts(await clipStem("video"));
-      await pv(`await p.seg("Video preview quality", "Mid"); await p.check("Animate wallpapers without a GIF", false); return true`);
+      await pv(`await p.seg("Video preview quality", "Mid"); await p.order("Not hovered", ${JSON.stringify(NOT_HOVERED)}); return true`);
       if (!midFull) return [...v, `the video card never played its full Mid clip (${await clipStem("video")}) — proved nothing`];
       if (!capMid?.startsWith(`Mid · ${mid.fps} fps · ~`)) v.push(`Mid caption ${J(capMid)}, want "Mid · ${mid.fps} fps · ~… MB per wallpaper"`);
       if (!hiAsk) v.push(`after choosing High, no /clip request asked for q=high (${asks.length} asks)`);
@@ -291,7 +458,7 @@ app.whenReady().then(async () => {
     await cell("cardpv:hover — hovering a preview card hands its clip to the real file and back", async () => {
       const v = [];
       if (!(await needCards(v, "hover"))) return v;
-      await pv(`await p.check("Animate wallpapers without a GIF", true); return true`);
+      await pv(`await p.order("Not hovered", ${JSON.stringify(ALWAYS)}); return true`);
       const clip = await waitFor(async () => { const l = await pv(`return p.layers("video")`); return l?.playing && l.src.includes("/clip?"); }, 15000, 200);
       await sleep(1000);
       const pt = await pv(`return p.box(p.card("video")?.querySelector(".thumb-wrap"))`);
@@ -300,7 +467,7 @@ app.whenReady().then(async () => {
       await sleep(600); await shot("hover");
       await move(5, 5);
       const back = await waitFor(async () => (await pv(`return p.layers("video")?.src`))?.includes("/clip?"), 6000, 100);
-      await pv(`await p.check("Animate wallpapers without a GIF", false); return true`);
+      await pv(`await p.order("Not hovered", ${JSON.stringify(NOT_HOVERED)}); return true`);
       if (!clip) return [...v, "the clip never played before the hover — proved nothing"];
       if (!real) v.push(`hovered: the card never handed over to the real file (${await pv(`return p.layers("video")?.src`)})`);
       if (!back) v.push("unhovered: the clip never took back over");
@@ -343,7 +510,7 @@ app.whenReady().then(async () => {
     await cell("cardpv:offscreen — scrolled away nothing decodes or asks; window inactive nothing plays", async () => {
       const v = [];
       if (!(await needCards(v, "offscreen"))) return v;
-      await pv(`await p.check("Animate wallpapers without a GIF", true); await p.check("Animate GIF previews", true); return true`);
+      await pv(`await p.order("Not hovered", ${JSON.stringify(ALWAYS)}); return true`);
       const playing = await waitFor(async () => (await pv(`return p.layers("video")?.playing && p.layers("both")?.gif`)) === true, 15000, 200);
       await pv(`await p.toTop(); performance.clearResourceTimings(); return true`);
       await sleep(5000); // longer than a card's re-ask while a clip is being made
@@ -354,7 +521,7 @@ app.whenReady().then(async () => {
       const idle = await waitFor(async () => { const r = await pv(`return [p.layers("video"), p.layers("both")]`); return r[0] && !r[0].video && !r[1].gif; }, 4000);
       const idleR = await pv(`return [p.layers("video"), p.layers("both")]`);
       await js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); return true`);
-      await pv(`await p.check("Animate GIF previews", false); await p.check("Animate wallpapers without a GIF", false); return true`);
+      await pv(`await p.order("Not hovered", ${JSON.stringify(NOT_HOVERED)}); return true`);
       if (!playing) return [...v, "the previews never played on screen — proved nothing"];
       if (away.cards || away.media) v.push(`scrolled away: ${away.cards} cards, ${away.media} media layers still mounted`);
       if (away.asks) v.push(`scrolled away: ${away.asks} clip requests in 5 s`);
@@ -375,7 +542,7 @@ app.whenReady().then(async () => {
       // centre), the video card playing, and a hover handing its clip to the real file and back
       const whole = async (what) => {
         const out = [];
-        await pv(`await p.check("Animate wallpapers without a GIF", true); await p.toRows(); return true`);
+        await pv(`await p.order("Not hovered", ${JSON.stringify(ALWAYS)}); await p.toRows(); return true`);
         const ok = await waitFor(async () => { const r = await pv(`return { f: +getComputedStyle(p.frame()).opacity, n: p.cards().length, play: !!p.layers("video")?.playing }`); return r.f === 1 && r.n >= 2 && r.play; }, 15000, 200);
         const st = await pv(`return { f: +getComputedStyle(p.frame()).opacity, on: p.host().hasAttribute("data-on"), cards: p.cards().map((c) => { const b = c.getBoundingClientRect();
           const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
@@ -399,7 +566,7 @@ app.whenReady().then(async () => {
             out.push(`${what}: unhovered, the clip never came back ${J(d)}`);
           }
         }
-        await pv(`await p.check("Animate wallpapers without a GIF", false); return true`);
+        await pv(`await p.order("Not hovered", ${JSON.stringify(NOT_HOVERED)}); return true`);
         return out;
       };
       const unscaled = () => pv(`return [...document.querySelectorAll("[data-card-preview] .card-pv-slot")].map((s) => ({ t: getComputedStyle(s).transform,

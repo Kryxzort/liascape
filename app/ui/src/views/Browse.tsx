@@ -8,6 +8,7 @@ import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
 import { WsListNote } from "../components/WorkshopSocial";
 import { useMotion } from "../components/motion";
+import { firstPreview, useHoverOrder, useIdleOrder } from "../components/mediaAssets";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useGridFit } from "../hooks/useGridFit";
@@ -53,8 +54,10 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const applyItem = useStore((s) => s.applyItem);
   const clearTags = useStore((s) => s.clearTags);
   const motion = useMotion();
-  // gate autoplay on window focus/visibility (see App.tsx appActive) → backgrounded = gifs hidden, unpainted: no decode drain
-  const autoPlayGifs = useStore((s) => !!(s.settings?.autoPlayGifs) && s.appActive);
+  // Settings → "On hover" / "Not hovered": a result shows its gif or its still image (no video before it's downloaded). Not
+  // hovered, nothing plays while the window is inactive (App.tsx appActive): no decode drain behind other windows.
+  const gifOnHover = firstPreview(useHoverOrder(), { video: false, gif: true }) === "gif";
+  const gifIdle = firstPreview(useIdleOrder(), { video: false, gif: true }) === "gif";
   // PERF: one Set per library change; each memo'd card gets a boolean, so only a card whose mark flips re-renders
   const libItems = useStore((s) => s.libraryItems);
   const libKeys = useMemo(() => libraryKeys(libItems), [libItems]);
@@ -184,7 +187,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}
               selected={sel.has(w.pageUrl)} focused={w.pageUrl === browseFocus} inLibrary={inLibrary(libKeys, w)}
               progress={downloads[w.pageUrl]}
-              autoPlayGifs={autoPlayGifs}
+              gifOnHover={gifOnHover} gifIdle={gifIdle}
               onCancel={cardCancel} onClick={cardClick} onDownload={cardDownload} onContext={cardContext} onMiddle={cardMiddle} />
           ))}
           {/* INFINITE FEEL: while more pages exist, always render a block of placeholder cards right

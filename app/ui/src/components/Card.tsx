@@ -12,20 +12,22 @@ import { isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
 // card's trash sits) → download & apply; middle-click → open the source page/location.
 // COOL: animated preview is a *layered* element kept mounted (opacity-toggled), not a src swap.
 export const Card = memo(function Card({
-  w, playing, selected, focused, inLibrary, progress, autoPlayGifs, onClick, onContext, onMiddle, onCancel, onDownload,
+  w, playing, selected, focused, inLibrary, progress, gifOnHover, gifIdle, onClick, onContext, onMiddle, onCancel, onDownload,
 }: {
-  w: Wallpaper; playing: boolean; selected: boolean; focused: boolean; inLibrary: boolean; progress: number | undefined; autoPlayGifs: boolean;
+  w: Wallpaper; playing: boolean; selected: boolean; focused: boolean; inLibrary: boolean; progress: number | undefined;
+  // Settings → "On hover" / "Not hovered" reach the gif before the still image (Browse.tsx)
+  gifOnHover: boolean; gifIdle: boolean;
   onClick: (e: React.MouseEvent, w: Wallpaper) => void;
   onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void; onDownload: (w: Wallpaper) => void;
 }) {
   const [hover, setHover] = useState(false);
   const sub = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
-  const active = hover || (autoPlayGifs && !!w.animatedThumbnailUrl);
+  const active = !!w.animatedThumbnailUrl && (hover ? gifOnHover : gifIdle);
   // keep the gif mounted once activated → re-hover never restarts it (just unhides the live frame)
   const [mounted, setMounted] = useState(false);
   useEffect(() => { if (active) setMounted(true); }, [active]);
   // A remote workshop preview's STATIC thumbnail is the
-  // gif's frame-0, which is often pure black (fade-in loops). So AutoPlayGifs-off / the gif's loop-gap
+  // gif's frame-0, which is often pure black (fade-in loops). So a gif not playing / the gif's loop-gap
   // showed black. For remote animated items use /still (first non-black/white frame); local items
   // already ship a real extracted thumbnail.
   const remoteAnim = !!w.animatedThumbnailUrl && /^https?:/i.test(w.animatedThumbnailUrl);

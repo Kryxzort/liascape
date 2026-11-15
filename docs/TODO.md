@@ -13,13 +13,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        parameters, so it isn't cached), and a first-ever load's NVIDIA compiles (~0.28 s, then its disk cache). A
        video texture's first decoded frame isn't part of the first frame: 3426575339 (all video) is still black 1 s
        after it in 2 of 51 loads.
-64. [ ] (owner) Signed out, the app stays disconnected from Steam for unsubscribes: no Unsubscribe at all — the card
-       button, the Delete key, the sidebar tile and its "Unsubscribe without deleting" menu, and Browse's Unsubscribe are
-       disabled with "Sign in to Steam to unsubscribe"; nothing is queued, no Steam page opens, the Steam client isn't
-       used (the unsubscribe drain's signed-out "open the page" branch goes). Signing out with an unsubscribe still in
-       its 5 s window drops it (the item comes back, like Undo). "Use the Steam app" mode counts the running Steam
-       client as the sign-in (its whole job), so Unsubscribe works there through it. Rewrite SteamSelfTest's "unsub,
-       signed out" checks to it.
 65. [ ] (owner) "Download without subscribing" uses the chosen download mode's own route, so it needs no steamcmd setup
        (steamcmd alone made it a duplicate of the steamcmd mode): "Use the Steam app" → the running client's
        ISteamUGC::DownloadItem (it fetches an unsubscribed item into Steam's Workshop folder; copy it into the library's
@@ -27,18 +20,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        "Subscribe with Steam login" (signed in) → subscribe → wait for Steam's copy → copy → unsubscribe (the "Unsubscribe
        without deleting" flow, with no Undo window); "Download via steamcmd" → steamcmd (today's route); "Open in the
        Steam app" → steamcmd when it's ready, else disabled with why (a one-off can't be done by clicks in Steam).
-       Signed out in the subscribe mode → disabled (#64: the app stays disconnected). After #64.
-55. [ ] (owner) The Library sidebar shows #52's Workshop features for a Workshop item too: favourite, comments (+ post),
-       the creator with browse-by-creator (opens Browse on them). Reuse #52's components; they sit below the scene
-       properties (#54), with its stat pills: current subscribers and favourites (no views). Every Library item
-       shows its size on disk. After #52.
+       Signed out in the subscribe mode → disabled (#64: the app stays disconnected). Also Undo's resubscribe
+       (`WorkshopDownloader.ResubscribeAsync`) still falls back to the Steam to-do page in the subscribe mode when signed
+       out: that mode never opens pages, so it goes too. After #64.
 60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
        makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
        case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
-62. [ ] (owner) Previews as two ordered lists, "On hover" and "Not hovered", each of video / GIF / image in the user's
-       order (the first a wallpaper has wins; image is always there, so it ends the list). Replaces "Animate GIF
-       previews", "Animate wallpapers without a GIF" and "Use the video instead of the GIF". Basic: a preset dropdown;
-       Standard: the ordering.
 63. [ ] (owner) Video memory: measure the library's scene VRAM (the player's readout) and round the per-scene cap's
        default from it (1 or 2 GiB); add a "stop and show nothing" choice beside Stop's last frame.
 57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
@@ -46,6 +33,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.
 49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
        (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
+66. [ ] Probe cells that fail now and then on this branch's HEAD too, each passing alone or on a rerun: probe-steam
+       `look:toggles` ("no tick pixels found in a ticked box"), probe-libops `libops:edge` (bg-live: the load bar leaves
+       ~1 % of the edge row border-coloured) and `libops:noMotion`, probe-icons `icon:centre:steamTodo` (the hovered
+       pl-toggle chip still moving when measured). Find each race (or the probe's wrong sample spot), fix that side. And
+       `probe-gif.js` is an old URL-argument script the runner can't start ("Invalid URL"): port it to the runner's cell
+       shape or fold it into probe-cardpreview.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

@@ -85,6 +85,7 @@ export default function App() {
   const [libKept, setLibKept] = useState(tab === "library");
   if (tab === "library" && !libKept) setLibKept(true);
   const showInLibrary = useStableFn((p: string) => { s.focusLib(p); setTab("library"); });
+  const showInBrowse = useStableFn(() => setTab("browse"));
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
@@ -105,13 +106,16 @@ export default function App() {
     else if (e.type === "toggle-loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
+    // API: the sign-in ended (here or by Steam): the Unsubscribe controls follow (SteamOps.SignInLost)
+    else if (e.type === "steam-status") useStore.setState({ steam: e.payload });
     else if (e.type === "steam-qr-error") s.setStatus("Steam: " + e.payload.message);
     // the password sign-in's steps (SteamPasswordModal)
     else if (e.type === "steam-login-code") s.onPwCode(e.payload);
     else if (e.type === "steam-login-error") s.onPwError(e.payload.message);
     else if (e.type === "unsub-progress") {
       s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
-      // no usable sign-in: the backend opened the item(s) in the Steam app — say what to click there (held, not a flash)
+      // what the drain wants the user to know (held, not a flash): what to click in the Steam app ("Open in the Steam app"), or
+      // that an unsubscribe was dropped for want of a sign-in
       if (e.payload.finished && e.payload.message) s.setStatus(e.payload.message, false);
       else if (e.payload.finished && e.payload.error) s.setStatus("Removing from Steam failed: " + e.payload.error);
       if (e.payload.finished) s.bumpWsState();
@@ -272,7 +276,7 @@ export default function App() {
       <LayoutGroup>
         {tab === "browse" && <Browse onShowInLibrary={showInLibrary} />}
         {tab === "settings" && <Suspense fallback={<div className="loadbar" />}><Settings /></Suspense>}
-        {libKept && <Activity mode={tab === "library" ? "visible" : "hidden"}><Library /></Activity>}
+        {libKept && <Activity mode={tab === "library" ? "visible" : "hidden"}><Library onShowInBrowse={showInBrowse} /></Activity>}
 
         {libKept && <Activity mode={tab === "library" ? "visible" : "hidden"}><PlaylistBar /></Activity>}
 
