@@ -315,15 +315,8 @@ impl Harness {
     }
 
     pub fn wait_ready(&mut self, id: &str) {
-        let t0 = Instant::now();
         let ok = self.tick_until(Duration::from_secs(5), |h| h.bool(&format!("{id}.ready")));
-        let worker = self.host.scene(id).map(|s| (s.worker_info(), s.log_tail()));
-        assert!(
-            ok,
-            "{id} never became ready ({:?} wall); worker: {worker:?}; events: {:?}",
-            t0.elapsed(),
-            self.src_events
-        );
+        assert!(ok, "{id} never became ready; events: {:?}", self.src_events);
     }
 
     pub fn get(&self, path: &str) -> Option<PropValue> {
