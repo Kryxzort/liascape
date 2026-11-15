@@ -799,6 +799,106 @@ impl Gfx {
             context,
         })
     }
+
+    /// How to make a [`share_context`](Self::share_context) like this context, later and on any
+    /// thread ([`ShareRecipe::create`]): its granted priority and, when this context reports resets
+    /// ([`loses_context_on_reset`](Self::loses_context_on_reset)), the same robustness — EGL refuses
+    /// to share across reset strategies (`EGL_BAD_MATCH`) — tried with the NV purge reset, then
+    /// without, then plain. Call with this context current; it makes no context itself, so a
+    /// caller that never needs one pays nothing (an `eglCreateContext` costs the scene worker's
+    /// render thread ~20–30 ms). The scene worker's texture upload context
+    /// (`docs/player/modules/scene-lwe-core.md` § Texture uploads).
+    pub fn share_recipe(&self) -> Result<ShareRecipe, String> {
+        let egl = load_egl()?;
+        let display = self.shared.display;
+        let ext = egl
+            .query_string(Some(display), egl::EXTENSIONS)
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !has_ext(&ext, "EGL_KHR_surfaceless_context") {
+            return Err(format!(
+                "EGL_KHR_surfaceless_context missing on display ({})",
+                self.path
+            ));
+        }
+        let robust = if self.loses_context_on_reset() {
+            robustness_attribs(&egl, display, &ext)
+        } else {
+            Vec::new()
+        };
+        let mut base = vec![
+            egl::CONTEXT_MAJOR_VERSION,
+            3,
+            egl::CONTEXT_MINOR_VERSION,
+            3,
+            egl::CONTEXT_OPENGL_PROFILE_MASK,
+            egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        ];
+        if let Some(p) = self.priority.filter(|_| has_ext(&ext, "EGL_IMG_context_priority")) {
+            base.extend([CONTEXT_PRIORITY_LEVEL_IMG, p.to_egl()]);
+        }
+        let without_purge = &robust[..robust.len().min(4)];
+        let mut tries: Vec<Vec<egl::Int>> = Vec::new();
+        for extra in [&robust[..], without_purge, &[][..]] {
+            let mut a = base.clone();
+            a.extend_from_slice(extra);
+            a.push(egl::NONE);
+            if !tries.contains(&a) {
+                tries.push(a);
+            }
+        }
+        Ok(ShareRecipe {
+            egl,
+            display,
+            config: self.config,
+            share: self.shared.context,
+            tries,
+        })
+    }
+}
+
+/// [`Gfx::share_recipe`]: the display, config, context to share with and the attribute lists to
+/// try, for [`create`](Self::create) on another thread. The [`Gfx`] it came from must outlive it
+/// (its display and context are used, not owned).
+pub struct ShareRecipe {
+    egl: EglInstance,
+    display: egl::Display,
+    config: egl::Config,
+    share: egl::Context,
+    tries: Vec<Vec<egl::Int>>,
+}
+
+// SAFETY: EGL display, config and context handles are process-wide names, valid from any thread;
+// `create` only passes them to `eglCreateContext` (which may run on any thread, the shared
+// context current elsewhere or not).
+unsafe impl Send for ShareRecipe {}
+unsafe impl Sync for ShareRecipe {}
+
+impl ShareRecipe {
+    /// The first attribute list the driver takes, as a [`SharedContext`] (current nowhere).
+    pub fn create(&self) -> Result<SharedContext, String> {
+        self.egl
+            .bind_api(egl::OPENGL_API)
+            .map_err(|e| format!("eglBindAPI(EGL_OPENGL_API) failed: {e}"))?;
+        let mut last = String::new();
+        for a in &self.tries {
+            match self
+                .egl
+                .create_context(self.display, self.config, Some(self.share), a)
+            {
+                Ok(context) => {
+                    display_acquire(self.display);
+                    return Ok(SharedContext {
+                        egl: load_egl()?,
+                        display: self.display,
+                        context,
+                    });
+                }
+                Err(e) => last = e.to_string(),
+            }
+        }
+        Err(format!("eglCreateContext (shared, desktop GL 3.3 core) failed: {last}"))
+    }
 }
 
 /// A context in another [`Gfx`]'s share group ([`Gfx::share_context`]) for a worker thread:
@@ -822,6 +922,14 @@ impl SharedContext {
         self.egl
             .make_current(self.display, None, None, Some(self.context))
             .map_err(|e| format!("eglMakeCurrent (shared, surfaceless) failed: {e}"))
+    }
+
+    /// `eglMakeCurrent(display, NO_SURFACE, NO_SURFACE, NO_CONTEXT)` on the calling thread, if this
+    /// context is current there: a thread that ends lets go of it first, so its owner can destroy it.
+    pub fn release_current(&self) {
+        if self.egl.get_current_context() == Some(self.context) {
+            let _ = self.egl.make_current(self.display, None, None, None);
+        }
     }
 
     /// A glow context loaded through `eglGetProcAddress` — the worker's own GL loader (real

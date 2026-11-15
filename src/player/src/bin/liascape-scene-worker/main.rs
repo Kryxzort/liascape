@@ -138,12 +138,16 @@ fn main() {
     let mut fd: Option<i32> = None;
     let mut parent: Option<i32> = None;
     let mut stub = false;
+    let mut preload = PreloadArgs::default();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--fd" => fd = args.next().and_then(|v| v.parse().ok()),
             "--parent-pid" => parent = args.next().and_then(|v| v.parse().ok()),
             "--stub" => stub = true,
+            "--preload" => preload.path = args.next(),
+            "--preload-assets" => preload.assets_dir = args.next(),
+            "--preload-steam" => preload.steam_dir = args.next(),
             _ => usage(),
         }
     }
@@ -166,7 +170,42 @@ fn main() {
     if stub {
         run_stub(sock, knobs)
     }
-    run_renderer(sock, knobs)
+    run_renderer(sock, knobs, preload)
+}
+
+/// `--preload <scene> --preload-assets <dir> [--preload-steam <dir>]`: the `Start` the host will
+/// send after `Hello` (`worker::preload_args`), so its project load can begin before the EGL
+/// context exists. The `Start` stays the authority: a preload it doesn't match is discarded.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct PreloadArgs {
+    path: Option<String>,
+    assets_dir: Option<String>,
+    steam_dir: Option<String>,
+}
+
+/// A running [`render::preload`] and what it loads.
+#[cfg(feature = "lwe")]
+struct Preload {
+    args: PreloadArgs,
+    tid: Arc<std::sync::atomic::AtomicI32>,
+    handle: std::thread::JoinHandle<Result<render::Project, String>>,
+}
+
+#[cfg(feature = "lwe")]
+impl Preload {
+    fn start(args: PreloadArgs) -> Option<Preload> {
+        let path = args.path.clone()?;
+        let tid = Arc::new(std::sync::atomic::AtomicI32::new(0));
+        let handle = render::preload(
+            path.into(),
+            args.assets_dir.clone().map(Into::into),
+            args.steam_dir.clone().map(Into::into),
+            tid.clone(),
+        )
+        .map_err(|e| warn(&format!("start the preload thread: {e}")))
+        .ok()?;
+        Some(Preload { args, tid, handle })
+    }
 }
 
 fn send(sock: &OwnedFd, m: &FromWorker) {
@@ -405,8 +444,12 @@ struct LoadGate {
     /// ms since `t0` + 1 when the current load started; 0 = not loading.
     since: AtomicU64,
     timeout: Duration,
-    /// The renderer thread's `/proc/self/task/<tid>/schedstat` (its CPU time, ns, first field).
-    schedstat: Option<std::fs::File>,
+    /// The loading thread's `/proc/self/task/<tid>/schedstat` (its CPU time, ns, first field):
+    /// the renderer's, or the preload's while the renderer waits for it ([`watch`](Self::watch)).
+    schedstat: std::sync::Mutex<Option<std::fs::File>>,
+    /// The renderer (the thread that made the gate).
+    #[cfg_attr(not(feature = "lwe"), allow(dead_code))]
+    renderer_tid: i32,
     /// Its CPU time when last read, and when (ms since `t0`) it last advanced.
     last_run_ns: AtomicU64,
     progress_at: AtomicU64,
@@ -424,10 +467,26 @@ impl LoadGate {
             t0: Instant::now(),
             since: AtomicU64::new(0),
             timeout,
-            schedstat: std::fs::File::open(format!("/proc/self/task/{tid}/schedstat")).ok(),
+            schedstat: std::sync::Mutex::new(Self::open_schedstat(tid)),
+            renderer_tid: tid,
             last_run_ns: AtomicU64::new(0),
             progress_at: AtomicU64::new(0),
         }
+    }
+
+    fn open_schedstat(tid: i32) -> Option<std::fs::File> {
+        std::fs::File::open(format!("/proc/self/task/{tid}/schedstat")).ok()
+    }
+
+    /// Judge the load's progress by thread `tid`'s CPU time (`None`: the renderer's again) —
+    /// while the renderer sleeps waiting for the preload, the preload is the load.
+    #[cfg(feature = "lwe")]
+    fn watch(&self, tid: Option<i32>) {
+        let f = Self::open_schedstat(tid.unwrap_or(self.renderer_tid));
+        *self.schedstat.lock().unwrap_or_else(|e| e.into_inner()) = f;
+        self.last_run_ns
+            .store(self.run_ns().unwrap_or(0), Ordering::SeqCst);
+        self.progress_at.store(self.now_ms(), Ordering::SeqCst);
     }
 
     fn now_ms(&self) -> u64 {
@@ -454,9 +513,11 @@ impl LoadGate {
     /// The renderer thread's CPU time (ns), `None` if it can't be read.
     fn run_ns(&self) -> Option<u64> {
         use std::os::unix::fs::FileExt;
-        let f = self.schedstat.as_ref()?;
+        let guard = self.schedstat.lock().unwrap_or_else(|e| e.into_inner());
+        let f = guard.as_ref()?;
         let mut buf = [0u8; 96];
         let n = f.read_at(&mut buf, 0).ok()?;
+        drop(guard);
         std::str::from_utf8(&buf[..n])
             .ok()?
             .split_whitespace()
@@ -592,6 +653,9 @@ struct Renderer {
     stall: Option<(Instant, Instant)>,
     /// The stand-ins' write ends: written (signalled) when the window ends.
     stall_fences: Vec<OwnedFd>,
+    /// The project load begun before the context (`--preload`), until the `Start` takes it.
+    #[cfg(feature = "lwe")]
+    preload: Option<Preload>,
 }
 
 /// A worker whose context is lost waits this long for the compositor's kill, then
@@ -680,7 +744,35 @@ impl Renderer {
         let t = Instant::now();
         let mut results = Vec::new();
         self.gate.set(true);
-        let r = render::LweScene::load(&self.gfx, &opts, |n, r| results.push((n.to_string(), r)));
+        let asked = PreloadArgs {
+            path: Some(s.path.clone()),
+            assets_dir: s.assets_dir.clone(),
+            steam_dir: s.steam_dir.clone(),
+        };
+        let mut waited_ms = None;
+        let project = match self.preload.take() {
+            Some(p) if p.args == asked => {
+                let w = Instant::now();
+                self.gate.watch(Some(p.tid.load(Ordering::SeqCst)).filter(|t| *t > 0));
+                let r = p
+                    .handle
+                    .join()
+                    .unwrap_or_else(|_| Err("load failed: the preload thread panicked".into()));
+                self.gate.watch(None);
+                waited_ms = Some(w.elapsed().as_secs_f64() * 1e3);
+                Some(r)
+            }
+            // Not what the `Start` asks for: its scene is dropped here, with the context current.
+            Some(p) => {
+                warn("the preload doesn't match the Start: loading again");
+                drop(p.handle.join());
+                None
+            }
+            None => None,
+        };
+        let r = render::LweScene::load(&self.gfx, &opts, project, |n, r| {
+            results.push((n.to_string(), r))
+        });
         self.gate.set(false);
         for (n, r) in results {
             self.property_result(&n, r);
@@ -690,12 +782,13 @@ impl Renderer {
             Err(e) => return self.fatal(e),
         };
         self.log(format!(
-            "lwe: loaded {} in {:.0} ms, built in {:.0} ms ({} ms in all): native {}x{}, audio \
+            "lwe: loaded {} in {:.0} ms, built in {:.0} ms ({} ms in all{}): native {}x{}, audio \
              streams {}, audio input {}",
             s.path,
             scene.load_ms,
             scene.build_ms,
             t.elapsed().as_millis(),
+            waited_ms.map_or(String::new(), |w| format!("; preloaded, waited {w:.0} ms")),
             scene.native.0,
             scene.native.1,
             scene.has_audio,
@@ -1177,7 +1270,12 @@ struct StartArgs {
 }
 
 /// The real renderer (synthetic, or LWE).
-fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
+fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
+    // The project load needs no GL: it runs while the driver sets the context up below.
+    #[cfg(feature = "lwe")]
+    let preload = Preload::start(preload);
+    #[cfg(not(feature = "lwe"))]
+    let _ = preload;
     let mut features = vec!["synthetic"];
     if cfg!(feature = "lwe") {
         features.push("lwe");
@@ -1186,6 +1284,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
     // every scene load compiles every shader. Reported after `Hello`. Guard:
     // tests/worker.rs renderer_creates_the_shader_cache_dir.
     let shader_cache = shader_cache::ensure_from_env();
+    let egl_t0 = Instant::now();
     let gfx = match Gfx::new_offscreen_with(OffscreenOpts {
         priority: Some(Priority::Low),
         // A GPU reset / video-memory purge is reported (→ `ContextLost`, a restart).
@@ -1206,6 +1305,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
             idle_until_quit(&sock)
         }
     };
+    let egl_ms = egl_t0.elapsed().as_secs_f64() * 1e3;
     let fdpoll =
         std::env::var("LIASCAPE_SCENE_SYNC").as_deref() == Ok("fdpoll") || !gfx.has_native_fences();
     hello(&sock, &features, if fdpoll { "fdpoll" } else { "fence" });
@@ -1267,10 +1367,14 @@ fn run_renderer(sock: OwnedFd, k: Knobs) -> ! {
         lost: None,
         stall: None,
         stall_fences: Vec::new(),
+        #[cfg(feature = "lwe")]
+        preload,
     };
+    // `src/player/tests/onmachine/scene_load.py` splits the spawn → `Hello` time with the ms.
     r.log(format!(
-        "gfx: context priority requested low, granted {}",
-        r.gfx.context_priority().map_or("n/a", |p| p.name())
+        "gfx: context priority requested low, granted {}, in {:.0} ms",
+        r.gfx.context_priority().map_or("n/a", |p| p.name()),
+        egl_ms
     ));
     let mut r = r;
     r.robust = r.gfx.loses_context_on_reset() && r.gfx.reset_status().is_some();

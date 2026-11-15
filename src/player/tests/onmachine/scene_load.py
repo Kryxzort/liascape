@@ -13,8 +13,9 @@ Per round and scene, against one `serve --headless` started with fresh private c
   boot    the files dropped again with the shader caches kept: the first apply after a reboot.
 Each apply creates the source and shows it on the output (a cut) at t0, then times on the client's clock the
 events the player streams: `worker.spawned`, `worker.ready` (the worker's Hello: exec, link, EGL), and
-`source.ready` (the first latched frame). The worker's log tail adds its own split: `lwe: loaded … in` (context
-+ project) and `built in`, and, with a core built with phase timers, their JSON lines. A load the hang detector
+`source.ready` (the first latched frame). The worker's log tail adds its own split: the EGL setup (`gfx: … in`),
+`lwe: loaded … in` (context + project; with `preloaded, waited`, it ran beside the EGL setup and `load` is only
+the wait for it) and `built in`, and, with a core built with phase timers, their JSON lines. A load the hang detector
 killed counts its `restarts` instead of a split. One JSON line per apply goes to <out>/records.jsonl, a summary
 (medians per scene and mode) to stdout.
 
@@ -188,7 +189,8 @@ class Player:
         if capture and "ready_ms" in rec:
             time.sleep(1.0)
             rec["capture"] = self.ctl.call("capture", {"target": src, "path": str(capture)}, timeout=20.0).get("path")
-        workers = self.ctl.call("probe", {"name": "workers", "args": {"log_tail": True}})
+        # a loaded machine can keep the loop busy for seconds right after a heavy build
+        workers = self.ctl.call("probe", {"name": "workers", "args": {"log_tail": True}}, timeout=30.0)
         for w in workers.get("workers", []):
             if w.get("id") != src:
                 continue
@@ -202,6 +204,12 @@ class Player:
                 m = re.search(r"lwe: loaded .* in ([\d.]+) ms, built in ([\d.]+) ms", line)
                 if m:
                     rec["load_ms"], rec["build_ms"] = float(m.group(1)), float(m.group(2))
+                m = re.search(r"; preloaded, waited ([\d.]+) ms", line)
+                if m:
+                    rec["preload_wait_ms"] = float(m.group(1))
+                m = re.search(r"gfx: context priority .* in ([\d.]+) ms", line)
+                if m:
+                    rec["egl_ms"] = float(m.group(1))
                 m = re.search(r'(\{"timing":.*\})', line)
                 if m:
                     t = json.loads(m.group(1))
@@ -237,7 +245,10 @@ def phases(rec):
         "total": g("ready_ms"),
         "spawn": g("spawned_ms"),
         "exec_egl": (g("hello_ms") - g("spawned_ms")) if g("hello_ms") and g("spawned_ms") else None,
-        "load": g("load_ms"),
+        "egl": g("egl_ms"),
+        # a preloaded project loaded beside the EGL setup: only the wait for it follows the Start
+        "load": g("load_ms") if g("preload_wait_ms") is None else g("preload_wait_ms"),
+        "load_own": g("load_ms"),
         "build": g("build_ms"),
     }
     if g("restarts"):
@@ -262,6 +273,8 @@ def phases(rec):
 
 
 def main():
+    # a SIGTERM (a timeout, a VRAM watchdog) unwinds through `finally`, so the private serve and its workers quit too
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scene", action="append", required=True)
     ap.add_argument("--rounds", type=int, default=3)

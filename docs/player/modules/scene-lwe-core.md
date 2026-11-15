@@ -55,17 +55,34 @@ and `patches/lwe/tests/host_api_test.cpp` stays C++.
 
 ## Rendering a real scene (`render.rs`)
 
-`check_folder` first: a missing dir (deleted, a dangling link, or Steam still downloading) or no `project.json` is a
+`check_folder` first (on the preload thread, beside the EGL setup: [scene-worker.md](scene-worker.md) § The worker
+binary): a missing dir (deleted, a dangling link, or Steam still downloading) or no `project.json` is a
 fatal `load failed`. Then load (NULL → `load failed`, a truncated `scene.pkg` or an unsupported project), apply
 `Start.properties`, `first_render` into a 1×1 scratch FBO (≤ 1 → `renderer build failed`), a native-sized FBO for
 LWE (its final quad sets `glViewport(0,0,sceneW,sceneH)`), the ring at `cover_size`, then `Ready {native,
 has_audio, wants_audio_input}`. Each frame renders into the native FBO and `glBlitFramebuffer`s into the slot (scissor
 off first — LWE leaves its state), no flip, alpha forced to 1. Every failure is fatal: no restart, no crash record.
 
-The worker's log tail says where a load went: `lwe: loaded <dir> in A ms, built in B ms` (A = context + project
-load, B = the renderer build with its first frame). `src/player/tests/onmachine/scene_load.py` times a whole apply
+The worker's log tail says where a load went: `gfx: context … in E ms` (the EGL setup before `Hello`) and `lwe:
+loaded <dir> in A ms, built in B ms (… ms in all; preloaded, waited W ms)` (A = context + project load, run beside
+the EGL setup, W = what the `Start` still waited for it, B = the renderer build with its first frame). `src/player/tests/onmachine/scene_load.py` times a whole apply
 (create → `worker.spawned` → the worker's Hello → `source.ready`) on a private headless player, cold, warm and
 after-a-boot.
+
+## Texture uploads
+
+NVIDIA converts a texture's pixels on the CPU of the thread that calls `glTexImage2D` (~1.6 GB/s; from a pixel
+buffer object slower still): on the render thread a scene's large JPEG / PNG textures cost their whole conversion
+before the first frame (~160 ms of 3042492564's, ~200 ms of 3163060610's). With a core that has
+`wp_context_set_gl_upload_context` (looked up at run time; without it nothing changes), `lwe::Scene::set_upload_context`
+hands LWE a `gfx::ShareRecipe` (`Gfx::share_recipe`: this context's priority and robustness — EGL refuses to share
+across reset strategies). LWE's `wp-tex-upload` thread starts once a scene's deferred JPEG / PNG images reach 64 MB
+(`TextureUploads::kStartBytes`; below that the thread, its context and its uploads beside the render thread's GL
+calls cost more than they save, and those images upload on the render thread) and makes the shared context there
+(an `eglCreateContext` costs ~20–30 ms, which on the render thread every scene would pay). Each decode job uploads
+its pixels on it, waits (decodes queuing uploads without waiting gained less), and returns a fence that
+`finishUpload` `glWaitSync`s on the GPU before the texture is first sampled. DXT and raw textures still upload
+where they are created. Measured (warm first frame, against the pin): 3042492564 571 → 480 ms, 3163060610 468 → 426.
 
 ## Shader cache
 

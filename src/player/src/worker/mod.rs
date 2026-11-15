@@ -107,6 +107,35 @@ impl RestartBudget {
     }
 }
 
+/// The worker's `--preload` argv for `start`: a real scene's folder, assets and Steam library, so
+/// the worker loads the project while its EGL context comes up instead of after `Hello`
+/// (`docs/player/modules/scene-worker.md` § The worker binary). The `Start` sent at `Hello`
+/// stays the authority (the worker drops a preload it doesn't match); a synthetic scene or one
+/// with no assets dir (an error at `Start`) gets none. Guard: unit
+/// `preload_args_name_a_real_scene_only`.
+pub fn preload_args(start: &ToWorker) -> Vec<String> {
+    let ToWorker::Start {
+        path,
+        assets_dir: Some(assets),
+        steam_dir,
+        synthetic: false,
+        ..
+    } = start
+    else {
+        return Vec::new();
+    };
+    let mut a = vec![
+        "--preload".to_string(),
+        path.clone(),
+        "--preload-assets".to_string(),
+        assets.clone(),
+    ];
+    if let Some(s) = steam_dir {
+        a.extend(["--preload-steam".to_string(), s.clone()]);
+    }
+    a
+}
+
 /// What to run and how to supervise it.
 #[derive(Debug, Clone)]
 pub struct WorkerSpec {
@@ -512,7 +541,7 @@ impl WorkerHost {
             c"--parent-pid".into(),
             CString::new(std::process::id().to_string()).unwrap(),
         ];
-        for a in &self.spec.args {
+        for a in self.spec.args.iter().chain(&preload_args(&self.spec.start)) {
             argv.push(cstr(a.as_bytes())?);
         }
         let mut envp: Vec<CString> = Vec::new();
@@ -1317,6 +1346,45 @@ mod tests {
             max: 0,
         };
         assert_eq!(none.admit(&mut VecDeque::new(), t0), None);
+    }
+
+    #[test]
+    fn preload_args_name_a_real_scene_only() {
+        let start = |assets: Option<&str>, steam: Option<&str>, synthetic: bool| ToWorker::Start {
+            path: "/w/431960/123".into(),
+            assets_dir: assets.map(Into::into),
+            steam_dir: steam.map(Into::into),
+            position: 0.0,
+            paused: false,
+            audio: proto::AudioRoute::Null,
+            max_size: [640, 360],
+            synthetic,
+            properties: Default::default(),
+            id: "src1".into(),
+            gain_db: crate::units::SILENT_DB,
+            no_audio: false,
+            speed: 1.0,
+            loudness: true,
+        };
+        assert_eq!(
+            preload_args(&start(Some("/we/assets"), Some("/lib"), false)),
+            [
+                "--preload",
+                "/w/431960/123",
+                "--preload-assets",
+                "/we/assets",
+                "--preload-steam",
+                "/lib"
+            ]
+        );
+        assert_eq!(
+            preload_args(&start(Some("/we/assets"), None, false)),
+            ["--preload", "/w/431960/123", "--preload-assets", "/we/assets"]
+        );
+        // No assets dir is an error the `Start` reports; a synthetic scene has no project.
+        assert!(preload_args(&start(None, Some("/lib"), false)).is_empty());
+        assert!(preload_args(&start(Some("/we/assets"), None, true)).is_empty());
+        assert!(preload_args(&ToWorker::Quit).is_empty());
     }
 
     #[test]

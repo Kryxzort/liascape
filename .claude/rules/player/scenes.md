@@ -81,6 +81,12 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   change, so no fingerprint continues a measurement of the old sound. Guard:
   `fingerprint_carries_the_sound_semantics`.
 - Stop pulling audio before `wp_context_destroy`.
+- Load a real scene's project (`render::load_project`: no GL) on `lia-scene-preload` beside the EGL setup, from
+  the host's `--preload` argv (`worker::preload_args`); the `Start` stays the authority (a mismatch loads again).
+  Create no GL object or QuickJS runtime there. Guard: `tests/scene.rs::real_scene_project_loads_beside_the_egl_setup`.
+- Hand LWE the texture upload context as a `gfx::ShareRecipe` (`lwe::Scene::set_upload_context`, looked up with
+  `dlsym`): its `wp-tex-upload` thread makes the context, never the render thread (`docs/player/modules/scene-lwe-core.md`
+  § Texture uploads).
 - Give LWE the shader text cache dir `gfx::shader_cache::lwe_dir` (`wp_config_set_shader_cache_dir`,
   `docs/player/modules/scene-lwe-core.md` § Shader cache); keep it out of the user's cache in tests (`tests/common`
   sets `LIASCAPE_SCENE_SHADER_CACHE_DIR`) and on-machine scripts (their private dir). Guards:

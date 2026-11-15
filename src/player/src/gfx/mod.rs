@@ -27,6 +27,7 @@ pub mod shader_cache;
 pub use compose::{Composer, UvRect, fit_rect};
 pub use effects::{Catalogue, EffectProgram};
 pub use egl::{
-    CurrentGuard, Gfx, GlKeepAlive, OffscreenOpts, Priority, SharedContext, WindowTarget,
+    CurrentGuard, Gfx, GlKeepAlive, OffscreenOpts, Priority, ShareRecipe, SharedContext,
+    WindowTarget,
 };
 pub use gl::{Fbo, MappedPixels, PackBuffer, PendingReadback, Readback, Tex};

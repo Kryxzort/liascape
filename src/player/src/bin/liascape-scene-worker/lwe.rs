@@ -31,6 +31,13 @@ struct WpTimeCounter {
 }
 
 #[repr(C)]
+struct WpGlUploadContext {
+    user_parameter: *mut c_void,
+    make_current: extern "C" fn(*mut c_void) -> bool,
+    release: extern "C" fn(*mut c_void),
+}
+
+#[repr(C)]
 struct WpAudioOutput {
     sample_rate: c_int,
     channels: c_int,
@@ -149,6 +156,39 @@ extern "C" fn gl_proc_address(_: *mut c_void, name: *const c_char) -> *mut c_voi
     unsafe { eglGetProcAddress(name) }
 }
 
+/// The texture upload context's callbacks (`wp_gl_upload_context`): they run on LWE's
+/// `wp-tex-upload` thread, which starts at a scene's first JPEG / PNG texture and owns the
+/// context until `wp_context_destroy` stops it. The context is made there, at that start: a
+/// scene without such textures never makes one, and one that has them doesn't spend the
+/// render thread's time on it.
+struct Upload {
+    recipe: liascape_player::gfx::ShareRecipe,
+    shared: std::sync::Mutex<Option<liascape_player::gfx::SharedContext>>,
+    callbacks: WpGlUploadContext,
+}
+
+extern "C" fn upload_make_current(user: *mut c_void) -> bool {
+    let u = unsafe { &*(user as *const Upload) };
+    let made = u.recipe.create().and_then(|c| c.make_current().map(|()| c));
+    match made {
+        Ok(c) => {
+            *u.shared.lock().unwrap_or_else(|e| e.into_inner()) = Some(c);
+            true
+        }
+        Err(e) => {
+            eprintln!("lwe: texture uploads stay on the render thread: {e}");
+            false
+        }
+    }
+}
+
+extern "C" fn upload_release(user: *mut c_void) {
+    let u = unsafe { &*(user as *const Upload) };
+    if let Some(c) = u.shared.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        c.release_current();
+    }
+}
+
 extern "C" fn scene_time(user: *mut c_void) -> f32 {
     unsafe { (*(user as *const Cell<f32>)).get() }
 }
@@ -209,6 +249,9 @@ pub struct Scene {
     built: bool,
     /// the "now playing" feed (B10), for a scene that takes media events
     media: Option<crate::media::Media>,
+    /// The texture upload context, once given ([`Scene::set_upload_context`]): dropped after
+    /// `wp_context_destroy` (the field outlives `drop`'s body), which stops the thread using it.
+    upload: Option<Box<Upload>>,
 }
 
 impl Scene {
@@ -293,6 +336,7 @@ impl Scene {
                 pointer,
                 built: false,
                 media: None,
+                upload: None,
             };
             if project.is_null() {
                 return Err(format!("load failed: {}", dir.display()));
@@ -303,6 +347,34 @@ impl Scene {
             }
             Ok(scene)
         }
+    }
+
+    /// How to make a context in the render context's share group for LWE's texture upload
+    /// thread (`wp_context_set_gl_upload_context`): a scene's JPEG / PNG pixels then reach the
+    /// GPU while it builds, not after (`docs/player/modules/scene-lwe-core.md` § Texture
+    /// uploads). Before [`first_render`](Self::first_render), once.
+    pub fn set_upload_context(&mut self, recipe: liascape_player::gfx::ShareRecipe) {
+        let mut u = Box::new(Upload {
+            recipe,
+            shared: std::sync::Mutex::new(None),
+            callbacks: WpGlUploadContext {
+                user_parameter: std::ptr::null_mut(),
+                make_current: upload_make_current,
+                release: upload_release,
+            },
+        });
+        u.callbacks.user_parameter = &*u as *const Upload as *mut c_void;
+        // Looked up, not linked: with a core that lacks the call the worker still plays, its
+        // textures uploading on the render thread.
+        type SetUpload = unsafe extern "C" fn(*mut c_void, *mut WpGlUploadContext);
+        let name = c"wp_context_set_gl_upload_context";
+        let sym = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+        if sym.is_null() {
+            return;
+        }
+        let set: SetUpload = unsafe { std::mem::transmute(sym) };
+        unsafe { set(self.context, &mut u.callbacks) };
+        self.upload = Some(u);
     }
 
     /// Renders frame 0 into `scratch_fbo` (any size) and returns the native size; ≤ 1 = the

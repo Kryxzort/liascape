@@ -278,6 +278,11 @@ impl Drop for Sup {
         if self.pid != 0 && alive(self.pid) {
             unsafe { libc::kill(self.pid as i32, libc::SIGKILL) };
         }
+        // A failed test keeps its event log, snapshot and stderr: the children's own story of it.
+        if std::thread::panicking() {
+            eprintln!("kept {} (events.jsonl, snapshot.json, stderr.log)", self.root.display());
+            return;
+        }
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }

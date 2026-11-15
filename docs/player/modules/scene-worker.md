@@ -91,6 +91,13 @@ inherited limit). It keeps its socket `CLOEXEC`: nothing it starts may hold it, 
   `LOAD_TIMEOUT_MAX_FACTOR` (4) × the bound. LWE's build is one thread on the CPU and a saturated machine queues it
   (6.3 s quiet, 21–28 s at 3–5 runnable threads per CPU); a deadlocked load sleeps, so its CPU time stops. A `Quit`
   or EOF during a load `_exit(0)`s at once; `Resize`/`Pointer`/`SetProperty` queue and apply after it.
+- **Preload.** For a real scene the host adds `--preload <scene> --preload-assets <dir> [--preload-steam <dir>]`
+  (`worker::preload_args`, from the `Start` it will send) and the worker loads the project (folder check, LWE
+  context + `project.json` + the scene's parse, no GL) on `lia-scene-preload` while the renderer sets EGL up. The
+  `Start` stays the authority: `start_lwe` takes the preload only when its path, assets and Steam dir match, else
+  drops it and loads again; a preload's error is the load's error. While the renderer waits for it the `LoadGate`
+  watches the preload thread's CPU time. Nothing thread-bound exists before the build: LWE's thread-locals live
+  inside one parser call, and the QuickJS runtime and every GL object come with `first_render` on the renderer.
 - **`--stub`** (tests, no GPU) answers pings and ticks with fd-less frames and is scripted by
   `LIASCAPE_SCENE_WORKER_TEST` (`crash_after_ms`, `hang_after_ms`, `ring:N` for slot starvation, `freeze_after_ms`
   + `freeze_ms`, `exit_code`, `ignore_quit`, `spam_stderr`). Without `--stub`, a folder holding

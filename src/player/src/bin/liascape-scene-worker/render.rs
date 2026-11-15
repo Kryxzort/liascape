@@ -78,34 +78,96 @@ pub fn wants_audio_input(dir: &Path) -> bool {
     }
 }
 
+/// The GL-free half of a load: the folder check and LWE's context + project (`lwe::Scene::load_in`
+/// parses `project.json` and the scene and touches no GL), so it can run on another thread while
+/// the worker's EGL context comes up ([`preload`]).
+pub struct Project {
+    scene: lwe::Scene,
+    assets: PathBuf,
+    /// Wall time of the context + project load.
+    pub load_ms: f64,
+}
+
+// SAFETY: a `Project` is moved, never shared: the thread that loaded it hands it over whole (a
+// join) and never touches it again. Nothing in it is tied to its thread: LWE's thread-locals live
+// only inside one parser call, no GL object or QuickJS runtime exists before the build (the
+// script engine is created by `first_render`, on the renderer thread), and the media feed is
+// `Arc`s and atomics.
+unsafe impl Send for Project {}
+
+/// `check_folder`, then LWE's context + project for `dir` — [`LweScene::load`]'s first half.
+pub fn load_project(
+    dir: &Path,
+    assets: Option<&Path>,
+    steam_dir: Option<&Path>,
+) -> Result<Project, String> {
+    check_folder(dir)?;
+    let Some(assets_dir) = assets else {
+        return Err(format!(
+            "no Wallpaper Engine assets dir was given to the scene worker; {}",
+            assets::HINT
+        ));
+    };
+    let backgrounds: Option<PathBuf> = steam_dir
+        .map(|s| s.join("steamapps/workshop/content").join(assets::WE_APP_ID))
+        .filter(|b| b.is_dir());
+    let t0 = std::time::Instant::now();
+    let scene = lwe::Scene::load_in(dir, assets_dir, backgrounds.as_deref())
+        .map_err(|e| format!("{e} (a truncated scene.pkg or an unsupported project)"))?;
+    Ok(Project {
+        scene,
+        assets: assets_dir.to_path_buf(),
+        load_ms: t0.elapsed().as_secs_f64() * 1e3,
+    })
+}
+
+/// [`load_project`] on its own thread (`lia-scene-preload`), started before the worker's EGL
+/// context: the project load then overlaps the driver's setup instead of following the `Start`.
+/// `tid` gets the thread's id at once, so the load gate can watch its CPU time while the renderer
+/// waits for it.
+pub fn preload(
+    dir: PathBuf,
+    assets: Option<PathBuf>,
+    steam_dir: Option<PathBuf>,
+    tid: std::sync::Arc<std::sync::atomic::AtomicI32>,
+) -> std::io::Result<std::thread::JoinHandle<Result<Project, String>>> {
+    std::thread::Builder::new()
+        .name("lia-scene-preload".into())
+        .spawn(move || {
+            tid.store(unsafe { libc::gettid() }, std::sync::atomic::Ordering::SeqCst);
+            load_project(&dir, assets.as_deref(), steam_dir.as_deref())
+        })
+}
+
 impl LweScene {
     /// Load + build (the slow part: a cold build took up to 2.8 s — the caller keeps the
-    /// protocol answered meanwhile). `on_prop` gets each `properties` entry's outcome.
+    /// protocol answered meanwhile). `project` is the load's first half when a [`preload`] did
+    /// it already (else it runs here). `on_prop` gets each `properties` entry's outcome.
     pub fn load(
         gfx: &Gfx,
         o: &LoadOpts,
+        project: Option<Result<Project, String>>,
         mut on_prop: impl FnMut(&str, Result<(), String>),
     ) -> Result<LweScene, String> {
-        check_folder(o.dir)?;
-        let Some(assets_dir) = o.assets else {
-            return Err(format!(
-                "no Wallpaper Engine assets dir was given to the scene worker; {}",
-                assets::HINT
-            ));
+        let project = match project {
+            Some(p) => p?,
+            None => load_project(o.dir, o.assets, o.steam_dir)?,
         };
-        let backgrounds: Option<PathBuf> = o
-            .steam_dir
-            .map(|s| s.join("steamapps/workshop/content").join(assets::WE_APP_ID))
-            .filter(|b| b.is_dir());
-        let t0 = std::time::Instant::now();
-        let mut scene = lwe::Scene::load_in(o.dir, assets_dir, backgrounds.as_deref())
-            .map_err(|e| format!("{e} (a truncated scene.pkg or an unsupported project)"))?;
+        let Project {
+            mut scene,
+            assets: assets_dir,
+            load_ms,
+        } = project;
         for (name, value) in o.properties {
             on_prop(name, scene.set_property(name, value));
         }
         scene.hint_screen(o.screen.0, o.screen.1);
-        let load_ms = t0.elapsed().as_secs_f64() * 1e3;
         let t1 = std::time::Instant::now();
+        // Without it every texture uploads here, on the render thread: slower, never wrong.
+        match gfx.share_recipe() {
+            Ok(recipe) => scene.set_upload_context(recipe),
+            Err(e) => eprintln!("lwe: texture uploads stay on the render thread: {e}"),
+        }
         let scratch = gfx.tex(1, 1);
         let scratch_fbo = gfx.fbo(&scratch);
         let (w, h) = scene.first_render(scratch_fbo.id.0.get()).map_err(|e| {

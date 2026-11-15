@@ -5,14 +5,19 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-48. [ ] (owner) Scene wallpapers load radically faster — the rest. The shader cache (fork 0129) took 3042492564's warm
-       apply → first frame from ~1.24 s to ~0.53 s; what is left (`src/player/tests/onmachine/scene_load.py`): the worker's
-       exec + EGL setup before its Hello (~0.1–0.16 s on every apply, most of a small scene's load: a pre-spawned
-       spare worker with its context ready would hide it — owner's call, it costs an idle process and context), texture
-       uploads after the pool's decode (~0.1 s), the units' preprocessing (~0.1 s: it resolves textures and builds
-       parameters, so it isn't cached), and a first-ever load's NVIDIA compiles (~0.28 s, then its disk cache). A
-       video texture's first decoded frame isn't part of the first frame: 3426575339 (all video) is still black 1 s
-       after it in 2 of 51 loads.
+48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
+       player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
+       and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
+       pixels convert on a shared context's thread while it builds; the worker hands it over through
+       `wp_context_set_gl_upload_context`, looked up at run time, so nothing changes until the pin has it) and the
+       Container's remembered lookups. Measured with them (warm, cold): 3042492564 571 → 480 ms, 1110 → 945; 3163060610
+       468 → 426, 808 → 695; 2388299037 470 → 424; no scene measurably slower. Left: the worker's spawn → `Hello` (105–125 ms on every apply: exec and the
+       dynamic link of ~145 libraries ~35 ms, EGL ~75–85 ms; a pre-spawned spare worker with its context ready would
+       save about that, less the project load it then can't overlap — owner's call, it costs an idle process and
+       context); the units' preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover
+       every texture format and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was
+       still black 1 s after its first frame in 7 of 181 loads, the baseline build too, five of them in one player
+       run: needs mpv's log of a black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.
 65. [ ] (owner) "Download without subscribing" uses the chosen download mode's own route, so it needs no steamcmd setup
        (steamcmd alone made it a duplicate of the steamcmd mode): "Use the Steam app" → the running client's
        ISteamUGC::DownloadItem (it fetches an unsubscribed item into Steam's Workshop folder; copy it into the library's

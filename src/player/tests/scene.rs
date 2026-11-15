@@ -1651,6 +1651,45 @@ fn min_scene_renders_through_the_worker() {
     }
 }
 
+/// A real scene's project loads on the worker's preload thread, beside its EGL setup, and the
+/// `Start` takes that load instead of loading again (`docs/player/modules/scene-worker.md` § The
+/// worker binary): the load log line says it waited for a preload.
+#[test]
+fn real_scene_project_loads_beside_the_egl_setup() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: liascape-scene-worker built without LWE");
+        return;
+    }
+    let assets = empty_dir("preload");
+    let mut src = open_real(
+        &gfx,
+        "preload",
+        &lwe_fixture("min-scene"),
+        Some(&assets),
+        |_| {},
+    );
+    assert!(
+        pump(&gfx, &mut src, Duration::from_secs(10), |s| s.is_ready()
+            || s.error().is_some()),
+        "never ready"
+    );
+    assert!(src.error().is_none(), "{:?}", src.error());
+    let tail = src.log_tail().join("\n");
+    assert!(
+        tail.lines()
+            .any(|l| l.contains("lwe: loaded") && l.contains("; preloaded, waited")),
+        "the Start loaded the project again:\n{tail}"
+    );
+    assert!(
+        tail.lines().any(|l| l.contains("gfx: context priority") && l.contains(" ms")),
+        "no EGL setup time in the log:\n{tail}"
+    );
+}
+
 /// Set in the child [`real_workers_keep_the_shader_cache_in_the_tests_dir`] re-runs this binary
 /// as: only then does [`lwe_cache_guard_child`] do anything.
 const LWE_CACHE_GUARD_ENV: &str = "LIASCAPE_TEST_LWE_CACHE_GUARD";
