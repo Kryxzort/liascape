@@ -238,7 +238,8 @@ app.whenReady().then(async () => {
       const base = await tucked();
       // each preset: both orders saved, the cards follow at once, nothing tucked away
       const PRE = { "Never animate": [NOT_HOVERED, NOT_HOVERED], "Always animate": [ALWAYS, ALWAYS],
-        "Always animate, video first": [["video", "gif", "image"], ["video", "gif", "image"]], "Animate on hover": [ON_HOVER, NOT_HOVERED] };
+        "Always animate, video first": [["video", "gif", "image"], ["video", "gif", "image"]],
+        "Animate on hover, video first": [["video", "gif", "image"], NOT_HOVERED], "Animate on hover": [ON_HOVER, NOT_HOVERED] };
       for (const [name, [hov, idle]] of Object.entries(PRE)) {
         await pv(`await p.toRows(); await p.select("Card previews", ${J(name)}); await p.toRows(); return true`);
         const saved = await waitFor(async () => { const [h, i] = await orders(); return reachOf(h) === reachOf(hov) && reachOf(i) === reachOf(idle); }, 4000);
@@ -290,7 +291,7 @@ app.whenReady().then(async () => {
       await pv(`p.row("Card previews")?.querySelector(".sel")?.click(); await p.sleep(250); return true`);
       const opts = await pv(`const o = [...document.querySelectorAll(".sel-pop .sel-opt")].map((e) => e.textContent.trim()); document.querySelector(".sel-backdrop")?.click(); await p.sleep(200); return o`);
       if (opts.includes("Custom")) v.push(`a preset chosen: the choices still offer Custom ${J(opts)}`);
-      if (J(opts) !== J(["Never animate", "Animate on hover", "Always animate", "Always animate, video first"])) v.push(`the presets offered: ${J(opts)}`);
+      if (J(opts) !== J(["Never animate", "Animate on hover", "Animate on hover, video first", "Always animate", "Always animate, video first"])) v.push(`the presets offered: ${J(opts)}`);
       await level("advanced");
       return v;
     });

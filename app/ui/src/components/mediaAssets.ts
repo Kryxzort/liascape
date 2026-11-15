@@ -62,6 +62,8 @@ export const PREVIEW_PRESETS: PreviewPreset[] = [
     hover: ["image", "gif", "video"], idle: ["image", "gif", "video"] },
   { value: "hover", label: "Animate on hover", hint: "the card under the pointer plays its GIF, else its video.",
     hover: DEFAULT_ON_HOVER, idle: DEFAULT_NOT_HOVERED },
+  { value: "hoverVideo", label: "Animate on hover, video first", hint: "the card under the pointer plays its video, else its GIF.",
+    hover: ["video", "gif", "image"], idle: DEFAULT_NOT_HOVERED },
   { value: "always", label: "Always animate", hint: "every card on screen plays its GIF, else its video. Video previews use more processing and storage.",
     hover: ["gif", "video", "image"], idle: ["gif", "video", "image"] },
   { value: "video", label: "Always animate, video first", hint: "every card on screen plays its video, else its GIF. Video previews use more processing and storage.",

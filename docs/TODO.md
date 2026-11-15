@@ -5,6 +5,9 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
+68. [ ] (owner) Settings → Sound: replace the "Mute wallpapers" row with a mute button at the end of the Volume
+       slider (reuse the sidebar's `.side-mute` control; same `NoAudio` setting, the slider dims while muted, the
+       `toggle-mute` action unchanged). One control instead of a slider plus a checkbox row.
 48. [ ] (owner) Scene wallpapers load radically faster — the rest. The shader cache (fork 0129) took 3042492564's warm
        apply → first frame from ~1.24 s to ~0.53 s; what is left (`src/player/tests/onmachine/scene_load.py`): the worker's
        exec + EGL setup before its Hello (~0.1–0.16 s on every apply, most of a small scene's load: a pre-spawned
