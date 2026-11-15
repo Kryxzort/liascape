@@ -4,7 +4,8 @@
 //   cardpv:present     only while the card rows are on screen; real library cards (one video-only, one with a gif + video)
 //   cardpv:shape       "Thumbnail shape" 1:1 / 16:9 → the cards' shape, live
 //   cardpv:size        "Card size" → the cards' width, live, Medium = the Library grid's own card width
-//   cardpv:preset      Basic: "Card previews" (a preset dropdown, no lists) sets both orders, live on the cards; a hidden
+//   cardpv:preset      Basic: "Card previews" (a preset dropdown, no lists) sets both orders, live on the cards (and
+//                      "Always animate" on the Library grid's own: its gif card plays the gif, a video-only one its clip); a hidden
 //                      order a preset names isn't "tucked away"; Standard: the two lists show, an order no preset has
 //                      reads "Custom" (Basic too, and then it is tucked away), a preset picked again puts the lists back
 //   cardpv:order       "On hover" / "Not hovered": for several orders, what the video-only and the gif + video card show
@@ -251,6 +252,20 @@ app.whenReady().then(async () => {
         if (n !== base) v.push(`Basic, "${name}": ${n} settings tucked away, ${base} with the defaults — a preset's orders show on Basic, they aren't tucked away`);
         const val = await pv(`return p.selVal("Card previews")`);
         if (val !== name) v.push(`Basic, "${name}" picked: the preset reads ${J(val)}`);
+        // the Library grid itself follows the preset too: unhovered, every gif card on screen plays its gif and every
+        // video-only card its clip (the cards above are the same LibraryCard, but in Settings' own preview)
+        if (name === "Always animate") {
+          await js(`[...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Library")?.click(); return true`);
+          await move(5, 5);
+          const grid = () => js(`const cards = [...document.querySelectorAll('.app[data-page="library"] .lib-scroll .card.lib')].filter((c) => { const r = c.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; });
+            return cards.map((c) => { const v = c.querySelector("video.thumb.anim"), g = [...c.querySelectorAll("img.thumb.anim")].find((i) => getComputedStyle(i).visibility !== "hidden");
+              return { t: c.querySelector(".lib-title")?.dataset.title, gif: !!g, video: !!v, playing: !!v && !v.paused && v.readyState >= 2, src: v?.getAttribute("src") || "" }; });`);
+          let g = [];
+          const ok = await waitFor(async () => { g = await grid(); const k1 = g.find((c) => c.t === "k1"), k2 = g.find((c) => c.t === "k2");
+            return !!k1 && !!k2 && shows(k1, "gif", false) && shows(k2, "video", false); }, 15000, 200);
+          if (!ok) v.push(`Basic, "Always animate": the Library grid's cards ${J(g.filter((c) => /^k[12]$/.test(c.t)))}, want k1 (a gif) playing its gif and k2 (video only) its clip, unhovered`);
+          await pv(`await p.settingsTab(); return true`);
+        }
       }
       // Standard: the lists; an order no preset has → Custom (its hint names the lists); back at Basic it's Custom and tucked away
       if (!(await level("standard"))) v.push("Standard: no On hover / Not hovered rows");

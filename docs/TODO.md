@@ -29,14 +29,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
        time, nudge:engine finds no nudge row right after switching to legacy, cache:clear:reduced starts on an already
        emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.
-49. [ ] probe-select `look:glow`, `look:motion`, `look:motion:off` and `perf:drag` fail on this branch's HEAD too
-       (seen while verifying the click change): find out whether the probe or the drag selection broke, fix that side.
-66. [ ] Probe cells that fail now and then on this branch's HEAD too, each passing alone or on a rerun: probe-steam
-       `look:toggles` ("no tick pixels found in a ticked box"), probe-libops `libops:edge` (bg-live: the load bar leaves
-       ~1 % of the edge row border-coloured) and `libops:noMotion`, probe-icons `icon:centre:steamTodo` (the hovered
-       pl-toggle chip still moving when measured). Find each race (or the probe's wrong sample spot), fix that side. And
-       `probe-gif.js` is an old URL-argument script the runner can't start ("Invalid URL"): port it to the runner's cell
-       shape or fold it into probe-cardpreview.
+67. [ ] UI matrix cells that fail in a full run now and then and pass on a rerun: `single × load:afterApply:wsEarly`
+       and `idle × load:afterApply:wsLate` ("proved nothing": the player started the item before /current or the socket
+       came back) and `playlist × cli:next` (the UI showed no playing mark and an empty playlist bar while the backend
+       played k2). Find each race, fix that side.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

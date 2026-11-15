@@ -451,8 +451,20 @@ app.whenReady().then(async () => {
         if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
       if (!box) v.push("no ticked checkbox in Settings to measure");
       else {
-        await sleep(300);
-        const b2 = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+        // the box as drawn: Settings' sections cascade in (index.css ssection-in, up to ~1.4 s from the tab opening, later
+        // sections last) and a section mounted late (GPU & memory, once the engine is known) starts its own, so a capture
+        // taken on a timer can catch the box at opacity 0. Wait for every animation on it and its ancestors to finish, then
+        // for a frame drawn after that.
+        const b2 = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked);
+          for (let n = 0; n < 5; n++) {
+            const run = [...e.getAnimations({ subtree: true })]; for (let x = e.parentElement; x; x = x.parentElement) run.push(...x.getAnimations());
+            const fin = run.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity && a.playState !== "finished");
+            if (!fin.length) break;
+            await Promise.race([Promise.all(fin.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]);
+          }
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          let op = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
+          const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, op };`);
         const img = await win.webContents.capturePage({ x: Math.floor(b2.x), y: Math.floor(b2.y), width: Math.ceil(b2.w) + 1, height: Math.ceil(b2.h) + 1 });
         const { width: W, height: H } = img.getSize(), px = img.toBitmap(); // BGRA
         const sc = W / (Math.ceil(b2.w) + 1);
@@ -472,7 +484,7 @@ app.whenReady().then(async () => {
         const dx = (tx - cx) / sc, dy = (ty - cy) / sc;
         console.log(`        tick's bounding box off the box centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px (${Math.round(sw)} tick px, scale ${sc.toFixed(2)})`);
         fs.writeFileSync(path.join(OUT, "steam-tick.png"), img.resize({ width: W * 8, quality: "good" }).toPNG());
-        if (!sw) v.push("no tick pixels found in a ticked box");
+        if (!sw) v.push(`no tick pixels found in a ticked box (drawn at opacity ${b2.op}, fill ${J(fill)})`);
         // ±0.5 css px: at most half a pixel of rounding
         else if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) v.push(`the tick is off-centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px`);
       }

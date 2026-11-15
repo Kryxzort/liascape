@@ -14,7 +14,8 @@
 // chip's layout box and 2 device pixels around it (a change elsewhere — a hover moving off the hidden chip — isn't the chip);
 // (dx, dy) = the glyph box's centre minus the chip box's, in css px. Both selectors must match one element each (the first match is used).
 // A fourth capture, as shown again, must match the first (else something moved under the chip meanwhile: the measurement
-// is retried, up to `tries` times, then reported as an error rather than a wrong offset).
+// is retried, up to `tries` times, then reported as an error rather than a wrong offset: where it changed, and both
+// pictures beside the close-up).
 // Before measuring: settle what moves under the chip (pause a <video>, finish the icon's one-shots); a hover glow is part of
 // the chip's box — pass `css` that removes it (`box-shadow: none`) to measure against the ring itself, and hide anything
 // that overlaps the chip but isn't it (a pill sliding out from under it).
@@ -28,7 +29,7 @@ const STYLE = "__pxc";
 async function measure(win, opts) {
   let r;
   for (let i = 0; i < (opts.tries ?? 3); i++) { r = await once(win, opts); if (!r.moved) return r; await sleep(300); }
-  return { error: `the picture under ${opts.chip} kept changing while it was measured (${r.moved} px) — settle it first` };
+  return { error: `the picture under ${opts.chip} kept changing while it was measured (${r.moved} px in ${JSON.stringify(r.where)} of the chip's ${JSON.stringify(r.chipAt)}${r.pngs ? `: ${r.pngs}` : ""}) — settle it first` };
 }
 
 async function once(win, { chip, glyph, css = "", png = null, pad = 6, glyphThresh = 48, chipThresh = 24 }) {
@@ -60,8 +61,12 @@ async function once(win, { chip, glyph, css = "", png = null, pad = 6, glyphThre
       return { n, b: [x0, y0, x1, y1], cx: (x0 + x1 + 1) / 2, cy: (y0 + y1 + 1) / 2 };
     };
     const a = A.toBitmap(), bb = B.toBitmap(), c = C.toBitmap();
-    const moved = box(a, A2.toBitmap(), chipThresh).n;
-    if (moved > 3) return { moved };
+    const mv = box(a, A2.toBitmap(), chipThresh);
+    // what moved and where (device px in the capture), with both pictures beside the close-up: the thing to settle
+    if (mv.n > 3) {
+      const pngs = png ? [A, A2].map((P, i) => { const f = png.replace(/\.png$/, `-moved${i}.png`); fs.writeFileSync(f, P.resize({ width: W * 8, quality: "good" }).toPNG()); return f; }).join(", ") : null;
+      return { moved: mv.n, where: mv.b, chipAt: [X0, Y0, X1, Y1], pngs };
+    }
     const g = box(a, bb, glyphThresh), k = box(bb, c, chipThresh);
     if (png) fs.writeFileSync(png, A.resize({ width: W * 8, quality: "good" }).toPNG());
     return { dx: (g.cx - k.cx) / scale, dy: (g.cy - k.cy) / scale, glyphPx: g.n, chipPx: k.n, glyph: g.b, box: k.b, css: [b.w, b.h], scale };

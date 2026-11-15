@@ -660,8 +660,10 @@ app.whenReady().then(async () => {
     // whole css pixels; at a fractional ratio a border snaps to whole device pixels (1 css px draws 1 device px = 0.955 css px
     // at 1.047), so a bordered chip's margins come out a few hundredths short there
     const whole = (x, dpr) => Math.abs(x - Math.round(x)) < (Math.abs(dpr - Math.round(dpr)) < 1e-3 ? 0.01 : 0.1);
-    // what moves under a chip while it's measured (a playing preview, the volume pill sliding out of the mute chip)
-    const HUSH = "video, .side-vol-slide { visibility: hidden !important; }";
+    // what moves under a chip while it's measured (a playing preview, the volume pill sliding out of the mute chip): a hovered
+    // card's animated gif too — under a card's own chips (the playlist toggle) its frames change between the first and the
+    // last capture, and pixel-centre.js reads that as the chip moving
+    const HUSH = "video, .thumb.anim, .side-vol-slide { visibility: hidden !important; }";
     // icon:centre:<scene>: every icon chip on screen, at rest and hovered, at two window sizes (the narrow one folds the top
     // bar's Import / Stop to their icons and the search to its magnifier). A chip is judged twice:
     //  - its layout at rest: whole-pixel glyph, and the glyph's margins in the chip whole pixels and equal on opposite sides.

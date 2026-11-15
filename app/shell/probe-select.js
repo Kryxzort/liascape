@@ -13,7 +13,7 @@
 //   <g>:autoscroll    held at the bottom edge the container scrolls and the box grows with it: the selection is exactly the
 //                     cards under the box afterwards (cards that were off screen at the start included); the top edge scrolls up
 //   <g>:tiny          a 2 px drag is a click: no box, the selection clears (the empty-space click)
-//   <g>:fromCard      a drag that starts on a card draws no box and selects nothing
+//   <g>:fromCard      a drag that starts on a card draws no box, selects nothing and drags no picture off (no native drag)
 //   <g>:plainClick    a plain click: Library — applies the card, the sidebar stays closed, and an open one moves to the card;
 //                     Browse — opens the sidebar on the card (and moves an open one to it), downloads nothing
 //   <g>:modClick      Ctrl+click and Shift+click only select: the sidebar stays closed, an open one stays where it is, nothing applies
@@ -425,9 +425,14 @@ function gridCells(cell, G) {
     await G.enter(); await reset();
     const g = await geo();
     await page(`m.watch();`);
+    // a native drag of the card's picture (the browser's own for an <img>) runs under its own loop: the pointer stream goes to
+    // it, nothing in the app takes its drop, and in the matrix it never ends, eating every later cell's input
+    await js(`window.__dg = []; if (!window.__dgOn) { window.__dgOn = 1; addEventListener("dragstart", (e) => window.__dg.push(e.target.tagName + "." + String(e.target.className)), true); } true`);
     const a = mid(g.cards[g.cols + 1]), b = mid(g.cards[2 * g.cols + 3]);
     await drag(a, b, { steps: 14 });
     await sleep(300);
+    const dg = await js(`window.__dg`);
+    if (dg.length) v.push(`a drag starting on a card started the browser's own drag of ${J(dg)} (a picture dragged off as an image)`);
     if (await js(`window.__mqSeen`)) v.push("a drag starting on a card drew a box");
     const s = await sel();
     if (s.length) v.push(`a drag starting on a card selected ${fmt(s, g)}`);

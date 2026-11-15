@@ -42,6 +42,10 @@ html, body, #root { margin: 0; height: 100%; }
 /* An app, not a page: a drag or Ctrl+A never highlights the chrome (tabs, pills, buttons, labels). Text worth copying opts
    back in: what you type, the sidebar's title / author / values, error messages. Guard: probe-layout select:chrome. */
 body { user-select: none; -webkit-user-select: none; }
+/* nor does a picture drag off as a browser image: nothing in the app takes a drop, a drag that starts on a card does
+   nothing (hooks/useMarquee.ts), and a native drag takes the pointer stream from the page while it runs.
+   Guard: probe-select lib:fromCard, br:fromCard */
+img { -webkit-user-drag: none; }
 :is(input, textarea, [contenteditable="true"], .side-head-text, .side-val, .ws-creator-name, .err-text, .pw-err) { user-select: text; -webkit-user-select: text; }
 body {
   /* Inter 14. */

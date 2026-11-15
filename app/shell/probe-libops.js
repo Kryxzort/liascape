@@ -23,9 +23,10 @@
 //                    playing", the first of two dots); a click and Enter flip them to the now-playing line and back,
 //                    cross-fading (motion on and off); the pick lasts while counts move; a timed message shows over both for
 //                    its 5 s; the operation's end brings the now-playing line back, plain
-//   libops:edge      the edge row of the top bar (its bottom border's pixels, captured) holds no border-coloured pixel while
-//                    the operations' line (Library) or the load bar (Browse) runs, and is the border when neither does — with
-//                    and without the wallpaper behind every tab. Pictures libops-edge-*.png (8× zoomed)
+//   libops:edge      the top bar's bottom border shows nowhere along the edge row while the operations' line (Library) or the
+//                    load bar (Browse) runs (the row as drawn = the row with the border taken away, everything held still), and
+//                    across the row when neither does — with and without the wallpaper behind every tab. Pictures
+//                    libops-edge-*.png (8× zoomed)
 //   libops:combined  three operations at once: one line, its fill the sum of done over the sum of total; the words name the one
 //                    that started first with its own count and "· +2 more" (narrow: "+2"), the line's accessible name lists all
 //                    three; counts moving never switch the named one; when it ends the words cross-fade to the next
@@ -107,10 +108,10 @@ const loadLibrary = async (debug = false) => {
 // the words in the top bar's status slot (the one coming in, not one fading out)
 const WORDS = ".topbar > .status .st-op:not(.out)";
 // every frame until the line has come and gone (≤ ms): the line, its words and its fill as motion-off.js's SAMPLE records them
-// ([t, opacity, x, y, w, h] / [t, null]), the texts the words showed, the line's accessible name, and whether a tab ever hung
-// under the bar
+// ([t, opacity, x, y, w, h] / [t, null]), the texts the words showed, the line's accessible name, whether a tab ever hung
+// under the bar, and per frame how far the fill is from its count ([t, px])
 // (the frames follow the words' layer through its fade out too: WORDS stops matching it once it is leaving)
-const LINE_SAMPLE = (ms) => `(() => new Promise((res) => { const S = { line: ".libops", words: ".topbar > .status [data-st=op]", fill: ".libops-fill" }, out = { texts: [], aria: [], tab: 0 };
+const LINE_SAMPLE = (ms) => `(() => new Promise((res) => { const S = { line: ".libops", words: ".topbar > .status [data-st=op]", fill: ".libops-fill" }, out = { texts: [], aria: [], tab: 0, off: [] };
   for (const k in S) out[k] = [];
   const t0 = performance.now(); let seen = 0, goneAt = 0;
   const f = () => { const t = Math.round(performance.now() - t0);
@@ -122,6 +123,10 @@ const LINE_SAMPLE = (ms) => `(() => new Promise((res) => { const S = { line: ".l
     if (document.querySelector(".libops-tab")) out.tab++;
     const w = document.querySelector(${JSON.stringify(WORDS)}); if (w && out.texts.at(-1) !== w.textContent) out.texts.push(w.textContent);
     if (l) { seen = 1; goneAt = 0;
+      // how far the drawn fill is from the count the line says this frame (a leave runs it out to the end)
+      const fl = l.querySelector(".libops-fill"), max = +l.getAttribute("aria-valuemax"), now = +l.getAttribute("aria-valuenow");
+      const want = l.classList.contains("closing") && !l.classList.contains("away") ? 1 : max > 0 ? Math.min(1, now / max) : 0;
+      if (fl) out.off.push([t, +(fl.getBoundingClientRect().width - want * l.getBoundingClientRect().width).toFixed(1)]);
       const a = [l.getAttribute("role"), l.getAttribute("aria-label"), l.getAttribute("aria-valuetext")].join("|"); if (out.aria.at(-1) !== a) out.aria.push(a); }
     else if (seen && !goneAt) goneAt = t;
     if (t < ${ms} && !(goneAt && t - goneAt > 600)) requestAnimationFrame(f); else res(out); };
@@ -182,6 +187,7 @@ app.whenReady().then(async () => {
       if (rightMoved(sm.words)) v.push(`the words' right edge moved in ${rightMoved(sm.words)} frames (${MO.brief(sm.words)})`);
       if (sm.tab) v.push(`a tab hung under the top bar in ${sm.tab} frames (the words belong in its status slot)`);
       if (!(gliding(sm.fill) >= 3)) v.push(`the fill didn't ease to its counts (${gliding(sm.fill)} gliding frames)`);
+      console.log(`        the fill between its counts (easing) in ${sm.off.filter((f) => Math.abs(f[1]) > 1).length} of ${sm.off.length} frames`);
       const bad = sm.texts.filter((t) => !/^Making Low previews\d+ \/ \d+$/.test(t || ""));
       if (bad.length || !sm.texts.length) v.push(`the status slot read ${J(sm.texts)}, want "Making Low previews" + "n / total"`);
       if (!sm.aria.length || !sm.aria.every((a) => /^progressbar\|Making Low previews\|Making Low previews: \d+ of \d+$/.test(a))) v.push(`its accessible name ${J(sm.aria)}`);
@@ -222,7 +228,12 @@ app.whenReady().then(async () => {
       v.push(...MO.judge("motion off, the line", sm.line, { appear: true, leave: true }));
       v.push(...MO.judge("motion off, the words", sm.words, { appear: true, leave: true, still: false }));
       if (rightMoved(sm.words)) v.push(`motion off: the words' right edge moved in ${rightMoved(sm.words)} frames`);
-      if (gliding(sm.fill)) v.push(`motion off: the fill glided in ${gliding(sm.fill)} frames (want steps)`);
+      // a step = the fill on its count in every frame; two counts landing in consecutive frames (the stack's small clips finish
+      // fast) look like a glide to a width-only reading, so the fill is judged against the count it shows
+      const between = sm.off.filter((f) => Math.abs(f[1]) > 1);
+      if (!sm.off.length) v.push("motion off: the fill was never sampled — proved nothing");
+      if (between.length) v.push(`motion off: the fill sat between its counts in ${between.length} frames (want steps; [t, px off]: ${J(between.slice(0, 4))})`);
+      console.log(`        motion off: the fill off its count in ${between.length} of ${sm.off.length} frames; width changes in consecutive frames: ${gliding(sm.fill)}`);
       if (look && look.sweep !== "none") v.push(`motion off: the highlight still sweeps (${look.sweep})`);
       if (!sm.texts.every((t) => /^Making High previews\d+ \/ \d+$/.test(t || ""))) v.push(`the status slot read ${J(sm.texts)}`);
       return v;
@@ -497,24 +508,33 @@ app.whenReady().then(async () => {
     await cell("libops:edge — a running line covers the top bar's bottom border (no border pixel under it), the border shows without one", async () => {
       const v = [];
       await opsIdle();
-      // the edge rows: how much of the most border-coloured one is the border's colour; and a zoomed picture
-      // `at`: the device row the border was found on without a line (the line's own track below it may be near its colour)
-      const edge = async (name, at = null) => {
-        const g = await js(`const tb = document.querySelector(".topbar").getBoundingClientRect(); const i = document.createElement("i"); i.style.background = "var(--surface0)";
-          document.body.append(i); const c = getComputedStyle(i).backgroundColor; i.remove(); return { bottom: tb.bottom, W: Math.floor(tb.width), c: c.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(Number) }`);
+      // the edge rows, captured as drawn (A) and again with the top bar's border taken away (B), every animation and video held
+      // still between the two: the border shows exactly where they differ. (A colour match can't tell: the load bar's sweep fades
+      // through the border's colour on its way to transparent, so a few of its own pixels match it, more or fewer by where
+      // the sweep is when captured.) `share` = the share of the most differing device row (the border lands on one or two
+      // of them at a fractional scale); and a zoomed picture of A
+      const edge = async (name) => {
+        const g = await js(`const tb = document.querySelector(".topbar").getBoundingClientRect(); return { bottom: tb.bottom, W: Math.floor(tb.width) }`);
         const y0 = Math.floor(g.bottom) - 3, rect = { x: 0, y: y0, width: g.W, height: 6 };
-        const img = await win.webContents.capturePage(rect);
-        const { width: iw, height: ih } = img.getSize(), sf = iw / rect.width, bmp = img.toBitmap();
-        // every device row around the edge (the border lands on one or two of them at a fractional scale): the most
-        // border-coloured one counts
-        let share = 0, row = at ?? -1;
-        for (let y = at ?? 0; y < (at == null ? ih : at + 1); y++) {
+        // held still: the CSS animations and the videos (the live wallpaper plays behind the translucent bar under bg-live)
+        const still = () => js(`window.__held = document.getAnimations().filter((a) => a.playState === "running"); for (const a of window.__held) a.pause();
+          window.__heldV = [...document.querySelectorAll("video")].filter((x) => !x.paused); for (const x of window.__heldV) x.pause();
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); return true`);
+        const noBorder = (on) => js(`let s = document.getElementById("__noborder"); if (${on}) { s ??= document.head.appendChild(Object.assign(document.createElement("style"), { id: "__noborder" }));
+          s.textContent = ".topbar { border-bottom-color: transparent !important; transition: none !important; }"; } else s?.remove();
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); return true`);
+        await still();
+        let A, B;
+        try { A = await win.webContents.capturePage(rect); await noBorder(true); B = await win.webContents.capturePage(rect); }
+        finally { await noBorder(false); await js(`for (const a of window.__held ?? []) a.play(); for (const x of window.__heldV ?? []) x.play().catch(() => {}); return true`); }
+        const { width: iw, height: ih } = A.getSize(), sf = iw / rect.width, a = A.toBitmap(), b = B.toBitmap();
+        let share = 0, row = -1;
+        for (let y = 0; y < ih; y++) {
           let hit = 0;
-          for (let x = 0; x < iw; x++) { const o = (y * iw + x) * 4;
-            if (Math.abs(bmp[o + 2] - g.c[0]) <= 6 && Math.abs(bmp[o + 1] - g.c[1]) <= 6 && Math.abs(bmp[o] - g.c[2]) <= 6) hit++; }
+          for (let x = 0; x < iw; x++) { const o = (y * iw + x) * 4; if (Math.abs(a[o] - b[o]) + Math.abs(a[o + 1] - b[o + 1]) + Math.abs(a[o + 2] - b[o + 2]) > 24) hit++; }
           if (hit / iw > share) { share = hit / iw; row = y; }
         }
-        fs.writeFileSync(path.join(OUT, `libops-edge-${name}.png`), img.crop({ x: 0, y: 0, width: Math.min(iw, Math.round(320 * sf)), height: ih })
+        fs.writeFileSync(path.join(OUT, `libops-edge-${name}.png`), A.crop({ x: 0, y: 0, width: Math.min(iw, Math.round(320 * sf)), height: ih })
           .resize({ width: Math.min(iw, Math.round(320 * sf)) * 8, height: ih * 8, quality: "good" }).toPNG());
         return { share, row, sf };
       };
@@ -525,7 +545,7 @@ app.whenReady().then(async () => {
         await dbg(`ops([])`); await sleep(700);
         const none = await edge(`${L}-none`);
         await dbg(`ops([{ id: "clips", phase: "low", done: 3, total: 12 }])`); await sleep(1500);
-        const line = await edge(`${L}-libops`, none.row);
+        const line = await edge(`${L}-libops`);
         await dbg(`ops([])`); await sleep(900);
         // Browse's load bar: its page request held open (a stub that never answers), so it stays up
         await js(`const f = window.fetch; window.fetch = (u, o) => String(u).split("?")[0].endsWith("/browse") && o?.method === "POST" ? new Promise(() => {}) : f(u, o); return true`);
@@ -534,12 +554,12 @@ app.whenReady().then(async () => {
           await js(`[...document.querySelectorAll(".pill")].find((p) => !p.classList.contains("active"))?.click(); return true`);
         const loading = await waitFor(async () => js(`return !!document.querySelector(".loadbar")`), 4000, 50);
         await sleep(400);
-        const load = loading ? await edge(`${L}-loadbar`, none.row) : null;
-        console.log(`        ${L}: border-coloured share of the edge row — no line ${none.share.toFixed(3)}, operations' line ${line.share.toFixed(3)}, load bar ${load?.share.toFixed(3) ?? "(none)"} (row ${none.row}, ×${none.sf})`);
-        if (none.share < 0.5) v.push(`${L}: with no line the edge row is only ${(none.share * 100).toFixed(0)} % border-coloured — the check can't see the border, proved nothing`);
-        if (line.share > 0.01) v.push(`${L}: the operations' line leaves ${(line.share * 100).toFixed(1)} % of the edge row border-coloured (want none)`);
+        const load = loading ? await edge(`${L}-loadbar`) : null;
+        console.log(`        ${L}: the border's share of the edge row — no line ${none.share.toFixed(3)}, operations' line ${line.share.toFixed(3)}, load bar ${load?.share.toFixed(3) ?? "(none)"} (row ${none.row}, ×${none.sf})`);
+        if (none.share < 0.5) v.push(`${L}: with no line the border is only ${(none.share * 100).toFixed(0)} % of the edge row — the check can't see the border, proved nothing`);
+        if (line.share > 0.01) v.push(`${L}: the border still shows under the operations' line in ${(line.share * 100).toFixed(1)} % of the edge row (want none)`);
         if (!load) v.push(`${L}: Browse's load bar never showed — proved nothing`);
-        else if (load.share > 0.01) v.push(`${L}: the load bar leaves ${(load.share * 100).toFixed(1)} % of the edge row border-coloured (want none)`);
+        else if (load.share > 0.01) v.push(`${L}: the border still shows under the load bar in ${(load.share * 100).toFixed(1)} % of the edge row (want none)`);
       }
       await http("POST", "/settings", { liveWallpaperBehindAllTabs: false });
       await loadLibrary();
