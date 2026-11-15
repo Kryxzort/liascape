@@ -19,6 +19,7 @@ and § Settings & state.
 - Every media URL (`img`, `media`, `clip`, `anim`, `still`) starts with `MEDIA` (the backend's media listener, the API's port + 1), never `API`: on `API` it would share the API's 6 browser connections and queue API calls behind it. Guard: matrix `browse:mediaPool`.
 - `/media` serves only library / cache / Workshop-folder paths — keep test fixtures under the stack's cache dir.
 - Links open in the user's browser (`target=_blank` / `window.open` → main.js); the window never navigates away from the app's origin.
+- A poll keeps one request open at a time (`components/WallpaperBg.tsx`): one stacked per tick behind a slow backend fills the page's 6 connections to the API and queues every other call. Guard: probe-settings `bg:onePoll`.
 - Mark `// API:` where the UI depends on a backend contract.
 
 ## The store mirrors backend-owned state

@@ -20,6 +20,8 @@
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
 //                     "legacy" by a stubbed /player-engine; hidden, its value stays saved
+//   bg:onePoll        the live background behind Settings (components/WallpaperBg.tsx) keeps one /current read open at a
+//                     time while every answer is held 7 s, and reads again once the slow one answered
 //   vram:stopShows    "Stopped scene shows" (Advanced, liascape-player) sits right under the video memory cap and only while the
 //                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
 //                     saves sceneVramStopShows; at Standard it hides and the value stays
@@ -34,7 +36,7 @@
 //   cache:look        a line's hover glow (and none under no-glow), the size and "Freed" in theme colours, bg-live: the
 //                     lines add no fill of their own over the section card; pictures settings-cache-*.png
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
-const { app, BrowserWindow, clipboard } = require("electron");
+const { app, BrowserWindow, clipboard, session } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
@@ -54,6 +56,10 @@ async function http(method, p, body) {
     return { status: r.status, json };
   } catch (e) { return { status: 0, json: null, error: e.message }; }
 }
+// how long a save may take to land: an atomic write + fsync, which on a busy disk (another process's heavy writes to the
+// same btrfs) took 3–16 s for one POST /settings, the page's saves queued behind each other. A ceiling only: the
+// waits end the moment the value is saved.
+const SAVE_MS = 20000;
 async function waitFor(pred, ms = 8000, step = 100) {
   const end = Date.now() + ms;
   while (Date.now() < end) { try { if (await pred()) return true; } catch { /* retry */ } await sleep(step); }
@@ -92,30 +98,45 @@ const HELPERS = `
       const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, l: r.left, t: r.top, w: r.width, h: r.height }; },
     async tab(name) { [...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === name)?.click(); await this.sleep(500); },
   }; true`;
-// `engine`: answer the page's /player-engine with this engine (the Settings view asks it when it mounts)
+// `engine`: answer the page's /player-engine with this engine (the Settings view asks it when it mounts).
+// Settings shows its rows before the store's settings and the engine's answer arrive (a row they hide is simply absent
+// until then), so a load waits for both: the level on screen is the saved one, and the view's /player-engine answered.
+// No fixed pause covers a loaded box (nudge:engine read "legacy, Full-live: no nudge row") and a stalled disk holds
+// them for seconds, so the wait is long; it ends the moment both are in.
 async function load({ engine } = {}) {
   await win.loadURL(withToken(U + "/"));
   for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
   await js(HELPERS);
   await js(`await window.__x.tab("Library"); return true`);
-  if (engine) await js(`const of = window.fetch.bind(window);
-    window.fetch = (u, o) => String(u).includes("/player-engine")
-      ? Promise.resolve(new Response(${J(J({ engine, active: engine, available: true, binary: null, reason: null }))}, { headers: { "Content-Type": "application/json" } }))
-      : of(u, o); return true`);
-  await js(`await window.__x.tab("Settings"); for (let i = 0; i < 60 && !document.querySelector(".settings .srow"); i++) await window.__x.sleep(100);
-    await window.__x.sleep(700); return true`);
+  await js(`const of = window.fetch.bind(window); window.__engineRead = 0; window.__engineAsked = [];
+    window.fetch = (u, o) => !String(u).includes("/player-engine") ? of(u, o)
+      : (window.__engineAsked.push(Math.round(performance.now())), ${engine ? `Promise.resolve(new Response(${J(J({ engine, active: engine, available: true, binary: null, reason: null }))}, { headers: { "Content-Type": "application/json" } }))` : "of(u, o)"})
+        .finally(() => { window.__engineRead++; }); return true`);
+  const level = (await field("settingsLevel")) ?? "standard";
+  const ready = await js(`await window.__x.tab("Settings");
+    for (let i = 0; i < 300 && !(document.querySelector(".settings .srow") && window.__engineRead > 0
+      && document.querySelector("[data-settings-level]")?.dataset.settingsLevel === ${J(level)}); i++) await window.__x.sleep(100);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return { rows: !!document.querySelector(".settings .srow"), engine: window.__engineRead > 0, level: document.querySelector("[data-settings-level]")?.dataset.settingsLevel,
+      engineAskedAgo: window.__engineAsked.map((t) => Math.round(performance.now()) - t) }`);
+  if (!ready.rows || !ready.engine || ready.level !== level) throw new Error(`Settings never got ready (${J(ready)}, saved level ${J(level)})`);
+  await sleep(700);
 }
 const has = (label) => js(`return !!window.__x.row(${J(label)})`);
 
-// per frame for `ms`: the copy-like control `sel` (its faces' opacity + vertical offset, its width / left, data-copied) and
-// a neighbour `near` (its layout left, so a pressed button's squeeze isn't a move) — what the eye sees while the words change
-const SAMPLE = (sel, near, ms) => `(() => new Promise((res) => { const out = []; const t0 = performance.now();
+// per frame for at least `ms`: the copy-like control `sel` (its faces' opacity + vertical offset, its width / left, data-copied)
+// and a neighbour `near` (its layout left, so a pressed button's squeeze isn't a move) — what the eye sees while the words
+// change. It goes on until the control turned "Copied" and is back at rest for 8 frames (up to `cap`): on a loaded box the
+// click lands late, and a fixed window can end mid-hold ("never settled back").
+const SAMPLE = (sel, near, ms, cap = ms + 3000) => `(() => new Promise((res) => { const out = []; const t0 = performance.now(); let seenOn = false, rest = 0;
   const f = () => { const t = Math.round(performance.now() - t0), b = document.querySelector(${J(sel)}), n = ${near ? `document.querySelector(${J(near)})` : "null"};
     if (!b) out.push({ t, gone: true });
     else { const r = b.getBoundingClientRect();
-      out.push({ t, on: b.hasAttribute("data-copied"), w: +r.width.toFixed(2), x: +r.x.toFixed(2), nx: n ? n.offsetLeft : null,
-        faces: [...b.querySelectorAll(".xfade > *")].map((x) => { const cs = getComputedStyle(x); return { o: +(+cs.opacity).toFixed(3), ty: +new DOMMatrix(cs.transform).f.toFixed(2), tf: cs.transform, tx: x.textContent }; }) }); }
-    if (t < ${ms}) requestAnimationFrame(f); else res(out); };
+      const row = { t, on: b.hasAttribute("data-copied"), w: +r.width.toFixed(2), x: +r.x.toFixed(2), nx: n ? n.offsetLeft : null,
+        faces: [...b.querySelectorAll(".xfade > *")].map((x) => { const cs = getComputedStyle(x); return { o: +(+cs.opacity).toFixed(3), ty: +new DOMMatrix(cs.transform).f.toFixed(2), tf: cs.transform, tx: x.textContent }; }) };
+      out.push(row); seenOn ||= row.on;
+      rest = seenOn && !row.on && row.faces[0]?.o >= 0.95 && row.faces[1]?.o <= 0.05 && Math.abs(row.faces[0].ty) <= 0.3 ? rest + 1 : 0; }
+    if (t < ${ms} || (t < ${cap} && rest < 8)) requestAnimationFrame(f); else res(out); };
   requestAnimationFrame(f); }))()`;
 const mid = (o) => o > 0.05 && o < 0.95;
 // a face's change of state in the frames: how many in-between opacity frames, how many off-rest offsets, how long it took
@@ -218,21 +239,30 @@ async function setTicks(ids) {
   const got = await js(`return [...document.querySelectorAll(".settings [data-cache-line] input:checked")].map((c) => c.closest("[data-cache-line]").dataset.cacheLine)`);
   if (J([...got].sort()) !== J([...ids].sort())) throw new Error(`ticked ${J(got)}, want ${J(ids)}`);
 }
-// per frame for `ms`: each line's two size faces (opacity, vertical offset, words) and the "Freed" note's opacity
-const SIZE_SAMPLE = (ms) => `(() => new Promise((res) => { const out = []; const t0 = performance.now();
+// per frame for at least `ms`: each line's two size faces (opacity, vertical offset, words) and the "Freed" note's opacity.
+// It goes on (up to `cap`) until the clear answered — "Freed" fully shown — and every face is at rest for 8 frames: on a
+// loaded box the clear can answer late, and a cell that moves on judges files the backend is still deleting while the
+// next cell's fresh fixtures fall to this clear ("holds nothing before the clear").
+const SIZE_SAMPLE = (ms, cap = ms + SAVE_MS) => `(() => new Promise((res) => { const out = []; const t0 = performance.now(); let rest = 0;
   const f = () => { const t = Math.round(performance.now() - t0), row = { t, lines: {} };
     for (const e of document.querySelectorAll("[data-cache-size]")) row.lines[e.dataset.cacheSize] = [...e.children].map((x) => { const cs = getComputedStyle(x);
       return { o: +(+cs.opacity).toFixed(3), ty: +new DOMMatrix(cs.transform).f.toFixed(2), tx: x.textContent, on: !x.hasAttribute("data-off") }; });
     const n = document.querySelector("[data-cache-freed]"); row.freed = n ? +(+getComputedStyle(n).opacity).toFixed(3) : null;
-    out.push(row); if (t < ${ms}) requestAnimationFrame(f); else res(out); };
+    const still = Object.values(row.lines).every((faces) => faces.every((x) => (x.o <= 0.02 || x.o >= 0.98) && Math.abs(x.ty) <= 0.3));
+    rest = row.freed >= 0.98 && still ? rest + 1 : 0;
+    out.push(row); if (t < ${ms} || (t < ${cap} && rest < 8)) requestAnimationFrame(f); else res(out); };
   requestAnimationFrame(f); }))()`;
 
 app.whenReady().then(async () => {
+  // The Library cards' stills, GIF previews and clips are made on request into the very folders the cache cells fill and
+  // clear (workshop_previews, video_clips): one made for a card the page just reloaded can land after a clear, and the
+  // line's "Empty" no longer matches the disk. No cell here looks at a card's picture, so the page never asks for one.
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ["*://127.0.0.1/still*", "*://127.0.0.1/anim*", "*://127.0.0.1/clip*"] }, (d, cb) => cb({ cancel: true }));
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
   win.focus();
   try {
     await setSettings({ SettingsLevel: "standard", Morphs: true, Glows: true });
-    await load();
+    await load().catch((e) => console.log(`(the first load: ${e.message})`)); // a warm-up: each cell loads its own page
 
     await cell("rename:autoMute — the row is \"Mute when other apps play audio\" and still switches autoMute", async () => {
       const v = [];
@@ -246,7 +276,7 @@ app.whenReady().then(async () => {
       if (!/^Auto-mute$/i.test(r.section ?? "")) v.push(`it sits in section ${J(r.section)}, want Auto-mute`);
       const p = await js(`return await window.__x.show(window.__x.row("Mute when other apps play audio").querySelector(".slabel"))`);
       await clickAt(p.x, p.y);
-      if (!(await waitFor(async () => (await field("autoMute")) === true, 4000))) v.push(`a click on the row didn't save autoMute (${await field("autoMute")})`);
+      if (!(await waitFor(async () => (await field("autoMute")) === true, SAVE_MS))) v.push(`a click on the row didn't save autoMute (${await field("autoMute")})`);
       await setSettings({ AutoMute: false, SettingsLevel: "standard" });
       return v;
     });
@@ -319,7 +349,7 @@ app.whenReady().then(async () => {
       const p = await js(`const b = [...document.querySelectorAll('[aria-label="Remove monitor"]')].pop(); return b ? await window.__x.show(b) : null`);
       if (!p) return [...v, "no Remove monitor button"];
       await clickAt(p.x, p.y);
-      if (!(await waitFor(async () => { const s = (await lwe()) ?? ""; return /PRB-A/.test(s) && !/PRB-B/.test(s); }, 4000)))
+      if (!(await waitFor(async () => { const s = (await lwe()) ?? ""; return /PRB-A/.test(s) && !/PRB-B/.test(s); }, SAVE_MS)))
         v.push(`after removing PRB-B the command still reads ${J(await lwe())}`);
       await setSettings({ SceneMonitors: [], AllowScenes: false, SettingsLevel: "standard" });
       return v;
@@ -358,7 +388,7 @@ app.whenReady().then(async () => {
         const EVERY = G ? `window.__x.row("Switch every")?.querySelector(".hms")` : MIN;
         const saved = async () => { if (G) { const st = (await http("GET", "/settings")).json ?? {}; return [st.globalSwitchWhenVideoEnds, st.globalIntervalSeconds, st.globalMaxPlaySeconds]; }
           const ps = await psOf(); return [ps.switchWhenVideoEnds, ps.intervalSeconds, ps.maxPlaySeconds]; };
-        const settle = (want) => waitFor(async () => J(await saved()) === J(want), 3000);
+        const settle = (want) => waitFor(async () => J(await saved()) === J(want), SAVE_MS);
         const advance = (on) => G ? js(`const c = window.__x.row("Switch when video ends")?.querySelector("input"); if (c.checked !== ${on}) c.click(); await window.__x.sleep(400); return true`)
           : js(`const c = [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith("Switch when video ends"))?.querySelector("input"); if (c.checked !== ${on}) c.click(); await window.__x.sleep(400); return true`);
         const ps0 = (await http("GET", "/playlist/state")).json;
@@ -519,6 +549,29 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    await cell("bg:onePoll — the live background behind Settings reads /current one at a time while the backend is slow", async () => {
+      await setSettings({ SettingsLevel: "standard" }); await load();
+      if (!(await js(`return !!document.querySelector("video.settings-bg")`))) return ["no live background behind Settings — proved nothing"];
+      // every /current answer is held 7 s once its headers arrive (a backend that answers late), and the reads open at
+      // once are counted from the page's own requests
+      const wr = session.defaultSession.webRequest, f = { urls: ["*://127.0.0.1/current*"] }, open = new Set(), held = new Set();
+      let most = 0, asked = 0;
+      wr.onSendHeaders(f, (d) => { open.add(d.id); asked++; most = Math.max(most, open.size); });
+      wr.onCompleted(f, (d) => open.delete(d.id)); wr.onErrorOccurred(f, (d) => open.delete(d.id));
+      wr.onHeadersReceived(f, (d, cb) => { const go = () => { held.delete(go); clearTimeout(t); cb({}); }, t = setTimeout(go, 7000); held.add(go); });
+      let after;
+      try {
+        await sleep(7500);
+        for (const go of [...held]) go();
+        const n = asked; after = await waitFor(() => asked > n, SAVE_MS, 50);
+      } finally { wr.onSendHeaders(f, null); wr.onCompleted(f, null); wr.onErrorOccurred(f, null); wr.onHeadersReceived(f, null); for (const go of [...held]) go(); }
+      const v = [];
+      if (!asked) return ["the background never read /current in 7.5 s — proved nothing"];
+      if (most > 1) v.push(`${most} /current reads open at once while each answer took 7 s (one at a time: the page has 6 connections to the API)`);
+      if (!after) v.push("no fresh /current read once the slow one answered (a sync asked meanwhile is owed)");
+      return v;
+    });
+
     await cell("vram:stopShows — \"Stopped scene shows\" sits under the cap, a Last frame / Nothing switch that saves sceneVramStopShows", async () => {
       const v = [];
       const eng = (await http("GET", "/player-engine")).json?.active;
@@ -543,7 +596,7 @@ app.whenReady().then(async () => {
         if (/—|;|·/.test(r.hint)) v.push(`the hint breaks the Settings words (em dash, semicolon or ·): ${J(r.hint)}`);
         const p = await js(`return await window.__x.show([...window.__x.row(${J(ROW)}).querySelectorAll(".seg-opt")].find((b) => b.textContent.trim() === "Nothing"))`);
         await clickAt(p.x, p.y);
-        if (!(await waitFor(async () => (await field("sceneVramStopShows")) === "nothing", 4000))) v.push(`a click on Nothing didn't save sceneVramStopShows (${await field("sceneVramStopShows")})`);
+        if (!(await waitFor(async () => (await field("sceneVramStopShows")) === "nothing", SAVE_MS))) v.push(`a click on Nothing didn't save sceneVramStopShows (${await field("sceneVramStopShows")})`);
         const on = await js(`return window.__x.row(${J(ROW)})?.querySelector('.seg-opt[aria-checked="true"]')?.textContent.trim()`);
         if (on !== "Nothing") v.push(`after the click the switch shows ${J(on)} chosen`);
         await setSettings({ SettingsLevel: "standard" }); await load();
@@ -717,7 +770,7 @@ app.whenReady().then(async () => {
       await setTicks(["media-art"]);
       const q = await js(`return await window.__x.show(document.querySelector("[data-cache-clear]"))`);
       await clickAt(q.x, q.y);
-      await waitFor(() => js(`return +getComputedStyle(document.querySelector("[data-cache-freed]")).opacity > 0.95`), 3000);
+      await waitFor(() => js(`return +getComputedStyle(document.querySelector("[data-cache-freed]")).opacity > 0.95`), SAVE_MS);
       const fc = await js(`return getComputedStyle(document.querySelector("[data-cache-freed]")).color`);
       if (fc !== await C("var(--success)")) v.push(`"Freed" is ${fc}, want --success ${await C("var(--success)")}`);
       await mv(5, 5, 900);

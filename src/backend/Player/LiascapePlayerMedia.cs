@@ -431,7 +431,7 @@ public static class LiascapePlayerMedia
             // that loaded in between missed that and read /current while it still said A (or nothing): tell every client
             // again now. B's path comes with the event (no query to time out into a "nothing plays"); Broadcast never
             // blocks, so it goes from this thread, in the events' order. Guard: matrix load:afterApply:wsEarly
-            if (e.TryGetProperty("b", out var b) && Str(b, "path") is { Length: > 0 } bPath) PlayerHelper.OnWallpaperChanged?.Invoke(bPath);
+            if (e.TryGetProperty("b", out var b) && Str(b, "path") is { Length: > 0 } bPath) { _lastCur = bPath; PlayerHelper.OnWallpaperChanged?.Invoke(bPath); }
             return;
         }
         Interlocked.Increment(ref _eventOutcomes);
@@ -440,7 +440,7 @@ public static class LiascapePlayerMedia
         // requested (wallpaper-changed) — the UI marked a wallpaper playing that never showed (matrix apply:broken).
         // Tell them what's really there; off this callback, which must never block on a request.
         if (kind == "transition.failed" && corr == _lastCorr)
-            _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPath()));
+            _ = Task.Run(() => PlayerHelper.OnWallpaperChanged?.Invoke(CurrentPathOrLast()));
     }
 
     // A live outbox fact: stored off the event thread, its `outbox_seq` acked only once that returned.
@@ -1209,6 +1209,7 @@ public static class LiascapePlayerMedia
     {
         var client = C;
         _intent = new Intent(null, null); // nothing shows from here (a restart's snapshot can't bring one back)
+        _lastCur = null;
         _alignedCorrs.Clear();
         if (client.SocketExists && client.TryCall("stop", null, LiascapePlayerClient.QuickMs) == null && client.IsStalled) // item 6
             LostToStall("stop");
@@ -1733,8 +1734,22 @@ public static class LiascapePlayerMedia
         return ShownOrIncoming(client, parked: true) is { } shown ? shown.Count > 0 : null;
     }
 
-    public static string? CurrentPath() =>
-        GetCur("path") is JsonElement { ValueKind: JsonValueKind.String } v && v.GetString() is { Length: > 0 } s ? s : null;
+    public static string? CurrentPath() => CurrentPath(out _);
+
+    // `answered` false = the player didn't answer (a timeout or the stall breaker): null then means "not known", not
+    // "nothing shows". An answer is remembered for CurrentPathOrLast.
+    private static string? CurrentPath(out bool answered)
+    {
+        var path = GetCur("path", out answered) is JsonElement { ValueKind: JsonValueKind.String } v && v.GetString() is { Length: > 0 } s ? s : null;
+        if (answered) _lastCur = path;
+        return path;
+    }
+
+    // What `/current` names: the player's answer, or while it doesn't answer, the last path it reported (a query's answer,
+    // a `transition.started`'s B, our own stop). A page takes a "nothing plays" there as the truth: loaded during a stall,
+    // it would unmark the playing item until the next switch (no event follows). Guard: matrix load:duringStall
+    public static string? CurrentPathOrLast() => CurrentPath(out bool answered) is string p ? p : answered ? null : _lastCur;
+    private static volatile string? _lastCur;
 
     public static double? Query(string prop) =>
         GetCur(prop) is JsonElement { ValueKind: JsonValueKind.Number } v ? v.GetDouble() : null;
@@ -1759,8 +1774,13 @@ public static class LiascapePlayerMedia
 
     // `get cur:*.<prop>` (deduplicated across outputs); with different sources per output → the first
     // output's. Never spawns; null when nothing is on screen / no player.
-    private static JsonElement? GetCur(string prop)
+    private static JsonElement? GetCur(string prop) => GetCur(prop, out _);
+
+    // `answered` false only for a request the player never answered (code "timeout": no reply, the stall breaker, a busy
+    // connection); no_such_node (nothing shown) and io (no player) are answers
+    private static JsonElement? GetCur(string prop, out bool answered)
     {
+        answered = true;
         var client = C;
         if (!client.SocketExists) return null;
         const int q = LiascapePlayerClient.QuickMs;
@@ -1774,9 +1794,9 @@ public static class LiascapePlayerMedia
                 if (first == null) return null;
                 return client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:{first}.{prop}" }, q).GetProperty("value");
             }
-            catch (LiascapePlayerException) { return null; }
+            catch (LiascapePlayerException e2) { answered = e2.Code != "timeout"; return null; }
         }
-        catch (LiascapePlayerException) { return null; } // no_such_node = nothing shown; io = no player
+        catch (LiascapePlayerException e) { answered = e.Code != "timeout"; return null; } // no_such_node = nothing shown; io = no player
     }
 
     private static JsonElement? Graph(LiascapePlayerClient client)

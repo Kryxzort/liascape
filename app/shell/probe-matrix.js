@@ -88,6 +88,16 @@ async function http(method, p, body) {
   return { status: r.status, json };
 }
 const post = (p, b = {}) => http("POST", p, b);
+// the backend's /events as any page hears them, on the probe's own socket: `seen(ms)` is true once a message matching
+// `pred` arrived (`t` = when), false after `ms`
+async function backendEvents(pred) {
+  const ws = new WebSocket(withToken(`${U.replace(/^http/, "ws")}/events`));
+  await new Promise((res, rej) => { ws.addEventListener("open", res, { once: true }); ws.addEventListener("error", () => rej(new Error("no /events socket")), { once: true }); });
+  let hit; const got = new Promise((r) => (hit = r));
+  const o = { t: null, close: () => ws.close(), seen: (ms) => Promise.race([got.then(() => true), sleep(ms).then(() => false)]) };
+  ws.addEventListener("message", (ev) => { let m; try { m = JSON.parse(ev.data); } catch { return; } if (o.t == null && pred(m)) { o.t = Date.now(); hit(); } });
+  return o;
+}
 const getSettings = async () => (await http("GET", "/settings")).json;
 function cli(action) {
   const t0 = Date.now();
@@ -3649,9 +3659,12 @@ C["restart:initDown"] = { states: ["idle"], noSwitch: true, async run(c) {
 //   reload      the real path: the page reloads the moment /apply answered (nothing held; the player takes ~0.4–1 s to start B
 //               here, the page asks /current within ~0.1 s of loading)
 // The others are made deterministic by holding the page's first /current and its /events socket:
-//   wsLate      /current answered before the player starts B; the socket opens only after it started
-//   wsEarly     /current answered before the start; the socket opens at once (up before the player starts B)
+//   wsLate      /current answered before the apply; the socket opens only after the player started B
+//   wsEarly     /current answered before the apply; the socket opens the moment the announcement went out (seen on the
+//               probe's own socket), before the player starts B (it takes ≥ 0.3 s to load B here)
 //   staleReply  the socket is up for the announcement; /current, asked before the apply, answers only after B started
+// (wsLate / wsEarly release nothing on /apply's reply: on a loaded box it can come as late as the player's start, the
+// very moment the page's reads must straddle.)
 for (const how of ["reload", "wsLate", "wsEarly", "staleReply"]) C[`load:afterApply:${how}`] = { states: ["idle", "single"], switch: true, async run(c) {
     c.target = c.state === "idle" ? K[1] : c.other;
     const t = TITLE(c.target), wsUrl = `${U.replace(/^http/, "ws")}/events*`, curUrl = `${U}/current*`;
@@ -3676,19 +3689,39 @@ for (const how of ["reload", "wsLate", "wsEarly", "staleReply"]) C[`load:afterAp
         await win.loadURL(withToken(U + "/"));
         c.startedSeen = await waitFor(() => !!started(), 8000, 10);
         c.tStart = started()?._t;
-      } else {
+      } else if (how === "staleReply") {
       const loading = win.loadURL(withToken(U + "/"));
-      c.held = await waitFor(() => curSeen && (how === "staleReply" || wsSeen), 8000, 10);
-      // staleReply: the page's socket is up before the apply (its announcement reaches the page)
-      if (how === "staleReply") c.wsUp = await waitFor(() => httpLog.some((r) => r.t >= c.tLoad && /\/events/.test(r.url)), 4000, 20);
+      c.held = await waitFor(() => curSeen, 8000, 10);
+      // the page's socket is up before the apply (its announcement reaches the page)
+      c.wsUp = await waitFor(() => httpLog.some((r) => r.t >= c.tLoad && /\/events/.test(r.url)), 4000, 20);
       c.t0 = Date.now();
       const ap = await post("/apply", { path: c.target });
       if (ap.status !== 200) c.applyErr = `${ap.status} ${JSON.stringify(ap.json)}`;
-      if (how !== "staleReply") { releaseCur(); if (how === "wsEarly") releaseWs(); }
       c.startedSeen = await waitFor(() => !!started(), 8000, 10);
       c.tStart = started()?._t;
       await sleep(150);
-      c.tRelease = Date.now(); releaseCur(); releaseWs();
+      c.tRelease = Date.now(); releaseCur();
+      await loading;
+      } else {
+      const loading = win.loadURL(withToken(U + "/"));
+      c.held = await waitFor(() => curSeen && wsSeen, 8000, 10);
+      releaseCur();
+      c.curBack = await waitFor(() => httpLog.some((r) => r.t >= c.tLoad && /\/current/.test(r.url)), 4000, 10);
+      // the probe's own socket hears the announcement at the moment every open page would
+      const ann = await backendEvents((m) => m.type === "wallpaper-changed" && m.payload?.path === c.target);
+      try {
+        c.t0 = Date.now();
+        const ap = post("/apply", { path: c.target });
+        c.announced = await ann.seen(8000);
+        c.tAnn = ann.t;
+        if (how === "wsEarly") releaseWs();
+        const r = await ap;
+        if (r.status !== 200) c.applyErr = `${r.status} ${JSON.stringify(r.json)}`;
+        c.startedSeen = await waitFor(() => !!started(), 8000, 10);
+        c.tStart = started()?._t;
+        await sleep(150);
+        releaseWs();
+      } finally { ann.close(); }
       await loading;
       }
     } finally {
@@ -3709,19 +3742,49 @@ for (const how of ["reload", "wsLate", "wsEarly", "staleReply"]) C[`load:afterAp
     const back = (re, from = c.tLoad) => httpLog.find((r) => r.t >= from && re.test(r.url))?.t;
     c.tCur = back(/\/current/, how === "staleReply" ? c.tRelease : c.tLoad); c.tWs = back(/\/events/);
   }, check(c) {
-    const v = [], t = TITLE(c.target);
+    const v = [], t = TITLE(c.target), how = c.control.split(":").pop(), held = how === "wsLate" || how === "wsEarly";
     if (!c.held) return ["the page's first /current (and /events) were never seen — nothing was held, proved nothing"];
     if (c.applyErr) v.push(`/apply answered ${c.applyErr}`);
+    if (held && !c.curBack) return [...v, "the page's held /current never came back before the apply — proved nothing"];
+    if (held && !c.announced) return [...v, `the backend never announced ${t} (no wallpaper-changed on the probe's socket) — proved nothing`];
     if (!c.startedSeen) return [...v, `the player never started ${t} (no transition.started) — proved nothing`];
-    const how = c.control.split(":").pop(), order = `/current back +${c.tCur - c.t0} ms, socket +${c.tWs - c.t0} ms, player started ${t} +${c.tStart - c.t0} ms`;
+    const order = `/current back +${c.tCur - c.t0} ms, socket +${c.tWs - c.t0} ms, player started ${t} +${c.tStart - c.t0} ms`;
     console.log(`        ${c.state} × ${c.control}: ${order}`);
     if (c.tCur == null || c.tWs == null) return [...v, `the page's /current or socket never completed (${order}) — proved nothing`];
     if (how !== "staleReply" && c.tCur >= c.tStart) v.push(`/current came back after the player started ${t} (${order}) — proved nothing`);
     if (how === "reload" && c.tWs <= c.tLoad) v.push(`the page's socket opened before the apply (${order}) — proved nothing`);
     if (how === "wsLate" && c.tWs <= c.tStart) v.push(`the socket opened before the player started ${t} (${order}) — proved nothing`);
     if (how === "wsEarly" && c.tWs >= c.tStart) v.push(`the socket opened after the player started ${t} (${order}) — proved nothing`);
+    if (held && c.tWs < c.tAnn) v.push(`the socket opened before the announcement (${order}, announced +${c.tAnn - c.t0} ms): the page heard it — proved nothing`);
     if (how === "staleReply" && (!c.wsUp || c.tCur <= c.tStart)) v.push(`the socket wasn't up before the apply, or /current came back before the player started ${t} (${order}) — proved nothing`);
     if (!c.shows) v.push(`the page loaded during the apply doesn't show ${t} playing 4 s after the player started it: Stop ${c.page?.stop}, now-playing line ${JSON.stringify(c.page?.line)}, marked ${JSON.stringify(c.page?.marks)}`);
+    return v;
+  } };
+
+// A page loaded while the player doesn't answer (its compositor SIGSTOPped: the backend's quick queries time out and its
+// stall breaker opens) still marks what plays: /current names the last path the player reported, never "nothing plays" —
+// no event follows to correct it (LiascapePlayerMedia.CurrentPathOrLast).
+C["load:duringStall"] = { states: ["single"], noSwitch: true, async run(c) {
+    c.target = c.shown;
+    const pid = (await ctl.call("hello")).pid;
+    const state = () => { try { return fs.readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /, "")[0]; } catch { return null; } };
+    await win.loadURL("about:blank");
+    process.kill(pid, "SIGSTOP");
+    try {
+      c.stopped = await waitFor(() => state() === "T", 2000, 20);
+      c.cur = (await http("GET", "/current")).json;
+      await loadUi();
+      c.shows = await waitFor(async () => { const p = (c.page = await ui(`return { marks: m.playing().cards, line: document.querySelector(".topbar > .status [data-st=playing]")?.textContent ?? null };`));
+        return p.marks.length === 1 && p.marks[0] === TITLE(c.target) && (p.line ?? "").includes(TITLE(c.target)); }, 3000, 100);
+      c.stillStopped = state() === "T";
+    } finally { process.kill(pid, "SIGCONT"); }
+    await sleep(3300); // the backend's stall breaker lets requests through 3 s after its last timeout
+  }, check(c) {
+    const t = TITLE(c.target);
+    if (!c.stopped || !c.stillStopped) return [`the player's compositor wasn't stopped throughout (stopped ${c.stopped}, still ${c.stillStopped}) — proved nothing`];
+    const v = [];
+    if (c.cur?.path !== c.target) v.push(`/current during the stall named ${JSON.stringify(TITLE(c.cur?.path))}, want ${t} (what the player last reported)`);
+    if (!c.shows) v.push(`a page loaded during the stall doesn't show ${t} playing: marked ${JSON.stringify(c.page?.marks)}, now-playing line ${JSON.stringify(c.page?.line)}`);
     return v;
   } };
 
@@ -4457,6 +4520,8 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   const playlistBar = await ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); } return m.barItems().map((e) => e.dataset.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (playlistBar && JSON.stringify(playlistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(playlistBar)}, backend playlist ${JSON.stringify(want)}`);
+  // what the page showed when its marks or bar disagreed (another tab, still loading, reloaded, "nothing plays")
+  if (v.some((x) => /^UI (marks|playlistBar)/.test(x))) v.push(`  the page: ${JSON.stringify(await js(`({ url: location.pathname, tab: document.querySelector(".tab.active")?.textContent.trim(), cards: document.querySelectorAll(".card.lib").length, plItems: document.querySelectorAll(".pl-item").length, playing: document.querySelectorAll(".card.lib.playing").length, mx: !!window.__mx, status: document.querySelector(".topbar > .status")?.textContent ?? null, ready: document.readyState, vis: document.visibilityState, focus: document.hasFocus() })`).catch((e) => String(e)))}`);
   if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
   // load-dependent (the user's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
   const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`the command took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
@@ -4531,6 +4596,7 @@ const FUZZ_RULES = [
   [/^(cover:|prog:|plStart:|parked:|expert:|cli:next:backendDown$)/, { exclude: "Phase 3 Task 11: the cover Signal's fake source, a program held by a pause, the start choice, outputs removed, the expert tier or a backend down — their own fixtures" }],
   [/^appear:(glows|morphs|videoThumbs)$/, { exclude: "real mouse hovers + a reload of the page, and they leave the page's look toggled" }],
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
+  [/^load:duringStall$/, { exclude: "stops the player's compositor; the backend's stall breaker then fails the next step's queries for 3 s" }],
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
   [/^plShuffle$/, { last: "a shuffled order makes every later 'the playlist bar's next' expectation (armedCheck, *+next) unknowable" }],

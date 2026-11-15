@@ -38,11 +38,19 @@ export function WallpaperBg() {
   const playingItem = useMemo(() => libraryItems.find((i) => i.videoPath === playingPath), [libraryItems, playingPath]);
   const effSpeed = syncLive ? (playingItem?.speedOverride ?? globalSpeed) : 1;
   // seek the preview to the live mpv position (only meaningful when the preview IS the playing video)
-  // every poll also re-reads the pause: a switch's resume (or one from another client) has no event of its own
+  // every poll also re-reads the pause: a switch's resume (or one from another client) has no event of its own.
+  // One read at a time, and a sync asked meanwhile runs once it answered (its answer may predate a pause): while the
+  // backend is slow to answer (a busy player, a stalled disk) a 2 s poll would stack up more /current reads than the
+  // browser's 6 connections to the API, and every other call of the page (Settings' own code, /player-engine, a save)
+  // would queue behind them. Guard: probe-settings bg:onePoll
+  const asking = useRef<"idle" | "busy" | "again">("idle");
+  const [resync, setResync] = useState(0);
   const syncNow = () => {
     const v = ref.current;
     if (!v || !appActive) return;
-    api.current().then((c) => {
+    if (asking.current !== "idle") { asking.current = "again"; return; }
+    asking.current = "busy";
+    api.current().finally(() => { const again = asking.current === "again"; asking.current = "idle"; if (again) setResync((n) => n + 1); }).then((c) => {
       useStore.getState().setWallpaperPaused(!!c.paused);
       const vv = ref.current;
       if (!vv || !syncLive || c.path !== playingVideo || c.position == null || !vv.duration) return;
@@ -50,6 +58,7 @@ export function WallpaperBg() {
       if (Math.abs(vv.currentTime - target) > 0.3) vv.currentTime = target;
     }).catch(() => {});
   };
+  useEffect(() => { if (resync) syncNow(); }, [resync]); // eslint-disable-line
   useEffect(() => {
     if (!bgVideo || !appActive) return;
     const id = setInterval(syncNow, 2000);

@@ -29,13 +29,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
        makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
        case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
-57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
-       time, nudge:engine finds no nudge row right after switching to legacy, cache:clear:reduced starts on an already
-       emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.
-67. [ ] UI matrix cells that fail in a full run now and then and pass on a rerun: `single × load:afterApply:wsEarly`
-       and `idle × load:afterApply:wsLate` ("proved nothing": the player started the item before /current or the socket
-       came back) and `playlist × cli:next` (the UI showed no playing mark and an empty playlist bar while the backend
-       played k2). Find each race, fix that side.
+67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist
+       bar while the backend played k2) and hasn't come back in five full runs since. Ruled out: the keybind touches no
+       playlist state, playlist_state.json is written atomically, and a stalled player's /current no longer reads
+       "nothing plays" (a likely cause of the missing mark: matrix load:duringStall). Unexplained: the empty bar. A failing mark/bar
+       check now prints what the page showed (tab, cards, bar items, status line): read it on the next failure.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs

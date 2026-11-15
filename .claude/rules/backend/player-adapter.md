@@ -54,6 +54,7 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 - `WaitCorr` checks the outcome map first (the event can beat the reply) and polls `logs {corr}` every 2 s as a safety net.
 - Our latest switch failing → re-broadcast `wallpaper-changed` with the real current path. Matrix `apply:broken`.
 - Every `transition.started` → broadcast `wallpaper-changed` with the event's `b.path`, from the event thread: `/current` names B only from then, so a page that loaded after `/apply`'s announcement learns it here. Matrix `load:afterApply:wsEarly`.
+- `/current` (and the failed-switch re-broadcast) read `CurrentPathOrLast`: a player that doesn't answer (code `timeout`: no reply, the stall breaker) names the path it last reported, never "nothing plays" (a page loaded then has no event to correct it). `CurrentPath()` itself stays null without an answer (self-test "a stopped player still answered"). Matrix `load:duringStall`.
 - Drain the player's outbox on every subscribe ack; ack only after the handler stored synchronously; handlers must be idempotent (`OnOutboxEvent`). Self-test `OutboxAckAssertions`.
 
 ## Rotation (the one home of its semantics)

@@ -784,18 +784,26 @@ public static class ServerHost
             if (r.User) PlayerHelper.SetUserMute(r.Value); else if (r.Value) PlayerHelper.SetMute(true); else PlayerHelper.UnmuteAuto();
             return Results.Ok();
         });
-        app.MapGet("/current", () => Results.Json(new
+        app.MapGet("/current", () =>
         {
-            path = PlayerHelper.QueryCurrentPath(),
-            sceneId = PlayerHelper.QueryCurrentSceneWorkshopId(),
-            playing = PlayerHelper.IsPlaying,
-            timed = PlayerHelper.IsTimedPlaylistActive(),
-            position = PlayerHelper.QueryTimePos(), // live mpv time-pos → sync the in-app preview
-            keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape toggle-loop-current`: the rotation holds what plays
-            // the user's pause (`player.paused` / mpv `pause`; never "pause behind windows", a per-output clock): the in-app
-            // background (WallpaperBg) holds still with the wallpaper
-            paused = PlayerHelper.IsPlaying && PlayerHelper.IsPausedNow(),
-        }));
+            // liascape-player: a player that doesn't answer (a stall) still names what it last reported, never "nothing
+            // plays" (LiascapePlayerMedia.CurrentPathOrLast)
+            bool lp = Liascape.Player.PlayerEngine.IsLiascapePlayer;
+            var path = lp ? Liascape.Player.LiascapePlayerMedia.CurrentPathOrLast() : PlayerHelper.QueryCurrentPath();
+            bool playing = lp ? path != null : PlayerHelper.IsPlaying;
+            return Results.Json(new
+            {
+                path,
+                sceneId = PlayerHelper.QueryCurrentSceneWorkshopId(),
+                playing,
+                timed = PlayerHelper.IsTimedPlaylistActive(),
+                position = PlayerHelper.QueryTimePos(), // live mpv time-pos → sync the in-app preview
+                keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape toggle-loop-current`: the rotation holds what plays
+                // the user's pause (`player.paused` / mpv `pause`; never "pause behind windows", a per-output clock): the in-app
+                // background (WallpaperBg) holds still with the wallpaper
+                paused = playing && PlayerHelper.IsPausedNow(),
+            });
+        });
 
         // ---- image proxy + local media ----------------------------------------------------
         // API: browser can't send the Firefox UA / Referer (moewalls needs it) and would hit
