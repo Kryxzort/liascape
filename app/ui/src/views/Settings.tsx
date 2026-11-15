@@ -22,6 +22,7 @@ import { ROT_HINT } from "../components/rotHint";
 import { WarnIcon } from "../components/FeatureWarn";
 import { HealthCtx, healthWarnings } from "../components/featureHealth";
 import { CopyButton } from "../components/CopyButton";
+import { MuteButton } from "../components/MuteButton";
 import { useMotion } from "../components/motion";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
@@ -172,8 +173,10 @@ function CachePicker() {
 // cover non-settings-backed rows (e.g. Theme, applied via applyTheme not setSetting). `wk` = the key whose
 // feature warnings (WarnIcon) the row shows, when it has no `rk`. `lv` = the Settings level the row shows from
 // (default: its key's in LEVEL_OF_KEY, else Basic); above the current level it renders nothing (its value is untouched).
-function Row({ label, hint, disabled, rk, wk, def, deviated, deviatedTitle, onReset, lv, children }: {
+function Row({ label, hint, disabled, liveChip, rk, wk, def, deviated, deviatedTitle, onReset, lv, children }: {
   label: string; hint?: string; disabled?: boolean;
+  // a disabled row that holds a mute chip dims its name and other controls but not the chip (the way back, index.css `.live-chip`)
+  liveChip?: boolean;
   rk?: string; wk?: string; def?: unknown; deviated?: boolean; deviatedTitle?: string; onReset?: () => void; lv?: Level; children: React.ReactNode;
 }) {
   const cur = useStore((s) => (rk ? s.settings?.[rk] : undefined));
@@ -193,7 +196,7 @@ function Row({ label, hint, disabled, rk, wk, def, deviated, deviatedTitle, onRe
   const toggle = isValidElement<{ type?: string }>(children) && children.type === "input" && (children.props.type === "checkbox" || children.props.type === "radio");
   const Tag = toggle ? "label" : "div";
   return (
-    <Tag className={`srow${disabled ? " disabled" : ""}${toggle ? " toggle" : ""}`} data-level={own} data-expert={own === "expert" ? "" : undefined}
+    <Tag className={`srow${disabled ? " disabled" : ""}${liveChip ? " live-chip" : ""}${toggle ? " toggle" : ""}`} data-level={own} data-expert={own === "expert" ? "" : undefined}
       data-row-toggle={toggle ? "" : undefined}>
       <div className="slabel">
         <span className="slabel-row">{label}
@@ -439,9 +442,10 @@ export const Settings = memo(function Settings() {
       )}
 
       <Section title="Sound" icon={<Volume2 size={15} />}>
-        <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}%`} disabled={mute} rk="volume">
-          <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} /></Row>
-        <Row label="Mute wallpapers" rk="noAudio"><input type="checkbox" checked={mute} onChange={(e) => set("noAudio", e.target.checked)} /></Row>
+        {/* the mute chip is the way back from muted: the row dims around it (`liveChip`), and it follows the Volume row's level */}
+        <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}%`} disabled={mute} liveChip rk="volume">
+          <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} />
+          <MuteButton muted={mute} what="wallpapers" data-wall-mute onToggle={() => set("noAudio", !mute)} /></Row>
         <Row label="Audio normalization" hint="keeps wallpapers at about the same loudness" disabled={mute} rk="normalizeAudio">
           <input type="checkbox" checked={g("normalizeAudio", false)} disabled={mute} onChange={(e) => set("normalizeAudio", e.target.checked)} /></Row>
         {!mute && g("normalizeAudio", false) && <Row label="Loudness target" hint="how loud to even the audio out. −14 is the standard, lower is quieter." rk="normalizeTargetLufs">

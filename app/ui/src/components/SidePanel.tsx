@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, Volume2, VolumeX, AppWindow } from "lucide-react";
+import { X, Image as ImageIcon, Film, TvMinimalPlay, Sparkles, AppWindow } from "lucide-react";
 import { captureSource, sourceEl, useMotion, FADE_EXIT_MS } from "./motion";
 import { YouTubeEmbed } from "./YouTubeEmbed";
 import { Segmented } from "./Segmented";
@@ -8,6 +8,7 @@ import { SideTitle } from "./SideTitle";
 import { type PreviewKind, useStore } from "../store";
 import { useStableFn } from "../hooks/useStableFn";
 import { api } from "../api/client";
+import { MuteButton } from "./MuteButton";
 import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPreviewMuted, followWallpaper, unmutePreview, rangeFill } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
@@ -272,7 +273,7 @@ function PreviewVolume({ wall }: { wall: number }) {
   const shown = silent ? 0 : level;
   // several wheel events can land before React renders the last one's level: step from the level the last one asked for
   const wheelAt = useRef({ v: 0, t: -Infinity });
-  // the glyph pops on a change the user made, never when the chip first shows
+  // the slider can flip the glyph too (to 0, or off 0): that change pops like a click on the chip (components/MuteButton.tsx)
   const [touched, setTouched] = useState(false);
   const following = sound.own == null;
   const change = (v: number) => {
@@ -281,7 +282,7 @@ function PreviewVolume({ wall }: { wall: number }) {
     if (v > 0) setPreviewMuted(false);
   };
   const toggle = () => {
-    setTouched(true); wheelAt.current.t = -Infinity;
+    wheelAt.current.t = -Infinity;
     if (silent) unmutePreview(wall); else setPreviewMuted(true);
   };
   const step = useStableFn((n: number) => {
@@ -309,10 +310,7 @@ function PreviewVolume({ wall }: { wall: number }) {
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
     <div ref={ref} className="side-vol" data-side-vol onClick={stop} onPointerDown={stop} onDoubleClick={stop}>
-      <button className={`side-mute${silent ? "" : " on"}`} data-side-mute aria-pressed={!silent} aria-label={silent ? "Unmute the preview" : "Mute the preview"}
-        onClick={toggle}>
-        {/* keyed by the state: the new glyph pops once on a change (icon motion: toggle) */}
-        <span className={`side-mute-ico${touched ? " ico-pop" : ""}`} key={silent ? "off" : "on"}>{silent ? <VolumeX size={16} /> : <Volume2 size={16} />}</span></button>
+      <MuteButton muted={silent} what="the preview" data-side-mute onToggle={toggle} popped={touched} />
       <div className="side-vol-slide">
         <span className={`side-vol-val${following ? " follow" : ""}`} aria-hidden>{shown}</span>
         <span className="side-vol-track">

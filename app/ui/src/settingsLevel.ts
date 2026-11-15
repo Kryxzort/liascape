@@ -10,6 +10,7 @@ export const rank = (l: Level) => LEVELS.indexOf(l);
 
 // The level each setting's row lives at, by settings key (a row without a key passes its own `lv`). Also what the
 // "hidden but changed" note at the top of Settings counts.
+// `noAudio` has no row of its own: its mute chip sits in the Volume row, so it stays at `volume`'s level.
 export const LEVEL_OF_KEY: Record<string, Level> = {
   // basic
   volume: "basic", noAudio: "basic", normalizeAudio: "basic", autoMute: "basic", pauseWhenCovered: "basic",

@@ -226,6 +226,8 @@ const PAGE = `window.__mx = {
   setValue(el, v, what) { if (!el) throw new Error("not found: " + what); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     set.call(el, String(v)); el.dispatchEvent(new Event("input", { bubbles: true })); },
   setCheck(el, b, what) { if (!el) throw new Error("not found: " + what); if (el.checked !== b) el.click(); },
+  // Settings → Sound: the mute chip at the end of the Volume row (the sidebar's, pressed = sound on)
+  setMute(b) { const el = this.row("Volume")?.querySelector("[data-wall-mute]"); if (!el) throw new Error("not found: the Volume row's mute button"); if ((el.getAttribute("aria-pressed") === "false") !== b) el.click(); },
   row(label) { return [...document.querySelectorAll(".settings .srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === label); },
   input(label, sel = "input") { return this.row(label)?.querySelector(sel); },
   async select(label, opt) { this.click(this.row(label)?.querySelector(".sel"), "select " + label); await this.sleep(200); this.click(this.byText(".sel-pop .sel-opt", opt), opt); },
@@ -580,7 +582,7 @@ for (const [kind, label, field, key, from, to, own, eps] of [["Vol", "Volume", "
 }
 setting("volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`);
 setting("speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`);
-setting("noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
+setting("noAudio", "noAudio", true, `m.setMute(true);`);
 setting("scaleFit", "videoScale", "fit", `await m.select("Fit to screen", "Fit");`);
 setting("fps24", "videoFpsCap", 24, `m.setValue(m.input("Video frame rate cap"), 24, "fps");`);
 setting("hwdecNo", "hwDec", "no", `await m.select("Hardware decoding", "no");`);
@@ -1388,7 +1390,7 @@ C["seq:mute+next"] = { states: ["single", ...PL_STATES], switch: true, async run
   }, exp: { muted: true }, check: (c) => stayed(c, "next") };
 // a global setting changed (Settings page), then next: B takes the new global (the other live item keeps its override)
 for (const [name, key, value, drive] of [["volume", "volume", 55, `m.setValue(m.input("Volume"), 55, "Volume");`],
-  ["speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`], ["noAudio", "noAudio", true, `m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`]]) {
+  ["speed", "speed", 1.5, `m.setValue(m.input("Playback speed"), 1.5, "Playback speed");`], ["noAudio", "noAudio", true, `m.setMute(true);`]]) {
   C[`seq:set:${name}+next`] = { states: name === "noAudio" ? ["playlist", "effect"] : ["single", ...PL_STATES], switch: true,
     async pre(c) { if (c.other) await post("/library/volume", { path: c.other, intValue: 30 }); },
     async run(c) { await ui(`m.tab("Settings"); await m.sleep(500); ${drive}`); await sleep(900); await cliStep(c, "next"); },
@@ -1928,9 +1930,9 @@ C["seq:set:normalizeOn+next"] = { states: ["single", "playlist", "effect", "pend
 // normalized — not only at its next switch
 C["seq3:normalize+noAudio+next+noAudioOff"] = { states: ["single", "playlist", "effect"], switch: true, async pre(c) { c.measured = await measureAll(); await normOn(); },
   async run(c) {
-    await ui(settingsTab(`m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`)); await sleep(900);
+    await ui(settingsTab(`m.setMute(true);`)); await sleep(900);
     await cliStep(c, "next"); await sleep(400); await waitSettled(8000);
-    await ui(`m.setCheck(m.input("Mute wallpapers"), false, "Mute wallpapers");`); await sleep(900);
+    await ui(`m.setMute(false);`); await sleep(900);
   }, check: (c) => [...normMeasured(c), ...stayed(c, "next"), ...(c.after.s.noAudio === false && c.after.s.normalizeAudio === true ? [] : [`noAudio ${c.after.s.noAudio} normalizeAudio ${c.after.s.normalizeAudio}`])] };
 
 // --- Settings → Appearance (theme / thumbnail aspect / card size / gif autoplay): UI-only — it must not touch
@@ -3226,7 +3228,7 @@ for (const [k, idx, val, field] of [["itemVol", 0, 37, "volumeOverride"], ["item
 
 // Mute audio (NoAudio) on a scene: no_audio on its source (the oracle) and its worker, live, same worker
 C["noAudio:scene"] = { states: ["scene"], async run(c) {
-    await ui(`${settingsRow("Mute wallpapers")} m.setCheck(m.input("Mute wallpapers"), true, "Mute wallpapers");`);
+    await ui(`${settingsRow("Volume")} m.setMute(true);`);
     await waitWorker(SC[0], (w) => w.audio?.no_audio === true, 5000);
   }, check(c) {
     const v = c.after.s.noAudio === true ? [] : [`settings.noAudio ${c.after.s.noAudio}`];
@@ -4618,7 +4620,7 @@ const FUZZ_RULES = [
   [/^cardToggle:shown$/, { shrinks: true, removes: (x) => x.shown }],
   [/^seq:playlistBarRemove\+next:/, { shrinks: true }],
   [/^seq3:playlistBarRemove\+trashUndo\+next$/, { shrinks: true }], // removes one, then trashes what plays: needs a survivor after both
-  // Settings → "Mute wallpapers" on disables the Volume slider and "Audio normalization" (and hides the target): their drive
+  // Settings → Volume's mute chip on disables the Volume slider and "Audio normalization" (and hides the target): their drive
   // would click a disabled input
   [/^(set:volume|globalDragVol|seq:set:volume\+next|set:normalize(On|Off|Target)|seq:set:normalizeOn\+next)$/, { when: (x) => !x.s.noAudio }],
   [/^itemVol:/, { when: offGlobal(37) }], [/^itemSpd:/, { when: offGlobal(undefined, 1.7) }], [/^playlistBarVol:/, { when: offGlobal(42) }],

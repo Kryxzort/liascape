@@ -35,6 +35,14 @@
 //                     "Freed N" appears; pictures settings-cache-mid-*.png, settings-cache-done-*.png
 //   cache:look        a line's hover glow (and none under no-glow), the size and "Freed" in theme colours, bg-live: the
 //                     lines add no fill of their own over the section card; pictures settings-cache-*.png
+//   mute:row:<level>  Sound has no "Mute wallpapers" checkbox row; the Volume row ends in the shared mute chip (button.side-mute,
+//                     components/MuteButton.tsx) after the slider, 32 px, on the slider's centre line, at the row's control edge;
+//                     a click saves noAudio and dims the slider, the hint ("muted") and "Audio normalization" but not the chip,
+//                     a second click un-mutes
+//   mute:motion:<m>   motion on: the new glyph pops through in-between sizes on a click (transform / opacity only); off and
+//                     prefers-reduced-motion: it only swaps; nothing pops on load; pictures settings-mute-motion-*.png
+//   mute:look         the chip's accent fill while sound plays (--accent / --accent-fg), see-through and --text while muted, hover
+//                     glow (none under no-glow), bg-live; pictures settings-mute-look-*.png
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow, clipboard, session } = require("electron");
 const fs = require("fs");
@@ -777,6 +785,144 @@ app.whenReady().then(async () => {
       await shot("cache-freed", rect);
       return v;
     });
+
+    // ---- Sound: the mute button at the end of the Volume row (components/MuteButton.tsx, the sidebar's chip) ----
+    // what the page shows of the Volume row and its mute button; `eff` = an element's opacity as seen (the product up the tree)
+    const MUTE_READ = `const r = window.__x.row("Volume"), b = r?.querySelector("[data-wall-mute]"), s = r?.querySelector("input[type=range]"), n = window.__x.row("Audio normalization");
+      const eff = (e) => { let o = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) o *= +getComputedStyle(x).opacity; return +o.toFixed(3); };
+      const bx = b?.getBoundingClientRect(), sx = s?.getBoundingClientRect(), rx = r?.getBoundingClientRect();
+      return { row: !!r, btn: !!b, tag: b?.tagName, label: b?.getAttribute("aria-label"), pressed: b?.getAttribute("aria-pressed"), on: b?.classList.contains("side-mute") && b.classList.contains("on"),
+        glyph: b?.querySelector("svg")?.getAttribute("class")?.match(/lucide-[a-z0-9-]+/g)?.pop(), hint: r?.querySelector(".shint")?.textContent,
+        sliderDisabled: s?.disabled, sliderOp: s ? eff(s) : null, labelOp: r ? eff(r.querySelector(".slabel")) : null, btnOp: b ? eff(b) : null, rowOp: r ? eff(r) : null,
+        normOp: n ? eff(n) : null, boxes: !!r?.querySelector("input[type=checkbox]"),
+        geo: bx && { w: bx.width, h: bx.height, dx: +(bx.left - sx.right).toFixed(1), dy: +((bx.top + bx.height / 2) - (sx.top + sx.height / 2)).toFixed(1), dr: +(rx.right - 9 - bx.right).toFixed(1) } }`;
+    const muteRead = () => js(MUTE_READ);
+    // the Volume row and the one below it, for the pictures
+    const muteRect = () => js(`const r = window.__x.row("Volume").getBoundingClientRect(), n = window.__x.row("Audio normalization").getBoundingClientRect();
+      return { x: Math.round(r.x) - 8, y: Math.round(r.y) - 8, width: Math.round(r.width) + 16, height: Math.round(n.bottom - r.top) + 16 }`);
+    const muteAt = () => js(`return await window.__x.show(window.__x.row("Volume")?.querySelector("[data-wall-mute]"))`);
+
+    for (const level of ["basic", "expert"]) {
+      await cell(`mute:row:${level} — Sound has no "Mute wallpapers" row; the Volume row ends in the shared mute chip, which saves noAudio and dims the slider`, async () => {
+        const v = [];
+        await setSettings({ SettingsLevel: level, NoAudio: false, Volume: 70, NormalizeAudio: true }); await load();
+        if (await has("Mute wallpapers")) v.push('the row "Mute wallpapers" is still there (the checkbox)');
+        let st = await muteRead();
+        if (!st.row) return [...v, 'no "Volume" row'];
+        if (!st.btn) return [...v, "the Volume row has no [data-wall-mute] button"];
+        if (st.boxes) v.push("the Volume row still holds a checkbox");
+        if (st.tag !== "BUTTON" || !st.on) v.push(`the control isn't the sidebar's chip (${J({ tag: st.tag, on: st.on })}): want button.side-mute.on while sound plays`);
+        if (st.label !== "Mute wallpapers" || st.pressed !== "true") v.push(`sound on: aria-label ${J(st.label)} / aria-pressed ${J(st.pressed)}, want "Mute wallpapers" / "true"`);
+        if (st.glyph !== "lucide-volume-2") v.push(`sound on: the glyph is ${st.glyph}, want lucide-volume-2`);
+        if (st.hint !== "70%") v.push(`sound on: the Volume hint reads ${J(st.hint)}, want "70%"`);
+        if (st.sliderDisabled || st.sliderOp < 0.99 || st.btnOp < 0.99) v.push(`sound on: slider disabled ${st.sliderDisabled}, slider ${st.sliderOp} / chip ${st.btnOp} opacity`);
+        if (st.geo && (Math.abs(st.geo.w - 32) > 0.5 || Math.abs(st.geo.h - 32) > 0.5)) v.push(`the chip is ${st.geo.w}×${st.geo.h}, want 32×32 like the sidebar's`);
+        if (st.geo && st.geo.dx < 4) v.push(`the chip isn't after the slider (its left is ${st.geo.dx}px from the slider's right)`);
+        if (st.geo && Math.abs(st.geo.dy) > 1.5) v.push(`the chip is ${st.geo.dy}px off the slider's centre line`);
+        if (st.geo && Math.abs(st.geo.dr) > 1.5) v.push(`the chip's right edge is ${st.geo.dr}px from the row's control edge`);
+        const p = await muteAt();
+        await shot(`mute-${level}-on`, await muteRect());
+        await clickAt(p.x, p.y);
+        if (!(await waitFor(async () => (await field("noAudio")) === true, SAVE_MS))) return [...v, `a click saved noAudio ${await field("noAudio")}, want true`];
+        await waitFor(async () => (await muteRead()).label === "Unmute wallpapers", 3000); await sleep(450);
+        st = await muteRead();
+        if (st.label !== "Unmute wallpapers" || st.pressed !== "false" || st.on) v.push(`muted: aria-label ${J(st.label)} / pressed ${J(st.pressed)} / on ${st.on}, want "Unmute wallpapers" / "false" / off`);
+        if (st.glyph !== "lucide-volume-x") v.push(`muted: the glyph is ${st.glyph}, want lucide-volume-x`);
+        if (st.hint !== "muted") v.push(`muted: the Volume hint reads ${J(st.hint)}, want "muted"`);
+        if (!st.sliderDisabled) v.push("muted: the slider is still enabled");
+        if (!(st.sliderOp > 0.3 && st.sliderOp < 0.6) || !(st.labelOp > 0.3 && st.labelOp < 0.6)) v.push(`muted: slider ${st.sliderOp} / label ${st.labelOp} opacity, want ≈ .45 (dimmed)`);
+        if (st.btnOp < 0.99 || st.rowOp < 0.99) v.push(`muted: the chip is dimmed with the row (chip ${st.btnOp}, row ${st.rowOp}) — it is the way back`);
+        if (!(st.normOp > 0.3 && st.normOp < 0.6)) v.push(`muted: "Audio normalization" opacity ${st.normOp}, want ≈ .45 (dimmed as before)`);
+        await shot(`mute-${level}-muted`, await muteRect());
+        await clickAt(p.x, p.y);
+        if (!(await waitFor(async () => (await field("noAudio")) === false, SAVE_MS))) return [...v, `a second click saved noAudio ${await field("noAudio")}, want false`];
+        await waitFor(async () => (await muteRead()).label === "Mute wallpapers", 3000);
+        st = await muteRead();
+        if (st.sliderDisabled || !st.on) v.push(`unmuted again: slider disabled ${st.sliderDisabled}, chip on ${st.on}`);
+        await mv(5, 5);
+        await setSettings({ SettingsLevel: "standard", NormalizeAudio: false });
+        return v;
+      });
+    }
+
+    // the glyph pops once on the user's click (motion on: in-between sizes; off / prefers-reduced-motion: it just swaps) and
+    // never on load; the slider's dimming eases in either way (a fade is allowed with motion off)
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`mute:motion:${mode} — the new glyph pops on a click (motion on), only swaps with motion ${mode === "on" ? "off" : mode}; nothing pops on load`, async () => {
+        await setSettings({ SettingsLevel: "standard", Morphs: mode !== "off", NoAudio: false, Volume: 70 }); await reducedMotion(mode === "reduced"); await load();
+        try {
+          const noMotion = await js(`return document.documentElement.classList.contains("no-motion")`);
+          if (noMotion !== (mode !== "on")) return [`:root.no-motion is ${noMotion} under motion ${mode} — proved nothing`];
+          const v = [];
+          if (await js(`return !!window.__x.row("Volume")?.querySelector("[data-wall-mute] .ico-pop")`)) v.push("the glyph pops on load (.ico-pop before any click)");
+          const p = await muteAt(); if (!p) return [...v, "no [data-wall-mute] button"];
+          const samp = js(`return await (() => new Promise((res) => { const out = []; const t0 = performance.now();
+            const f = () => { const t = Math.round(performance.now() - t0), b = window.__x.row("Volume")?.querySelector("[data-wall-mute]"), g = b?.querySelector(".side-mute-ico"), s = window.__x.row("Volume")?.querySelector("input[type=range]");
+              out.push({ t, scale: g ? +new DOMMatrix(getComputedStyle(g).transform).a.toFixed(3) : null, anims: g ? g.getAnimations().map((a) => Object.keys(a.effect.getKeyframes()[0] ?? {}).filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k)).join("+")) : [],
+                glyph: b?.querySelector("svg")?.getAttribute("class")?.match(/lucide-[a-z0-9-]+/g)?.pop(), slider: s ? +getComputedStyle(s).opacity : null });
+              if (t < 1100) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); }))()`);
+          await sleep(80); await clickAt(p.x, p.y);
+          if (mode === "on") { await sleep(40); await shot("mute-pop-mid", await muteRect()); }
+          const fr = await samp;
+          if (!(await waitFor(async () => (await field("noAudio")) === true, SAVE_MS))) return [...v, "the click saved nothing — proved nothing"];
+          const k = fr.findIndex((f) => f.glyph === "lucide-volume-x");
+          if (k < 0) return [...v, `the glyph never turned to volume-x in the frames (${J([...new Set(fr.map((f) => f.glyph))])}) — proved nothing`];
+          const after = fr.slice(k), mids = after.filter((f) => f.scale != null && f.scale > 0.62 && f.scale < 0.98);
+          if (mode === "on") {
+            if (mids.length < 3) v.push(`motion on: the new glyph popped through only ${mids.length} in-between sizes (want ≥ 3: ${J(after.slice(0, 8).map((f) => f.scale))})`);
+            const props = [...new Set(after.flatMap((f) => f.anims))].filter((x) => x && !/^(transform|scale|opacity)$/.test(x));
+            if (props.length) v.push(`motion on: the pop animates ${J(props)}, want transform / opacity only`);
+          } else {
+            const moved = after.filter((f) => f.scale != null && Math.abs(f.scale - 1) > 0.01);
+            if (moved.length) v.push(`motion ${mode}: the glyph changed size in ${moved.length} frames (${J(moved[0])}), want a plain swap`);
+          }
+          const dim = fr.filter((f) => f.slider != null).map((f) => f.slider);
+          if (Math.min(...dim) > 0.5) v.push(`the slider never dimmed in the frames (min opacity ${Math.min(...dim)})`);
+          await shot(`mute-motion-${mode}`, await muteRect());
+          return v;
+        } finally { await reducedMotion(false); await mv(5, 5); await setSettings({ NoAudio: false, Morphs: true }); }
+      });
+    }
+
+    await cell("mute:look — theme colours, hover glow (none under no-glow), bg-live; pictures", async () => {
+      const v = [];
+      await setSettings({ SettingsLevel: "standard", Morphs: true, Glows: true, NoAudio: false, Volume: 70 }); await load();
+      const C = (expr) => js(`const p = document.createElement("i"); p.style.color = ${J(expr)}; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c`);
+      const lit = (sh) => !!sh && sh !== "none" && sh.split(/,(?![^(]*\))/).some((part) => {
+        const m = /rgba?\(([^)]*)\)/.exec(part); if (!m) return false; const c = m[1].split(",").map(Number); return c.length < 4 || c[3] > 0; });
+      const read = () => js(`const b = window.__x.row("Volume")?.querySelector("[data-wall-mute]"), cs = getComputedStyle(b); return { shadow: cs.boxShadow, bg: cs.backgroundColor, color: cs.color, border: cs.borderTopColor }`);
+      const p = await muteAt(); if (!p) return ["no [data-wall-mute] button"];
+      const rect = await muteRect();
+      await mv(5, 5, 300);
+      const on = await read();
+      if (on.bg !== await C("var(--accent)") || on.color !== await C("var(--accent-fg)")) v.push(`sound on: ${J(on)} want the accent fill (${await C("var(--accent)")}) and --accent-fg text`);
+      if (lit(on.shadow)) v.push(`at rest it glows (${on.shadow})`);
+      await shot("mute-look-rest", rect);
+      await mv(p.x, p.y, 400);
+      if (!lit((await read()).shadow)) v.push(`hovered, no glow (${(await read()).shadow})`);
+      await shot("mute-look-hover", rect);
+      await js(`document.documentElement.classList.add("no-glow"); return true`); await sleep(300);
+      if (lit((await read()).shadow)) v.push(`no-glow: still glowing (${(await read()).shadow})`);
+      await shot("mute-look-noglow", rect);
+      await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await sleep(300);
+      await shot("mute-look-bglive-on", rect);
+      await js(`document.documentElement.classList.remove("bg-live"); return true`);
+      await clickAt(p.x, p.y);
+      if (!(await waitFor(async () => (await field("noAudio")) === true && (await muteRead()).label === "Unmute wallpapers", SAVE_MS))) return [...v, "a click never muted — proved nothing"];
+      await mv(5, 5, 400);
+      const off = await read();
+      if (off.color !== await C("var(--text)")) v.push(`muted: the glyph is ${off.color}, want --text ${await C("var(--text)")}`);
+      const a = /\/\s*([0-9.]+)\s*\)$/.exec(off.bg)?.[1] ?? /rgba\([^)]*,\s*([0-9.]+)\)/.exec(off.bg)?.[1] ?? 1;
+      if (!(+a < 1)) v.push(`muted: the chip's fill ${off.bg} is opaque (want the sidebar chip's see-through material)`);
+      await shot("mute-look-muted", rect);
+      await js(`document.documentElement.classList.add("bg-live"); return true`); await sleep(300);
+      await shot("mute-look-bglive-muted", rect);
+      await js(`document.documentElement.classList.remove("bg-live"); return true`);
+      await mv(5, 5);
+      await setSettings({ NoAudio: false });
+      return v;
+    });
+
     await setSettings({ Morphs: true });
   } catch (e) {
     results.push({ name: "setup", v: [e.message] });
