@@ -117,8 +117,8 @@ invalidation happened is never stored (epoch).
 - `scene_props` diff as JSON (numbers within 1e-6). A key the overrides dropped is sent as its project.json default
   (`WithResets`): LWE has no reset.
 - Per-monitor `SceneMonitors[].Fps` → `set out:<name>.scene_fps`, the name mapped like the player's
-  `output_name`. GPU settings (`GpuProps`): `AutoThrottleScenes` → `scene_throttle`; `LimitVramPerScene` +
-  `SceneVramLimitMib` → `scene_vram_limit_mib` (0 when off); `VramLowMode` → `vram_low_mode`. Cover
+  `output_name`. GPU settings (`GpuProps`) go to their `player.` props, `scene_vram_limit_mib` 0 while
+  `LimitVramPerScene` is off. Cover
   (`PauseWhenCovered` → `pause_when_covered`; the player's own default is `off`) and auto-mute settings go with them.
   `AssertSceneFps` re-asserts all of these once per player process, since a fresh player has its own defaults.
 - **Loudness storage** (`MergeSceneLoudness`, per audio configuration): a report replaces the stored measurement

@@ -9019,6 +9019,64 @@ fn scene_over_vram_limit_is_stopped_not_crashed() {
     near(png_pixel(&p, 320, 180), [10, 200, 30], 0, "the last frame");
 }
 
+/// `player.scene_vram_stop_shows` `nothing`: a scene the per-scene limit stops leaves its
+/// outputs black (what an empty output draws), not its last frame; the choice is live both
+/// ways on a scene already stopped, and the deliberate blank is never counted as a seam.
+#[test]
+fn scene_over_vram_limit_can_show_nothing() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok(
+        "subscribe",
+        json!({"topics": ["scene.vram_exceeded"]}),
+    );
+    c.ok(
+        "set",
+        json!({"path": "player.scene_vram_stop_shows", "value": "nothing"}),
+    );
+    let mut spec = synth(Pattern::Solid);
+    spec.rgb = [10, 200, 30];
+    let id = create_scene(&mut c, "api-t8-vram-blank", &spec, json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    let p = srv.path("t8-vram-blank.png");
+    let shot = |c: &mut Client| {
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&p)}));
+        png_pixel(&p, 320, 180)
+    };
+    near(shot(&mut c), [10, 200, 30], 0, "the scene before the stop");
+    let seams0: u64 = seam_totals(&mut c).iter().map(|t| t.1).sum();
+    c.ok("set", json!({"path": "player.scene_vram_limit_mib", "value": 1536}));
+    write_vram(&file, 6000.0, &[(pid, 1800.0)]);
+    let mut seen = Vec::new();
+    wait_event(&mut c, &mut seen, "scene.vram_exceeded", Duration::from_secs(5));
+    wait_for(Duration::from_secs(2), "the outputs to go black", || {
+        (shot(&mut c)[..3] == [0, 0, 0]).then_some(())
+    });
+    assert_eq!(worker_of(&mut c, &id)["vram_stopped"]["used_mib"], json!(1800.0));
+    // Live: the last frame comes back, then goes again.
+    c.ok(
+        "set",
+        json!({"path": "player.scene_vram_stop_shows", "value": "last_frame"}),
+    );
+    wait_for(Duration::from_secs(2), "the last frame back", || {
+        (shot(&mut c)[..3] == [10, 200, 30]).then_some(())
+    });
+    c.ok(
+        "set",
+        json!({"path": "player.scene_vram_stop_shows", "value": "nothing"}),
+    );
+    wait_for(Duration::from_secs(2), "black again", || {
+        (shot(&mut c)[..3] == [0, 0, 0]).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let seams: u64 = seam_totals(&mut c).iter().map(|t| t.1).sum();
+    assert_eq!(seams, seams0, "a blank on purpose is not a seam");
+}
+
 /// A playing video on VIRTUAL-1 and a scene on VIRTUAL-2, for the low-VRAM rule.
 fn video_and_scene(c: &mut Client, name: &str) -> (String, String) {
     let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });

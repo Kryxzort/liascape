@@ -446,6 +446,12 @@ pub struct SceneSource {
     /// The VRAM guard: the worker was stopped for using more VRAM than the per-scene
     /// limit — `(used_mib, limit_mib)`; reported like an error, never a crash.
     vram_stopped: Option<(f64, f64)>,
+    /// `player.scene_vram_stop_shows` is `nothing`: a VRAM-stopped scene hides its shown
+    /// frame (kept, so the choice is live both ways) and its outputs draw nothing.
+    vram_blank: bool,
+    /// What [`texture`](Self::texture) shows changed outside a frame latch (a stop or the
+    /// choice above): the next `update` reports it, so the outputs redraw.
+    shown_dirty: bool,
     /// The worker died with a frame on screen — the scene clock is stopped at that
     /// frame's `t` until a frame of a later worker generation (`> held`) latched: the restart
     /// resumes exactly where the picture froze. `Some(held generation)`.
@@ -771,6 +777,8 @@ impl SceneSource {
             rate_since: None,
             gpu_ms: VecDeque::new(),
             vram_stopped: None,
+            vram_blank: false,
+            shown_dirty: false,
             resuming: None,
             resume_ticked: false,
             clock_jumped: false,
@@ -887,9 +895,10 @@ impl SceneSource {
 
     /// The VRAM guard: the worker used `used_mib` > `limit_mib` of VRAM — stop it.
     /// Reported like a broken scene (`SourceEvent::Error` "stopped: used X MiB > limit Y MiB",
-    /// so a rotation advances / a single wallpaper keeps its last frame) plus
+    /// so a rotation advances / a single wallpaper stays) plus
     /// `scene.vram_exceeded`, but never a crash: no restart, no crash record, nothing marks it
-    /// crashed. The last frame stays shown; a `path` change starts a new worker.
+    /// crashed. The last frame stays (hidden under `player.scene_vram_stop_shows` `nothing`);
+    /// a `path` change starts a new worker.
     pub fn stop_for_vram(&mut self, used_mib: f64, limit_mib: f64) {
         if self.vram_stopped.is_some() || self.host.is_none() {
             return;
@@ -903,6 +912,7 @@ impl SceneSource {
         }
         self.release_ring_but_shown();
         self.vram_stopped = Some((used_mib, limit_mib));
+        self.shown_dirty |= self.vram_blank;
         let reason = format!(
             "stopped: used {used_mib:.0} MiB > limit {limit_mib:.0} MiB of VRAM (vram_exceeded)"
         );
@@ -937,6 +947,21 @@ impl SceneSource {
     /// The VRAM guard stopped this scene: `(used_mib, limit_mib)`.
     pub fn vram_stopped(&self) -> Option<(f64, f64)> {
         self.vram_stopped
+    }
+
+    /// `player.scene_vram_stop_shows` (the runtime, every tick): `nothing` hides a VRAM-stopped
+    /// scene's frame, `last_frame` shows it again.
+    pub fn set_vram_blank(&mut self, blank: bool) {
+        if self.vram_blank != blank {
+            self.vram_blank = blank;
+            self.shown_dirty |= self.vram_stopped.is_some();
+        }
+    }
+
+    /// Draws nothing on purpose (a VRAM stop under `nothing`): not a seam. Guard:
+    /// `tests/api.rs::scene_over_vram_limit_can_show_nothing`.
+    pub fn shows_nothing(&self) -> bool {
+        self.vram_blank && self.vram_stopped.is_some()
     }
 
     /// One GPU-budget observation (the runtime, every `budget::OBSERVE_EVERY`):
@@ -2041,8 +2066,11 @@ impl SceneSource {
     }
 
     /// The latched frame (kept through a worker crash, restart and path change); `None`
-    /// before the first.
+    /// before the first and while a VRAM stop shows nothing ([`shows_nothing`](Self::shows_nothing)).
     pub fn texture(&self) -> Option<&Tex> {
+        if self.shows_nothing() {
+            return None;
+        }
         match self.latch.current() {
             Some((slot, _, _, generation)) => self
                 .rings
@@ -2366,7 +2394,7 @@ impl Source for SceneSource {
                 self.send_loudness_meter();
             }
         }
-        let mut changed = false;
+        let mut changed = std::mem::take(&mut self.shown_dirty);
         if self.preview_wanted || self.preview.is_some() || self.preview_dying.is_some() {
             changed |= self.update_preview(gfx);
         }

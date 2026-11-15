@@ -512,7 +512,7 @@ export const Settings = memo(function Settings() {
       </Section>
 
       {/* liascape-player only (the player owns the GPU budget + both VRAM rules); every row applies live
-          (API: /settings → player.scene_throttle / scene_vram_limit_mib / vram_low_mode) */}
+          (API: /settings → player.scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode) */}
       {liascapeActive && (
         <Section title="GPU & memory" icon={<Gauge size={15} />} lv="standard">
           <Row label="Ease off heavy scenes" hint="if a scene makes your GPU stutter, it runs at a lower frame rate until things calm down. Off, every scene keeps its set frame rate." rk="autoThrottleScenes">
@@ -520,10 +520,13 @@ export const Settings = memo(function Settings() {
           <Row label="When video memory runs low" hint="when a game grabs the GPU's memory. Stop frees the wallpaper's memory and shows its last frame, Pause only pauses. Both pick up again once there's room." rk="vramLowMode">
             <Select value={g("vramLowMode", "stop")} onChange={(v) => set("vramLowMode", v)}
               options={[{ value: "stop", label: "Stop (free memory)" }, { value: "pause", label: "Pause" }, { value: "off", label: "Off" }]} /></Row>
-          <Row label="Cap each scene's video memory" hint="stops a scene that uses more video memory than the cap. A playlist moves on, a single wallpaper keeps its last frame. It doesn't count as a crash." rk="limitVramPerScene">
+          <Row label="Cap each scene's video memory" hint="stops a scene that uses more video memory than the cap. A playlist moves on. It doesn't count as a crash." rk="limitVramPerScene">
             <input type="checkbox" checked={g("limitVramPerScene", false)} onChange={(e) => set("limitVramPerScene", e.target.checked)} /></Row>
-          {g("limitVramPerScene", false) && <Row label="Video memory cap (MiB)" hint="per scene. About 1536 suits most scenes." rk="sceneVramLimitMib">
-            <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 1536)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
+          {g("limitVramPerScene", false) && <Row label="Video memory cap (MiB)" hint="per scene" rk="sceneVramLimitMib">
+            <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 2048)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
+          {g("limitVramPerScene", false) && <Row label="Stopped scene shows" hint="Last frame: its picture stays, still. Nothing: the screen goes black." rk="sceneVramStopShows">
+            <Segmented<string> label="Stopped scene shows" value={g<string>("sceneVramStopShows", "last_frame")} onChange={(v) => set("sceneVramStopShows", v)}
+              options={[{ value: "last_frame", label: "Last frame" }, { value: "nothing", label: "Nothing" }]} /></Row>}
           {engine?.vram?.low_active && <Help>Video memory is low right now — the wallpaper is {engine.vram.mode === "stop" ? "stopped (its memory freed)" : "paused"} until it frees up.</Help>}
         </Section>
       )}

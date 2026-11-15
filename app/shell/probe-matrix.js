@@ -3296,6 +3296,9 @@ for (const [name, prop, want, drive, saved] of [
   ["vramLimit", "player.scene_vram_limit_mib", 2048, `${settingsRow("Cap each scene's video memory")} m.setCheck(m.input("Cap each scene's video memory"), true, "VRAM limit"); await m.sleep(300);
     for (let i = 0; i < 30 && !m.input("Video memory cap (MiB)"); i++) await m.sleep(100); m.setValue(m.input("Video memory cap (MiB)"), 2048, "MiB");`, (s) => s.limitVramPerScene === true && s.sceneVramLimitMib === 2048],
   ["vramLowMode", "player.vram_low_mode", "pause", `${settingsRow("When video memory runs low")} await m.select("When video memory runs low", "Pause");`, (s) => s.vramLowMode === "pause"],
+  ["vramStopShows", "player.scene_vram_stop_shows", "nothing", `${settingsRow("Cap each scene's video memory")} m.setCheck(m.input("Cap each scene's video memory"), true, "VRAM limit");
+    for (let i = 0; i < 30 && !m.row("Stopped scene shows"); i++) await m.sleep(100);
+    m.click([...(m.row("Stopped scene shows")?.querySelectorAll(".seg-opt") ?? [])].find((b) => b.textContent.trim() === "Nothing"), "Nothing");`, (s) => s.sceneVramStopShows === "nothing"],
 ]) {
   C[`settings:${name}`] = { states: ["scene"], async run(c) {
       c.was = await pget(prop);
@@ -3305,7 +3308,7 @@ for (const [name, prop, want, drive, saved] of [
     }, check(c) {
       const v = [];
       if (!c.ok) v.push(`${prop} ${JSON.stringify(c.was)} → never ${JSON.stringify(want)}`);
-      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ autoThrottleScenes: c.after.s.autoThrottleScenes, limitVramPerScene: c.after.s.limitVramPerScene, sceneVramLimitMib: c.after.s.sceneVramLimitMib, vramLowMode: c.after.s.vramLowMode })})`);
+      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ autoThrottleScenes: c.after.s.autoThrottleScenes, limitVramPerScene: c.after.s.limitVramPerScene, sceneVramLimitMib: c.after.s.sceneVramLimitMib, sceneVramStopShows: c.after.s.sceneVramStopShows, vramLowMode: c.after.s.vramLowMode })})`);
       if (c.lowActive !== false) v.push(`player.vram_low_active ${c.lowActive} (the fake VRAM sample is healthy)`);
       return [...v, ...samePid(c, SC[0])];
     } };

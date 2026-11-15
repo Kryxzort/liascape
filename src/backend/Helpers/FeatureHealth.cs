@@ -116,7 +116,7 @@ public static class FeatureHealth
                     ["globalTransitionEnabled", "transitionMethod", "transitions"]));
                 var (vok, vwhy) = Part(i.PlayerHealth, "vram");
                 f.Add(new("vram", "VRAM measurement", vok, vok == false ? vwhy : null,
-                    ["limitVramPerScene", "sceneVramLimitMib", "vramLowMode"]));
+                    ["limitVramPerScene", "sceneVramLimitMib", "sceneVramStopShows", "vramLowMode"]));
                 var (hok, hwhy) = Part(i.PlayerHealth, "hwdec_interop");
                 f.Add(new("hwdec-interop", "Zero-copy hardware decoding", hok, hok == false ? hwhy : null, ["hwDec"]));
                 // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause behind windows" can't act

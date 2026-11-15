@@ -414,10 +414,10 @@ public static class LiascapePlayerSelfTest
         // AppSettings → the player's GPU / VRAM props (the limit is 0 = off while its toggle is off)
         string G(AppSettings s) => string.Join(" ", LiascapePlayerMedia.GpuProps(s).Select(p => $"{p.prop}={p.value}"));
         foreach (var (s, want) in new (AppSettings, string)[] {
-            (new AppSettings(), "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
-            (new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, VramLowMode = "pause" }, "scene_throttle=False scene_vram_limit_mib=1536 vram_low_mode=pause"),
-            (new AppSettings { SceneVramLimitMib = 2048, VramLowMode = "bogus" }, "scene_throttle=True scene_vram_limit_mib=0 vram_low_mode=stop"),
-            (new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = 1, VramLowMode = "off" }, "scene_throttle=True scene_vram_limit_mib=64 vram_low_mode=off") })
+            (new AppSettings(), "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop"),
+            (new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, SceneVramStopShows = "nothing", VramLowMode = "pause" }, "scene_throttle=False scene_vram_limit_mib=1536 scene_vram_stop_shows=nothing vram_low_mode=pause"),
+            (new AppSettings { SceneVramLimitMib = 2048, SceneVramStopShows = "bogus", VramLowMode = "bogus" }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop"),
+            (new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = 1, SceneVramStopShows = "NOTHING", VramLowMode = "off" }, "scene_throttle=True scene_vram_limit_mib=64 scene_vram_stop_shows=nothing vram_low_mode=off") })
             if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
         // ScenesPlayable: AllowScenes × engine × (liascape-player: the player's `scene` capability | legacy: LWE)
         foreach (var allow in new[] { false, true })
@@ -1141,13 +1141,13 @@ public static class LiascapePlayerSelfTest
                 // the GPU / VRAM settings → the player props, live, diffed
                 string PlayerProp(string p) { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"player.{p}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(); }
                 var g0 = new AppSettings();
-                var g1 = new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, VramLowMode = "pause" };
+                var g1 = new AppSettings { AutoThrottleScenes = false, LimitVramPerScene = true, SceneVramLimitMib = 1536, SceneVramStopShows = "nothing", VramLowMode = "pause" };
                 LiascapePlayerMedia.ApplyGpuSettings(g0, g1); LiascapePlayerMedia.Drain().Wait(2000);
-                string Gpu() => $"{PlayerProp("scene_throttle")} {PlayerProp("scene_vram_limit_mib")} {PlayerProp("vram_low_mode")}";
-                if (Gpu() != "false 1536.0 pause" && Gpu() != "false 1536 pause") fails.Add($"ApplyGpuSettings → {Gpu()}, want false 1536 pause");
+                string Gpu() => $"{PlayerProp("scene_throttle")} {PlayerProp("scene_vram_limit_mib")} {PlayerProp("scene_vram_stop_shows")} {PlayerProp("vram_low_mode")}";
+                if (Gpu() != "false 1536.0 nothing pause" && Gpu() != "false 1536 nothing pause") fails.Add($"ApplyGpuSettings → {Gpu()}, want false 1536 nothing pause");
                 LiascapePlayerMedia.ApplyGpuSettings(g1, g0); LiascapePlayerMedia.Drain().Wait(2000);
-                if (Gpu() != "true 0.0 stop" && Gpu() != "true 0 stop") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 stop");
-                else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / vram_low_mode live and back");
+                if (Gpu() != "true 0.0 last_frame stop" && Gpu() != "true 0 last_frame stop") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 last_frame stop");
+                else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode live and back");
                 // pause when covered → player.pause_when_covered, live, diffed (the player's own default is off)
                 LiascapePlayerMedia.ApplyCoverSetting(g0, new AppSettings { PauseWhenCovered = "fullscreen" }); LiascapePlayerMedia.Drain().Wait(2000);
                 if (PlayerProp("pause_when_covered") != "fullscreen") fails.Add($"ApplyCoverSetting(fullscreen) → {PlayerProp("pause_when_covered")}");

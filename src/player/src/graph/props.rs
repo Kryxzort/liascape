@@ -183,8 +183,9 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
             ),
             // The per-scene VRAM guard: a scene worker using more than this many MiB of
             // VRAM (2 s in a row) is stopped — reported like a broken scene (`source.error`)
-            // plus `scene.vram_exceeded`, never a crash record. 0 = off (the default; a
-            // suggested value when on: 1536). Live (the next sample applies it).
+            // plus `scene.vram_exceeded`, never a crash record. 0 = off (the default; the
+            // backend's default when on: 2048, `AppSettings.SceneVramLimitMib`). Live (the next
+            // sample applies it).
             (
                 "scene_vram_limit_mib",
                 ranged(
@@ -192,6 +193,17 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                     (0.0, 1_048_576.0),
                     "0–1048576",
                     PropValue::F64(0.0),
+                ),
+            ),
+            // What a scene the per-scene guard stopped shows: `last_frame` (the default) or
+            // `nothing` (its outputs draw as an empty output does, black). Live both ways on a
+            // scene already stopped: the shown frame is kept and only hidden.
+            (
+                "scene_vram_stop_shows",
+                def(
+                    PropType::Enum(&["last_frame", "nothing"]),
+                    false,
+                    PropValue::Str("last_frame".to_string()),
                 ),
             ),
             // The system low-VRAM rule: what happens while the GPU's

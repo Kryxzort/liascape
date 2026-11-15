@@ -1216,8 +1216,8 @@ restart_player 8 "${VRAM_ENV[@]}"
 pget() { ctl get "{\"path\":\"player.$1\"}" | jq -r '.value | if type == "number" then (. * 1000 | round / 1000) else . end'; }   # 0.0 → 0
 p_is() { [ "$(pget "$1")" = "$2" ]; }
 p_near() { near "$(pget "$1")" "$2" 0.001; }
-gpu_props() { echo "throttle $(pget scene_throttle), limit $(pget scene_vram_limit_mib), low $(pget vram_low_mode)"; }
-[ "$(gpu_props)" = "throttle true, limit 0, low stop" ] && ok "a fresh player: the defaults ($(gpu_props))" || bad "a fresh player: $(gpu_props)"
+gpu_props() { echo "throttle $(pget scene_throttle), limit $(pget scene_vram_limit_mib), shows $(pget scene_vram_stop_shows), low $(pget vram_low_mode)"; }
+[ "$(gpu_props)" = "throttle true, limit 0, shows last_frame, low stop" ] && ok "a fresh player: the defaults ($(gpu_props))" || bad "a fresh player: $(gpu_props)"
 post /apply "{\"path\":\"$S1\"}" >/dev/null
 waitfor 5000 scene_ready "$S1" || bad "/apply s1 on the fake-VRAM player → $(basename "$(cur path)") ready $(cur ready)"
 SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
@@ -1231,18 +1231,22 @@ setting '.SceneVramLimitMib = 2048'
 waitfor $WAIT p_near scene_vram_limit_mib 2048 && ok "…2048 MiB → 2048" || bad "VRAM limit 2048 → $(gpu_props)"
 setting '.LimitVramPerScene = false'
 waitfor $WAIT p_near scene_vram_limit_mib 0 && [ "$(curl -sf -m 5 "$U/settings" | jq -r '.sceneVramLimitMib')" = 2048 ] && ok "the limit off → 0 (off), the MiB value kept for the toggle" || bad "VRAM limit off → $(gpu_props), saved MiB $(curl -sf -m 5 "$U/settings" | jq -r '.sceneVramLimitMib')"
+for m in nothing last_frame; do
+  setting ".SceneVramStopShows = \"$m\""
+  waitfor $WAIT p_is scene_vram_stop_shows "$m" && [ "$(wpid "$SID")" = "$WP" ] && ok "SceneVramStopShows $m → player.scene_vram_stop_shows $m live, same worker" || bad "SceneVramStopShows $m → $(gpu_props)"
+done
 for m in pause off stop; do
   setting ".VramLowMode = \"$m\""
   waitfor $WAIT p_is vram_low_mode "$m" && ok "VramLowMode $m → player.vram_low_mode $m live" || bad "VramLowMode $m → $(gpu_props)"
 done
 [ "$(pget paused)" = false ] && ok "none of it touched player.paused" || bad "player.paused $(pget paused) after the GPU settings"
 # a fresh player process (not restored: the defaults) gets the backend's values back (the settings re-apply)
-setting '.AutoThrottleScenes = false | .LimitVramPerScene = true | .SceneVramLimitMib = 1536 | .VramLowMode = "pause"'
-waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' || bad "set before the restart: $(gpu_props)"
+setting '.AutoThrottleScenes = false | .LimitVramPerScene = true | .SceneVramLimitMib = 1536 | .SceneVramStopShows = "nothing" | .VramLowMode = "pause"'
+waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, shows nothing, low pause" ]' || bad "set before the restart: $(gpu_props)"
 stop_now
 restart_player 8b "${VRAM_ENV[@]}"
-waitfor 15000 eval '[ "$(gpu_props)" = "throttle false, limit 1536, low pause" ]' && ok "a fresh player gets them re-applied: $(gpu_props)" || bad "after a player restart: $(gpu_props) (want throttle false, limit 1536, low pause)"
-setting '.AutoThrottleScenes = true | .VramLowMode = "stop"'
+waitfor 15000 eval '[ "$(gpu_props)" = "throttle false, limit 1536, shows nothing, low pause" ]' && ok "a fresh player gets them re-applied: $(gpu_props)" || bad "after a player restart: $(gpu_props) (want throttle false, limit 1536, shows nothing, low pause)"
+setting '.AutoThrottleScenes = true | .SceneVramStopShows = "last_frame" | .VramLowMode = "stop"'
 
 # a scene over the limit in a timed playlist: stopped by the player (never a crash) → the rotation advances at once,
 # the UI is told why (WS scene-vram-stopped), the item is NOT marked crashed and stays playable
@@ -1277,6 +1281,13 @@ waitfor 10000 eval '[ -n "$(vram_ev "$n0")" ]' || bad "no scene.vram_exceeded fo
 sleep 2   # the window is the check: nothing may switch after the stop
 [ "$(nsch)" = "$ns" ] && [ "$(cur path)" = "$S1" ] && jq -e '."900000001".crashed // false | not' "$IDX" >/dev/null \
   && ok "a single scene over the limit: stays on screen (its last frame), no switch, not marked crashed" || bad "single scene VRAM stop: switches $ns → $(nsch), cur $(basename "$(cur path)"), index $(jq -c '."900000001"' "$IDX")"
+# "Stopped scene shows": Nothing turns the stopped scene's screen black, Last frame brings the frame back — live, still no switch
+px_not_black() { local v; v=$(px "$1"); [ -n "$v" ] && [ "$v" != "0 0 0" ]; }
+was=$(px out:VIRTUAL-1)
+setting '.SceneVramStopShows = "nothing"'
+waitfor $WAIT px_is out:VIRTUAL-1 "0 0 0" && ok "SceneVramStopShows nothing → the stopped scene's screen goes black (was $was)" || bad "SceneVramStopShows nothing → out:VIRTUAL-1 $(px out:VIRTUAL-1), want 0 0 0 (was $was)"
+setting '.SceneVramStopShows = "last_frame"'
+waitfor $WAIT px_not_black out:VIRTUAL-1 && [ "$(nsch)" = "$ns" ] && [ "$(cur path)" = "$S1" ] && ok "…last_frame → its last frame back ($(px out:VIRTUAL-1)), no switch" || bad "SceneVramStopShows last_frame → out:VIRTUAL-1 $(px out:VIRTUAL-1), switches $ns → $(nsch)"
 vram_fake ""
 stop_now
 kill "$WSP" 2>/dev/null; WSP=""

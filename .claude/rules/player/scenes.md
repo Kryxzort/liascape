@@ -189,6 +189,9 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - A scene over `scene_vram_limit_mib` is stopped, not crashed (no restart, no record), keeping only its shown
   slot. Guards: `tests/api.rs::scene_over_vram_limit_is_stopped_not_crashed`,
   `tests/scene.rs::vram_stopped_scene_keeps_only_its_shown_slot`.
+- Under `player.scene_vram_stop_shows` `nothing` a VRAM-stopped scene hides that slot (`SceneSource::shows_nothing`,
+  never dropped, so the choice is live both ways) and the seam probe skips it. Guard:
+  `tests/api.rs::scene_over_vram_limit_can_show_nothing`.
 - The low-VRAM hold composes into the effective pause (never `player.paused`); `stop` mode suspends every
   media source and resumes each at its position; the reserve keeps freed memory from reading as free.
   Guards: `low_vram_never_flaps_under_light_load`, `low_vram_releases_when_the_probe_dies`,

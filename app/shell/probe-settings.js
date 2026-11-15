@@ -20,6 +20,9 @@
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
 //                     "legacy" by a stubbed /player-engine; hidden, its value stays saved
+//   vram:stopShows    "Stopped scene shows" (Advanced, liascape-player) sits right under the video memory cap and only while the
+//                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
+//                     saves sceneVramStopShows; at Standard it hides and the value stays
 //   cache:lines       Housekeeping's cache picker: one line per cache (AppOps.CacheCategories) with its words, a themed tick
 //                     and the size of exactly its folder on disk (the shader cache's absent folder reads "Empty"); the
 //                     thumbnails ticked by default, nothing else; /cache/size agrees with the disk
@@ -512,6 +515,42 @@ app.whenReady().then(async () => {
         if ((await field("fullLiveSyncOffsetMs")) !== -40) v.push(`hiding changed the saved value: fullLiveSyncOffsetMs ${await field("fullLiveSyncOffsetMs")}, want -40`);
       } finally {
         await setSettings({ SettingsLevel: "standard", TransitionMethod: "reveal", FullLiveSyncOffsetMs: -30 });
+      }
+      return v;
+    });
+
+    await cell("vram:stopShows — \"Stopped scene shows\" sits under the cap, a Last frame / Nothing switch that saves sceneVramStopShows", async () => {
+      const v = [];
+      const eng = (await http("GET", "/player-engine")).json?.active;
+      if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
+      const ROW = "Stopped scene shows";
+      await setSettings({ SettingsLevel: "advanced", LimitVramPerScene: false, SceneVramStopShows: "last_frame" });
+      try {
+        await load();
+        if (!(await has("Cap each scene's video memory"))) return ['no "Cap each scene\'s video memory" row at Advanced — proved nothing'];
+        if (await has(ROW)) v.push(`the cap off: "${ROW}" shows (it means nothing then)`);
+        await setSettings({ LimitVramPerScene: true }); await load();
+        const r = await js(`const r = window.__x.row(${J(ROW)}); if (!r) return null;
+          const rows = [...document.querySelectorAll(".settings .srow")].map((x) => window.__x.label(x));
+          const seg = r.querySelector(".sctl > .seg.row");
+          return { after: rows[rows.indexOf(${J(ROW)}) - 1], seg: !!seg, opts: [...(seg?.querySelectorAll(".seg-opt") ?? [])].map((b) => b.textContent.trim()),
+            on: seg?.querySelector('[aria-checked="true"]')?.textContent.trim(), native: !!r.querySelector("select"), hint: r.querySelector(".shint")?.textContent ?? "" }`);
+        if (!r) return [...v, `the cap on: no "${ROW}" row`];
+        if (r.after !== "Video memory cap (MiB)") v.push(`"${ROW}" follows ${J(r.after)}, want "Video memory cap (MiB)"`);
+        if (!r.seg || r.native) v.push(`"${ROW}" isn't the shared Segmented switch (${J(r)})`);
+        if (J(r.opts) !== J(["Last frame", "Nothing"])) v.push(`options ${J(r.opts)}, want ["Last frame","Nothing"]`);
+        if (r.on !== "Last frame") v.push(`the default shows ${J(r.on)} chosen, want "Last frame"`);
+        if (/—|;|·/.test(r.hint)) v.push(`the hint breaks the Settings words (em dash, semicolon or ·): ${J(r.hint)}`);
+        const p = await js(`return await window.__x.show([...window.__x.row(${J(ROW)}).querySelectorAll(".seg-opt")].find((b) => b.textContent.trim() === "Nothing"))`);
+        await clickAt(p.x, p.y);
+        if (!(await waitFor(async () => (await field("sceneVramStopShows")) === "nothing", 4000))) v.push(`a click on Nothing didn't save sceneVramStopShows (${await field("sceneVramStopShows")})`);
+        const on = await js(`return window.__x.row(${J(ROW)})?.querySelector('.seg-opt[aria-checked="true"]')?.textContent.trim()`);
+        if (on !== "Nothing") v.push(`after the click the switch shows ${J(on)} chosen`);
+        await setSettings({ SettingsLevel: "standard" }); await load();
+        if (await has(ROW)) v.push(`Standard: "${ROW}" shows (it's an Advanced row)`);
+        if ((await field("sceneVramStopShows")) !== "nothing") v.push(`hiding the row changed the saved value: ${await field("sceneVramStopShows")}`);
+      } finally {
+        await setSettings({ SettingsLevel: "standard", LimitVramPerScene: false, SceneVramStopShows: "last_frame" });
       }
       return v;
     });

@@ -14,6 +14,8 @@
 # normalized, an old file's ResumeFromLast loads and is gone from GET and the next save, each is live on the player
 # (`player.pause_when_covered`, `prog:main.start_mode` / `.while_parked`, the current play untouched), and a playlist's
 # own PlaylistStart beats the global one only with its override on.
+# SceneVramStopShows (default last_frame): the default on a file without it, partial bodies keep it, unknown values read
+# as the default, live on `player.scene_vram_stop_shows`.
 #
 # Hermetic like scripts/test-liascape-player-adapter.sh: temp HOME + every XDG dir (own settings.json, library,
 # player socket), a private `liascape-player serve --headless --clock real --ao null`, its own backend port;
@@ -254,6 +256,24 @@ code_=$(code /settings '{"VideoPreviewQuality":5}'); [ "$code_" = 400 ] && ok "{
 snap v4; [ "$(f .videoPreviewQuality v4)" = '"mid"' ] && ok "…and videoPreviewQuality stays mid" || bad "videoPreviewQuality after the rejected body: $(f .videoPreviewQuality v4)"
 same v0 v4 '["theme"]' "videoPreviewQuality back to mid"
 
+echo "== What a scene stopped by its video memory cap shows: a file without it loads last_frame; partial bodies set / keep it; unknown values read as last_frame"
+[ "$(f .sceneVramStopShows s0)" = '"last_frame"' ] && ok "a file without sceneVramStopShows: last_frame (the default)" || bad "sceneVramStopShows after loading a file without it: $(f .sceneVramStopShows s0)"
+snap x0
+post /settings '{"SceneVramStopShows":"nothing"}' >/dev/null; snap x1
+[ "$(f .sceneVramStopShows x1)" = '"nothing"' ] && ok "{SceneVramStopShows:nothing} → nothing" || bad "{SceneVramStopShows:nothing} → $(f .sceneVramStopShows x1)"
+same x0 x1 '["sceneVramStopShows"]' "{SceneVramStopShows:nothing}"
+[ "$(disk .SceneVramStopShows)" = nothing ] && ok "SceneVramStopShows nothing written to settings.json" || bad "settings.json SceneVramStopShows → $(disk .SceneVramStopShows)"
+post /settings '{"theme":"Nord"}' >/dev/null; snap x2
+[ "$(f .sceneVramStopShows x2)" = '"nothing"' ] && ok "an unrelated partial body keeps sceneVramStopShows nothing" || bad "an unrelated partial body changed sceneVramStopShows to $(f .sceneVramStopShows x2)"
+for pair in 'sceneVramStopShows:LAST_FRAME:last_frame' 'SceneVramStopShows:black:last_frame' 'sceneVramStopShows:Nothing:nothing' 'sceneVramStopShows::last_frame'; do
+  IFS=: read -r k v want <<< "$pair"
+  post /settings "{\"$k\":\"$v\"}" >/dev/null; snap x3
+  [ "$(f .sceneVramStopShows x3)" = "\"$want\"" ] && ok "{$k:\"$v\"} → $want" || bad "{$k:\"$v\"} → $(f .sceneVramStopShows x3), want $want"
+done
+code_=$(code /settings '{"SceneVramStopShows":5}'); [ "$code_" = 400 ] && ok "{SceneVramStopShows:5} → 400" || bad "{SceneVramStopShows:5} → $code_"
+snap x4; [ "$(f .sceneVramStopShows x4)" = '"last_frame"' ] && ok "…and sceneVramStopShows stays last_frame" || bad "sceneVramStopShows after the rejected body: $(f .sceneVramStopShows x4)"
+same x0 x4 '["theme"]' "sceneVramStopShows back to last_frame"
+
 echo "== UI toggles: defaults on a file without the keys, partial bodies set / keep them, in either key spelling"
 for spec in "${UI_TOGGLES[@]}"; do
   k=${spec%%:*}; def=${spec##*:}; K=$(python3 -c "print('$k'[0].upper()+'$k'[1:])"); inv=$([ "$def" = true ] && echo false || echo true)
@@ -412,6 +432,15 @@ for v in fullscreen off maximized; do
   [ "$(pcov)" = "$v" ] && ok "{PauseWhenCovered:$v} → player.pause_when_covered $v live" || bad "{PauseWhenCovered:$v} → player.pause_when_covered $(pcov)"
 done
 [ "$(cur path)" = "$PLAYER" ] && [ "$(ctl get '{"path":"player.paused"}' | jq -r .value)" = false ] && ok "…the playing wallpaper untouched, not paused" || bad "the cover setting disturbed the play: cur $(cur path)"
+# what a scene stopped by its video memory cap shows is a player prop too: given to a fresh player, then live both ways
+pstop() { ctl get '{"path":"player.scene_vram_stop_shows"}' | jq -r .value; }
+[ "$(pstop)" = last_frame ] && ok "a fresh player has player.scene_vram_stop_shows = last_frame (the setting's default)" || bad "player.scene_vram_stop_shows = $(pstop) on a fresh player, want last_frame"
+for v in nothing last_frame; do
+  post /settings "{\"SceneVramStopShows\":\"$v\"}" >/dev/null
+  for _ in $(seq 1 30); do [ "$(pstop)" = "$v" ] && break; sleep 0.1; done
+  [ "$(pstop)" = "$v" ] && ok "{SceneVramStopShows:$v} → player.scene_vram_stop_shows $v live" || bad "{SceneVramStopShows:$v} → player.scene_vram_stop_shows $(pstop)"
+done
+[ "$(cur path)" = "$PLAYER" ] && ok "…the playing wallpaper untouched" || bad "the stop-shows setting disturbed the play: cur $(cur path)"
 post /settings '{"Volume":45}' >/dev/null; sleep 0.3
 near "$(cur gain.user)" "$(dB 45)" && ok "{Volume:45} → gain.user $(cur gain.user)" || bad "{Volume:45} → gain.user $(cur gain.user), want $(dB 45)"
 post /settings '{"speed":1.5}' >/dev/null; sleep 0.3

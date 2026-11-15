@@ -48,6 +48,39 @@ imported slot: a dmabuf lives while anyone holds it, so keeping the whole ring k
 memory alive; the other slots are dropped and their queued frames forgotten. A `path` change starts a new worker;
 raising the limit doesn't restart a stopped one.
 
+`player.scene_vram_stop_shows` `nothing` hides that slot instead (`SceneSource::shows_nothing`: `texture()` is
+`None`, so the outputs draw what an empty output draws, black; a rotation's effect runs from black). The slot is
+kept, one frame at the export size, so switching back to `last_frame` on a stopped scene shows its frame again; the
+seam probe doesn't count the deliberate blank (`note_composed`).
+
+### What scenes use
+
+The `vram` probe's `scenes[].used_mib` (NVML, the worker's own process) for 96 Workshop scenes, each alone on a
+private headless player at 1920×1080, the highest of 8 one-second samples after Ready (a scene's samples lie within 3 %
+of each other). Median 517 MiB, p90 1503, p95 2103, max 3832; ≤ 1 GiB: 79 (82 %), ≤ 1.5 GiB: 87 (91 %), ≤ 2 GiB: 90
+(94 %). At 3840×2160 the ten scenes between 1.2 and 2.3 GiB used 26–67 MiB more (the bigger export ring), none
+crossing 2 GiB that hadn't already. Hence the backend's default cap of 2 GiB (`AppSettings.SceneVramLimitMib`).
+Workshop id and MiB, highest first:
+
+```
+3233141951 3832, 2921510865 3642, 3509243656 3047, 3042865984 2209, 3326873240 2103, 3516174947 2075
+3414858021 1693, 2883756643 1651, 3243449890 1631, 3219908811 1503, 3163060610 1456, 2388299037 1451
+3363252053 1429, 3042492564 1181, 3419466417 1078, 3463520581 1045, 3479521040 1025, 3046119914 1013
+3022080536 861, 3104056709 846, 3276522107 842, 1864677589 836, 2932157836 806, 1195626192 799
+2325974975 797, 3366535880 796, 3184155462 782, 3489263099 775, 3013489778 773, 2064316482 748
+3174556087 745, 3289734539 732, 2511663284 723, 3490034653 695, 2890767643 670, 2375914945 661
+3319542538 615, 2542468435 610, 3445973124 601, 3432876246 600, 3395587987 592, 2679248947 589
+3089687436 582, 2134765860 564, 3028473503 537, 2561227934 530, 3516106265 524, 3556794116 524
+3480481965 509, 2815800031 488, 1556245028 478, 3749550751 468, 3413117423 468, 2886313155 466
+3354740764 464, 2694785040 440, 3019192537 432, 2672425887 387, 2288455459 382, 3422383300 365
+3426575339 356, 1264170639 322, 2469881470 319, 3029971128 316, 2828233985 311, 2371103399 308
+3134525336 302, 3432999904 301, 3309103316 282, 2189783622 280, 2290002190 272, 3023509773 272
+3291729669 266, 2683776412 264, 1160682576 244, 2951169110 227, 2783122117 214, 3422085307 196
+1797172968 191, 3477054430 184, 2905264428 180, 1934084447 172, 3291745179 154, 1155728109 136
+1174926427 128, 1726902114 125, 1884904087 121, 2182433068 120, 3387433141 106, 2219762084 106
+3478602089 103, 2638125030 102, 2679885269 101, 3593587273 81, 2047150134 65, 3461192631 47
+```
+
 ## Measuring VRAM (`vram.rs`)
 
 `LIASCAPE_PLAYER_VRAM_PROBE`: `auto` (default: the first that works of) NVML (`libnvidia-ml.so.1` dlopened by soname,

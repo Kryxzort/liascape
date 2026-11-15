@@ -302,14 +302,16 @@ public static class LiascapePlayerMedia
     }
 
     // ---- scene GPU budget + VRAM ---------------------------------------------------------------------
-    // Three player-level props, all live (docs/player/modules/scene-gpu-budget.md):
+    // Four player-level props, all live (docs/player/modules/scene-gpu-budget.md):
     // `player.scene_throttle` ← AutoThrottleScenes, `player.scene_vram_limit_mib` ← SceneVramLimitMib while
-    // LimitVramPerScene (else 0 = off), `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur
-    // (coalescible per prop, `player:<prop>`); a new player process gets every one (`AssertSceneFps`).
+    // LimitVramPerScene (else 0 = off), `player.scene_vram_stop_shows` ← SceneVramStopShows,
+    // `player.vram_low_mode` ← VramLowMode. `/settings` diffs prev → cur (coalescible per prop, `player:<prop>`); a
+    // new player process gets every one (`AssertSceneFps`).
     public static IReadOnlyList<(string prop, object value)> GpuProps(AppSettings s) =>
     [
         ("scene_throttle", s.AutoThrottleScenes),
         ("scene_vram_limit_mib", s.LimitVramPerScene ? (double)s.SceneVramLimitMib : 0.0),
+        ("scene_vram_stop_shows", s.SceneVramStopShows),
         ("vram_low_mode", s.VramLowMode),
     ];
 

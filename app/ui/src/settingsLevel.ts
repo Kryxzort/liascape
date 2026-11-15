@@ -27,6 +27,7 @@ export const LEVEL_OF_KEY: Record<string, Level> = {
   disableCache: "advanced", stayPausedWhenSwitching: "advanced", restartMpvpaperEverySeconds: "advanced",
   restartOnlyAtPlaylistChangeover: "advanced", autoMuteMinLevelDb: "advanced", hwDec: "advanced",
   demuxerMaxMib: "advanced", demuxerMaxBackMib: "advanced", limitVramPerScene: "advanced", sceneVramLimitMib: "advanced",
+  sceneVramStopShows: "advanced",
   liveWallpaperBehindAllTabs: "advanced", copyFilesInsteadOfSymlinking: "advanced", replaceDirectWithWorkshop: "advanced",
   sceneTransitionDelayMs: "advanced", playerEngine: "advanced", transitionMethod: "advanced", fullLiveSyncOffsetMs: "advanced",
   volumeKeyTarget: "advanced",

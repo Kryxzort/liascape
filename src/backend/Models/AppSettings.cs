@@ -181,14 +181,27 @@ public class AppSettings
     // scene at its fixed fps) → `player.scene_throttle`.
     public bool AutoThrottleScenes { get; set; } = true;
     // The per-scene VRAM guard: a scene worker using more than SceneVramLimitMib of VRAM is stopped (a rotation
-    // advances, a single wallpaper keeps its last frame; never marked crashed) → `player.scene_vram_limit_mib`
-    // (the MiB while enabled, else 0 = off). The MiB value is kept while off (the toggle restores it).
+    // advances, a single wallpaper shows what SceneVramStopShows says; never marked crashed) →
+    // `player.scene_vram_limit_mib` (the MiB while enabled, else 0 = off). The MiB value is kept while off (the
+    // toggle restores it).
     public bool LimitVramPerScene { get; set; } = false;
-    private int _sceneVramLimitMib = 1536;
+    // 2 GiB, not 1: measured over a real library with the player's own readout (docs/player/modules/scene-gpu-budget.md
+    // § What scenes use), 1 GiB would stop about one scene in six, and the 90th percentile (~1.5 GiB) already sits
+    // above it; 2 GiB keeps ~94 % playing with room for a bigger screen's frames, and still stops the few that take
+    // 3 to 4 GiB.
+    private int _sceneVramLimitMib = 2048;
     public int SceneVramLimitMib
     {
         get => _sceneVramLimitMib;
         set => _sceneVramLimitMib = Math.Clamp(value, 64, 1_048_576);
+    }
+    // What a scene the guard stopped shows: "last_frame" (its last frame stays) or "nothing" (its screens go black)
+    // → `player.scene_vram_stop_shows`, live both ways. An unknown value reads as the default.
+    private string _sceneVramStopShows = "last_frame";
+    public string SceneVramStopShows
+    {
+        get => _sceneVramStopShows;
+        set => _sceneVramStopShows = value?.ToLowerInvariant() is "last_frame" or "nothing" ? value.ToLowerInvariant() : "last_frame";
     }
     // When the GPU's VRAM runs low (system-wide, every source kind): "stop" (pause + free the sources' GPU memory),
     // "pause", or "off" → `player.vram_low_mode`. An unknown value reads as the default.

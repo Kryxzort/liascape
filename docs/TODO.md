@@ -26,8 +26,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
        makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
        case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
-63. [ ] (owner) Video memory: measure the library's scene VRAM (the player's readout) and round the per-scene cap's
-       default from it (1 or 2 GiB); add a "stop and show nothing" choice beside Stop's last frame.
 57. [ ] probe-settings flakes: one timing cell fails per full run (copy:feedback:on never settles back to "Copy" in
        time, nudge:engine finds no nudge row right after switching to legacy, cache:clear:reduced starts on an already
        emptied cache); each passes alone. Find the race in each (the nudge row may really appear late), fix it.

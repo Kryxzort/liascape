@@ -1195,6 +1195,12 @@ impl Runtime {
             _ => 0.0,
         };
         let scenes = self.host.scene_ids();
+        let blank = self.str_prop("player", "scene_vram_stop_shows") == "nothing";
+        for id in &scenes {
+            if let Some(sc) = self.host.scene_mut(id) {
+                sc.set_vram_blank(blank);
+            }
+        }
         let need = mode != "off" || (limit > 0.0 && !scenes.is_empty()) || self.vram.hold.is_some();
         if !need {
             if self.vram.monitor.take().is_some() {
@@ -2470,6 +2476,7 @@ impl Runtime {
                     &o.name,
                     o.refresh_mhz,
                     self.composer.last_missing(),
+                    host,
                 );
             }
             if let Err(e) = composed {
@@ -2552,6 +2559,7 @@ impl Runtime {
                         &o.name,
                         o.refresh_mhz,
                         self.composer.last_missing(),
+                        host,
                     );
                 }
                 if let Err(e) = composed {
@@ -4833,13 +4841,24 @@ impl Runtime {
 /// The seam probe (design §11; `probe::frames` module doc): count a composed frame of
 /// `output` that drew `missing` as transparent, and log each run of such frames once —
 /// `output.seam {output, missing}` (warn) when it starts, `output.seam_end {output, frames}`
-/// (info) at the next whole frame.
+/// (info) at the next whole frame. A scene that draws nothing on purpose (a VRAM stop under
+/// `player.scene_vram_stop_shows` `nothing`) is no hole. Guard:
+/// `tests/api.rs::scene_over_vram_limit_can_show_nothing`.
 fn note_composed(
     frames: &mut BTreeMap<String, FrameStats>,
     output: &str,
     refresh_mhz: u32,
     missing: &[String],
+    host: &SourceHost,
 ) {
+    let holes: Vec<String>;
+    let shows_nothing = |id: &str| host.scene(id).is_some_and(|s| s.shows_nothing());
+    let missing = if missing.iter().any(|m| shows_nothing(m)) {
+        holes = missing.iter().filter(|m| !shows_nothing(m)).cloned().collect();
+        &holes[..]
+    } else {
+        missing
+    };
     let st = frames
         .entry(output.to_string())
         .or_insert_with(|| FrameStats::new(refresh_mhz, Instant::now()));
