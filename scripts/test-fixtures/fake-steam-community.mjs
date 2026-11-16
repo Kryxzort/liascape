@@ -1,9 +1,11 @@
-// A fake steamcommunity.com + api.steampowered.com for scripts/test-workshop-social.sh: the backend's
+// A fake steamcommunity.com + api.steampowered.com for scripts/test-workshop-social.sh (and test-steam-signin.sh § 2): the backend's
 // LIASCAPE_STEAM_COMMUNITY / LIASCAPE_STEAM_API point here, so nothing reaches Steam. It answers the calls the Browse
 // sidebar's Workshop pieces make (Helpers/SteamCommunity.cs) the way Steam's site does, and records every request
 // (method, path, form, cookie names, whether the sign-in cookie and the sessionid pair matched) for the test to check:
 //   GET  /sharedfiles/filedetails/?id=N            an item page: g_steamID + #FavoriteItemBtn (toggled = favourited)
 //   POST /sharedfiles/favorite | unfavorite         id, appid, sessionid (= the sessionid cookie) + the sign-in → 200 ""
+//   POST /sharedfiles/subscribe | unsubscribe       id, appid, sessionid + the sign-in → {"success":1} (Steam's own files are the
+//                                                   test's to drop: nothing here writes a Workshop folder)
 //   POST /comment/PublishedFile_Public/render/O/N/  start, count → {success, start, total_count, comments_html}, newest first
 //   POST /comment/PublishedFile_Public/post/O/N/    comment, count, sessionid + the sign-in → the first page, the new one on top
 //   GET  /profiles/S/?xml=1                         a profile's XML (steamID, avatarMedium)
@@ -95,6 +97,10 @@ const server = http.createServer(async (req, res) => {
     if (!signedIn(ck) || !entry.sessionPair) return send(401, "<html>Sign in</html>", "text/html");
     if (m[1] === "favorite") favs.add(`${ME}:${form.id}`); else favs.delete(`${ME}:${form.id}`);
     return send(200, "", "text/html");
+  }
+  if (req.method === "POST" && /^\/sharedfiles\/(subscribe|unsubscribe)$/.test(u.pathname)) {
+    if (!signedIn(ck) || !entry.sessionPair) return send(200, { success: 2 });
+    return send(200, { success: 1 });
   }
   if (req.method === "POST" && (m = u.pathname.match(/^\/comment\/PublishedFile_Public\/render\/(\d+)\/(\d+)\/$/))) {
     if (m[1] !== OWNER) return send(200, { success: false, error: "wrong owner" });

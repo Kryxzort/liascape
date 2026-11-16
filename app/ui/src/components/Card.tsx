@@ -3,7 +3,7 @@ import { Check, X } from "lucide-react";
 import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client";
 import { useStore } from "../store";
 import { shortDownloadStatus } from "./downloadStatus";
-import { isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
+import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions (docs/decisions.md § "Left click does the tab's main action, right click opens the item
@@ -22,6 +22,9 @@ export const Card = memo(function Card({
 }) {
   const [hover, setHover] = useState(false);
   const sub = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
+  // a download the mode can't do now (components/subscribeMode.ts actionBlocked): the button dimmed, its tooltip says why. PERF:
+  // a string per card, the same for every card of a list
+  const getOff = useStore((s) => isWorkshopItem(w) ? actionBlocked(s.settings, s.steam, "download") : null);
   const active = !!w.animatedThumbnailUrl && (hover ? gifOnHover : gifIdle);
   // keep the gif mounted once activated → re-hover never restarts it (just unhides the live frame)
   const [mounted, setMounted] = useState(false);
@@ -65,8 +68,9 @@ export const Card = memo(function Card({
             `.dl-btn` — a hollow outline gets lost on bright thumbnails). A click on the card opens the sidebar. */}
         {/* not on a card the library already has: it would only apply the library's copy — double-click / Enter / the sidebar's Apply do that */}
         {!downloading && !inLibrary && (
-          <button className="dl-btn" title={sub ? "Subscribe & apply" : "Download & apply"} data-dl-sub={sub || undefined}
-            onClick={(e) => { e.stopPropagation(); onDownload(w); }} onDoubleClick={(e) => e.stopPropagation()}>
+          <button className="dl-btn" title={getOff ?? (sub ? "Subscribe & apply" : "Download & apply")} data-dl-sub={sub || undefined}
+            aria-disabled={getOff ? true : undefined}
+            onClick={(e) => { e.stopPropagation(); if (!getOff) onDownload(w); }} onDoubleClick={(e) => e.stopPropagation()}>
             {/* two parts, so the arrow can drop into its tray on hover (components/iconMotion.ts). The arrow + tray span y 2.6–21.1
                 (strokes included): the viewBox is shifted so THEIR centre is the box centre, not the paths' grid's. Subscribe
                 (components/subscribeMode.ts) draws the sidebar's cloud-download the same way: the cloud is the tray, the

@@ -240,8 +240,9 @@ public static class AppOps
     }
 
     // Web-source download OR workshop acquire (subscribe/steamcmd) then import into the library. `oneOff` (a Workshop item's
-    // "Download without subscribing"): WorkshopDownloader.AcquireOneOffAsync whatever the download mode, no subscription, and
-    // a queued unsubscribe of it stays queued (the copy is the library's own, not a subscription's).
+    // "Download without subscribing"): WorkshopDownloader.AcquireOneOffAsync by the download mode's own route, the library's own
+    // workshop/<id> copy, and a queued unsubscribe of it stays queued (the copy is the library's own, not a subscription's); a
+    // subscription the route made only to fetch it is let go once the copy is made (or the import failed).
     public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string thumbnailUrl, string sourceId, CancellationToken ct, string? animatedUrl = null,
         bool oneOff = false)
     {
@@ -251,37 +252,48 @@ public static class AppOps
 
         WallpaperDetail dl = detail;
         string? anim = animatedUrl;
-        if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
+        string? letGo = null; // a one-off's fetching subscription, unsubscribed once the library has its copy
+        try
         {
-            var ap = new Progress<(double, string)>(t =>
-                EventBus.Broadcast("download-progress", new { id = sourceId, value = Math.Max(0, t.Item1), status = t.Item2 }));
-            string dir;
-            if (oneOff) dir = await WorkshopDownloader.AcquireOneOffAsync(detail.WorkshopId, s, ap, ct);
-            else
-                // the Browse sidebar's toggle says "Subscribing…" meanwhile (steamcmd: no subscription)
-                using (s.WorkshopDownloadMode != "steamcmd" ? WorkshopSubOps.Subscribing(detail.WorkshopId) : null)
-                    dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
-            string url = dir;
-            if (!detail.IsScene)
+            if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
             {
-                var vf = await WorkshopDownloader.ResolveVideoFileAsync(dir);
-                if (!string.IsNullOrEmpty(vf)) url = vf;
+                var ap = new Progress<(double, string)>(t =>
+                    EventBus.Broadcast("download-progress", new { id = sourceId, value = Math.Max(0, t.Item1), status = t.Item2 }));
+                string dir;
+                if (oneOff)
+                {
+                    var got = await WorkshopDownloader.AcquireOneOffAsync(detail.WorkshopId, s, ap, ct);
+                    dir = got.Dir;
+                    if (got.Subscribed) letGo = detail.WorkshopId;
+                }
+                else
+                    // the Browse sidebar's toggle says "Subscribing…" meanwhile (steamcmd: no subscription)
+                    using (s.WorkshopDownloadMode != "steamcmd" ? WorkshopSubOps.Subscribing(detail.WorkshopId) : null)
+                        dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
+                string url = dir;
+                if (!detail.IsScene)
+                {
+                    var vf = await WorkshopDownloader.ResolveVideoFileAsync(dir);
+                    if (!string.IsNullOrEmpty(vf)) url = vf;
+                }
+                // animated preview lives in the acquired workshop folder (preview.gif/webp)
+                anim = ResolveLocalAnimatedPreview(dir) ?? anim;
+                dl = new WallpaperDetail { Title = detail.Title, PreviewUrl = thumbnailUrl, DownloadUrl = url, IsScene = detail.IsScene, WorkshopId = detail.WorkshopId, NeedsReferrer = false,
+                    Resolution = detail.Resolution, AgeRating = detail.AgeRating, YoutubeUrl = detail.YoutubeUrl,
+                    PageUrl = detail.PageUrl, AuthorName = detail.AuthorName, Description = detail.Description,
+                    FileSizeBytes = detail.FileSizeBytes, Subscriptions = detail.Subscriptions,
+                    Favorites = detail.Favorites, Tags = detail.Tags };
             }
-            // animated preview lives in the acquired workshop folder (preview.gif/webp)
-            anim = ResolveLocalAnimatedPreview(dir) ?? anim;
-            dl = new WallpaperDetail { Title = detail.Title, PreviewUrl = thumbnailUrl, DownloadUrl = url, IsScene = detail.IsScene, WorkshopId = detail.WorkshopId, NeedsReferrer = false,
-                Resolution = detail.Resolution, AgeRating = detail.AgeRating, YoutubeUrl = detail.YoutubeUrl,
-                PageUrl = detail.PageUrl, AuthorName = detail.AuthorName, Description = detail.Description,
-                FileSizeBytes = detail.FileSizeBytes, Subscriptions = detail.Subscriptions,
-                Favorites = detail.Favorites, Tags = detail.Tags };
-        }
 
-        var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim);
-        if (item.WorkshopId is string wid && !oneOff) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
-        SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
-        LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
-        EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
-        return item;
+            var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim,
+                ownCopy: oneOff);
+            if (item.WorkshopId is string wid && !oneOff) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
+            SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
+            LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
+            EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
+            return item;
+        }
+        finally { if (letGo != null) WorkshopDownloader.LetGoOfOneOff(letGo); }
     }
 
     // A volume keybind (`liascape volume up|down`, `/volume {delta}`): PlayerHelper.AdjustVolume moves the

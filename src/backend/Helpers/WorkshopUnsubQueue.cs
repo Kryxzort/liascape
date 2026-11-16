@@ -146,6 +146,30 @@ public static class WorkshopUnsubQueue
         }
     }
 
+    // Keeps a Steam folder that isn't a subscription out of auto-import (a one-off download's: WorkshopDownloader.AcquireOneOffAsync)
+    // without queueing an unsubscribe; pruned like the rest once Steam removes the folder. True = it wasn't blocked before.
+    public static bool Block(string id)
+    {
+        lock (_gate)
+        {
+            var s = Load();
+            if (s.Blocked.Contains(id)) return false;
+            s.Blocked.Add(id);
+            Save(s);
+            return true;
+        }
+    }
+
+    // Undoes a Block whose fetch failed: off `blocked` only (a queued unsubscribe of it stays queued).
+    public static void DropBlock(string id)
+    {
+        lock (_gate)
+        {
+            var s = Load();
+            if (!s.Pending.Contains(id) && s.Blocked.Remove(id)) Save(s);
+        }
+    }
+
     // Re-subscribe / re-add via WE Local → the item is wanted again, stop blocking it.
     public static void Unblock(string id)
     {

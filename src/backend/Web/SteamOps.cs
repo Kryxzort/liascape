@@ -26,11 +26,9 @@ public static class SteamOps
             accountName = s.SteamAccountName,
             daysLeft = SteamAuthService.RefreshTokenDaysRemaining(),
             mode = s.WorkshopDownloadMode,
-            // API: what the UI's Unsubscribe controls need to mirror WorkshopDownloader.UnsubscribeBlocked under any mode
-            // (components/subscribeMode.ts unsubBlocked): a sign-in an unsubscribe can use, and whether "Open in the Steam app"
-            // unsubscribes through pages
+            // API: what the UI's Workshop controls need to mirror WorkshopDownloader.Blocked under any mode
+            // (components/subscribeMode.ts actionBlocked): a sign-in the actions can use
             usable = SteamAuthService.HasUsableSignIn(s),
-            pageUnsubscribes = WorkshopDownloader.PageUnsubscribes,
         };
     }
 
@@ -219,13 +217,13 @@ public static class SteamOps
     public static void SignInLost()
     {
         EventBus.Broadcast("steam-status", Status());
-        if (WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load()) == null) return;
+        if (WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load()) is not { } why) return;
         var held = WorkshopUnsubQueue.SnapshotHeld();
         if (held.Count == 0) return;
         int back = AppOps.DropUnsubscribes(held);
         Console.WriteLine($"workshop: unsubscribe {string.Join(", ", held)}: the Steam sign-in ended inside the Undo window — dropped");
         EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = 0,
-            message = WorkshopDownloader.DroppedMessage(held.Count, back) });
+            message = WorkshopDownloader.DroppedMessage(held.Count, back, why) });
     }
 
     // How long an Unsubscribe (the Library's, the Browse sidebar's) waits before it reaches Steam: its Undo window. An Undo

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Monitor, User, ExternalLink, Download, CloudDownload, Check, Library as LibraryIcon, Play, X, Info } from "lucide-react";
 import { api, thumb, still, anim, CARD_STILL_W, type LibraryItem, type OneOffRoute, type Wallpaper } from "../api/client";
 import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
 import { useStore } from "../store";
 import { SubToggle } from "./SubToggle";
-import { isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
+import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
 import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
@@ -14,8 +15,10 @@ import { CommentsSection, CreatorRow, FavoriteTile } from "./WorkshopSocial";
 import { SizePill, StatPills } from "./sidePills";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { menuAt, oneOffMenuItems } from "./menuItems";
+import { FADE, useMotion } from "./motion";
 
-// how long an asked "Download without subscribing" route stays good (a settings change in another window moves it)
+// how long an asked "Download without subscribing" route stays good when nothing it hangs on changed here (a settings change in
+// another window moves it)
 const ONE_OFF_FRESH_MS = 5000;
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
@@ -67,6 +70,11 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   // (the Steam app / page, a steamcmd copy) keep Download and the card. Guard: probe-steam steam:subMerge:*
   const subIsDownload = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
   const GetIcon = subIsDownload ? CloudDownload : Download;
+  // a download the mode can't do now (components/subscribeMode.ts actionBlocked: signed out under "Subscribe with Steam
+  // login"): both buttons disabled up front, the line under them says why; their right-click menu still opens (its entries say
+  // their own). Guard: probe-steam side:blocked:download
+  const getOff = useStore((s) => isWorkshopItem(w) ? actionBlocked(s.settings, s.steam, "download") : null);
+  const motionOn = useMotion();
   // A Workshop item's download / subscribe buttons have a right-click menu (components/ContextMenu.tsx): "Download without
   // subscribing" (+ "& apply"), a one-off copy that is never a subscription (menuItems.tsx oneOffMenuItems). How it would be
   // fetched (GET /workshop/one-off) is asked as the pointer reaches a button, so the menu opens with its answer: without a
@@ -76,11 +84,14 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const [oneOff, setOneOff] = useState<OneOffRoute | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const menuFrom = useRef<HTMLButtonElement | null>(null);
-  const asked = useRef<{ at: number; p: Promise<OneOffRoute> } | null>(null);
+  const asked = useRef<{ at: number; key: string; p: Promise<OneOffRoute> } | null>(null);
+  // the route follows the download mode and the sign-in (a sign-out turns "Subscribe with Steam login"'s off): either changing
+  // here asks again at once
+  const routeKey = useStore((s) => `${String(s.settings?.workshopDownloadMode)}|${s.steam?.usable ?? (s.steam?.signedIn && !s.steam?.rejected)}`);
   const askOneOff = () => {
-    if (asked.current && Date.now() - asked.current.at < ONE_OFF_FRESH_MS) return asked.current.p;
+    if (asked.current && asked.current.key === routeKey && Date.now() - asked.current.at < ONE_OFF_FRESH_MS) return asked.current.p;
     const p = api.workshopOneOff().catch((): OneOffRoute => ({ route: null, missing: "Couldn't check how to download it here. Try again." }));
-    asked.current = { at: Date.now(), p };
+    asked.current = { at: Date.now(), key: routeKey, p };
     return p;
   };
   const getMenu = oneOffable ? {
@@ -131,8 +142,16 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             <button className="btn accent ico side-go" ref={magnetRef} onClick={() => onApplyLib(libItem.videoPath)}><Play size={15} fill="currentColor" /> Apply</button>
           ) : (
             <>
-              <button className="btn accent ico side-go" data-side-get="apply" ref={magnetRef} onClick={() => onDownload(true)} {...getMenu}><span className="side-dl-ico"><GetIcon size={16} /></span> {subIsDownload ? "Subscribe" : "Download"} &amp; Apply</button>
-              <button className="btn ghost ico side-go" data-side-get="only" onClick={() => onDownload(false)} {...getMenu}><span className="side-dl-ico"><GetIcon size={15} /></span> {subIsDownload ? "Subscribe" : "Download"}</button>
+              <button className="btn accent ico side-go" data-side-get="apply" ref={magnetRef} aria-disabled={getOff ? true : undefined}
+                onClick={getOff ? undefined : () => onDownload(true)} {...getMenu}><span className="side-dl-ico"><GetIcon size={16} /></span> {subIsDownload ? "Subscribe" : "Download"} &amp; Apply</button>
+              <button className="btn ghost ico side-go" data-side-get="only" aria-disabled={getOff ? true : undefined}
+                onClick={getOff ? undefined : () => onDownload(false)} {...getMenu}><span className="side-dl-ico"><GetIcon size={15} /></span> {subIsDownload ? "Subscribe" : "Download"}</button>
+              {/* COOL: the reason rises in under the buttons (motion off: fades), a sign-in turning it off live included */}
+              <AnimatePresence initial={false}>
+                {getOff && <motion.span key={getOff} className="side-cta-why" data-side-get-why
+                  {...(motionOn ? { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 },
+                    transition: { duration: 0.2, ease: [0.2, 0.9, 0.3, 1] as const } } : FADE)}>{getOff}</motion.span>}
+              </AnimatePresence>
             </>
           )}
         </div>

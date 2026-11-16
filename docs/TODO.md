@@ -18,16 +18,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        every texture format and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was
        still black 1 s after its first frame in 7 of 181 loads, the baseline build too, five of them in one player
        run: needs mpv's log of a black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.
-65. [ ] (owner) "Download without subscribing" uses the chosen download mode's own route, so it needs no steamcmd setup
-       (steamcmd alone made it a duplicate of the steamcmd mode): "Use the Steam app" → the running client's
-       ISteamUGC::DownloadItem (it fetches an unsubscribed item into Steam's Workshop folder; copy it into the library's
-       own workshop/<id>; if the client refuses an unsubscribed item, subscribe → copy → unsubscribe through the client);
-       "Subscribe with Steam login" (signed in) → subscribe → wait for Steam's copy → copy → unsubscribe (the "Unsubscribe
-       without deleting" flow, with no Undo window); "Download via steamcmd" → steamcmd (today's route); "Open in the
-       Steam app" → steamcmd when it's ready, else disabled with why (a one-off can't be done by clicks in Steam).
-       Signed out in the subscribe mode → disabled (#64: the app stays disconnected). Also Undo's resubscribe
-       (`WorkshopDownloader.ResubscribeAsync`) still falls back to the Steam to-do page in the subscribe mode when signed
-       out: that mode never opens pages, so it goes too. After #64.
 60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
        makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
        case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.

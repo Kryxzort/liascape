@@ -25,7 +25,8 @@ namespace Liascape.Helpers;
 //   read from Valve's own libsteam_api wrappers (objdump: `mov (%rdi),%rax; jmp *0x220(%rax)` = slot 68), not guessed:
 //   ISteamClient "SteamClient020" CreateSteamPipe 0, BReleaseSteamPipe 1, ConnectToGlobalUser 2, ReleaseUser 4,
 //   GetISteamGenericInterface 12; ISteamUGC "STEAMUGC_INTERFACE_VERSION018" SubscribeItem 68, UnsubscribeItem 69, GetItemState 72,
-//   GetItemInstallInfo 73, GetItemDownloadInfo 74.
+//   GetItemInstallInfo 73, GetItemDownloadInfo 74, DownloadItem 75 (the slot after GetItemDownloadInfo in every version's
+//   wrappers: 014 0x210 → 0x218, 021 0x270 → 0x278).
 // - In a SHORT-LIVED CHILD (`liascape-backend steam-ugc subscribe <id> <steamclient.so>…`, SteamAppId=431960 in ITS
 //   environment only): connected for the download's seconds, not the backend's lifetime, and a crash in Steam's library
 //   can't take the backend down. JSON lines on stdout; the parent closes its stdin to stop it (release → exit).
@@ -71,8 +72,32 @@ public static class SteamClientUgc
     public static async Task<Result> SubscribeAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)
     {
         await TakeTurnAsync(progress, ct);
-        try { return await SubscribeCoreAsync(workshopId, s, progress, ct); }
+        RunResult r;
+        try { r = await RunItemAsync("subscribe", workshopId, s, progress, "Subscribing through Steam…", ct); }
         finally { Turn.Release(); }
+        if (r.Folder != null) return new(r.Folder, null);
+        if (!r.Accepted) return new(null, r.Error ?? "Steam didn't answer");
+        throw new InvalidOperationException($"Steam took the subscription but didn't install it: {r.Error ?? "no reason given"}");
+    }
+
+    /// What a download without subscribing got: Folder = Steam's install folder; WasSubscribed = the user had it subscribed
+    /// already; Refused = Steam won't download it unsubscribed (the caller may subscribe instead); Fallback = why the Steam
+    /// client couldn't be used at all.
+    public sealed record DownloadResult(string? Folder, bool WasSubscribed, bool Refused, string? Fallback);
+
+    /// ISteamUGC::DownloadItem: Steam fetches the item into its Workshop folder WITHOUT a subscription (and keeps it there for a
+    /// while, never updating it), reporting its bytes like a subscribe. Throws only for cancellation and for failures after Steam
+    /// took the download. Guard: test-steam-signin.sh § 3 j.
+    public static async Task<DownloadResult> DownloadAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)
+    {
+        await TakeTurnAsync(progress, ct);
+        RunResult r;
+        try { r = await RunItemAsync("download", workshopId, s, progress, "Asking Steam for it…", ct); }
+        finally { Turn.Release(); }
+        if (r.Folder != null) return new(r.Folder, r.WasSubscribed, false, null);
+        if (r.Refused) return new(null, r.WasSubscribed, true, null);
+        if (!r.Accepted) return new(null, r.WasSubscribed, false, r.Error ?? "Steam didn't answer");
+        throw new InvalidOperationException($"Steam took the download but didn't install it: {r.Error ?? "no reason given"}");
     }
 
     /// The card's words while a download waits for its turn with the Steam client (another helper is running).
@@ -89,25 +114,28 @@ public static class SteamClientUgc
         await Turn.WaitAsync(ct);
     }
 
-    static async Task<Result> SubscribeCoreAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)
+    // what a `subscribe` / `download` child said: Accepted = Steam took the request; Folder = installed there
+    sealed record RunResult(bool Accepted, string? Folder, string? Error, bool Refused, bool WasSubscribed);
+
+    static async Task<RunResult> RunItemAsync(string verb, string workshopId, AppSettings s, IProgress<(double, string)>? progress, string asking, CancellationToken ct)
     {
         var libs = Candidates(s);
-        if (libs.Count == 0) return new(null, "the Steam client's steamclient.so wasn't found — is Steam installed?");
+        if (libs.Count == 0) return new(false, null, "the Steam client's steamclient.so wasn't found — is Steam installed?", false, false);
         var self = PlayerHelper.GetSelfInvocationArgs();
-        if (self.Count == 0) return new(null, "can't start the helper");
+        if (self.Count == 0) return new(false, null, "can't start the helper", false, false);
         var psi = new ProcessStartInfo(self[0]) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in self.Skip(1)) psi.ArgumentList.Add(a);
-        psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add("subscribe"); psi.ArgumentList.Add(workshopId);
+        psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add(verb); psi.ArgumentList.Add(workshopId);
         foreach (var l in libs) psi.ArgumentList.Add(l);
         psi.Environment["SteamAppId"] = WallpaperEngineAppId.ToString();
         psi.Environment["SteamGameId"] = WallpaperEngineAppId.ToString();
         psi.Environment.Remove("LD_LIBRARY_PATH"); // the backend's (a dev shell's) must not shadow Steam's client library's
 
-        progress?.Report((-1, "Subscribing through Steam…"));
+        progress?.Report((-1, asking));
         using var proc = Process.Start(psi);
-        if (proc == null) return new(null, "can't start the helper");
+        if (proc == null) return new(false, null, "can't start the helper", false, false);
         _ = proc.StandardError.ReadToEndAsync(); // drained; Valve's library chats on stderr
-        bool accepted = false; string? folder = null, error = null; var shown = "";
+        bool accepted = false, refused = false, wasSubscribed = false; string? folder = null, error = null; var shown = "";
         using var reg = ct.Register(() => { try { proc.StandardInput.Close(); } catch { } }); // the child shuts down + exits
         try
         {
@@ -118,7 +146,9 @@ public static class SteamClientUgc
                 try { e = JsonDocument.Parse(line).RootElement; } catch { continue; }
                 switch (e.GetProperty("event").GetString())
                 {
-                    case "subscribed": accepted = true; break;
+                    case "subscribed": case "accepted": accepted = true; break;
+                    case "before": wasSubscribed = e.GetProperty("subscribed").GetBoolean(); break;
+                    case "refused": refused = true; break;
                     case "progress":
                         long done = e.GetProperty("done").GetInt64(), total = e.GetProperty("total").GetInt64();
                         if (total > 0) { shown = "bytes"; progress?.Report((Math.Clamp((double)done / total, 0.001, 0.999), WorkshopDownloader.SteamDownloading)); }
@@ -135,9 +165,7 @@ public static class SteamClientUgc
             if (!proc.WaitForExit(3000)) { try { proc.Kill(); } catch { } } // a wedged library: it had its chance to shut down
         }
         ct.ThrowIfCancellationRequested();
-        if (folder != null) return new(folder, null);
-        if (!accepted) return new(null, error ?? "Steam didn't answer");
-        throw new InvalidOperationException($"Steam took the subscription but didn't install it: {error ?? "no reason given"}");
+        return new(accepted, folder, error, refused, wasSubscribed);
     }
 
     /// Unsubscribe through the running Steam client. Done = the ids Steam confirmed (no longer subscribed); Fallback = why the
@@ -230,7 +258,7 @@ public static class SteamClientUgc
     // ---- the child side (`steam-ugc …`, its own process) -------------------------------------------------------------
 
     const int ClientCreatePipe = 0, ClientReleasePipe = 1, ClientConnectUser = 2, ClientReleaseUser = 4, ClientGenericInterface = 12;
-    const int UgcSubscribe = 68, UgcUnsubscribe = 69, UgcState = 72, UgcInstallInfo = 73, UgcDownloadInfo = 74;
+    const int UgcSubscribe = 68, UgcUnsubscribe = 69, UgcState = 72, UgcInstallInfo = 73, UgcDownloadInfo = 74, UgcDownload = 75;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr CreateInterfaceFn([MarshalAs(UnmanagedType.LPStr)] string version, IntPtr ret);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int PipeFn(IntPtr self);
@@ -242,6 +270,7 @@ public static class SteamClientUgc
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate ulong SubscribeFn(IntPtr self, ulong id);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate uint StateFn(IntPtr self, ulong id);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool DlInfoFn(IntPtr self, ulong id, out ulong done, out ulong total);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool DownloadFn(IntPtr self, ulong id, [MarshalAs(UnmanagedType.I1)] bool highPriority);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool InstallInfoFn(IntPtr self, ulong id, out ulong size, byte[] folder, uint folderSize, out uint timestamp);
     // steamclient.so's own exports: the pipe's callback queue (drained so it never grows while we poll)
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool GetCallbackFn(int pipe, IntPtr msg);
@@ -306,20 +335,20 @@ public static class SteamClientUgc
             Emit(new { @event = "ready" });
             return 0;
         }
-        if (args.Length < 3 || args[0] is not ("subscribe" or "unsubscribe"))
-        { Emit(new { @event = "error", message = "usage: steam-ugc subscribe <id> | unsubscribe <id,id,…> | probe  <steamclient.so>…" }); return 2; }
+        if (args.Length < 3 || args[0] is not ("subscribe" or "unsubscribe" or "download"))
+        { Emit(new { @event = "error", message = "usage: steam-ugc subscribe <id> | download <id> | unsubscribe <id,id,…> | probe  <steamclient.so>…" }); return 2; }
         var ids = new List<ulong>();
         foreach (var part in args[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
             if (ulong.TryParse(part, out var v)) ids.Add(v);
             else { Emit(new { @event = "error", message = $"not a Workshop id: {part}" }); return 2; }
-        if (ids.Count == 0 || (args[0] == "subscribe" && ids.Count != 1)) { Emit(new { @event = "error", message = "one id to subscribe, one or more to unsubscribe" }); return 2; }
+        if (ids.Count == 0 || (args[0] != "unsubscribe" && ids.Count != 1)) { Emit(new { @event = "error", message = "one id to subscribe or download, one or more to unsubscribe" }); return 2; }
 
         var session = Connect(args.Skip(2), out var why);
         if (session == null) { Emit(new { @event = "error", message = why }); return 3; }
         // the parent closes our stdin to stop us (a cancel)
         var stop = new ManualResetEventSlim();
         new Thread(() => { try { while (Console.In.ReadLine() != null) { } } catch { } stop.Set(); }) { IsBackground = true }.Start();
-        try { return args[0] == "subscribe" ? Subscribe(session, ids[0], stop) : Unsubscribe(session, ids, stop); }
+        try { return args[0] switch { "subscribe" => Subscribe(session, ids[0], stop), "download" => Download(session, ids[0], stop), _ => Unsubscribe(session, ids, stop) }; }
         finally { Release(session); }
     }
 
@@ -381,5 +410,42 @@ public static class SteamClientUgc
         }
         if (rc == 1) Emit(new { @event = "error", message = stop.IsSet ? "cancelled" : "Steam didn't install it within 30 minutes" });
         return rc;
+    }
+    // DownloadItem: no subscription. "before" = whether the user had it subscribed; "refused" = Steam won't fetch it (the call
+    // said no, or nothing started within 20 s); else bytes like a subscribe, then "installed" with Steam's folder.
+    static int Download(Session s, ulong id, ManualResetEventSlim stop)
+    {
+        var download = Slot<DownloadFn>(s.Ugc, UgcDownload);
+        var state = Slot<StateFn>(s.Ugc, UgcState);
+        var dlInfo = Slot<DlInfoFn>(s.Ugc, UgcDownloadInfo);
+        var install = Slot<InstallInfoFn>(s.Ugc, UgcInstallInfo);
+        var pump = Pump(s);
+        Emit(new { @event = "before", subscribed = (state(s.Ugc, id) & StateSubscribed) != 0 });
+        if (!download(s.Ugc, id, true)) { Emit(new { @event = "refused" }); return 5; }
+        Emit(new { @event = "accepted" });
+        var sw = Stopwatch.StartNew();
+        bool started = false; string last = "";
+        while (sw.Elapsed < TimeSpan.FromMinutes(30) && !stop.IsSet)
+        {
+            pump();
+            uint st = state(s.Ugc, id);
+            if ((st & (StateInstalled | StateDownloading | StateDownloadPending)) != 0) started = true;
+            dlInfo(s.Ugc, id, out var done, out var total);
+            var now = $"{st}:{done}:{total}";
+            if (now != last) { last = now; Emit(new { @event = "progress", state = st, done, total }); }
+            if ((st & StateInstalled) != 0 && (st & (StateDownloading | StateDownloadPending | StateNeedsUpdate)) == 0)
+            {
+                var buf = new byte[4096];
+                if (install(s.Ugc, id, out var size, buf, (uint)buf.Length, out _))
+                {
+                    var folder = System.Text.Encoding.UTF8.GetString(buf, 0, Math.Max(0, Array.IndexOf(buf, (byte)0)));
+                    Emit(new { @event = "installed", folder, size }); return 0;
+                }
+            }
+            if (!started && sw.Elapsed > TimeSpan.FromSeconds(20)) { Emit(new { @event = "refused" }); return 5; }
+            stop.Wait(250);
+        }
+        Emit(new { @event = "error", message = stop.IsSet ? "cancelled" : "Steam didn't install it within 30 minutes" });
+        return 1;
     }
 }

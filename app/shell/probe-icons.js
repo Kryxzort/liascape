@@ -11,6 +11,9 @@
 //                       Settings order list's move buttons), arrow-right
 //                       + skip-forward + stop (the Steam to-do), sort (the Library top bar's split: the arrow dips, the bars
 //                       settle; its <svg> no longer tilts as an object). Frames: <OUT>/icons-<name>-f<i>.png
+//   icon:act:download:off  signed out under "Subscribe with Steam login": the sidebar's Download & Apply, Subscribe and the card's
+//                       download button are aria-disabled (components/subscribeMode.ts actionBlocked) and their glyphs stay at
+//                       rest on hover
 //   icon:hold:<name>    trash (a Library card's delete: the lid), folder (the playlist bar's Load: the flap), x (the sidebar's
 //                       close), chevron (the playlist bar's fold, clicked): hover → it moves through in-between frames, overshoots,
 //                       HOLDS a moved state; leaving → back to rest through in-between frames
@@ -75,7 +78,9 @@ const STUB = `(() => {
   window.fetch = (u, o = {}) => {
     const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0], m = (o.method || "GET").toUpperCase();
     const res = (b, status = 200) => Promise.resolve(new Response(b == null ? "" : JSON.stringify(b), { status, headers: b == null ? {} : { "Content-Type": "application/json" } }));
-    if (p === "/steam/status") return res({ signedIn: false, rejected: false, accountName: "", daysLeft: null, mode: "subscribe" });
+    // signed in: under "Subscribe with Steam login" (the default) a signed-out page disables every download and Subscribe
+    // (components/subscribeMode.ts actionBlocked), and a disabled control plays nothing (icon:act:download:off)
+    if (p === "/steam/status") return res({ signedIn: true, rejected: false, accountName: "probe", daysLeft: 200, mode: "subscribe", usable: true });
     if (p.startsWith("/steam/")) return res(null);
     if (p === "/steam-todo") return res({ finished: true });
     if (p.startsWith("/steam-todo/") && m === "POST") return res(null);
@@ -327,6 +332,37 @@ app.whenReady().then(async () => {
     await act("card-download", async () => { await closeSide(); await browse();
       const t = await centre(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")`); await mv(t.x - 10, t.y - 10, 300); },
       `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")`, ":scope .dl-glyph .dl-arrow", { stay: true });
+    // a download the mode can't do now (signed out under "Subscribe with Steam login": components/subscribeMode.ts actionBlocked)
+    // is aria-disabled and plays nothing: the sidebar's, the Subscribe's and the card's glyphs stay at rest on hover
+    await cell("icon:act:download:off", async () => {
+      const v = [];
+      const status = (signedIn) => js(`window.__fakeWs("steam-status", { signedIn: ${signedIn}, rejected: false, accountName: "probe", daysLeft: 200, mode: "subscribe", usable: ${signedIn} }); true`);
+      const cardSetup = async () => { await closeSide(); await browse();
+        const t = await centre(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")`); await mv(t.x - 10, t.y - 10, 300); };
+      try {
+        for (const [name, setup, host, part, stay] of [
+          ["download", browseSide, sideBtn("Download & Apply"), ":scope svg.lucide-download > :nth-child(1)", false],
+          ["cloud-download", browseSide, `document.querySelector("[data-side-sub-btn=subscribe]")`, ":scope svg.lucide-cloud-download > :nth-child(1)", false],
+          ["card-download", cardSetup, `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")`, ":scope .dl-glyph .dl-arrow", true]]) {
+          await setup();
+          await status(false); await sleep(400);
+          const off = await page(`return ${host}?.getAttribute("aria-disabled") ?? null;`);
+          if (off !== "true") { v.push(`${name}: signed out, its control isn't aria-disabled (${off}) — proved nothing`); await status(true); continue; }
+          const c = await centre(host);
+          if (stay) await mv(c.x - 30, c.y - 30, 900); else await mv(3, 3, 900);
+          const rest = await page(`const e = ${partExpr(host, part)}; return e ? m.look(e) : null;`);
+          if (!rest) { v.push(`${name}: no icon part ${part} — proved nothing`); await status(true); continue; }
+          await page(`window.__smp = m.sample(() => ${partExpr(host, part)}, 60); true`);
+          await mv(c.x, c.y);
+          const mo = motionOf(await js(`window.__smp`), rest), j = judge(mo.vals, mo.key);
+          console.log(`        ${name} (disabled): ${mo.key} max ${mo.dev.toFixed(3)}, ${j.between} in-between frames`);
+          if (j.between > 0) v.push(`${name}: disabled, it still acts on hover (${j.between} in-between frames of ${mo.key})`);
+          await mv(3, 3, 200);
+          await status(true); await sleep(300);
+        }
+      } finally { await status(true); }
+      return v;
+    });
 
     // ---- hold ----
     await hold("trash", async () => { await lib(); const c = await centre(`document.querySelector(".card.lib .thumb-wrap")`); await mv(c.x, c.y - 20, 400); },

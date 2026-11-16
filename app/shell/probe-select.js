@@ -101,6 +101,9 @@ const stub = () => `(() => { window.__dl = []; const items = ${J(Array.from({ le
     if (p === "/browse" && m) { const b = JSON.parse(o.body); return ok(b.page > 1 ? [] : items); }
     if (p === "/detail" && m) { const b = JSON.parse(o.body); return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
     if (p === "/download" && m) { const b = JSON.parse(o.body); window.__dl.push(b.result.pageUrl); return ok({ skipped: true }); }
+    // signed in: under "Subscribe with Steam login" (the default) a signed-out page disables every Workshop download
+    // (components/subscribeMode.ts actionBlocked), and these cells test the selection, not Steam
+    if (p === "/steam/status") return ok({ signedIn: true, rejected: false, accountName: "probe", daysLeft: 200, mode: "subscribe", usable: true });
     return f(u, o); }; })();`;
 
 let win;

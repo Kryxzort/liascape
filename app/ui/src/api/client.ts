@@ -108,7 +108,9 @@ async function apiError(path: string, r: Response): Promise<ApiError> {
 // already has the current one (its download finished) — still the user's Next; `message` = the Steam app couldn't be opened /
 // reached; `busy` = "Let the Steam app do all N" is asking Steam.
 // POST /workshop/state: a Workshop item's subscription as the Browse sidebar shows it (disk + the unsubscribe queue + the to-do)
-export type OneOffRoute = { route: "steamcmd" | null; missing: string | null };
+// GET /workshop/one-off: how "Download without subscribing" would get an item in the chosen download mode (the Steam client,
+// the sign-in's subscribe-copy-unsubscribe, steamcmd), or null + why not (WorkshopDownloader.OneOffRouteOf)
+export type OneOffRoute = { route: "steamapp" | "subscribe" | "steamcmd" | null; missing: string | null };
 export type WorkshopSubState = { subscribed: boolean; pending: "subscribe" | "unsubscribe" | null; inLibrary: boolean; onDisk: boolean };
 export const steamPageUrl = (workshopId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`;
 export type SteamTodo =
@@ -314,7 +316,7 @@ export const api = {
     jpost<{ message: string }>("/playlist/play", { paths, settings }),
   playFrom: (paths: string[], startIndex: number, settings: PlaylistSettings) =>
     jpost<{ message: string }>("/playlist/play-from", { paths, startIndex, settings }),
-  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean; pageUnsubscribes?: boolean }>("/steam/status"),
+  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean }>("/steam/status"),
   qrStart: () => jpost("/steam/qr/start"),
   qrCancel: () => jpost("/steam/qr/cancel"),
   signout: () => jpost("/steam/signout"),

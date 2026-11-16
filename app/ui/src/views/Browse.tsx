@@ -20,7 +20,7 @@ import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper } from "../api/client";
 import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
-import { isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
+import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // WE-local browse sort menu (client-side over the single loaded page).
 function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
@@ -149,8 +149,14 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
 
   // a selection of Workshop items in the merged mode subscribes (components/subscribeMode.ts)
   const bulkSub = useStore((s) => subscribeIsDownload(s.settings)) && sel.size > 0 && sorted.some((w) => sel.has(w.pageUrl) && isWorkshopItem(w));
+  // a download the mode can't do now (components/subscribeMode.ts actionBlocked): a selection of only such items disables the
+  // button with the reason; a mixed one downloads the rest. Guard: probe-steam side:blocked:download
+  const getOff = useStore((s) => actionBlocked(s.settings, s.steam, "download"));
+  const selItems = sorted.filter((w) => sel.has(w.pageUrl));
+  const bulkOff = getOff && selItems.length > 0 && selItems.every(isWorkshopItem) ? getOff : null;
   const bulkDownload = () => {
-    sorted.filter((w) => sel.has(w.pageUrl)).forEach((w) => download(activeSource, w, false)); // bulk = download without applying
+    if (bulkOff) return;
+    selItems.filter((w) => !getOff || !isWorkshopItem(w)).forEach((w) => download(activeSource, w, false)); // bulk = download without applying
     setSel(new Set());
   };
 
@@ -204,7 +210,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
       {sel.size > 0 && (
         <div className="sel-toolbar">
           <span>{sel.size} selected</span>
-          <button className="btn accent" onClick={bulkDownload}>{bulkSub ? "Subscribe" : "Download"} {sel.size}</button>
+          <button className="btn accent" onClick={bulkDownload} aria-disabled={bulkOff ? true : undefined} title={bulkOff ?? undefined}>{bulkSub ? "Subscribe" : "Download"} {sel.size}</button>
           <button className="btn ghost" onClick={() => setSel(new Set())}>Cancel</button>
         </div>
       )}

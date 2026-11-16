@@ -2,14 +2,17 @@
 // client's part with real C++-shaped objects (first word = a vtable; only the slots the helper uses are filled):
 // ISteamClient "SteamClient020" CreateSteamPipe 0, BReleaseSteamPipe 1, ConnectToGlobalUser 2, ReleaseUser 4,
 // GetISteamGenericInterface 12; ISteamUGC "STEAMUGC_INTERFACE_VERSION018" SubscribeItem 68, UnsubscribeItem 69, GetItemState 72,
-// GetItemInstallInfo 73, GetItemDownloadInfo 74. SubscribeItem → "subscribed" at once, "downloading" with bytes climbing
-// over ~1.2 s, then installed in $FAKE_UGC_DIR/<id> (project.json + v.mp4 copied from $FAKE_UGC_CLIP). Never talks to Steam.
+// GetItemInstallInfo 73, GetItemDownloadInfo 74, DownloadItem 75. SubscribeItem → "subscribed" at once, "downloading" with
+// bytes climbing over ~1.2 s, then installed in $FAKE_UGC_DIR/<id> (project.json + v.mp4 copied from $FAKE_UGC_CLIP).
+// DownloadItem → the same download without subscribing (the subscribed bit stays as it was). Never talks to Steam.
+//   $FAKE_UGC_DIR/refuse-download exists → DownloadItem returns false for an item that isn't subscribed
+//   $FAKE_UGC_DIR/downloads ← a line "<id>" per DownloadItem Steam took
 //   $FAKE_UGC_DIR/fail-init exists → ConnectToGlobalUser returns 0 (Steam not running / WE not owned)
 //   SteamAppId must be 431960 (the helper sets it in its child only) — else ConnectToGlobalUser returns 0
 //   $FAKE_UGC_DIR/child.pid ← the caller's pid; $FAKE_UGC_DIR/released ← a line per pipe released
 //   $FAKE_UGC_DIR/sub-<id> = subscribed (a file: each helper run is a NEW process — an unsubscribe run must see what an
 //   earlier download subscribed); UnsubscribeItem deletes it
-//   $FAKE_UGC_DIR/helpers.log ← "open <pid> <unix s>" (CreateInterface), "use <pid>" (Subscribe/UnsubscribeItem), "close <pid>
+//   $FAKE_UGC_DIR/helpers.log ← "open <pid> <unix s>" (CreateInterface), "use <pid>" (Subscribe/Unsubscribe/DownloadItem), "close <pid>
 //   <unix s>" (BReleaseSteamPipe) — the test checks that no two subscribe/unsubscribe helpers were connected at once
 #include <stdbool.h>
 #include <stdint.h>
@@ -69,10 +72,19 @@ static uint64_t unsubscribe(Obj *s, uint64_t id) {
   (void)s; helper_log("use", 0); char p[4096]; subfile(id, p, sizeof p); unlink(p); if (id == sub_id) t_sub = -1; note("unsubscribed", "x\n"); return 2;
 }
 static uint32_t item_state(Obj *s, uint64_t id) {
-  (void)s; double f = frac(id);
-  if (f < 0) { char p[4096]; subfile(id, p, sizeof p); return access(p, F_OK) == 0 ? (1 | 4) : 0; } // subscribed by an earlier run
-  if (f >= 1) { install(id); return 1 | 4; }
-  return 1 | 8 | 16;
+  (void)s; double f = frac(id); char p[4096]; subfile(id, p, sizeof p);
+  uint32_t sub = access(p, F_OK) == 0 ? 1 : 0;
+  if (f < 0) return sub ? (1 | 4) : 0; // subscribed by an earlier run
+  if (f >= 1) { install(id); return sub | 4; }
+  return sub | 8 | 16;
+}
+static bool download_item(Obj *s, uint64_t id, bool high) {
+  (void)s; (void)high; helper_log("use", 0);
+  char p[4096], sp[4096]; snprintf(p, sizeof p, "%s/refuse-download", dir()); subfile(id, sp, sizeof sp);
+  if (access(p, F_OK) == 0 && access(sp, F_OK) != 0) return false;
+  sub_id = id; t_sub = now();
+  char line[32]; snprintf(line, sizeof line, "%llu\n", (unsigned long long)id); note("downloads", line);
+  return true;
 }
 static bool download_info(Obj *s, uint64_t id, uint64_t *done, uint64_t *total) {
   (void)s; double f = frac(id); if (f < 0 || f >= 1) { *done = *total = 0; return f >= 1; }
@@ -89,6 +101,7 @@ void *CreateInterface(const char *ver, int *ret) {
   client_vt[0] = (void *)create_pipe; client_vt[1] = (void *)release_pipe; client_vt[2] = (void *)connect_user;
   client_vt[4] = (void *)release_user; client_vt[12] = (void *)generic;
   ugc_vt[68] = (void *)subscribe; ugc_vt[69] = (void *)unsubscribe; ugc_vt[72] = (void *)item_state; ugc_vt[73] = (void *)install_info; ugc_vt[74] = (void *)download_info;
+  ugc_vt[75] = (void *)download_item;
   helper_log("open", 1);
   char pid[32]; snprintf(pid, sizeof pid, "%d\n", getpid());
   char p[4096]; snprintf(p, sizeof p, "%s/child.pid", dir()); FILE *f = fopen(p, "w"); if (f) { fputs(pid, f); fclose(f); }

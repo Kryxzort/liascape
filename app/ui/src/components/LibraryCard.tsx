@@ -5,7 +5,6 @@ import { PlaylistToggle } from "./PlaylistToggle";
 import { MotionThumb } from "./MotionThumb";
 import { usePreviewKinds } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
-import { UNSUB_SIGN_IN } from "./subscribeMode";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
@@ -18,7 +17,7 @@ export const LibraryCard = memo(function LibraryCard({
   // unsub: its Delete is Unsubscribe (a subscribed Workshop item with auto-import on: Library.tsx doTrash); unsubOff: it can't
   // unsubscribe now (signed out): the button shows disabled, its name says why, and a click only puts that in the status bar
   // (no tooltips on cards). Guard: probe-steam side:unsub:signedOut
-  item: LibraryItem; playing: boolean; selected: boolean; focused: boolean; inPlaylist: boolean; unsub?: boolean; unsubOff?: boolean;
+  item: LibraryItem; playing: boolean; selected: boolean; focused: boolean; inPlaylist: boolean; unsub?: boolean; unsubOff?: string | null;
   // PERF: each takes the item, so the list passes the same function to every card (Library.tsx useStableFn) and a
   // focus / selection change re-renders only the cards whose own props changed
   onClick: (item: LibraryItem, e: React.MouseEvent) => void; onTrash: (item: LibraryItem) => void; onToggle: (item: LibraryItem) => void;
@@ -44,7 +43,7 @@ export const LibraryCard = memo(function LibraryCard({
         {item.hasCrashed && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
           onClick={(e) => { e.stopPropagation(); onToggle(item); }}><PlaylistToggle on={inPlaylist} /></button>
-        <button className="del" aria-label={unsub ? (unsubOff ? UNSUB_SIGN_IN : "Unsubscribe") : "Delete"} aria-disabled={unsubOff || undefined}
+        <button className="del" aria-label={unsub ? (unsubOff ?? "Unsubscribe") : "Delete"} aria-disabled={unsubOff ? true : undefined}
           onClick={(e) => { e.stopPropagation(); onTrash(item); }}><Trash2 size={24} /></button>
         {/* bottom title bar, 2-line clamp, centered white over #66000000 */}
         <div className="lib-title" data-title={item.title}><span>{item.title}</span></div>

@@ -767,9 +767,13 @@ public static class LibraryService
         var localDir = LibraryStore.SourceDir(LibraryStore.Local);
         Directory.CreateDirectory(localDir);
         var moved = new List<string>();
+        // a blocked id's folder in the WE dir isn't a subscription (an unsubscribed item, a one-off download's): Steam deletes it,
+        // so the library's own copy stays. Guard: steam-selftest "reconcile"
+        var blocked = WorkshopUnsubQueue.SnapshotBlockedSet();
         foreach (var dir in SafeDirs(workshopLib).ToList())
         {
             var id = Path.GetFileName(dir);
+            if (blocked.Contains(id)) continue;
             var weDir = Path.Combine(workshopPath, id);
             if (!Directory.Exists(weDir)) continue;            // the WE-dir copy hasn't appeared
             var link = Path.Combine(localDir, id);

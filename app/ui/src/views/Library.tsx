@@ -122,8 +122,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // Unsubscribe = Delete from source (undoable; Undo subscribes again), on the card's button, the Delete key and the
   // sidebar alike; a mixed selection unsubscribes those and deletes the rest. The library's own copy of one ("Unsubscribe
   // without deleting") deletes like any local item. Guard: probe-steam side:unsub:*
-  // Signed out (unsubOff) those Workshop items stay, nothing queued, and the status bar says why; the rest of a selection still
-  // deletes. Guard: probe-steam side:unsub:signedOut
+  // When the mode can't unsubscribe (unsubOff: signed out) those Workshop items stay, nothing queued, and the status bar
+  // says why; the rest of a selection still deletes. Guard: probe-steam side:unsub:signedOut
   const unsubs = (i: LibraryItem) => autoImport && !!i.workshopId && !!i.subscribed;
   const doTrash = (list: LibraryItem[]) => {
     const ws = list.filter(unsubs);
@@ -241,7 +241,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
             selected={sel.has(it.videoPath)}
             focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
-            unsub={unsubs(it)} unsubOff={unsubs(it) && !!unsubOff}
+            unsub={unsubs(it)} unsubOff={unsubs(it) ? unsubOff : null}
             onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
       </div>

@@ -588,6 +588,13 @@ public static class ServerHost
         app.MapPost("/download", async (DownloadReq r, HttpContext ctx) =>
         {
             if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
+            // a Workshop item the download mode can't fetch now (WorkshopDownloader.Blocked; a one-off's route): 400 {error}
+            // before anything reaches Steam. A WE-local folder's item (a path, not a page) only imports from disk.
+            // Guard: test-steam-signin.sh § 2 (refused)
+            if (!string.IsNullOrEmpty(r.Result.WorkshopId) && r.Result.PageUrl.StartsWith("http", StringComparison.Ordinal)
+                && (r.OneOff ? WorkshopDownloader.OneOffRouteFor(SettingsService.Load()).Missing
+                    : WorkshopDownloader.Blocked(SettingsService.Load(), WorkshopDownloader.WorkshopAction.Download)) is { } refused)
+                return Results.Json(new { error = refused }, statusCode: 400);
             var detail = await Providers[r.Source].GetDetailAsync(r.Result);
             LibraryItem item;
             try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl, r.OneOff); }
@@ -676,11 +683,12 @@ public static class ServerHost
             WorkshopDownloader.LaunchSteamCmdSignIn(exe, s.SteamUsername);
             return Results.Ok();
         });
-        // an unsubscribe the download mode can't do now (signed out: WorkshopDownloader.UnsubscribeBlocked) → 400 {error} before
-        // anything is trashed, copied or queued, so the CLI / API can't get round the UI's disabled Unsubscribe.
-        // Guard: test-steam-signin.sh § 2 (unsubscribe refused)
-        static IResult? NoUnsubscribe() => WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load()) is { } why
+        // an action the download mode can't do now (WorkshopDownloader.Blocked: signed out, steamcmd's subscribe / unsubscribe) →
+        // 400 {error} before anything is trashed, copied, queued or sent, so the CLI / API can't get round the UI's disabled
+        // controls. Guard: test-steam-signin.sh § 2 (refused)
+        static IResult? Refused(WorkshopDownloader.WorkshopAction a) => WorkshopDownloader.Blocked(SettingsService.Load(), a) is { } why
             ? Results.Json(new { error = why }, statusCode: 400) : null;
+        static IResult? NoUnsubscribe() => Refused(WorkshopDownloader.WorkshopAction.Unsubscribe);
         app.MapPost("/workshop/delete-from-source", (TrashReq r) =>
             (r.Items.Any(i => i.WorkshopId != null) ? NoUnsubscribe() : null)
             ?? Results.Json(new { batch = AppOps.DeleteFromSource(r.Items), unsubscribeInMs = (int)SteamOps.UnsubUndoWindow.TotalMilliseconds }));
@@ -695,14 +703,14 @@ public static class ServerHost
             Console.WriteLine($"workshop: {r.WorkshopId}: Open on Steam — {(ok ? "opened its page in the Steam app" : "the Steam app couldn't be opened")}");
             return Results.Json(new { ok });
         });
-        // how "Download without subscribing" (POST /download {oneOff}) would get an item: {route: "steamcmd" | null, missing}
+        // how "Download without subscribing" (POST /download {oneOff}) would get an item: {route: "steamapp" | "subscribe" | "steamcmd" | null, missing}
         // (WorkshopDownloader.OneOffRouteFor) — the Browse sidebar's right-click menu asks as it opens. Local only: no Steam request
         app.MapGet("/workshop/one-off", () => Results.Json(WorkshopDownloader.OneOffRouteFor(SettingsService.Load())));
         // the Browse sidebar's Subscribe / Unsubscribe toggle (Web/WorkshopSubOps.cs)
         app.MapPost("/workshop/state", (IdsReq r) => Results.Json(WorkshopSubOps.State(r.Ids ?? [])));
         app.MapPost("/workshop/subscribe", async (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
-                : Results.Json(await WorkshopSubOps.SubscribeAsync(r.WorkshopId!, r.Title)));
+                : Refused(WorkshopDownloader.WorkshopAction.Subscribe) ?? Results.Json(await WorkshopSubOps.SubscribeAsync(r.WorkshopId!, r.Title)));
         app.MapPost("/workshop/unsubscribe", (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : NoUnsubscribe() ?? Results.Json(WorkshopSubOps.Unsubscribe(r.WorkshopId!, r.Title)));

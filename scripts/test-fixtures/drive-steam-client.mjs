@@ -488,4 +488,61 @@ out(autoFlag === false && r5?.status === 200 && t?.current?.id === "760000005" &
 await post("/steam-todo/next");
 t = await waitTodo((x) => x?.finished);
 out(t?.finished === true, "…Next moves on");
+
+// j. "Download without subscribing" under "Use the Steam app": the running client's DownloadItem fetches the item without a
+// subscription (WorkshopDownloader.AcquireOneOffAsync); the library gets its own workshop/<id> copy, the lingering Steam folder
+// is blocked from auto-import and isn't called subscribed. A client that won't download an unsubscribed item → subscribe, copy,
+// unsubscribe, all through the client. An item already subscribed stays subscribed. Steam unreachable → fails with the reason.
+await setMode("steamapp");
+const unsubFile = `${process.env.XDG_CONFIG_HOME}/liascape/workshop_unsub.json`;
+const blockedIds = () => { try { return JSON.parse(fs.readFileSync(unsubFile, "utf8")).Blocked ?? []; } catch { return []; } };
+const fakeLines = (f) => fs.existsSync(`${T}/steamlib/${f}`) ? fs.readFileSync(`${T}/steamlib/${f}`, "utf8").split("\n").filter(Boolean) : [];
+const oneOff = (id) => post("/download", { source: src, result: result(id), apply: false, oneOff: true });
+const ownCopy = (b, id) => { const d = `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/liascape/library/workshop/${id}`;
+  return (b?.videoPath ?? "").includes(`/library/workshop/${id}/`) && fs.existsSync(b.videoPath) && !fs.lstatSync(b.videoPath.replace(/\/[^/]*$/, "")).isSymbolicLink() ? true : `${b?.videoPath} (want ${d})`; };
+const route1 = await (await fetch(U + "/workshop/one-off")).json();
+out(route1.route === "steamapp" && route1.missing == null, "one-off route (Use the Steam app): the Steam client's own", JSON.stringify(route1));
+n0 = urls().length; h0 = helpersLog().length;
+const unsub0 = fakeLines("unsubscribed").length;
+let ro1 = await settle(oneOff("770000001"), 20000);
+const own1 = ownCopy(ro1?.body, "770000001");
+out(ro1?.status === 200 && own1 === true, "one-off (Use the Steam app): the library's own workshop/<id> copy", `${JSON.stringify(ro1)?.slice(0, 160)} | ${own1}`);
+out(fakeLines("downloads").includes("770000001") && !fs.existsSync(`${T}/steamlib/sub-770000001`) && fakeLines("unsubscribed").length === unsub0,
+  "…fetched by the client's DownloadItem, never subscribed (no subscribe, no unsubscribe)", `downloads [${fakeLines("downloads")}] sub ${fs.existsSync(`${T}/steamlib/sub-770000001`)}`);
+out(statuses("770000001").includes("Steam is downloading it…") && urls().length === n0 && !todo.some((x) => x.current?.id === "770000001"),
+  "…\"Steam is downloading it…\", nothing opened in the Steam app, nothing in the to-do", statuses("770000001").join(" > "));
+st = await state(["770000001"]);
+out(st["770000001"]?.subscribed === false && st["770000001"].onDisk === true && blockedIds().includes("770000001") && !(await queue()).includes("770000001"),
+  "…Steam's folder for it lingers: not called subscribed, kept out of auto-import (blocked), no unsubscribe queued", JSON.stringify(st["770000001"]));
+// an item the user is subscribed to: the client's copy is copied, the subscription untouched
+await post("/workshop/subscribe", { workshopId: "770000002", title: "ws-770000002" });
+await sleep(1500); // the subscribe's helper lets go
+const sub2 = fs.existsSync(`${T}/steamlib/sub-770000002`);
+let ro2 = await settle(oneOff("770000002"), 20000);
+st = await state(["770000002"]);
+out(sub2 && ro2?.status === 200 && ownCopy(ro2.body, "770000002") === true && fs.existsSync(`${T}/steamlib/sub-770000002`) && st["770000002"]?.subscribed === true
+  && !blockedIds().includes("770000002") && fakeLines("unsubscribed").length === unsub0,
+  "one-off of a subscribed item (Use the Steam app): its own copy, still subscribed, nothing blocked or unsubscribed", `${sub2} ${JSON.stringify(ro2)?.slice(0, 120)} | ${JSON.stringify(st["770000002"])}`);
+// the client won't download an unsubscribed item: subscribe → copy → unsubscribe through the client, no Undo window
+fs.writeFileSync(`${T}/steamlib/refuse-download`, "");
+unsub.length = 0;
+const t3 = Date.now();
+let ro3 = await settle(oneOff("770000003"), 20000);
+for (let i = 0; i < 100 && fs.existsSync(`${T}/steamlib/sub-770000003`); i++) await sleep(100);
+const tUnsub3 = Date.now() - t3;
+await unsubDone();
+st = await state(["770000003"]);
+out(ro3?.status === 200 && ownCopy(ro3.body, "770000003") === true && !fakeLines("downloads").includes("770000003"),
+  "one-off, the client refuses DownloadItem: the library's own copy all the same", JSON.stringify(ro3)?.slice(0, 160));
+out(!fs.existsSync(`${T}/steamlib/sub-770000003`) && fakeLines("unsubscribed").length === unsub0 + 1 && tUnsub3 < 4500 && !(await queue()).includes("770000003")
+  && blockedIds().includes("770000003") && st["770000003"]?.subscribed === false && urls().length === n0,
+  "…subscribed and unsubscribed again through the client (no 5 s Undo window), blocked, not subscribed, nothing opened",
+  `sub ${fs.existsSync(`${T}/steamlib/sub-770000003`)} unsubscribed +${fakeLines("unsubscribed").length - unsub0} after ${tUnsub3} ms | ${JSON.stringify(st["770000003"])}`);
+fs.rmSync(`${T}/steamlib/refuse-download`);
+// Steam unreachable: fails with the reason, nothing imported, nothing blocked
+fs.writeFileSync(`${T}/steamlib/fail-init`, "");
+let ro4 = await settle(oneOff("770000004"), 20000);
+fs.rmSync(`${T}/steamlib/fail-init`);
+out(ro4 && ro4.status >= 400 && /Couldn't use the Steam app/.test(ro4.body?.error ?? "") && !(await item("770000004")) && !blockedIds().includes("770000004") && urls().length === n0,
+  "one-off, Steam unreachable (Use the Steam app): fails with the reason, nothing imported, opened or blocked", JSON.stringify(ro4)?.slice(0, 200));
 ws.close();

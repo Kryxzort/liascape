@@ -60,6 +60,9 @@ public static class WorkshopSubOps
         return result;
     }
 
+    /// Is this item subscribed, by State()'s rule? (a one-off download leaves the user's own subscription alone)
+    public static bool IsSubscribed(string id) => Snap.Read().Of(id).Subscribed;
+
     /// The library's items with `Subscribed` set (GET /library): what State() calls subscribed, per Workshop item. The
     /// Library offers Unsubscribe instead of Delete for these while auto-import is on (it would import them again).
     public static List<LibraryItem> MarkSubscribed(List<LibraryItem> items)

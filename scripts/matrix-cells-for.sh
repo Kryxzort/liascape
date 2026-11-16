@@ -44,7 +44,8 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|\
+    scripts/test-steam-signin.sh|scripts/test-fixtures/drive-steam-client.mjs|scripts/test-fixtures/fake_steamclient.c|src/backend/Web/SteamSelfTest.cs) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
     src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
       echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;
@@ -64,7 +65,7 @@ for f in $FILES; do
     src/backend/Helpers/AtomicFile.cs) add "race:|$LIB|$PL|$SET" "$f" ;;
     src/backend/Helpers/ImportService.cs) add "cardApply" "$f (the matrix imports its clips with it)" ;;
     src/backend/Scrapers/*|src/backend/Services/*|src/backend/Helpers/Steam*|src/backend/Web/SteamOps.cs|\
-    src/backend/Helpers/Workshop*|src/backend/Helpers/DownloadHelper.cs|src/backend/Web/WorkshopSocialOps.cs|src/backend/Models/WorkshopList.cs)
+    src/backend/Helpers/Workshop*|src/backend/Helpers/DownloadHelper.cs|src/backend/Web/WorkshopSocialOps.cs|src/backend/Web/WorkshopSubOps.cs|src/backend/Models/WorkshopList.cs)
       echo "  $f → nothing (Browse/download/Steam: not in the matrix — test it by hand / its own script)" >&2 ;;
     # the scene worker, its compositor side, the scene helpers, the VRAM rules and their probes: only scenes use them
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\

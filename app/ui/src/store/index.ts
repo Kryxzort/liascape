@@ -4,7 +4,7 @@ import {
   type LibraryOp, type CacheCleared, type WsList, type WsListSort, ApiError,
 } from "../api/client";
 import { eventsOpened } from "../api/events";
-import { isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
+import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
@@ -108,8 +108,8 @@ interface State {
   // playlist
   playlist: string[]; playlistSettings: PlaylistSettings; playlistName: string | null; playlistNames: string[];
   // steam / workshop
-  // usable / pageUnsubscribes: what the Unsubscribe controls follow (components/subscribeMode.ts unsubBlocked)
-  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean; pageUnsubscribes?: boolean } | null;
+  // usable: what the Workshop controls follow (components/subscribeMode.ts actionBlocked)
+  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean } | null;
   qrOpen: boolean; qrPng: string | null;
   // the password sign-in modal (SteamPasswordModal): which step Steam is at (WS steam-login-code), busy while a request /
   // Steam's answer is pending, the inline error. The password itself is never in the store — the modal's own field only.
@@ -431,6 +431,10 @@ export const useStore = create<State>((set, get) => ({
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async download(source, w, apply, oneOff = false) {
+    // the one rule (components/subscribeMode.ts actionBlocked): every way in (a button, Enter, a double-click, a selection)
+    // stops here with the reason, nothing sent. Guard: probe-steam side:blocked:download
+    const off = isWorkshopItem(w) ? actionBlocked(get().settings, get().steam, oneOff ? "oneOff" : "download") : null;
+    if (off) { get().setStatus(off, true, true); return; }
     const ctrl = new AbortController(); dlCtrls[w.pageUrl] = ctrl;
     set({ downloads: { ...get().downloads, [w.pageUrl]: 0 } });
     try {

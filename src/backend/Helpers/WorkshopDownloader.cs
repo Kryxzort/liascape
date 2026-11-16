@@ -25,6 +25,8 @@ public static class WorkshopDownloader
         CancellationToken ct,
         string? title = null)
     {
+        // the one rule (Blocked): a mode that can't download now refuses before anything reaches Steam
+        if (Blocked(settings, WorkshopAction.Download) is { } blocked) throw new InvalidOperationException(blocked);
         // Already present (WE/Steam downloaded it, or a prior steamcmd run) — skip re-download.
         // Subscribe mode still subscribes below so the item is tracked online even if present.
         bool alreadyHave = false;
@@ -44,37 +46,45 @@ public static class WorkshopDownloader
         return await AcquireViaSubscribeAsync(workshopId, title, settings, alreadyHave, progress, ct);
     }
 
-    /// How "Download without subscribing" would get an item: `Route` = "steamcmd", or null with `Missing` = what the user
-    /// lacks, in their words (the menu shows it on the disabled entry).
+    /// How "Download without subscribing" would get an item: `Route` = the download mode's own way ("steamapp", "subscribe",
+    /// "steamcmd"), or null with `Missing` = why not, in the user's words (the menu shows it on the disabled entries).
     public sealed record OneOffRoute(string? Route, string? Missing);
 
     public const string SteamCmdWhere = "Settings → Getting Workshop wallpapers → Download via steamcmd";
+    public const string OneOffSignIn = "Sign in to Steam to download without subscribing";
+    public const string OneOffPageOnly = "A Steam page can only subscribe";
 
-    /// The way a one-off copy is fetched (the Browse sidebar's right-click "Download without subscribing"): steamcmd, once it
-    /// is found and has an account name (its one-time sign-in in a terminal caches the login; a stale cache fails the
-    /// download with steamcmd's own exit). Not the app's Steam sign-in over Steam's content servers: the depot key and the
-    /// manifest's request code need a Steam-client logon, and the sign-in is a website one (SteamAuthService: WebBrowser
-    /// refresh tokens, audience `web`), which a client logon doesn't accept — so the reason says so when that's all the user
-    /// has. Pure: the caller reads the disk, the settings and the secret store.
-    /// Guard: steam-selftest "one-off route", test-steam-signin.sh § 2 (one-off)
-    public static OneOffRoute OneOffRouteOf(bool steamCmdFound, bool steamCmdAccount, bool steamSignIn)
+    /// The way a one-off copy is fetched (the Browse sidebar's right-click "Download without subscribing"): the chosen download
+    /// mode's own, never another's (Blocked). "Use the Steam app": the running client's DownloadItem. "Subscribe with Steam
+    /// login": the sign-in's subscribe → Steam's copy → unsubscribe, so none signed out. steamcmd: steamcmd once found and given
+    /// an account (its one-time sign-in in a terminal caches the login). "Open in the Steam app": none, a page can only
+    /// subscribe. Pure: the caller reads the disk, the settings and the secret store.
+    /// Guard: steam-selftest "one-off route", test-steam-signin.sh § 2 (one-off), probe-steam side:oneOff:modes
+    public static OneOffRoute OneOffRouteOf(string mode, bool steamCmdFound, bool steamCmdAccount, bool steamSignIn)
     {
+        if (BlockedFor(mode, steamSignIn, WorkshopAction.OneOff) is { } why) return new(null, why);
+        if (mode == "steamapp") return new("steamapp", null);
+        if (mode == "subscribe") return new("subscribe", null);
         if (steamCmdFound && steamCmdAccount) return new("steamcmd", null);
-        string why = !steamCmdFound
+        return new(null, !steamCmdFound
             ? $"Needs steamcmd: install it, then sign in to it under {SteamCmdWhere}."
-            : $"Needs steamcmd signed in: {SteamCmdWhere} → Sign in.";
-        return new(null, steamSignIn ? $"Your Steam sign-in can't download files by itself. {why}" : why);
+            : $"Needs steamcmd signed in: {SteamCmdWhere} → Sign in.");
     }
 
-    public static OneOffRoute OneOffRouteFor(AppSettings s) => OneOffRouteOf(
+    public static OneOffRoute OneOffRouteFor(AppSettings s) => OneOffRouteOf(s.WorkshopDownloadMode,
         FindSteamCmd(s.SteamCmdPath) != null, !string.IsNullOrWhiteSpace(s.SteamUsername), SteamAuthService.HasUsableSignIn(s));
 
-    /// "Download without subscribing": a one-off copy for the library, never a subscription (nothing is sent to Steam's
-    /// subscribe, no Steam to-do page, no unblock of a queued unsubscribe), so nothing ever updates it. Always a fresh fetch
-    /// into our steamcmd cache, never Steam's own folder for it (that is a subscription's, and may be on its way out), so the
-    /// library gets its own `workshop/<id>` copy. Without a route it fails with what's missing.
-    /// Guard: test-steam-signin.sh § 2 (one-off)
-    public static async Task<string> AcquireOneOffAsync(string workshopId, AppSettings settings,
+    /// A one-off's fetched folder (Steam's or our steamcmd cache's), for the library to copy. `Subscribed` = the route subscribed
+    /// to fetch it: once the library's copy is made the caller hands that back (LetGoOfOneOff) — the copy first, since Steam
+    /// deletes its folder after the unsubscribe.
+    public sealed record OneOffFetch(string Dir, bool Subscribed);
+
+    /// "Download without subscribing": a one-off copy for the library that nothing updates, fetched by the download mode's own
+    /// route (OneOffRouteOf). It never opens a Steam page or a to-do entry and never takes an item out of the unsubscribe queue;
+    /// a subscription the user already had is copied and left alone. Steam's folder of an item that isn't a subscription
+    /// (DownloadItem's, or one about to be unsubscribed) is blocked from auto-import until Steam removes it. Without a route it
+    /// fails with why. Guard: test-steam-signin.sh § 2 (one-off), § 3 j.
+    public static async Task<OneOffFetch> AcquireOneOffAsync(string workshopId, AppSettings settings,
         IProgress<(double Progress, string Status)>? progress, CancellationToken ct)
     {
         var route = OneOffRouteFor(settings);
@@ -84,7 +94,104 @@ public static class WorkshopDownloader
             throw new InvalidOperationException(route.Missing);
         }
         Console.WriteLine($"workshop: {workshopId}: downloading without subscribing (via {route.Route})");
-        return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
+        return route.Route switch
+        {
+            "steamapp" => await OneOffViaSteamAppAsync(workshopId, settings, progress, ct),
+            "subscribe" => await OneOffViaSignInAsync(workshopId, settings, progress, ct),
+            _ => new(await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct), false),
+        };
+    }
+
+    /// Unsubscribes what a one-off subscribed only to fetch it: the unsubscribe queue and its drain, at once (no Undo window: the
+    /// user never asked for the subscription), through the mode's own way (the sign-in, the Steam client). The drain marks it
+    /// blocked; a sign-in gone by then drops it like any unsubscribe, saying so.
+    public static void LetGoOfOneOff(string workshopId)
+    {
+        Console.WriteLine($"workshop: {workshopId}: copied without subscribing — unsubscribing the subscription that fetched it");
+        WorkshopUnsubQueue.AddPending([workshopId]);
+        SteamOps.StartDrain();
+    }
+
+    // "Use the Steam app": DownloadItem fetches it with no subscription. A client that won't download an unsubscribed item →
+    // subscribe through it instead (LetGoOfOneOff then unsubscribes through it too). Never another way: it fails with
+    // SteamClientUgc.FailureMessage when the client can't be used.
+    private static async Task<OneOffFetch> OneOffViaSteamAppAsync(string workshopId, AppSettings settings,
+        IProgress<(double, string)>? progress, CancellationToken ct)
+    {
+        // blocked while Steam's folder appears, so an auto-import meanwhile doesn't link it
+        bool blockedHere = !WorkshopSubOps.IsSubscribed(workshopId) && WorkshopUnsubQueue.Block(workshopId);
+        try
+        {
+            var r = await SteamClientUgc.DownloadAsync(workshopId, settings, progress, ct);
+            if (r.Folder != null)
+            {
+                if (!r.WasSubscribed) WorkshopUnsubQueue.Block(workshopId);
+                else if (blockedHere) WorkshopUnsubQueue.DropBlock(workshopId); // the user's own subscription
+                return new(MediaOrThrow(workshopId, r.Folder), false);
+            }
+            if (r.Refused && !r.WasSubscribed)
+            {
+                Console.WriteLine($"workshop: {workshopId}: the Steam app won't download it unsubscribed — subscribing to fetch it, then unsubscribing");
+                var sub = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
+                if (sub.Folder != null)
+                {
+                    try { return new(MediaOrThrow(workshopId, sub.Folder), true); }
+                    catch { LetGoOfOneOff(workshopId); throw; }
+                }
+                r = r with { Fallback = sub.Fallback };
+            }
+            var why = r.Fallback ?? (r.Refused ? "Steam won't download it" : null);
+            Console.WriteLine($"workshop: {workshopId}: the Steam app couldn't download it — {why}");
+            throw new InvalidOperationException(SteamClientUgc.FailureMessage(why));
+        }
+        catch when (blockedHere && !WorkshopUnsubQueue.SnapshotPending().Contains(workshopId))
+        {
+            WorkshopUnsubQueue.DropBlock(workshopId);
+            throw;
+        }
+    }
+
+    // "Subscribe with Steam login": the sign-in subscribes, Steam's client downloads it like any subscription, and the caller
+    // unsubscribes once the library has its copy. An item the user already has subscribed: only its copy, nothing sent.
+    private static async Task<OneOffFetch> OneOffViaSignInAsync(string workshopId, AppSettings settings,
+        IProgress<(double, string)>? progress, CancellationToken ct)
+    {
+        const string waiting = "Waiting for Steam to download it…";
+        if (WorkshopSubOps.IsSubscribed(workshopId))
+            return new(await WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null, steamRootsOnly: true), false);
+        bool blockedHere = WorkshopUnsubQueue.Block(workshopId);
+        string? failed = null;
+        try
+        {
+            var cookie = await SteamAuthService.GetCookieAsync(settings, ct);
+            if (string.IsNullOrWhiteSpace(cookie)) failed = SignInFailure.NotSignedIn;
+            else
+            {
+                progress?.Report((-1, "Subscribing on Steam to fetch it…"));
+                await SubscribeAsync(workshopId, cookie, subscribe: true, ct);
+            }
+        }
+        catch (SteamSignInRejectedException) { failed = SignInFailure.SignedOut; }
+        catch (InvalidOperationException e) { failed = e.Message; } // Steam rejected it: its own words say what to do
+        catch (Exception e) when (e is not (OperationCanceledException or SteamRateLimitException))
+        { failed = SignInFailure.Unusable; Console.WriteLine($"workshop: {workshopId}: the sign-in failed ({e.Message})"); }
+        catch { if (blockedHere) WorkshopUnsubQueue.DropBlock(workshopId); throw; }
+        if (failed != null)
+        {
+            if (blockedHere) WorkshopUnsubQueue.DropBlock(workshopId);
+            Console.WriteLine($"workshop: {workshopId}: not downloaded without subscribing — {failed}");
+            throw new InvalidOperationException(failed);
+        }
+        try { return new(await WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null, steamRootsOnly: true), true); }
+        catch { LetGoOfOneOff(workshopId); throw; }
+    }
+
+    // Steam's folder for it, holding a video or a scene; else why it's no use here
+    private static string MediaOrThrow(string workshopId, string folder)
+    {
+        if (TryGetMediaPath(folder) != null) return folder;
+        Console.WriteLine($"workshop: {workshopId}: Steam installed it at {folder} but there's no video or scene in it");
+        throw new InvalidOperationException("Steam installed it, but there's no video or scene in it — a web or application wallpaper can't play here.");
     }
 
     /// The user skipped (or stopped) this item in the Steam to-do: its /download ends as skipped, not failed.
@@ -152,7 +259,7 @@ public static class WorkshopDownloader
                 catch (InvalidOperationException e)
                 { failed = e.Message; } // Steam rejected it: its own words say what to do (SubscribeAsync)
             }
-            // no usable sign-in, but Steam already has it on disk (subscribed earlier): nothing to subscribe, it imports
+            // a sign-in Steam won't take at the click, but Steam already has it on disk (subscribed earlier): nothing to subscribe, it imports
             if (failed != null && alreadyHave)
                 foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
                     if (IsWorkshopDirReady(dir)) { WorkshopUnsubQueue.Unblock(workshopId); return dir; }
@@ -184,6 +291,15 @@ public static class WorkshopDownloader
             Console.WriteLine($"workshop: {workshopId}: {why} — in the Steam to-do, waiting for the download");
         }
 
+        return await WaitForSteamCopyAsync(workshopId, settings, progress, ct, todo, waitingFor, why, steamRootsOnly: false);
+    }
+
+    // Waits for Steam's copy of the item: its media in a Workshop root, steady across two polls, then that folder (steamRootsOnly:
+    // Steam's own roots, never our steamcmd cache). `todo` = its Steam to-do entry (its Skip / Stop / "Let the Steam app do all
+    // N" end the wait; ended here either way); `why` = it waits on the user's click in the Steam app (the timeout says so).
+    private static async Task<string> WaitForSteamCopyAsync(string workshopId, AppSettings settings, IProgress<(double, string)>? progress,
+        CancellationToken ct, SteamTodo.Entry? todo, string waitingFor, string? why, bool steamRootsOnly)
+    {
         const int maxWaitMs = 600_000;
         int pollMs = PollMs;
         int waited = 0;
@@ -220,6 +336,7 @@ public static class WorkshopDownloader
                 bool arrived = false;
                 foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
                 {
+                    if (steamRootsOnly && dir.StartsWith(SteamCmdWorkshopContentDir + "/", StringComparison.Ordinal)) continue;
                     var media = TryGetMediaPath(dir);
                     if (media == null) continue;
                     arrived = true;
@@ -321,7 +438,7 @@ public static class WorkshopDownloader
         string cookieValue = Uri.EscapeDataString(Uri.UnescapeDataString(steamLoginSecure.Trim()));
 
         using var req = new HttpRequestMessage(HttpMethod.Post,
-            $"https://steamcommunity.com/sharedfiles/{action}");
+            $"{SteamCommunity.Base}/sharedfiles/{action}");
         req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
         req.Headers.Add("Cookie", $"sessionid={sessionId}; steamLoginSecure={cookieValue}");
         req.Content = new FormUrlEncodedContent(new System.Collections.Generic.Dictionary<string, string>
@@ -397,15 +514,16 @@ public static class WorkshopDownloader
     /// else Todo = it waits in the Steam to-do for the user's click + Next.
     public sealed record SubscribeOnlyResult(bool Subscribed, string Message, SteamTodo.Entry? Todo = null);
 
-    /// Subscribe WITHOUT importing anything into the library (the sidebar's subscribe/unsubscribe button) — routed by the
-    /// download mode like a download's subscribe: `steamapp` → the Steam client (it waits for the
-    /// install, reporting Steam's bytes), else a usable sign-in (not under `steampage`) → the website's subscribe call (done —
-    /// Steam downloads it by itself), else → a Steam to-do subscribe entry without a download (the user clicks Subscribe on its
-    /// page, then Next). `steamcmd` isn't a subscription mode, but this is an explicit Subscribe click: the sign-in / to-do route.
-    /// Unblocks the id (wanted again). A rate limit throws (no page — it's steamcommunity.com from the same connection).
+    /// Subscribe WITHOUT importing anything into the library (the sidebar's subscribe/unsubscribe button) — the download mode's
+    /// own way only: `steamapp` → the Steam client (it waits for the install, reporting Steam's bytes), `subscribe` → the
+    /// website's subscribe call with the sign-in (done — Steam downloads it by itself), `steampage` → a Steam to-do subscribe
+    /// entry without a download (the user clicks Subscribe on its page, then Next). steamcmd can't subscribe, so it never
+    /// borrows the sign-in: refused like a signed-out `subscribe` (Blocked). Unblocks the id (wanted again). A rate limit throws
+    /// (no page — it's steamcommunity.com from the same connection).
     public static async Task<SubscribeOnlyResult> SubscribeOnlyAsync(string workshopId, string? title, AppSettings settings,
         IProgress<(double, string)>? progress, CancellationToken ct)
     {
+        if (Blocked(settings, WorkshopAction.Subscribe) is { } blocked) throw new InvalidOperationException(blocked);
         WorkshopUnsubQueue.Unblock(workshopId);
         SteamTodo.DropUnsubscribe(workshopId); // its unsubscribe still waited in the Steam to-do: nothing to click any more
         string mode = settings.WorkshopDownloadMode;
@@ -420,9 +538,8 @@ public static class WorkshopDownloader
             Console.WriteLine($"workshop: {workshopId}: the Steam app couldn't subscribe it — {r.Fallback}");
             return new(false, SteamClientUgc.FailureMessage(r.Fallback)); // a failure, never the sign-in / the to-do instead
         }
-        // "Subscribe with Steam login" (and steamcmd, which isn't a subscription mode: an explicit Subscribe click takes the
-        // sign-in): without a usable sign-in it fails with why and what to do, never the page (AcquireViaSubscribeAsync)
-        if (mode != "steampage")
+        // "Subscribe with Steam login": a sign-in Steam won't take at the click fails with why and what to do, never the page
+        if (mode == "subscribe")
         {
             string failed;
             try
@@ -487,31 +604,55 @@ public static class WorkshopDownloader
     /// What a drain did beyond the queue: how many items it opened in the Steam app, and what the user should hear.
     public sealed record DrainResult(int OpenedInSteam = 0, string? Message = null);
 
-    /// "Open in the Steam app" unsubscribes through each item's page in the Steam app (the Steam to-do), signed in or not: pages
-    /// are that mode's whole job. False = that mode needs the sign-in to unsubscribe, like "Subscribe with Steam login" and
-    /// steamcmd, and then unsubscribes with it. Guard: steam-selftest "unsub allowed"
-    public static readonly bool PageUnsubscribes = true;
+    /// The Workshop actions a download mode may or may not do (WorkshopDownloader.Blocked).
+    public enum WorkshopAction { Download, Subscribe, Unsubscribe, OneOff }
+
     public const string UnsubSignIn = "Sign in to Steam to unsubscribe";
+    public const string SteamCmdNoSubscribe = "Download via steamcmd can't subscribe";
 
-    /// Why an Unsubscribe can't happen now, else null. Without a usable sign-in the app stays disconnected from Steam for
-    /// unsubscribes: nothing queued for later, no Steam page, no Steam client. "Use the Steam app" counts the running client
-    /// as its sign-in. The endpoints refuse with it (400) and the UI mirrors it (components/subscribeMode.ts unsubBlocked).
-    /// Guard: steam-selftest "unsub allowed", test-steam-signin.sh § 2 (unsubscribe refused), probe-steam side:unsub:signedOut
-    public static string? UnsubscribeBlocked(AppSettings s) =>
-        s.WorkshopDownloadMode == "steamapp" || (s.WorkshopDownloadMode == "steampage" && PageUnsubscribes)
-            || SteamAuthService.HasUsableSignIn(s) ? null : UnsubSignIn;
+    /// Why a Workshop action can't happen in the chosen download mode, else null: THE rule every action's endpoint refuses with
+    /// (400, these words) and the UI mirrors up front, disabled with the same words (components/subscribeMode.ts actionBlocked).
+    /// Each mode does an action only its own way, never another mode's (docs/decisions.md § "Offer four Workshop download modes,
+    /// the user's choice"): "Subscribe with Steam login" without a usable sign-in reaches Steam for nothing (the app stays
+    /// disconnected); steamcmd can't subscribe (it unsubscribes through the item's Steam page, like "Open in the Steam app":
+    /// DrainUnsubQueueAsync); a Steam page can only subscribe; "Use the Steam app" does
+    /// everything through the running client (it fails at the click when the client can't). Whether steamcmd is set up for a
+    /// one-off is OneOffRouteFor's (it reads the disk). Pure. Guard: steam-selftest "action rule", "unsub allowed",
+    /// test-steam-signin.sh § 2 (refused), probe-steam side:blocked:*, side:unsub:signedOut, side:oneOff:modes
+    public static string? BlockedFor(string mode, bool usableSignIn, WorkshopAction a) => mode switch
+    {
+        "subscribe" when !usableSignIn => a switch
+        {
+            WorkshopAction.Download => "Sign in to Steam to download",
+            WorkshopAction.Subscribe => "Sign in to Steam to subscribe",
+            WorkshopAction.Unsubscribe => UnsubSignIn,
+            _ => OneOffSignIn,
+        },
+        "steamcmd" => a == WorkshopAction.Subscribe ? SteamCmdNoSubscribe : null,
+        "steampage" => a == WorkshopAction.OneOff ? OneOffPageOnly : null,
+        _ => null,
+    };
 
-    /// what the status bar says when unsubscribes were dropped for want of a sign-in (`back` = library items that came back)
-    public static string DroppedMessage(int ids, int back) =>
-        $"Not unsubscribed{(back > 0 ? $": {(back == 1 ? "it's" : "they're")} back in your library" : ids == 1 ? ": it stays subscribed" : ": they stay subscribed")}. {UnsubSignIn}.";
+    // merged (auto-import on + "subscribe": the UI's Download IS the subscription and says Subscribe) a download's words are
+    // the subscribe's, like the button's
+    public static string? Blocked(AppSettings s, WorkshopAction a) => BlockedFor(s.WorkshopDownloadMode, SteamAuthService.HasUsableSignIn(s),
+        a == WorkshopAction.Download && s.AutoAddWeWallpapersToLibrary && s.WorkshopDownloadMode == "subscribe" ? WorkshopAction.Subscribe : a);
+
+    /// Why an Unsubscribe can't happen now, else null (Blocked's Unsubscribe): nothing queued for later, no Steam page, no
+    /// Steam client.
+    public static string? UnsubscribeBlocked(AppSettings s) => Blocked(s, WorkshopAction.Unsubscribe);
+
+    /// what the status bar says when unsubscribes were dropped (`back` = library items that came back; `why` = Blocked's words)
+    public static string DroppedMessage(int ids, int back, string why) =>
+        $"Not unsubscribed{(back > 0 ? $": {(back == 1 ? "it's" : "they're")} back in your library" : ids == 1 ? ": it stays subscribed" : ": they stay subscribed")}. {why}.";
 
     // A due unsubscribe the drain can't send (no usable sign-in, or Steam turned it down mid-drain): dropped like its Undo,
     // never left queued for a later sign-in and never a page. Guard: steam-selftest "unsub, signed out", "unsub, sign-in rejected"
-    private static DrainResult Dropped(System.Collections.Generic.List<string> ids, string why)
+    private static DrainResult Dropped(System.Collections.Generic.List<string> ids, string why, string reason)
     {
         int back = AppOps.DropUnsubscribes(ids);
         Console.WriteLine($"workshop: unsubscribe {string.Join(", ", ids)}: {why} — not sent, dropped");
-        return new DrainResult(0, DroppedMessage(ids.Count, back));
+        return new DrainResult(0, DroppedMessage(ids.Count, back, reason));
     }
 
     /// Drains the unsubscribe queue: for each pending id, unsubscribe → mark blocked. We do NOT delete
@@ -560,9 +701,13 @@ public static class WorkshopDownloader
                 ? SteamClientUgc.FailureMessage(fallback) + " The unsubscribe stays queued."
                 : $"Steam didn't confirm unsubscribing {pending.Count} item{(pending.Count == 1 ? "" : "s")} — they stay queued; try again.");
         }
-        if (settings.WorkshopDownloadMode == "steampage" && PageUnsubscribes) return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
-        if (!SteamAuthService.HasUsableSignIn(settings))
-            return Dropped(pending, settings.SteamSignInRejected ? "Steam turned the sign-in down" : "not signed in to Steam");
+        // "Open in the Steam app" and steamcmd (which has no unsubscribe of its own) unsubscribe through each item's Steam page,
+        // signed in or not: never the sign-in
+        if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
+        if (settings.WorkshopDownloadMode == "steamcmd") return UnsubscribeInSteamApp(settings, pending, "steamcmd can't unsubscribe");
+        // the sign-in's mode without a usable sign-in: dropped, never another mode's way
+        if (UnsubscribeBlocked(settings) is { } blockedWhy)
+            return Dropped(pending, settings.SteamSignInRejected ? "Steam turned the sign-in down" : "not signed in to Steam", blockedWhy);
         int total = pending.Count, done = 0;
         for (int i = 0; i < pending.Count; i++)
         {
@@ -577,7 +722,7 @@ public static class WorkshopDownloader
             catch (SteamSignInRejectedException)
             {
                 // Steam ended the sign-in mid-drain: the rest isn't sent (the ones done before it stay done)
-                return Dropped(pending.GetRange(i, pending.Count - i), "Steam turned the sign-in down");
+                return Dropped(pending.GetRange(i, pending.Count - i), "Steam turned the sign-in down", UnsubSignIn);
             }
             catch (SteamRateLimitException)
             {
@@ -598,47 +743,67 @@ public static class WorkshopDownloader
     }
 
     /// Subscribe again to items an Undo brought back after Steam had already unsubscribed them — the way the download mode
-    /// subscribes: the Steam client
-    /// (steamapp), the sign-in (subscribe), else the item's page in the Steam app. Null = all done; else what the user still
-    /// has to click (the status bar shows it). steamcmd: nothing (no subscription).
+    /// subscribes: the Steam client (steamapp), the sign-in (subscribe), the item's page in the Steam app (steampage). Null = all
+    /// done; else what the user should know (the status bar shows it). Like every other action, never another mode's way: a
+    /// mode that can't subscribe now (Blocked: signed out, steamcmd) sends nothing and the words say why.
+    /// Guard: steam-selftest "undo's re-subscribe", test-steam-signin.sh § 3 g.
     public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? titles = null)
     {
-        if (settings.WorkshopDownloadMode == "steamcmd" || ids.Count == 0) return null;
-        var toPage = new System.Collections.Generic.List<string>();
-        string? failedViaApp = null;
+        string mode = settings.WorkshopDownloadMode;
+        if (ids.Count == 0) return null;
+        if (mode == "steampage")
+        {
+            // the Steam to-do: one page at a time, Next moves on (Steam shows only one of several pages opened at once)
+            foreach (var id in ids)
+                SteamTodo.EnqueueSubscribe(id, titles != null && titles.TryGetValue(id, out var t) ? t : null, hasDownload: false, out _);
+            // the page route can't know whether the user clicked Unsubscribe there — the words cover both
+            return ids.Count == 1
+                ? "Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then Next."
+                : $"Undone — to keep them subscribed, click Subscribe on each of the {ids.Count} pages the Steam to-do opens (any that say Subscribed are set).";
+        }
+        // the one rule: a mode that can't subscribe now sends nothing (no page, no other mode's way); the words say why
+        if (Blocked(settings, WorkshopAction.Subscribe) is { } blocked)
+        {
+            Console.WriteLine($"workshop: {string.Join(", ", ids)}: not subscribed again (undo) — {blocked}, nothing sent");
+            return ids.Count == 1
+                ? $"Undone, but it isn't subscribed again, so Steam may delete its files. {blocked}."
+                : $"Undone, but they aren't subscribed again, so Steam may delete their files. {blocked}.";
+        }
+        string? failedViaApp = null, failed = null;
+        var notSent = new System.Collections.Generic.List<string>();
         foreach (var id in ids)
         {
+            if (mode == "steamapp")
+            {
+                SteamClientUgc.Result r;
+                try { r = await SteamClientUgc.SubscribeAsync(id, settings, null, ct); }
+                catch (Exception e) when (e is not OperationCanceledException) { r = new(null, e.Message); }
+                if (r.Folder != null) { Console.WriteLine($"workshop: {id}: subscribed again through the Steam app (undo)"); continue; }
+                // a failure, never the sign-in / the to-do instead
+                Console.WriteLine($"workshop: {id}: the Steam app couldn't subscribe it again — {r.Fallback}");
+                failedViaApp ??= r.Fallback ?? "Steam didn't answer";
+                continue;
+            }
             try
             {
-                if (settings.WorkshopDownloadMode == "steamapp")
-                {
-                    var r = await SteamClientUgc.SubscribeAsync(id, settings, null, ct);
-                    if (r.Folder != null) { Console.WriteLine($"workshop: {id}: subscribed again through the Steam app (undo)"); continue; }
-                    // a failure, never the sign-in / the to-do instead
-                    Console.WriteLine($"workshop: {id}: the Steam app couldn't subscribe it again — {r.Fallback}");
-                    failedViaApp ??= r.Fallback ?? "Steam didn't answer";
-                    continue;
-                }
-                if (settings.WorkshopDownloadMode != "steampage" && SteamAuthService.HasUsableSignIn(settings))
-                {
-                    await SetSubscribedAsync(id, settings, subscribe: true, ct);
-                    Console.WriteLine($"workshop: {id}: subscribed again with the sign-in (undo)"); continue;
-                }
+                await SetSubscribedAsync(id, settings, subscribe: true, ct);
+                Console.WriteLine($"workshop: {id}: subscribed again with the sign-in (undo)");
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception e) { Console.WriteLine($"workshop: {id}: re-subscribing failed ({e.Message}) — opening it in the Steam app"); }
-            toPage.Add(id);
+            catch (SteamSignInRejectedException) { notSent.Add(id); }
+            catch (Exception e) { Console.WriteLine($"workshop: {id}: re-subscribing failed ({e.Message})"); failed ??= e.Message; }
         }
         if (failedViaApp != null) return "Undone, but " + char.ToLowerInvariant(SteamClientUgc.FailureMessage(failedViaApp)[0]) + SteamClientUgc.FailureMessage(failedViaApp)[1..];
-        if (toPage.Count == 0) return null;
-        // the Steam to-do: one page at a time, Next moves on (Steam shows only one of several pages opened at once)
-        foreach (var id in toPage)
-            SteamTodo.EnqueueSubscribe(id, titles != null && titles.TryGetValue(id, out var t) ? t : null, hasDownload: false, out _);
-        // the page route can't know whether the user clicked Unsubscribe there — the words cover both
-        return toPage.Count == 1
-            ? "Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then Next."
-            : $"Undone — to keep them subscribed, click Subscribe on each of the {toPage.Count} pages the Steam to-do opens (any that say Subscribed are set).";
+        if (notSent.Count > 0)
+        {
+            var why = BlockedFor("subscribe", false, WorkshopAction.Subscribe);
+            Console.WriteLine($"workshop: {string.Join(", ", notSent)}: not subscribed again (undo) — Steam turned the sign-in down");
+            return notSent.Count == 1
+                ? $"Undone, but it isn't subscribed again, so Steam may delete its files. {why}."
+                : $"Undone, but they aren't subscribed again, so Steam may delete their files. {why}.";
+        }
+        return failed == null ? null : $"Undone, but subscribing again failed: {failed}";
     }
 
     /// "Open in the Steam app"'s unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each

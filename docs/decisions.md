@@ -86,10 +86,10 @@ of the allowed ages, which drops the few hundred items with no age tag; other gr
 `WorkshopTags.Build`.
 
 ### Offer four Workshop download modes, the user's choice — 2026-11-11
-`steamapp`, `steampage`, `subscribe` (default), `steamcmd`: the owner wanted a fourth that opens the item in the Steam app.
-No mode switches method by itself (`subscribe` signed out fails, saying why); the to-do's "Let the Steam app do all N" is
-the one explicit switch. Signed out nothing unsubscribes (owner, 2026-11-14: the app stays disconnected): no page, nothing
-queued; `steamapp`'s client is its sign-in. `.claude/rules/backend/sources-steam.md`.
+`steamapp`, `steampage`, `subscribe` (default), `steamcmd`: the owner wanted a fourth that opens items in the Steam app.
+A mode never uses another's way (owner: "we dont switch modes when user haven't chose it!"): what it can't do is disabled
+with why (steamcmd can't subscribe, a page can't fetch a one-off); steamcmd unsubscribes through the item's page (owner:
+"make it open steam page"); the to-do's "Let the Steam app do all N" is the user's own switch. `subscribe` signed out reaches Steam for nothing. `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
 `libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a copy

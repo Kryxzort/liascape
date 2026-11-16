@@ -15,7 +15,10 @@ public static class DownloadHelper
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "liascape", "library");
 
-    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string? thumbnailUrl, string? sourceId = null, IProgress<double>? progress = null, bool copyLocalFiles = false, CancellationToken ct = default, string? animatedUrl = null)
+    // ownCopy: a Workshop item always becomes the library's own workshop/<id> copy, even from a folder under the WE dir (a
+    // one-off download: Steam's folder for it isn't a subscription and goes away)
+    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string? thumbnailUrl, string? sourceId = null, IProgress<double>? progress = null, bool copyLocalFiles = false, CancellationToken ct = default, string? animatedUrl = null,
+        bool ownCopy = false)
     {
         Directory.CreateDirectory(LibraryPath);
         var settings = SettingsService.Load();
@@ -32,7 +35,7 @@ public static class DownloadHelper
             // compared as REAL paths (else a duplicate copy of a whole item) — the Steam client reports an item's real folder
             // (/mnt/Games/…/content/431960/<id>) while the WE folder setting can name it through a symlink
             // (~/.local/share/Steam/…/content/431960 → /mnt/Games/…): as text "not under it" → an owned COPY instead of the link
-            bool underWeDir = weSteamDir != null && !string.IsNullOrEmpty(settings.WorkshopFolder)
+            bool underWeDir = !ownCopy && weSteamDir != null && !string.IsNullOrEmpty(settings.WorkshopFolder)
                 && IsUnder(RealPath(weSteamDir), RealPath(settings.WorkshopFolder));
             source = underWeDir ? LibraryStore.Local : LibraryStore.Workshop;
         }
