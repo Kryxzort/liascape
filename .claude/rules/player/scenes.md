@@ -55,6 +55,11 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `starved_worker_that_hangs_is_still_killed`, `starved_forever_is_killed_after_the_starve_limit`,
   `host_stall_is_not_a_hang`, `worker_freeze_while_the_host_polls_is_hung`,
   `tests/scene.rs::gpu_stall_that_starves_the_worker_is_not_a_hang`.
+- A worker is starting until its first `Frame`: one late for `Hello` whose CPU time or major faults still move, or
+  late for a ping while it pages in (major faults, IO wait `D`; CPU work then is the `LoadGate`'s), is not hung (up
+  to `HELLO_TIMEOUT_MAX_FACTOR` × `HELLO_TIMEOUT` from its spawn); one that stopped moving is. Guards:
+  `tests/worker.rs::slow_start_is_not_a_hang`, `slow_first_render_is_not_a_hang`, `busy_first_render_is_hung`,
+  `stuck_start_is_hung`, `endless_start_is_hung_at_the_cap`.
 - Fold `Start`/`Paused`/`Resize`/`Route`/`SetProperty`/`Gain`/`NoAudio`/`Speed`/`LoudnessMeter` into the
   restart's `Start` so a restart never resumes stale. Guard: `restart_start_folds_live_changes`.
 - A fatal `error` (can't play) is not a crash: no restart, no crash record; the caller stops the worker.

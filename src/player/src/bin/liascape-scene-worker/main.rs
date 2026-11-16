@@ -15,7 +15,11 @@
 //! `ignore_quit` (ignores `Quit` and EOF; only SIGKILL ends it), `spam_stderr:N` (N stderr
 //! lines after `Hello`), `ring:N` (announce N slots on `Start`, frame each tick into a free one,
 //! hold the newest tick while the host has them all — the renderer's slot starvation),
-//! `freeze_after_ms:N` + `freeze_ms:M` (N ms after `Hello` stop reading for M ms, then carry on).
+//! `freeze_after_ms:N` + `freeze_ms:M` (N ms after `Hello` stop reading for M ms, then carry on),
+//! `start_busy_ms:N` / `start_sleep_ms:N` (before `Hello`, spend N ms on the CPU / asleep: a slow
+//! start that makes progress, and one that is stuck), `first_fault_ms:N` / `first_busy_ms:N` (right
+//! after `Hello`, N ms paging a file in from disk / on the CPU before reading anything: a first
+//! render held up by a busy disk, and one that spins).
 //!
 //! Without `--stub`: the renderer — the NVIDIA shader cache directory created if
 //! `__GL_SHADER_DISK_CACHE_PATH` names a missing one (`gfx::shader_cache`; `--lwe-smoke` and
@@ -82,6 +86,13 @@ struct Knobs {
     /// (as if blocked in the driver by a GPU-wide stall), then carry on.
     freeze_after_ms: Option<u64>,
     freeze_ms: u64,
+    /// `start_busy_ms:N` / `start_sleep_ms:N` (stub): before `Hello`, N ms on the CPU / asleep.
+    start_busy_ms: u64,
+    start_sleep_ms: u64,
+    /// `first_fault_ms:N` / `first_busy_ms:N` (stub): right after `Hello`, N ms of major page
+    /// faults / on the CPU before reading anything.
+    first_fault_ms: u64,
+    first_busy_ms: u64,
 }
 
 impl Knobs {
@@ -98,6 +109,10 @@ impl Knobs {
                 "ring" => k.ring = val.parse().unwrap_or(0),
                 "freeze_after_ms" => k.freeze_after_ms = val.parse().ok(),
                 "freeze_ms" => k.freeze_ms = val.parse().unwrap_or(0),
+                "start_busy_ms" => k.start_busy_ms = val.parse().unwrap_or(0),
+                "start_sleep_ms" => k.start_sleep_ms = val.parse().unwrap_or(0),
+                "first_fault_ms" => k.first_fault_ms = val.parse().unwrap_or(0),
+                "first_busy_ms" => k.first_busy_ms = val.parse().unwrap_or(0),
                 other => warn(&format!("unknown LIASCAPE_SCENE_WORKER_TEST knob {other:?}")),
             }
         }
@@ -288,8 +303,62 @@ fn wait_readable(fd: i32, timeout: Option<Duration>) {
     unsafe { libc::poll(&mut p, 1, ms) };
 }
 
+/// `first_fault_ms` (stub): page a private 4 MiB file in from disk again and again for `ms` —
+/// each page dropped from this mapping and the page cache, then read: a major fault each time,
+/// like a cold start's on a busy disk (the host's start grace counts them).
+fn fault_in(ms: u64) {
+    if ms == 0 {
+        return;
+    }
+    const LEN: usize = 4 << 20;
+    let path = std::env::temp_dir().join(format!("liascape-stub-fault-{}", std::process::id()));
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path);
+    let Ok(f) = file.and_then(|mut f| {
+        f.write_all(&vec![1u8; LEN])?;
+        f.sync_all()?;
+        Ok(f)
+    }) else {
+        return warn("first_fault_ms: can't write the fault file");
+    };
+    let _ = std::fs::remove_file(&path);
+    use std::os::fd::AsRawFd;
+    let fd = f.as_raw_fd();
+    let page = 4096;
+    let t = Instant::now();
+    unsafe {
+        let m = libc::mmap(std::ptr::null_mut(), LEN, libc::PROT_READ, libc::MAP_SHARED, fd, 0);
+        if m == libc::MAP_FAILED {
+            return warn("first_fault_ms: mmap failed");
+        }
+        let mut off = 0;
+        while t.elapsed() < Duration::from_millis(ms) {
+            let p = (m as *mut u8).add(off);
+            libc::madvise(p.cast(), page, libc::MADV_DONTNEED);
+            libc::posix_fadvise(fd, off as libc::off_t, page as libc::off_t, libc::POSIX_FADV_DONTNEED);
+            std::ptr::read_volatile(p);
+            off = (off + page) % LEN;
+        }
+        libc::munmap(m, LEN);
+    }
+}
+
 fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
+    let spin = |ms: u64| {
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(ms) {
+            std::hint::spin_loop();
+        }
+    };
+    spin(k.start_busy_ms);
+    std::thread::sleep(Duration::from_millis(k.start_sleep_ms));
     hello(&sock, &["stub"], "none");
+    fault_in(k.first_fault_ms);
+    spin(k.first_busy_ms);
     {
         let mut err = std::io::stderr().lock();
         for i in 0..k.spam_stderr {

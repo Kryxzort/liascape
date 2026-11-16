@@ -278,6 +278,11 @@ impl Drop for Sup {
         if self.pid != 0 && alive(self.pid) {
             unsafe { libc::kill(self.pid as i32, libc::SIGKILL) };
         }
+        // A failed test keeps its event log, snapshot and stderr: the children's own story of it.
+        if std::thread::panicking() {
+            eprintln!("kept {} (events.jsonl, snapshot.json, stderr.log)", self.root.display());
+            return;
+        }
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -1342,9 +1347,11 @@ fn program_survives_a_crash() {
     let mut c = sup.client();
     create_program(&mut c, &items, json!({"mode": "timer", "interval_ms": 3000}));
     c.ok("program.play", json!({"id": "prog:main"}));
-    // 2 switches, then 1.5 s into the third item
+    // 2 switches, then 1.5 s into the third item. Read while it plays (not `switching`): the
+    // order's history already lists a requested next item, and a slow read can land after the
+    // 3 s timer asked for it.
     let p = wait_state(&mut c, Duration::from_secs(15), |st| {
-        st["programs"][0]["path"] == items[2]
+        st["programs"][0]["path"] == items[2] && st["programs"][0]["phase"] == "playing"
     });
     assert_eq!(p["programs"][0]["history"], json!(items[..3]));
     sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_program(sn, items[2], 1500.0));

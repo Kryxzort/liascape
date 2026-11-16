@@ -642,6 +642,128 @@ fn worker_freeze_while_the_host_polls_is_hung() {
     );
 }
 
+/// A worker still starting past the hello timeout but making progress (here on the CPU; a cold
+/// start on a busy disk pages its binary and the GL driver in, its major faults moving) is waited
+/// for: it says `Hello` and is never killed. Killing it would only start it again from scratch,
+/// and three restarts mark the scene broken.
+#[test]
+fn slow_start_is_not_a_hang() {
+    let mut spec = stub_spec("slow-start", "start_busy_ms:3000");
+    spec.hang_timeout = Duration::from_millis(300);
+    spec.hello_timeout = Duration::from_millis(1500);
+    spec.budget.max = 0;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(8), |e| {
+        matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    assert!(
+        matches!(evs.last(), Some((_, WorkerEvent::Msg(FromWorker::Hello { .. }, _)))),
+        "Hello after the slow start, no Hung: {evs:?}"
+    );
+    let at = evs.last().unwrap().0;
+    assert!(at >= Duration::from_millis(3000), "Hello after {at:?}: the start was not slow");
+    assert!(matches!(host.state(), WorkerState::Running));
+    host.stop();
+}
+
+/// The start lasts until the first `Frame`: a worker past `Hello` whose first render keeps it from
+/// answering pings beyond the hang timeout while it pages in (on a busy disk the driver's first
+/// calls fault their code in) is not hung either — it frames the tick once through.
+#[test]
+fn slow_first_render_is_not_a_hang() {
+    first_render("slow-first", "ring:3,first_fault_ms:2000", true);
+}
+
+/// After `Hello` CPU time alone is no progress: a load's CPU work is covered by the worker's own
+/// protocol thread (bounded by its load timeout), and a first render that spins without answering
+/// is hung at the hang timeout, as before.
+#[test]
+fn busy_first_render_is_hung() {
+    first_render("busy-first", "ring:3,first_busy_ms:2000", false);
+}
+
+fn first_render(id: &str, knobs: &str, frames: bool) {
+    let mut spec = stub_spec(id, knobs);
+    spec.hang_timeout = Duration::from_millis(300);
+    spec.budget.max = 0;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(2), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    assert!(
+        matches!(evs.last(), Some((_, WorkerEvent::Msg(FromWorker::Hello { .. }, _)))),
+        "{evs:?}"
+    );
+    let hello = Instant::now();
+    host.send(&ToWorker::Tick { seq: 1, t: 1.0, input: None }, &[])
+        .unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(6), |e| {
+        matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Msg(FromWorker::Frame { .. }, _))
+    });
+    if frames {
+        assert!(
+            matches!(evs.last(), Some((_, WorkerEvent::Msg(FromWorker::Frame { seq: 1, .. }, _)))),
+            "the first tick framed after the slow first render, no Hung: {evs:?}"
+        );
+        assert!(hello.elapsed() >= Duration::from_millis(2000), "the first render was not slow");
+    } else {
+        assert!(matches!(evs.last(), Some((_, WorkerEvent::Hung { .. }))), "{evs:?}");
+        assert!(
+            hello.elapsed() < Duration::from_millis(1500),
+            "Hung only {:?} after Hello",
+            hello.elapsed()
+        );
+    }
+    host.stop();
+}
+
+/// A start that stops moving (asleep: blocked on a lock or in the driver) is hung at the hello
+/// timeout, as before.
+#[test]
+fn stuck_start_is_hung() {
+    let mut spec = stub_spec("stuck-start", "start_sleep_ms:4000");
+    spec.hang_timeout = Duration::from_millis(300);
+    spec.hello_timeout = Duration::from_millis(600);
+    spec.budget.max = 0;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(3), |e| {
+        matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    match evs.last() {
+        Some((at, WorkerEvent::Hung { waited_ms })) => {
+            assert!(*waited_ms >= 600, "Hung after {waited_ms} ms");
+            assert!(*at < Duration::from_millis(2000), "Hung only {at:?} after the spawn");
+        }
+        other => panic!("expected Hung, got {other:?} (all: {evs:?})"),
+    }
+}
+
+/// A start that keeps moving but never says `Hello` (spinning) is hung at
+/// `HELLO_TIMEOUT_MAX_FACTOR` × the hello timeout.
+#[test]
+fn endless_start_is_hung_at_the_cap() {
+    let mut spec = stub_spec("endless-start", "start_busy_ms:12000");
+    spec.hang_timeout = Duration::from_millis(300);
+    spec.hello_timeout = Duration::from_millis(1000);
+    spec.budget.max = 0;
+    let cap = spec.hello_timeout * liascape_player::worker::HELLO_TIMEOUT_MAX_FACTOR;
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn(spec).unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(13), |e| {
+        matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    match evs.last() {
+        Some((_, WorkerEvent::Hung { waited_ms })) => {
+            let w = Duration::from_millis(*waited_ms);
+            assert!(w >= cap && w < cap + Duration::from_secs(1), "Hung after {w:?} (cap {cap:?})");
+        }
+        other => panic!("expected Hung at the cap, got {other:?} (all: {evs:?})"),
+    }
+}
+
 #[test]
 fn restarts_three_times_then_broken() {
     let spec = stub_spec("crashy", "crash_after_ms:50");

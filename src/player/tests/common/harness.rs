@@ -43,6 +43,16 @@ pub const TICK_WAIT: Duration = Duration::from_micros(16_667);
 /// gain push gets an mpv reply, the reply wakes the fd, the next tick pushes again
 /// (measured: ~650 ticks in 30 ms).
 pub const MIN_TICK: Duration = Duration::from_millis(2);
+/// How much longer than its own limit a wait may run while sources come up ([`Harness::within`]):
+/// the backend's own switch wait (`LOADING_READY_TIMEOUT` is under it).
+pub const LOADING_CEILING: Duration = Duration::from_secs(60);
+
+/// See [`Harness::mark`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Mark {
+    now: Duration,
+    settled: Duration,
+}
 
 pub struct Harness {
     pub gfx: Gfx,
@@ -57,8 +67,12 @@ pub struct Harness {
     pub outputs: Vec<(String, Tex, Fbo)>,
     /// Every source event, with the tick time it was seen at.
     pub src_events: Vec<(Duration, String, SourceEvent)>,
+    /// Sources whose latest `Error` no `Ready` followed (they won't come up on their own).
+    failed: std::collections::BTreeSet<String>,
     pub tr_events: Vec<TransitionEvent>,
     pub ticks: u64,
+    /// Player time not spent waiting for a source to come up (see [`Harness::within`]).
+    settled: Duration,
     last_wall: Instant,
     debt: Duration,
     /// Declared last: dropped after every source is gone.
@@ -140,8 +154,10 @@ impl Harness {
             tr: Transitions::new(),
             outputs: outs,
             src_events: Vec::new(),
+            failed: Default::default(),
             tr_events: Vec::new(),
             ticks: 0,
+            settled: Duration::ZERO,
             last_wall: Instant::now(),
             debt: Duration::ZERO,
             _serial: serial,
@@ -174,6 +190,9 @@ impl Harness {
         }
         self.clock.step(d);
         self.run();
+        if !self.any_coming_up() {
+            self.settled += d;
+        }
     }
 
     pub fn tick(&mut self) {
@@ -193,22 +212,51 @@ impl Harness {
         }
     }
 
-    /// Tick until `done` (checked after every tick) or `timeout` of player time.
+    /// Tick until `done` (checked after every tick) or [`within`](Self::within) `timeout` no more.
     pub fn tick_until(
         &mut self,
         timeout: Duration,
         mut done: impl FnMut(&Harness) -> bool,
     ) -> bool {
-        let end = self.now() + timeout;
+        let m = self.mark();
         loop {
             self.tick();
             if done(self) {
                 return true;
             }
-            if self.now() >= end {
+            if !self.within(m, timeout) {
                 return false;
             }
         }
+    }
+
+    /// Where a wait begins, for [`within`](Self::within); `Mark::default()` = the harness's start.
+    pub fn mark(&self) -> Mark {
+        Mark {
+            now: self.now(),
+            settled: self.settled,
+        }
+    }
+
+    /// The wait begun at `m` is still inside `limit` — of player time not spent while a source
+    /// was coming up ([`any_coming_up`](Self::any_coming_up)), and never past `limit` +
+    /// [`LOADING_CEILING`] of player time. The player waits for a source coming up itself
+    /// (`READY_TIMEOUT`, `LOADING_READY_TIMEOUT`, the worker's hello grace), and on a busy box a
+    /// cold scene worker start alone takes seconds: a test's deadline is for what it checks.
+    pub fn within(&self, m: Mark, limit: Duration) -> bool {
+        self.settled - m.settled < limit && self.now() - m.now < limit + LOADING_CEILING
+    }
+
+    /// A source is still coming up: not `ready` yet and not failed (a video opening its file, a
+    /// scene before its first frame), or a scene's restarted worker before its first frame.
+    pub fn any_coming_up(&self) -> bool {
+        self.sources().iter().any(|s| {
+            !self.bool(&format!("{s}.ready"))
+                && !self.bool(&format!("{s}.broken"))
+                && !self.failed.contains(s)
+        }) || self.host.scene_ids().iter().any(|id| {
+            self.host.scene(id).is_some_and(|sc| sc.resuming() && sc.broken().is_none())
+        })
     }
 
     fn run(&mut self) {
@@ -230,6 +278,15 @@ impl Harness {
         let evs = self.host.events();
         for (id, e) in &evs {
             self.src_events.push((now, id.clone(), e.clone()));
+            match e {
+                SourceEvent::Error { .. } => {
+                    self.failed.insert(id.clone());
+                }
+                SourceEvent::Ready => {
+                    self.failed.remove(id);
+                }
+                _ => {}
+            }
         }
         self.tr.tick(&mut self.graph, &mut self.anim, &evs, now);
         self.tr_events.extend(self.tr.drain_events());
@@ -315,8 +372,15 @@ impl Harness {
     }
 
     pub fn wait_ready(&mut self, id: &str) {
+        let t0 = Instant::now();
         let ok = self.tick_until(Duration::from_secs(5), |h| h.bool(&format!("{id}.ready")));
-        assert!(ok, "{id} never became ready; events: {:?}", self.src_events);
+        let worker = self.host.scene(id).map(|s| (s.worker_info(), s.log_tail()));
+        assert!(
+            ok,
+            "{id} never became ready ({:?} wall); worker: {worker:?}; events: {:?}",
+            t0.elapsed(),
+            self.src_events
+        );
     }
 
     pub fn get(&self, path: &str) -> Option<PropValue> {

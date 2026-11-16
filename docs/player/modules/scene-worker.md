@@ -61,7 +61,15 @@ restarts; `waitpid` runs every poll only once the worker is ending, else every `
 Every `Tick` (answered by any `Frame` with `seq` ≥ it) and `Ping` is recorded; the oldest unanswered one older than
 the hang timeout (`HANG_TIMEOUT` 2 s, `LIASCAPE_SCENE_WORKER_HANG_MS`) → SIGKILL + `Hung`. With no ticks flowing a
 `Ping` goes every `hang_timeout / 2` (so a hang shows within 1.5 × the timeout), counted from the last tick or ping
-sent — other traffic never postpones it. No `Hello` within `HELLO_TIMEOUT` (5 s) is a hang too.
+sent — other traffic never postpones it. No `Hello` within `HELLO_TIMEOUT` (5 s) is a hang too. Until its first
+`Frame` a worker is still starting, and a late `Hello` or answer is no hang while it moves (`/proc/<pid>/stat`) within
+the last third of the bound it is late for: before `Hello` its CPU time or major page faults advanced or it sat in IO
+wait (`D`); after it only paging in counts (major faults, `D`), since CPU work then is a load the worker's protocol
+thread covers itself (`LoadGate`, its own cap) and a renderer spinning without answering is hung. All of it up to
+`HELLO_TIMEOUT_MAX_FACTOR` (10) × `HELLO_TIMEOUT` from its spawn (50 s, as long as the transition recipe waits for a
+loading B). A cold start pages its binary and the GL driver in; with those evicted from the page cache and the disk
+saturated, the debug build's sat in D state for over 20 s at 2–3 major faults a second. A slow start killed would only
+start over, and three restarts mark the scene broken.
 
 "Hung" means the worker is the reason no frame comes, so two waits don't count:
 

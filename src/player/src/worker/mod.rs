@@ -43,8 +43,23 @@ pub const STOP_GRACE: Duration = Duration::from_millis(500);
 pub const LOG_TAIL: usize = 50;
 /// Crash records kept in the crash dir (oldest dropped).
 pub const MAX_CRASH_RECORDS: usize = 20;
-/// A spawned worker that hasn't said `Hello` by then is hung.
+/// A spawned worker that hasn't said `Hello` by then is hung — unless it is still starting
+/// ([`start_activity`] moved within the last `HELLO_TIMEOUT / HELLO_PROGRESS_DIV`). A worker is
+/// starting until its first `Frame`: a cold start pages its binary and the GL driver in, and with
+/// those evicted from the page cache and the disk busy the debug build's `Hello` took over 5 s
+/// and its first frame over 10 s more — its first render's driver calls can miss a `Ping` past
+/// the hang timeout the same way. Killing a slow start only starts it over from scratch, and
+/// three restarts mark the scene broken.
 pub const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+/// The quiet window that ends a start's grace, as a fraction of the bound it extends (the hello
+/// timeout, then the hang timeout once `Hello` came): no CPU time and no major fault that long =
+/// blocked (on a lock, in the driver).
+pub const HELLO_PROGRESS_DIV: u32 = 3;
+/// A start still making progress is waited for up to this many × the hello timeout from its spawn:
+/// 50 s, as long as a transition waits for a loading B (`recipes::transition::LOADING_READY_TIMEOUT`).
+/// A worker paging in from a saturated disk was seen in D state for over 20 s, 2–3 major faults
+/// a second.
+pub const HELLO_TIMEOUT_MAX_FACTOR: u32 = 10;
 /// Heartbeat period while no ticks flow (shortened to `hang_timeout / 2` for short timeouts,
 /// so a hang is always seen within `1.5 × hang_timeout`).
 pub const PING_INTERVAL: Duration = Duration::from_secs(1);
@@ -58,6 +73,38 @@ pub const STARVE_LIMIT_FACTOR: u32 = 5;
 pub fn host_stall_gap(hang_timeout: Duration) -> Duration {
     hang_timeout / 2
 }
+/// A starting worker's activity, from `/proc/<pid>/stat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StartActivity {
+    /// CPU time, clock ticks (`utime + stime`).
+    cpu: u64,
+    majflt: u64,
+    /// In uninterruptible IO wait (`D`): on a saturated disk one fault outlasts the quiet window.
+    in_io: bool,
+}
+
+/// Moving = still starting. Before `Hello` CPU time counts too (nothing else answers then);
+/// after it only paging in does: CPU work is a load the worker's own protocol thread covers
+/// (`LoadGate`, with its own cap), and outside it a renderer that spins without answering is
+/// hung. Guards: `tests/worker.rs::slow_start_is_not_a_hang`, `slow_first_render_is_not_a_hang`,
+/// `busy_first_render_is_hung`, `stuck_start_is_hung`, `tests/scene.rs::starved_scene_load_outlasts_the_load_timeout`,
+/// unit `start_activity_parses_stat`.
+fn start_activity(pid: libc::pid_t) -> Option<StartActivity> {
+    parse_start_activity(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+fn parse_start_activity(stat: &str) -> Option<StartActivity> {
+    // Fields after the `(comm)` (which may hold spaces and parentheses): state is field 3,
+    // majflt 12, utime 14, stime 15.
+    let f: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+    let n = |field: usize| f.get(field - 3)?.parse::<u64>().ok();
+    Some(StartActivity {
+        cpu: n(14)? + n(15)?,
+        majflt: n(12)?,
+        in_io: *f.first()? == "D",
+    })
+}
+
 /// The child's socket end.
 pub const CHILD_FD: RawFd = 3;
 /// After socket EOF, a process that still hasn't exited by then is killed.
@@ -149,6 +196,8 @@ pub struct WorkerSpec {
     /// Added to (and overriding) the compositor's environment.
     pub env: Vec<(String, String)>,
     pub hang_timeout: Duration,
+    /// [`HELLO_TIMEOUT`] (tests shorten it).
+    pub hello_timeout: Duration,
     pub budget: RestartBudget,
     /// Where crash records go ([`crate::paths::crash_dir`] by default).
     pub crash_dir: PathBuf,
@@ -165,6 +214,7 @@ impl WorkerSpec {
             start,
             env: Vec::new(),
             hang_timeout: HANG_TIMEOUT,
+            hello_timeout: HELLO_TIMEOUT,
             budget: RestartBudget::default(),
             crash_dir: crate::paths::crash_dir(),
         }
@@ -206,6 +256,11 @@ struct Proc {
     out: Option<OwnedFd>,
     started: Instant,
     hello_at: Option<Instant>,
+    /// A `Frame` came: the start (see [`HELLO_TIMEOUT`]) is over.
+    framed: bool,
+    /// While starting: the process's [`start_activity`] when last sampled, and when it last moved.
+    start_activity: Option<StartActivity>,
+    start_moved_at: Instant,
     /// Sent ticks not answered yet (`seq`, sent at); a `Frame {seq}` answers every tick ≤ it.
     ticks: VecDeque<(u64, Instant)>,
     ping: Option<(u64, Instant)>,
@@ -649,6 +704,9 @@ impl WorkerHost {
             out: Some(out_r),
             started: now,
             hello_at: None,
+            framed: false,
+            start_activity: None,
+            start_moved_at: now,
             ticks: VecDeque::new(),
             ping: None,
             last_beat: now,
@@ -771,6 +829,7 @@ impl WorkerHost {
                 return;
             }
             FromWorker::Frame { seq, slot, .. } => {
+                p.framed = true;
                 while p.ticks.front().is_some_and(|(s, _)| s <= seq) {
                     p.ticks.pop_front();
                 }
@@ -868,6 +927,7 @@ impl WorkerHost {
         if p.hello_at.is_none() {
             p.started = now;
         }
+        p.start_moved_at = now;
         if outstanding > 0 || p.hello_at.is_none() {
             log::event(
                 "worker",
@@ -907,19 +967,47 @@ impl WorkerHost {
         } else {
             p.starved_since = None;
         }
+        // Still starting (no `Frame` yet, see `HELLO_TIMEOUT`): a late answer is no hang while
+        // the process moved within the last third of the bound it is late for, up to the cap
+        // from its spawn. Sampled on each poll from one window before that bound on (an unloaded
+        // start answers in time and reads nothing).
+        let base = self.spec.hello_timeout.max(hang);
+        let since_spawn = now.saturating_duration_since(p.started);
+        let starting_moves = |p: &mut Proc, window: Duration, near_bound: bool| -> bool {
+            if p.framed || since_spawn > base * HELLO_TIMEOUT_MAX_FACTOR {
+                return false;
+            }
+            if near_bound {
+                let cpu_counts = p.hello_at.is_none();
+                let a = start_activity(p.pid);
+                let moved = match (p.start_activity, a) {
+                    (_, Some(a)) if a.in_io => true,
+                    (Some(b), Some(a)) => a.majflt != b.majflt || (cpu_counts && a.cpu != b.cpu),
+                    _ => false,
+                };
+                if moved {
+                    p.start_moved_at = now;
+                }
+                p.start_activity = a;
+            }
+            now.saturating_duration_since(p.start_moved_at) < window
+        };
         let waited = match p.hello_at {
             None => {
-                let w = now.saturating_duration_since(p.started);
-                (w > HELLO_TIMEOUT.max(hang)).then_some(w)
+                let window = base / HELLO_PROGRESS_DIV;
+                let moves = starting_moves(p, window, since_spawn + window > base);
+                (since_spawn > base && !moves).then_some(since_spawn)
             }
             Some(_) => {
                 let oldest = [p.ticks.front().map(|t| t.1), p.ping.map(|t| t.1)]
                     .into_iter()
                     .flatten()
-                    .min();
+                    .min()
+                    .map(|t| now.saturating_duration_since(t));
+                let window = hang / HELLO_PROGRESS_DIV;
+                let moves = starting_moves(p, window, oldest.is_some_and(|w| w + window > hang));
                 oldest
-                    .map(|t| now.saturating_duration_since(t))
-                    .filter(|w| *w > hang)
+                    .filter(|w| *w > hang && !moves)
                     .or(starved_ms)
             }
         };
@@ -1311,6 +1399,17 @@ pub mod reap {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn start_activity_parses_stat() {
+        // A comm with spaces and a `)`; state D; majflt 7, utime 30, stime 5.
+        let stat = "4242 (liascape (x) w) D 1 2 3 0 -1 4194304 100 0 7 0 30 5 0 0 20 0 2 0 99";
+        let a = |in_io| Some(super::StartActivity { cpu: 35, majflt: 7, in_io });
+        assert_eq!(super::parse_start_activity(stat), a(true));
+        let stat = "4242 (w) S 1 2 3 0 -1 4194304 100 0 7 0 30 5 0 0 20 0 2 0 99";
+        assert_eq!(super::parse_start_activity(stat), a(false));
+        assert_eq!(super::parse_start_activity("garbage"), None);
+    }
+
     use super::*;
 
     #[test]

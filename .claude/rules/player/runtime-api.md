@@ -131,6 +131,8 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
 - Stamp transition events with the pause-excised player clock (`Runtime::now`), not `t_mono_ms`.
 - Tests: one harness at a time (process-wide lock) — parallel 1080p decoders starve each other.
   Pure state-machine rules are unit-tested graph-only in `recipes/transition.rs`.
+- Bound a harness wait with `tick_until` / `Harness::within`, not an `h.now() < …` assert: neither counts the
+  time a source is still coming up (`any_coming_up`), seconds per cold worker start on a busy box.
 
 ## Programs (`recipes/program/`)
 - A program is a graph node `prog:<name>` that only issues `transition` requests through

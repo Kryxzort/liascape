@@ -2157,6 +2157,11 @@ impl SceneSource {
             })
     }
 
+    /// A restarted worker's first frame isn't on screen yet (the held frame shows meanwhile).
+    pub fn resuming(&self) -> bool {
+        self.resuming.is_some()
+    }
+
     /// Readable when [`update`](Self::update) has worker input (stable across restarts and
     /// path changes: our own epoll fd over the current worker's).
     pub fn wake_fd(&self) -> RawFd {

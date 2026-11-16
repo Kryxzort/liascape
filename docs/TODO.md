@@ -49,6 +49,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        playlist state, playlist_state.json is written atomically, and a stalled player's /current no longer reads
        "nothing plays" (a likely cause of the missing mark: matrix load:duringStall). Unexplained: the empty bar. A failing mark/bar
        check now prints what the page showed (tab, cards, bar items, status line): read it on the next failure.
+       Not reproduced under load: `--only ' × cli:next$'` 18/18 cells in 2 runs with 16 CPU burners + 4 fsync-ing
+       writers + page-cache eviction (2 more runs there never reached their states), and the `playlist × ` cells' run
+       under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
+       all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
+       under that load); the printed `cards` count tells.
 23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
        still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
        each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
@@ -207,6 +212,38 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] **Load-sensitive test flakes** (seen once each under a busy desktop, never reproduced unloaded):
       `stepped_align_end_reveal`, `bus_down_falls_back_to_default_device`, `supervise::crash_restores` (clip
       wrap under load). Watch; harden their timing margins if they recur.
+      **Scene starts under IO load — a real bug + test deadlines, fixed (2026-11-16).** The "never became ready"
+      family in `tests/transition.rs` (10 in one full run at load ~40) is a cold scene worker start: not CPU (16
+      burners pinned with the suite: 0 failures in 3 runs) but IO — 2 fsync-ing writers + the worker's binary/libs
+      evicted from the page cache every 3 s: 12 and 9 failures in 2 runs (`src1 never became ready`, B not started in
+      5 s, `slow_loading_scene_b_is_waited_for` broken after 3 "hung" kills, `scene_b_load_error_keeps_a` counting a
+      kill as a crash). Sampled: the worker sits in D state paging in (`filemap_fault`, 2–3 major faults/s) for 5–20+
+      s before `Hello`, and its first render can miss pings the same way. The host killed it at `HELLO_TIMEOUT` (5 s)
+      / the 2 s hang timeout and restarted it from scratch; three in a row = a broken scene. Now a worker is
+      "starting" until its first `Frame`: before `Hello` moving CPU time, major faults or IO wait (`D`: one fault
+      outlasted the quiet window) keep it alive, after it only paging in does (CPU work then is the `LoadGate`'s,
+      whose cap `tests/scene.rs::starved_scene_load_outlasts_the_load_timeout` holds — counting CPU there broke it), ≤
+      50 s from spawn (`tests/worker.rs` `slow_start_is_not_a_hang`, `slow_first_render_is_not_a_hang`,
+      `endless_start_is_hung_at_the_cap` RED before; `stuck_start_is_hung`, `busy_first_render_is_hung`). The
+      harness's deadlines (`tick_until`, `Harness::within`) no longer count time a source is still coming up. After
+      the hello part alone: 3 left under the same load (a first-render kill, a broken B's restarts counted against its
+      8 s, `align_end_video_a_to_scene_b` 40 ms off its 34 ms at load — it now fails on its own "B came up late"
+      message when B's start, not the alignment, is the problem; a 10 s A for B's start drifted −35 ms under CPU load
+      alone, so A stays 3 s, and it requests with ≥ 1.5 s of A left: its "A's last iteration" failure (once on a busy
+      box, again after a reboot under btrfs-cleaner) was a request in A's last moments); the first-render grace, the
+      50 s cap and restart-aware deadlines came after, unproven under IO load (the runs stopped: owner on the desktop,
+      disk 95 % full) — checked with CPU load + unloaded only. **Left for a quiet night (owner's go):** under `bash
+      scripts/test-lock.sh`, 2 writers `while :; do dd if=/dev/zero of=<scratch>/io-N.bin bs=1M count=256
+      conv=fsync,notrunc status=none; done`, plus every 3 s `os.posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)` on
+      `src/player/target/debug/liascape-scene-worker` and each library `ldd` lists for it; run `cargo test --test
+      transition` 2× on 1c6ae31a's `src/worker/mod.rs` + `tests/common/harness.rs` + `tests/transition.rs` (RED: 9–12
+      failures, the family above) and 3× on this change (GREEN: 0); then `--test supervise` and `--test program` once
+      each; delete the writers' files. Under heavier IO (4 writers, eviction every 0.3 s, the test binaries evicted
+      too) starts outlast 50 s and frame-timing checks fail: past what the suite can hold.
+      `program_survives_a_crash`'s other failure (history with a 4th, requested item: a read landing between the
+      timer's request and its commit) now waits for `phase: playing`. Its post-crash "program idle, item 0 from 0"
+      state (once, load ~40) is unexplained: a failing `tests/supervise.rs` test now keeps its root (event log,
+      snapshot, stderr) and prints where.
       Not a margin: `i2_switch_while_gated_never_leaves_a_playing_source_silent` (~1 in 8 under CPU load) was
       a real bug — a resuming pause gate was dropped on a second clock read after its last `ramp_db`, so
       `gain.pause` stayed a hair under 0 dB for good (−0.0003 measured; −0.04…−0.56 dB with a 2 ms stall

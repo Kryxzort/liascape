@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use common::harness::{FRAME, Harness, from_ms, ms, start_of};
+use common::harness::{FRAME, Harness, Mark, from_ms, ms, start_of};
 use common::{ClipSpec, ensure_clip};
 use liascape_player::recipes::TransitionEventKind;
 use liascape_player::sources::SourceEvent;
@@ -271,6 +271,7 @@ fn align_end_full_live() {
         &["VIRTUAL-1"],
     );
     let t_req = h.now();
+    let m_req = h.mark();
     let remaining_ms = (h.f64(&format!("{a}.duration")) - h.f64(&format!("{a}.time_pos"))) * 1000.0;
     let corr = h.start(json!({
         "outputs": "out:VIRTUAL-1", "to": {"path": s(&blue10()), "loop": true},
@@ -302,7 +303,7 @@ fn align_end_full_live() {
         || (h.src_event_at(&a, |e| *e == SourceEvent::Ended).is_none() && wrapped_at.is_none())
     {
         assert!(
-            h.now() < t_req + MS(8000),
+            h.within(m_req, MS(8000)),
             "A never ended / no handoff: {:?}",
             h.tr_events
         );
@@ -396,7 +397,7 @@ fn short_a_holds_last_frame() {
     let mut last = h.corner(&a).unwrap();
     let mut b_ready = None;
     while h.event(&corr, "transition.handoff").is_none() {
-        assert!(h.now() < MS(60_000), "no handoff: {:?}", h.tr_events);
+        assert!(h.within(Mark::default(), MS(60_000)), "no handoff: {:?}", h.tr_events);
         h.tick();
         if b_ready.is_none() {
             b_ready = h.src_event_at(&b, |e| *e == SourceEvent::Ready);
@@ -636,7 +637,7 @@ fn cut_without_effect() {
         if let Some(e) = h.event(&corr, "transition.started") {
             break e;
         }
-        assert!(h.now() < MS(10_000), "never started: {:?}", h.tr_events);
+        assert!(h.within(Mark::default(), MS(10_000)), "never started: {:?}", h.tr_events);
     };
     let t0 = from_ms(started.at_ms);
     while h.now() < t0 + MS(30) {
@@ -770,7 +771,7 @@ fn shared_a_untouched() {
     let mut a_corners = Vec::new();
     let mut v2_corners = Vec::new();
     while h.event(&corr, "transition.done").is_none() {
-        assert!(h.now() < MS(30_000), "never done: {:?}", h.tr_events);
+        assert!(h.within(Mark::default(), MS(30_000)), "never done: {:?}", h.tr_events);
         h.tick();
         untouched(&h, "during");
         if copied_from.is_none()
@@ -980,7 +981,7 @@ fn shared_a_align_end_boundary() {
         let mut held_marker = None;
         while h.event(&corr, "transition.done").is_none() {
             assert!(
-                h.now() < MS(30_000),
+                h.within(Mark::default(), MS(30_000)),
                 "{method}: never done: {:?}",
                 h.tr_events
             );
@@ -1293,7 +1294,7 @@ fn zero_duration_gains_still_ramp_30ms() {
         let mut series: Vec<(String, Vec<(f64, f64)>)> =
             vec![(a.clone(), Vec::new()), (b.clone(), Vec::new())];
         while h.event(&t, "transition.done").is_none() {
-            assert!(h.now() < MS(30_000), "{method}: never done");
+            assert!(h.within(Mark::default(), MS(30_000)), "{method}: never done");
             let next = h.now() + MS(5);
             h.tick_to(next);
             for (id, v) in &mut series {
@@ -1768,7 +1769,9 @@ fn s_to_s_each_method() {
 /// `align: end` from a video A onto a scene B: full-live ends one clip frame after A's
 /// `Ended` (± one tick; F3 — `Ended` fires as A's last frame is presented, and that frame
 /// keeps its 33 ms), reveal/frozen start at it (± one frame, as V→V) — B being a scene
-/// changes nothing.
+/// changes nothing. B's worker must be up before the effect is due: one that comes up late
+/// (a cold worker start on a disk-bound box takes seconds) starts late, with nothing to align —
+/// that fails on its own message.
 #[test]
 fn align_end_video_a_to_scene_b() {
     for method in METHODS {
@@ -1780,6 +1783,11 @@ fn align_end_video_a_to_scene_b() {
             json!({"loop": true}),
             &["VIRTUAL-1"],
         );
+        // Request with over a second of A's iteration left: one in its last moments can see A
+        // end before the loop check below, and on a busy box `play` can return that late in a
+        // 3 s clip.
+        let ok = h.tick_until(MS(4000), |h| h.f64(&format!("{a}.time_pos")) < 1.5);
+        assert!(ok, "{method}: A never wrapped");
         let corr = h.start(json!({
             "outputs": "out:VIRTUAL-1", "to": to_props(Kind::Scene, "t9-end-b"),
             "effect_id": "fade", "duration_ms": 1000, "method": method, "align": "end"
@@ -1791,6 +1799,10 @@ fn align_end_video_a_to_scene_b() {
             "{method}: A's last iteration"
         );
         let started = h.wait_event(&corr, "transition.started", MS(6000));
+        let b_ready = h
+            .src_event_at(&b, |e| *e == SourceEvent::Ready)
+            .map(ms)
+            .expect("B is ready once its effect started");
         if method == "full-live" {
             let progress_one = ms(start_of(&started)) + 1000.0;
             // Keep A alive past the handoff (shown elsewhere → restored, never destroyed)
@@ -1802,7 +1814,7 @@ fn align_end_video_a_to_scene_b() {
                 || (h.src_event_at(&a, |e| *e == SourceEvent::Ended).is_none()
                     && wrapped_at.is_none())
             {
-                assert!(h.now() < MS(60_000), "{method}: {:?}", h.tr_events);
+                assert!(h.within(Mark::default(), MS(60_000)), "{method}: {:?}", h.tr_events);
                 h.tick();
                 let tp = h.f64(&format!("{a}.time_pos"));
                 if wrapped_at.is_none() && tp + 0.5 < last_tp {
@@ -1824,6 +1836,12 @@ fn align_end_video_a_to_scene_b() {
             // two ticks here (measured −17…−7 ms); the precise bound is
             // `tests/api.rs::align_end_hands_off_as_a_last_frame_ends` at 144 Hz.
             let due = ended + 1000.0 / 30.0;
+            assert!(
+                b_ready < due - 1000.0,
+                "{method}: B came up at {b_ready:.0} ms, after its effect was due to start \
+                 ({:.0} ms)",
+                due - 1000.0
+            );
             println!(
                 "align_end V→S full-live: progress=1 − (A's end + one frame) = {:+.1} ms",
                 progress_one - due
@@ -1836,6 +1854,11 @@ fn align_end_video_a_to_scene_b() {
             let ended = h
                 .src_event_at(&a, |e| *e == SourceEvent::Ended)
                 .expect("A's Ended");
+            assert!(
+                b_ready < ms(ended),
+                "{method}: B came up at {b_ready:.0} ms, after A's end ({:.0} ms)",
+                ms(ended)
+            );
             println!(
                 "align_end V→S {method}: started − A's Ended = {:+.1} ms",
                 started.at_ms - ms(ended)
@@ -1890,7 +1913,7 @@ fn scene_a_align_end_starts_at_once() {
         let mut started_tick = None;
         while started_tick.is_none() {
             assert!(
-                h.now() < MS(8000),
+                h.within(Mark::default(), MS(8000)),
                 "{what}: never started: {:?}",
                 h.tr_events
             );
@@ -1962,7 +1985,7 @@ fn shared_scene_a_is_untouched() {
         let mut held: Option<(String, Vec<u8>)> = None;
         let mut fx_seen = false;
         while h.event(&corr, "transition.done").is_none() {
-            assert!(h.now() < MS(30_000), "never done: {:?}", h.tr_events);
+            assert!(h.within(Mark::default(), MS(30_000)), "never done: {:?}", h.tr_events);
             h.tick();
             untouched(&h, "during");
             let content = h.content("VIRTUAL-1");
@@ -2056,7 +2079,7 @@ fn scene_b_load_error_keeps_a() {
         let mut failed = None;
         while failed.is_none() {
             assert!(
-                h.now() < MS(60_000),
+                h.within(Mark::default(), MS(60_000)),
                 "{path}: never failed: {:?}",
                 h.tr_events
             );
@@ -2111,10 +2134,11 @@ fn slow_loading_scene_b_is_waited_for() {
     }));
     let b = h.to_of(&corr);
     let t_req = h.now();
+    let m_req = h.mark();
     let mut saw_loading = false;
     while h.event(&corr, "transition.started").is_none() {
         assert!(
-            h.now() < t_req + MS(30_000),
+            h.within(m_req, MS(30_000)),
             "never started: {:?}",
             h.tr_events
         );
@@ -2164,6 +2188,7 @@ fn scene_b_worker_crash_mid_effect_still_hands_off() {
         }));
         let b = h.to_of(&corr);
         let t0 = start_of(&h.wait_event(&corr, "transition.started", MS(5000)));
+        let m0 = h.mark();
         h.tick_to(t0 + MS(1000));
         let pid = h.scene_src(&b).pid().expect("B's worker");
         let t_before = h.scene_src(&b).latched_t().expect("B's frame");
@@ -2179,7 +2204,7 @@ fn scene_b_worker_crash_mid_effect_still_hands_off() {
         };
         while h.event(&corr, "transition.handoff").is_none() {
             assert!(
-                h.now() < t0 + MS(10_000),
+                h.within(m0, MS(10_000)),
                 "{method}: no handoff: {:?}",
                 h.tr_events
             );
@@ -2212,7 +2237,12 @@ fn scene_b_worker_crash_mid_effect_still_hands_off() {
             "{method}: the restarted worker resumed at {t_new}, before B's last frame {t_before}"
         );
         let st = h.scene_src(&b).stats();
-        assert_eq!(st.restarts, 1, "{method}: {st:?}");
+        assert_eq!(
+            st.restarts,
+            1,
+            "{method}: {st:?}; worker log: {:?}",
+            h.scene_src(&b).log_tail()
+        );
         assert_eq!(
             harness_crash_records(),
             records0,
