@@ -29,6 +29,7 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - Work not done yet → `docs/TODO.md`: product work only, agreed-but-unstarted work at the top under "Queued", in order;
   delete an item in the commit that does it.
 - A zero-exception ban → a hook or a permission rule, not prose.
+- What a user needs to install, start and use the app → `README.md` (see below); never internals or a change log.
 - One person's own workflow on their machine (where their notes go, their habits) → `CLAUDE.local.md` (gitignored,
   loaded like `CLAUDE.md` for that checkout only); a tracked file never points at anything that exists only locally.
 
@@ -57,6 +58,13 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - Stale beats missing never: when the code changes, update or cut the paragraph in the same commit; a doc nobody can
   keep true gets deleted. Rules win over reference docs; reference docs never give orders a rule doesn't.
 - Measured results and reports (`docs/player/reports/`) are dated snapshots: keep them as data, never cite them as the current state.
+
+## `README.md`
+- Written for a person reading top to bottom: what Liascape does for them, how to get it running, everyday use; contributor
+  and build detail last and short. Plain sentences, short paragraphs; bullets only for things people scan (commands, keybinds).
+- Keep it true, not complete: a change to something it already says (an install step, a command, a feature or setting it
+  names, a requirement) updates it in the same commit; a new feature is added only when a user would miss it.
+- Never internals (paths under libexec, engine and worker details, pins, tests), dates, history or every setting.
 
 ## Code comments
 - Say why the code is the way it is when the code can't: the contract, the trap a "simplification" would fall into,
