@@ -7,16 +7,13 @@
     { self, nixpkgs }:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs {
-        inherit system;
-        # Electron 42 is EOL upstream, so nixpkgs marks electron_42 insecure ("Electron version … is EOL").
-        # We keep the 42.x pin (see `liascape` below, app/shell/package.json, the AppImage) until all three
-        # move to a newer major together; this lets only electron 42.x through, nothing else insecure.
-        config.allowInsecurePredicate =
-          p:
-          nixpkgs.lib.getName p == "electron" && nixpkgs.lib.versions.major (nixpkgs.lib.getVersion p) == "42";
-      };
+      pkgs = nixpkgs.legacyPackages.${system};
       inherit (pkgs) lib;
+
+      # The app's Electron: one major for the flake, app/shell/package.json (+ its `allowScripts` key) and the
+      # AppImage (.claude/rules/build-and-packaging.md § Electron). An EOL major is marked insecure by nixpkgs and
+      # fails to evaluate: move all three to a supported one together.
+      electron = pkgs.electron_45;
 
       version = "0.1.0";
 
@@ -195,9 +192,8 @@
         '';
       };
 
-      # 4) Electron shell sources (plain JS; electron comes from nixpkgs, not the bundled prebuilt
-      # which can't dlopen its libs on NixOS). Keep the 42.x pin — older crash-loops the GPU on
-      # NVIDIA + kernel ≥6.12 (see .claude/rules/build-and-packaging.md).
+      # 4) Electron shell sources (plain JS; electron comes from nixpkgs (`electron` above), not the bundled
+      # prebuilt which can't dlopen its libs on NixOS).
       shellSrc = pkgs.runCommand "liascape-shell-src" { } ''
         mkdir -p $out
         cp -r ${./app/shell}/. $out/
@@ -233,7 +229,7 @@
           install -Dm755 ${./scripts/liascape} $out/bin/liascape
           patchShebangs $out/bin/liascape
           wrapProgram $out/bin/liascape \
-            --set-default LIASCAPE_ELECTRON ${pkgs.electron_42}/bin/electron \
+            --set-default LIASCAPE_ELECTRON ${electron}/bin/electron \
             --prefix PATH : ${lib.makeBinPath runtimeTools}
 
           cat > $out/share/applications/liascape.desktop <<EOF
@@ -301,8 +297,11 @@
           pkgs.rustfmt
           pkgs.rust-analyzer
           pkgs.sccache
+          electron
         ] ++ runtimeTools;
         DOTNET_ROOT = "${pkgs.dotnet-sdk_10}/share/dotnet";
+        # the app's Electron for the launcher, scripts/agent-window.sh and the UI matrix (scripts/test-ui-matrix.sh)
+        LIASCAPE_ELECTRON = "${electron}/bin/electron";
         # Shared compile cache (~/.cache/sccache): every git worktree (one per agent) has its own
         # target/, so without it each one recompiles all dependencies from scratch.
         RUSTC_WRAPPER = "sccache";

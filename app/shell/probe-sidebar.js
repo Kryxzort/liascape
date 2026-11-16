@@ -2134,9 +2134,10 @@ app.whenReady().then(async () => {
       if (sel.length < 4 || !LONG.startsWith(sel.trim().slice(0, 4))) v.push(`a drag across the title selected ${J(sel)}`);
       if (s3.exp !== "false") v.push("the drag that selected words unfolded the title");
       // Ctrl+C copies what's selected (the app's own Edit menu, hidden, keeps its accelerators)
-      clipboard.writeText("");
+      await clipboard.writeText("");
       send({ type: "keyDown", keyCode: "C", modifiers: ["control"] }); send({ type: "keyUp", keyCode: "C", modifiers: ["control"] }); await sleep(250);
-      if (sel.length >= 4 && clipboard.readText() !== sel) v.push(`Ctrl+C put ${J(clipboard.readText().slice(0, 60))} on the clipboard, want the selection ${J(sel.slice(0, 60))}`);
+      const got = await clipboard.readText();
+      if (sel.length >= 4 && got !== sel) v.push(`Ctrl+C put ${J(got.slice(0, 60))} on the clipboard, want the selection ${J(sel.slice(0, 60))}`);
       await page(`getSelection().removeAllRanges();`);
       // a plain click still unfolds it
       await clickAt(s0.x + 30, s0.y + 8); await sleep(700);

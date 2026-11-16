@@ -16,9 +16,13 @@ rm -rf "$APPDIR"
 DESTDIR="$APPDIR" PREFIX=/usr bash "$ROOT/scripts/install.sh"
 
 echo "==> bundling Electron (portable — no system electron needed)"
-(cd "$ROOT/app/shell" && npm install >/dev/null 2>&1 || true)
+# the lockfile's Electron (app/shell/package.json, the same major as the flake's). Its npm package has no install script:
+# it fetches its binary into node_modules/electron/dist on first run, so fetch it here (its `install-electron` bin;
+# checked against the package's checksums.json)
+(cd "$ROOT/app/shell" && npm ci --no-audit --no-fund && node node_modules/electron/install.js) \
+  || { echo "ERROR: couldn't install the bundled electron (npm ci / install-electron in app/shell)"; exit 1; }
 ELECTRON_DIST="$ROOT/app/shell/node_modules/electron/dist"
-[ -d "$ELECTRON_DIST" ] || { echo "ERROR: no bundled electron at $ELECTRON_DIST (npm install failed?)"; exit 1; }
+[ -x "$ELECTRON_DIST/electron" ] || { echo "ERROR: no bundled electron at $ELECTRON_DIST"; exit 1; }
 mkdir -p "$APPDIR/usr/lib/electron"
 cp -r "$ELECTRON_DIST"/. "$APPDIR/usr/lib/electron/"
 

@@ -63,8 +63,8 @@
 # LIASCAPE_MATRIX_SCREEN=<w>x<h> (default 1400x900): the private Xvfb's screen size (a probe that measures at the owner's 1080p).
 # LIASCAPE_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
-# Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: the nix store's
-# electron-42); pulseaudio (PULSEAUDIO=…) + pactl / paplay / parec for the auto-mute cells (they SKIP
+# Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: $LIASCAPE_ELECTRON — the
+# devShell's, the flake's major — else `electron` on PATH; the version it runs is printed); pulseaudio (PULSEAUDIO=…) + pactl / paplay / parec for the auto-mute cells (they SKIP
 # without). Exit 0 = every cell passed. Results: $LIASCAPE_MATRIX_OUT (default: a dir printed at the end).
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
@@ -111,8 +111,9 @@ case "$JOBS" in ''|*[!0-9]*|0) echo "--jobs wants a positive number"; exit 2 ;; 
 SELF=$ROOT/scripts/$(basename "${BASH_SOURCE[0]}")
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
-ELECTRON=${ELECTRON:-$(ls -d /nix/store/*-electron-42*/bin/electron 2>/dev/null | head -1)}
-[ -x "$ELECTRON" ] || { echo "no electron — set ELECTRON=/path/to/electron"; exit 2; }
+ELECTRON=${ELECTRON:-${LIASCAPE_ELECTRON:-$(command -v electron || true)}}
+[ -x "$ELECTRON" ] || { echo "no electron — set ELECTRON=/path/to/electron (or run in the devShell)"; exit 2; }
+[ -n "$SHARD" ] || echo "== electron $("$ELECTRON" --version 2>/dev/null) ($ELECTRON)"
 for t in ffmpeg jq curl node; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
 # Electron renders on a private Xvfb (its headless ozone platform crashes on this build; no display of
 # the session is ever used)

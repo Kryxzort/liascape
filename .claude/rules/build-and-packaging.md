@@ -31,7 +31,7 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 - CLI commands and flags (`liascape help` lists them; `Program.cs` parses them) may change freely before the first release (`CLAUDE.md` § Hard rules).
 
 ## Electron
-- Use the system's Electron (`electron` on PATH, AUR `depends`, the flake's `electron_42`; the AppImage bundles one). Keep the 42.x pin in `app/shell/package.json` with its exact-version `allowScripts` entry — older Chromium crash-loops the GPU process on NVIDIA with kernel ≥ 6.12.
+- Use the system's Electron (`electron` on PATH, AUR `depends`, the flake's `electron` binding, also the devShell's `LIASCAPE_ELECTRON`; the AppImage bundles the npm one). One supported major everywhere: the flake's `electron_45`, `app/shell/package.json` + its lockfile with the exact-version `allowScripts` entry, and the AppImage move together; nixpkgs fails to evaluate an EOL major (insecure), so move rather than allow it. Never below 42 — older Chromium crash-loops the GPU process on NVIDIA with kernel ≥ 6.12.
 - The shell's Chromium profile is `~/.config/liascape-shell`, apart from the backend's `~/.config/liascape`.
 
 ## Nix

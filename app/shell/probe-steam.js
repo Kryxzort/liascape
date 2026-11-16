@@ -2337,7 +2337,7 @@ app.whenReady().then(async () => {
       const name0 = await axName(BPILL);
       if (name0 !== "Workshop ID 930000 — copy") v.push(`its name at rest is ${J(name0)}`);
       const r = await js(`(() => { const r = document.querySelector("${BPILL}").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-      clipboard.writeText("");
+      await clipboard.writeText("");
       const tClick = Date.now();
       const fr = js(`new Promise((res) => { const out = []; const t0 = performance.now();
         const f = () => { out.push({ b: ${HERO}, on: !!document.querySelector("${BPILL}[data-copied]"),
@@ -2352,7 +2352,8 @@ app.whenReady().then(async () => {
       if ((await shownText()) !== "Copied") v.push(`it reads ${J(await shownText())}, want "Copied"`);
       const name1 = await axName(BPILL);
       if (name1 !== "Workshop ID 930000 — copied") v.push(`its name while copied is ${J(name1)}`);
-      if (clipboard.readText() !== "930000") v.push(`the clipboard holds ${J(clipboard.readText())}, want "930000"`);
+      const got = await clipboard.readText();
+      if (got !== "930000") v.push(`the clipboard holds ${J(got)}, want "930000"`);
       const moved = frs.find((f) => f.b && before && f.b.some((x, i) => before[i] && x.slice(1).some((n, k) => Math.abs(n - before[i][k + 1]) > 0.75)));
       if (moved) v.push(`a hero chip moved or resized: ${J(before)} → ${J(moved.b)}`);
       const ys = frs.filter((f) => f.on && f.y != null).map((f) => f.y);
@@ -2550,9 +2551,10 @@ app.whenReady().then(async () => {
       console.log(`        dragged: ${J(sel)}`);
       await shot("ws-creatorselect");
       if (sel.trim().length < 3 || !NM.startsWith(sel.trim())) v.push(`a drag across the name selected ${J(sel)}`);
-      clipboard.writeText("");
+      await clipboard.writeText("");
       send({ type: "keyDown", keyCode: "C", modifiers: ["control"] }); send({ type: "keyUp", keyCode: "C", modifiers: ["control"] }); await sleep(250);
-      if (sel.trim().length >= 3 && clipboard.readText() !== sel) v.push(`Ctrl+C put ${J(clipboard.readText())} on the clipboard, want ${J(sel)}`);
+      const got = await clipboard.readText();
+      if (sel.trim().length >= 3 && got !== sel) v.push(`Ctrl+C put ${J(got)} on the clipboard, want ${J(sel)}`);
       await sleep(300);
       if ((await browses()).slice(nb).some((b) => b.list)) v.push("the drag across the name listed the creator's wallpapers");
       if (!(await js(`!!document.querySelector(${J(SIDE)})`))) v.push("the drag closed the sidebar");
@@ -2597,9 +2599,10 @@ app.whenReady().then(async () => {
       const sel = await js(`getSelection().toString()`);
       if (sel.length < 4 || !LONG_T.startsWith(sel.trim().slice(0, 4))) v.push(`a drag across the title selected ${J(sel)}`);
       if ((await st()).exp !== "false") v.push("the drag that selected words unfolded the title");
-      clipboard.writeText("");
+      await clipboard.writeText("");
       send({ type: "keyDown", keyCode: "C", modifiers: ["control"] }); send({ type: "keyUp", keyCode: "C", modifiers: ["control"] }); await sleep(250);
-      if (sel.length >= 4 && clipboard.readText() !== sel) v.push(`Ctrl+C put ${J(clipboard.readText().slice(0, 50))} on the clipboard, want the selection`);
+      const got = await clipboard.readText();
+      if (sel.length >= 4 && got !== sel) v.push(`Ctrl+C put ${J(got.slice(0, 50))} on the clipboard, want the selection`);
       await js(`getSelection().removeAllRanges(); true`);
       return v;
     }));

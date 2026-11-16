@@ -2588,7 +2588,6 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
   // k1 only on its card: the playlist bar's copy would share its decodes
   async pre() { await post("/playlist/state", { videoPaths: [K[1], K[2], K[3]], settings: PS(), name: null }); },
   async run(c) {
-    const { contentTracing } = require("electron");
     const send = (e) => win.webContents.sendInputEvent(e);
     // the frame k1's card shows now (from a screenshot of its centre): null = not on screen, -1 = not a k1.gif frame
     const frame = async () => {
@@ -2602,18 +2601,26 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
     };
     // wait for k1 to play into frames [lo, hi] (far from both the loop's start and its wrap)
     const playTo = async (lo, hi) => { let f = null; await waitFor(async () => { f = await frame(); return f >= lo && f <= hi; }, 9000, 60); return f; };
-    // a full garbage collection in the page: Chromium resets a gif's animation once no <img> of it is left, and an
-    // unmounted one goes at the next GC (whenever that runs)
-    const gc = async () => { const d = win.webContents.debugger; d.attach("1.3"); try { await d.sendCommand("HeapProfiler.collectGarbage"); } finally { d.detach(); } };
-    // Chromium's own image decodes over `ms` (with a GC in it, when `collect`)
-    let tn = 0;
+    // Chromium's own image decodes over `ms`, with a full garbage collection in the page in it when `collect` (Chromium
+    // resets a gif's animation once no <img> of it is left, and an unmounted one goes at the next GC, whenever that
+    // runs). The trace comes as JSON events over the page's DevTools session: contentTracing writes only Perfetto
+    // protobuf (Electron ≥ 45).
     const decodesDuring = async (ms, collect) => {
-      await contentTracing.startRecording({ included_categories: ["blink", "cc", "disabled-by-default-devtools.timeline"], excluded_categories: ["*"] });
-      if (collect) { await sleep(300); await gc(); await sleep(ms - 300); } else await sleep(ms);
-      const f = await contentTracing.stopRecording(path.join(OUT, `gif-resume-${tn++}.json`));
-      let n = 0;
-      try { const t = JSON.parse(fs.readFileSync(f, "utf8")); for (const e of t.traceEvents || t) if (e.name === "ImageFrameGenerator::decode" && e.ph !== "E") n++; } finally { fs.rmSync(f, { force: true }); }
-      return n;
+      const d = win.webContents.debugger, events = [];
+      let complete; const done = new Promise((res) => { complete = res; });
+      const onMsg = (_e, method, params) => {
+        if (method === "Tracing.dataCollected") events.push(...params.value);
+        else if (method === "Tracing.tracingComplete") complete();
+      };
+      d.attach("1.3"); d.on("message", onMsg);
+      try {
+        await d.sendCommand("Tracing.start", { transferMode: "ReportEvents",
+          traceConfig: { includedCategories: ["blink", "cc", "disabled-by-default-devtools.timeline"], excludedCategories: ["*"] } });
+        if (collect) { await sleep(300); await d.sendCommand("HeapProfiler.collectGarbage"); await sleep(ms - 300); } else await sleep(ms);
+        await d.sendCommand("Tracing.end");
+        await Promise.race([done, sleep(10000)]);
+      } finally { d.removeListener("message", onMsg); d.detach(); }
+      return events.filter((e) => e.name === "ImageFrameGenerator::decode" && e.ph !== "E").length;
     };
     // one out-of-sight round: k1 playing mid-loop → hidden (decodes counted) → shown → the frame it shows
     // (fetched: the gif's requests that reached the network stack — a memory-cache hit never does)

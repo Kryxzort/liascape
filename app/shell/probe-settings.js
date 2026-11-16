@@ -342,11 +342,11 @@ app.whenReady().then(async () => {
         if (!text || text === "…") { v.push(`${what}: nothing to copy (${J(text)}) — proved nothing`); continue; }
         const p = await js(`return await window.__x.show(document.querySelector(${J(sel)}))`);
         if (!p) { v.push(`${what}: no Copy button (${sel})`); continue; }
-        clipboard.writeText("");
+        await clipboard.writeText("");
         await js(`window.__wrote.length = 0; return true`);
         await clickAt(p.x, p.y);
-        await waitFor(() => clipboard.readText() !== "", 1500);
-        const got = clipboard.readText(), wrote = await js(`return window.__wrote.slice()`);
+        await waitFor(async () => (await clipboard.readText()) !== "", 1500);
+        const got = await clipboard.readText(), wrote = await js(`return window.__wrote.slice()`);
         if (got !== text) v.push(`${what}: the clipboard holds ${J(got.slice(0, 80))}${wrote.length ? ` (the page wrote ${J(wrote[0]?.slice(0, 80))})` : " (no write)"}, want ${J(text.slice(0, 80))}`);
         if (!(await js(`return document.querySelector(${J(sel)})?.hasAttribute("data-copied")`))) v.push(`${what}: the button didn't turn into "Copied"`);
       }
@@ -579,13 +579,14 @@ app.whenReady().then(async () => {
       if (!id) return ["no Library item with a Workshop ID pill — proved nothing"];
       await sleep(600);
       const p = await js(`const r = document.querySelector(${J(PILL)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }`);
-      clipboard.writeText("");
+      await clipboard.writeText("");
       await clickAt(p.x, p.y);
       const t0 = Date.now();
       if (!(await waitFor(() => js(`return document.querySelector(${J(SHOWN)})?.textContent.trim() === "Copied"`), 600, 30))) v.push(`the pill never read "Copied" (${await js(`return document.querySelector(${J(SHOWN)})?.textContent.trim()`)})`);
       if (!(await waitFor(() => js(`return document.querySelector(${J(SHOWN)})?.textContent.trim() === ${J(id)}`), 2500, 50))) v.push("the pill never went back to its ID");
       else if (Date.now() - t0 < 900) v.push(`"Copied" held only ${Date.now() - t0} ms (want ≈ 1200)`);
-      if (clipboard.readText() !== id) v.push(`the clipboard holds ${J(clipboard.readText())}, want ${J(id)}`);
+      const got = await clipboard.readText();
+      if (got !== id) v.push(`the clipboard holds ${J(got)}, want ${J(id)}`);
       await js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return true`);
       return v;
     });

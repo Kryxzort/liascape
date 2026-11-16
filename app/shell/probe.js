@@ -9,7 +9,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 1400, height: 900,
     webPreferences: { backgroundThrottling: false } });
   const logs = [];
-  win.webContents.on("console-message", (_e, level, msg) => logs.push(`[${level}] ${msg}`));
+  win.webContents.on("console-message", (e) => logs.push(`[${e.level}] ${e.message}`));
   await win.loadURL(withToken(url));
   await new Promise((r) => setTimeout(r, 6000)); // let init() fetch + render
   const browse = await win.webContents.executeJavaScript(`(() => ({

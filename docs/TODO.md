@@ -17,8 +17,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 75. [ ] (owner) Library sidebar layout: a Workshop item's stat pills (subscribers, favourites, size on disk) sit at
        the top beside the other pills, video wallpapers' too; the creator near the top; "All their wallpapers" is an
        icon button (with its tooltip), not a text link.
-77. [ ] (owner) Electron upgrade: move off EOL Electron 42 to the supported major in nixpkgs (flake,
-       app/shell/package.json + allowScripts, the AppImage together); check the NVIDIA GPU-process crash-loop first.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
@@ -65,7 +63,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
       from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
 - [ ] **Packaging**: rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world
-      (both still build the pre-rewrite Avalonia app). After #77 (the Electron upgrade).
+      (both still build the pre-rewrite Avalonia app).
 
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
@@ -128,9 +126,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
             but not flat, so the restart default (600 s) **stays**. Open: find the RSS growth (mpv demuxer/hwdec
             pool? try `demuxer-max-bytes`, `hwdec=no` A/B, a 1080p file) before relaxing it; a 1 h restart would
             cap it at ~100 MB.
-      - [ ] Electron 42 is EOL: nixpkgs marks `electron_42` insecure, so the flake lets electron 42.x only through
-            (`allowInsecurePredicate`). Move the flake, `app/shell/package.json` (+ its `allowScripts` key) and the
-            AppImage to a supported major together (43 in nixpkgs now); check the NVIDIA GPU-process crash-loop first.
       - [ ] `scripts/lwe.sh --nix` loses the caller's `LIASCAPE_LWE_CORE_DIR`: the devShell sets it to the store core,
             so `build` tries to install into the read-only store. Workaround: `nix develop -c env
             LIASCAPE_LWE_CORE_DIR=<dir> bash scripts/lwe.sh build …`. Fix: carry the caller's value (or the
