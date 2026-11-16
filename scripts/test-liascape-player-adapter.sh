@@ -387,7 +387,7 @@ post /preview '{"volume":20}' >/dev/null; waitfor $WAIT cur_near gain.user "$g20
 echo "== normalization: a target of 0 plays at its fixed gain; one below −70 is clamped; an af mpv can't build plays without it, never silent"
 # A video plays at ONE fixed gain, `lavfi=[volume=<g>dB]`, g = min(target − I, −1 − TP), the target clamped to −70…0
 # (LibraryService.LoudnormAf; never ffmpeg's loudnorm at playback: it falls back to a dynamic rider — docs/decisions.md).
-# A target of 0, written straight into the file (the UI offers −70…−5), is valid for that gain; loudnorm refused it and
+# A target of 0 (the Settings control's top end) is valid for that gain; loudnorm refused it and
 # mpv then played the video with no audio at all. The player survives any af mpv can't build (falls back to its chain
 # without it, re-selects the audio track, reports `source.rejected`).
 sf_raw() { jq "$1" "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/sf0.json" && mv "$T/sf0.json" "$XDG_CONFIG_HOME/liascape/settings.json"; }

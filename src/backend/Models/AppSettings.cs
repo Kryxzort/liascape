@@ -7,7 +7,7 @@ namespace Liascape.Models;
 
 public class AppSettings
 {
-    public bool NoAudio { get; set; } = true;
+    public bool NoAudio { get; set; } = false;
     public bool DisableCache { get; set; } = false;
     public int DemuxerMaxMib { get; set; } = 20;
     public int DemuxerMaxBackMib { get; set; } = 5;

@@ -236,7 +236,7 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 // or steam tokens). Used for the per-setting reset icon + "Clear settings". workshopFolder is
 // environment-derived so it's intentionally omitted (no fixed default to reset to).
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
-  noAudio: true, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
+  noAudio: false, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
   debugMode: false, debugOverlay: true, restartOnlyAtPlaylistChangeover: false, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartMpvpaperEverySeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
   globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,

@@ -14,6 +14,11 @@
 //                     and leaving the fields saves the minimum; 0 saves "off"; the minimum raised past the maximum moves the
 //                     maximum up with it at once (on screen and saved), lowered it leaves it; with "Switch when video ends"
 //                     off ("Switch every") a smaller maximum is left alone until advance-on-end turns on
+//   playtime:maxSteps:<where>  the maximum's − button, ↓ key and wheel stop at the minimum (nothing focused, or the field focused);
+//                     what the fields show is what is saved after every step; a step up from "off" lands on the minimum; the
+//                     minimum's + carries a maximum sitting on it up
+//   loudness:target  the Loudness target goes up to 0 LUFS (typed 0 saves, + at 0 disabled), anything above clamps to 0 and below
+//                     -70 to -70
 //   playtime:scenesFloor  "Switch scenes and pictures after" is never 0: an all-zero entry is a draft that leaving drops,
 //                     a 0 saved through the API comes back as 1 s
 //   copy:sidebarPill  the Library sidebar's Workshop ID pill, which shares the feedback (hooks/useCopied.ts), still flips and copies
@@ -35,6 +40,7 @@
 //                     "Freed N" appears; pictures settings-cache-mid-*.png, settings-cache-done-*.png
 //   cache:look        a line's hover glow (and none under no-glow), the size and "Freed" in theme colours, bg-live: the
 //                     lines add no fill of their own over the section card; pictures settings-cache-*.png
+//   mute:reset        the Volume row's reset unmutes and puts the level at 100 %; shown only while muted or off 100 %
 //   mute:row:<level>  Sound has no "Mute wallpapers" checkbox row; the Volume row ends in the shared mute chip (button.side-mute,
 //                     components/MuteButton.tsx) after the slider, 32 px, on the slider's centre line, at the row's control edge;
 //                     a click saves noAudio and dims the slider, the hint ("muted") and "Audio normalization" but not the chip,
@@ -447,6 +453,91 @@ app.whenReady().then(async () => {
       });
     }
 
+    // the maximum's steppers, keys and wheel (and the minimum's) stop where the maximum would go under the minimum: what the fields
+    // show is what is saved, a draft is only ever typed; a step up from "off" lands on the minimum
+    for (const where of ["global", "playlist"]) {
+      await cell(`playtime:maxSteps:${where} — the maximum's −, keys and wheel never go under the minimum; shown = saved`, async () => {
+        const v = [];
+        const G = where === "global";
+        const MIN = G ? `window.__x.row("Minimum play time")?.querySelector(".hms")` : `document.querySelectorAll(".pl-modal .hms")[0]`;
+        const MAX = G ? `window.__x.row("Maximum play time")?.querySelector(".hms")` : `document.querySelectorAll(".pl-modal .hms")[1]`;
+        const saved = async () => { if (G) { const st = (await http("GET", "/settings")).json ?? {}; return [st.globalSwitchWhenVideoEnds, st.globalIntervalSeconds, st.globalMaxPlaySeconds]; }
+          const ps = await psOf(); return [ps.switchWhenVideoEnds, ps.intervalSeconds, ps.maxPlaySeconds]; };
+        const secs = (a) => a[0] * 3600 + a[1] * 60 + a[2];
+        const ps0 = (await http("GET", "/playlist/state")).json;
+        const g0 = { GlobalSwitchWhenVideoEnds: await field("globalSwitchWhenVideoEnds"), GlobalIntervalSeconds: await field("globalIntervalSeconds"), GlobalMaxPlaySeconds: await field("globalMaxPlaySeconds") };
+        // what the fields show is what lands in the file, and the maximum is 0 or at least the minimum, after every step
+        const agree = async (what) => {
+          const shownMax = secs(await hmsOf(MAX)), shownMin = secs(await hmsOf(MIN));
+          if (!(await waitFor(async () => { const [, mn, mx] = await saved(); return mn === shownMin && mx === shownMax; }, 4000)))
+            v.push(`${what}: the fields show min ${shownMin} s / max ${shownMax} s, saved ${J(await saved())}`);
+          if (shownMax !== 0 && shownMax < shownMin) v.push(`${what}: the maximum shows ${shownMax} s under the minimum ${shownMin} s`);
+        };
+        const btn = (grp, i, dir) => js(`const b = (${grp}).querySelectorAll(".num-step")[${i}].querySelector('[data-step="${dir}"]'); return await window.__x.show(b)`);
+        const press = async (grp, i, dir, what) => { const p = await btn(grp, i, dir); await clickAt(p.x, p.y); await sleep(450); await agree(what); };
+        try {
+          if (G) await setSettings({ SettingsLevel: "standard", GlobalSwitchWhenVideoEnds: true, GlobalIntervalSeconds: 8, GlobalMaxPlaySeconds: 10 });
+          else await http("POST", "/playlist/state", { settings: { overrideGlobalSettings: true, switchWhenVideoEnds: true, intervalSeconds: 8, maxPlaySeconds: 10 } });
+          await load();
+          if (!G) await js(`await window.__x.tab("Library"); document.querySelector('button[title="Playlist settings"]').click(); await window.__x.sleep(600); return true`);
+          if (J(await hmsOf(MIN)) !== J([0, 0, 8]) || J(await hmsOf(MAX)) !== J([0, 0, 10])) return [`setup: minimum ${J(await hmsOf(MIN))} / maximum ${J(await hmsOf(MAX))}, want 0:00:08 / 0:00:10 — proved nothing`];
+          // − on the maximum's seconds, nothing focused: 9, 8, then it stays at the minimum
+          await press(MAX, 2, -1, "− 10 → 9");
+          await press(MAX, 2, -1, "− 9 → 8");
+          for (let i = 0; i < 2; i++) await press(MAX, 2, -1, "− at the minimum");
+          if (J(await hmsOf(MAX)) !== J([0, 0, 8])) v.push(`− past the minimum: the maximum shows ${J(await hmsOf(MAX))}, want it stopped at [0,0,8]`);
+          // the keys (focus in the seconds field): up moves it, down stops at the minimum
+          const f = await js(`return await window.__x.show((${MAX}).querySelectorAll("input")[2])`);
+          await clickAt(f.x, f.y); await sleep(200);
+          const key = async (k) => { send({ type: "keyDown", keyCode: k }); send({ type: "keyUp", keyCode: k }); await sleep(450); };
+          await key("Up"); await key("Up"); await agree("keys up");
+          const up = secs(await hmsOf(MAX));
+          if (up !== 10) v.push(`two ↑ from the minimum: the maximum shows ${up} s, want 10 (vacuous: the keys moved nothing)`);
+          for (let i = 0; i < 4; i++) { await key("Down"); await agree(`key ↓ #${i + 1}`); }
+          if (J(await hmsOf(MAX)) !== J([0, 0, 8])) v.push(`↓ past the minimum: the maximum shows ${J(await hmsOf(MAX))}, want it stopped at [0,0,8]`);
+          // the wheel over the focused field, both ways
+          const wheel = async (dy) => { send({ type: "mouseWheel", x: Math.round(f.x), y: Math.round(f.y), deltaX: 0, deltaY: dy, canScroll: true }); await sleep(450); };
+          await wheel(-120);
+          const upDy = secs(await hmsOf(MAX)) > 8 ? -120 : 120; // which way is "up" depends on the platform's wheel sign
+          if (upDy === 120) { await wheel(120); if (secs(await hmsOf(MAX)) <= 8) v.push("the wheel moved the maximum neither way — proved nothing"); }
+          await agree("wheel up");
+          for (const dy of [upDy, -upDy, -upDy, -upDy, -upDy, upDy, -upDy, -upDy, -upDy, -upDy, -upDy]) { await wheel(dy); await agree(`wheel ${dy === upDy ? "up" : "down"}`); }
+          if (J(await hmsOf(MAX)) !== J([0, 0, 8])) v.push(`after the wheel's notches down the maximum shows ${J(await hmsOf(MAX))}, want it stopped at [0,0,8]`);
+          // a step up from "off" lands on the minimum, not 1 s
+          await setHms(MAX, 2, 0); await sleep(600);
+          if (J(await saved()) !== J([true, 8, 0])) v.push(`typing 0 s saved ${J(await saved())}, want the maximum off (0)`);
+          await press(MAX, 2, 1, "+ from off");
+          if (J(await hmsOf(MAX)) !== J([0, 0, 8])) v.push(`+ from off: the maximum shows ${J(await hmsOf(MAX))}, want [0,0,8] (the minimum)`);
+          // the minimum's own + carries a maximum at it up, on screen and saved
+          await press(MIN, 2, 1, "minimum +");
+          if (J(await hmsOf(MIN)) !== J([0, 0, 9]) || J(await hmsOf(MAX)) !== J([0, 0, 9])) v.push(`minimum + : minimum ${J(await hmsOf(MIN))} / maximum ${J(await hmsOf(MAX))}, want both [0,0,9]`);
+        } finally {
+          if (G) await setSettings(g0);
+          else { await js(`[...document.querySelectorAll(".pl-modal button")].find((b) => b.textContent.trim() === "Close")?.click(); return true`); await sleep(300);
+            await http("POST", "/playlist/state", { settings: ps0?.settings ?? { overrideGlobalSettings: false, switchWhenVideoEnds: true, intervalSeconds: 0, maxPlaySeconds: 0 } }); }
+        }
+        return v;
+      });
+    }
+
+    await cell("loudness:target — the Loudness target reaches 0 LUFS: typed 0 saves, + at 0 is off, more than 0 and under -70 clamp", async () => {
+      const v = [];
+      const IN = `window.__x.row("Loudness target")?.querySelector("input")`;
+      const typed = (n) => js(`const el = ${IN}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, String(${n})); el.dispatchEvent(new Event("input", { bubbles: true })); await window.__x.sleep(150); return +el.value`);
+      try {
+        await setSettings({ SettingsLevel: "standard", NormalizeAudio: true, NoAudio: false, NormalizeTargetLufs: -14 }); await load();
+        if (!(await js(`return !!${IN}`))) return ["no Loudness target row with normalization on — proved nothing"];
+        if ((await typed(0)) !== 0) v.push("typing 0 doesn't show 0");
+        if (!(await waitFor(async () => (await field("normalizeTargetLufs")) === 0, SAVE_MS))) v.push(`0 saved as ${await field("normalizeTargetLufs")}`);
+        const plus = await js(`return !!${IN}?.closest(".num-step")?.querySelector('[data-step="1"]')?.disabled`);
+        if (!plus) v.push("at 0 the + button isn't disabled (nothing is louder than 0)");
+        if ((await typed(5)) !== 0) v.push("typing 5 isn't clamped to 0");
+        if ((await typed(-100)) !== -70) v.push("typing -100 isn't clamped to -70");
+        if (!(await waitFor(async () => (await field("normalizeTargetLufs")) === -70, SAVE_MS))) v.push(`-100 saved as ${await field("normalizeTargetLufs")}, want -70`);
+      } finally { await setSettings({ NormalizeAudio: false, NormalizeTargetLufs: -14 }); }
+      return v;
+    });
+
     await cell("playtime:scenesFloor — \"Switch scenes and pictures after\" is never 0 (a draft in the page, 1 s from the API)", async () => {
       const v = [];
       const AFTER = `window.__x.row("Switch scenes and pictures after")?.querySelector(".hms")`;
@@ -844,6 +935,27 @@ app.whenReady().then(async () => {
         return v;
       });
     }
+
+    // the Volume row's reset puts the sound back as well as the level: shown while muted or off 100 %, one click → sound at
+    // 100 %, and gone at 100 % with sound
+    await cell("mute:reset — the Volume row's reset unmutes and puts the level back to 100 %; it shows only while either is off", async () => {
+      const v = [];
+      const resetBtn = () => js(`const b = window.__x.row("Volume")?.querySelector(".s-reset"); return b ? await window.__x.show(b) : null`);
+      await setSettings({ SettingsLevel: "standard", NoAudio: false, Volume: 100 }); await load();
+      if (await resetBtn()) v.push("sound on at 100 %: the Volume row shows a reset button (nothing is off)");
+      await setSettings({ NoAudio: true, Volume: 70 }); await load();
+      const p = await resetBtn();
+      if (!p) return [...v, "muted at 70 %: the Volume row has no reset button"];
+      await clickAt(p.x, p.y);
+      if (!(await waitFor(async () => (await field("noAudio")) === false && (await field("volume")) === 100, SAVE_MS)))
+        v.push(`after the reset: noAudio ${await field("noAudio")} / volume ${await field("volume")}, want false / 100`);
+      if (!(await waitFor(async () => !(await resetBtn()), 3000))) v.push("after the reset the reset button still shows");
+      await setSettings({ NoAudio: true, Volume: 100 }); await load();
+      if (!(await resetBtn())) v.push("muted at 100 %: no reset button (muted is off the sound)");
+      await mv(5, 5);
+      await setSettings({ NoAudio: false, Volume: 100 });
+      return v;
+    });
 
     // the glyph pops once on the user's click (motion on: in-between sizes; off / prefers-reduced-motion: it just swaps) and
     // never on load; the slider's dimming eases in either way (a fade is allowed with motion off)

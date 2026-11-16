@@ -25,7 +25,7 @@
 #     fetches it into the library's own workshop/<id> copy, nothing subscribed, opened or queued in the to-do, a queued
 #     unsubscribe of it left queued; signed in (a pasted cookie, the sign-in's subscribe / unsubscribe answered by a fake
 #     community, scripts/test-fixtures/fake-steam-community.mjs) → subscribe, the test drops Steam's files, the library's own
-#     copy, unsubscribed at once, the lingering folder blocked; an item already subscribed is copied, its subscription untouched. Without a usable sign-in the unsubscribe endpoints refuse (400
+#     copy, unsubscribed at once (no unsub-progress for the UI), the lingering folder blocked; an item already subscribed is copied, its subscription untouched. Without a usable sign-in the unsubscribe endpoints refuse (400
 #     + "Sign in to Steam to unsubscribe") under "Subscribe with Steam login" and steamcmd: nothing queued, trashed or opened.
 #  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
@@ -65,7 +65,8 @@ BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 for t in node ffmpeg curl jq timeout; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
-DLL=$ROOT/src/backend/bin/Debug/net10.0/liascape-backend.dll
+# LIASCAPE_SS_DLL: another backend build to test (e.g. an older commit's, for a RED run of new checks; with --no-build)
+DLL=${LIASCAPE_SS_DLL:-$ROOT/src/backend/bin/Debug/net10.0/liascape-backend.dll}
 if [ $BUILD = 1 ]; then
   "$DOTNET" build "$ROOT/src/backend" -nologo -v q 2>&1 | grep -E " error |Build succeeded" | sort -u
   [ ${PIPESTATUS[0]} = 0 ] || { echo "dotnet build failed"; exit 2; }
@@ -164,8 +165,10 @@ const urls = () => (fs.existsSync(`${T}/xdg-open.urls`) ? fs.readFileSync(`${T}/
 const status = {}; // workshop id → the statuses seen
 const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN));
 const todo = []; // WS steam-todo payloads
+const unsubEv = []; // WS unsub-progress payloads (the UI's "Removing from Steam" toast and held message)
 ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress" && e.payload.status) (status[e.payload.id] ??= []).push(e.payload.status);
-  if (e.type === "steam-todo") todo.push(e.payload); };
+  if (e.type === "steam-todo") todo.push(e.payload);
+  if (e.type === "unsub-progress") unsubEv.push(e.payload); };
 await new Promise((r) => { ws.onopen = r; });
 const sources = await (await fetch(U + "/sources")).json();
 const src = sources.find((s) => s.supportsTagFilter)?.index ?? sources.findIndex((s) => s.supportsTagFilter);
@@ -401,6 +404,7 @@ await setMode("subscribe");
   }
   const n2 = urls().length, t2 = todo.length;
   const p9 = oneOff("700000009");
+  unsubEv.length = 0;
   let subscribed9 = false;
   for (let i = 0; i < 100 && !subscribed9; i++) { await sleep(100); subscribed9 = (await subCalls("700000009")).includes("subscribe"); }
   const queued9 = !(unsubState().Pending ?? []).includes("700000009") && (unsubState().Blocked ?? []).includes("700000009");
@@ -416,6 +420,10 @@ await setMode("subscribe");
     "one-off signed in (Subscribe with Steam login): the library's own workshop/<id> copy, not a link into Steam's folder", r9 ? `${r9.status} ${b9?.videoPath ?? JSON.stringify(b9)}` : "timed out");
   out(subscribed9 && queued9 && calls9.join(" ") === "subscribe unsubscribe" && tUnsub9 < 4500,
     "…subscribed with the sign-in, kept out of auto-import meanwhile, unsubscribed once copied (no 5 s Undo window)", `${calls9.join(" ")} after ${tUnsub9} ms, blocked while fetching ${queued9} | ${fs.readFileSync(`${T}/backend.log`, "utf8").split("\n").filter((l) => /700000009|unsubscribe|drain/.test(l)).slice(-6).join(" / ")}`);
+  // its unsubscribe is part of the download: the UI is sent no progress for it (only the finish, which shows nothing)
+  for (let i = 0; i < 50 && !unsubEv.some((e) => e.finished); i++) await sleep(100);
+  out(unsubEv.some((e) => e.finished) && !unsubEv.some((e) => !e.finished),
+    "…its unsubscribe sends no unsub-progress (nothing for the UI's \"Removing from Steam\"), only the finishing event", JSON.stringify(unsubEv));
   const st9 = await wsState("700000009"), q9 = unsubState();
   out((q9.Blocked ?? []).includes("700000009") && !(q9.Pending ?? []).includes("700000009") && st9?.subscribed === false && st9.onDisk === true,
     "…Steam's lingering folder blocked from auto-import, not called subscribed, nothing left queued", JSON.stringify({ q9, st9 }));

@@ -107,6 +107,9 @@ const ok5 = await dropAndDrain("710000005");
 out(ok5 && had && !fs.existsSync(`${T}/steamlib/sub-710000005`) && urls().length === n0 && !(await queue()).includes("710000005"),
   "Delete from source under Use the Steam app: Steam unsubscribes it, nothing opens, the queue is empty",
   `was subscribed ${had}, still ${fs.existsSync(`${T}/steamlib/sub-710000005`)}, opened ${urls().length - n0}, finished ${JSON.stringify(unsub.at(-1) ?? null)}`);
+// the user's own unsubscribe reports its progress (the toast), counted 0 of 1 then 1 of 1
+out(unsub.some((e) => !e.finished && e.total === 1 && e.done === 0 && e.currentId === "710000005") && unsub.some((e) => !e.finished && e.total === 1 && e.done === 1),
+  "…and reports its progress (0 of 1, then 1 of 1): unsub-progress stays for the user's own unsubscribes", JSON.stringify(unsub));
 // Steam unreachable → the unsubscribe FAILS with the reason and stays queued; nothing opens
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
@@ -534,6 +537,9 @@ await unsubDone();
 st = await state(["770000003"]);
 out(ro3?.status === 200 && ownCopy(ro3.body, "770000003") === true && !fakeLines("downloads").includes("770000003"),
   "one-off, the client refuses DownloadItem: the library's own copy all the same", JSON.stringify(ro3)?.slice(0, 160));
+// its unsubscribe is part of the download: no progress for the UI's "Removing from Steam", only the finishing event
+out(unsub.some((e) => e.finished) && !unsub.some((e) => !e.finished),
+  "…its unsubscribe sends no unsub-progress, only the finishing event", JSON.stringify(unsub));
 out(!fs.existsSync(`${T}/steamlib/sub-770000003`) && fakeLines("unsubscribed").length === unsub0 + 1 && tUnsub3 < 4500 && !(await queue()).includes("770000003")
   && blockedIds().includes("770000003") && st["770000003"]?.subscribed === false && urls().length === n0,
   "…subscribed and unsubscribed again through the client (no 5 s Undo window), blocked, not subscribed, nothing opened",

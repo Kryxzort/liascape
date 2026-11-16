@@ -104,11 +104,13 @@ public static class WorkshopDownloader
 
     /// Unsubscribes what a one-off subscribed only to fetch it: the unsubscribe queue and its drain, at once (no Undo window: the
     /// user never asked for the subscription), through the mode's own way (the sign-in, the Steam client). The drain marks it
-    /// blocked; a sign-in gone by then drops it like any unsubscribe, saying so.
+    /// blocked; a sign-in gone by then drops it like any unsubscribe, saying so. It is part of the download, so the drain reports
+    /// no progress for it (the UI's "Removing from Steam" is for the user's own unsubscribes). Guard: test-steam-signin.sh § 2
+    /// (one-off), § 3 j.
     public static void LetGoOfOneOff(string workshopId)
     {
         Console.WriteLine($"workshop: {workshopId}: copied without subscribing — unsubscribing the subscription that fetched it");
-        WorkshopUnsubQueue.AddPending([workshopId]);
+        WorkshopUnsubQueue.AddPending([workshopId], quiet: true);
         SteamOps.StartDrain();
     }
 
@@ -668,6 +670,15 @@ public static class WorkshopDownloader
         // ids still in their Undo window wait for the drain at its end (SteamOps.DrainAfterUndoWindow)
         var pending = WorkshopUnsubQueue.SnapshotDue().FindAll(id => !inTodo.Contains(id));
         if (pending.Count == 0) return new DrainResult();
+        // the progress is the user's own unsubscribes' only (a one-off's let-go is part of its download): they go first, so
+        // "n of m" counts just them and a quiet one never moves it
+        var quiet = WorkshopUnsubQueue.SnapshotQuiet();
+        pending = [.. pending.Where(id => !quiet.Contains(id)), .. pending.Where(quiet.Contains)];
+        int shown = pending.Count(id => !quiet.Contains(id));
+        void Report(int done, int total, string id)
+        {
+            if (shown > 0 && !quiet.Contains(id)) progress?.Report((Math.Min(done, shown), shown, id));
+        }
         var undone = new System.Collections.Generic.List<string>(); // unsubscribed after an Undo restored them → re-subscribed at the end
         try { return await DrainCoreAsync(); }
         finally
@@ -685,13 +696,13 @@ public static class WorkshopDownloader
         if (settings.WorkshopDownloadMode == "steamapp")
         {
             int total0 = pending.Count, n = 0;
-            progress?.Report((0, total0, pending[0]));
+            Report(0, total0, pending[0]);
             var (confirmed, fallback) = await SteamClientUgc.UnsubscribeAsync(pending, settings, id =>
             {
                 // unsubscribed → Steam removes the folder; AutoImport keeps out meanwhile. Not pending any more = undone
                 // while this ran → subscribe it again
                 if (!WorkshopUnsubQueue.MarkBlocked(id)) lock (undone) undone.Add(id);
-                progress?.Report((++n, total0, id));
+                Report(++n, total0, id);
             }, ct);
             pending = pending.Where(id => !confirmed.Contains(id)).ToList();
             if (pending.Count == 0 || ct.IsCancellationRequested) return new DrainResult();
@@ -713,7 +724,7 @@ public static class WorkshopDownloader
         {
             var id = pending[i];
             if (ct.IsCancellationRequested) break;
-            progress?.Report((done, total, id));
+            Report(done, total, id);
             try
             {
                 await SetSubscribedAsync(id, settings, subscribe: false, ct);
@@ -735,7 +746,7 @@ public static class WorkshopDownloader
                 // Leave queued — retry on a later drain (e.g. after sign-in / next launch).
             }
             done++;
-            progress?.Report((done, total, id));
+            Report(done, total, id);
             try { await Task.Delay(300, ct); } catch { break; } // throttle
         }
         return new DrainResult();

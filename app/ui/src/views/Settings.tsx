@@ -443,7 +443,11 @@ export const Settings = memo(function Settings() {
 
       <Section title="Sound" icon={<Volume2 size={15} />}>
         {/* the mute chip is the way back from muted: the row dims around it (`liveChip`), and it follows the Volume row's level */}
-        <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}%`} disabled={mute} liveChip rk="volume">
+        {/* the reset puts the sound back as well as the level: one click from muted or any level to sound at 100 %, so
+            it shows while either is off */}
+        <Row label="Volume" hint={mute ? "muted" : `${g("volume", 100)}%`} disabled={mute} liveChip rk="volume"
+          deviated={mute || g("volume", 100) !== SETTINGS_DEFAULTS.volume}
+          onReset={() => { set("volume", SETTINGS_DEFAULTS.volume); set("noAudio", false); }}>
           <input type="range" min={0} max={100} value={g("volume", 100)} disabled={mute} onChange={(e) => { set("volume", +e.target.value); previewGlobal({ volume: +e.target.value }); }} />
           <MuteButton muted={mute} what="wallpapers" data-wall-mute onToggle={() => set("noAudio", !mute)} /></Row>
         <Row label="Audio normalization" hint="keeps wallpapers at about the same loudness" disabled={mute} rk="normalizeAudio">

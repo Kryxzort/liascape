@@ -7,6 +7,9 @@ import { useStableFn } from "../hooks/useStableFn";
 type Props = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "min" | "max" | "type"> & {
   value: number;
   onChange: (v: number) => void;
+  /** a step (−/+, ↑/↓, the wheel) landing on `v`, for a parent that may put the field somewhere else: it answers the value the
+   *  field then shows (typing and blur still go through `onChange`) */
+  onStep?: (v: number) => number;
   min?: number;
   max?: number;
   /** what an emptied field commits on blur (default: min, else 0) */
@@ -36,8 +39,16 @@ function stepFrom(from: number, dir: 1 | -1, size: number, base: number, mult: n
 // `clampNum` and committed at once; a bound reached disables its button. Typing keeps docs/decisions.md § "Let numeric
 // fields be emptied while focused": while focused the field shows exactly what was typed, only a complete in-range
 // number commits, blur / Enter clamps. Guard: probe-expert "stepper: …" cells, probe-matrix num:*.
-export function NumInput({ value, onChange, min, max, emptyValue, integer, step, className = "num", disabled, style, onBlur, onFocus, onKeyDown, ...rest }: Props) {
+export function NumInput({ value, onChange, onStep, min, max, emptyValue, integer, step, className = "num", disabled, style, onBlur, onFocus, onKeyDown, ...rest }: Props) {
   const [draft, setDraft] = useState<string | null>(null); // non-null while focused
+  // the value changed from outside while focused (a linked field carried it, a backend change): a draft that is still
+  // the old value follows it, so the field never shows a number that isn't saved; one the user typed stays theirs.
+  // Guard: probe-settings playtime:maxSteps:* (the minimum's + carries a focused maximum)
+  const lastValue = useRef(value);
+  useEffect(() => {
+    if (lastValue.current !== value && draft === String(lastValue.current)) setDraft(String(value));
+    lastValue.current = value;
+  }, [value, draft]);
   const motion = useMotion();
   const input = useRef<HTMLInputElement>(null);
   const ghost = useRef<HTMLSpanElement>(null);
@@ -82,9 +93,10 @@ export function NumInput({ value, onChange, min, max, emptyValue, integer, step,
     const shown = draft ?? String(value);
     const from = typed ?? value;
     const v = clampNum(String(stepFrom(from, dir, size, min ?? 0, mult)), min, max, value, whole);
-    if (draft != null) setDraft(String(v));
-    if (v !== value) onChange(v);
-    if (String(v) === shown) return false;
+    let landed = v;
+    if (v !== value) { if (onStep) landed = onStep(v); else onChange(v); }
+    if (draft != null) setDraft(String(landed));
+    if (String(landed) === shown) return false;
     roll(shown, dir);
     return true;
   });

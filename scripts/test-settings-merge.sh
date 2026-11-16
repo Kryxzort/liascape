@@ -345,6 +345,17 @@ post /settings '{"GlobalSwitchScenesAfterSeconds":99999999}' >/dev/null; snap l7
 post /settings '{"GlobalSeparateSceneTiming":true,"GlobalSwitchScenesAfterSeconds":1800}' >/dev/null; snap l8
 same l4 l8 '[]' "the scene timing back to on, 1800 s"
 
+echo "== the loudness target: 0 LUFS (the loudest) is valid; above it clamps to 0, below -100 to -100"
+post /settings '{"NormalizeTargetLufs":0}' >/dev/null; snap n1
+[ "$(f .normalizeTargetLufs n1)" = 0 ] && ok "{NormalizeTargetLufs:0} → 0" || bad "normalizeTargetLufs 0 → $(f .normalizeTargetLufs n1)"
+same l8 n1 '["normalizeTargetLufs"]' "{NormalizeTargetLufs:0}"
+post /settings '{"normalizeTargetLufs":5}' >/dev/null; snap n2
+[ "$(f .normalizeTargetLufs n2)" = 0 ] && ok "{normalizeTargetLufs:5} → clamped to 0" || bad "normalizeTargetLufs 5 → $(f .normalizeTargetLufs n2)"
+post /settings '{"NormalizeTargetLufs":-150}' >/dev/null; snap n3
+[ "$(f .normalizeTargetLufs n3)" = -100 ] && ok "{NormalizeTargetLufs:-150} → clamped to -100" || bad "normalizeTargetLufs -150 → $(f .normalizeTargetLufs n3)"
+post /settings '{"NormalizeTargetLufs":-14}' >/dev/null; snap n4
+same l8 n4 '[]' "the loudness target back to -14"
+
 echo "== the maximum play time is 0 (off) or at least the minimum (advance-on-end); a playlist's own too"
 # what the section changes, put back at its end
 rot0=$(f '{GlobalSwitchWhenVideoEnds:.globalSwitchWhenVideoEnds, GlobalIntervalSeconds:.globalIntervalSeconds, GlobalMaxPlaySeconds:.globalMaxPlaySeconds}' l8)

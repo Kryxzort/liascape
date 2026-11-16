@@ -29,9 +29,21 @@ export function PlayTimeInput({ value, onChange, disabled, label, zeroText, min 
   const [draft, setDraft] = useState<{ t: number; over: number } | null>(null);
   const shown = draft && draft.over === v ? draft.t : v;
   const H = Math.floor(shown / 3600), M = Math.floor((shown % 3600) / 60), S = shown % 60;
+  const total = (h: number, m: number, s: number) => Math.min(max, h * 3600 + m * 60 + s);
+  const allowed = (t: number) => t >= min || (orZero && t === 0);
   const set = (h: number, m: number, s: number) => {
-    const t = Math.min(max, h * 3600 + m * 60 + s);
-    if (t >= min || (orZero && t === 0)) { setDraft(null); onChange(t); } else setDraft({ t, over: v });
+    const t = total(h, m, s);
+    if (allowed(t)) { setDraft(null); onChange(t); } else setDraft({ t, over: v });
+  };
+  // a step (−/+, keys, wheel) is never a draft: nobody is typing a number that needs a moment to be complete, and a draft
+  // made by a click with the focus elsewhere would stay on screen unsaved. One that lands under `min` (or in the gap between
+  // 0 and `min`) stops at `min`, so what the fields show is what is saved. Answers the field's own unit of the total saved.
+  // Guard: probe-settings playtime:maxFloor:* (steps)
+  const step = (unit: 0 | 1 | 2, h: number, m: number, s: number) => {
+    const t = total(h, m, s), r = allowed(t) ? t : min;
+    setDraft(null);
+    if (r !== v) onChange(r);
+    return unit === 0 ? Math.floor(r / 3600) : unit === 1 ? Math.floor((r % 3600) / 60) : r % 60;
   };
   return (
     <div className="hms" role="group" aria-label={label}
@@ -40,9 +52,9 @@ export function PlayTimeInput({ value, onChange, disabled, label, zeroText, min 
         setDraft(null);
         if (orZero && draft.over === v && min !== v) onChange(min);
       }}>
-      <NumInput min={0} max={99} disabled={disabled} value={H} aria-label={`${label} hours`} onChange={(n) => set(n, M, S)} /><span>h</span>
-      <NumInput min={0} max={59} disabled={disabled} value={M} aria-label={`${label} minutes`} onChange={(n) => set(H, n, S)} /><span>m</span>
-      <NumInput min={0} max={59} disabled={disabled} value={S} aria-label={`${label} seconds`} onChange={(n) => set(H, M, n)} /><span>s</span>
+      <NumInput min={0} max={99} disabled={disabled} value={H} aria-label={`${label} hours`} onChange={(n) => set(n, M, S)} onStep={(n) => step(0, n, M, S)} /><span>h</span>
+      <NumInput min={0} max={59} disabled={disabled} value={M} aria-label={`${label} minutes`} onChange={(n) => set(H, n, S)} onStep={(n) => step(1, H, n, S)} /><span>m</span>
+      <NumInput min={0} max={59} disabled={disabled} value={S} aria-label={`${label} seconds`} onChange={(n) => set(H, M, n)} onStep={(n) => step(2, H, M, n)} /><span>s</span>
       {zeroText && shown === 0 && <span className="playtime-zero">{zeroText}</span>}
     </div>
   );

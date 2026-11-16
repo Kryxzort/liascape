@@ -57,7 +57,11 @@ public static class WorkshopUnsubQueue
     // Enqueue for unsubscribe AND block from AutoImport immediately — the block is durable from the
     // moment of deletion, independent of whether/when the unsubscribe POST runs. (pending = still
     // needs the POST; blocked = don't re-import. A deleted item is both at once.)
-    public static void AddPending(IEnumerable<string> ids)
+    //
+    // `quiet`: the unsubscribe is part of something else the user asked for (a "Download without subscribing" letting go of the
+    // subscription that fetched it), not an unsubscribe of their own: the drain does it without any `unsub-progress` the UI shows
+    // (SteamOps.StartDrain, WorkshopDownloader.DrainUnsubQueueAsync). An id queued again as the user's own is no longer quiet.
+    public static void AddPending(IEnumerable<string> ids, bool quiet = false)
     {
         lock (_gate)
         {
@@ -66,6 +70,7 @@ public static class WorkshopUnsubQueue
             foreach (var id in ids)
             {
                 if (string.IsNullOrWhiteSpace(id)) continue;
+                if (quiet) _quiet.Add(id); else _quiet.Remove(id);
                 if (!s.Pending.Contains(id)) { s.Pending.Add(id); changed = true; }
                 if (!s.Blocked.Contains(id)) { s.Blocked.Add(id); changed = true; }
             }
@@ -81,6 +86,15 @@ public static class WorkshopUnsubQueue
     public static void Hold(IEnumerable<string> ids, TimeSpan d)
     {
         lock (_gate) { var until = DateTime.UtcNow + d; foreach (var id in ids) _holdUntil[id] = until; }
+    }
+
+    // the pending ids that are not the user's own unsubscribes (AddPending's `quiet`); in memory only, like the holds: after a
+    // backend restart a leftover shows as an ordinary unsubscribe
+    private static readonly HashSet<string> _quiet = new(StringComparer.Ordinal);
+
+    public static HashSet<string> SnapshotQuiet()
+    {
+        lock (_gate) return new HashSet<string>(_quiet, StringComparer.Ordinal);
     }
 
     // the pending ids still inside their Undo window (Web/SteamOps.DropHeldUnsubscribes: a sign-out drops them)
@@ -113,7 +127,7 @@ public static class WorkshopUnsubQueue
         {
             var s = Load();
             bool changed = false;
-            foreach (var id in ids) changed |= s.Pending.Remove(id);
+            foreach (var id in ids) { changed |= s.Pending.Remove(id); _quiet.Remove(id); }
             if (changed) Save(s);
         }
     }
@@ -126,6 +140,7 @@ public static class WorkshopUnsubQueue
         {
             var s = Load();
             if (!s.Pending.Remove(id)) return false;
+            _quiet.Remove(id);
             if (!s.Blocked.Contains(id)) s.Blocked.Add(id);
             Save(s);
             return true;
@@ -141,6 +156,7 @@ public static class WorkshopUnsubQueue
             var s = Load();
             bool done = s.Blocked.Contains(id) && !s.Pending.Contains(id);
             _holdUntil.Remove(id);
+            _quiet.Remove(id);
             if (s.Pending.Remove(id) | s.Blocked.Remove(id)) Save(s);
             return done;
         }
@@ -176,6 +192,7 @@ public static class WorkshopUnsubQueue
         lock (_gate)
         {
             var s = Load();
+            _quiet.Remove(id);
             bool changed = s.Pending.Remove(id) | s.Blocked.Remove(id);
             if (changed) Save(s);
         }

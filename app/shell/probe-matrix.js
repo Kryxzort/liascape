@@ -1433,7 +1433,7 @@ C["seq:previewDrag+reopen"] = { states: ["single", "playlist", "effect"], async 
   } };
 
 // The UI saves its whole settings on every change while the backend reads them (every request, the tick, the
-// adapter): a read that lands mid-save must still see the settings — never the C# defaults (NoAudio on,
+// adapter): a read that lands mid-save must still see the settings — never the C# defaults (
 // volume 100, the legacy engine; /settings itself then saved those over everything, Steam tokens included).
 C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
     const s = await getSettings(); c.want = { volume: s.volume, noAudio: s.noAudio, playerEngine: s.playerEngine };

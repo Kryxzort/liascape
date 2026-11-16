@@ -5,12 +5,10 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-69. [ ] (owner) Play-time limits: a maximum below the minimum must not be reachable. Today the maximum's steppers (the
-       − button, keys, wheel) go below the minimum (seen: minimum 8 s, maximum 6 s); only a typed value clamps on
-       leaving the field. Every way of changing either field keeps maximum = 0 or ≥ minimum, live.
-70. [ ] (owner) Settings → "Loudness target": allow up to 0 LUFS (the fixed gain takes it; −5 was a loudnorm-era bound).
-71. [ ] (owner) A "Download without subscribing" that goes through a subscription doesn't show "Unsubscribing 1…" in
-       the top bar (its unsubscribe is part of the download, not the user's own).
+79. [ ] probe-expert fails two cells on HEAD too: `settings:noOverflow` — the "On hover" / "Not hovered" lists
+       (components/OrderList.tsx) put a DIV 10 px left of their row at 1920 and 960 px (fix the list's layout, not the
+       check); and the "Pause behind windows" cell reads a hint the row no longer has ("pauses the wallpaper while all
+       its monitors are covered") — update the cell to the row's current wording.
 72. [ ] (owner) Text is selectable instead of copy buttons: the item sidebars' title (remove its Copy button), the
        Browse "Author" pill (no Copy), Workshop comments and commenters' names — selectable like any text, both tabs.
 73. [ ] (owner) Bug: Workshop comments always show their date as Jan 1, 1970 (a timestamp read wrong — seconds vs
