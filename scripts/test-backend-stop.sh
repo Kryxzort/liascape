@@ -16,10 +16,12 @@
 # everything it started is stopped on exit.
 #
 # Usage: scripts/test-backend-stop.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
+#   LIASCAPE_KEEP_TMP=1 keeps the temp folder; a failed run keeps only its logs / screenshots and prints where (last line).
 # Needs: dotnet (or DOTNET=…), the player's debug build (src/player/target/debug/liascape-player), unshare + ip
 # (iproute2), ffmpeg, curl, jq, python3. Last line `RESULT pass=N fail=M`, exit 0 = pass.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+. "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 if [ -z "${LIASCAPE_STOP_T:-}" ]; then
   . "$ROOT/scripts/test-lock.sh" # one heavy test run at a time on this machine
   BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
@@ -44,6 +46,7 @@ if [ -z "${LIASCAPE_STOP_T:-}" ]; then
   [ -n "$cg0" ] && mkdir "/sys/fs/cgroup${cg0%/}/liascape-stop-$$" 2>/dev/null && CG=/sys/fs/cgroup${cg0%/}/liascape-stop-$$
   cg_procs() { [ -n "$CG" ] && [ -d "$CG" ] && find "$CG" -name cgroup.procs -exec cat {} + 2>/dev/null; }
   cleanup() {
+    rc=$?
     trap - EXIT INT TERM HUP
     if [ -n "$CG" ] && [ -d "$CG" ]; then   # whatever outlived the namespaced run (all of it started by this test)
       for p in $(cg_procs); do kill -TERM "$p" 2>/dev/null; done
@@ -52,7 +55,7 @@ if [ -z "${LIASCAPE_STOP_T:-}" ]; then
       for _ in $(seq 1 20); do [ -z "$(cg_procs)" ] && break; sleep 0.1; done
       find "$CG" -depth -type d -exec rmdir {} \; 2>/dev/null
     fi
-    case "$T" in /tmp/liascape-stop-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
+    lp_tmp_done "$T" /tmp/liascape-stop- "$rc"
   }
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP

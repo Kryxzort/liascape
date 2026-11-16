@@ -4,6 +4,11 @@
 //! `ignore_quit`, `spam_stderr`). Crash records go to a private dir under `temp_dir()`; the
 //! stub sets its own `RLIMIT_CORE` 1 before `abort()` (no systemd-coredump / DrKonqi popups).
 
+/// This suite's own temp root, removed at exit (`src/test_tmp.rs`).
+#[path = "../src/test_tmp.rs"]
+#[allow(dead_code)]
+mod test_tmp;
+
 use std::io::Read;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};

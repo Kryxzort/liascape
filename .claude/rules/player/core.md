@@ -23,7 +23,7 @@ you touch before changing a recipe, a source or the runtime.
 - Run the suite as `cd src/player && env -u LD_LIBRARY_PATH nix develop -c cargo test -q`: the shell's stray
   `LD_LIBRARY_PATH` breaks native links; never "fix" a link or EGL problem by setting it or
   `__EGL_VENDOR_LIBRARY_DIRS`.
-- Keep `src/player/src/lib.rs` to `pub mod` lines only; put logic in the module.
+- Keep `src/player/src/lib.rs` to `pub mod` lines only (plus the one `#[cfg(test)] mod test_tmp;`); put logic in the module.
 - `src/player/build.rs` generates mpv C enums as module consts, never Rust `enum`s — a value a newer libmpv adds
   must not become UB. Keep the allowlist `mpv_.*` / `MPV_.*`.
 

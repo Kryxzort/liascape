@@ -13,6 +13,9 @@
 # the real player or the session's audio server; everything it started is stopped and the temp dir
 # removed on every exit path.
 #
+# Temp folders: removed on every exit; LIASCAPE_KEEP_TMP=1 keeps them. A failed run keeps its results + logs in
+# /tmp/liascape-mx-last (the last line says so).
+#
 # Usage: scripts/test-ui-matrix.sh [--no-build] [--only <regex over cell names>] [--ui-dir <built UI>]
 #                                  [--jobs N] [--probe <app/shell script>]  (default probe-matrix.js;
 #                                  probe-sidebar.js = the item sidebar probe, same hermetic stack)
@@ -66,6 +69,7 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
+. "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 if [ "${LIASCAPE_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
 BUILD=1; ONLY=""; UIDIR=""; JOBS=${LIASCAPE_MATRIX_JOBS:-6}; SHARD=""; PROBE=""; CHANGED=""
 FUZZ=""; FSEED=""; FRUNS=""; FREPLAY=""; JOBS_SET=""
@@ -157,15 +161,18 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   fi
   PIDS=()
   pcleanup() {
+    rc=$?; kept=""
     trap - EXIT INT TERM HUP
     # each shard runs in its own session (setsid): its whole tree — Electron, Xvfb, backend, player — goes
     for pid in "${PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && kill -TERM -- "-$pid" 2>/dev/null; done
     for pid in "${PIDS[@]}"; do for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done; kill -KILL -- "-$pid" 2>/dev/null; done
-    if [ -z "${LIASCAPE_MATRIX_OUT:-}" ] && [ -d "$OUTROOT" ]; then
-      [ -e /tmp/liascape-mx-last ] && trash /tmp/liascape-mx-last 2>/dev/null
-      cp -r "$OUTROOT" /tmp/liascape-mx-last && echo "results kept in /tmp/liascape-mx-last"
+    # a passing run leaves nothing; a failed one keeps its results (screens, cells.jsonl, shard logs) in /tmp/liascape-mx-last
+    if [ -z "${LIASCAPE_MATRIX_OUT:-}" ] && [ -d "$OUTROOT" ] && [ "$rc" != 0 ] && [ -z "${LIASCAPE_KEEP_TMP:-}" ]; then
+      rm -rf -- /tmp/liascape-mx-last
+      cp -r "$OUTROOT" /tmp/liascape-mx-last && kept=/tmp/liascape-mx-last
     fi
-    case "$P" in /tmp/liascape-mx-*) if command -v trash >/dev/null; then trash "$P" 2>/dev/null; else rm -rf -- "$P"; fi ;; esac
+    lp_tmp_done "$P" /tmp/liascape-mx- 0
+    [ -n "$kept" ] && echo "results kept in $kept"
   }
   trap pcleanup EXIT
   trap 'exit 130' INT TERM HUP
@@ -274,6 +281,7 @@ unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_IN
 unset PULSE_SERVER PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH
 SP=""; BP=""; XP=""; PA=""
 cleanup() {
+  rc=$?
   trap - EXIT INT TERM HUP
   [ -n "$XP" ] && kill "$XP" 2>/dev/null
   [ -n "$PA" ] && kill $PA 2>/dev/null
@@ -296,11 +304,20 @@ cleanup() {
   done
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
-  if [ -z "${LIASCAPE_MATRIX_OUT:-}" ] && [ -d "$OUT" ]; then
-    [ -e /tmp/liascape-mx-last ] && trash /tmp/liascape-mx-last 2>/dev/null
-    cp -r "$OUT" /tmp/liascape-mx-last && echo "results kept in /tmp/liascape-mx-last"
+  # pass: nothing stays. Fail: the results (screens, cells.jsonl) plus this stack's logs go to /tmp/liascape-mx-last, or
+  # (a shard of --jobs, whose parent collects them) beside the shard's results in $OUT/tmp-logs.
+  if [ -z "${LIASCAPE_MATRIX_OUT:-}" ]; then
+    if [ "$rc" != 0 ] && [ -z "${LIASCAPE_KEEP_TMP:-}" ] && [ -d "$OUT" ]; then
+      rm -rf -- /tmp/liascape-mx-last
+      cp -r "$OUT" /tmp/liascape-mx-last
+      lp_tmp_done "$T" /tmp/liascape-mx- "$rc" /tmp/liascape-mx-last/tmp-logs ./out
+      echo "results kept in /tmp/liascape-mx-last"
+    else
+      lp_tmp_done "$T" /tmp/liascape-mx- "$rc"
+    fi
+  else
+    lp_tmp_done "$T" /tmp/liascape-mx- "$rc" "$OUT/tmp-logs"
   fi
-  case "$T" in /tmp/liascape-mx-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP

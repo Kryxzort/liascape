@@ -10,8 +10,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        another folder). Nothing Microsoft-licensed is shipped or copied: the core reads them where they are.
 77. [ ] (owner) Electron upgrade: move off EOL Electron 42 to the supported major in nixpkgs (flake,
        app/shell/package.json + allowScripts, the AppImage together); check the NVIDIA GPU-process crash-loop first.
-78. [ ] (owner) Test runs delete their own /tmp folders when they finish (pass or fail; keep them only on request or a
-       failure a human must read, and say where).
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG

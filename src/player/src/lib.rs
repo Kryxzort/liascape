@@ -38,3 +38,7 @@ pub mod units;
 pub mod vram;
 pub mod wl;
 pub mod worker;
+
+/// The lib's unit tests' own temp root (the integration suites include the same file from `tests/common`).
+#[cfg(test)]
+mod test_tmp;

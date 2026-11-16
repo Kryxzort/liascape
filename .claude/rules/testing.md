@@ -49,6 +49,16 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   text (`tests/api.rs` hints, probe labels, `test-*.sh` output). Never trust "no test reads this" without the grep.
 - A refactor must keep what an effect did on mount (an initial value, a first fetch); a test that only covers updates misses it.
 
+## Temp folders: a test leaves nothing in /tmp
+- A test's temp root is removed when the run ends, pass, fail or interrupt: shell tests source `scripts/test-tmp.sh` and
+  call `lp_tmp_done "$T" <the mktemp prefix> "$rc"` from the EXIT trap (`rc=$?` first); Rust suites get a per-process root
+  from `src/player/src/test_tmp.rs` (`TMPDIR` moved into it before `main`, removed at exit; a new suite that makes temp
+  files `mod`-includes it like `tests/common`). Never `trash` a temp folder: on `/tmp` it moves into `/tmp/.Trash-<uid>`
+  on the same disk and frees nothing. Never a glob over `/tmp`; remove only the folder your own script made.
+- `LIASCAPE_KEEP_TMP=1` keeps everything and the last line says where (the one switch, in every script's usage header).
+- A failed shell run keeps only what a human reads (`*.log`, `*.png`, `*.jsonl`, `*.txt`) under `/tmp/liascape-fail-*` (the
+  matrix: `/tmp/liascape-mx-last`) and prints the path on its last line. A run you own and no longer need: delete it.
+
 ## One heavy run at a time
 - Every `scripts/test-*.sh` and `scripts/bench-live-ui.mjs` take the machine's test lock (`scripts/test-lock.sh`): a second
   run waits its turn and says who holds it. Run anything else heavy through it too: `bash scripts/test-lock.sh <command>`

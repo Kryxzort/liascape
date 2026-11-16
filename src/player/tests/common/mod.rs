@@ -81,6 +81,7 @@ static PROCESS_SHADER_CACHE: extern "C" fn() = private_process_shader_cache;
 static PROCESS_SHADER_CACHE_CLEANUP: extern "C" fn() = remove_process_shader_cache;
 
 extern "C" fn private_process_shader_cache() {
+    process_tmp::setup(); // temp_dir() below must already be this process's own root
     let dir = process_shader_cache_dir();
     let _ = std::fs::create_dir_all(&dir);
     // SAFETY: `.init_array` runs before `main`, with no other thread to read the environment.
@@ -93,6 +94,12 @@ extern "C" fn private_process_shader_cache() {
 extern "C" fn remove_process_shader_cache() {
     let _ = std::fs::remove_dir_all(process_shader_cache_dir());
 }
+
+/// The process's own temp root (`TMPDIR` is moved into it before `main`, and it is removed at exit, pass or fail:
+/// `src/test_tmp.rs`). Every `std::env::temp_dir()` of a test, or of a process it spawns, lands inside.
+#[path = "../../src/test_tmp.rs"]
+#[allow(dead_code)]
+pub mod process_tmp;
 
 /// Create a real, surfaceless [`Gfx`] for a test, or skip cleanly.
 ///

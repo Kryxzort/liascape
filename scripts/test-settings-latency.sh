@@ -10,10 +10,12 @@
 # never touches another backend, the real library or the real player. Everything is stopped on exit.
 #
 # Usage: scripts/test-settings-latency.sh [--no-build]   (env N = library size, default 300)
+#   LIASCAPE_KEEP_TMP=1 keeps the temp folder; a failed run keeps only its logs / screenshots and prints where (last line).
 # Needs: dotnet (or DOTNET=…), ffmpeg, jq, curl, python3. Last line `RESULT pass=N fail=M`, exit 0 = pass.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+. "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -40,11 +42,12 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_PROFILE_SETTINGS=1
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 SP=""; BP=""
 cleanup() {
+  rc=$?
   trap - EXIT INT TERM HUP
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
-  case "$T" in /tmp/liascape-lat-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
+  lp_tmp_done "$T" /tmp/liascape-lat- "$rc"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP

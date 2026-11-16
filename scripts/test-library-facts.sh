@@ -23,10 +23,12 @@
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-library-facts.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
+#   LIASCAPE_KEEP_TMP=1 keeps the temp folder; a failed run keeps only its logs / screenshots and prints where (last line).
 # Needs: dotnet (or DOTNET=…), unshare + ip (iproute2), ffmpeg, ffprobe, curl, jq, python3.
 # Last line `RESULT pass=N fail=M`, exit 0 = pass.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+. "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 if [ -z "${LIASCAPE_FACTS_T:-}" ]; then
   . "$ROOT/scripts/test-lock.sh" # one heavy test run at a time on this machine
   BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
@@ -41,7 +43,7 @@ if [ -z "${LIASCAPE_FACTS_T:-}" ]; then
   [ -f "$DLL" ] || { echo "not built: $DLL (drop --no-build)"; exit 2; }
   T=$(mktemp -d /tmp/liascape-facts-XXXXXX)
   mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
-  cleanup() { trap - EXIT INT TERM HUP; case "$T" in /tmp/liascape-facts-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac; }
+  cleanup() { rc=$?; trap - EXIT INT TERM HUP; lp_tmp_done "$T" /tmp/liascape-facts- "$rc"; }
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   # the test itself runs with no network at all (loopback only): nothing in it can reach Steam

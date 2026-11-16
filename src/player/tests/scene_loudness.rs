@@ -2,6 +2,11 @@
 //! `docs/player/modules/scene-loudness.md` § Offline estimate): a
 //! generated packaged scene, end to end through the binary. Needs ffmpeg (SKIP without it).
 
+/// This suite's own temp root, removed at exit (`src/test_tmp.rs`).
+#[path = "../src/test_tmp.rs"]
+#[allow(dead_code)]
+mod test_tmp;
+
 use std::path::PathBuf;
 use std::process::Command;
 

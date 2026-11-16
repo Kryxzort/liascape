@@ -7,10 +7,12 @@
 # player (no serve.port → nothing to forward to; no player socket → the live push is a no-op).
 #
 # Usage: scripts/test-cross-process.sh [--no-build]
+#   LIASCAPE_KEEP_TMP=1 keeps the temp folder; a failed run keeps only its logs / screenshots and prints where (last line).
 # Needs: dotnet (or DOTNET=…), jq. Last line `RESULT pass=N fail=M`, exit 0 = pass.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias makes MSBuild delete its own outputs
+. "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -30,7 +32,7 @@ export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cach
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
-cleanup() { case "$T" in /tmp/liascape-xp-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac; }
+cleanup() { rc=$?; lp_tmp_done "$T" /tmp/liascape-xp- "$rc"; }
 trap cleanup EXIT
 pass=0; fail=0
 ok()  { echo "  ok   $*"; pass=$((pass+1)); }

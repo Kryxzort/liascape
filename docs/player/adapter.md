@@ -180,7 +180,7 @@ Adapter log `~/.cache/liascape/liascape-player-adapter.log` (identical lines ≤
   backend over HTTP against a private headless player (`--clock real --ao null`), hermetic (temp HOME and XDG dirs,
   own socket and port, display env unset; it aborts unless `/player-engine` says `active: liascape-player`). Every
   player it starts runs the backend's own binary path, so the upgrade check never replaces it under the script.
-  Converging state is polled to a deadline, never read after a fixed sleep. `LIASCAPE_IT_KEEP=1` keeps its temp
+  Converging state is polled to a deadline, never read after a fixed sleep. `LIASCAPE_KEEP_TMP=1` keeps its temp
   dir; `LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor` runs the auto-mute section on the old engine.
 - **Self-test** (`player-selftest`): pure tables, the queue behind a deliberately slow command, then a round trip
   against a private supervised player — the spawned process is the supervisor, so `hello.pid` differs from it.

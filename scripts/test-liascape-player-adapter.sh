@@ -25,6 +25,7 @@
 # path (EXIT/INT/TERM/HUP trap; a SIGSTOPped compositor is SIGCONTed first; cleanup kills the SUPERVISOR
 # `$SP` — never just a compositor pid, which would only make it restart again).
 #
+# Temp folder: LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs / screenshots and prints where (last line).
 # Usage (from anywhere; uses the binaries of the tree this script lives in):
 #   scripts/test-liascape-player-adapter.sh             # builds liascape-player (cargo, via the flake devShell when
 #                                                 # `nix` exists) + the backend (dotnet build), then tests
@@ -37,6 +38,7 @@
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
+. "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -112,6 +114,7 @@ esac
 export PULSE_SERVER=unix:$XDG_RUNTIME_DIR/pulse/native
 SP=""; CP=""; BP=""; PWP=""
 cleanup() {
+  rc=$?
   trap - EXIT INT TERM HUP
   # SIGCONT both the compositor (it may be SIGSTOPped by the stall test) and the supervisor (no-op if
   # it was never stopped) before anything else, so a `quit`/TERM below can actually be handled.
@@ -127,8 +130,7 @@ cleanup() {
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
   for p in $PWP; do kill -9 "$p" 2>/dev/null; done   # the auto-mute section's private audio daemons
-  [ -n "${LIASCAPE_IT_KEEP:-}" ] && { echo "kept $T"; return; }
-  case "$T" in /tmp/liascape-it-*) if command -v trash >/dev/null; then trash "$T" 2>/dev/null; else rm -rf -- "$T"; fi ;; esac
+  lp_tmp_done "$T" /tmp/liascape-it- "$rc"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
