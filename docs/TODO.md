@@ -5,6 +5,31 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
+69. [ ] (owner) Play-time limits: a maximum below the minimum must not be reachable. Today the maximum's steppers (the
+       − button, keys, wheel) go below the minimum (seen: minimum 8 s, maximum 6 s); only a typed value clamps on
+       leaving the field. Every way of changing either field keeps maximum = 0 or ≥ minimum, live.
+70. [ ] (owner) Settings → "Loudness target": allow up to 0 LUFS (the fixed gain takes it; −5 was a loudnorm-era bound).
+71. [ ] (owner) A "Download without subscribing" that goes through a subscription doesn't show "Unsubscribing 1…" in
+       the top bar (its unsubscribe is part of the download, not the user's own).
+72. [ ] (owner) Text is selectable instead of copy buttons: the item sidebars' title (remove its Copy button), the
+       Browse "Author" pill (no Copy), Workshop comments and commenters' names — selectable like any text, both tabs.
+73. [ ] (owner) Bug: Workshop comments always show their date as Jan 1, 1970 (a timestamp read wrong — seconds vs
+       ms, or the field's name).
+74. [ ] (owner) Browse sidebar's download block, clearer: say what Download / Download & Apply do in the chosen mode
+       (in "Subscribe with Steam login" they subscribe too) next to the "Not subscribed / Subscribe" row, so the two
+       don't read as contradicting; a button's right-click menu offers only its own one-off variant (not the other
+       button's); call the one-off "Download then unsubscribe" in the modes where that is what it does; the About text
+       area taller so more reads without scrolling.
+75. [ ] (owner) Library sidebar layout: a Workshop item's stat pills (subscribers, favourites, size on disk) sit at
+       the top beside the other pills, video wallpapers' too; the creator near the top; "All their wallpapers" is an
+       icon button (with its tooltip), not a text link.
+76. [ ] (owner) Windows fonts for scenes that name them (19 scenes: Consolas, Comic Sans, Arial…): use the fonts from
+       the user's own Windows install (found on a mounted Windows partition, e.g. Windows/Fonts; a setting to point at
+       another folder). Nothing Microsoft-licensed is shipped or copied: the core reads them where they are.
+77. [ ] (owner) Electron upgrade: move off EOL Electron 42 to the supported major in nixpkgs (flake,
+       app/shell/package.json + allowScripts, the AppImage together); check the NVIDIA GPU-process crash-loop first.
+78. [ ] (owner) Test runs delete their own /tmp folders when they finish (pass or fail; keep them only on request or a
+       failure a human must read, and say where).
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
