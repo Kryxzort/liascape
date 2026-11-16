@@ -1690,6 +1690,113 @@ fn real_scene_project_loads_beside_the_egl_setup() {
     );
 }
 
+/// A scene's text naming Windows system fonts gets them from the worker's fonts folder
+/// (`scene::fonts`, `render::windows_fonts`): the worker's fontconfig is given no fonts of its own (an
+/// empty `FONTCONFIG_FILE`), and the folder holds two freely licensed faces copied from this
+/// system (DejaVu Sans and DejaVu Sans Mono, never a Microsoft font). `systemfont_consolas` takes
+/// DejaVu Sans Mono and `systemfont_verdana` DejaVu Sans from the folder (each the first family
+/// of its stand-in list the folder has); with the fonts off the same text finds none. The text
+/// layers can't draw without WE's assets (none here), so the proof is LWE's own font line.
+#[test]
+fn scene_text_takes_its_system_font_from_the_fonts_folder() {
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: liascape-scene-worker built without LWE");
+        return;
+    }
+    let face = |family: &str| {
+        std::process::Command::new("fc-match")
+            .args(["-f", "%{file}", family])
+            .output()
+            .ok()
+            .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).into_owned()))
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("DejaVu"))
+            })
+    };
+    let (Some(mono), Some(sans)) = (face("DejaVu Sans Mono"), face("DejaVu Sans")) else {
+        println!("SKIP: fc-match finds no DejaVu Sans / DejaVu Sans Mono here");
+        return;
+    };
+    let root = empty_dir("fonts");
+    let fonts = root.join("Fonts");
+    std::fs::create_dir_all(&fonts).unwrap();
+    for f in [&mono, &sans] {
+        std::fs::copy(f, fonts.join(f.file_name().unwrap())).unwrap();
+    }
+    let conf = root.join("fonts.conf");
+    std::fs::write(
+        &conf,
+        format!(
+            "<?xml version=\"1.0\"?>\n<fontconfig><cachedir>{}</cachedir></fontconfig>\n",
+            root.join("fc-cache").display()
+        ),
+    )
+    .unwrap();
+    let scene = root.join("scene");
+    std::fs::create_dir_all(&scene).unwrap();
+    std::fs::write(
+        scene.join("project.json"),
+        r#"{"title":"fonts","type":"scene","file":"scene.json"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        scene.join("scene.json"),
+        r#"{"camera":{"center":"0 0 -1","eye":"0 0 0","up":"0 1 0"},
+            "general":{"clearcolor":"0.2 0.4 0.6","orthogonalprojection":{"width":64,"height":32}},
+            "objects":[{"id":1,"name":"mono","text":"Consolas","font":"systemfont_consolas","pointsize":12},
+                       {"id":2,"name":"sans","text":"Verdana","font":"systemfont_verdana","pointsize":12}]}"#,
+    )
+    .unwrap();
+    let assets = empty_dir("fonts-assets");
+    let run = |name: &str, choice: liascape_player::scene::fonts::Choice| {
+        let mut src = open_real(&gfx, name, &scene, Some(&assets), |o| {
+            o.fonts = choice;
+            o.env
+                .push(("FONTCONFIG_FILE".into(), conf.display().to_string()));
+        });
+        assert!(
+            pump(&gfx, &mut src, Duration::from_secs(15), |s| s.is_ready()
+                || s.error().is_some()),
+            "{name}: never ready {:?}",
+            src.log_tail()
+        );
+        assert!(src.error().is_none(), "{name}: {:?} {:?}", src.error(), src.log_tail());
+        src.log_tail().join("\n")
+    };
+    let tail = run(
+        "fonts-folder",
+        liascape_player::scene::fonts::Choice::Folder(fonts.clone()),
+    );
+    for (layer, font, file) in [
+        ("mono", "systemfont_consolas", fonts.join(mono.file_name().unwrap())),
+        ("sans", "systemfont_verdana", fonts.join(sans.file_name().unwrap())),
+    ] {
+        let want = format!("font {font} -> {}", file.display());
+        assert!(
+            tail.lines().any(|l| l.contains(&format!("'{layer}'")) && l.ends_with(&want)),
+            "{layer}: not drawn with {} from the fonts folder:\n{tail}",
+            file.display()
+        );
+    }
+    assert!(
+        tail.lines()
+            .any(|l| l.starts_with("fonts: Windows fonts from ") && l.contains("(the setting)")),
+        "no fonts line in the worker's log:\n{tail}"
+    );
+    let off = run("fonts-off", liascape_player::scene::fonts::Choice::Off);
+    assert!(
+        off.lines()
+            .any(|l| l.contains("no usable font for 'mono' (systemfont_consolas)")),
+        "with the fonts off the text still found a font (the folder's proof proves nothing):\n{off}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// Set in the child [`real_workers_keep_the_shader_cache_in_the_tests_dir`] re-runs this binary
 /// as: only then does [`lwe_cache_guard_child`] do anything.
 const LWE_CACHE_GUARD_ENV: &str = "LIASCAPE_TEST_LWE_CACHE_GUARD";

@@ -622,6 +622,24 @@ impl Drop for Scene {
     }
 }
 
+/// Adds `dir` to fontconfig's current configuration as an application font dir
+/// (`FcConfigAppFontAddDir`), for every later lookup in this process — LWE's text included.
+/// Looked up, not linked: fontconfig is the core's dependency, not the worker's.
+pub fn add_app_font_dir(dir: &Path) -> Result<(), String> {
+    type AddDir = unsafe extern "C" fn(*mut c_void, *const u8) -> c_int;
+    let sym = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"FcConfigAppFontAddDir".as_ptr()) };
+    if sym.is_null() {
+        return Err("fontconfig isn't loaded (no FcConfigAppFontAddDir)".into());
+    }
+    let add: AddDir = unsafe { std::mem::transmute(sym) };
+    let c = CString::new(dir.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
+    // config NULL = the current one (made here if no lookup made it yet)
+    if unsafe { add(std::ptr::null_mut(), c.as_ptr().cast()) } == 0 {
+        return Err("fontconfig refused the folder".into());
+    }
+    Ok(())
+}
+
 /// `liascape-scene-worker --shader-sweep <request.json> --assets <dir> --out <results.jsonl>`: compiles shaders
 /// through the core's own pipeline (its preprocessing, glslang + SPIRV-Cross, the GL compile and link on an
 /// offscreen context) without rendering — `wp_project_shader_check`, fork patch "core: a shader sweep". The request is
@@ -939,6 +957,8 @@ fn run_smoke(
     use liascape_player::gfx::Gfx;
 
     let gfx = Gfx::new_offscreen()?;
+    // the fonts the worker's load gives the scene (`LIASCAPE_SCENE_FONTS`, unset = auto)
+    crate::render::windows_fonts();
     let t0 = std::time::Instant::now();
     // a smoke run keeps the scene's localStorage with its PNGs, not in the user's state
     if std::env::var_os("LIASCAPE_SCENE_STORAGE_DIR").is_none() {

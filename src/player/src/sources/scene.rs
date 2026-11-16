@@ -252,6 +252,9 @@ pub struct SceneOpts {
     pub steam_dir: Option<String>,
     /// The scene's user properties (`scene_props`), applied at every (re)start.
     pub properties: Map<String, Value>,
+    /// The Windows fonts its worker reads (`scene::fonts`, sent as `LIASCAPE_SCENE_FONTS`): the
+    /// runtime's base opt `scene_fonts` (`player.scene_fonts`); off by default here.
+    pub fonts: crate::scene::fonts::Choice,
     pub audio: AudioRoute,
     pub env: Vec<(String, String)>,
     pub budget: RestartBudget,
@@ -283,7 +286,8 @@ pub struct SceneOpts {
 
 impl SceneOpts {
     /// Defaults: 30 ticks/s, a 1920×1080 demand, LWE (not synthetic), position 0,
-    /// playing at 1×, production restart budget / hang timeout / crash dir, spawned at open.
+    /// playing at 1×, production restart budget / hang timeout / crash dir, spawned at open,
+    /// no Windows fonts.
     pub fn new(path: impl Into<PathBuf>, worker_bin: impl Into<PathBuf>) -> SceneOpts {
         SceneOpts {
             id: "scene".into(),
@@ -299,6 +303,7 @@ impl SceneOpts {
             assets_dir: None,
             steam_dir: None,
             properties: Map::new(),
+            fonts: crate::scene::fonts::Choice::Off,
             audio: AudioRoute::Null,
             env: Vec::new(),
             budget: RestartBudget::default(),
@@ -635,6 +640,14 @@ impl SceneSource {
                 bs("scene_assets_error").unwrap_or_else(|| crate::scene::assets::HINT.into())
             )));
         }
+        // the runtime's resolved choice; a host without one (harnesses) the environment's
+        o.fonts = match bs("scene_fonts") {
+            Some(f) => crate::scene::fonts::Choice::parse(&f),
+            None => crate::scene::fonts::effective(
+                "",
+                std::env::var(crate::scene::fonts::ENV).ok().as_deref(),
+            ),
+        };
         o.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
             .map(|p| p.to_string_lossy().into_owned());
         if let Some(PropValue::Map(m)) = get("scene_props") {
@@ -830,7 +843,7 @@ impl SceneSource {
         self.meter_on = !self.loudness_capped();
         self.gain_sent = Some(self.gains.effective_db());
         let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
-        spec.env = self.opts.env.clone();
+        spec.env = self.worker_env();
         spec.budget = self.opts.budget;
         spec.hang_timeout = self.opts.hang_timeout;
         spec.crash_dir = self.opts.crash_dir.clone();
@@ -1149,31 +1162,7 @@ impl SceneSource {
             WorkerEvent::Msg(m, fds) => self.on_message(gfx, now, m, fds),
             WorkerEvent::Restarted { attempt } => {
                 self.stats.restarts += 1;
-                self.latch.forget_worker();
-                self.worker_ready = false;
-                self.inflight = 0;
-                self.step_seq = None;
-                if !self.loaded {
-                    self.load_ticked = false; // the first frame's tick died with it
-                }
-                if self.exact_seq.is_some() {
-                    self.exact_seq = None;
-                    self.exact_pending = true;
-                }
-                // The held frame is final now (queued ones were dropped): resume at its `t`.
-                if let Some(t) = self.hold_for_restart(now) {
-                    if let Some(h) = self.host.as_mut() {
-                        h.set_resume_position(t);
-                    }
-                    log::event(
-                        "scene",
-                        Level::Info,
-                        "scene.resuming",
-                        None,
-                        json!({"id": self.opts.id, "t": t, "attempt": attempt}),
-                    );
-                }
-                self.want_preview_if_blank();
+                self.on_new_worker(now, attempt);
             }
             WorkerEvent::Broken { record } => {
                 self.want_preview_if_blank();
@@ -1195,6 +1184,69 @@ impl SceneSource {
                 self.want_preview_if_blank();
             }
         }
+    }
+
+    /// A new worker process took over (a crash restart, or [`set_fonts`](Self::set_fonts)'s
+    /// planned replacement, `attempt` 0): the shown frame stays (never released: the new worker
+    /// never had its slot) and the scene resumes at its `t`.
+    fn on_new_worker(&mut self, now: Instant, attempt: u32) {
+        self.latch.forget_worker();
+        self.worker_ready = false;
+        self.inflight = 0;
+        self.step_seq = None;
+        if !self.loaded {
+            self.load_ticked = false; // the first frame's tick died with it
+        }
+        if self.exact_seq.is_some() {
+            self.exact_seq = None;
+            self.exact_pending = true;
+        }
+        // The held frame is final now (queued ones were dropped): resume at its `t`.
+        if let Some(t) = self.hold_for_restart(now) {
+            if let Some(h) = self.host.as_mut() {
+                h.set_resume_position(t);
+            }
+            log::event(
+                "scene",
+                Level::Info,
+                "scene.resuming",
+                None,
+                json!({"id": self.opts.id, "t": t, "attempt": attempt}),
+            );
+        }
+        self.want_preview_if_blank();
+    }
+
+    /// The Windows fonts its worker reads (`player.scene_fonts`, live): a changed choice replaces
+    /// the running worker at once (a planned replacement, never a crash: no restart budget, no
+    /// crash record), the shown frame held and the scene resuming at its time, as after a crash
+    /// restart; a worker's fontconfig can't drop fonts it was given, so a new process is the only
+    /// way. A source not spawned yet, broken or stopped just keeps the choice for its next start.
+    /// Guard: `tests/api.rs::scene_fonts_change_replaces_the_running_worker`.
+    pub fn set_fonts(&mut self, fonts: crate::scene::fonts::Choice) {
+        if fonts == self.opts.fonts {
+            return;
+        }
+        self.opts.fonts = fonts;
+        let env = self.worker_env();
+        let Some(h) = self.host.as_mut() else {
+            return;
+        };
+        match h.replace(env, "Windows fonts changed") {
+            Ok(true) => self.on_new_worker(Instant::now(), 0),
+            Ok(false) => {}
+            Err(e) => self.fail(format!("scene worker: {e}")),
+        }
+    }
+
+    /// The environment a worker of this source gets on top of the compositor's.
+    fn worker_env(&self) -> Vec<(String, String)> {
+        let mut env = self.opts.env.clone();
+        env.push((
+            crate::scene::fonts::ENV.to_string(),
+            self.opts.fonts.as_env(),
+        ));
+        env
     }
 
     /// The worker is gone with a frame on screen — stop the scene clock at that

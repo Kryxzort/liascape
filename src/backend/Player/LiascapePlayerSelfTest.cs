@@ -419,6 +419,14 @@ public static class LiascapePlayerSelfTest
             (new AppSettings { SceneVramLimitMib = 2048, SceneVramStopShows = "bogus", VramLowMode = "bogus" }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop"),
             (new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = 1, SceneVramStopShows = "NOTHING", VramLowMode = "off" }, "scene_throttle=True scene_vram_limit_mib=64 scene_vram_stop_shows=nothing vram_low_mode=off") })
             if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
+        // AppSettings → `player.scene_fonts`: "off" while the toggle is off, else the folder ("" = find a mounted Windows install's)
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var (s, want) in new (AppSettings, string)[] {
+            (new AppSettings(), ""),
+            (new AppSettings { UseWindowsFonts = false, WindowsFontsFolder = "/mnt/c/Windows/Fonts" }, "off"),
+            (new AppSettings { WindowsFontsFolder = " /mnt/c/Windows/Fonts " }, "/mnt/c/Windows/Fonts"),
+            (new AppSettings { WindowsFontsFolder = "~/fonts" }, home + "/fonts") })
+            if (LiascapePlayerMedia.SceneFontsProp(s) != want) fails.Add($"SceneFontsProp → {LiascapePlayerMedia.SceneFontsProp(s)}, want {want}");
         // ScenesPlayable: AllowScenes × engine × (liascape-player: the player's `scene` capability | legacy: LWE)
         foreach (var allow in new[] { false, true })
         foreach (var onPlayer in new[] { false, true })
@@ -1148,6 +1156,13 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.ApplyGpuSettings(g1, g0); LiascapePlayerMedia.Drain().Wait(2000);
                 if (Gpu() != "true 0.0 last_frame stop" && Gpu() != "true 0 last_frame stop") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 last_frame stop");
                 else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode live and back");
+                // the Windows fonts setting → player.scene_fonts, live, diffed
+                var f1 = new AppSettings { UseWindowsFonts = false };
+                LiascapePlayerMedia.ApplySceneFonts(g0, f1); LiascapePlayerMedia.Drain().Wait(2000);
+                if (PlayerProp("scene_fonts") != "off") fails.Add($"ApplySceneFonts(off) → player.scene_fonts {PlayerProp("scene_fonts")}, want off");
+                LiascapePlayerMedia.ApplySceneFonts(f1, g0); LiascapePlayerMedia.Drain().Wait(2000);
+                if (PlayerProp("scene_fonts") != "") fails.Add($"ApplySceneFonts back to the default → player.scene_fonts {PlayerProp("scene_fonts")}, want \"\"");
+                else Phase("ApplySceneFonts: player.scene_fonts off live and back to auto");
                 // pause when covered → player.pause_when_covered, live, diffed (the player's own default is off)
                 LiascapePlayerMedia.ApplyCoverSetting(g0, new AppSettings { PauseWhenCovered = "fullscreen" }); LiascapePlayerMedia.Drain().Wait(2000);
                 if (PlayerProp("pause_when_covered") != "fullscreen") fails.Add($"ApplyCoverSetting(fullscreen) → {PlayerProp("pause_when_covered")}");

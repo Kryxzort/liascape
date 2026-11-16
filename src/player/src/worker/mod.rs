@@ -482,6 +482,49 @@ impl WorkerHost {
         );
     }
 
+    /// Replace the live worker with a new one started with `env` as the spec's environment —
+    /// a planned replacement, not a crash: the old process gets `Quit` and goes to the reaper
+    /// (as [`stop`](Self::stop)), the new one starts at once with the folded `Start`, and
+    /// nothing counts against the [`RestartBudget`] or writes a crash record. `Ok(true)` = a
+    /// new worker is starting (`Restarting {attempt: 0}` until its `Hello`): the caller holds
+    /// its frame as for [`WorkerEvent::Restarted`]. `Ok(false)` = nothing was running (not
+    /// spawned yet, broken, stopped); the spec's env still takes `env` for any later start.
+    /// Never blocks. Guard: `tests/api.rs::scene_fonts_change_replaces_the_running_worker`.
+    pub fn replace(&mut self, env: Vec<(String, String)>, why: &str) -> io::Result<bool> {
+        self.spec.env = env;
+        if self.proc_.is_none() || matches!(self.state, WorkerState::Broken { .. }) {
+            return Ok(false);
+        }
+        self.drain_output(false);
+        let p = self.proc_.take().unwrap();
+        if let Some(s) = &p.sock {
+            let _ = proto::send(s.as_fd(), &ToWorker::Quit, &[]);
+        }
+        self.forget_fds(&p);
+        reap::hand_off(p.pid, Instant::now() + STOP_GRACE);
+        self.sync = None;
+        match self.spawn_proc(0) {
+            Ok(np) => {
+                let pid = np.pid;
+                self.proc_ = Some(np);
+                self.state = WorkerState::Restarting { attempt: 0 };
+                self.push_line(format!("--- liascape-player: worker replaced ({why}) ---"));
+                log::event(
+                    "worker",
+                    Level::Info,
+                    "worker.replaced",
+                    Some(self.corr.clone()),
+                    json!({"id": self.spec.id, "prev_pid": p.pid, "pid": pid, "why": why}),
+                );
+                Ok(true)
+            }
+            Err(e) => {
+                self.state = WorkerState::Stopped;
+                Err(e)
+            }
+        }
+    }
+
     /// `Quit`, then the process is handed to the reaper (SIGKILL after [`STOP_GRACE`]).
     /// Never blocks; `Stopped` afterwards, no more events.
     pub fn stop(&mut self) {

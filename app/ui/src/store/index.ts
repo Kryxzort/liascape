@@ -243,7 +243,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", fullLiveSyncOffsetMs: -30,
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 500, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
-  autoThrottleScenes: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop",
+  autoThrottleScenes: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop", useWindowsFonts: true, windowsFontsFolder: "",
   thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", glows: true, textShadow: false, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",

@@ -173,6 +173,15 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_assets_resolved",
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
+            // The Windows fonts a scene's text may use (`scene::fonts`): "" = auto
+            // (`LIASCAPE_SCENE_FONTS` when the environment sets it, else a mounted Windows
+            // install's `Windows/Fonts`), "off", or a folder. Live: each scene source whose choice
+            // changes replaces its running worker, its frame held (`SceneSource::set_fonts`: a
+            // worker's fontconfig can't drop fonts it was given).
+            (
+                "scene_fonts",
+                def(PropType::Str, false, PropValue::Str(String::new())),
+            ),
             // The GPU budget is a setting, auto-throttle by default: `true`
             // = a scene whose worker starves its outputs is throttled stepwise and restored
             // (`scene::budget`); `false` = every scene ticks at exactly its outputs'

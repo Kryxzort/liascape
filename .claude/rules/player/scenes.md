@@ -96,6 +96,14 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `docs/player/modules/scene-lwe-core.md` § Shader cache); keep it out of the user's cache in tests (`tests/common`
   sets `LIASCAPE_SCENE_SHADER_CACHE_DIR`) and on-machine scripts (their private dir). Guards:
   `tests/scene.rs::real_workers_keep_the_shader_cache_in_the_tests_dir`, `host_api_test` `shader_cache_reuses_text_work`.
+- Give a scene's text the user's own Windows fonts only by reading them in place: the worker adds the folder
+  `LIASCAPE_SCENE_FONTS` resolves to (`scene::fonts`) as a fontconfig app font dir before the build
+  (`render::windows_fonts`); never ship, copy or link a Microsoft font. Resolve "auto" in the worker, never on the
+  compositor's loop (a mount can block). Keep the suites at `off` (`tests/common`) (`docs/player/modules/scene-lwe-core.md`
+  § Fonts). A `player.scene_fonts` change replaces each running worker whose choice changed (`WorkerHost::replace`: not a
+  crash, no budget, no record), its frame held. Guards: `tests/scene.rs::scene_text_takes_its_system_font_from_the_fonts_folder`,
+  `tests/api.rs::scene_fonts_reach_the_next_scene_worker`, `scene_fonts_change_replaces_the_running_worker`, matrix
+  `settings:windowsFonts`.
 
 ## Frame transport (`gfx/dmabuf.rs`, `worker/dmabuf.rs`, `sources/scene.rs`)
 - Latch only the newest frame whose acquire fence already polls readable; release older queued frames

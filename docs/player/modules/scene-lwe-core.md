@@ -1,6 +1,6 @@
 # LWE core in the scene worker
 
-Covers `src/player/src/bin/liascape-scene-worker/lwe.rs` and `render.rs`, `src/player/build.rs`'s LWE link,
+Covers `src/player/src/bin/liascape-scene-worker/lwe.rs` and `render.rs`, `src/player/src/scene/fonts.rs`, `src/player/build.rs`'s LWE link,
 `scripts/lwe.sh`, `patches/lwe/` and `third_party/lwe/`. Rules: `.claude/rules/player/scenes.md` § Build, § Corpus
 and health tooling. The pin, the patch series (one row per patch with its why) and the resync recipe live in
 `UPSTREAM.md` § linux-wallpaperengine — not repeated here.
@@ -105,6 +105,27 @@ distinct pairs come to tens of MB.
 Without WE's `assets/` only a scene of a clear colour builds (`patches/lwe/tests/fixtures/min-scene`, the hermetic
 real-LWE fixture); anything with an image, particle or effect needs `assets/shaders`. `fail-scene` (an object whose
 parent doesn't exist) loads, then its build throws — the deterministic broken-build fixture.
+
+## Fonts
+
+The core's text asks fontconfig for every font (fork patch 0091, `TextLayout.cpp`): a `systemfont_*` name is WE's
+Windows file, looked up by its family then the stand-ins fontconfig commonly has (`systemfont_consolas`: Consolas,
+Inconsolata, DejaVu Sans Mono, monospace), and a character the font lacks goes down WE's fallback chain (Arial,
+Segoe UI Emoji, Arial Unicode MS, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic). A stand-in's
+metrics change wrapping (3354740764's notepad: Inconsolata fits 24 characters on a line where Consolas fits 21).
+So the worker gives fontconfig the user's own Windows fonts where they are, nothing shipped or copied
+(`scene::fonts`, `render::windows_fonts`): `player.scene_fonts` (the backend's "Use Windows fonts in scenes" and
+"Windows fonts folder") reaches each worker as `LIASCAPE_SCENE_FONTS` (`auto`, `off` or a folder; an auto prop takes
+the compositor's own variable, which the test suites set to `off`). Auto is the first `Windows/Fonts`, any case, at
+the root of an NTFS mount in `/proc/self/mountinfo`. The worker resolves it itself on `lia-scene-fonts`, beside the
+EGL setup and the project load, so a sleeping disk or a stuck FUSE mount delays that scene, never the compositor's
+loop; it adds the folder with `FcConfigAppFontAddDir` (looked up with `dlsym`), and the build waits for it before
+the text layers are set up. fontconfig caches the folder's scan in its own cache dir: about 0.5 s the first time for
+a Windows 11 install, 0.17 s after (mostly fontconfig's own start). A change is live: a worker's fontconfig can't drop
+fonts it was given, so each scene source whose choice changed replaces its running worker
+(`SceneSource::set_fonts` → `WorkerHost::replace`, a planned replacement: no restart budget, no crash record), holding
+its frame and resuming at its time as after a crash restart. The worker's log says what it read (`fonts: …`), and LWE's
+`CText: '<layer>' (<id>) font <name> -> <file>` which face each text took.
 
 ## Diagnosing a scene
 

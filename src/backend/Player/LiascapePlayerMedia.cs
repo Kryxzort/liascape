@@ -296,6 +296,7 @@ public static class LiascapePlayerMedia
     {
         foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
+        SetPlayerProp(client, "scene_fonts", SceneFontsProp(s));
         SetPlayerProp(client, "pause_when_covered", AppSettings.CoverMode(s.PauseWhenCovered));
         if (AudioMonitor.AutoMuteInPlayer) foreach (var (prop, v) in AutoMuteProps(s)) SetPlayerProp(client, prop, v);
         _sceneFpsGen = client.Generation;
@@ -320,6 +321,22 @@ public static class LiascapePlayerMedia
         var had = GpuProps(prev);
         foreach (var (prop, v) in GpuProps(cur))
             if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
+    }
+
+    // Windows fonts for scene text: `player.scene_fonts` ← "off" unless UseWindowsFonts, else WindowsFontsFolder ("" = the
+    // player finds a mounted Windows install's fonts; a leading ~ is the user's home). Live: the player replaces each playing
+    // scene's worker with one that has the new fonts (its picture held); a new player process gets it from AssertSceneFps.
+    public static string SceneFontsProp(AppSettings s)
+    {
+        if (!s.UseWindowsFonts) return "off";
+        var f = (s.WindowsFontsFolder ?? "").Trim();
+        if (f == "~" || f.StartsWith("~/")) f = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + f[1..];
+        return f;
+    }
+
+    public static void ApplySceneFonts(AppSettings prev, AppSettings cur)
+    {
+        if (SceneFontsProp(prev) != SceneFontsProp(cur)) QueuePlayerProp("scene_fonts", SceneFontsProp(cur));
     }
 
     // Pause when covered: `player.pause_when_covered` ← PauseWhenCovered, live (coalescible per prop); a new

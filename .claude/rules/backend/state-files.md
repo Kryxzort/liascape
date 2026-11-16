@@ -35,6 +35,7 @@ The CLI, the daemons, `serve` and the player-side processes all read and write t
 - `SettingsLevel` (basic | standard | advanced | expert) is UI-only; the backend never reads it, and hiding a setting never resets it.
 - Rotation fields (`Global*` and `PlaylistSettings.*`, used only when `OverrideGlobalSettings`): semantics in `.claude/rules/backend/player-adapter.md` § Rotation.
 - `PauseWhenCovered`, `GlobalPlaylistStart` / `PlaylistStart`, `RotateWhileParked`, the GPU/VRAM settings and `SceneMonitors` fps are liascape-player props, all live.
+- `UseWindowsFonts` / `WindowsFontsFolder` are `player.scene_fonts` (`LiascapePlayerMedia.SceneFontsProp`), live: a playing scene's worker is replaced by one with the new fonts, its picture held (a worker's fontconfig can't drop fonts).
 - `RestartMpvpaperEverySeconds` and `RestartOnlyAtPlaylistChangeover` are legacy only.
 
 ## `LastSession`

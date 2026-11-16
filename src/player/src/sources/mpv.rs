@@ -922,7 +922,7 @@ impl MpvSource {
                 | "shader_cache_dir" => {}
                 // `SourceHost`'s base opts for scene sources — not an mpv's.
                 "scene_worker" | "scene_crash_dir" | "scene_assets" | "scene_assets_error"
-                | "allow_synthetic" => {}
+                | "scene_fonts" | "allow_synthetic" => {}
                 "position" => {
                     start =
                         Some(v.as_f64().ok_or_else(|| {

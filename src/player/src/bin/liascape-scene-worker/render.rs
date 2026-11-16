@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use glow::HasContext;
 use liascape_player::gfx::{Fbo, Gfx, Tex};
-use liascape_player::scene::assets;
+use liascape_player::scene::{assets, fonts};
 use serde_json::{Map, Value};
 
 use crate::lwe;
@@ -95,6 +95,54 @@ pub struct Project {
 // `Arc`s and atomics.
 unsafe impl Send for Project {}
 
+/// The Windows fonts this process's text may use, once per process, before the first text layer
+/// is set up (`docs/player/modules/scene-lwe-core.md` § Fonts): the folder `LIASCAPE_SCENE_FONTS`
+/// resolves to (`scene::fonts`, unset = auto) joins fontconfig's fonts as an application font dir,
+/// read where it is. LWE's text asks fontconfig for each `systemfont_*` family and its fallback
+/// chain, so a scene naming Consolas gets the real Consolas when the user's Windows has it.
+/// fontconfig keeps the folder's scan in its own cache: only a first load (or a changed folder)
+/// scans it (about 0.5 s for a Windows 11 install's 400 files; 0.17 s from the cache, most of it
+/// fontconfig's own start, which a text layer pays anyway). The worker starts it on its own
+/// thread at once ([`windows_fonts_early`]) and the build waits for it here. Returns the line saying
+/// what was read (printed into the worker's log). Guard: tests/scene.rs
+/// `scene_text_takes_its_system_font_from_the_fonts_folder`.
+pub fn windows_fonts() -> &'static str {
+    static NOTE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NOTE.get_or_init(|| {
+        let choice = fonts::Choice::parse(&std::env::var(fonts::ENV).unwrap_or_default());
+        let r = fonts::resolve(&choice);
+        let note = match &r.dir {
+            Some(d) => {
+                let t = std::time::Instant::now();
+                match lwe::add_app_font_dir(d) {
+                    Ok(()) => format!(
+                        "fonts: {} ({:.0} ms)",
+                        r.note,
+                        t.elapsed().as_secs_f64() * 1e3
+                    ),
+                    Err(e) => format!("fonts: {}: {e}", r.note),
+                }
+            }
+            None => format!("fonts: {}", r.note),
+        };
+        eprintln!("{note}");
+        note
+    })
+}
+
+/// [`windows_fonts`] on `lia-scene-fonts`, beside the EGL setup and the project load (neither touches
+/// fontconfig); the build's own call then only waits for it.
+pub fn windows_fonts_early() {
+    if let Err(e) = std::thread::Builder::new()
+        .name("lia-scene-fonts".into())
+        .spawn(|| {
+            windows_fonts();
+        })
+    {
+        eprintln!("fonts: start the fonts thread: {e}");
+    }
+}
+
 /// `check_folder`, then LWE's context + project for `dir` — [`LweScene::load`]'s first half.
 pub fn load_project(
     dir: &Path,
@@ -162,6 +210,8 @@ impl LweScene {
             on_prop(name, scene.set_property(name, value));
         }
         scene.hint_screen(o.screen.0, o.screen.1);
+        // before the build sets its text layers up
+        windows_fonts();
         let t1 = std::time::Instant::now();
         // Without it every texture uploads here, on the render thread: slower, never wrong.
         match gfx.share_recipe() {

@@ -5,9 +5,18 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-76. [ ] (owner) Windows fonts for scenes that name them (19 scenes: Consolas, Comic Sans, Arial…): use the fonts from
-       the user's own Windows install (found on a mounted Windows partition, e.g. Windows/Fonts; a setting to point at
-       another folder). Nothing Microsoft-licensed is shipped or copied: the core reads them where they are.
+72. [ ] (owner) Text is selectable instead of copy buttons: the item sidebars' title (remove its Copy button), the
+       Browse "Author" pill (no Copy), Workshop comments and commenters' names — selectable like any text, both tabs.
+73. [ ] (owner) Bug: Workshop comments always show their date as Jan 1, 1970 (a timestamp read wrong — seconds vs
+       ms, or the field's name).
+74. [ ] (owner) Browse sidebar's download block, clearer: say what Download / Download & Apply do in the chosen mode
+       (in "Subscribe with Steam login" they subscribe too) next to the "Not subscribed / Subscribe" row, so the two
+       don't read as contradicting; a button's right-click menu offers only its own one-off variant (not the other
+       button's); call the one-off "Download then unsubscribe" in the modes where that is what it does; the About text
+       area taller so more reads without scrolling.
+75. [ ] (owner) Library sidebar layout: a Workshop item's stat pills (subscribers, favourites, size on disk) sit at
+       the top beside the other pills, video wallpapers' too; the creator near the top; "All their wallpapers" is an
+       icon button (with its tooltip), not a text link.
 77. [ ] (owner) Electron upgrade: move off EOL Electron 42 to the supported major in nixpkgs (flake,
        app/shell/package.json + allowScripts, the AppImage together); check the NVIDIA GPU-process crash-loop first.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
@@ -503,10 +512,6 @@ Two bug classes kept recurring; fix the class, not the instance:
           3289734539): WE's pointer arrives with the capture's xdotool nudge after load and its parallax eases in
           from there; wallpiper (GetCursorPos hook) has it from the first frame. Nudge earlier, or take the 0.5 s
           frame from wallpiper.
-    - [ ] The compare gives ours the Windows install's fonts (the faces WE drew with); the owner's player uses
-          fontconfig's, so 19 scenes naming `systemfont_*` draw with stand-ins (3354740764's Consolas → Inconsolata
-          wraps after 24 characters, not 21). Owner's call: a "Windows fonts folder" setting (auto-found on a
-          mounted Windows install) for the player.
     - [ ] 3184155462's cursor ripple vs the owner's Windows: WE's ripple force scales with the frame time (≈10× weaker
           at 120 fps than at 30); at a matched 30 fps ours is WE's strength. The owner's Windows WE (main profile,
           `/mnt/Windows/…/wallpaper_engine/config.json`) runs at **240 fps** (Ultra, MSAA x8; the Linux library's

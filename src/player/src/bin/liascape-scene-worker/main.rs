@@ -1342,6 +1342,8 @@ struct StartArgs {
 fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
     // The project load needs no GL: it runs while the driver sets the context up below.
     #[cfg(feature = "lwe")]
+    render::windows_fonts_early();
+    #[cfg(feature = "lwe")]
     let preload = Preload::start(preload);
     #[cfg(not(feature = "lwe"))]
     let _ = preload;

@@ -211,6 +211,12 @@ public class AppSettings
         get => _vramLowMode;
         set => _vramLowMode = value is "stop" or "pause" or "off" ? value : "stop";
     }
+    // liascape-player scenes: a text that names a Windows font (systemfont_consolas …) draws with the real one from the
+    // user's own Windows install, read where it is → `player.scene_fonts` (LiascapePlayerMedia.SceneFontsProp: "off",
+    // the folder, or "" = find a mounted install's Windows/Fonts). Live: the player replaces a playing scene's worker with
+    // one that has the new fonts, its picture held (docs/player/modules/scene-lwe-core.md § Fonts).
+    public bool UseWindowsFonts { get; set; } = true;
+    public string WindowsFontsFolder { get; set; } = "";
     public bool AutoAddLibraryToPlaylist { get; set; } = false;
     // on by default: Workshop subscriptions live in the library (the Library's Delete of one is Unsubscribe; the Browse
     // sidebar's Download under the "subscribe" mode is Subscribe); a file that says false keeps false
