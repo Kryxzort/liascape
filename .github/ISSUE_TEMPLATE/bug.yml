@@ -1,0 +1,40 @@
+name: Something's broken
+description: Liascape does something wrong, crashes, or a feature doesn't work.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open Library
+        2. Right-click a wallpaper
+        3. …
+  - type: textarea
+    id: pictures
+    attributes:
+      label: Screenshots or a short video
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup
+      description: Distro, compositor, graphics card. If you know it, the player engine (Settings → Under the hood).
+      placeholder: e.g. Arch, Hyprland, NVIDIA RTX 3070, liascape-player
+  - type: input
+    id: version
+    attributes:
+      label: Liascape version
+      description: The commit you built (`git rev-parse --short HEAD` in your clone) or the Nix flake revision.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: "`liascape ctl logs` for the player; the terminal output if you started `liascape` from one."
+      render: text

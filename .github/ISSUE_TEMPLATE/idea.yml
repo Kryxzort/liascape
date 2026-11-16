@@ -1,0 +1,15 @@
+name: Idea or request
+description: Something you'd like Liascape to do.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: What you're trying to do, and how you'd like it to work. Mockups welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it matter to you?

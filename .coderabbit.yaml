@@ -1,0 +1,50 @@
+# CodeRabbit reviews pull requests against the project's own rules (CLAUDE.md and .claude/rules/).
+language: en-US
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/package-lock.json"
+    - "!flake.lock"
+    - "!patches/lwe/**"
+    - "!docs/player/reports/**"
+    - "!transitions/**"
+  path_instructions:
+    - path: "src/player/**"
+      instructions: |
+        Check against .claude/rules/player/ (core.md, scenes.md, sources-audio.md, runtime-api.md, gfx-wayland.md)
+        and docs/player/invariants.md: never hand an audible or visible stream from one owner to another, never block
+        the runtime loop, never wait on a fence on the loop, a new behaviour names its guard test.
+    - path: "src/backend/**"
+      instructions: |
+        Check against .claude/rules/backend/: shared state files are written field-level and atomically, secrets never
+        reach settings.json or logs, settings apply live to the playing wallpaper.
+    - path: "app/ui/src/**"
+      instructions: |
+        Check against .claude/rules/ui/design.md: theme variables only (no hard-coded colours), motion-off fades,
+        no-glow and bg-live variants, the shared components (NumInput, Select, Segmented) instead of native controls.
+    - path: "app/shell/probe-*.js"
+      instructions: |
+        A probe cell must be able to fail: look for vacuous passes and checks that read a proxy instead of what the
+        user sees (.claude/rules/testing.md).
+    - path: "**/*.md"
+      instructions: |
+        Follow .claude/rules/writing-rules.md: present tense, no history or dates in reference docs, no personal details.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CLAUDE.md"
+      - ".claude/rules/**/*.md"

@@ -203,6 +203,12 @@ Settings → Keyboard shortcuts lists each command with a Copy button.
 Wallpapers from your Workshop folder are linked into the library, not copied, unless you turn on "Copy files instead
 of linking".
 
+## Reporting a problem
+
+A scene that won't load or doesn't look like it does in Wallpaper Engine? Open an issue with the
+"A scene looks wrong" form: the Workshop link and a screenshot are all it needs. For anything else, use
+"Something's broken" or "Idea or request".
+
 ## Contributing and building
 
 `CLAUDE.md` lists how to build, run and test each part. The player's design is in

@@ -1,0 +1,63 @@
+name: A scene looks wrong
+description: A Wallpaper Engine scene doesn't load, is black, or looks different from Wallpaper Engine on Windows.
+title: "Scene: "
+labels: ["scene"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! The Workshop link and a picture of what you see are the most useful parts. Everything else is optional.
+  - type: input
+    id: workshop
+    attributes:
+      label: Workshop link or ID
+      description: From the wallpaper's sidebar in Liascape (its ID pill), or its Steam Workshop page.
+      placeholder: https://steamcommunity.com/sharedfiles/filedetails/?id=1234567890
+    validations:
+      required: true
+  - type: dropdown
+    id: what
+    attributes:
+      label: What's wrong?
+      multiple: true
+      options:
+        - It doesn't load (error, or stays on the preview)
+        - It's black or blank
+        - It looks different from Wallpaper Engine
+        - Something moves wrong or doesn't move
+        - Text or fonts look wrong
+        - The mouse or clicks don't do what they should
+        - Sound is wrong or missing
+        - It crashes or keeps restarting
+        - It's slow or makes other things stutter
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What do you see?
+      description: A sentence or two is enough. If it differs from Wallpaper Engine, say what Wallpaper Engine shows instead.
+    validations:
+      required: true
+  - type: textarea
+    id: pictures
+    attributes:
+      label: Screenshots or a short video
+      description: Drag files here. A Liascape picture next to a Wallpaper Engine one (from Windows or the Workshop page) helps most.
+  - type: input
+    id: gpu
+    attributes:
+      label: Graphics card and driver
+      placeholder: e.g. NVIDIA RTX 3070, driver 580 / AMD RX 7800 XT, Mesa 25.2
+  - type: input
+    id: version
+    attributes:
+      label: Liascape version
+      description: The commit you built (`git rev-parse --short HEAD` in your clone) or the Nix flake revision.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Player log (optional)
+      description: Right after it goes wrong, run `liascape ctl logs` and paste the end of it.
+      render: text
