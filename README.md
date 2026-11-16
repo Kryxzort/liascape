@@ -21,6 +21,7 @@ change between versions.
 **Finds wallpapers.** The Browse tab searches MotionBgs, Moewalls, Desktophut and the Wallpaper Engine Steam
 Workshop. You can browse the Workshop without signing in: filter by tags and age rating, sort the way Steam does, read
 comments, and see a creator's other wallpapers. Your local Wallpaper Engine folder shows up as a source too.
+Wallpaper Engine's web, application and preset wallpapers don't play yet, so Browse leaves them out.
 
 **Keeps a library.** Downloads land in your library, and so does anything new in your Wallpaper Engine Workshop folder
 (you can turn that off). Import your own videos, GIFs and pictures with the Library tab's Import button. Click a card to

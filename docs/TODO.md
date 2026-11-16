@@ -95,6 +95,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `programs.sh crash`), and the owner's calls in § 5 (count frozen onsets? start-up seam? Phase 4 vs 5?).
       Fixed on the way: the battery's late-B "handoff" check (the test) and the dropout probe's ended-A snapshot
       (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
+      - [ ] At the flip, `docs/README-next.md` replaces `README.md` (fix its relative links if any changed meanwhile),
+            and its line in `.claude/rules/writing-rules.md` § Where a new fact goes goes away; the Debian/Fedora/Arch
+            lines in `scripts/install.sh`'s native-toolchain check drop the legacy-only packages to match its table.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
