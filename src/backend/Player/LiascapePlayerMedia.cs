@@ -536,6 +536,7 @@ public static class LiascapePlayerMedia
         _alignedCorrs.Clear();
         if (_intent is { } it) _intent = it with { Corr = null }; // corr ids start over in the new process
         QueueEssential(ReconcileShown);
+        QueueEssential(AnnounceShownAfterRestart);
         foreach (var (k, w) in _waiters) { _waiters.TryRemove(k, out _); w.TrySetResult("failed:player restarted"); }
         ReapplyAll();
         LiascapePlayerProgram.OnRestarted();
@@ -608,6 +609,18 @@ public static class LiascapePlayerMedia
             + $" — the backend last switched to {Path.GetFileName(intent.Path)}: switching {(why == "restarted" ? "back" : "to it")} (cut)");
         Interlocked.Increment(ref _reconciles);
         Switch(intent.Path, SettingsService.Load(), null, alignEnd: false);
+    }
+
+    // Queued by OnRestarted right after ReconcileShown: tell every client what the restarted player shows. A page loaded
+    // in the restart's gap read /current while no player answered ("nothing plays" — honest then: what comes back is the
+    // player's snapshot, which may be behind or, past the restart budget, not restored at all), and the new process
+    // resumes its item without a `transition.started`, so nothing else would correct that page. Skipped when a switch of
+    // ours was requested since the restart (the reconcile's own cut, or a click): its start or failure announces it, and
+    // /current may still name A here. Guard: matrix load:duringRestart
+    private static void AnnounceShownAfterRestart()
+    {
+        if (PlayerHelper.OnWallpaperChanged is not { } announce || _intent?.Corr != null) return;
+        announce(CurrentPathOrLast());
     }
 
     private static int _reconciles;

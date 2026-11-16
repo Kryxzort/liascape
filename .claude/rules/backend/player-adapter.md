@@ -55,6 +55,7 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 - Our latest switch failing → re-broadcast `wallpaper-changed` with the real current path. Matrix `apply:broken`.
 - Every `transition.started` → broadcast `wallpaper-changed` with the event's `b.path`, from the event thread: `/current` names B only from then, so a page that loaded after `/apply`'s announcement learns it here. Matrix `load:afterApply:wsEarly`.
 - `/current` (and the failed-switch re-broadcast) read `CurrentPathOrLast`: a player that doesn't answer (code `timeout`: no reply, the stall breaker) names the path it last reported, never "nothing plays" (a page loaded then has no event to correct it). `CurrentPath()` itself stays null without an answer (self-test "a stopped player still answered"). Matrix `load:duringStall`.
+- A restarted player (`OnRestarted`) → after `ReconcileShown`, broadcast `wallpaper-changed` with what it shows (`AnnounceShownAfterRestart`), unless a switch of ours was requested since (its start announces it): in the restart's gap `/current` says nothing plays (no player; never a guess — a snapshot can be behind or not restored), and the resumed item sends no `transition.started`. Matrix `load:duringRestart`.
 - Drain the player's outbox on every subscribe ack; ack only after the handler stored synchronously; handlers must be idempotent (`OnOutboxEvent`). Self-test `OutboxAckAssertions`.
 
 ## Rotation (the one home of its semantics)

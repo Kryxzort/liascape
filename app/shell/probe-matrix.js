@@ -3790,6 +3790,53 @@ C["load:duringStall"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
+// A page loaded while the player restarts (its compositor SIGKILLed: the supervisor brings it back from the snapshot with
+// the same item) ends up marking what plays: in the gap /current says nothing plays (no player answers), and the restarted
+// player resumes without a switch, so the backend tells every page what it shows once it's back
+// (LiascapePlayerMedia.AnnounceShownAfterRestart). The page's first /current and its socket are held until the old
+// compositor is gone, then let go together, so both are answered inside the gap (the socket's own re-read of /current too).
+C["load:duringRestart"] = { states: ["single"], noSwitch: true, async run(c) {
+    c.target = c.shown;
+    c.pid0 = (await ctl.call("hello")).pid;
+    const wsUrl = `${U.replace(/^http/, "ws")}/events*`, curUrl = `${U}/current*`;
+    let curSeen = false, wsSeen = false, release;
+    const go = new Promise((r) => (release = r));
+    const wr = session.defaultSession.webRequest;
+    wr.onBeforeRequest({ urls: [curUrl, wsUrl] }, (d, cb) => {
+      if (/\/events/.test(d.url)) { if (wsSeen) return cb({}); wsSeen = true; return go.then(() => cb({})); }
+      if (curSeen) return cb({}); curSeen = true; go.then(() => cb({}));
+    });
+    let loading;
+    try {
+      await win.loadURL("about:blank");
+      loading = loadUi();
+      c.held = await waitFor(() => curSeen && wsSeen, 8000, 10);
+      process.kill(c.pid0, "SIGKILL");
+      c.dead = await waitFor(() => !procAlive(c.pid0), 3000, 10);
+      c.gapCur = (await http("GET", "/current")).json;
+      c.tRel = Date.now(); release();
+      // when the restarted compositor first answered (the page's reads must have come back before it)
+      c.up = await waitFor(async () => { const h = await ctl.call("hello", {}, 500).catch(() => null); if (h && h.pid !== c.pid0) { c.tUp = Date.now(); return true; } return false; }, 10000, 20);
+    } finally { release(); wr.onBeforeRequest(null); }
+    await loading;
+    const back = (re) => httpLog.find((r) => r.t >= c.tRel && re.test(r.url))?.t;
+    c.tCur = back(/\/current/); c.tWs = back(/\/events/);
+    c.shows = await waitFor(async () => { const p = (c.page = await ui(`return { marks: m.playing().cards, line: document.querySelector(".topbar > .status [data-st=playing]")?.textContent ?? null };`));
+      return p.marks.length === 1 && p.marks[0] === TITLE(c.target) && (p.line ?? "").includes(TITLE(c.target)); }, 6000, 100);
+  }, check(c) {
+    const t = TITLE(c.target);
+    if (!c.held) return ["the page's first /current and /events were never seen — nothing was held, proved nothing"];
+    if (!c.dead) return [`the compositor ${c.pid0} didn't die after SIGKILL — proved nothing`];
+    if (!c.up) return [`no restarted compositor answered within 10 s of SIGKILL of ${c.pid0}`];
+    const order = `/current back +${c.tCur - c.tRel} ms, socket +${c.tWs - c.tRel} ms, restarted player answered +${c.tUp - c.tRel} ms`;
+    console.log(`        ${c.state} × ${c.control}: ${order}`);
+    if (c.gapCur?.path != null) return [`/current right after the kill named ${TITLE(c.gapCur.path)}: the player was already back — not in the gap, proved nothing`];
+    if (c.tCur == null || c.tWs == null || c.tCur >= c.tUp || c.tWs >= c.tUp) return [`the page's /current or socket didn't come back inside the restart's gap (${order}) — proved nothing`];
+    const v = [];
+    if (!c.shows) v.push(`a page loaded during the player's restart doesn't show ${t} playing 6 s after: marked ${JSON.stringify(c.page?.marks)}, now-playing line ${JSON.stringify(c.page?.line)}`);
+    return v;
+  } };
+
 // a scene's user properties (the card settings modal's "Scene properties"): s1's project.json declares `color` (the synthetic
 // renderer's colour, WE-encoded — red by default), `clock` (bool) and `bars` (shown while clock is on). Oracle: s1's own
 // picture (a pixel of its source), its source's scene_props, the worker's `properties` answer, the index, the modal.
@@ -4599,6 +4646,7 @@ const FUZZ_RULES = [
   [/^appear:(glows|morphs|videoThumbs)$/, { exclude: "real mouse hovers + a reload of the page, and they leave the page's look toggled" }],
   [/^restart:/, { exclude: "restarts the backend under the page (their own fixtures: an item added on disk, a held request, a file:// page)" }],
   [/^load:duringStall$/, { exclude: "stops the player's compositor; the backend's stall breaker then fails the next step's queries for 3 s" }],
+  [/^load:duringRestart$/, { exclude: "kills the player's compositor; its restart from the snapshot lands under the next step" }],
   [/^(playlist|global):(minPlay|maxPlay)/, { exclude: "timed against the pending fixture's k4 (10 s, fresh); a limit left set reshapes every later step's rotation" }],
   [/^(trash:|selTrash:|selRange\+Delete$)/, { last: "trashed items stay gone — the later controls name k1..k4's cards" }],
   [/^plShuffle$/, { last: "a shuffled order makes every later 'the playlist bar's next' expectation (armedCheck, *+next) unknowable" }],
