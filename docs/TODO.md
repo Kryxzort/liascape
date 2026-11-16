@@ -60,6 +60,22 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
        clock") — not unless the owner asks.
 
+## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
+- [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (design spec §12
+      Phase 4), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
+      Browse and the scrapers; once it plays, take it out of Unplayable and the Browse type filter (its tag then shows
+      in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).
+- [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
+      Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
+      removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
+      published, existing ones can't be fetched), and running them would mean executing downloaded Windows programs.
+      Keep Application in Unplayable.
+- [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
+      monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
+      from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
+- [ ] **Packaging**: rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world
+      (both still build the pre-rewrite Avalonia app). After #77 (the Electron upgrade).
+
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
@@ -467,23 +483,14 @@ Two bug classes kept recurring; fix the class, not the instance:
       or the player streaming its output frames to the UI. A gif preview was rejected (360p).
 - [ ] **Draft: "Game running" signal** (mute / pause while a game runs) —
       `docs/superpowers/plans/2026-10-29-game-running-signal-DRAFT.md`.
-- [ ] **Deferred from Phase 2** (not Phase 2 work): web wallpapers — WE `web` items via CEF / LWE's `webhelper`,
-      an optional build module, **Phase 4**, gated on the NVIDIA LINEAR-dmabuf external-only risk (spec §12); the
-      `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike `lwe-core.md` §4.2; needs a host-side
-      clock-of-day feed); scene-compatibility patches from the corpus (**Phase 6**, below).
-- [ ] **Presets and Application wallpapers** (owner, 2026-11-12: planned, with web wallpapers above): today
-      WorkshopTags.Unplayable drops Web / Application / Preset from Browse and the scrapers. When one becomes playable,
-      take it out of Unplayable and the Browse type filter. Its tag then shows in the sidebar on its own
-      (components/sideTags.ts hides only "Wallpaper", which every playable item carries, and the type).
+- [ ] **Deferred from Phase 2**: the `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike
+      `lwe-core.md` §4.2; needs a host-side clock-of-day feed); scene-compatibility patches from the corpus
+      (**Phase 6**, below).
 - [ ] **Sidebar type tags** (owner, 2026-11-12: "drop the scene/video for the while"): components/sideTags.ts hides
       "Video" / "Scene" in both sidebars; revisit with the types above (show the type once there are more than two?).
-- [ ] **Per-monitor wallpapers, user-facing**: UI assignment, per-output rotation, which monitor actions target,
-      `/current` + preview per output, `--restore`, hotplug defaults. The player supports it from Phase 1.
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
       (audio follows the picture). Decide: primary output only / loudest / all / user choice. liascape-player keeps a
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
-- [ ] Rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world (both still build the
-      pre-rewrite Avalonia app).
 - [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625 — closed unmerged, gap audit G06 —, #631, #694 …;
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
       labelled patches. The corpus runner exists (Phase 2 Task 13:
