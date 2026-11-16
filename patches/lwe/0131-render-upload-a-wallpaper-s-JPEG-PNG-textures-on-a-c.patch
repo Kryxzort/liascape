@@ -1,0 +1,400 @@
+From 61dd67b1f426e1e858267753c2bd353fdb7cc109 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 23:26:53 +0530
+Subject: [PATCH 131/132] render: upload a wallpaper's JPEG / PNG textures on a
+ context of the host's while it builds
+
+A wallpaper's JPEG / PNG textures decode on the pool's threads while it builds (0128), but their pixels still
+reached the GPU in finishTextureUploads, on the render thread, after the build. NVIDIA converts a texture's pixels
+on the CPU of the thread that calls glTexImage2D: measured on the scene worker (thread CPU time around each
+call), 333 MB of 3163060610's 152 uploads took 202 ms of CPU, 1.6 GB/s; with nothing passed (glTexImage2D(NULL))
+the same calls took 1 ms. Uploading from a pixel buffer object made it slower (536 ms; 334 ms with GL_STATIC_DRAW:
+the driver reads the buffer back on the CPU), and BGRA source pixels changed nothing. So the work itself can't
+shrink here; it can only leave the render thread.
+
+wp_context_set_gl_upload_context gives the core a second context in the share group of the host's: a
+make_current callback the core's upload thread (wp-tex-upload, one per context, stopped in wp_context_destroy
+after the texture cache) calls once, and release as it stops. The thread starts once a context's deferred images
+reach 64 MB of RGBA8 (~40 ms of conversion); the images before that upload on the render thread as before. Started
+at the first image, it cost more than it saved below that: a scene whose images convert in ~3 ms built ~20 ms
+slower, scenes with 30-60 MB of images 0-50 ms slower (starting the thread, its context, its uploads beside the
+render thread's own GL calls). A decode
+job then uploads its pixels on that thread and waits for it, and the fence after the upload goes back with the
+image; finishUpload binds the texture (the re-bind after which the render context sees it), glWaitSync's the fence
+on the GPU and deletes it. Each decode job waits for its upload: with the jobs queuing uploads and going on to the
+next decode, the heavy scenes gained less (3163060610 warm 516 -> 647 ms against the waiting version). Without the call, or when make_current fails, nothing changes: the pixels upload on the
+render thread as before. A texture destroyed before finishUpload waits for its decode and upload first.
+
+Measured on a private headless liascape-player (scene_load.py, apply to first frame, medians of 4 cold / 8 warm /
+4 after-a-boot loads; this core with its Container patch and the worker giving it the context, against the pin,
+alternating): 3042492564 warm 571 -> 480 ms, cold 1110 -> 945, boot 609 -> 527; 3163060610 warm 468 -> 426,
+cold 808 -> 695, boot 513 -> 428; 2388299037 warm 470 -> 424; 2290002190 256 -> 249; 1864677589 290 -> 271;
+2511663284 262 -> 273 (cold 432 -> 375); 3480481965 273 -> 268. Same pictures: captures 1 s after the first frame
+differ from the pin's no more than two of the pin's own loads differ from each other.
+
+Origin: ours
+Why: docs/TODO.md (scene wallpapers load faster: texture uploads after the pool's decode)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/linux-wallpaperengine/context.h       | 32 +++++++
+ src/core/CMakeLists.txt                       |  1 +
+ src/core/WallpaperEngine/Context.h            |  7 ++
+ src/core/WallpaperEngine/Render/CTexture.cpp  | 33 ++++++-
+ src/core/WallpaperEngine/Render/CTexture.h    |  2 +
+ .../WallpaperEngine/Render/TextureUploads.cpp | 88 +++++++++++++++++++
+ .../WallpaperEngine/Render/TextureUploads.h   | 64 ++++++++++++++
+ src/core/frontends/context.cpp                |  6 ++
+ 8 files changed, 231 insertions(+), 2 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/Render/TextureUploads.cpp
+ create mode 100644 src/core/WallpaperEngine/Render/TextureUploads.h
+
+diff --git a/include/linux-wallpaperengine/context.h b/include/linux-wallpaperengine/context.h
+index 07059a7..2b0417a 100644
+--- a/include/linux-wallpaperengine/context.h
++++ b/include/linux-wallpaperengine/context.h
+@@ -53,6 +53,27 @@ struct wp_time_counter {
+     float (*get_time) (void* user_parameter);
+ };
+ 
++/**
++ * A second OpenGL context in the share group of the one the host renders on, for the core's texture upload thread
++ */
++struct wp_gl_upload_context {
++    /**
++     * Pointer to user-defined data that will be passed to the callbacks
++     */
++    void* user_parameter;
++
++    /**
++     * Makes the upload context current on the calling thread (the core's upload thread, once, before its first
++     * upload); false: there is none, and textures upload on the render thread
++     */
++    bool (*make_current) (void* user_parameter);
++
++    /**
++     * Makes no context current on the calling thread (the upload thread, once, as it stops in wp_context_destroy)
++     */
++    void (*release) (void* user_parameter);
++};
++
+ /**
+  * Provides callbacks to get new audio frames for audio-responsive backgrounds
+  */
+@@ -103,6 +124,17 @@ WPENGINE_API void wp_context_destroy (wp_context* context);
+  */
+ WPENGINE_API void wp_context_set_gl_proc_address (wp_context* context, wp_gl_proc_address* address);
+ 
++/**
++ * Gives the core a context to upload textures on from a thread of its own while a wallpaper builds (its JPEG / PNG
++ * textures: the driver's copy of their pixels otherwise runs on the render thread). Set it before the first
++ * wp_render_frame; it must stay valid until wp_context_destroy returns. Unset (or make_current failing): every
++ * texture uploads on the render thread
++ *
++ * @param context The context to set the upload context for
++ * @param upload The upload context's callbacks, or NULL
++ */
++WPENGINE_API void wp_context_set_gl_upload_context (wp_context* context, wp_gl_upload_context* upload);
++
+ /**
+  * Updates the time counter handlers
+  *
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 6051cce..7374787 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -55,6 +55,7 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Render/Camera.cpp
+     WallpaperEngine/Render/CObject.cpp
+     WallpaperEngine/Render/CTexture.cpp
++    WallpaperEngine/Render/TextureUploads.cpp
+     WallpaperEngine/Render/AlbumTexture.cpp
+ 
+     WallpaperEngine/Render/Objects/CRenderable.cpp
+diff --git a/src/core/WallpaperEngine/Context.h b/src/core/WallpaperEngine/Context.h
+index 6ac6ea7..0bfbe90 100644
+--- a/src/core/WallpaperEngine/Context.h
++++ b/src/core/WallpaperEngine/Context.h
+@@ -11,14 +11,21 @@
+ 
+ #include "Audio/AudioContext.h"
+ #include "Render/RenderContext.h"
++#include "Render/TextureUploads.h"
+ 
+ namespace WallpaperEngine {
+ class Context {
+ public:
++    /** the upload thread (TextureUploads::of): declared first so it stops after every texture in the cache is gone */
++    mutable std::unique_ptr<Render::TextureUploads> texture_uploads;
++    /** the deferred JPEG / PNG bytes seen so far (TextureUploads::of starts the thread past kStartBytes) */
++    mutable size_t deferred_upload_bytes = 0;
+     std::unique_ptr<TextureCache> texture_cache;
+     std::unique_ptr<Audio::AudioContext> audio;
+     const Configuration& config;
+     wp_gl_proc_address* gl_proc_address;
++    /** the host's context for the upload thread (wp_context_set_gl_upload_context), or null */
++    wp_gl_upload_context* gl_upload_context = nullptr;
+     wp_time_counter* time_counter;
+     wp_audio_input_mix* audio_input_mix;
+     std::vector<Data::Model::ProjectSharedPtr> projects;
+diff --git a/src/core/WallpaperEngine/Render/CTexture.cpp b/src/core/WallpaperEngine/Render/CTexture.cpp
+index 8493a1f..b039ed2 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.cpp
++++ b/src/core/WallpaperEngine/Render/CTexture.cpp
+@@ -5,6 +5,8 @@
+ 
+ #define STB_IMAGE_IMPLEMENTATION
+ #include "RenderContext.h"
++#include "TextureUploads.h"
++#include "WallpaperEngine/Context.h"
+ 
+ #include <stb_image.h>
+ 
+@@ -139,10 +141,23 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header, const bool
+ 
+ 	for (const auto& mipmap : mipmaps) {
+ 	    if (this->m_header->freeImageFormat != FIF_UNKNOWN && deferUpload) {
++		// asked here, on the render thread, so the thread starts before a pool thread can use it
++		TextureUploads* uploads = TextureUploads::of (
++		    this->getContext ().getContext (), static_cast<size_t> (mipmap->width) * mipmap->height * 4
++		);
++		const GLuint texture = this->m_textureID[index];
+ 		this->m_pendingUploads.push_back (
+ 		    { index, level,
+-		      DecodePool::get ().submit (std::packaged_task<DecodedTextureImage ()> ([mipmap] {
+-			  return decodeImage (mipmap);
++		      DecodePool::get ().submit (std::packaged_task<DecodedTextureImage ()> ([mipmap, uploads, texture, level] {
++			  DecodedTextureImage image = decodeImage (mipmap);
++			  if (uploads != nullptr && image.pixels) {
++			      image.uploaded
++				  = uploads->upload (texture, level, image.width, image.height, image.pixels.get ());
++			      if (image.uploaded != nullptr) {
++				  image.pixels.reset ();
++			      }
++			  }
++			  return image;
+ 		      })) }
+ 		);
+ 		level++;
+@@ -212,6 +227,13 @@ void CTexture::finishUpload () const {
+     for (auto& pending : this->m_pendingUploads) {
+ 	const DecodedTextureImage image = pending.decoded.get ();
+ 	glBindTexture (GL_TEXTURE_2D, this->m_textureID[pending.image]);
++	if (image.uploaded != nullptr) {
++	    // the upload thread's pixels: the GPU waits for them, and the bind above is the re-bind after which this
++	    // context sees them
++	    glWaitSync (image.uploaded, 0, GL_TIMEOUT_IGNORED);
++	    glDeleteSync (image.uploaded);
++	    continue;
++	}
+ 	glTexImage2D (
+ 	    GL_TEXTURE_2D, pending.level, GL_RGBA8, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+ 	    image.pixels.get ()
+@@ -229,6 +251,13 @@ CTexture::~CTexture () {
+     // first release the player to prevent using null references
+     this->m_player.reset ();
+ 
++    // never uploaded (finishUpload didn't run): a decode or upload still writing this texture must end first
++    for (auto& pending : this->m_pendingUploads) {
++	if (const DecodedTextureImage image = pending.decoded.get (); image.uploaded != nullptr) {
++	    glDeleteSync (image.uploaded);
++	}
++    }
++
+     if (this->m_header->isVideoMp4 || this->m_header->flags & TextureFlags_Video) {
+ 	glDeleteTextures (1, this->m_textureID);
+     } else {
+diff --git a/src/core/WallpaperEngine/Render/CTexture.h b/src/core/WallpaperEngine/Render/CTexture.h
+index 5198014..8f0e87c 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.h
++++ b/src/core/WallpaperEngine/Render/CTexture.h
+@@ -24,6 +24,8 @@ struct DecodedTextureImage {
+     std::unique_ptr<unsigned char, void (*) (void*)> pixels { nullptr, std::free };
+     int width = 0;
+     int height = 0;
++    /** uploaded on the upload thread (TextureUploads), `pixels` freed: the fence after it */
++    GLsync uploaded = nullptr;
+ };
+ /**
+  * A normal texture file in WallpaperEngine's format
+diff --git a/src/core/WallpaperEngine/Render/TextureUploads.cpp b/src/core/WallpaperEngine/Render/TextureUploads.cpp
+new file mode 100644
+index 0000000..6f1f66a
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/TextureUploads.cpp
+@@ -0,0 +1,88 @@
++#include "TextureUploads.h"
++
++#include "WallpaperEngine/Context.h"
++
++#include <pthread.h>
++
++using namespace WallpaperEngine::Render;
++
++TextureUploads* TextureUploads::of (const Context& context, size_t bytes) {
++    if (context.gl_upload_context == nullptr || context.gl_upload_context->make_current == nullptr) {
++	return nullptr;
++    }
++    context.deferred_upload_bytes += bytes;
++    if (context.texture_uploads == nullptr) {
++	if (context.deferred_upload_bytes < kStartBytes) {
++	    return nullptr;
++	}
++	context.texture_uploads = std::make_unique<TextureUploads> (*context.gl_upload_context);
++    }
++    return context.texture_uploads.get ();
++}
++
++TextureUploads::TextureUploads (wp_gl_upload_context& host) : m_host (host) {
++    this->m_thread = std::thread (&TextureUploads::run, this);
++}
++
++TextureUploads::~TextureUploads () {
++    {
++	std::lock_guard lock (this->m_mutex);
++	this->m_stop = true;
++    }
++    this->m_wake.notify_one ();
++    this->m_thread.join ();
++}
++
++GLsync TextureUploads::upload (GLuint texture, GLint level, int w, int h, const unsigned char* pixels) {
++    std::packaged_task<GLsync ()> job ([texture, level, w, h, pixels] {
++	glBindTexture (GL_TEXTURE_2D, texture);
++	glTexImage2D (GL_TEXTURE_2D, level, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
++	glBindTexture (GL_TEXTURE_2D, 0);
++	GLsync fence = glFenceSync (GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++	// the render thread's glWaitSync needs the fence submitted
++	glFlush ();
++	return fence;
++    });
++    auto done = job.get_future ();
++    {
++	std::lock_guard lock (this->m_mutex);
++	if (this->m_failed || this->m_stop) {
++	    return nullptr;
++	}
++	this->m_jobs.push_back (std::move (job));
++    }
++    this->m_wake.notify_one ();
++    try {
++	return done.get ();
++    } catch (const std::future_error&) {
++	// queued before the thread found it has no context: dropped unrun
++	return nullptr;
++    }
++}
++
++void TextureUploads::run () {
++    pthread_setname_np (pthread_self (), "wp-tex-upload");
++    const bool current = this->m_host.make_current (this->m_host.user_parameter);
++    for (;;) {
++	std::packaged_task<GLsync ()> job;
++	{
++	    std::unique_lock lock (this->m_mutex);
++	    if (!current) {
++		this->m_failed = true;
++	    }
++	    this->m_wake.wait (lock, [this] { return this->m_stop || !this->m_jobs.empty (); });
++	    if (this->m_jobs.empty ()) {
++		break;
++	    }
++	    job = std::move (this->m_jobs.front ());
++	    this->m_jobs.pop_front ();
++	}
++	if (current) {
++	    job ();
++	}
++	// else: dropped unrun, its upload () answers null
++    }
++    if (current && this->m_host.release != nullptr) {
++	this->m_host.release (this->m_host.user_parameter);
++    }
++}
+diff --git a/src/core/WallpaperEngine/Render/TextureUploads.h b/src/core/WallpaperEngine/Render/TextureUploads.h
+new file mode 100644
+index 0000000..89dca36
+--- /dev/null
++++ b/src/core/WallpaperEngine/Render/TextureUploads.h
+@@ -0,0 +1,64 @@
++#pragma once
++
++#include <glad/glad.h>
++
++#include <condition_variable>
++#include <cstddef>
++#include <deque>
++#include <future>
++#include <mutex>
++#include <thread>
++
++#include "linux-wallpaperengine/context.h"
++
++namespace WallpaperEngine {
++class Context;
++}
++
++namespace WallpaperEngine::Render {
++/**
++ * The thread deferred JPEG / PNG textures upload on, current on the host's upload context
++ * (wp_context_set_gl_upload_context). NVIDIA converts a texture's pixels on the CPU of the thread that calls
++ * glTexImage2D (about 1.6 GB/s, pixel buffer objects slower still), so on the render thread a scene's large images
++ * cost their whole conversion before its first frame; here it runs while the wallpaper builds. One per Context,
++ * started at its first texture and stopped in its destructor, after every texture of the cache is gone
++ */
++class TextureUploads {
++public:
++    /**
++     * The thread starts once a context's deferred images reach this many RGBA8 bytes (~40 ms of conversion); the
++     * ones before it upload on the render thread. Below it the thread costs more than it saves (starting it, its
++     * context, its uploads beside the render thread's own GL calls): measured, a scene whose images convert in ~3 ms
++     * built ~20 ms slower with a thread from the first image, and scenes with 30-60 MB of images 0-50 ms slower
++     */
++    static constexpr size_t kStartBytes = 64u << 20;
++
++    /**
++     * The context's upload thread for an image of `bytes` (RGBA8), started on the render thread once the context's
++     * deferred images reach kStartBytes; null: not yet, or the host gave no upload context
++     */
++    static TextureUploads* of (const Context& context, size_t bytes);
++
++    explicit TextureUploads (wp_gl_upload_context& host);
++    ~TextureUploads ();
++
++    /**
++     * From any thread: uploads `w` × `h` RGBA8 `pixels` into `level` of `texture` and waits for it. Returns the fence
++     * after the upload (the render thread waits on it with glWaitSync, then re-binds the texture), or null: no upload
++     * context (make_current failed), and the caller uploads on the render thread
++     */
++    GLsync upload (GLuint texture, GLint level, int w, int h, const unsigned char* pixels);
++
++private:
++    void run ();
++
++    wp_gl_upload_context& m_host;
++    std::mutex m_mutex;
++    std::condition_variable m_wake;
++    std::deque<std::packaged_task<GLsync ()>> m_jobs;
++    /** make_current failed: every upload is the render thread's */
++    bool m_failed = false;
++    bool m_stop = false;
++    std::thread m_thread;
++};
++} // namespace WallpaperEngine::Render
+diff --git a/src/core/frontends/context.cpp b/src/core/frontends/context.cpp
+index 481fbe9..ebcd4c4 100644
+--- a/src/core/frontends/context.cpp
++++ b/src/core/frontends/context.cpp
+@@ -43,6 +43,12 @@ WPENGINE_API void wp_context_set_gl_proc_address (wp_context* context, wp_gl_pro
+     WPENGINE_CONTEXT_API_END ();
+ }
+ 
++WPENGINE_API void wp_context_set_gl_upload_context (wp_context* context, wp_gl_upload_context* upload) {
++    WPENGINE_CONTEXT_API_BEGIN
++    static_cast<WallpaperEngine::Context*> (context)->gl_upload_context = upload;
++    WPENGINE_CONTEXT_API_END ();
++}
++
+ WPENGINE_API void wp_context_set_time_counter (wp_context* context, wp_time_counter* counter) {
+     WPENGINE_CONTEXT_API_BEGIN
+     static_cast<WallpaperEngine::Context*> (context)->time_counter = counter ?: &default_time_counter;

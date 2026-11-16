@@ -1,0 +1,144 @@
+From 139976220df0c7553ea3529c18be03900f451c71 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 23:26:47 +0530
+Subject: [PATCH 132/132] fs: remember where a path resolved, so a build asks
+ the filesystem once per path
+
+Container::resolve looked every path up again on each read: an exact check in every mountpoint, then, for a
+path in none of them, the same mountpoints again ignoring case, which lists directories. A build asks for the
+same paths many times: one launch of 3042492564 (strace, warm) opened common.h 177 times and common_blending.h 99,
+and listed the zcompat shader folder 226 times, the scene folder 355 and materials 128, for paths that never
+match exactly (5042 opens, 5078 stats, 1451 directory reads in all).
+
+resolve now keeps each answer (the adapter and the path to open on it, or "in no mountpoint"), keyed by the path
+as asked, for as long as the mountpoints and the VFS stay as they were: a mount, or a VFS add (VirtualAdapter's
+new generation counter), drops them all. A remembered hit still reopens the file, so a read sees the file as it
+is now. While the health report is on nothing is remembered: it records each lookup's own outcome (a case-only
+match is reported once per lookup). The cache has its own lock: lookups may come from other threads.
+
+Measured (same player, warm medians of 8, with the upload context patch on both sides): 3042492564's file
+lookups during the build 72 -> 49 ms and first frame 596 -> 567 ms; 3163060610 32 -> 24 and 501 -> 479; the
+other scenes within noise. Same pictures as without it.
+
+Origin: ours
+Why: docs/TODO.md (scene wallpapers load faster)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../FileSystem/Adapters/Virtual.cpp           |  1 +
+ .../FileSystem/Adapters/Virtual.h             |  2 ++
+ .../WallpaperEngine/FileSystem/Container.cpp  | 29 +++++++++++++++++++
+ .../WallpaperEngine/FileSystem/Container.h    | 21 ++++++++++++++
+ 4 files changed, 53 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.cpp b/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.cpp
+index ecb9d7e..0472c9d 100644
+--- a/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.cpp
++++ b/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.cpp
+@@ -42,6 +42,7 @@ void VirtualAdapter::add (const std::filesystem::path& path, const std::string&
+ 
+ void VirtualAdapter::add (const std::filesystem::path& path, MemoryStreamSharedPtr stream) {
+     this->files.insert_or_assign (path, stream);
++    this->generation++;
+ }
+ 
+ bool VirtualFactory::handlesMountpoint (const std::filesystem::path& path) const { return path.string () == "virtual"; }
+diff --git a/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.h b/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.h
+index 47bf477..6989c6c 100644
+--- a/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.h
++++ b/src/core/WallpaperEngine/FileSystem/Adapters/Virtual.h
+@@ -28,5 +28,7 @@ struct VirtualAdapter final : Adapter {
+     void add (const std::filesystem::path& path, MemoryStreamSharedPtr stream);
+ 
+     std::map<std::filesystem::path, MemoryStreamSharedPtr> files;
++    /** bumped by every add: a Container's remembered lookups are stale after one */
++    uint64_t generation = 0;
+ };
+ }
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/FileSystem/Container.cpp b/src/core/WallpaperEngine/FileSystem/Container.cpp
+index 15374ca..94151ed 100644
+--- a/src/core/WallpaperEngine/FileSystem/Container.cpp
++++ b/src/core/WallpaperEngine/FileSystem/Container.cpp
+@@ -122,6 +122,35 @@ Adapter* Container::findAdapter (const std::string& normalized, bool ignoreCase,
+ }
+ 
+ std::pair<Adapter&, std::filesystem::path> Container::resolve (const std::filesystem::path& path) const {
++    if (WallpaperEngine::Health::enabled ()) {
++	return this->resolveUncached (path);
++    }
++    std::lock_guard lock (this->m_resolvedLock);
++    const std::pair<size_t, uint64_t> state { this->m_mountpoints.size (), this->m_vfs->generation };
++    if (state != this->m_resolvedFor) {
++	this->m_resolved.clear ();
++	this->m_resolvedFor = state;
++    }
++    const auto key = path.string ();
++    if (const auto it = this->m_resolved.find (key); it != this->m_resolved.end ()) {
++	if (it->second.adapter == nullptr) {
++	    throw std::filesystem::filesystem_error (
++		"Cannot find requested file in any of the mountpoints", path, std::error_code ()
++	    );
++	}
++	return { *it->second.adapter, it->second.path };
++    }
++    try {
++	auto [adapter, found] = this->resolveUncached (path);
++	this->m_resolved.emplace (key, Resolved { &adapter, found });
++	return { adapter, found };
++    } catch (const std::filesystem::filesystem_error&) {
++	this->m_resolved.emplace (key, Resolved { nullptr, {} });
++	throw;
++    }
++}
++
++std::pair<Adapter&, std::filesystem::path> Container::resolveUncached (const std::filesystem::path& path) const {
+     const auto normalized = normalize_path (path).string ();
+     const bool rooted = normalized.starts_with ("/");
+     std::filesystem::path found;
+diff --git a/src/core/WallpaperEngine/FileSystem/Container.h b/src/core/WallpaperEngine/FileSystem/Container.h
+index 448054d..fb6fb0d 100644
+--- a/src/core/WallpaperEngine/FileSystem/Container.h
++++ b/src/core/WallpaperEngine/FileSystem/Container.h
+@@ -5,6 +5,9 @@
+ 
+ #include "../Data/Utils/BinaryReader.h"
+ #include <filesystem>
++#include <mutex>
++#include <string>
++#include <unordered_map>
+ 
+ namespace WallpaperEngine::FileSystem {
+ using namespace WallpaperEngine::Data::Utils;
+@@ -73,6 +76,8 @@ private:
+      * @return The adapter handling the file and the path to open on it
+      */
+     std::pair<Adapter&, std::filesystem::path> resolve (const std::filesystem::path& path) const;
++    /** resolve without m_resolved */
++    std::pair<Adapter&, std::filesystem::path> resolveUncached (const std::filesystem::path& path) const;
+     /**
+      * @param normalized The normalized path
+      * @param ignoreCase Whether to match it ignoring case (findIgnoringCase) instead of exactly (exists)
+@@ -86,6 +91,22 @@ private:
+     std::vector<std::pair<std::filesystem::path, AdapterSharedPtr>> m_mountpoints;
+     /** Virtual file system adapter */
+     std::shared_ptr<VirtualAdapter> m_vfs;
++
++    /** what resolve found for a path as asked: the adapter (null: in no mountpoint) and the path to open on it */
++    struct Resolved {
++	Adapter* adapter;
++	std::filesystem::path path;
++    };
++    /**
++     * resolve's answers, so a path asked for again (a scene reads common.h once per shader unit, and probes the same
++     * missing zcompat and texture paths, each a directory scan ignoring case) costs one lookup. Kept while the
++     * mountpoints and the VFS stay as they were (m_resolvedFor); off while the health report is on, which records
++     * every lookup's own outcome. Files are reopened on every read, so a remembered hit reads the file as it is now
++     */
++    mutable std::unordered_map<std::string, Resolved> m_resolved;
++    /** the mountpoint count and VFS generation m_resolved was made for */
++    mutable std::pair<size_t, uint64_t> m_resolvedFor { 0, 0 };
++    mutable std::mutex m_resolvedLock;
+ };
+ 
+ using ContainerUniquePtr = std::unique_ptr<Container>;
