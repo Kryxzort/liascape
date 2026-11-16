@@ -228,7 +228,7 @@ app.whenReady().then(async () => {
       let r = await js(`return window.__x.info(${JSON.stringify(L)})`);
       if (!r) return [`no "${L}" row (the stack runs liascape-player)`];
       if (r.sel !== "A fullscreen or maximized window") v.push(`default reads ${JSON.stringify(r.sel)}`);
-      if (!/Pauses picture and sound while every monitor showing the wallpaper is covered/.test(r.hint)) v.push(`hint ${JSON.stringify(r.hint)}`);
+      if (!/pauses the wallpaper while all its monitors are covered/.test(r.hint)) v.push(`hint ${JSON.stringify(r.hint)}`);
       if (r.reset) v.push("a reset icon on the default value");
       await js(`await window.__x.select(${JSON.stringify(L)}, "A fullscreen window"); return true`);
       if (!(await waitFor(async () => (await field("pauseWhenCovered")) === "fullscreen", 4000))) v.push(`pauseWhenCovered ${await field("pauseWhenCovered")}, want fullscreen`);

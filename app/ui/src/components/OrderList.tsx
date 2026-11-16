@@ -18,6 +18,9 @@ const SENSOR_OPTS = { activationConstraint: { distance: 4 } };
 // the list only reorders up and down
 const vertical: Modifier = ({ transform }) => ({ ...transform, x: 0 });
 const MODS = [vertical];
+// dnd-kit's screen-reader live region is a DIV it renders beside the list; in the row's control column it sat outside its row.
+// Portalled to the body it keeps announcing the moves and takes no place in the row.
+const A11Y = { container: document.body };
 
 export function OrderList({ items, order, onChange, label, endAt }: {
   items: OrderItem[]; order: string[]; onChange: (order: string[]) => void; label: string; endAt?: string;
@@ -59,7 +62,7 @@ export function OrderList({ items, order, onChange, label, endAt }: {
   };
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={MODS} onDragEnd={onDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={MODS} onDragEnd={onDragEnd} accessibility={A11Y}>
       <SortableContext items={order} strategy={verticalListSortingStrategy}>
         <ol ref={listRef} className="ord" aria-label={label} data-ord={order.join(",")}>
           {order.map((id, i) => {

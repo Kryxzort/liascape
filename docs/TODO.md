@@ -5,10 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
 
 ## Queued (in order — the next thing to pick up)
-79. [ ] probe-expert fails two cells on HEAD too: `settings:noOverflow` — the "On hover" / "Not hovered" lists
-       (components/OrderList.tsx) put a DIV 10 px left of their row at 1920 and 960 px (fix the list's layout, not the
-       check); and the "Pause behind windows" cell reads a hint the row no longer has ("pauses the wallpaper while all
-       its monitors are covered") — update the cell to the row's current wording.
 76. [ ] (owner) Windows fonts for scenes that name them (19 scenes: Consolas, Comic Sans, Arial…): use the fonts from
        the user's own Windows install (found on a mounted Windows partition, e.g. Windows/Fonts; a setting to point at
        another folder). Nothing Microsoft-licensed is shipped or copied: the core reads them where they are.
