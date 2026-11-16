@@ -9,18 +9,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (components/OrderList.tsx) put a DIV 10 px left of their row at 1920 and 960 px (fix the list's layout, not the
        check); and the "Pause behind windows" cell reads a hint the row no longer has ("pauses the wallpaper while all
        its monitors are covered") — update the cell to the row's current wording.
-72. [ ] (owner) Text is selectable instead of copy buttons: the item sidebars' title (remove its Copy button), the
-       Browse "Author" pill (no Copy), Workshop comments and commenters' names — selectable like any text, both tabs.
-73. [ ] (owner) Bug: Workshop comments always show their date as Jan 1, 1970 (a timestamp read wrong — seconds vs
-       ms, or the field's name).
-74. [ ] (owner) Browse sidebar's download block, clearer: say what Download / Download & Apply do in the chosen mode
-       (in "Subscribe with Steam login" they subscribe too) next to the "Not subscribed / Subscribe" row, so the two
-       don't read as contradicting; a button's right-click menu offers only its own one-off variant (not the other
-       button's); call the one-off "Download then unsubscribe" in the modes where that is what it does; the About text
-       area taller so more reads without scrolling.
-75. [ ] (owner) Library sidebar layout: a Workshop item's stat pills (subscribers, favourites, size on disk) sit at
-       the top beside the other pills, video wallpapers' too; the creator near the top; "All their wallpapers" is an
-       icon button (with its tooltip), not a text link.
 76. [ ] (owner) Windows fonts for scenes that name them (19 scenes: Consolas, Comic Sans, Arial…): use the fonts from
        the user's own Windows install (found on a mounted Windows partition, e.g. Windows/Fonts; a setting to point at
        another folder). Nothing Microsoft-licensed is shipped or copied: the core reads them where they are.

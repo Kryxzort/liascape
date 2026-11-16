@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
-import { ArrowRight, LoaderCircle, MessageSquare, RotateCcw, Send, Star, User } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { Images, LoaderCircle, MessageSquare, RotateCcw, Send, Star, User } from "lucide-react";
 import { api, thumb, ApiError, type WsComment, type WsCounts, type WsCreator } from "../api/client";
 import { useStore } from "../store";
-import { CopyButton } from "./CopyButton";
 import { StatPills } from "./sidePills";
+import { useMotion } from "./motion";
+import { glideFlip, snapFlip, type FlipSnap } from "./flipGlide";
 
 // The item sidebars' Workshop community pieces (BrowseSide.tsx, and LibrarySide.tsx for a Workshop item): the creator, the
 // favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in and say
@@ -42,8 +43,9 @@ export function Avatar({ src, size }: { src: string | null | undefined; size: nu
 
 // The creator: their avatar and name; a click lists every Wallpaper Engine item they made in Browse (store setWsList —
 // a source pill of its own, components/SourcePills.tsx), and `onListed` takes the user there from another tab (the Library
-// sidebar). The name can be selected, and copied by the Copy that floats at the end of the "Made by" line while the row is
-// hovered or holds the keyboard focus. Guard: probe-steam ws:creator, ws:creatorCopy, lib:ws:creator
+// sidebar). The row's end says so with an icon chip (lucide Images, "All their wallpapers" as its tooltip and in the row's
+// name: an icon alone doesn't say it). The name is selectable text, the way to copy it: a drag that selected some of it
+// isn't a click. Guard: probe-steam ws:creator, ws:creatorSelect, lib:ws:creator
 export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: string; authorId: string | null | undefined; onListed?: () => void }) {
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCreator | null>(() => creators.get(workshopId) ?? null);
@@ -60,7 +62,6 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
   // nothing to say who made it (the creator unknown and unreadable): no row
   if (failed && !id) return null;
   const name = c?.name ?? (c || failed ? "Steam creator" : null);
-  // the name is selectable: a drag that selected some of it isn't a click on the row
   const go = (e: MouseEvent<HTMLButtonElement>) => {
     const sel = getSelection();
     if (sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) return;
@@ -71,16 +72,14 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
   return (
     <div className="ws-creator-row">
       <button type="button" className={`ws-creator${name ? "" : " loading"}`} data-ws-creator={c ? "known" : failed ? "unknown" : "loading"}
-        disabled={!id} onClick={go}>
+        aria-label={`All their wallpapers, made by ${name ?? "…"}`} disabled={!id} onClick={go}>
         <Avatar src={c?.avatar} size={30} />
         <span className="ws-creator-text">
           <span className="ws-creator-by">Made by</span>
           <span className="ws-creator-name" data-ws-creator-name>{name ?? "…"}</span>
         </span>
-        <span className="ws-creator-go">All their wallpapers <ArrowRight size={14} /></span>
+        <span className="ws-creator-ico" data-ws-creator-go title="All their wallpapers"><Images size={16} aria-hidden="true" /></span>
       </button>
-      {/* only Steam's own name: "Steam creator" stands in for one it couldn't read */}
-      {c?.name && <CopyButton text={c.name} what="creator's name" className="side-copy" />}
     </div>
   );
 }
@@ -134,30 +133,48 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
   );
 }
 
+// what glides when the held stat pills leave: the hero row's pills and the blocks under it
+const STATS_FLIP = ":scope > *, :scope > .side-hero > *";
+
 // The Library sidebar's stat pills: Steam's current subscribers and favourites (a Browse result carries its own, shown in its
-// hero), asked once the sidebar settles (GET /workshop/counts, Steam's client protocol) and kept for the session. The row is
-// held while they're asked, its pills unseen, so they fade in where they stay (motion on: rising a little) and nothing after
-// them moves; no answer (Steam unreachable) → no row. Guard: probe-steam lib:ws:counts, lib:ws:countsOff
+// hero), asked once the sidebar settles (GET /workshop/counts, Steam's client protocol) and kept for the session. They sit in
+// the hero's row beside the other pills (LibrarySide.tsx; `display: contents`, so they are the row's own items), held there
+// unseen while they're asked, so they fade in where they stay (motion on: rising a little) and nothing moves; no answer
+// (Steam unreachable) → the held pills leave, and what followed them glides into their room (motion off: takes it at once).
+// Guard: probe-steam lib:ws:counts, lib:ws:countsOff, lib:ws:pillRow
 export function WorkshopStats({ workshopId }: { workshopId: string }) {
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCounts | null>(() => counts.get(workshopId) ?? null);
   const [failed, setFailed] = useState(false);
+  const motionOn = useMotion();
+  const ref = useRef<HTMLSpanElement>(null);
+  // the hero row and the body under it, measured as the failure lands (before the held pills go)
+  const flip = useRef<{ snap: FlipSnap | null; root: Element } | null>(null);
   useEffect(() => {
     if (!settled || counts.has(workshopId)) return;
     let alive = true;
     api.workshopCounts(workshopId).then((r) => { counts.set(workshopId, r); if (alive) setC(r); })
-      .catch(() => { if (alive) setFailed(true); });
+      .catch(() => {
+        if (!alive) return;
+        const root = ref.current?.closest(".side-body");
+        if (root && motionOn) flip.current = { snap: snapFlip(root, STATS_FLIP), root };
+        setFailed(true);
+      });
     return () => { alive = false; };
-  }, [settled, workshopId]);
-  if (failed && !c) return null;
-  // the held row's stand-ins: the widths of numbers like Steam's, so the real ones land about where they show
+  }, [settled, workshopId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const gone = failed && !c;
+  useLayoutEffect(() => {
+    const f = flip.current; flip.current = null;
+    if (gone && f) glideFlip(f.snap, f.root, STATS_FLIP);
+  }, [gone]);
+  if (gone) return null;
+  // the held pills' stand-ins: the widths of numbers like Steam's, so the real ones land about where they show
   return (
-    <div className="side-hero ws-stats" data-ws-stats={c ? "known" : "loading"} aria-hidden={!c || undefined}>
+    <span ref={ref} className="ws-stats" data-ws-stats={c ? "known" : "loading"} aria-hidden={!c || undefined}>
       <StatPills subscriptions={c?.subscriptions ?? 1000} favorites={c?.favorites ?? 100} />
-    </div>
+    </span>
   );
 }
-
 const rel = (t: number) => {
   const s = Date.now() / 1000 - t;
   if (s < 60) return "just now";
@@ -241,9 +258,10 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
             <Avatar src={c.avatar} size={26} />
             <div className="ws-c-body">
               <div className="ws-c-head">
-                <b className="ws-c-name">{c.author}</b>
+                <b className="ws-c-name" data-ws-c-name>{c.author}</b>
                 {c.authorId && c.authorId === owner && <span className="ws-c-op">Creator</span>}
-                <span className="ws-c-time" title={new Date(c.time * 1000).toLocaleString()}>{rel(c.time)}</span>
+                {/* a time Steam's markup didn't give (0) shows nothing rather than 1970 */}
+                {c.time > 0 && <span className="ws-c-time" data-ws-c-time={c.time} title={new Date(c.time * 1000).toLocaleString()}>{rel(c.time)}</span>}
               </div>
               <p className="ws-c-text" data-ws-text>{c.text}</p>
             </div>

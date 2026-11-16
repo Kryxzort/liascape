@@ -232,9 +232,13 @@ public static class SteamCommunity
             string? authorId = null;
             if (author != null && ulong.TryParse(author.GetAttributeValue("data-miniprofile", ""), out var acct) && acct is > 0 and <= uint.MaxValue)
                 authorId = (IndividualBase + acct).ToString();
-            var img = n.SelectSingleNode(".//div[contains(@class,'commentthread_comment_avatar')]//img");
+            // the avatar is the profile link's picture: an avatar frame's picture comes first in the same block
+            var img = n.SelectSingleNode(".//div[contains(@class,'commentthread_comment_avatar')]//a//img")
+                ?? n.SelectSingleNode(".//div[contains(@class,'commentthread_comment_avatar')]//img");
             var avatar = img?.GetAttributeValue("src", "") is { } src && Uri.TryCreate(src, UriKind.Absolute, out var au) && au.Scheme is "https" or "http" ? au.ToString() : null;
-            var ts = n.SelectSingleNode(".//*[contains(@class,'commentthread_comment_timestamp')]");
+            // Steam's markup carries an empty timestamp block before the one with the time: only one with data-timestamp counts.
+            // Guard: test-workshop-social.sh "comments: author (plain), author id, avatar, time"
+            var ts = n.SelectSingleNode(".//*[contains(@class,'commentthread_comment_timestamp')][@data-timestamp]");
             long time = long.TryParse(ts?.GetAttributeValue("data-timestamp", ""), out var tt) ? tt : 0;
             var textNode = n.SelectSingleNode(".//div[contains(@class,'commentthread_comment_text')]");
             var text = textNode == null ? "" : TextOf(textNode);

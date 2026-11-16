@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
-import { CopyButton } from "./CopyButton";
 import { FADE_MS, FADE_EXIT_MS, useMotion } from "./motion";
 import { glideFlip, glideY, snapFlip, softSpring, type FlipSnap } from "./flipGlide";
 
@@ -9,16 +8,15 @@ import { glideFlip, glideY, snapFlip, softSpring, type FlipSnap } from "./flipGl
 // selection note and the panel's scroller glide with it (a FLIP on the same spring). Folding keeps every line until the box
 // has closed over them, then the clamp's ellipsis fades back. Motion off: the old title cross-fades into the new one in
 // place, nothing travels; sizes change at once (folding, once the hidden lines have faded). A title that fits in two lines
-// is plain text: nothing to click. The words stay selectable (a drag that selected some isn't a click), and a Copy button
-// floats over the end of the last line while the title is hovered or holds the keyboard focus. A switch to another item
-// starts it folded and measures nothing.
+// is plain text: nothing to click. The words are selectable text, the way to copy them (a drag that selected some isn't a
+// click). A switch to another item starts it folded and measures nothing.
 // PERF: measured on the user's click (the FLIP's before) and in that click's commit (the after), nowhere else: no framer
 // `layout` here (its projection re-measures on renders the user didn't ask for, e.g. the close); whether it's clamped comes
 // from a ResizeObserver, never a mount effect's read.
-// Guard: probe-sidebar side:titleFold:<on|off|reduced>, side:titlePlain, side:titleFoldKeys, side:titleCopy, probe-layout perf:sidebar
-// what moves when the title's height changes: the rest of the head's text (the selection note), the floating Copy button and
-// the panel's scroller (each measured against its own parent)
-const BELOW = ":scope > .side-scroll, :scope > .side-head > .side-head-text > :not(.side-title), :scope > .side-head .side-title > .side-copy";
+// Guard: probe-sidebar side:titleFold:<on|off|reduced>, side:titlePlain, side:titleFoldKeys, side:titleSelect, probe-layout perf:sidebar
+// what moves when the title's height changes: the rest of the head's text (the selection note) and the panel's scroller (each
+// measured against its own parent)
+const BELOW = ":scope > .side-scroll, :scope > .side-head > .side-head-text > :not(.side-title)";
 
 // The box morph without a stretch: the box scales from `from` px to its new height `to` while its words get the exact inverse
 // in every keyframe (sampled from the soft spring, as glideFlip's curve), so they stay their size and only the clip moves.
@@ -124,7 +122,6 @@ export function SideTitle({ id, title, panel }: { id: string; title: string; pan
         {ghost && <span key={ghost.n} className={`side-title-txt side-title-ghost${ghost.loose ? "" : " clamp"}${ghost.late ? " late" : ""}`}
           aria-hidden inert>{ghost.title}</span>}
       </h2>
-      <CopyButton text={title} what="title" className="side-copy" />
     </div>
   );
 }

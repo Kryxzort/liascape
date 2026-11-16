@@ -68,8 +68,8 @@
 //                        off / reduced, sizes change at once and the old title cross-fades into the new. Shots side-title-*.png
 //   side:titlePlain      a title that fits in two lines is plain text: no button, no Tab stop, a click changes nothing
 //   side:titleFoldKeys   Enter unfolds the focused title, Space folds it; nothing applies; a switch away and back starts it folded
-//   side:titleCopy       the title's Copy rises in over its last line's end on hover; a click copies the whole title ("Copied",
-//                        still folded); Tab reaches it; a drag selects words without unfolding; no-glow, bg-live. Shots side-titlecopy-*.png
+//   side:titleSelect     the title is selectable text (no Copy button, at rest or hovered): a drag selects words without
+//                        unfolding, Ctrl+C copies them, a plain click still unfolds. Shot side-titleselect.png
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
 //   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
 //   browse:dblclick      a double-click downloads & applies
@@ -1961,10 +1961,10 @@ app.whenReady().then(async () => {
       } finally { fs.writeFileSync(INDEX + ".pb", idx0); fs.renameSync(INDEX + ".pb", INDEX); await mv(5, 5); await loadUi(); }
     };
     const titleState = () => page(`const s = m.side(), t = s?.querySelector("[data-side-title]"), h = t?.closest("h2"); if (!t) return null;
-      const r = t.getBoundingClientRect(), hr = h.getBoundingClientRect(), c = s.querySelector(".side-title > .side-copy");
+      const r = t.getBoundingClientRect(), hr = h.getBoundingClientRect();
       return { x: r.x, y: r.y, w: r.width, hx: hr.x, hy: hr.y, hh: +hr.height.toFixed(1), th: t.offsetHeight, state: t.dataset.sideTitle, role: t.getAttribute("role"),
         tab: t.getAttribute("tabindex"), exp: t.getAttribute("aria-expanded"), clamp: t.classList.contains("clamp"), title: h.getAttribute("title"),
-        lh: parseFloat(getComputedStyle(t).lineHeight), text: t.textContent, copy: c ? { r: m.rect(c), op: +getComputedStyle(c).opacity, copied: c.hasAttribute("data-copied") } : null };`);
+        lh: parseFloat(getComputedStyle(t).lineHeight), text: t.textContent };`);
     // every frame for `ms`: the title's clip (the h2's box as drawn), its words' drawn height over their laid-out one (1 =
     // unstretched) and opacity, the scroller's top, the head's line's offset (its ::after transform), the motion-off ghost's
     // opacity, and the properties any running animation in the panel animates
@@ -2035,7 +2035,7 @@ app.whenReady().then(async () => {
         if (mode === "reduced") await reducedMotion(true);
         await page(`await m.closeAll(); await m.openSide(${J(LONG)}); await m.sleep(400);`);
         const s0 = await titleState();
-        console.log(`        folded: ${J({ ...s0, text: undefined, copy: undefined })}`);
+        console.log(`        folded: ${J({ ...s0, text: undefined })}`);
         if (!s0) return ["no sidebar title — proved nothing"];
         if (s0.state !== "folded" || s0.role !== "button" || s0.exp !== "false" || s0.tab !== "0") v.push(`the clamped title isn't a folded button (${J(s0)})`);
         if (!s0.clamp || Math.abs(s0.hh - 2 * s0.lh) > 1) v.push(`folded, the title is ${s0.hh} px (clamp ${s0.clamp}), want two lines (${2 * s0.lh})`);
@@ -2106,54 +2106,22 @@ app.whenReady().then(async () => {
       return v;
     }));
 
-    // side:titleCopy — the title's Copy: hidden at rest, it rises in (per frame) over the end of the title's last line while the
-    // title is hovered; a real click copies the WHOLE title (clipboard) and flips to "Copied" without unfolding it; Tab from the
-    // title reaches it and shows it; a drag across the words selects them and doesn't unfold; no-glow: no hover glow; bg-live:
-    // a fill of its own. Screenshots side-titlecopy-*.png
-    await cell("side:titleCopy", async () => withLongTitle(async () => {
+    // side:titleSelect — the title is selectable text, the way to copy it: no Copy button in the head, at rest or hovered; the
+    // words are user-select text; a real drag across them selects them and doesn't unfold (it isn't a click); Ctrl+C then puts
+    // the selection on the clipboard; a plain click still unfolds. Screenshot side-titleselect.png
+    await cell("side:titleSelect", async () => withLongTitle(async () => {
       const v = [], J = JSON.stringify;
       const { clipboard } = require("electron");
       await mv(5, 5, 200);
       await page(`await m.closeAll(); await m.openSide(${J(LONG)}); await m.sleep(400);`);
       const s0 = await titleState();
-      if (!s0.copy) return ["no Copy on the sidebar's title"];
-      if (s0.copy.op > 0.02) v.push(`at rest the title's Copy shows (opacity ${s0.copy.op})`);
-      const CP = ".side-panel:not(.closing) .side-title > .side-copy";
-      const samp = js(MO.SAMPLE({ c: CP }, 600));
-      await sleep(40); await mv(s0.x + 40, s0.y + 10); await sleep(120); await shot("titlecopy-in");
-      const fr = (await samp).c;
-      const ops = fr.map((f) => f[1]).filter((x) => x != null), ys = fr.filter((f) => f[1] != null && f[1] > 0.02).map((f) => f[3]);
-      if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`the Copy popped in on hover (opacities ${J(ops.slice(0, 8))})`);
-      if (!(ys.length > 2 && spread(ys) > 1)) v.push(`the Copy didn't rise in (y ${J(ys.slice(0, 8))})`);
-      const s1 = await titleState();
-      if (s1.copy.op < 0.95) v.push(`hovering the title, its Copy is at opacity ${s1.copy.op}`);
-      const c = s1.copy.r, hr = { r: s1.hx + s1.w, b: s1.hy + s1.hh };
-      if (Math.abs(c.x + c.w - hr.r) > 1.5 || Math.abs(c.y + c.h - hr.b) > 1.5) v.push(`the Copy isn't over the end of the last line (its box ${J(c)}, the title ends ${J(hr)})`);
-      // hover glow / no-glow / bg-live
-      await mv(c.x + c.w / 2, c.y + c.h / 2, 350);
-      const lk = await page(`const c = document.querySelector(${J(CP)}), root = document.documentElement; const g = getComputedStyle(c).boxShadow;
-        root.classList.add("no-glow"); await m.sleep(250); const ng = getComputedStyle(c).boxShadow; root.classList.remove("no-glow");
-        root.classList.add("bg-live"); await m.sleep(250); const bg = getComputedStyle(c).backgroundColor; return { g, ng, bg };`);
-      await shot("titlecopy-bglive"); await page(`document.documentElement.classList.remove("bg-live");`);
-      console.log(`        ${J(lk)}`);
-      if (!/rgb/.test(lk.g)) v.push(`the hovered Copy doesn't glow (${lk.g})`);
-      if (/rgb/.test(lk.ng) && !/rgba\(0, 0, 0/.test(lk.ng)) v.push(`no-glow: the hovered Copy glows (${lk.ng})`);
-      const a = /\/\s*([\d.]+)\s*\)/.exec(lk.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(lk.bg)?.[1] ?? "1";
-      if (+a < 0.8) v.push(`bg-live: the Copy's fill is too see-through over the words (${lk.bg})`);
-      // a real click: the whole title on the clipboard, "Copied", still folded
-      clipboard.writeText("");
-      await clickAt(c.x + c.w / 2, c.y + c.h / 2); await sleep(150); await shot("titlecopy-copied");
-      const s2 = await titleState();
-      if (clipboard.readText() !== LONG) v.push(`the clipboard holds ${J(clipboard.readText().slice(0, 60))}, want the whole title`);
-      if (!s2.copy.copied) v.push("the Copy didn't turn into \"Copied\"");
-      if (s2.exp !== "false") v.push("copying unfolded the title");
-      // the keyboard: Tab from the title reaches the Copy and shows it
-      await mv(5, 5, 400);
-      await page(`m.side().querySelector("[data-side-title]").focus();`);
-      send({ type: "keyDown", keyCode: "Tab" }); send({ type: "keyUp", keyCode: "Tab" }); await sleep(400);
-      const kb = await page(`const a = document.activeElement; return { copy: !!a?.matches(${J(CP)}), op: +getComputedStyle(document.querySelector(${J(CP)})).opacity };`);
-      if (!kb.copy || kb.op < 0.95) v.push(`Tab from the title: ${J(kb)} (want the Copy focused and shown)`);
-      await shot("titlecopy-kbd");
+      if (!s0) return ["no sidebar title"];
+      const copies = () => page(`const h = m.side().querySelector(".side-head"); return h.querySelectorAll(".side-copy, [data-copy], .copy-btn").length;`);
+      if (await copies()) v.push("the sidebar's head still has a Copy button");
+      await mv(s0.x + 40, s0.y + 10, 350);
+      if (await copies()) v.push("hovering the title shows a Copy button");
+      const us = await page(`return getComputedStyle(m.side().querySelector("[data-side-title]")).userSelect;`);
+      if (us !== "text" && us !== "auto") v.push(`the title's words aren't selectable (user-select ${us})`);
       // a drag across the words selects them; it isn't a click that unfolds
       await page(`getSelection().removeAllRanges(); document.activeElement?.blur();`);
       const y = s0.y + s0.lh / 2;
@@ -2162,9 +2130,18 @@ app.whenReady().then(async () => {
       send({ type: "mouseUp", x: Math.round(s0.x + 153), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(500);
       const sel = await page(`return getSelection().toString();`), s3 = await titleState();
       console.log(`        dragged: ${J(sel)}`);
+      await shot("titleselect");
       if (sel.length < 4 || !LONG.startsWith(sel.trim().slice(0, 4))) v.push(`a drag across the title selected ${J(sel)}`);
       if (s3.exp !== "false") v.push("the drag that selected words unfolded the title");
+      // Ctrl+C copies what's selected (the app's own Edit menu, hidden, keeps its accelerators)
+      clipboard.writeText("");
+      send({ type: "keyDown", keyCode: "C", modifiers: ["control"] }); send({ type: "keyUp", keyCode: "C", modifiers: ["control"] }); await sleep(250);
+      if (sel.length >= 4 && clipboard.readText() !== sel) v.push(`Ctrl+C put ${J(clipboard.readText().slice(0, 60))} on the clipboard, want the selection ${J(sel.slice(0, 60))}`);
       await page(`getSelection().removeAllRanges();`);
+      // a plain click still unfolds it
+      await clickAt(s0.x + 30, s0.y + 8); await sleep(700);
+      if ((await titleState()).exp !== "true") v.push("a plain click on the title didn't unfold it");
+      await mv(5, 5, 100);
       return v;
     }));
 

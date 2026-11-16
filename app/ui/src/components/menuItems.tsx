@@ -14,11 +14,15 @@ export function menuAt(e: { clientX: number; clientY: number; currentTarget: Ele
 export const keepMenuItem = (onPick: () => void): MenuItem =>
   ({ key: "keep", label: "Unsubscribe without deleting", icon: <LibraryIcon size={14} />, onPick });
 
-// "Download without subscribing" and its "& apply", the right-click menu of the Browse sidebar's download / subscribe buttons
-// (BrowseSide.tsx): a one-off copy into the library (POST /download {oneOff}), never a subscription, so nothing updates it.
-// `missing` (GET /workshop/one-off: no way to fetch it here) = both entries disabled; the menu's note says what's missing.
-// Guard: probe-steam side:oneOff:menu, side:oneOff:missing
-export const oneOffMenuItems = (onPick: (apply: boolean) => void, missing: string | null): MenuItem[] => [
-  { key: "oneoff", label: "Download without subscribing", icon: <Download size={14} />, onPick: () => onPick(false), disabled: !!missing },
-  { key: "oneoff-apply", label: "Download without subscribing & apply", icon: <Play size={14} />, onPick: () => onPick(true), disabled: !!missing },
-];
+// "Download without subscribing", the right-click menu of the Browse sidebar's download / subscribe buttons (BrowseSide.tsx):
+// a one-off copy into the library (POST /download {oneOff}) that stays no subscription, so nothing updates it. Each button's
+// menu offers only its own variant: Download's the copy, "Download & Apply"'s the copy + apply. Under "Subscribe with Steam
+// login" the copy comes through a subscription the download takes back (WorkshopDownloader.OneOffViaSignInAsync), so it says
+// "Download then unsubscribe". `missing` (GET /workshop/one-off: no way to fetch it here) = the entry disabled; the menu's
+// note says what's missing. Guard: probe-steam side:oneOff:menu, side:oneOff:missing, side:oneOff:words
+export function oneOffMenuItem(apply: boolean, mode: unknown, onPick: () => void, missing: string | null): MenuItem {
+  const base = mode === "subscribe" ? "Download then unsubscribe" : "Download without subscribing";
+  return apply
+    ? { key: "oneoff-apply", label: `${base} & apply`, icon: <Play size={14} />, onPick, disabled: !!missing }
+    : { key: "oneoff", label: base, icon: <Download size={14} />, onPick, disabled: !!missing };
+}

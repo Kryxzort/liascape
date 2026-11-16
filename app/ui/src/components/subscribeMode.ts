@@ -6,6 +6,19 @@ import type { Wallpaper } from "../api/client";
 // Guard: probe-steam steam:subMerge:*
 export const subscribeIsDownload = (settings: Record<string, unknown> | null | undefined) =>
   !!settings?.autoAddWeWallpapersToLibrary && settings?.workshopDownloadMode === "subscribe";
+// What a Workshop item's Download / "Download & Apply" do in the chosen mode, the line under them in the Browse sidebar, so
+// they and the subscription card's Subscribe below never read as contradicting: every mode but steamcmd subscribes to get it.
+// Merged (the buttons say Subscribe) and unknown modes: no line. Guard: probe-steam side:getHint
+export function downloadHint(settings: Record<string, unknown> | null | undefined): string | null {
+  if (subscribeIsDownload(settings)) return null;
+  switch (settings?.workshopDownloadMode) {
+    case "subscribe": return "Subscribes with your Steam login, then adds it to your library";
+    case "steamapp": return "Subscribes through the Steam app, then adds it to your library";
+    case "steampage": return "Opens its Steam page for you to subscribe, then adds it to your library";
+    case "steamcmd": return "Downloads a copy with steamcmd, no subscription";
+    default: return null;
+  }
+}
 // a Workshop source's item (a WE-local folder's is on disk already: its Download imports it)
 export const isWorkshopItem = (w: Pick<Wallpaper, "workshopId" | "pageUrl">) => !!w.workshopId && w.pageUrl.startsWith("http");
 

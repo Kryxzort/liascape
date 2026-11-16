@@ -241,10 +241,15 @@ export function LibrarySide({
           {item.ageRating && <span className="side-pill"><Shield size={13} /> {item.ageRating}</span>}
           {/* the Workshop ID: a pill that copies itself (a "Details" card for one property looks odd) */}
           {item.workshopId && at("standard") && <WorkshopIdPill id={item.workshopId} />}
+          {/* a Workshop item's current subscribers and favourites, beside the other pills (held unseen while Steam is asked).
+              Guard: probe-steam lib:ws:pillRow */}
+          {workshop && <WorkshopStats workshopId={workshop} />}
           {/* its files on this disk, Workshop or not (measured in the background, Web/LibraryFactsOps.cs: none until then; last,
               so a late one moves no chip). Guard: probe-steam lib:ws:size, test-library-facts.sh § 7 */}
           <SizePill bytes={item.diskBytes} title="Size on disk" />
         </div>
+        {/* who made it, near the top as in Browse (a click lists all their wallpapers there). Guard: probe-steam lib:ws:creator */}
+        {workshop && <CreatorRow workshopId={workshop} authorId={null} onListed={onShowInBrowse} />}
         {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
         {/* the crash mark, as a notice block of the body (the tiles' material, a danger stripe) with its own Clear */}
         {crash.value && (
@@ -322,13 +327,11 @@ export function LibrarySide({
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
         {sceneProps && <ScenePropsEditor key={p} path={p} onReady={() => setReady(true)} />}
         {/* a Workshop item's community, after everything about playing it: the Browse sidebar's own pieces
-            (components/WorkshopSocial.tsx) — Steam's current counts, who made it (a click lists all their wallpapers in Browse),
-            the favourite and the comments (read once in view). Not for an item the Workshop no longer has, nor a
-            multi-selection (each item has its own). Guard: probe-steam lib:ws:* */}
+            (components/WorkshopSocial.tsx), the favourite and the comments (read once in view); its counts and its creator sit
+            at the top. Not for an item the Workshop no longer has, nor a multi-selection (each item has its own).
+            Guard: probe-steam lib:ws:* */}
         {workshop && (
           <>
-            <WorkshopStats workshopId={workshop} />
-            <CreatorRow workshopId={workshop} authorId={null} onListed={onShowInBrowse} />
             <div className="side-tiles"><FavoriteTile workshopId={workshop} /></div>
             <CommentsSection workshopId={workshop} authorId={null} />
           </>

@@ -75,7 +75,7 @@ for f in $FILES; do
     app/ui/src/components/MuteButton.tsx) add "$SET|$MODAL|noAudio" "$f (+ --probe probe-settings.js — mute:; --probe probe-sidebar.js — preview:volume, preview:volumeLook)" ;;
     # copy feedback: Settings' Copy buttons and the Library sidebar's Workshop ID pill
     app/ui/src/components/CopyButton.tsx|app/ui/src/hooks/useCopied.ts)
-      echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill; probe-sidebar.js side:titleCopy; probe-steam.js ws:creatorCopy)" >&2 ;;
+      echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill)" >&2 ;;
     # the controls' right-click menus (Unsubscribe → keep the files, Download → without subscribing) and the menu itself
     app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx|app/ui/src/components/menuItems.tsx|app/ui/src/components/subscribeMode.ts)
       echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, steam:subMerge:, side:)" >&2 ;;

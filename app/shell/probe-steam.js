@@ -67,16 +67,19 @@
 //                         unsubscribe" (no tooltip), a click posts nothing, its right-click entry disabled with that note; "Use the
 //                         Steam app" keeps it. Shot steam-subtoggle-signedout.png
 //   side:oneOff:menu      the Browse sidebar's Download and "Download & Apply" (and, merged, "Subscribe"): a real right-click
-//                         opens a menu at the pointer ("Download without subscribing", "… & apply"; the first focused, grows
+//                         opens a menu at the pointer with that button's own entry only (Download: "Download then unsubscribe"
+//                         under "Subscribe with Steam login", "… & apply" for Download & Apply; focused, grows
 //                         in per frame, no request); picking each → ONE POST /download {oneOff: true, apply} and the menu fades
 //                         out while the download shows; the left-click still posts a plain download (oneOff false); the route
 //                         is asked as the pointer reaches the button; a WE-local item's Download has no menu; no-glow + bg-live
 //                         (own fill, no glow). Shots steam-oneoff*.png
-//   side:oneOff:missing   no route (GET /workshop/one-off {route: null, missing}): both entries shown disabled (aria-disabled,
+//   side:oneOff:missing   no route (GET /workshop/one-off {route: null, missing}): the entry shown disabled (aria-disabled,
 //                         muted), the note says what's missing; a click on one posts nothing and keeps the menu open; Escape
 //                         closes it. Shot steam-oneoff-missing.png
 //   side:oneOff:menuOff   motion off: the menu fades in and out in place (motion-off.js)
-//   side:oneOff:modes     the route the stack's own backend gives per download mode (its sign-in: none): "Use the Steam app"
+//   side:oneOff:modes     per download mode, each button's menu holds its own entry in the mode's words ("Download then
+//                         unsubscribe" under "Subscribe with Steam login", else "Download without subscribing"), and the route
+//                         the stack's own backend gives (its sign-in: none): "Use the Steam app"
 //                         enabled with no steamcmd; "Subscribe with Steam login" disabled, "Sign in to Steam to download without
 //                         subscribing"; "Download via steamcmd" enabled once steamcmd has an account, else disabled with
 //                         what's missing; "Open in the Steam app" always disabled, "A Steam page can only subscribe" (steamcmd
@@ -89,6 +92,11 @@
 //                         to subscribe"; the other modes keep them; a sign-out under an open sidebar (WS steam-status): the line
 //                         rises in (per frame; motion off: only fades, motion-off.js); hovered, a disabled button stays still;
 //                         no-glow + bg-live. Shots steam-blocked*.png
+//   side:getHint          the line under the Browse sidebar's download buttons says what they do in each mode (they subscribe in
+//                         all but steamcmd), the card's Subscribe that it subscribes only (auto-import on: it then joins the
+//                         library); merged no line; signed out the reason in its place; a live mode change swaps the words in one
+//                         cell (on: rising in per frame; off: a fade in place); bg-live drop shadow. Shots steam-gethint*.png
+//   side:aboutTall        the About text of a long description: ≥ 300 px in a 900 px window, ≤ 45 % of the window, scrolls inside
 //   side:blocked:subscribe  the Browse sidebar's Subscribe: "Subscribe with Steam login" signed out → aria-disabled, "Sign in to
 //                         Steam to subscribe" as its sub-line, a click posts nothing; "Download via steamcmd" (signed in) →
 //                         "Download via steamcmd can't subscribe"; "Use the Steam app" / "Open in the Steam app" keep it
@@ -130,10 +138,11 @@
 //   ws:creator[Off]       the creator row (avatar from the media origin + name, asked once with the item's owner); a click lists
 //                         their items (/browse list creator): the creator's pill slides in (per frame; Off: fades), the search
 //                         goes, the sort is the list's, the sidebar closes; × back (the pill leaves); no-glow + bg-live
-//   ws:creatorCopy[Off]   the creator's name: its Copy appears at the end of the "Made by" line, clear of the name, on the row's
-//                         hover (rises in; Off: fades); a click copies the (long) name ("Copied"), lists nothing; a drag selects the
-//                         name; no-glow, bg-live
-//   side:browseTitle      the Browse sidebar's long title: folded, a click unfolds it, another folds it; its Copy copies it whole
+//                         the row ends in an icon chip (lucide images, tooltip and row name "All their wallpapers"), no words; its
+//                         icon tilts on the spring while the row is hovered (Off: stays still); bg-live: the chip's own fill
+//   ws:creatorSelect      the creator's name is selectable text: no Copy beside it; a drag selects it and lists nothing, Ctrl+C copies it
+//   side:browseTitle      the Browse sidebar's long title: folded, a click unfolds it, another folds it; no Copy: a drag selects
+//                         words without unfolding, Ctrl+C copies them
 //   look:browseTitles     a Browse card's long title: two lines, clamped; every card keeps its box (the grid as with short titles)
 //   ws:favorite[Off]      the favourite tile: read state, a click POSTs, "Favourited" rolls in (Off: fades), the star fills and pops
 //                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; signed
@@ -141,13 +150,19 @@
 //   ws:comments[Off]      the comments: read only once in view, 10 of 23 newest first, the creator's marked, the text plain (markup
 //                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out "Sign in to
 //                         comment"; a failed read a quiet line, Retry; bg-live
+//   ws:commentSelect      a comment's text and its commenter's name select with a drag; an old comment's date shows its year
+//                         (never 1970), one with no time shows none
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
 //   ws:pills              the Favourites pill: signed out the grid's "Sign in …" note, signed in the list; the Workshop pill back
 //                         Shots steam-ws-*.png
-//   lib:ws:order          a Workshop item's Library sidebar: after Playback and the scene properties, its counts, the creator, the
-//                         favourite and the comments, last, 12 px apart; none off the Workshop, for a plain item, for a multi-selection
+//   lib:ws:order          a Workshop item's Library sidebar: its counts in the hero row, the creator under it, then Playback, the
+//                         scene properties, the favourite and the comments, last, 12 px apart; none off the Workshop, for a plain
+//                         item, for a multi-selection
+//   lib:ws:pillRow        a Workshop scene's and a Workshop video's counts are hero pills beside the others (same row box and
+//                         line as a neighbour, before the size), the creator right under the hero, both above Playback
 //   lib:ws:counts[Off]    its counts: held unseen while asked (once, after the sidebar settles), they fade in (on: rising) where they
-//                         stay, the creator row never moves; 4.3k people / 87 star, no views; no answer → no row; no-glow + bg-live
+//                         stay, the creator row never moves; 4.3k people / 87 star, no views; no answer → the pills leave and the
+//                         size glides into their room (Off: at once); no-glow + bg-live
 //   lib:ws:size[Off]      every Library item's size on disk (the backend's measure) as the hero's last pill; a late measure fades in
 //                         (on: rising) at the row's end, the Workshop ID pill never moves
 //   lib:ws:creator        the creator (asked without an owner): a click lists their wallpapers on the Browse tab
@@ -263,14 +278,16 @@ const STUB = `(() => {
     // which the Workshop no longer has: __probe_lib_off = [workshopId] (the rest it has: the stack's empty CM fixture
     // answers "no such item" for every id), read per request
     // an item whose size on disk isn't measured yet (lib:ws:size): __probe_lib_nosize = [title]
-    if (p === "/library" && m === "GET" && (localStorage.getItem("__probe_lib_full") === "1" || localStorage.getItem("__probe_lib_sub") || localStorage.getItem("__probe_lib_nosize"))) {
+    // a plain video made a Workshop item (lib:ws:pillRow: a Workshop video's sidebar): __probe_lib_ws = {title: workshopId}
+    if (p === "/library" && m === "GET" && (localStorage.getItem("__probe_lib_full") === "1" || localStorage.getItem("__probe_lib_sub") || localStorage.getItem("__probe_lib_nosize") || localStorage.getItem("__probe_lib_ws"))) {
       const full = localStorage.getItem("__probe_lib_full") === "1", sub = JSON.parse(localStorage.getItem("__probe_lib_sub") || "{}");
       const off = localStorage.getItem("__probe_lib_off") ? JSON.parse(localStorage.getItem("__probe_lib_off")) : null;
-      const nosize = JSON.parse(localStorage.getItem("__probe_lib_nosize") || "[]");
+      const nosize = JSON.parse(localStorage.getItem("__probe_lib_nosize") || "[]"), wsOf = JSON.parse(localStorage.getItem("__probe_lib_ws") || "{}");
       return f(u, o).then((r) => r.json()).then((list) => res(list.map((x) => {
         let y = full && x.isScene && x.workshopId ? { ...x, resolution: "3840 x 2160", ageRating: "Everyone" } : x;
         if (x.workshopId && x.workshopId in sub) y = { ...y, subscribed: sub[x.workshopId] };
         if (nosize.includes(x.title)) y = { ...y, diskBytes: null };
+        if (x.title in wsOf) y = { ...y, workshopId: wsOf[x.title] };
         return x.workshopId && off ? { ...y, offWorkshop: off.includes(x.workshopId) } : y; })));
     }
     if (p === "/browse" && m === "POST") {
@@ -279,9 +296,9 @@ const STUB = `(() => {
       // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
       if (b.list) { if (b.list.kind === "favorites" && !(window.__ws ??= {}).signedIn) return res({ error: "Sign in to Steam to see your Workshop favourites", signIn: true }, 403);
         return res(b.page > 1 ? [] : items.slice(0, 3)); }
-      // a long first title (side:browseTitle, look:browseTitles)
-      const long = localStorage.getItem("__probe_long_title");
-      if (b.filter) return res(b.page > 1 ? [] : long ? items.map((x, i) => (i === 0 ? { ...x, title: long } : x)) : items);
+      // a long first title (side:browseTitle, look:browseTitles), a long first description (side:aboutTall)
+      const long = localStorage.getItem("__probe_long_title"), longDesc = localStorage.getItem("__probe_long_desc");
+      if (b.filter) return res(b.page > 1 ? [] : items.map((x, i) => (i === 0 ? { ...x, ...(long ? { title: long } : {}), ...(longDesc ? { description: longDesc } : {}) } : x)));
       // a fake Wallpaper Engine (Local) folder (steam:subToggle): local page paths + Workshop ids
       if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
         pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
@@ -1347,7 +1364,10 @@ app.whenReady().then(async () => {
     const pickAt = (key) => js(`(() => { const r = document.querySelector("[data-ctx-item=${key}]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
     const heldDl = () => js(`window.__st.dl ? { body: window.__st.dl.body, aborted: window.__st.dl.aborted } : null`);
     const cancelDl = async () => { await page(`document.querySelector("${SIDE} [data-side-download] button")?.click();`); await sleep(400); };
-    const ONE_OFF_ITEMS = [["oneoff", "Download without subscribing"], ["oneoff-apply", "Download without subscribing & apply"]];
+    // a button's menu: its own one-off variant only (menuItems.tsx oneOffMenuItem), "Download then unsubscribe" under
+    // "Subscribe with Steam login" (the copy comes through a subscription the download takes back)
+    const oneOffFor = (btn, mode) => { const base = mode === "subscribe" ? "Download then unsubscribe" : "Download without subscribing";
+      return btn === "apply" ? [["oneoff-apply", `${base} & apply`]] : [["oneoff", base]]; };
     await cell("side:oneOff:menu", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, workshopDownloadMode: "subscribe" });
@@ -1369,9 +1389,9 @@ app.whenReady().then(async () => {
         const m = await ctxItems();
         console.log(`        ${btn}: ${J(m)}`);
         if (!m) { v.push(`no menu after a right-click on [data-side-get=${btn}]`); continue; }
-        if (J(m.items.map((x) => [x.key, x.text])) !== J(ONE_OFF_ITEMS)) v.push(`${btn}: menu items ${J(m.items)}`);
+        if (J(m.items.map((x) => [x.key, x.text])) !== J(oneOffFor(btn, "subscribe"))) v.push(`${btn}: menu items ${J(m.items.map((x) => [x.key, x.text]))} (want only ${J(oneOffFor(btn, "subscribe"))})`);
         if (m.items.some((x) => x.off) || m.note) v.push(`${btn}: with a route, an entry is disabled or a note shows (${J(m)})`);
-        if (m.focus !== "oneoff") v.push(`${btn}: the first entry isn't focused (${m.focus})`);
+        if (m.focus !== oneOffFor(btn, "subscribe")[0][0]) v.push(`${btn}: its entry isn't focused (${m.focus})`);
         if (m.titles) v.push(`${btn}: ${m.titles} tooltip(s) in the menu`);
         if (between(ws, 1) < 2) v.push(`${btn}: the menu didn't grow in (widths ${J(ws.slice(0, 10))})`);
         if (await heldDl()) v.push(`${btn}: the right-click itself posted /download`);
@@ -1403,7 +1423,7 @@ app.whenReady().then(async () => {
       const label = await js(`document.querySelector("${SIDE} [data-side-get=only]")?.textContent.trim() ?? null`);
       await clickAt(b.x, b.y, "right"); await sleep(350);
       let m = await ctxItems();
-      if (label !== "Subscribe" || !m || J(m.items.map((x) => x.key)) !== J(ONE_OFF_ITEMS.map((x) => x[0]))) v.push(`merged: "${label}" right-click menu ${J(m)}`);
+      if (label !== "Subscribe" || !m || J(m.items.map((x) => [x.key, x.text])) !== J(oneOffFor("only", "subscribe"))) v.push(`merged: "${label}" right-click menu ${J(m)}`);
       await key("Escape"); await sleep(300);
       if (!(await js(`document.activeElement?.dataset?.sideGet === "only"`))) v.push("after Escape the focus isn't back on the button");
       await setSettings({ autoAddWeWallpapersToLibrary: false });
@@ -1447,7 +1467,7 @@ app.whenReady().then(async () => {
       const m = await ctxItems();
       console.log(`        ${J(m)}`);
       if (!m) return ["no menu without a route (it should say what's missing)"];
-      if (J(m.items.map((x) => [x.key, x.text])) !== J(ONE_OFF_ITEMS) || m.items.some((x) => !x.off)) v.push(`entries ${J(m.items)} (want both, disabled)`);
+      if (J(m.items.map((x) => [x.key, x.text])) !== J(oneOffFor("only", "subscribe")) || m.items.some((x) => !x.off)) v.push(`entries ${J(m.items)} (want Download's own, disabled)`);
       if (m.note !== MISSING) v.push(`the note says "${m.note}"`);
       if (!m.described) v.push("the menu isn't described by its note");
       const textColor = await js(`getComputedStyle(document.querySelector(".side-title, h2") ?? document.body).color`);
@@ -1487,8 +1507,8 @@ app.whenReady().then(async () => {
       const SIGN_IN = "Sign in to Steam to download without subscribing";
       const scFile = __filename; // any existing file passes as "steamcmd found" (WorkshopDownloader.FindSteamCmd); nothing runs it
       await js(`localStorage.setItem("__probe_oneoff_real", "1"); true`);
-      const menuFor = async (shotName) => {
-        const b = await getBox("only");
+      const menuFor = async (shotName, btn = "only") => {
+        const b = await getBox(btn);
         if (!b) return null;
         await mvTo(b.x, b.y, 150); await sleep(150);
         await clickAt(b.x, b.y, "right");
@@ -1497,10 +1517,10 @@ app.whenReady().then(async () => {
         await key("Escape"); await sleep(300);
         return m;
       };
-      const judge = (label, m, want) => {
-        console.log(`        ${label}: ${J(m && { off: m.items.map((x) => x.off), note: m.note })}`);
+      const judge = (label, m, want, mode, btn = "only") => {
+        console.log(`        ${label} (${btn}): ${J(m && { items: m.items.map((x) => x.text), off: m.items.map((x) => x.off), note: m.note })}`);
         if (!m) return v.push(`${label}: no menu`);
-        if (J(m.items.map((x) => x.key)) !== J(ONE_OFF_ITEMS.map((x) => x[0]))) v.push(`${label}: entries ${J(m.items)}`);
+        if (J(m.items.map((x) => [x.key, x.text])) !== J(oneOffFor(btn, mode))) v.push(`${label} (${btn}): entries ${J(m.items.map((x) => [x.key, x.text]))}, want ${J(oneOffFor(btn, mode))}`);
         if (want === null) { if (m.items.some((x) => x.off) || m.note) v.push(`${label}: want both entries on and no note, got ${J(m)}`); }
         else if (!m.items.every((x) => x.off) || !want.test(m.note ?? "")) v.push(`${label}: want both entries disabled with a note matching ${want}, got ${J({ off: m.items.map((x) => x.off), note: m.note })}`);
       };
@@ -1517,16 +1537,17 @@ app.whenReady().then(async () => {
         for (const [label, patch, want] of cases) {
           await setSettings(patch);
           await browseWs(SIGNED_OUT); await openSide(0);
-          judge(label, await menuFor(label === "Subscribe with Steam login, signed out" ? "oneoff-signin" : null), want);
+          judge(label, await menuFor(label === "Subscribe with Steam login, signed out" ? "oneoff-signin" : null), want, patch.workshopDownloadMode);
+          judge(label, await menuFor(null, "apply"), want, patch.workshopDownloadMode, "apply");
         }
         // live, no reload: the mode changes (another window's save → WS settings-changed) → the next right-click asks again
         await setSettings({ workshopDownloadMode: "steamapp", steamCmdPath: "", steamUsername: "" });
         await browseWs(SIGNED_OUT); await openSide(0);
-        judge("live: Use the Steam app", await menuFor(), null);
+        judge("live: Use the Steam app", await menuFor(), null, "steamapp");
         const asks0 = await js(`window.__st.oneOffAsks?.length ?? 0`);
         await setSettings({ workshopDownloadMode: "subscribe" });
         await ev("settings-changed", { workshopDownloadMode: "subscribe" }); await sleep(200);
-        judge("live: then Subscribe with Steam login (signed out), within the route's 5 s", await menuFor(), new RegExp(`^${SIGN_IN}$`));
+        judge("live: then Subscribe with Steam login (signed out), within the route's 5 s", await menuFor(), new RegExp(`^${SIGN_IN}$`), "subscribe");
         if ((await js(`window.__st.oneOffAsks?.length ?? 0`)) === asks0) v.push("live: the mode change didn't ask the route again");
       } finally {
         await js(`localStorage.removeItem("__probe_oneoff_real"); true`);
@@ -1639,6 +1660,98 @@ app.whenReady().then(async () => {
           if (why && mode === "steamcmd") await shot("blocked-subscribe");
         }
       } finally { await setSettings({ workshopDownloadMode: "subscribe" }); }
+      return v;
+    });
+    // side:getHint — what the download buttons do in the chosen mode, on the line under them (components/subscribeMode.ts
+    // downloadHint), and the subscription card's Subscribe saying it subscribes only, so the two never read as contradicting:
+    // per mode (subscribe, the Steam app, the Steam page, steamcmd) and with "Import new Workshop wallpapers" on; merged: no
+    // line; signed out under "Subscribe with Steam login": the reason takes the line's place. A mode change under the open
+    // sidebar swaps the words in one cell (never stacked: the line's box never grows past the taller of the two): on, the new
+    // words rise in per frame; off, they only fade in place. bg-live: the words' drop shadow. Shots steam-gethint*.png
+    await cell("side:getHint", async () => {
+      const v = [];
+      const NOT = { subscribed: false, pending: null, inLibrary: false, onDisk: false };
+      const HINTS = { subscribe: "Subscribes with your Steam login, then adds it to your library", steamapp: "Subscribes through the Steam app, then adds it to your library",
+        steampage: "Opens its Steam page for you to subscribe, then adds it to your library", steamcmd: "Downloads a copy with steamcmd, no subscription" };
+      const SUBHINT = { off: "Subscribe only, without adding it to your library", on: "Subscribe only, it joins your library once Steam has it" };
+      const line = () => js(`(() => { const h = document.querySelector("${SIDE} [data-side-get-hint]"), w = document.querySelector("${SIDE} [data-side-get-why]");
+        return { hint: h?.textContent ?? null, why: w?.textContent ?? null, filter: h ? getComputedStyle(h).filter : null }; })()`);
+      try {
+        for (const [mode, auto, status] of [["subscribe", false, SIGNED_IN], ["steamapp", false, SIGNED_OUT], ["steampage", false, SIGNED_OUT],
+          ["steamcmd", false, SIGNED_IN], ["steamapp", true, SIGNED_OUT]]) {
+          await setSettings({ workshopDownloadMode: mode, autoAddWeWallpapersToLibrary: auto, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+          await browseWs(status); await setWs("930000", NOT); await openSide(0);
+          const x = await waitFor(() => sub().then((y) => y && y.state === "not-subscribed" ? y : null), 3000);
+          const l = await line();
+          const label = `${mode}${auto ? " + auto-import" : ""}`;
+          console.log(`        ${label}: ${J({ line: l.hint ?? l.why, sub: x?.hint })}`);
+          if (l.hint !== HINTS[mode] || l.why) v.push(`${label}: the line under the buttons says ${J(l)}, want ${J(HINTS[mode])}`);
+          const wantSub = mode === "steamcmd" ? "Download via steamcmd can't subscribe" : SUBHINT[auto ? "on" : "off"];
+          if (x?.hint !== wantSub) v.push(`${label}: the card's Subscribe says ${J(x?.hint)}, want ${J(wantSub)}`);
+          if (mode === "subscribe") await shot("gethint");
+        }
+        await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: true });
+        await browseWs(SIGNED_IN); await openSide(0);
+        let l = await line();
+        if (l.hint || l.why) v.push(`merged: ${J(l)} (want no line: the buttons say Subscribe)`);
+        await setSettings({ autoAddWeWallpapersToLibrary: false });
+        await browseWs(SIGNED_OUT); await openSide(0);
+        l = await line();
+        if (l.hint || l.why !== "Sign in to Steam to download") v.push(`signed out: ${J(l)} (want only the reason)`);
+        const NOTE = `(() => { const n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return null;
+          return { h: +n.getBoundingClientRect().height.toFixed(1), hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e);
+            return [e.textContent, +(+cs.opacity).toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2)]; }) }; })()`;
+        for (const motion of [true, false]) {
+          await setSettings({ workshopDownloadMode: "steamapp", morphs: motion });
+          await browseWs(SIGNED_OUT); await openSide(0); await sleep(300);
+          const h0 = (await js(NOTE))?.h;
+          const fr = frames("", NOTE, 700); await sleep(30);
+          await setSettings({ workshopDownloadMode: "steampage" }); await ev("settings-changed", { workshopDownloadMode: "steampage" });
+          if (motion) { await sleep(70); await shot("gethint-swap"); }
+          const f = (await fr).filter((x) => x);
+          const h1 = (await js(NOTE))?.h;
+          const nw = f.map((x) => x.hs.find((h) => h[0] === HINTS.steampage)).filter((x) => x);
+          const ops = nw.map((x) => x[1]), ys = nw.map((x) => x[2]), maxH = Math.max(...f.map((x) => x.h));
+          console.log(`        motion ${motion}: heights ${h0} → ${h1} (max ${maxH}), new opacity ${J(ops.slice(0, 8))} y ${J(ys.slice(0, 8))}`);
+          if (!nw.length) { v.push(`motion ${motion}: the steampage words never showed — proved nothing`); continue; }
+          if (maxH > Math.max(h0, h1) + 1) v.push(`motion ${motion}: the old and new words stacked (the line grew to ${maxH}, from ${h0} to ${h1})`);
+          if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion ${motion}: the new words popped in (opacity ${J(ops.slice(0, 10))})`);
+          if (motion && new Set(ys).size < 3) v.push(`motion on: the new words didn't rise in (y ${J(ys.slice(0, 10))})`);
+          if (!motion && ys.some((y) => Math.abs(y) > 0.01)) v.push(`motion off: the new words moved (y ${J(ys.slice(0, 10))})`);
+        }
+        await setSettings({ morphs: true, glows: false, liveWallpaperBehindAllTabs: true, workshopDownloadMode: "subscribe" });
+        await browseWs(SIGNED_IN); await openSide(0); await sleep(300);
+        l = await line();
+        const html = await js(`document.documentElement.className`);
+        if (!/bg-live/.test(html) || !/drop-shadow/.test(l.filter ?? "")) v.push(`bg-live: the line's words have no drop shadow (${J(l)}, ${html})`);
+        await shot("gethint-live");
+      } finally {
+        await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      }
+      return v;
+    });
+    // side:aboutTall — the Browse sidebar's About shows a long description tall (most read whole, ≥ 300 px in a 900 px window),
+    // never past 45 % of the window, scrolling inside past that. Shot steam-about-tall.png
+    await cell("side:aboutTall", async () => {
+      const v = [];
+      const DESC = Array.from({ length: 40 }, (_, i) => `Line ${i + 1} of a long Workshop description.`).join("\n");
+      await js(`localStorage.setItem("__probe_long_desc", ${J(DESC)}); true`);
+      try {
+        await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        for (const [w, hgt] of [[1400, 900], [1400, 560]]) {
+          win.setContentSize(w, hgt); await sleep(300);
+          await browseWs(); await openSide(0);
+          const r = await js(`(() => { const d = document.querySelector("${SIDE} .side-sec .desc"); if (!d) return null;
+            return { h: d.clientHeight, sh: d.scrollHeight, vh: innerHeight, ov: getComputedStyle(d).overflowY }; })()`);
+          console.log(`        ${w}x${hgt}: ${J(r)}`);
+          if (!r) { v.push(`${w}x${hgt}: no About text`); continue; }
+          if (r.sh <= r.h) { v.push(`${w}x${hgt}: the description fits whole — proved nothing`); continue; }
+          if (r.h > r.vh * 0.45 + 1) v.push(`${w}x${hgt}: the About text is ${r.h} px, past 45 % of the window (${r.vh})`);
+          if (hgt === 900 && r.h < 300) v.push(`${w}x${hgt}: the About text is only ${r.h} px tall`);
+          if (r.ov !== "auto") v.push(`${w}x${hgt}: the About text doesn't scroll inside (overflow ${r.ov})`);
+          if (hgt === 900) { await js(`document.querySelector("${SIDE} .side-sec .desc").scrollIntoView({ block: "center" }); true`); await sleep(200); await shot("about-tall"); }
+        }
+      } finally { await js(`localStorage.removeItem("__probe_long_desc"); true`); win.setContentSize(1400, 900); await sleep(200); }
       return v;
     });
     // ---- auto-import on: a subscribed Workshop item's Delete is Unsubscribe (views/Library.tsx doTrash) — the sidebar's tile
@@ -2161,7 +2274,9 @@ app.whenReady().then(async () => {
       if (motionOn) await shot("resub");
       const n0 = (await calls()).length;
       await page(`document.querySelector("${SIDE} [data-side-sub-btn=subscribe]")?.click();`); await sleep(400);
-      const got = (await calls()).slice(n0);
+      // the sidebar's own community reads (counts, creator, favourite state, asked once it settles) may land meanwhile: they
+      // read, they never act
+      const got = (await calls()).slice(n0).filter((c) => !/^\/workshop\/(counts|creator|comments)$/.test(c.p) && !(c.p === "/workshop/favorite" && c.m === "GET"));
       if (got.length !== 1 || got[0].p !== "/workshop/subscribe" || got[0].body?.workshopId !== "900000002" || got[0].body?.title !== "s2") v.push(`Subscribe posted ${J(got)}`);
       const sc = await libCard();
       if (sc?.state !== "subscribing") v.push(`while subscribing: ${J(sc)}`);
@@ -2311,6 +2426,37 @@ app.whenReady().then(async () => {
         if (c.length !== 1 || !/owner=76561190000000007/.test(c[0].q)) v.push(`creator asked ${c.length}× (${J(c)}), want once with the item's owner`);
         const name = await js(`document.querySelector("${ROW} [data-ws-creator-name]")?.textContent`);
         if (name !== "Probe Creator") v.push(`the row says ${J(name)}`);
+        // "All their wallpapers" is an icon chip at the row's end (lucide images), said by its tooltip and the row's name
+        const go = await js(`(() => { const r = document.querySelector(${J(ROW)}), g = r?.querySelector("[data-ws-creator-go]"); if (!g) return null;
+          const sv = g.querySelector("svg"), gr = g.getBoundingClientRect(), rr = r.getBoundingClientRect();
+          return { text: g.textContent.trim(), icon: [...(sv?.classList ?? [])].find((c) => c.startsWith("lucide-") && c !== "lucide") ?? null, title: g.getAttribute("title"),
+            label: r.getAttribute("aria-label"), words: r.textContent.includes("All their wallpapers"), w: gr.width, h: gr.height, endGap: +(rr.right - gr.right).toFixed(1),
+            m: sv ? (() => { const b = sv.getBoundingClientRect(); return [b.left - gr.left, gr.right - b.right, b.top - gr.top, gr.bottom - b.bottom, b.width, b.height].map((x) => +x.toFixed(2)); })() : null }; })()`);
+        console.log(`        the row's end: ${J(go)}`);
+        if (!go) v.push("the row's end has no icon chip ([data-ws-creator-go])");
+        else {
+          if (go.text || go.words) v.push(`"All their wallpapers" is still words in the row (${J(go)})`);
+          if (go.icon !== "lucide-images") v.push(`the chip's icon is ${go.icon} (want lucide-images)`);
+          if (go.title !== "All their wallpapers") v.push(`the chip's tooltip reads ${J(go.title)}`);
+          if (!/^All their wallpapers, made by Probe Creator$/.test(go.label ?? "")) v.push(`the row's name reads ${J(go.label)}`);
+          if (go.endGap > 14) v.push(`the chip isn't at the row's end (${go.endGap} px short)`);
+          // its glyph centred: whole-pixel size and equal whole-pixel margins (design.md § Controls; probe-icons never opens a
+          // Workshop sidebar, so it is judged here)
+          const [ml, mr, mt, mb, gw, gh] = go.m ?? [];
+          if (!go.m || [ml, mr, mt, mb, gw, gh].some((x) => Math.abs(x - Math.round(x)) > 0.05) || Math.abs(ml - mr) > 0.05 || Math.abs(mt - mb) > 0.05)
+            v.push(`the chip's glyph isn't centred on whole pixels (left, right, top, bottom margins, size: ${J(go.m)})`);
+        }
+        // its icon: the object tilt while the row is hovered (motion on: on the spring, per frame; off: stays still)
+        await mvTo(3, 3, 300);
+        const rb = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+        const tilt = frames("", `(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector("${ROW} [data-ws-creator-go] svg")).transform); return +(Math.atan2(m.b, m.a) * 180 / Math.PI).toFixed(2); })()`, 600);
+        await sleep(30); await mvTo(rb.x, rb.y);
+        if (motion) { await sleep(90); await shot("ws-creator-go"); }
+        const ang = (await tilt).filter((x) => x != null);
+        console.log(`        the icon's turn per frame: ${J(ang.slice(0, 14))}`);
+        if (motion && (Math.abs(ang.at(-1)) < 3 || between(ang, 0.5) < 3)) v.push(`motion on: the icon didn't tilt on the spring (${J(ang.slice(0, 14))})`);
+        if (!motion && ang.some((a) => Math.abs(a) > 0.01)) v.push(`motion off: the icon turned (${J(ang.slice(0, 14))})`);
+        await mvTo(3, 3, 200);
         if (libThumb && !(await waitFor(() => js(`document.querySelector("${ROW} [data-ws-avatar]")?.dataset.wsAvatar === "loaded"`), 3000))) v.push("the avatar never loaded");
         const src = await js(`document.querySelector("${ROW} img")?.src ?? ""`);
         const api = await js(`location.origin`);
@@ -2322,8 +2468,9 @@ app.whenReady().then(async () => {
           await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000); await sleep(300);
           const rr = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
           await mvTo(rr.x, rr.y, 400);
-          const lk = await looks(ROW);
-          console.log(`        no-glow + bg-live: ${J(lk)}`);
+          const lk = await looks(ROW), chip = await looks(`${ROW} [data-ws-creator-go]`);
+          console.log(`        no-glow + bg-live: ${J(lk)} chip ${J(chip)}`);
+          if (!chip || /rgba\(0, 0, 0, 0\)|transparent/.test(chip.bg)) v.push(`bg-live: the chip has no fill of its own (${chip?.bg})`);
           if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
           if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the creator row has no fill of its own (${lk.bg})`);
           if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the hovered row glows (${lk.shadow})`);
@@ -2376,84 +2523,42 @@ app.whenReady().then(async () => {
       });
     }
 
-    // ws:creatorCopy[Off] — the creator's name copies: hidden at rest, its Copy (the row's sibling) appears on the row's hover
-    // at the end of the "Made by" line, clear of the name (on: rises in per frame; Off: fades in place); a real click puts the (long) name on the
-    // clipboard and reads "Copied", asking for no list and leaving the sidebar open; a drag across the name selects it and
-    // lists nothing. On: no glow under no-glow, a fill of its own under bg-live. Shots steam-ws-creatorcopy*.png
-    for (const motion of [true, false]) {
-      await cell(`ws:creatorCopy${motion ? "" : "Off"}`, async () => {
-        const v = [];
-        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
-        // a name long enough to run under where the Copy floats
-        const NM = "Probe Creator With A Rather Long Steam Name";
-        await browseWs(); await W({ avatar: libThumb, creator: { steamId: "76561190000000007", name: NM, avatar: libThumb } }); await mvTo(3, 3); await openSide(0);
-        const ROW = `${SIDE} [data-ws-creator]`, CP = `${SIDE} .ws-creator-row > .side-copy`, NAME = `${ROW} [data-ws-creator-name]`, BY = `${ROW} .ws-creator-by`;
-        if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
-        await sleep(300);
-        const geo = () => js(`(() => { const c = document.querySelector(${J(CP)}), n = document.querySelector(${J(NAME)}), r = document.querySelector(${J(ROW)}); if (!c || !n) return null;
-          const R = (e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
-          // the name's letters: a Range's box (the line box is taller than the glyphs)
-          const rg = document.createRange(); rg.selectNodeContents(n); const gl = R(rg);
-          return { c: R(c), n: R(n), gl, by: R(document.querySelector(${J(BY)})), row: R(r), op: +getComputedStyle(c).opacity, copied: c.hasAttribute("data-copied"), label: c.getAttribute("aria-label") }; })()`);
-        const g0 = await geo();
-        if (!g0) return ["no Copy beside the creator's name"];
-        if (g0.op > 0.02) v.push(`at rest the creator's Copy shows (opacity ${g0.op})`);
-        const smp = js(MO.SAMPLE({ c: CP }, 600)); await sleep(40);
-        await mvTo(g0.row.x + 50, g0.row.y + g0.row.h / 2);
-        await sleep(motion ? 110 : 50); await shot(`ws-creatorcopy-in${motion ? "" : "-off"}`);
-        const fr = (await smp).c;
-        if (motion) {
-          const ops = fr.map((f) => f[1]).filter((x) => x != null), ys = fr.filter((f) => f[1] != null && f[1] > 0.02).map((f) => f[3]);
-          if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`the Copy popped in (opacities ${J(ops.slice(0, 8))})`);
-          if (!(ys.length > 2 && Math.max(...ys) - Math.min(...ys) > 1)) v.push(`the Copy didn't rise in (y ${J(ys.slice(0, 8))})`);
-        } else v.push(...MO.judge("motion off: the creator's Copy appearing", fr, { appear: true }));
-        const g1 = await geo();
-        if (g1.op < 0.95) v.push(`hovering the row, the Copy is at opacity ${g1.op}`);
-        const br = g1.by.x + g1.by.w, bc = g1.by.y + g1.by.h / 2, cr = g1.c.x + g1.c.w, cc = g1.c.y + g1.c.h / 2;
-        if (Math.abs(cr - br) > 1.5 || cc < g1.by.y || cc > g1.by.y + g1.by.h) v.push(`the Copy isn't on the end of the "Made by" line (Copy right ${cr.toFixed(1)} / centre ${cc.toFixed(1)}, line ${br.toFixed(1)} / ${bc.toFixed(1)})`);
-        // "Ink" of the name's letters: the Range box spans the font's ascent; its upper ~15 % holds no glyph
-        const inkTop = g1.gl.y + g1.gl.h * 0.15;
-        if (g1.c.x > g1.gl.x + g1.gl.w) v.push(`the name ends before the Copy (x ${(g1.gl.x + g1.gl.w).toFixed(1)} < ${g1.c.x.toFixed(1)}) — its letters can't be covered: proved nothing`);
-        else if (g1.c.y + g1.c.h > inkTop) v.push(`the Copy covers the name's letters (its bottom ${(g1.c.y + g1.c.h).toFixed(1)}, the letters from ${inkTop.toFixed(1)}, x to ${(g1.gl.x + g1.gl.w).toFixed(1)})`);
-        if (g1.c.x + g1.c.w > g1.row.x + g1.row.w || g1.c.y < g1.row.y || g1.c.y + g1.c.h > g1.row.y + g1.row.h) v.push(`the Copy sticks out of the row (${J(g1.c)} vs ${J(g1.row)})`);
-        if (motion) {
-          await mvTo(cr - g1.c.w / 2, cc, 350);
-          const lk = await js(`(async () => { const c = document.querySelector(${J(CP)}), root = document.documentElement, s = (ms) => new Promise((r) => setTimeout(r, ms));
-            const g = getComputedStyle(c).boxShadow; root.classList.add("no-glow"); await s(250); const ng = getComputedStyle(c).boxShadow; root.classList.remove("no-glow");
-            root.classList.add("bg-live"); await s(250); const bg = getComputedStyle(c).backgroundColor; return { g, ng, bg }; })()`);
-          await shot("ws-creatorcopy-bglive"); await js(`document.documentElement.classList.remove("bg-live"); true`);
-          console.log(`        ${J(lk)}`);
-          if (!/rgb/.test(lk.g)) v.push(`the hovered Copy doesn't glow (${lk.g})`);
-          if (/rgb/.test(lk.ng) && !/rgba\(0, 0, 0/.test(lk.ng)) v.push(`no-glow: the hovered Copy glows (${lk.ng})`);
-          const a = /\/\s*([\d.]+)\s*\)/.exec(lk.bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(lk.bg)?.[1] ?? "1";
-          if (+a < 0.8) v.push(`bg-live: the Copy's fill is too see-through over the name (${lk.bg})`);
-        }
-        // a real click on it
-        const nb = (await browses()).length;
-        clipboard.writeText("");
-        await clickAt(cr - g1.c.w / 2, cc); await sleep(150);
-        if (motion) await shot("ws-creatorcopy-copied");
-        const g2 = await geo();
-        if (clipboard.readText() !== NM) v.push(`the clipboard holds ${J(clipboard.readText())}, want ${J(NM)}`);
-        if (!g2?.copied) v.push("the Copy didn't turn into \"Copied\"");
-        await sleep(400);
-        if ((await browses()).slice(nb).some((b) => b.list)) v.push("the Copy's click listed the creator's wallpapers");
-        if (!(await js(`!!document.querySelector(${J(SIDE)})`))) v.push("the Copy's click closed the sidebar");
-        // a drag across the name selects it, lists nothing
-        await js(`getSelection().removeAllRanges(); true`);
-        const y = g2.n.y + g2.n.h / 2;
-        send({ type: "mouseDown", x: Math.round(g2.n.x + 1), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
-        for (let i = 1; i <= 6; i++) { send({ type: "mouseMove", x: Math.round(g2.n.x + 1 + i * 14), y: Math.round(y), button: "left" }); await sleep(20); }
-        send({ type: "mouseUp", x: Math.round(g2.n.x + 85), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(500);
-        const sel = await js(`getSelection().toString()`);
-        console.log(`        dragged: ${J(sel)}`);
-        if (sel.trim().length < 3 || !NM.startsWith(sel.trim())) v.push(`a drag across the name selected ${J(sel)}`);
-        if ((await browses()).slice(nb).some((b) => b.list)) v.push("the drag across the name listed the creator's wallpapers");
-        await js(`getSelection().removeAllRanges(); true`); await mvTo(3, 3);
-        await setSettings({ morphs: true });
-        return v;
-      });
-    }
+    // ws:creatorSelect — the creator's name is selectable text, the way to copy it: no Copy beside it, at rest or with the row
+    // hovered; a real drag across the (long) name selects it and lists nothing, the sidebar stays; Ctrl+C then puts the
+    // selection on the clipboard; a plain click on the row still lists their wallpapers (ws:creator). Shot steam-ws-creatorselect.png
+    await cell("ws:creatorSelect", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      const NM = "Probe Creator With A Rather Long Steam Name";
+      await browseWs(); await W({ avatar: libThumb, creator: { steamId: "76561190000000007", name: NM, avatar: libThumb } }); await mvTo(3, 3); await openSide(0);
+      const ROW = `${SIDE} [data-ws-creator]`, NAME = `${ROW} [data-ws-creator-name]`;
+      if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
+      await sleep(300);
+      const copies = () => js(`document.querySelector(${J(ROW)}).parentElement.querySelectorAll(".side-copy, [data-copy], .copy-btn").length`);
+      if (await copies()) v.push("a Copy sits beside the creator's name");
+      const n = await js(`(() => { const e = document.querySelector(${J(NAME)}), b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, us: getComputedStyle(e).userSelect }; })()`);
+      await mvTo(n.x + 20, n.y + n.h / 2, 300);
+      if (await copies()) v.push("hovering the row shows a Copy");
+      if (n.us !== "text") v.push(`the name isn't selectable (user-select ${n.us})`);
+      const nb = (await browses()).length;
+      await js(`getSelection().removeAllRanges(); true`);
+      const y = n.y + n.h / 2;
+      send({ type: "mouseDown", x: Math.round(n.x + 1), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
+      for (let i = 1; i <= 6; i++) { send({ type: "mouseMove", x: Math.round(n.x + 1 + i * 14), y: Math.round(y), button: "left" }); await sleep(20); }
+      send({ type: "mouseUp", x: Math.round(n.x + 85), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(500);
+      const sel = await js(`getSelection().toString()`);
+      console.log(`        dragged: ${J(sel)}`);
+      await shot("ws-creatorselect");
+      if (sel.trim().length < 3 || !NM.startsWith(sel.trim())) v.push(`a drag across the name selected ${J(sel)}`);
+      clipboard.writeText("");
+      send({ type: "keyDown", keyCode: "C", modifiers: ["control"] }); send({ type: "keyUp", keyCode: "C", modifiers: ["control"] }); await sleep(250);
+      if (sel.trim().length >= 3 && clipboard.readText() !== sel) v.push(`Ctrl+C put ${J(clipboard.readText())} on the clipboard, want ${J(sel)}`);
+      await sleep(300);
+      if ((await browses()).slice(nb).some((b) => b.list)) v.push("the drag across the name listed the creator's wallpapers");
+      if (!(await js(`!!document.querySelector(${J(SIDE)})`))) v.push("the drag closed the sidebar");
+      await js(`getSelection().removeAllRanges(); true`); await mvTo(3, 3);
+      return v;
+    });
 
     // Browse's long titles: the first Workshop item named far past two lines (the page's stub, __probe_long_title)
     const LONG_T = "An extremely long Workshop wallpaper title that goes on well past the two lines a card and the sidebar's head show";
@@ -2462,15 +2567,16 @@ app.whenReady().then(async () => {
       try { return await fn(); } finally { await js(`localStorage.removeItem("__probe_long_title"); true`).catch(() => {}); await mvTo(3, 3); }
     };
     // side:browseTitle — the Browse sidebar's title: folded (a button, aria-expanded false, two lines), a real click unfolds it to
-    // the whole title and another folds it; its Copy, hovered and clicked, puts the whole title on the clipboard. Shot steam-browsetitle-open.png
+    // the whole title and another folds it; no Copy in the head: a drag selects its words without unfolding it and Ctrl+C
+    // copies them. Shot steam-browsetitle-open.png
     await cell("side:browseTitle", async () => withLongBrowse(async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       await browseWs(); await openSide(0);
       const T0 = `${SIDE} [data-side-title]`;
-      const st = () => js(`(() => { const t = document.querySelector(${J(T0)}); if (!t) return null; const r = t.getBoundingClientRect(), h = t.closest("h2").getBoundingClientRect(), c = t.closest(".side-title").querySelector(".side-copy");
-        const cr = c?.getBoundingClientRect(); return { x: r.x, y: r.y, hh: h.height, lh: parseFloat(getComputedStyle(t).lineHeight), exp: t.getAttribute("aria-expanded"), text: t.textContent,
-          c: cr ? { x: cr.x + cr.width / 2, y: cr.y + cr.height / 2 } : null, copied: !!c?.hasAttribute("data-copied") }; })()`);
+      const st = () => js(`(() => { const t = document.querySelector(${J(T0)}); if (!t) return null; const r = t.getBoundingClientRect(), h = t.closest("h2").getBoundingClientRect();
+        return { x: r.x, y: r.y, hh: h.height, lh: parseFloat(getComputedStyle(t).lineHeight), exp: t.getAttribute("aria-expanded"), text: t.textContent,
+          copies: t.closest(".side-head").querySelectorAll(".side-copy, [data-copy], .copy-btn").length }; })()`);
       const s0 = await st();
       if (!s0) return ["no Browse sidebar title"];
       if (s0.text !== LONG_T) return [`the sidebar shows ${J(s0.text)} — proved nothing`];
@@ -2482,11 +2588,19 @@ app.whenReady().then(async () => {
       const s2 = await st();
       if (s2.exp !== "false" || Math.abs(s2.hh - 2 * s2.lh) > 1) v.push(`another click didn't fold it: ${J({ exp: s2.exp, hh: s2.hh })}`);
       await mvTo(s2.x + 40, s2.y + 10, 350);
-      const s3 = await st();
+      if ((await st()).copies) v.push("the Browse sidebar's head has a Copy button");
+      await js(`getSelection().removeAllRanges(); true`);
+      const y = s2.y + s2.lh / 2;
+      send({ type: "mouseDown", x: Math.round(s2.x + 3), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
+      for (let i = 1; i <= 6; i++) { send({ type: "mouseMove", x: Math.round(s2.x + 3 + i * 25), y: Math.round(y), button: "left" }); await sleep(20); }
+      send({ type: "mouseUp", x: Math.round(s2.x + 153), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(500);
+      const sel = await js(`getSelection().toString()`);
+      if (sel.length < 4 || !LONG_T.startsWith(sel.trim().slice(0, 4))) v.push(`a drag across the title selected ${J(sel)}`);
+      if ((await st()).exp !== "false") v.push("the drag that selected words unfolded the title");
       clipboard.writeText("");
-      await clickAt(s3.c.x, s3.c.y); await sleep(200);
-      if (clipboard.readText() !== LONG_T) v.push(`the title's Copy put ${J(clipboard.readText().slice(0, 50))} on the clipboard`);
-      if (!(await st()).copied) v.push("the title's Copy didn't read \"Copied\"");
+      send({ type: "keyDown", keyCode: "C", modifiers: ["control"] }); send({ type: "keyUp", keyCode: "C", modifiers: ["control"] }); await sleep(250);
+      if (sel.length >= 4 && clipboard.readText() !== sel) v.push(`Ctrl+C put ${J(clipboard.readText().slice(0, 50))} on the clipboard, want the selection`);
+      await js(`getSelection().removeAllRanges(); true`);
       return v;
     }));
 
@@ -2652,6 +2766,45 @@ app.whenReady().then(async () => {
       });
     }
 
+    // ws:commentSelect — a comment's text and its commenter's name are selectable text (a real drag selects each); a comment's
+    // date says its own year (never 1970), and one Steam gave no time for shows none. Shot steam-ws-commentselect.png
+    await cell("ws:commentSelect", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      const OLD = Math.floor(new Date(2025, 2, 7, 12).getTime() / 1000);
+      const LIST = [{ id: "s1", author: "Selectable Commenter Name", authorId: "76561190000000201", avatar: null, time: Math.floor(Date.now() / 1000) - 7200, text: "a comment whose words can be selected" },
+        { id: "s2", author: "an old one", authorId: "76561190000000202", avatar: null, time: OLD, text: "from March 2025" },
+        { id: "s3", author: "no time", authorId: "76561190000000203", avatar: null, time: 0, text: "Steam gave no time" }];
+      await browseWs(); await W({ comments: LIST, signedIn: false }); await openSide(0);
+      const SEC = `${SIDE} [data-ws-comments]`;
+      await scrollSideTo(SEC);
+      if (!(await waitFor(() => js(`document.querySelectorAll("${SEC} .ws-c").length === 3`), 3000))) return ["the three comments never showed"];
+      await sleep(400);
+      const times = await js(`[...document.querySelectorAll("${SEC} .ws-c")].map((c) => c.querySelector(".ws-c-time")?.textContent ?? null)`);
+      console.log(`        times: ${J(times)}`);
+      if (!/2025/.test(times[1] ?? "")) v.push(`the old comment's date reads ${J(times[1])} (want its year)`);
+      if (times.some((t) => /1970/.test(t ?? ""))) v.push(`a date reads 1970 (${J(times)})`);
+      if (times[2] != null) v.push(`a comment with no time shows ${J(times[2])}`);
+      const drag = async (sel, want) => {
+        const b = await js(`(() => { const e = document.querySelector(${J(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, h: r.height, us: getComputedStyle(e).userSelect }; })()`);
+        if (!b) return v.push(`no ${sel}`);
+        if (b.us !== "text") v.push(`${sel}: not selectable (user-select ${b.us})`);
+        await js(`getSelection().removeAllRanges(); true`);
+        const y = b.y + Math.min(b.h, 16) / 2;
+        send({ type: "mouseDown", x: Math.round(b.x + 1), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(40);
+        for (let i = 1; i <= 5; i++) { send({ type: "mouseMove", x: Math.round(b.x + 1 + i * 14), y: Math.round(y), button: "left" }); await sleep(20); }
+        send({ type: "mouseUp", x: Math.round(b.x + 71), y: Math.round(y), button: "left", clickCount: 1 }); await sleep(400);
+        const got = await js(`getSelection().toString()`);
+        console.log(`        ${sel.split(" ").at(-1)}: dragged ${J(got)}`);
+        if (got.trim().length < 3 || !want.startsWith(got.trim())) v.push(`a drag across ${sel.split(" ").at(-1)} selected ${J(got)}`);
+      };
+      await drag(`${SEC} [data-ws-comment="s1"] [data-ws-c-name]`, "Selectable Commenter Name");
+      await shot("ws-commentselect");
+      await drag(`${SEC} [data-ws-comment="s1"] [data-ws-text]`, "a comment whose words can be selected");
+      await js(`getSelection().removeAllRanges(); true`);
+      return v;
+    });
+
     // posting: signed in, the box posts the text as typed; the new comment drops in on top, the box empties; Steam's refusal
     // shows its words under the box
     await cell("ws:commentPost", async () => {
@@ -2712,16 +2865,17 @@ app.whenReady().then(async () => {
     // scene properties — and every Library item's size on disk (LibrarySide.tsx). The stack's scenes s1..s3 are Workshop copies
     // (workshop/<id>); its empty CM fixture marks every id off the Workshop, so __probe_lib_off names the only ones that are.
     // Shots steam-libws*.png
-    const libWs = async ({ off = [], nosize = [] } = {}, ws = {}) => {
-      await js(`localStorage.setItem("__probe_lib_sub", "{}"); localStorage.setItem("__probe_lib_off", ${J(J(off))}); localStorage.setItem("__probe_lib_nosize", ${J(J(nosize))}); true`);
+    const libWs = async ({ off = [], nosize = [], wsOf = {} } = {}, ws = {}) => {
+      await js(`localStorage.setItem("__probe_lib_sub", "{}"); localStorage.setItem("__probe_lib_off", ${J(J(off))}); localStorage.setItem("__probe_lib_nosize", ${J(J(nosize))});
+        localStorage.setItem("__probe_lib_ws", ${J(J(wsOf))}); true`);
       await load(SIGNED_OUT);
       await W(ws);
     };
     const libWsDone = async () => {
-      await js(`for (const k of ["__probe_lib_sub", "__probe_lib_off", "__probe_lib_nosize"]) localStorage.removeItem(k); true`);
+      await js(`for (const k of ["__probe_lib_sub", "__probe_lib_off", "__probe_lib_nosize", "__probe_lib_ws"]) localStorage.removeItem(k); true`);
       win.setContentSize(1400, 900); await sleep(200);
     };
-    // openLib, waiting on the title's own text (the sidebar head's text also holds its Copy's words): back as soon as it shows
+    // openLib, waiting on the title's own text: back as soon as it shows
     const openLibWs = async (t) => {
       await tab("Library");
       return page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="${t}"]'));
@@ -2735,13 +2889,14 @@ app.whenReady().then(async () => {
       return { stats: q("[data-ws-stats]"), creator: q(".ws-creator-row"), fav: q("[data-ws-fav]"), comments: q("[data-ws-comments]") }; })()`;
     const BODY_ORDER = `(() => { const b = document.querySelector("${SIDE} .side-body"); if (!b) return null; const kids = [...b.children], at = (f) => kids.findIndex(f);
       return { n: kids.length, playback: at((k) => k.matches('[data-sec="playback"]')), props: at((k) => k.matches("[data-scene-props]")),
+        hero: at((k) => k.matches(".side-hero")), statsInHero: !!b.querySelector(":scope > .side-hero > [data-ws-stats]"),
         stats: at((k) => k.matches("[data-ws-stats]")), creator: at((k) => k.matches(".ws-creator-row")),
         fav: at((k) => k.matches(".side-tiles") && !!k.querySelector("[data-ws-fav]")), comments: at((k) => k.matches("[data-ws-comments]")),
         gaps: kids.slice(1).map((k, i) => +(k.getBoundingClientRect().top - kids[i].getBoundingClientRect().bottom).toFixed(1)) }; })()`;
 
-    // lib:ws:order — a Workshop item's Library sidebar: after the Playback card and the scene properties come its counts, the
-    // creator, the favourite and the comments, last, in the body's rhythm (12 px apart); none of them for an item the Workshop no
-    // longer has, a non-Workshop item, or a multi-selection. Shot steam-libws.png
+    // lib:ws:order — a Workshop item's Library sidebar: its counts in the hero row, the creator right under it (as in Browse),
+    // and after the Playback card and the scene properties the favourite and the comments, last, in the body's rhythm (12 px
+    // apart); none of them for an item the Workshop no longer has, a non-Workshop item, or a multi-selection. Shot steam-libws.png
     await cell("lib:ws:order", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, settingsLevel: "standard" });
@@ -2752,10 +2907,11 @@ app.whenReady().then(async () => {
         const o = await js(BODY_ORDER);
         console.log(`        s1: ${J(o)}`);
         if (!o || o.props < 0) return ["s1's sidebar shows no scene properties — proved nothing"];
-        if (!(o.playback >= 0 && o.playback < o.props && o.props < o.stats && o.stats + 1 === o.creator && o.creator + 1 === o.fav && o.fav + 1 === o.comments && o.comments === o.n - 1))
-          v.push(`the order: ${J(o)} (want Playback, the scene properties, then the counts, the creator, the favourite and the comments, last)`);
-        for (let i = Math.max(o.props, 0); i < o.n - 1; i++) if (Math.abs(o.gaps[i] - 12) > 0.75) v.push(`blocks ${i} → ${i + 1}: ${o.gaps[i]} px apart (want the body's 12)`);
-        await scrollSideTo(`${SIDE} [data-ws-stats]`); await sleep(300); await shot("libws");
+        if (!(o.hero === 0 && o.statsInHero && o.creator === 1 && o.playback > o.creator && o.playback < o.props && o.props < o.fav && o.fav + 1 === o.comments && o.comments === o.n - 1))
+          v.push(`the order: ${J(o)} (want the counts in the hero row, the creator under it, then Playback, the scene properties, the favourite and the comments, last)`);
+        for (const i of [0, ...Array.from({ length: Math.max(0, o.n - 1 - Math.max(o.props, 0)) }, (_, k) => Math.max(o.props, 0) + k)])
+          if (Math.abs(o.gaps[i] - 12) > 0.75) v.push(`blocks ${i} → ${i + 1}: ${o.gaps[i]} px apart (want the body's 12)`);
+        await shot("libws");
         const plain = await plainTitle();
         for (const t of ["s3", plain]) {
           if (!t || !(await openLibWs(t))) { v.push(`no sidebar for ${t}`); continue; }
@@ -2774,6 +2930,45 @@ app.whenReady().then(async () => {
         const multi = await page(`return { sel: document.querySelectorAll(".card.lib.selected").length, title: document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null };`);
         if (multi.sel !== 2 || multi.title !== "s1") v.push(`the multi-selection didn't happen: ${J(multi)} — proved nothing`);
         else { await sleep(700); const w = await js(WS_PARTS); if (Object.values(w).some((x) => x)) v.push(`a multi-selection shows Workshop pieces: ${J(w)}`); }
+      } finally { await libWsDone(); }
+      return v;
+    });
+
+    // lib:ws:pillRow — the counts are hero pills: for a Workshop scene (s1) and a Workshop video (a plain item given an id), the
+    // subscribers and favourites pills sit in the hero row beside the others (inside its box, on a line another hero pill
+    // shares) before the size, which stays last; the creator row comes right under the hero; both above the Playback card.
+    // Shots steam-libws-pillrow*.png
+    await cell("lib:ws:pillRow", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, settingsLevel: "standard" });
+      const plain = (((await http("GET", "/library")).json ?? []).find((i) => !i.workshopId && !i.isScene) ?? {}).title;
+      if (!plain) return ["no plain video in the library — proved nothing"];
+      await libWs({ wsOf: { [plain]: "900000077" } }, { avatar: libThumb });
+      try {
+        for (const t of ["s1", plain]) {
+          if (!(await openLibWs(t))) { v.push(`no sidebar for ${t}`); continue; }
+          await sleep(1200);
+          const r = await js(`(() => { const b = document.querySelector("${SIDE} .side-body"), h = b?.querySelector(":scope > .side-hero"); if (!h) return null;
+            const R = (e) => { const x = e.getBoundingClientRect(); return { x: +x.x.toFixed(1), y: +x.y.toFixed(1), w: +x.width.toFixed(1), h: +x.height.toFixed(1) }; };
+            const subs = h.querySelector("[data-side-stat=subscribers]"), favs = h.querySelector("[data-side-stat=favorites]");
+            const others = [...h.querySelectorAll(".side-pill, .side-chip")].filter((e) => !e.closest("[data-ws-stats]") && getComputedStyle(e).visibility !== "hidden").map(R);
+            const pb = b.querySelector('[data-sec="playback"]'), cr = b.querySelector(":scope > .ws-creator-row");
+            return { hero: R(h), subs: subs && R(subs), favs: favs && R(favs), others, last: h.lastElementChild?.dataset.sideRow ?? null,
+              known: h.querySelector("[data-ws-stats]")?.dataset.wsStats ?? null, creatorNext: h.nextElementSibling === cr, creator: cr && R(cr), playback: pb && R(pb),
+              loose: b.querySelectorAll(":scope > [data-ws-stats]").length }; })()`);
+          console.log(`        ${t}: ${J(r)}`);
+          if (!r) { v.push(`${t}: no hero row`); continue; }
+          if (!r.subs || !r.favs) { v.push(`${t}: the counts aren't in the hero row (${J({ subs: r.subs, favs: r.favs, loose: r.loose })})`); continue; }
+          if (r.known !== "known") v.push(`${t}: the counts never landed (${r.known})`);
+          for (const [k, p] of [["subscribers", r.subs], ["favourites", r.favs]]) {
+            if (p.x < r.hero.x - 0.5 || p.x + p.w > r.hero.x + r.hero.w + 0.5 || p.y < r.hero.y - 0.5 || p.y + p.h > r.hero.y + r.hero.h + 0.5) v.push(`${t}: the ${k} pill lies outside the hero row (${J(p)} vs ${J(r.hero)})`);
+            if (!r.others.some((o) => Math.abs(o.y + o.h / 2 - (p.y + p.h / 2)) < 1.5) && r.others.length) v.push(`${t}: the ${k} pill shares no line with the other pills (${J(p)})`);
+          }
+          if (r.last !== "size") v.push(`${t}: the hero's last pill is ${r.last} (want the size, last)`);
+          if (!r.creatorNext) v.push(`${t}: the creator row isn't right under the hero`);
+          if (!r.playback || !r.creator || r.creator.y > r.playback.y || r.subs.y > r.playback.y) v.push(`${t}: the counts / creator sit below Playback (${J({ creator: r.creator, playback: r.playback })})`);
+          await shot(t === "s1" ? "libws-pillrow" : "libws-pillrow-video");
+        }
       } finally { await libWsDone(); }
       return v;
     });
@@ -2827,10 +3022,21 @@ app.whenReady().then(async () => {
             await shot("libws-live"); await mvTo(3, 3);
             await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
           }
-          // no answer: no row, the rest stays
-          await libWs({}, { countsFail: true }); await openLibWs("s1"); await sleep(1000);
+          // no answer: the held pills leave, the size after them takes their room (motion on: glides there per frame; off: at
+          // once, nothing in between), the rest stays
+          await libWs({}, { countsFail: true, countsDelay: 1300 }); await openLibWs("s1"); await sleep(600);
+          const SZ = `${SIDE} .side-hero [data-side-row=size]`;
+          // its travel from where it was held: how far it has come, per frame (it may change lines)
+          const gx = frames("", `(() => { const e = document.querySelector(${J(SZ)}); if (!e) return null; const r = e.getBoundingClientRect();
+            window.__sz0 ??= [r.x, r.y]; return +Math.hypot(r.x - window.__sz0[0], r.y - window.__sz0[1]).toFixed(1); })()`, 1400);
+          const ds = (await gx).filter((x) => x != null); await js(`delete window.__sz0; true`);
+          const xs = ds.map((d) => -d);
           const w = await js(WS_PARTS);
-          if (w.stats || !w.creator) v.push(`Steam unreachable: ${J(w)} (want no counts row, the creator row still there)`);
+          console.log(`        Steam unreachable: ${J(w)}; the size's x per frame ${J([...new Set(xs)].slice(0, 10))}`);
+          if (w.stats || !w.creator) v.push(`Steam unreachable: ${J(w)} (want no counts, the creator row still there)`);
+          if (!xs.length || xs[0] - xs.at(-1) < 20) v.push(`Steam unreachable: the size didn't take the counts' room (x ${xs[0]} → ${xs.at(-1)}) — proved nothing`);
+          else if (motion && between(xs, 1) < 3) v.push(`motion on: the size jumped into the counts' room (x per frame ${J([...new Set(xs)].slice(0, 10))})`);
+          else if (!motion && between(xs, 1) > 0) v.push(`motion off: the size glided into the counts' room (x per frame ${J([...new Set(xs)].slice(0, 10))})`);
         } finally { await libWsDone(); }
         return v;
       });

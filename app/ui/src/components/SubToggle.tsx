@@ -74,6 +74,9 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
   const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
   // a Subscribe the mode can't do now (signed out, steamcmd): disabled the same way, its sub-line says why
   const subOff = useStore((s) => actionBlocked(s.settings, s.steam, "subscribe"));
+  // the Subscribe's hint says it subscribes only (the Browse sidebar's Download above subscribes too, then imports): with
+  // "Import new Workshop wallpapers" on the subscription reaches the library by itself. Guard: probe-steam side:getHint
+  const autoImport = useStore((s) => !!s.settings?.autoAddWeWallpapersToLibrary);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -145,7 +148,8 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
     : state === "subscribed" ? (st.inLibrary ? "Also removes it from your library; right-click keeps it" : "Steam keeps it up to date")
     : state === "unsubscribed" ? "Steam removes its folder soon"
     : subOff ? subOff
-    : st.inLibrary ? "Subscribe to let Steam keep it up to date" : "Subscribe without adding it to your library";
+    : st.inLibrary ? "Subscribe to let Steam keep it up to date"
+    : autoImport ? "Subscribe only, it joins your library once Steam has it" : "Subscribe only, without adding it to your library";
   const icon = state === "subscribed" ? <CloudCheck size={16} /> : pending ? <LoaderCircle size={16} className="side-sub-spin" /> : <CloudOff size={16} />;
   const off = st.subscribed ? !!unsubOff : !!subOff;
   const click = async () => {

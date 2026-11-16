@@ -40,13 +40,14 @@
 :root.kbd-nav :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 html, body, #root { margin: 0; height: 100%; }
 /* An app, not a page: a drag or Ctrl+A never highlights the chrome (tabs, pills, buttons, labels). Text worth copying opts
-   back in: what you type, the sidebar's title / author / values, error messages. Guard: probe-layout select:chrome. */
+   back in: what you type, the sidebar's title / author / values / comments and their names (the way to copy them: no Copy
+   buttons there), error messages. Guard: probe-layout select:chrome, probe-sidebar side:titleSelect, probe-steam ws:creatorSelect, ws:commentSelect. */
 body { user-select: none; -webkit-user-select: none; }
 /* nor does a picture drag off as a browser image: nothing in the app takes a drop, a drag that starts on a card does
    nothing (hooks/useMarquee.ts), and a native drag takes the pointer stream from the page while it runs.
    Guard: probe-select lib:fromCard, br:fromCard */
 img { -webkit-user-drag: none; }
-:is(input, textarea, [contenteditable="true"], .side-head-text, .side-val, .ws-creator-name, .err-text, .pw-err) { user-select: text; -webkit-user-select: text; }
+:is(input, textarea, [contenteditable="true"], .side-head-text, .side-val, .side-author-name, .ws-creator-name, .ws-c-name, .err-text, .pw-err) { user-select: text; -webkit-user-select: text; }
 body {
   /* Inter 14. */
   background: radial-gradient(120% 120% at 50% 0%, var(--bg-mantle), var(--bg-base) 60%);
@@ -1371,7 +1372,7 @@ input[type=range]:focus-visible { outline: none; }
   .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-msg, .st-name, .st-use,
   .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
   .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
-  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op, .ws-creator-go) { text-shadow: none; }
+  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op, .ws-creator-ico) { text-shadow: none; }
 /* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
    the same shadow as a filter instead, as bg-live does */
 :root.text-shadow .side-head-text { filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
@@ -1425,7 +1426,6 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel .xfade > * { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-title-ghost { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .side-panel .side-title-ghost.late { animation-delay: var(--fade-dur) !important; }
-:root.no-motion .side-panel .side-copy { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving,
 :root.no-motion .side-panel .side-wl.leaving { animation: nm-out var(--fade-dur) linear forwards !important; animation-delay: 0s !important; }
 :root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
@@ -1530,16 +1530,6 @@ input[type=range]:focus-visible { outline: none; }
 .side-title-ghost { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; user-select: none;
   animation: nm-out var(--fade-dur) linear forwards; }
 .side-title-ghost.late { animation-delay: var(--fade-dur); }
-/* Copy for the title and the creator's name (components/CopyButton.tsx): floats over the end of the title's last line / of the
-   creator's "Made by" line, shown while the text is hovered or the keyboard is on it, rising in a little (motion off: a
-   fade); a fuller fill than .mini's so the words under it don't show through. Guard: probe-sidebar side:titleCopy, probe-steam ws:creatorCopy */
-.side-copy { position: absolute; z-index: 1; height: 22px; padding: 0 7px; font-size: 11.5px; user-select: none; -webkit-user-select: none;
-  background: color-mix(in srgb, var(--surface0) var(--tr-strong), transparent); opacity: 0; translate: 0 4px; pointer-events: none;
-  transition: opacity .15s ease, translate var(--spring-soft-dur) var(--spring-soft), color .12s, box-shadow .2s; }
-.side-title > .side-copy { right: 0; bottom: 0; }
-:is(.side-title:hover, .side-title:has(:focus-visible), .ws-creator-row:hover, .ws-creator-row:has(:focus-visible)) > .side-copy {
-  opacity: 1; translate: none; pointer-events: auto; }
-:root.no-motion .side-copy { translate: none; transition: opacity var(--fade-dur) linear, color .12s, box-shadow .2s; }
 .side-sub { display: block; margin-top: 3px; }
 .side-head-tools { display: flex; gap: 6px; }
 .side-head-tools:empty { display: none; }
@@ -1701,6 +1691,11 @@ button.side-pill.copy { overflow: hidden; }
 .side-cta > .side-go[aria-disabled="true"]:is(:hover, :active) { transform: none; box-shadow: none; }
 .side-go[aria-disabled="true"]::after { animation: none !important; }
 .side-cta-why { flex: 1 0 100%; font-size: 11.5px; color: var(--subtext); line-height: 1.3; }
+/* the line under the download buttons: what they do in the chosen mode, or why they're off; one cell, so the leaving words
+   and the coming ones overlap while they swap; nothing in it, no line (BrowseSide.tsx) */
+.side-cta-note { flex: 1 0 100%; display: grid; }
+.side-cta-note > * { grid-area: 1 / 1; align-self: start; } /* each keeps its own height while they overlap */
+.side-cta-note:empty { display: none; }
 :root.bg-live .side-cta-why { filter: drop-shadow(0 0 3px #000); }
 .side-dl-ico { display: inline-grid; }
 .side-dl { flex: 1; display: flex; align-items: center; gap: 8px; }
@@ -1789,20 +1784,21 @@ button.side-pill.copy { overflow: hidden; }
 .ws-creator-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .ws-creator-by { font-size: 10.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--subtext); }
 .ws-creator-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
-/* the name's Copy (.side-copy) is the row's sibling (a button can't hold another), placed by anchor at the end of the short
-   "Made by" line above the name, so it covers none of the name (in a narrow panel it may cover the caption's end); a little
-   smaller and raised a little, so it stays clear of the name's letters */
-.ws-creator-by { anchor-name: --ws-by; }
-.ws-creator-row { position: relative; anchor-scope: --ws-by; }
-.ws-creator-row > .side-copy { position-anchor: --ws-by; right: anchor(right); top: anchor(center); height: 20px; margin-top: -12px; font-size: 11px; }
 .ws-creator.loading .ws-creator-name { opacity: .4; }
-.ws-creator-go { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--accent); }
-.ws-creator:disabled .ws-creator-go { visibility: hidden; }
+/* where a click goes, as an icon chip (lucide Images, its tooltip "All their wallpapers"): the accent's tint, fuller while the
+   row is hovered; the glyph whole-pixel centred (16 in 28). Guard: probe-steam ws:creator, probe-icons icon:centre:* */
+.ws-creator-ico { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent); transition: background .15s; }
+.ws-creator-ico > svg { display: block; }
+.ws-creator:hover:not(:disabled) .ws-creator-ico { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.ws-creator:disabled .ws-creator-ico { visibility: hidden; }
 /* the Library sidebar's size on disk, measured in the background: a late one fades in at the hero row's end (LibrarySide.tsx) */
 .side-hero > [data-side-row="size"]:last-child { animation: side-pill-in .28s ease-out; }
 @keyframes side-pill-in { from { opacity: 0; transform: translateY(4px); } }
-/* COOL: the Library sidebar's stat pills (WorkshopSocial.tsx WorkshopStats): held unseen while Steam is asked, then they fade
-   in where they stay, rising a little (motion off: only the fade, under the no-motion block). Guard: probe-steam lib:ws:counts */
+/* COOL: the Library sidebar's stat pills (WorkshopSocial.tsx WorkshopStats), in its hero row: held unseen while Steam is asked,
+   then they fade in where they stay, rising a little (motion off: only the fade, under the no-motion block).
+   Guard: probe-steam lib:ws:counts, lib:ws:pillRow */
+.ws-stats { display: contents; } /* its pills are the hero row's own items */
 .ws-stats > .side-pill { transition: opacity .28s ease-out, transform var(--spring-soft-dur) var(--spring-soft); }
 .ws-stats[data-ws-stats="loading"] > .side-pill { opacity: 0; transform: translateY(5px); }
 /* the comment thread (a .side-sec): each comment an avatar + its head (name, the creator's mark, when) + its plain text; they
@@ -1901,7 +1897,9 @@ button.side-pill.copy { overflow: hidden; }
 .side-line svg { color: var(--accent); }
 .side-line b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 .side-note { margin: 0 0 6px; }
-.side-sec .desc { margin: 0 0 8px; }
+/* the Browse sidebar's About: tall enough that most descriptions read whole, a long one scrolls inside (the window's height
+   bounds it so the buttons and the rest stay near). Guard: probe-steam side:aboutTall */
+.side-sec .desc { margin: 0 0 8px; max-height: min(360px, 45vh); }
 .side-sec .tags { margin: 4px 0 8px; }
 .side-wl { display: flex; margin: 2px 0 6px; }
 /* sliders: an accent-filled track up to the value (--fill, set inline: SidePanel.tsx rangeFill), a thumb that grows and glows on

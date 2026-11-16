@@ -24,18 +24,28 @@ const favs = new Set();                   // `${steamid}:${id}`
 let rateLimitNext = false;
 let n = 0;
 
-// Steam's own markup for a comment (the parts the backend reads), user text already escaped by Steam
+// Steam's own markup for a comment (the parts the backend reads, as the item page serves them), user text already escaped by
+// Steam: the avatar sits in the author line, under an avatar frame's picture when the commenter has one, and an empty
+// timestamp block comes before the one that carries the time
+const MINI = (c) => BigInt(c.author) - 76561197960265728n;
 const commentHtml = (c) => `
-<div class="commentthread_comment responsive_body_text   " id="comment_${c.id}" style="">
-  <div class="commentthread_comment_avatar playerAvatar online">
-    <a href="https://steamcommunity.com/profiles/${c.author}" data-miniprofile="${BigInt(c.author) - 76561197960265728n}">
-      <img src="${c.avatar}" srcset="${c.avatar} 1x"></a>
-  </div>
+<div data-panel="{&quot;flow-children&quot;:&quot;row&quot;}" class="commentthread_comment responsive_body_text   " id="comment_${c.id}" style="">
   <div class="commentthread_comment_content">
-    <div class="commentthread_comment_author">
-      <a class="hoverunderline commentthread_author_link" href="https://steamcommunity.com/profiles/${c.author}" data-miniprofile="${BigInt(c.author) - 76561197960265728n}">
-        <bdi>${c.name}</bdi></a>
-      <span class="commentthread_comment_timestamp" title="a date" data-timestamp="${c.time}">a while ago</span>
+    <div data-panel="{&quot;flow-children&quot;:&quot;row&quot;}" class="commentthread_comment_author">
+      <div class="commentthread_comment_avatar playerAvatar online">${c.frame ? `
+        <div class="profile_avatar_frame"><picture><source srcset="${c.frame}"></source><img src="${c.frame}"></picture></div>` : ""}
+        <a href="https://steamcommunity.com/profiles/${c.author}" data-miniprofile="${MINI(c)}">
+          <img src="${c.avatar}" srcset="${c.avatar} 1x"></a>
+      </div>
+      <div class="author_name_group">
+        <div class="flex_row">
+          <a class="hoverunderline commentthread_author_link" href="https://steamcommunity.com/profiles/${c.author}" data-miniprofile="${MINI(c)}">
+            <bdi>${c.name}</bdi></a>
+        </div>
+        <div class="commentthread_comment_timestamp">
+        </div>
+        <div class="commentthread_comment_timestamp" title="a date" data-timestamp="${c.time}">a while ago&nbsp;</div>
+      </div>
     </div>
     <div class="commentthread_comment_text" id="comment_content_${c.id}">
 \t\t\t\t${c.html}\t\t\t</div>
@@ -45,6 +55,7 @@ const commentHtml = (c) => `
 const comments = { [ITEM]: Array.from({ length: 23 }, (_, i) => ({
   id: String(900000 + 23 - i), author: String(76561198000000100n + BigInt(i)), name: i === 0 ? "Fan &amp; friend <i>x</i>" : `fan ${i}`,
   avatar: `https://avatars.example.invalid/${i}_medium.jpg`, time: 1790000000 - i * 3600,
+  frame: i === 0 ? "https://frames.example.invalid/frame.png" : null,
   html: i === 0
     ? `First line<br>second &lt;b&gt;line&lt;/b&gt; <script>window.__pwned=1</script><img src="x" onerror="window.__pwned=2"> <img class="emoticon" alt=":steamhappy:" src="https://e.invalid/e.png"> <a class="bb_link" href="https://steamcommunity.com/linkfilter/?u=https%3A%2F%2Fevil.invalid" onclick="x()">a link</a>`
     : `comment number ${23 - i}`,

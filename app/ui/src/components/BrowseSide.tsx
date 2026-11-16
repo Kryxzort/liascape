@@ -6,7 +6,7 @@ import { SideMedia, SideSection } from "./SidePanel";
 import { usePreview, useOnline } from "./sidePreview";
 import { useStore } from "../store";
 import { SubToggle } from "./SubToggle";
-import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
+import { actionBlocked, downloadHint, isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
 import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
@@ -14,7 +14,7 @@ import { WorkshopIdPill } from "./WorkshopIdPill";
 import { CommentsSection, CreatorRow, FavoriteTile } from "./WorkshopSocial";
 import { SizePill, StatPills } from "./sidePills";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
-import { menuAt, oneOffMenuItems } from "./menuItems";
+import { menuAt, oneOffMenuItem } from "./menuItems";
 import { FADE, useMotion } from "./motion";
 
 // how long an asked "Download without subscribing" route stays good when nothing it hangs on changed here (a settings change in
@@ -74,13 +74,20 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   // login"): both buttons disabled up front, the line under them says why; their right-click menu still opens (its entries say
   // their own). Guard: probe-steam side:blocked:download
   const getOff = useStore((s) => isWorkshopItem(w) ? actionBlocked(s.settings, s.steam, "download") : null);
+  // otherwise that line says what the buttons do in the chosen mode (components/subscribeMode.ts downloadHint): in three of
+  // the four modes they subscribe, which the subscription card under them must not seem to contradict
+  const getHint = useStore((s) => isWorkshopItem(w) ? downloadHint(s.settings) : null);
+  const mode = useStore((s) => s.settings?.workshopDownloadMode);
   const motionOn = useMotion();
-  // A Workshop item's download / subscribe buttons have a right-click menu (components/ContextMenu.tsx): "Download without
-  // subscribing" (+ "& apply"), a one-off copy that is never a subscription (menuItems.tsx oneOffMenuItems). How it would be
+  // A Workshop item's download / subscribe buttons have a right-click menu (components/ContextMenu.tsx) with the button's own
+  // one-off variant: Download's "Download without subscribing", "Download & Apply"'s "… & apply", a copy that stays no
+  // subscription (menuItems.tsx oneOffMenuItem; "Download then unsubscribe" where that is how it's done). How it would be
   // fetched (GET /workshop/one-off) is asked as the pointer reaches a button, so the menu opens with its answer: without a
-  // way, both entries are disabled and its note says what's missing. Guard: probe-steam side:oneOff:menu, side:oneOff:missing
+  // way, the entry is disabled and its note says what's missing. Guard: probe-steam side:oneOff:menu, side:oneOff:missing
   const oneOffable = isWorkshopItem(w);
   const [menu, setMenu] = useState<MenuAt | null>(null);
+  // the button whose menu is open (kept through the menu's fade out)
+  const [menuApply, setMenuApply] = useState(false);
   const [oneOff, setOneOff] = useState<OneOffRoute | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
   const menuFrom = useRef<HTMLButtonElement | null>(null);
@@ -99,12 +106,14 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
     onPointerEnter: () => { void askOneOff(); },
     onContextMenu: (e: MouseEvent<HTMLButtonElement>) => {
       e.preventDefault();
-      const at = menuAt(e);
+      const at = menuAt(e), apply = e.currentTarget.dataset.sideGet === "apply";
       menuFrom.current = e.currentTarget;
-      void askOneOff().then((r) => { setOneOff(r); setMenu(at); });
+      void askOneOff().then((r) => { setOneOff(r); setMenuApply(apply); setMenu(at); });
     },
   } : {};
   const missing = oneOff?.route ? null : oneOff?.missing ?? null;
+  const rise = motionOn ? { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 },
+    transition: { duration: 0.2, ease: [0.2, 0.9, 0.3, 1] as const } } : FADE;
   // the About card only for a description; tags alone sit in a plain row (a card for one property looks odd)
   const tags = sideTags(w.tags, { resolution: !!w.resolution });
   const tagRow = tags.length > 0 ? <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div> : null;
@@ -125,7 +134,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
           {/* Steam's current counts, the Library sidebar's own pills (components/sidePills.tsx). Guard: probe-steam ws:counts */}
           <StatPills subscriptions={w.subscriptions} favorites={w.favorites} />
           <SizePill bytes={w.fileSizeBytes} title="Size" />
-          {w.authorName && !w.workshopId && <span className="side-pill" title="Author"><User size={13} /> {w.authorName}</span>}
+          {/* the name is selectable text (index.css), the way to copy it */}
+          {w.authorName && !w.workshopId && <span className="side-pill" title="Author" data-side-author><User size={13} /> <span className="side-author-name">{w.authorName}</span></span>}
           {w.workshopId && <WorkshopIdPill id={w.workshopId} />}
         </div>
         {/* who made it — a click lists all of their wallpapers in Browse */}
@@ -146,18 +156,20 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
                 onClick={getOff ? undefined : () => onDownload(true)} {...getMenu}><span className="side-dl-ico"><GetIcon size={16} /></span> {subIsDownload ? "Subscribe" : "Download"} &amp; Apply</button>
               <button className="btn ghost ico side-go" data-side-get="only" aria-disabled={getOff ? true : undefined}
                 onClick={getOff ? undefined : () => onDownload(false)} {...getMenu}><span className="side-dl-ico"><GetIcon size={15} /></span> {subIsDownload ? "Subscribe" : "Download"}</button>
-              {/* COOL: the reason rises in under the buttons (motion off: fades), a sign-in turning it off live included */}
-              <AnimatePresence initial={false}>
-                {getOff && <motion.span key={getOff} className="side-cta-why" data-side-get-why
-                  {...(motionOn ? { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 },
-                    transition: { duration: 0.2, ease: [0.2, 0.9, 0.3, 1] as const } } : FADE)}>{getOff}</motion.span>}
-              </AnimatePresence>
+              {/* COOL: the reason rises in under the buttons (motion off: fades), a sign-in turning it off live included; it takes
+                  the place of what the buttons do, both in one cell (index.css .side-cta-note), so a swap never stacks them */}
+              <div className="side-cta-note">
+                <AnimatePresence initial={false}>
+                  {getOff ? <motion.span key={getOff} className="side-cta-why" data-side-get-why {...rise}>{getOff}</motion.span>
+                    : getHint && <motion.span key={getHint} className="side-cta-why" data-side-get-hint {...rise}>{getHint}</motion.span>}
+                </AnimatePresence>
+              </div>
             </>
           )}
         </div>
         {/* outside the buttons' branch: a pick starts the download, and the menu still fades out once they're gone */}
         {oneOffable && <ContextMenu at={menu} onClose={closeMenu} returnTo={menuFrom} label="Download" note={missing}
-          items={oneOffMenuItems((apply) => onDownload(apply, true), missing)} />}
+          items={[oneOffMenuItem(menuApply, mode, () => onDownload(menuApply, true), missing)]} />}
         {/* a Workshop item's subscription (Browse > Wallpaper Engine (Local) and (Workshop)) — Subscribe / Unsubscribe */}
         {w.workshopId && <SubToggle id={w.workshopId} title={w.title} weLocal={!web} only={subIsDownload ? "subscribed" : undefined} likely={!!libItem} />}
         {w.description ? (
