@@ -931,7 +931,7 @@ step_pause() {
 
 # ------------------------------------------------------------------ step 7 — soak
 # SOAK_MIN minutes on both real outputs: 2 videos, 2 synthetic scenes, 2 SFW scenes, a switch
-# every 30 s (out:*), methods and effects rotating. Bounds: compositor RSS slope ≤ 0.5 MiB/min
+# every 30 s (out:*), methods and effects rotating. Bounds: compositor RssAnon+VmSwap slope ≤ 0.5 MiB/min
 # (after a 10 min warm-up), live workers ≤ 2 (+ dying) at every sample, each scene worker's VRAM
 # flat ± 10 % across its plays, no worker after `ctl stop`.
 soak_sample() { # → one JSON line
@@ -939,12 +939,16 @@ soak_sample() { # → one JSON line
     rec=$(python3 - "$PLAYER_PID" <<'PY'
 import sys, json, subprocess
 pid = sys.argv[1]
-rss = hwm = None
+rss = hwm = anon = swap = None
 for line in open(f"/proc/{pid}/status"):
     if line.startswith("VmRSS:"): rss = int(line.split()[1])
     if line.startswith("VmHWM:"): hwm = int(line.split()[1])
+    if line.startswith("RssAnon:"): anon = int(line.split()[1])
+    if line.startswith("VmSwap:"): swap = int(line.split()[1])
+# VmRSS drops when pages swap out, hiding a leak; anon + swap does not. Both in kB.
+foot = anon + swap if anon is not None and swap is not None else None
 kids = subprocess.run(["pgrep", "-P", pid, "-x", "liascape-scene-worker"], capture_output=True, text=True).stdout.split()
-print(json.dumps({"rss_kib": rss, "hwm_kib": hwm, "worker_children": [int(k) for k in kids]}))
+print(json.dumps({"rss_kib": rss, "hwm_kib": hwm, "anon_kib": anon, "swap_kib": swap, "footprint_kib": foot, "worker_children": [int(k) for k in kids]}))
 PY
 )
     wj=$(workers_json); vj=$(ctl probe '{"name":"vram"}')
@@ -959,7 +963,7 @@ for line in sys.stdin:
 print(json.dumps(out))')
     [[ -n $smi ]] || smi='{}'
     jq -nc --argjson t "$1" --argjson r "$rec" --argjson w "$wj" --argjson v "$vj" --argjson smi "$smi" --argjson n "$2" \
-        '{t_s:$t, switches:$n, rss_kib:$r.rss_kib, hwm_kib:$r.hwm_kib, children:$r.worker_children,
+        '{t_s:$t, switches:$n, rss_kib:$r.rss_kib, hwm_kib:$r.hwm_kib, anon_kib:$r.anon_kib, swap_kib:$r.swap_kib, footprint_kib:$r.footprint_kib, children:$r.worker_children,
           workers:[$w.workers[] | {id, pid, path:(.path | split("/") | last), state}], reaping:$w.reaping,
           vram_procs:($v.sample.procs // null), vram_free:($v.sample.free_mib // null), smi:$smi}'
 }
@@ -1024,7 +1028,7 @@ def slope(pts):
     if len(pts) < 3: return None
     xs, ys = zip(*pts); mx, my = statistics.mean(xs), statistics.mean(ys)
     return sum((x - mx) * (y - my) for x, y in pts) / sum((x - mx) ** 2 for x in xs)
-rss = [(s["t_s"] / 60, s["rss_kib"] / 1024) for s in S if s["rss_kib"]]
+rss = [(s["t_s"] / 60, s["footprint_kib"] / 1024) for s in S if s.get("footprint_kib")]
 warm = [p for p in rss if p[0] >= 10] or rss
 live = [len([w for w in s["workers"] if w["pid"]]) for s in S]
 excess = [s["t_s"] for s in S if len([w for w in s["workers"] if w["pid"]]) > 2 + (s["reaping"] or 0)]
@@ -1050,7 +1054,7 @@ PY
 )
     echo "$a" >"$RESULTS/soak-analysis.json"
     say "soak analysis: $a"
-    check "compositor RSS slope (after 10 min)" "$(jq -r .rss_slope_mib_min <<<"$a") MiB/min ($(jq -r .rss_first_mib <<<"$a") → $(jq -r .rss_last_mib <<<"$a") MiB over $(jq -r .minutes <<<"$a") min, $(jq -r .switches <<<"$a") switches)" "≤ 0.5 MiB/min" \
+    check "compositor RssAnon+VmSwap slope (after 10 min)" "$(jq -r .rss_slope_mib_min <<<"$a") MiB/min ($(jq -r .rss_first_mib <<<"$a") → $(jq -r .rss_last_mib <<<"$a") MiB over $(jq -r .minutes <<<"$a") min, $(jq -r .switches <<<"$a") switches)" "≤ 0.5 MiB/min" \
         "$(le "$(jq -r '.rss_slope_mib_min' <<<"$a")" 0.5)"
     check "live workers ≤ 2 + dying at every sample" "max $(jq -r .max_live_workers <<<"$a"), over the bound in $(jq -r .samples_over_2_plus_dying <<<"$a") of $(jq -r .samples <<<"$a") samples" "0 samples over" \
         "$(jq -r 'if .samples_over_2_plus_dying == 0 then 1 else 0 end' <<<"$a")"
