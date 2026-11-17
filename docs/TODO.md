@@ -98,6 +98,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       - [ ] At the flip, `docs/README-next.md` replaces `README.md` (fix its relative links if any changed meanwhile),
             and its line in `.claude/rules/writing-rules.md` § Where a new fact goes goes away; the Debian/Fedora/Arch
             lines in `scripts/install.sh`'s native-toolchain check drop the legacy-only packages to match its table.
+      - [ ] After the flip, the upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`):
+            no upstream livepaper line left in the tree, then `LICENSE.upstream-MIT` and the README's fork line go
+            (history stays). About 1,600 lines left: `PlayerHelper.cs` (~580, mostly legacy, goes with the flip),
+            the four scrapers (~480), `ImportService.cs`, `DownloadHelper.cs`, `PlaylistService.cs` and small pieces.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
