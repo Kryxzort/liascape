@@ -49,8 +49,25 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
       monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
       from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
-- [ ] **Packaging**: rebuild `scripts/PKGBUILD` + `scripts/build-appimage.sh` for the Electron + liascape-player world
-      (both still build the pre-rewrite Avalonia app).
+- [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
+      download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
+      makepkg does (`build()` with no network). Left:
+      - [ ] A clean-chroot build on Arch (`makechrootpkg -c` with `electron45-bin` built first and passed with `-I`), then
+            `namcap` on the PKGBUILD and the package (the scene worker's RUNPATH must be `$ORIGIN/../../lib/liascape`), and
+            an install test as a throwaway user: `liascape help`, the app under a headless compositor with one video and
+            one scene, nothing read from the repo or `~/.cache/liascape`. Check that Arch's source-built `dotnet-sdk`
+            restores the `linux-x64` runtime packs for the self-contained publish.
+      - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
+            calls `pactl`/`parec` any more), then publish `liascape-git` to the AUR.
+      - [ ] An app icon: none exists (`app/ui/public/favicon.svg` and `app/ui/src/assets/hero.png` are Vite's template
+            art), so the desktop entry has no `Icon=`. Add one to `scripts/install.sh` and the flake under
+            `share/icons/hicolor/scalable/apps/` once there is an icon.
+      - [ ] After the switch-over, rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
+            from install.sh's staged tree on an old glibc (an Ubuntu 22.04 container); bundle libmpv and its FFmpeg,
+            libplacebo, libass, SDL2, harfbuzz/freetype, lz4, libxkbcommon and static `ffmpeg`/`ffprobe`; take glibc,
+            GL/EGL/Vulkan (glvnd), libwayland, PipeWire/libpulse, libva, fontconfig and libcuda from the host; give every
+            bundled `.so` an `$ORIGIN` RUNPATH rather than `LD_LIBRARY_PATH` in AppRun; pass `--no-sandbox` only when
+            unprivileged user namespaces are off. Test with `ldd` on every ELF in containers without mpv/FFmpeg/SDL2.
 
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
