@@ -58,6 +58,10 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Player log (optional)
-      description: Right after it goes wrong, run `liascape ctl logs` and paste the end of it.
+      label: Scene log (optional)
+      description: >-
+        While the scene is still on screen, run
+        `liascape ctl probe '{"name":"workers","args":{"log_tail":true}}'` and paste what it prints: it holds the
+        scene's own warnings (a missing shader, an effect it skipped). If it crashed or never showed, paste the end of
+        `liascape ctl logs` instead.
       render: text
