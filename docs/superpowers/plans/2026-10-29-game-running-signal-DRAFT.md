@@ -1,7 +1,8 @@
 # DRAFT — "Game running" signal (mute / pause the wallpaper while a game runs)
 
 **Status:** draft, not planned. Owner, 2026-10-29: "save a draft for it now, we'll plan better later".
-To be folded into Phase 3 (next to pause-when-covered, Task 14's auto-mute) when it's planned properly.
+Part of the rules system (`docs/TODO.md` § UI, the macro feature): the detection below becomes a trigger, the
+actions are the user's rule; the open questions below are answered by that design, not up front.
 
 ## Why
 Pause-when-covered (Phase 3, O1) already pauses for a fullscreen/maximized game covering every wallpaper

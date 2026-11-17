@@ -105,8 +105,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
-- [ ] Scripting for advanced users, as part of the macro feature = the rules system (triggers → actions with exceptions;
-      research in `docs/superpowers/specs/2026-10-29-rules-recon.md`): an advanced tier where users write scripts.
+- [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
+      `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
+      separate setting: detection notes and the cases to compose with in
+      `docs/superpowers/plans/2026-10-29-game-running-signal-DRAFT.md`; what it does (pause, mute, stop) is the
+      user's rule, so no default to pick up front. Scripting for advanced users is an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
       triggers/actions can't express (the escape hatch, not just one more action type).
 
@@ -471,8 +474,6 @@ Two bug classes kept recurring; fix the class, not the instance:
       scenes** — `WallpaperBg` can only play a video, so with a scene on the desktop the app shows the last video /
       a random one (a different wallpaper entirely). Options: a transparent Electron window over the real desktop,
       or the player streaming its output frames to the UI. A gif preview was rejected (360p).
-- [ ] **Draft: "Game running" signal** (mute / pause while a game runs) —
-      `docs/superpowers/plans/2026-10-29-game-running-signal-DRAFT.md`.
 - [ ] **Deferred from Phase 2**: the `g_Daytime` uniform (LWE's core never updates it, it stays 0 — spike
       `lwe-core.md` §4.2; needs a host-side clock-of-day feed); scene-compatibility patches from the corpus
       (**Phase 6**, below).
