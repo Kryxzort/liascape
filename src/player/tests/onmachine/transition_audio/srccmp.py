@@ -19,6 +19,7 @@ if len(snd) != 1:
 name, off, ln = snd[0]
 f.seek(ds + off); blob = f.read(ln)
 td = tempfile.mkdtemp()
+import atexit, shutil; atexit.register(shutil.rmtree, td, True)  # the decoded sound goes with the run, however it ends
 p = os.path.join(td, 's' + os.path.splitext(name)[1]); open(p, 'wb').write(blob)
 raw = subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-i', p, '-ar', '48000', '-ac', '2', '-f', 'f32le', '-'], capture_output=True).stdout
 src = np.frombuffer(raw, dtype=np.float32).reshape(-1, 2).mean(1).astype(np.float64)

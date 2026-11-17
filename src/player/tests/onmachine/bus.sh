@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Temp folder: removed on exit; LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs and prints where (last line).
 # Task 14 on-machine check: the player audio bus + bus meter, with REAL audio on the owner's
 # PipeWire session. Exit 0 = pass. Spec §5.3; docs/player/modules/audio-bus.md.
 #
@@ -26,6 +27,7 @@ set -uo pipefail
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
+. "$REPO/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 WP_STATE=${XDG_STATE_HOME:-$HOME/.local/state}/wireplumber/stream-properties
 UID_=$(id -u)
 export PIPEWIRE_RUNTIME_DIR=/run/user/$UID_
@@ -251,12 +253,8 @@ cleanup() {
         wp_clear_saved_target
         wp_saved_target && echo "FAIL: could not clear it: $(grep 'liascape-player=' "$WP_STATE")" >&2
     fi
-    if [[ $rc == 0 ]]; then
-        rm -rf "$TMP"
-        echo PASS
-    else
-        echo "kept $TMP (serve.err, state/liascape/liascape-player/events.jsonl)"
-    fi
+    [[ $rc == 0 ]] && echo PASS
+    lp_tmp_done "$TMP" /tmp/lia-bus. "$rc"
     exit "$rc"
 }
 trap cleanup EXIT

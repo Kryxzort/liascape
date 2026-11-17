@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Temp folder: removed on exit; LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs and prints where (last line).
 # liascape-player on-machine battery for scene workers on the REAL outputs (DP-1 143.98 Hz, DP-2 239.76 Hz). The report is
 # docs/player/reports/phase2.md. Also reachable as `battery.sh scenes <step…>`.
 #
@@ -43,6 +44,7 @@ unset LD_LIBRARY_PATH
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 CRATE=$(cd "$HERE/../.." && pwd -P)
 REPO=$(cd "$CRATE/../.." && pwd -P)
+. "$REPO/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 WS=$HOME/.local/share/Steam/steamapps/workshop/content/431960
 # The three spike scenes (Task 7) + the scripted one (Bunk: 32 scripts, a visualiser).
 SC_EMILIA=$WS/1726902114   # 2048×1423
@@ -259,7 +261,7 @@ cleanup() {
         say "WARNING: an liascape-player layer surface is still mapped"
     fi
     say "results: $RESULTS"
-    command -v trash >/dev/null && trash "$SCRATCH" 2>/dev/null
+    lp_tmp_done "$SCRATCH" /tmp/liascape-p2. "$rc"
     exit "$rc"
 }
 trap cleanup EXIT

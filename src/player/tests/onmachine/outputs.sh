@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Temp folder: removed on exit; LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs and prints where (last line).
 # On-machine check for liascape-player's Wayland backend (Task 13): one wlr-layer-shell surface
 # per wl_output, the frame-timing probe, and hotplug through Hyprland. Task 16 adds: the
 # mixed-content check (a video on one output, a static colour on the other → that one stays
@@ -30,6 +31,7 @@ set -u -o pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CRATE=$(cd "$HERE/../.." && pwd)
 REPO=$(cd "$CRATE/../.." && pwd)
+. "$REPO/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 OUT_A=${OUT_A:-DP-1}
 OUT_B=${OUT_B:-DP-2}
 HZ_A=${HZ_A:-144}
@@ -169,12 +171,12 @@ cleanup() {
     if [[ $FAILED != 0 || $rc != 0 ]]; then
         say "serve log tail ($SCRATCH/serve.log):"
         tail -n 15 "$SCRATCH/serve.log" 2>/dev/null | sed 's/^/    /'
-        say "RESULT: FAIL (scratch kept in $SCRATCH)"
+        say "RESULT: FAIL"
+        lp_tmp_done "$SCRATCH" "${TMPDIR:-/tmp}/liascape-outputs." 1
         exit 1
     fi
     say "RESULT: PASS"
-    # Our own mktemp dir (test clips, logs) is kept only on failure.
-    if command -v trash >/dev/null; then trash "$SCRATCH"; else say "scratch: $SCRATCH"; fi
+    lp_tmp_done "$SCRATCH" "${TMPDIR:-/tmp}/liascape-outputs." 0
     exit 0
 }
 trap cleanup EXIT

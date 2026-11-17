@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Temp folder: removed on exit; LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs and prints where (last line).
 # liascape-player Phase 1 on-machine battery. Drives the REAL C# backend (`liascape serve`, PlayerEngine=liascape-player) over
 # HTTP exactly like the owner's UI would, and inspects the result with `liascape-player ctl` directly —
 # same split as `scripts/test-liascape-player-adapter.sh` (§ Integration test) and
@@ -133,6 +134,7 @@ unset LD_LIBRARY_PATH
 
 # ------------------------------------------------------------------ paths, binaries, defaults
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
+. "$REPO/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 
 METHODS=(full-live reveal frozen)
 MODES=(manual-next manual-prev timed-interval advance-on-end wait-for-end random restore-replay next-mid-transition)
@@ -601,6 +603,7 @@ assert_default_sink_unchanged() {
 # we want "nothing playing" at the moment of the switch so legacy comes back stopped, as found).
 # ==================================================================
 cleanup() {
+  local rc=$?
   trap - EXIT INT TERM HUP
   stop_bus_mute_watcher_and_restore_volume
   if [ "$HERMETIC" = 0 ] && [ -n "$API" ]; then
@@ -618,13 +621,12 @@ cleanup() {
   fi
   if [ "$HERMETIC" = 1 ]; then
     [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
-    if [ -n "$HERMETIC_T" ]; then
-      case "$HERMETIC_T" in
-        /tmp/liascape-battery-*) command -v trash >/dev/null && trash "$HERMETIC_T" 2>/dev/null || rm -rf -- "$HERMETIC_T" ;;
-      esac
-    fi
+    log "cleanup done. results kept at $RESULTS_DIR"
+    [ "$FAILED" = 1 ] && rc=1
+    [ -n "$HERMETIC_T" ] && lp_tmp_done "$HERMETIC_T" /tmp/liascape-battery- "$rc"
+  else
+    log "cleanup done. results kept at $RESULTS_DIR"
   fi
-  log "cleanup done. results kept at $RESULTS_DIR"
   [ "$FAILED" = 1 ] && exit 1
 }
 trap cleanup EXIT
@@ -1393,6 +1395,7 @@ dispatch_cell() {
   if [ "$RESUME" = 1 ] && [ -s "$SWITCHES_FILE" ]; then
     local tmp; tmp=$(mktemp)
     jq -c --arg c "$c" 'select(.cell != $c)' "$SWITCHES_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$SWITCHES_FILE"
+    rm -f -- "$tmp"   # a failed jq leaves it
   fi
   "$fn" "$method" "$mode" || { warn "cell $c FAILED (R99) -- continuing with remaining cells"; return 1; }
   return 0

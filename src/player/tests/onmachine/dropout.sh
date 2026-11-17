@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Temp folder: removed on exit; LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs and prints where (last line).
 # Task 15 on-machine check: the reference-based dropout detector, with REAL audio on the
 # owner's PipeWire session. Exit 0 = pass. Spec §5.3, §9 "debug mode";
 # docs/player/modules/audio-bus.md, docs/player/modules/command-api.md; docs/player/debugging.md.
@@ -49,6 +50,7 @@ set -uo pipefail
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
+. "$REPO/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
 UID_=$(id -u)
 OUTPUT_HZ=${DROPOUT_OUTPUT_HZ:-60}
 export PIPEWIRE_RUNTIME_DIR=/run/user/$UID_
@@ -174,12 +176,8 @@ cleanup() {
         echo "FAIL: default sink changed (was never touched by this script)" >&2
         rc=1
     fi
-    if [[ $rc == 0 ]]; then
-        rm -rf "$TMP"
-        echo PASS
-    else
-        echo "kept $TMP (serve.err, state/liascape/liascape-player/events.jsonl)"
-    fi
+    [[ $rc == 0 ]] && echo PASS
+    lp_tmp_done "$TMP" /tmp/liascape-dropout. "$rc"
     exit "$rc"
 }
 trap cleanup EXIT
