@@ -70,7 +70,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       scene format) needs the web player above: map `LivelyProperties.json` (slider, textbox, dropdown, colour, checkbox,
       button, label) onto the properties editor, call the page's `livelyPropertyListener`, later feed
       `livelyAudioListener` and its system data. Application type (Unity / Godot / .exe) NOT planned, as for WE.
-      Format docs: the project's GitHub wiki (GPL-3.0; the project moved to lively-community/lively, run by Sketches srl).
+      Lively is GPL-3.0 like us, so code may be copied (notices kept, a row in UPSTREAM.md / CREDITS.md), but only its
+      LivelyInfo / LivelyProperties C# models + parsing fit (our backend is C#); its player, audio and system data are
+      Windows-only (WinUI 3, CEF in a window, WASAPI). Cost: import + video types ~1–2 days, properties + JS shim small;
+      the web player is the big part and is shared with WE web wallpapers. Format docs: the project's GitHub wiki (the
+      project moved to lively-community/lively, run by Sketches srl).
 - [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
       Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
       removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
