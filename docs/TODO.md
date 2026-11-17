@@ -62,6 +62,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (the player's last phase), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
       Browse and the scrapers; once it plays, take it out of Unplayable and the Browse type filter (its tag then shows
       in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).
+      The same web player can then run Lively Wallpaper's web wallpapers (no central catalogue: they come as folders or
+      .zip packages through Import / #86): map its LivelyProperties.json controls onto the properties editor and shim
+      `livelyPropertyListener` (later `livelyAudioListener` for audio data) — Lively has no scene format of its own.
 - [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
       Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
       removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
