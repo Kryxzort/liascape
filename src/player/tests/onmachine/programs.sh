@@ -261,6 +261,7 @@ serve_down() {
 BE=$SCRATCH/be
 BE_PID=
 API=
+API_TOKEN=
 BE_ENV=()
 be_env() {
     RT=$BE/rt
@@ -304,8 +305,14 @@ be_up() {
         sleep 0.1
     done
     API=http://127.0.0.1:$(cat "$pf")
-    for ((i = 0; i < 100; i++)); do curl -sf -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
-    [[ $(curl -sf -m 5 "$API/player-engine" | jq -r .active) == liascape-player ]] || die "the private backend is not on liascape-player"
+    # Every route but /health answers 401 without the per-run token (written before serve.port).
+    API_TOKEN=$(cat "$BE/home/.config/liascape/serve.token" 2>/dev/null)
+    [[ -n $API_TOKEN ]] || die "the private backend wrote no serve.token"
+    for ((i = 0; i < 100; i++)); do bcurl -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
+    local eng
+    eng=$(bcurl -m 5 "$API/player-engine") || die "GET /player-engine failed (log $RESULTS/backend-$STEP.log)"
+    [[ $(jq -r .active <<<"$eng") == liascape-player ]] ||
+        die "the private backend is not on liascape-player: $(jq -c '{engine, active, available, reason}' <<<"$eng")"
     say "private backend up: pid $BE_PID, $API"
 }
 be_down() { # "the app closes": TERM, as the shell's quit does
@@ -330,8 +337,9 @@ legacy_daemons() { # a timer-daemon / restart-daemon of this run (never expected
     local p
     for p in $(be_procs); do tr '\0' ' ' <"/proc/$p/cmdline" | grep -qE 'timer-daemon|restart-daemon' && echo "$p"; done
 }
-bpost() { curl -sf -m 30 -X POST -H 'Content-Type: application/json' -d "$2" "$API$1"; }
-bget() { curl -sf -m 10 "$API$1"; }
+bcurl() { curl -sf -H "X-Liascape-Token: $API_TOKEN" "$@"; }
+bpost() { bcurl -m 30 -X POST -H 'Content-Type: application/json' -d "$2" "$API$1"; }
+bget() { bcurl -m 10 "$API$1"; }
 be_setting() { # <key> <json value> — GET → set one key → POST the whole object (never printed)
     local s
     s=$(bget /settings) || return 1

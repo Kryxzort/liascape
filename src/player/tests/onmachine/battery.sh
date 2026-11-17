@@ -240,14 +240,16 @@ IMPORTED_ITEMS_FILE="$RESULTS_DIR/.imported-items.jsonl"
 HAVE_ORIG_PLAYLIST_STATE=0
 HERMETIC_T=""     # hermetic temp dir
 API=""            # http://127.0.0.1:<port>, set once the backend we're using is known
+API_TOKEN_FILE="" # its serve.token: every route but /health answers 401 without it
 BP=""             # hermetic backend pid
 
 ctl() { "$BIN" ctl --timeout-ms "${CTL_TIMEOUT_MS:-10000}" "$@"; }
 comp_pid() { ctl hello 2>/dev/null | jq -r '.pid // empty'; }
 sup_pid()  { ctl hello 2>/dev/null | jq -r '.supervisor_pid // empty'; }
 
-post() { curl -sf -m 15 -X POST -H 'Content-Type: application/json' -d "$2" "$API$1"; }
-get()  { curl -sf -m 10 "$API$1"; }
+acurl() { curl -H "X-Liascape-Token: $(cat "$API_TOKEN_FILE" 2>/dev/null)" "$@"; }
+post() { acurl -sf -m 15 -X POST -H 'Content-Type: application/json' -d "$2" "$API$1"; }
+get()  { acurl -sf -m 10 "$API$1"; }
 settings_get() { get /settings; }   # NEVER echo this directly anywhere -- it carries SteamRefreshToken
 
 # GET -> modify with a jq filter -> POST the FULL object back. Same pattern as
@@ -645,11 +647,12 @@ setup_live_backend() {
   local portfile="$HOME/.config/liascape/serve.port"
   [ -s "$portfile" ] || { err "no $portfile -- is the owner's backend (liascape-watch) running?"; exit 1; }
   API="http://127.0.0.1:$(cat "$portfile")"
+  API_TOKEN_FILE="$(dirname "$portfile")/serve.token"
   curl -sf -m 5 "$API/health" >/dev/null || { err "backend at $API not responding"; exit 1; }
   snapshot_owner_settings
   setting_set ".playerEngine = \"liascape-player\" | .autoMute = false | .globalTransitionEnabled = true | .globalTransitionEffectIds = [\"$EFFECT_ID\"] | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
   sleep 1
-  [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "liascape-player" ] || { err "backend did not switch to liascape-player -- aborting before touching any playback"; exit 1; }
+  [ "$(get /player-engine | jq -r .active)" = "liascape-player" ] || { err "backend did not switch to liascape-player -- aborting before touching any playback"; exit 1; }
   PLAYER_SP=$(sup_pid)
   start_bus_mute_watcher
   sleep 1.5
@@ -696,8 +699,9 @@ EOF
   for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
   [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { err "hermetic backend did not start, see $HERMETIC_T/backend.log"; tail -5 "$HERMETIC_T/backend.log" >&2; exit 1; }
   API="http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")"
+  API_TOKEN_FILE="$XDG_CONFIG_HOME/liascape/serve.token"
   for _ in $(seq 1 50); do curl -sf -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
-  [ "$(curl -sf -m 5 "$API/player-engine" | jq -r .active)" = "liascape-player" ] || { err "hermetic backend not on liascape-player"; exit 1; }
+  [ "$(get /player-engine | jq -r .active)" = "liascape-player" ] || { err "hermetic backend not on liascape-player"; exit 1; }
   log "hermetic: player pid $(comp_pid) (supervisor $PLAYER_SP), backend $API"
 }
 
@@ -1289,7 +1293,7 @@ run_soak() {
   else
     local names; names=$(get /playlist/names | jq -r '.[]?' 2>/dev/null)
     if echo "$names" | grep -qx dp; then
-      local pl; pl=$(post /playlist/load '{"name":"dp"}' 2>/dev/null || curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d '{"name":"dp"}' "$API/playlist/load")
+      local pl; pl=$(post /playlist/load '{"name":"dp"}' 2>/dev/null || acurl -sf -m 10 -X POST -H 'Content-Type: application/json' -d '{"name":"dp"}' "$API/playlist/load")
       post /playlist/play "$(echo "$pl" | jq -c '{paths:.videoPaths, settings:.settings}')" >/dev/null
       log "soak: playing the owner's 'dp' playlist"
     else
