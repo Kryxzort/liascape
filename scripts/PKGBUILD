@@ -1,42 +1,79 @@
 # Maintainer: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
-# NOTE: this builds the Electron + React UI over the headless C# backend (the current rewrite),
-# NOT the old single-binary app. It delegates the whole build to scripts/install.sh so packaging
-# never drifts from the canonical build. Regenerate .SRCINFO with `makepkg --printsrcinfo > .SRCINFO`
-# after editing.
+# The whole build is scripts/install.sh (.claude/rules/build-and-packaging.md § One build, one layout); this file only
+# names the dependencies and does every download in prepare(), so build() runs offline. Regenerate .SRCINFO with
+# `makepkg --printsrcinfo > .SRCINFO` after editing.
 pkgname=liascape-git
 pkgver=r1.0000000
 pkgrel=1
-pkgdesc="Live wallpaper manager for Wayland (video + Wallpaper Engine scenes) — Electron/React + C# backend"
+pkgdesc="Live wallpaper manager for Wayland (video + Wallpaper Engine scenes)"
 arch=('x86_64')
 url="https://github.com/Kryxzort/liascape"
 license=('GPL-3.0-only' 'MIT')
-# Runtime: backend is published --self-contained (bundles .NET) so no dotnet-runtime needed.
-# libsecret: secret-tool keeps the Steam sign-in in the system keyring (Helpers/SecretStore.cs)
-depends=('mpvpaper' 'mpv' 'ffmpeg' 'libpulse' 'wl-clipboard' 'electron' 'libsecret')
-# Build: .NET SDK + Node for the app; Rust + clang (bindgen) for liascape-player; C toolchain + wayland/EGL/mpv/
-# pulse/PipeWire headers for the native helpers + the player; cmake + SDL2/freetype/glm/lz4 for LWE's core (scenes).
-makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'base-devel' 'rust' 'clang' 'wayland' 'wayland-protocols' 'libglvnd'
-             'pipewire' 'libxkbcommon' 'cmake' 'sdl2' 'freetype2' 'glm' 'lz4' 'zlib')
-optdepends=('linux-wallpaperengine: Wallpaper Engine scene support'
-            'playerctl: MPRIS-aware Auto-Mute')
+# electron45: the app supports one Electron major (.claude/rules/build-and-packaging.md § Electron) and Arch's `electron`
+# is an older one. AUR electron45-bin provides electron45 until Arch ships its own; the launcher runs `electron45`
+# before `electron`.
+# The backend is published self-contained (it bundles .NET), so there is no dotnet-runtime dependency.
+# libpulse: pactl and parec (auto-mute, the player's audio routing) and the legacy liascape-audio.
+# libsecret: secret-tool keeps the Steam sign-in in the system keyring (src/backend/Helpers/SecretStore.cs).
+depends=('electron45' 'mpv' 'ffmpeg' 'libpipewire' 'libpulse' 'wayland' 'libglvnd' 'libxkbcommon'
+         'sdl2' 'freetype2' 'fontconfig' 'harfbuzz' 'lz4' 'zlib' 'libsecret' 'gcc-libs' 'glibc')
+# the toolchains install.sh preflights, plus the LWE core's (scripts/lwe.sh deps lists the same Arch packages)
+makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'rust' 'clang' 'cmake' 'pkgconf' 'wayland-protocols' 'glm')
+# mpvpaper and linux-wallpaperengine run the legacy engine, still the default PlayerEngine: without mpvpaper it plays
+# no video and without linux-wallpaperengine no scene, while liascape-player (Settings → Player engine) needs neither.
+optdepends=('mpvpaper: video wallpapers under the legacy engine (AUR)'
+            'linux-wallpaperengine: Wallpaper Engine scenes under the legacy engine (AUR)'
+            'playerctl: MPRIS-aware auto-mute'
+            'steamcmd: Steam Workshop downloads (AUR)'
+            'xdg-utils: open a wallpaper in your default app'
+            'nvidia-utils: NVDEC decoding and the scene VRAM budget on NVIDIA')
 provides=('liascape')
 conflicts=('liascape')
+# !strip: the self-contained .NET publish is left as dotnet published it
 options=('!strip' '!debug')
 source=("$pkgname::git+https://github.com/Kryxzort/liascape.git")
 sha256sums=('SKIP')
 
 pkgver() {
     cd "$pkgname"
-    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    ( set -o pipefail
+      git describe --long --tags --abbrev=7 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' ||
+      printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)" )
+}
+
+# Every cache the build writes lives in $srcdir, never in the builder's HOME (.NET's certificate-revocation cache
+# follows HOME itself, so HOME moves too).
+_build_env() {
+    export HOME="$srcdir/home"
+    export npm_config_cache="$srcdir/npm-cache"
+    export NUGET_PACKAGES="$srcdir/nuget-packages"
+    export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+    # no MSBuild node or compiler server outliving the build
+    export MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 UseSharedCompilation=false
+    export CARGO_HOME="$srcdir/cargo-home" RUSTUP_TOOLCHAIN=stable
+    # scripts/lwe.sh clones the LWE fork here and checks its commit and every submodule against third_party/lwe/PIN
+    export LWE_SRC_CACHE="$srcdir/lwe-src"
+}
+
+prepare() {
+    cd "$pkgname"
+    _build_env
+    (cd app/ui && npm ci --no-audit --no-fund)
+    dotnet restore src/backend -r linux-x64 -p:SelfContained=true
+    cargo fetch --locked --manifest-path src/player/Cargo.toml --target "$(rustc -vV | sed -n 's/^host: //p')"
+    bash scripts/lwe.sh fetch
 }
 
 build() {
     cd "$pkgname"
-    # Stage the full install into a temp prefix (/usr). The wrappers bake /usr runtime paths;
-    # electron is resolved from PATH at runtime (the electron dependency), so nothing is bundled here.
+    _build_env
+    export npm_config_offline=true CARGO_NET_OFFLINE=true
+    # staged into $srcdir so package() is a copy; the runtime paths are /usr
     DESTDIR="$srcdir/pkg-stage" PREFIX=/usr bash scripts/install.sh
 }
 
 package() {
     cp -a "$srcdir/pkg-stage/." "$pkgdir/"
+    install -Dm644 "$pkgname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 "$pkgname/LICENSE.upstream-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.upstream-MIT"
 }

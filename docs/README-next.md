@@ -68,8 +68,8 @@ Liascape finds its Fonts folder by itself (or you pick one) and reads the fonts 
 
 ## Install
 
-There's no AUR package or AppImage yet. The packaging scripts in `scripts/` haven't been updated for the current
-app, so use Nix or build from source.
+There's no AUR package or AppImage yet. `scripts/PKGBUILD` builds the current app but hasn't been tested on Arch
+yet, and the AppImage script hasn't been updated, so use Nix or build from source.
 
 ### NixOS and Nix
 
@@ -107,8 +107,8 @@ It doesn't check for .NET or Node.js, so install those first (see below).
 Add `--no-scenes` to build without Wallpaper Engine scenes. That needs fewer packages and changes nothing else.
 Building with scenes downloads the linux-wallpaperengine source, so it needs network access.
 
-The script doesn't install Electron, which runs Liascape's window. Put an `electron` binary on your `PATH` (Arch
-packages it as `electron`) or point `LIASCAPE_ELECTRON` at one. Liascape targets Electron 45; versions older than 42
+The script doesn't install Electron, which runs Liascape's window. Put an `electron45` or `electron` binary on your
+`PATH` (on Arch, `electron45-bin` from the AUR) or point `LIASCAPE_ELECTRON` at one. Liascape targets Electron 45; versions older than 42
 are known to crash on NVIDIA. Only the window needs Electron: the commands work without it.
 
 <details>

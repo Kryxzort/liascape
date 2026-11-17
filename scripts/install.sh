@@ -177,9 +177,9 @@ install -Dm755 "$ROOT/src/player/target/release/liascape-scene-worker" "$S_LIBEX
 echo "==> ensuring Electron is available for the GUI"
 # The GUI runs: <electron> <shell-dir>. By default a system 'electron' (PATH) — the bundled prebuilt
 # can't load its libs on some distros (NixOS) and pulls 200MB. Packages provide electron their own way:
-# AUR depends=(electron); the AppImage bundles one and sets LIASCAPE_ELECTRON. Only warn here.
-if [ -z "${LIASCAPE_ELECTRON:-}" ] && ! command -v electron >/dev/null 2>&1; then
-  echo "    WARN: no 'electron' on PATH — install one (Arch: 'electron'; elsewhere an Electron 45 build, e.g. from npm or electronjs.org)"
+# the PKGBUILD depends on electron45; the AppImage bundles one and sets LIASCAPE_ELECTRON. Only warn here.
+if [ -z "${LIASCAPE_ELECTRON:-}" ] && ! command -v electron45 >/dev/null 2>&1 && ! command -v electron >/dev/null 2>&1; then
+  echo "    WARN: no 'electron45' or 'electron' on PATH — install Electron 45 (Arch: AUR 'electron45-bin'; elsewhere from npm or electronjs.org)"
   echo "          or set LIASCAPE_ELECTRON=/path/to/electron. The CLI works without it; only the GUI needs it."
 fi
 
