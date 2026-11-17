@@ -82,7 +82,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       (a slow or failing one never blocks the grid; it shows a warning by its checkbox). Search + type filter apply to
       all; source-only filters (Workshop tags / rating, Wallhaven colours…) sit in a section titled with the source,
       shown while it's checked. Sort: Newest merges by date; Popular interleaves, each source keeping its own ranking.
-      Defaults: Workshop + the licensed API sources checked, scraped rehost sites unchecked.
+      Defaults: only sources that work with no setup — Workshop, Wallhaven (keyless for SFW), the scraped live-wallpaper
+      sites. Keyed sources (Pexels, Pixabay, Unsplash) start unchecked and ask for the free key in place when checked;
+      never a key prompt on first launch. Later, if they're popular: a small project proxy (free serverless tier,
+      holds the key, caches) makes them keyless — a server to keep alive and one shared rate limit (Pexels ~200/h).
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
       makepkg does (`build()` with no network). Left:
