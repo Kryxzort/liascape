@@ -5,6 +5,13 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
+80. [ ] (owner) Drop the "Download via steamcmd" Workshop mode: three modes cover every level of trust (Open in the
+       Steam app = none; Use the Steam app = no login given to Liascape; Subscribe with Steam login = full). steamcmd needs
+       a Steam login too (typed into a terminal), and sign-in mode already downloads without subscribing. Remove its
+       setting, downloader route, "Needs steamcmd" messages, Settings rows, README line, tests and probes; a stored
+       "steamcmd" mode reads as the default (pre-release, no migration). One docs/decisions.md entry.
+81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
+       hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
