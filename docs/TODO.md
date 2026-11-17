@@ -72,9 +72,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
 - [ ] **More wallpaper sources** (owner: support all of them): first one source interface (search, page, details,
       download, filters/sort) that Browse, the sidebar and the download queue use, with MoeWalls / MotionBGs / DesktopHut
-      moved onto it (overlaps the upstream code rewrite); sources switch on/off in Settings. Then, one at a time: Pexels
-      Videos, Pixabay Videos (official APIs, free licence), Wallhaven, Unsplash (stills), then scraped Wallpaper Waifu,
-      MyLiveWallpapers, Alpha Coders (off by default). Keyed APIs take the user's own free key (never one in the repo);
+      moved onto it (overlaps the upstream code rewrite); sources switch on/off in Settings. Then add Wallhaven (stills,
+      keyless) and Pexels Videos (licensed ambient loops, key). Skipped as redundant: Pixabay (≈ Pexels; only if Pexels
+      proves too small), Unsplash (≈ Wallhaven's photos), Wallpaper Waifu / MyLiveWallpapers (≈ MoeWalls), Alpha Coders
+      (≈ Wallhaven), Coverr (≈ Pexels). Once the interface lands, compare MoeWalls / MotionBGs / DesktopHut's top 100 for
+      duplicates and drop one that adds little. Keyed APIs take the user's own free key (never one in the repo);
       credit the creator where the API asks (Pexels, Unsplash + its download ping); a source that stops answering says so.
       UI (owner's idea): ONE Browse view, no source pills — a Sources section heads the filter column: a checkbox per
       enabled source with its result count (click a name to show only it), 🔑 = needs a key (links to Settings). Results
@@ -83,7 +85,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       all; source-only filters (Workshop tags / rating, Wallhaven colours…) sit in a section titled with the source,
       shown while it's checked. Sort: Newest merges by date; Popular interleaves, each source keeping its own ranking.
       Defaults: only sources that work with no setup — Workshop, Wallhaven (keyless for SFW), the scraped live-wallpaper
-      sites. Keyed sources (Pexels, Pixabay, Unsplash) start unchecked and ask for the free key in place when checked;
+      sites. Keyed sources (Pexels) start unchecked and ask for the free key in place when checked;
       never a key prompt on first launch. Later, if they're popular: a small project proxy (free serverless tier,
       holds the key, caches) makes them keyless — a server to keep alive and one shared rate limit (Pexels ~200/h).
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
