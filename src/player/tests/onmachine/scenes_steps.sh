@@ -448,8 +448,8 @@ PYA
 # apart (the budget is 3 restarts per 60 s — this never breaks it); then a synthetic crash loop
 # to broken. Bounds: DP-1 paced p95 ≤ baseline × 1.10 and missed ≤ baseline + 1 in the 2 s after
 # each event, DP-1's tone without a 10 ms bin 15 dB under its level (drops 0); DP-2 holds its
-# frame (two grims during the outage identical) and recovers (scene.resumed) ≤ 2 s real /
-# ≤ 0.5 s synthetic.
+# frame (two grims during the outage identical outside the desktop cursor's box, `img_diff_held`)
+# and recovers (scene.resumed) ≤ 2 s real / ≤ 0.5 s synthetic.
 worker_pid_checked() { # the worker pid of scene $1, only if it is OUR compositor's child
     local w ppid
     w=$(worker_of "$1" | jq -r '.pid // empty')
@@ -470,8 +470,23 @@ steps = [s[i][0] - s[i - 1][0] for i in range(1, len(s))]
 print(json.dumps({"level_db": lvl, "drops": sum(1 for v in vals if lvl is not None and v < lvl - 15),
     "min_bin_db": min(vals) if vals else None, "max_step_ms": max(steps) if steps else None, "bins": len(vals)}))'
 }
-crash_events() { # <scene label> <scene id> <bound recover s>
-    local label=$1 id=$2 bound=$3 ev w t0 g1 g2 resumed rec fr p95 miss md lb
+# The synthetic frame_index marker (`scene::synthetic::MARKER`, top-left) on a 1920×1080 output showing a
+# 1920×1080 synthetic scene: the only part of its frame that changes.
+MARKER_PX=64
+hold_check() { # <check name> <img_diff_held json> <pair prefix> <keep prefix> [value suffix]
+    local hd=$2 held pass
+    held=$(jq -r '.diff // "nan"' <<<"$hd")
+    pass=$(python3 -c "print(1 if '$held' != 'nan' and float('$held') == 0 else 0)")
+    # A pair that differs is the evidence; keep it per event (the next one overwrites <pair prefix>-g1/g2).
+    if [[ $pass == 0 ]]; then
+        cp "$RESULTS/$3-g1.png" "$RESULTS/$4-g1.png"
+        cp "$RESULTS/$3-g2.png" "$RESULTS/$4-g2.png"
+    fi
+    check "$1" "grim diff $held (cursor box $(jq -c .mask <<<"$hd") masked, unmasked $(jq -r .raw_diff <<<"$hd"))${5:-}" \
+        "identical (0) outside the cursor" "$pass" "$hd"
+}
+crash_events() { # <scene label> <scene id> <bound recover s> [must-see box: the only part a frame of it changes]
+    local label=$1 id=$2 bound=$3 must=${4:-} ev w t0 g1 g2 resumed rec fr p95 miss md lb n=0
     local base base_p95 base_miss
     reset_frames; sleep 2.2; base=$(frames)
     base_p95=$(fstat "$base" $OUT_A .paced.p95_ms); base_miss=$(fstat "$base" $OUT_A .paced.missed)
@@ -479,13 +494,13 @@ crash_events() { # <scene label> <scene id> <bound recover s>
     note "$label baseline $OUT_A paced p95 $base_p95 ms, missed $base_miss (2 s)"
     CRASH_BASE_P95=$base_p95 CRASH_BASE_MISS=$base_miss
     for ev in kill kill hang kill hang kill kill; do
+        n=$((n + 1))
         w=$(worker_pid_checked "$id") || { check "$label $ev: worker found" none "a worker" 0; continue; }
         ctl probe '{"name":"loop","args":{"reset":true}}' >/dev/null
         reset_frames
         t0=$(now_ms)
         if [[ $ev == kill ]]; then kill -KILL "$w"; else kill -STOP "$w"; fi
-        grim_png $OUT_B "$RESULTS/crash-$label-g1.png"
-        grim_png $OUT_B "$RESULTS/crash-$label-g2.png"
+        grim_pair $OUT_B "$RESULTS/crash-$label-g1.png" "$RESULTS/crash-$label-g2.png"
         local tg=$(now_ms)
         sleep 2.2
         fr=$(frames)
@@ -500,19 +515,22 @@ crash_events() { # <scene label> <scene id> <bound recover s>
         exited=$(events_since "$t0" "worker.exited" | jq -r '.[0].t_mono_ms // empty')
         rec=$(python3 -c "print(round(($resumed - ${exited:-$t0}) / 1000, 3) if '$resumed' else 'none')")
         md=$(meter_drops "$(python3 -c "print($t0 - 100)")" "$(python3 -c "print($t0 + 2400)")")
-        local held
-        held=$(img_diff "$RESULTS/crash-$label-g1.png" "$RESULTS/crash-$label-g2.png")
+        local hd held
+        hd=$(img_diff_held $OUT_B "$RESULTS/crash-$label-g1.png" "$RESULTS/crash-$label-g2.png" "$must")
+        held=$(jq -r '.diff // "nan"' <<<"$hd")
         local res_before_g2=0
         [[ -n $resumed ]] && python3 -c "import sys; sys.exit(0 if $resumed < $tg else 1)" && res_before_g2=1
-        say "$label $ev (pid $w): recovered ${rec}s after the worker's exit; $OUT_A p95 $p95 missed $miss; tone $md; $OUT_B grims diff $held (resumed before 2nd grim: $res_before_g2); loop max_busy $(ctl probe '{"name":"loop"}' | jq -r .max_busy_ms)"
+        say "$label $ev (pid $w): recovered ${rec}s after the worker's exit; $OUT_A p95 $p95 missed $miss; tone $md; $OUT_B grims diff $held ($(jq -c '{raw_diff, mask}' <<<"$hd"), resumed before 2nd grim: $res_before_g2); loop max_busy $(ctl probe '{"name":"loop"}' | jq -r .max_busy_ms)"
         check "$label $ev: $OUT_A paced p95 / missed" "p95 $(fnum "$p95" 2) ms, missed $miss (baseline $(fnum "$base_p95" 2) / $base_miss)" "p95 ≤ baseline × 1.10, missed ≤ baseline + 1" \
             "$(python3 -c "print(1 if $p95 <= $base_p95 * 1.10 and $miss <= $base_miss + 1 else 0)")"
         check "$label $ev: $OUT_A tone drops" "$(jq -r '"\(.drops) (level \(.level_db | tostring | .[0:6]) dB, min bin \(.min_bin_db | tostring | .[0:6]), meter max step \(.max_step_ms | tostring | .[0:4]) ms)"' <<<"$md")" "0" \
             "$(jq -r 'if .drops == 0 and .bins > 100 then 1 else 0 end' <<<"$md")"
         if [[ $res_before_g2 == 1 ]]; then
             note "$label $ev: the new worker's frame latched before the 2nd grim — hold check n/a for this event"
+        elif [[ $(jq -r .over_must_see <<<"$hd") == true ]]; then
+            note "$label $ev: the cursor sat over the frame marker, its masked box hides the only part that changes — hold check n/a for this event"
         else
-            check "$label $ev: $OUT_B holds its frame" "grim diff $held" "identical (0)" "$(python3 -c "print(1 if float('$held') == 0 else 0)")"
+            hold_check "$label $ev: $OUT_B holds its frame" "$hd" "crash-$label" "crash-$label-$ev$n"
         fi
         check "$label $ev: recovery (worker exit → scene.resumed)" "${rec} s" "≤ $bound s" "$([[ $rec != none ]] && le "$rec" "$bound" || echo 0)"
         sleep 19
@@ -531,7 +549,7 @@ step_crash() {
     wait_ready "$sid" 20 || die "synthetic scene never ready"
     on_overlay
     sleep 2
-    crash_events synthetic "$sid" 0.5
+    crash_events synthetic "$sid" 0.5 "0,0,$MARKER_PX,$MARKER_PX"
     eid=$(create_scene "$SC_EMILIA")
     show $OUT_B "$eid"
     wait_ready "$eid" 20 || die "real scene never ready"
@@ -559,9 +577,15 @@ step_crash() {
     md=$(meter_drops "$t0" "$(now_ms)")
     check "crash loop: $OUT_A tone drops" "$(jq -c '{drops, level_db, max_step_ms}' <<<"$md")" "0" "$(jq -r 'if .drops == 0 then 1 else 0 end' <<<"$md")"
     sleep 0.5
-    grim_png $OUT_B "$RESULTS/crash-broken-g1.png"; sleep 1; grim_png $OUT_B "$RESULTS/crash-broken-g2.png"
-    check "broken: $OUT_B holds the last frame" "grim diff $(img_diff "$RESULTS/crash-broken-g1.png" "$RESULTS/crash-broken-g2.png"), stats $(img_stats "$RESULTS/crash-broken-g1.png")" "identical, not blank" \
-        "$(python3 -c "print(1 if float('$(img_diff "$RESULTS/crash-broken-g1.png" "$RESULTS/crash-broken-g2.png")') == 0 else 0)")"
+    grim_pair $OUT_B "$RESULTS/crash-broken-g1.png" "$RESULTS/crash-broken-g2.png" 1
+    local hd
+    hd=$(img_diff_held $OUT_B "$RESULTS/crash-broken-g1.png" "$RESULTS/crash-broken-g2.png" "0,0,$MARKER_PX,$MARKER_PX")
+    if [[ $(jq -r .over_must_see <<<"$hd") == true ]]; then
+        note "broken: the cursor sat over the frame marker — hold check n/a"
+    else
+        hold_check "broken: $OUT_B holds the last frame" "$hd" crash-broken crash-broken-held \
+            ", stats $(img_stats "$RESULTS/crash-broken-g1.png")"
+    fi
     wn=$(workers_json | jq '[.workers[] | select(.pid != null)] | length')
     check "broken: no live worker" "$wn" "0" "$([[ $wn == 0 ]] && echo 1 || echo 0)"
     on_background

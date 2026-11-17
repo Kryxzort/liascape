@@ -361,6 +361,64 @@ d = ImageChops.difference(a, b)
 print(f"{sum(ImageStat.Stat(d).mean) / 3:.4f}")
 PY
 }
+# "Holds its frame" compares two grims of a real output, and grim captures the desktop cursor whenever Hyprland
+# draws it in software (NVIDIA: cursor:no_hardware_cursors), with or without `-c`: an animated cursor theme then
+# differs between the two shots while the wallpaper under it is identical. So the pair is taken with the cursor
+# position sampled around each shot (read-only: never moved or hidden) and a box around every sample is masked out
+# of both images. The box's half side is 4 × the cursor size (min 96 px): room for a theme whose sprite reaches far
+# from its hotspot. Guard: scenes.sh crash "holds its frame".
+cursor_pos() { hyprctl -j cursorpos 2>/dev/null | jq -c '{x, y}' 2>/dev/null || echo '{}'; }
+GRIM_CURSOR='[]'
+grim_pair() { # <output> <g1.png> <g2.png> [seconds between] → sets GRIM_CURSOR (the cursor samples)
+    local s0 s1 s2 s3
+    s0=$(cursor_pos); grim_png "$1" "$2"; s1=$(cursor_pos)
+    [[ -n ${4:-} ]] && sleep "$4"
+    s2=$(cursor_pos); grim_png "$1" "$3"; s3=$(cursor_pos)
+    GRIM_CURSOR="[$s0,$s1,$s2,$s3]"
+}
+# <output> <g1.png> <g2.png> [must-see box "x0,y0,x1,y1" in output px] → JSON {diff (cursor box masked), raw_diff,
+# mask (image px, null = the cursor is elsewhere or unknown), masked_share, over_must_see (the box hides that region,
+# so the pair can't show a change there: the caller must not pass it)}.
+img_diff_held() {
+    local half=$((4 * ${HYPRCURSOR_SIZE:-${XCURSOR_SIZE:-24}}))
+    ((half < 96)) && half=96
+    python3 - "$1" "$2" "$3" "${4:-}" "$half" "$GRIM_CURSOR" "$(hyprctl -j monitors 2>/dev/null || echo '[]')" <<'PY'
+import json, math, sys
+from PIL import Image, ImageChops, ImageDraw, ImageStat
+out, pa, pb, must, half = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])
+samples, mons = json.loads(sys.argv[6]), json.loads(sys.argv[7])
+a = Image.open(pa).convert("RGB"); b = Image.open(pb).convert("RGB")
+if a.size != b.size:
+    print(json.dumps({"diff": None, "raw_diff": None, "mask": None, "masked_share": 0, "over_must_see": False})); sys.exit()
+mean = lambda x, y: sum(ImageStat.Stat(ImageChops.difference(x, y)).mean) / 3
+raw = mean(a, b)
+mask = None
+m = next((m for m in mons if m.get("name") == out), None)
+pts = [(s["x"], s["y"]) for s in samples if "x" in s and s["x"] is not None]
+if m and pts:
+    lw, lh = m["width"] / m["scale"], m["height"] / m["scale"]
+    if m.get("transform", 0) % 2:
+        lw, lh = lh, lw
+    fx, fy = a.width / lw, a.height / lh  # grim's scale: image px per layout px
+    xs = [x - m["x"] for x, _ in pts]; ys = [y - m["y"] for _, y in pts]
+    x0, y0, x1, y1 = min(xs) - half, min(ys) - half, max(xs) + half, max(ys) + half
+    if x1 > 0 and y1 > 0 and x0 < lw and y0 < lh:
+        mask = [max(0, math.floor(x0 * fx)), max(0, math.floor(y0 * fy)),
+                min(a.width, math.ceil(x1 * fx)), min(a.height, math.ceil(y1 * fy))]
+diff = raw
+over = False
+if mask:
+    for im in (a, b):
+        ImageDraw.Draw(im).rectangle([mask[0], mask[1], mask[2] - 1, mask[3] - 1], fill=(0, 0, 0))
+    diff = mean(a, b)
+    if must:
+        r = [float(v) for v in must.split(",")]
+        over = mask[0] < r[2] and r[0] < mask[2] and mask[1] < r[3] and r[1] < mask[3]
+share = (mask[2] - mask[0]) * (mask[3] - mask[1]) / (a.width * a.height) if mask else 0
+print(json.dumps({"diff": round(diff, 4), "raw_diff": round(raw, 4), "mask": mask, "masked_share": round(share, 4),
+                  "over_must_see": over}))
+PY
+}
 on_overlay() { # put our surfaces on the overlay layer (owner's windows cover the background) and wait
     ctl set '{"path":"out:*.layer","value":"overlay"}' >/dev/null
     local o
