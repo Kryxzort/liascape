@@ -177,7 +177,7 @@ echo "==> ensuring Electron is available for the GUI"
 # can't load its libs on some distros (NixOS) and pulls 200MB. Packages provide electron their own way:
 # AUR depends=(electron); the AppImage bundles one and sets LIASCAPE_ELECTRON. Only warn here.
 if [ -z "${LIASCAPE_ELECTRON:-}" ] && ! command -v electron >/dev/null 2>&1; then
-  echo "    WARN: no 'electron' on PATH — install it (Arch: electron / Debian: apt has none, use the AppImage)"
+  echo "    WARN: no 'electron' on PATH — install one (Arch: 'electron'; elsewhere an Electron 45 build, e.g. from npm or electronjs.org)"
   echo "          or set LIASCAPE_ELECTRON=/path/to/electron. The CLI works without it; only the GUI needs it."
 fi
 
