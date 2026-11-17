@@ -1024,6 +1024,32 @@ print(json.dumps(out))')
           workers:[$w.workers[] | {id, pid, path:(.path | split("/") | last), state}], reaping:$w.reaping,
           vram_procs:($v.sample.procs // null), vram_free:($v.sample.free_mib // null), smi:$smi}'
 }
+# A failed or empty `ctl logs` is not an outcome (a stalled desktop times the call out): retry with a backoff, then
+# say "unknown" with the ctl error. soak_finalize settles every record without a terminal event from the player's
+# own event log. The outcome logic is in soak_outcomes.py (no automated guard: check it by hand with its
+# `reread`/`summary` against a kept events.jsonl).
+soak_outcome_live() { # <corr> -> one outcome record
+    local corr=$1 try out err=
+    for try in 1 2 3 4; do
+        if out=$(ctl logs "{\"corr\":\"$corr\",\"kind_prefix\":\"transition.\"}" 2>&1) && jq -e '(.events | length) > 0' <<<"$out" >/dev/null 2>&1; then
+            python3 "$HERE/soak_outcomes.py" live "$corr" <<<"$out"
+            return
+        fi
+        err=${out:-empty reply}
+        sleep "$try"
+    done
+    jq -nc --arg corr "$corr" --arg r "ctl error: ${err:0:200}" '{corr:$corr, outcome:"unknown", latency_ms:null, reason:$r, source:"live"}'
+}
+# Re-reads every switch without a terminal event from the event log; also runs from the EXIT trap when the soak
+# dies. SOAK_EVENTS is non-empty only while a soak is open.
+soak_finalize() {
+    [[ -n ${SOAK_EVENTS:-} && -s $RESULTS/soak-outcomes.jsonl ]] || return 0
+    local r
+    r=$(python3 "$HERE/soak_outcomes.py" reread "$SOAK_EVENTS" "$RESULTS/soak-outcomes.jsonl" 2>&1) || r="re-read failed: $r"
+    SOAK_REREAD=$r
+    SOAK_EVENTS=
+}
+
 step_soak() {
     step_begin soak
     serve_up wayland
@@ -1038,6 +1064,7 @@ step_soak() {
     ((${#effects[@]})) || effects=(fade)
     local samples=$RESULTS/soak-samples.jsonl switches=$RESULTS/soak-switches.jsonl
     : >"$samples"; : >"$switches"; : >"$RESULTS/soak-outcomes.jsonl"
+    SOAK_EVENTS=$PSTATE/liascape/liascape-player/events.jsonl SOAK_REREAD=
     local t_start t_end now_s next_sw=0 n=0 to item kind path m e corr= line
     t_start=$(date +%s)
     t_end=$((t_start + SOAK_MIN * 60))
@@ -1048,8 +1075,7 @@ step_soak() {
         if (( now_s >= next_sw )); then
             # The previous switch's outcome (its last transition.* event), 30 s on.
             if [[ -n $corr ]]; then
-                jq -nc --arg corr "$corr" --arg out "$(ctl logs "{\"corr\":\"$corr\",\"kind_prefix\":\"transition.\"}" | jq -r '.events[-1].kind // "none"')" \
-                    '{corr:$corr, outcome:$out}' >>"$RESULTS/soak-outcomes.jsonl"
+                soak_outcome_live "$corr" >>"$RESULTS/soak-outcomes.jsonl"
             fi
             item=${items[$((n % ${#items[@]}))]}; kind=${item%%:*}; path=${item#*:}
             m=${methods[$((n % ${#methods[@]}))]}; e=${effects[$((n % ${#effects[@]}))]}
@@ -1063,13 +1089,13 @@ step_soak() {
         line=$(soak_sample "$((now_s - t_start))" "$n") && echo "$line" >>"$samples"
         sleep 5
     done
-    # Outcomes of the last 20 switches (older ones may have left the in-memory log ring).
-    local outcomes errs left a
-    outcomes=$(jq -r '.outcome' "$RESULTS/soak-outcomes.jsonl" | sort | uniq -c | tr '\n' ' ')
-    note "switch outcomes (each switch's last transition event, 30 s on): $outcomes"
-    local bad
-    bad=$(jq -s '[.[] | select(.outcome != "transition.done")] | length' "$RESULTS/soak-outcomes.jsonl")
-    check "every switch done" "$bad of $(jq -s length "$RESULTS/soak-outcomes.jsonl") not transition.done ($outcomes)" "0" "$([[ $bad == 0 ]] && echo 1 || echo 0)"
+    # The last switch has had no 30 s look yet: give it its second, then read it with the rest.
+    local errs left a sum
+    if [[ -n $corr ]]; then sleep 3; soak_outcome_live "$corr" >>"$RESULTS/soak-outcomes.jsonl"; fi
+    soak_finalize
+    sum=$(python3 "$HERE/soak_outcomes.py" summary "$RESULTS/soak-outcomes.jsonl")
+    note "switch outcomes (terminal transition event: live at 30 s, else re-read from the player's event log): $(jq -r .text <<<"$sum"); end-of-soak re-read: ${SOAK_REREAD:-none}"
+    check "every switch done" "$(jq -r .text <<<"$sum"); $(jq -r .reread <<<"$sum") needed the end-of-soak re-read" "0 not done" "$([[ $(jq -r .bad <<<"$sum") == 0 ]] && echo 1 || echo 0)"
     errs=$(ctl logs '{"min_level":"warn","limit":10000}' | jq -c '[.events[] | .kind] | group_by(.) | map({(.[0]): length}) | add // {}')
     note "warn+ events still in the ring at the end: $errs"
     # Stop → no worker.

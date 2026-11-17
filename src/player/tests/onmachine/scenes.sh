@@ -254,6 +254,7 @@ cursor_to() { hyprctl eval "hl.dispatch(hl.dsp.cursor.move({ x = $1, y = $2 }))"
 cleanup() {
     local rc=$?
     restore_cursor
+    declare -F soak_finalize >/dev/null && soak_finalize
     [[ -n ${TONE_PID:-} ]] && kill "$TONE_PID" 2>/dev/null
     serve_down
     pw_stop
