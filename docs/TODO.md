@@ -86,8 +86,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       shown while it's checked. Sort: Newest merges by date; Popular interleaves, each source keeping its own ranking.
       Defaults: only sources that work with no setup — Workshop, Wallhaven (keyless for SFW), the scraped live-wallpaper
       sites. Keyed sources (Pexels) start unchecked and ask for the free key in place when checked;
-      never a key prompt on first launch. Later, if they're popular: a small project proxy (free serverless tier,
-      holds the key, caches) makes them keyless — a server to keep alive and one shared rate limit (Pexels ~200/h).
+      never a key prompt on first launch. Checked 2026-11-17: Wallhaven needs no key for SFW (NSFW + account settings
+      need one), 45 calls/min per caller; Pexels' free key = 200 requests/h, 20,000/month, a visible "Photos provided by
+      Pexels" link required, and its limit raises may be paused — so no shared project key or proxy, each user's own.
+      MyLiveWallpapers stays out: it has a ring of look-alike clone domains.
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
       makepkg does (`build()` with no network). Left:
