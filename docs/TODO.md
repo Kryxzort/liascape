@@ -5,30 +5,7 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-80. [ ] (owner) Drop the "Download via steamcmd" Workshop mode: three modes cover every level of trust (Open in the
-       Steam app = none; Use the Steam app = no login given to Liascape; Subscribe with Steam login = full). steamcmd needs
-       a Steam login too (typed into a terminal), and sign-in mode already downloads without subscribing. Remove its
-       setting, downloader route, "Needs steamcmd" messages, Settings rows, README line, tests and probes; a stored
-       "steamcmd" mode reads as the default (pre-release, no migration). One docs/decisions.md entry.
-81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
-       hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
-82. [ ] (owner) Play GIF previews as converted videos — a setting, default off: each gif preview is transcoded once
-       (ffmpeg, cached beside the preview cache) to a small video, which pauses on window blur and resumes on the same frame,
-       decodes in hardware, and is smaller. Off = today's gif. The screenshot-freeze trial was tried and dropped (owner:
-       "the gif freeze sucks").
 83. [ ] (owner) Bug: a card whose preview is a gif gets a darker name strip while the window is unfocused.
-84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
-       seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
-       progress-bar area is needed or the status bar can carry it.
-85. [ ] (owner) Previews for the whole library in the background, not only for cards scrolled into view: queue every
-       item missing a preview at low priority (CPU/IO-friendly, paused under load or on battery-like holds), visible
-       cards first.
-86. [ ] (owner) Import folders, once or watched — one scanner for both: a folder with a project.json = one Wallpaper
-       Engine item (scene or video); loose videos / gifs / images = one wallpaper each; subfolders scanned the same way
-       (a backed-up Workshop folder imports every item). Import (button or a folder dropped on the window) shows what it
-       found first ("12 videos, 3 scenes, 2 already in your library", each ticked) before anything lands. Settings lists
-       watched folders: new or changed files picked up live, removed ones leave the library. Link or copy per folder
-       (the choice WE auto-import already has).
 87. [ ] Bug: Import saves every video and gif as `<name>.mp4` whatever its real format (`src/backend/Helpers/ImportService.cs`
        `mediaExt`): keep the source's extension.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
@@ -47,6 +24,32 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
        makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
        case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
+88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
+       below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
+       eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
+84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
+       seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
+       progress-bar area is needed or the status bar can carry it.
+85. [ ] (owner) Previews for the whole library in the background, not only for cards scrolled into view: queue every
+       item missing a preview at low priority (CPU/IO-friendly, paused under load or on battery-like holds), visible
+       cards first.
+80. [ ] (owner) Drop the "Download via steamcmd" Workshop mode: three modes cover every level of trust (Open in the
+       Steam app = none; Use the Steam app = no login given to Liascape; Subscribe with Steam login = full). steamcmd needs
+       a Steam login too (typed into a terminal), and sign-in mode already downloads without subscribing. Remove its
+       setting, downloader route, "Needs steamcmd" messages, Settings rows, README line, tests and probes; a stored
+       "steamcmd" mode reads as the default (pre-release, no migration). One docs/decisions.md entry.
+86. [ ] (owner) Import folders, once or watched — one scanner for both: a folder with a project.json = one Wallpaper
+       Engine item (scene or video); loose videos / gifs / images = one wallpaper each; subfolders scanned the same way
+       (a backed-up Workshop folder imports every item). Import (button or a folder dropped on the window) shows what it
+       found first ("12 videos, 3 scenes, 2 already in your library", each ticked) before anything lands. Settings lists
+       watched folders: new or changed files picked up live, removed ones leave the library. Link or copy per folder
+       (the choice WE auto-import already has).
+82. [ ] (owner) Play GIF previews as converted videos — a setting, default off: each gif preview is transcoded once
+       (ffmpeg, cached beside the preview cache) to a small video, which pauses on window blur and resumes on the same frame,
+       decodes in hardware, and is smaller. Off = today's gif. The screenshot-freeze trial was tried and dropped (owner:
+       "the gif freeze sucks").
+81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
+       hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
 67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist
        bar while the backend played k2) and hasn't come back in five full runs since. Ruled out: the keybind touches no
        playlist state, playlist_state.json is written atomically, and a stalled player's /current no longer reads
@@ -59,6 +62,33 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under that load); the printed `cards` count tells.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
+- [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
+      download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
+      makepkg does (`build()` with no network). Left:
+      - [ ] A clean-chroot build on Arch (`makechrootpkg -c` with `electron45-bin` built first and passed with `-I`), then
+            `namcap` on the PKGBUILD and the package (the scene worker's RUNPATH must be `$ORIGIN/../../lib/liascape`), and
+            an install test as a throwaway user: `liascape help`, the app under a headless compositor with one video and
+            one scene, nothing read from the repo or `~/.cache/liascape`. Check that Arch's source-built `dotnet-sdk`
+            restores the `linux-x64` runtime packs for the self-contained publish.
+      - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
+            calls `pactl`/`parec` any more), then publish `liascape-git` to the AUR.
+      - [ ] An app icon: none exists (`app/ui/public/favicon.svg` and `app/ui/src/assets/hero.png` are Vite's template
+            art), so the desktop entry has no `Icon=`. Add one to `scripts/install.sh` and the flake under
+            `share/icons/hicolor/scalable/apps/` once there is an icon.
+      - [ ] After the switch-over, rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
+            from install.sh's staged tree on an old glibc (an Ubuntu 22.04 container); bundle libmpv and its FFmpeg,
+            libplacebo, libass, SDL2, harfbuzz/freetype, lz4, libxkbcommon and static `ffmpeg`/`ffprobe`; take glibc,
+            GL/EGL/Vulkan (glvnd), libwayland, PipeWire/libpulse, libva, fontconfig and libcuda from the host; give every
+            bundled `.so` an `$ORIGIN` RUNPATH rather than `LD_LIBRARY_PATH` in AppRun; pass `--no-sandbox` only when
+            unprivileged user namespaces are off. Test with `ldd` on every ELF in containers without mpv/FFmpeg/SDL2.
+- [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
+      monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
+      from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
+- [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
+      Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
+      removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
+      published, existing ones can't be fetched), and running them would mean executing downloaded Windows programs.
+      Keep Application in Unplayable.
 - [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (the player's last phase), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
       Browse and the scrapers; once it plays, take it out of Unplayable and the Browse type filter (its tag then shows
       in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).
@@ -75,14 +105,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       Windows-only (WinUI 3, CEF in a window, WASAPI). Cost: import + video types ~1–2 days, properties + JS shim small;
       the web player is the big part and is shared with WE web wallpapers. Format docs: the project's GitHub wiki (the
       project moved to lively-community/lively, run by Sketches srl).
-- [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
-      Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
-      removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
-      published, existing ones can't be fetched), and running them would mean executing downloaded Windows programs.
-      Keep Application in Unplayable.
-- [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
-      monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
-      from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
 - [ ] **More wallpaper sources** (owner: support all of them): first one source interface (search, page, details,
       download, filters/sort) that Browse, the sidebar and the download queue use, with MoeWalls / MotionBGs / DesktopHut
       moved onto it (overlaps the upstream code rewrite); sources switch on/off in Settings. Then add Wallhaven (stills,
@@ -103,25 +125,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       need one), 45 calls/min per caller; Pexels' free key = 200 requests/h, 20,000/month, a visible "Photos provided by
       Pexels" link required, and its limit raises may be paused — so no shared project key or proxy, each user's own.
       MyLiveWallpapers stays out: it has a ring of look-alike clone domains.
-- [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
-      download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
-      makepkg does (`build()` with no network). Left:
-      - [ ] A clean-chroot build on Arch (`makechrootpkg -c` with `electron45-bin` built first and passed with `-I`), then
-            `namcap` on the PKGBUILD and the package (the scene worker's RUNPATH must be `$ORIGIN/../../lib/liascape`), and
-            an install test as a throwaway user: `liascape help`, the app under a headless compositor with one video and
-            one scene, nothing read from the repo or `~/.cache/liascape`. Check that Arch's source-built `dotnet-sdk`
-            restores the `linux-x64` runtime packs for the self-contained publish.
-      - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
-            calls `pactl`/`parec` any more), then publish `liascape-git` to the AUR.
-      - [ ] An app icon: none exists (`app/ui/public/favicon.svg` and `app/ui/src/assets/hero.png` are Vite's template
-            art), so the desktop entry has no `Icon=`. Add one to `scripts/install.sh` and the flake under
-            `share/icons/hicolor/scalable/apps/` once there is an icon.
-      - [ ] After the switch-over, rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
-            from install.sh's staged tree on an old glibc (an Ubuntu 22.04 container); bundle libmpv and its FFmpeg,
-            libplacebo, libass, SDL2, harfbuzz/freetype, lz4, libxkbcommon and static `ffmpeg`/`ffprobe`; take glibc,
-            GL/EGL/Vulkan (glvnd), libwayland, PipeWire/libpulse, libva, fontconfig and libcuda from the host; give every
-            bundled `.so` an `$ORIGIN` RUNPATH rather than `LD_LIBRARY_PATH` in AppRun; pass `--no-sandbox` only when
-            unprivileged user namespaces are off. Test with `ldd` on every ELF in containers without mpv/FFmpeg/SDL2.
 
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
