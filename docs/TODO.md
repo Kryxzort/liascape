@@ -12,6 +12,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        "steamcmd" mode reads as the default (pre-release, no migration). One docs/decisions.md entry.
 81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
        hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
+82. [ ] (owner) Play GIF previews as converted videos — a setting, default off: each gif preview is transcoded once
+       (ffmpeg, cached beside the preview cache) to a small video, which pauses on window blur and resumes on the same frame,
+       decodes in hardware, and is smaller. Off = today's gif. The screenshot-freeze trial was tried and dropped (owner:
+       "the gif freeze sucks").
+83. [ ] (owner) Bug: a card whose preview is a gif gets a darker name strip while the window is unfocused.
+84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
+       seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
+       progress-bar area is needed or the status bar can carry it.
+85. [ ] (owner) Previews for the whole library in the background, not only for cards scrolled into view: queue every
+       item missing a preview at low priority (CPU/IO-friendly, paused under load or on battery-like holds), visible
+       cards first.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
@@ -38,11 +49,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
        all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
        under that load); the printed `cards` count tells.
-23. [ ] GIF previews freeze on the frame they're showing while the window is unfocused (today they swap to the
-       still, usually frame 0): at blur, draw each on-screen gif's current frame to a canvas over it (one drawImage
-       each, then nothing decodes); on focus the gif continues on its own clock. Exact resume at the frozen frame needs
-       our own decoder (~2x CPU, +400 MB for 40 gifs: docs/decisions.md § "Let a hidden gif preview keep its own
-       clock") — not unless the owner asks.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (the player's last phase), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
