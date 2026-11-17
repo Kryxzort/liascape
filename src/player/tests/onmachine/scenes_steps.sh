@@ -485,16 +485,35 @@ hold_check() { # <check name> <img_diff_held json> <pair prefix> <keep prefix> [
     check "$1" "grim diff $held (cursor box $(jq -c .mask <<<"$hd") masked, unmasked $(jq -r .raw_diff <<<"$hd"))${5:-}" \
         "identical (0) outside the cursor" "$pass" "$hd"
 }
+# DP-1's pacing is judged against QUIET windows: the event's own procedure (frames reset, the grim pair on DP-2,
+# 2.2 s, read) with no event. On the live desktop DP-1 misses frames with nothing happening to any worker: a
+# 100 ms poll of DP-1 over a 6-minute run (idle, grims only, kills, hangs, fresh scene starts) counted ~0.35
+# misses/s in every condition alike, idle included (0–2 per 2.6 s window), each a 10.4–13.5 ms interval while the
+# player's loop was busy ≤ 3.9 ms, none aligned with a worker exit, restart or first frame. One 2 s baseline
+# sample (often 0) + 1 then failed events by chance. So the bound is the worst quiet window of the run + 1, the
+# quiet windows interleaved with the events (the desktop's rate drifts over minutes), and the p95 bound is the
+# quiet windows' median p95 × 1.10.
+quiet_window() { # → "<DP-1 missed> <DP-1 paced p95 ms>" over the window an event gets, with no event
+    reset_frames
+    grim_pair $OUT_B "$SCRATCH/quiet-g1.png" "$SCRATCH/quiet-g2.png"
+    sleep 2.2
+    local fr
+    fr=$(frames)
+    echo "$(fstat "$fr" $OUT_A .paced.missed) $(fstat "$fr" $OUT_A .paced.p95_ms)"
+}
+CRASH_QUIET_MISS=()
+CRASH_QUIET_P95=()
 crash_events() { # <scene label> <scene id> <bound recover s> [must-see box: the only part a frame of it changes]
-    local label=$1 id=$2 bound=$3 must=${4:-} ev w t0 g1 g2 resumed rec fr p95 miss md lb n=0
-    local base base_p95 base_miss
-    reset_frames; sleep 2.2; base=$(frames)
-    base_p95=$(fstat "$base" $OUT_A .paced.p95_ms); base_miss=$(fstat "$base" $OUT_A .paced.missed)
-    say "$label baseline $OUT_A: $(fstat "$base" $OUT_A '.paced | tostring')"
-    note "$label baseline $OUT_A paced p95 $base_p95 ms, missed $base_miss (2 s)"
-    CRASH_BASE_P95=$base_p95 CRASH_BASE_MISS=$base_miss
+    local label=$1 id=$2 bound=$3 must=${4:-} ev w t0 g1 g2 resumed rec fr p95 miss md lb n=0 qm qp
+    local ev_p95=() ev_miss=() ev_busy=() ev_name=()
+    for _ in 1 2 3; do
+        read -r qm qp <<<"$(quiet_window)"
+        CRASH_QUIET_MISS+=("$qm"); CRASH_QUIET_P95+=("$qp")
+    done
     for ev in kill kill hang kill hang kill kill; do
         n=$((n + 1))
+        read -r qm qp <<<"$(quiet_window)"
+        CRASH_QUIET_MISS+=("$qm"); CRASH_QUIET_P95+=("$qp")
         w=$(worker_pid_checked "$id") || { check "$label $ev: worker found" none "a worker" 0; continue; }
         ctl probe '{"name":"loop","args":{"reset":true}}' >/dev/null
         reset_frames
@@ -520,9 +539,10 @@ crash_events() { # <scene label> <scene id> <bound recover s> [must-see box: the
         held=$(jq -r '.diff // "nan"' <<<"$hd")
         local res_before_g2=0
         [[ -n $resumed ]] && python3 -c "import sys; sys.exit(0 if $resumed < $tg else 1)" && res_before_g2=1
-        say "$label $ev (pid $w): recovered ${rec}s after the worker's exit; $OUT_A p95 $p95 missed $miss; tone $md; $OUT_B grims diff $held ($(jq -c '{raw_diff, mask}' <<<"$hd"), resumed before 2nd grim: $res_before_g2); loop max_busy $(ctl probe '{"name":"loop"}' | jq -r .max_busy_ms)"
-        check "$label $ev: $OUT_A paced p95 / missed" "p95 $(fnum "$p95" 2) ms, missed $miss (baseline $(fnum "$base_p95" 2) / $base_miss)" "p95 ≤ baseline × 1.10, missed ≤ baseline + 1" \
-            "$(python3 -c "print(1 if $p95 <= $base_p95 * 1.10 and $miss <= $base_miss + 1 else 0)")"
+        local busy
+        busy=$(ctl probe '{"name":"loop"}' | jq -r .max_busy_ms)
+        say "$label $ev (pid $w): recovered ${rec}s after the worker's exit; $OUT_A p95 $p95 missed $miss (quiet window before: $qm); tone $md; $OUT_B grims diff $held ($(jq -c '{raw_diff, mask}' <<<"$hd"), resumed before 2nd grim: $res_before_g2); loop max_busy $busy"
+        ev_name+=("$ev"); ev_p95+=("$p95"); ev_miss+=("$miss"); ev_busy+=("$busy")
         check "$label $ev: $OUT_A tone drops" "$(jq -r '"\(.drops) (level \(.level_db | tostring | .[0:6]) dB, min bin \(.min_bin_db | tostring | .[0:6]), meter max step \(.max_step_ms | tostring | .[0:4]) ms)"' <<<"$md")" "0" \
             "$(jq -r 'if .drops == 0 and .bins > 100 then 1 else 0 end' <<<"$md")"
         if [[ $res_before_g2 == 1 ]]; then
@@ -533,8 +553,20 @@ crash_events() { # <scene label> <scene id> <bound recover s> [must-see box: the
             hold_check "$label $ev: $OUT_B holds its frame" "$hd" "crash-$label" "crash-$label-$ev$n"
         fi
         check "$label $ev: recovery (worker exit → scene.resumed)" "${rec} s" "≤ $bound s" "$([[ $rec != none ]] && le "$rec" "$bound" || echo 0)"
-        sleep 19
+        sleep 16 # + the next quiet window: events stay ≥ 21 s apart
     done
+    crash_quiet_bounds
+    note "$label quiet windows so far: $OUT_A missed ${CRASH_QUIET_MISS[*]}; p95 median $(fnum "$QUIET_P95" 2) ms"
+    local i
+    for i in "${!ev_name[@]}"; do
+        check "$label ${ev_name[$i]} #$((i + 1)): $OUT_A paced p95 / missed" \
+            "p95 $(fnum "${ev_p95[$i]}" 2) ms, missed ${ev_miss[$i]}, loop max_busy $(fnum "${ev_busy[$i]}" 2) ms (quiet windows: p95 median $(fnum "$QUIET_P95" 2), missed worst $QUIET_MISS of ${#CRASH_QUIET_MISS[@]})" \
+            "p95 ≤ quiet median × 1.10, missed ≤ quiet worst + 1" \
+            "$(python3 -c "print(1 if ${ev_p95[$i]} <= $QUIET_P95 * 1.10 and ${ev_miss[$i]} <= $QUIET_MISS + 1 else 0)")"
+    done
+}
+crash_quiet_bounds() { # → QUIET_P95 (median p95), QUIET_MISS (worst missed) over every quiet window so far
+    read -r QUIET_P95 QUIET_MISS <<<"$(python3 -c "import statistics, sys; p = [float(x) for x in sys.argv[1].split()]; m = [int(x) for x in sys.argv[2].split()]; print(statistics.median(p), max(m))" "${CRASH_QUIET_P95[*]}" "${CRASH_QUIET_MISS[*]}")"
 }
 step_crash() {
     step_begin crash
@@ -572,8 +604,9 @@ step_crash() {
     say "crash loop: broken $(jq -c '{restarts, signal, shows, record}' <<<"${b:-null}")"
     [[ -n ${b:-} ]] || b='{}'
     check "crash loop → broken" "$(jq -c '{restarts, shows}' <<<"$b")" "source.broken after 3 restarts" "$(jq -r 'if .restarts == 3 then 1 else 0 end' <<<"$b")"
-    check "crash loop: $OUT_A paced p95 / missed (worst 2 s window)" "p95 $(fnum "$worst_p95" 2), missed $worst_miss (baseline $(fnum "$CRASH_BASE_P95" 2) / $CRASH_BASE_MISS)" "p95 ≤ baseline × 1.10, missed ≤ baseline + 1" \
-        "$(python3 -c "print(1 if $worst_p95 <= $CRASH_BASE_P95 * 1.10 and $worst_miss <= $CRASH_BASE_MISS + 1 else 0)")"
+    crash_quiet_bounds
+    check "crash loop: $OUT_A paced p95 / missed (worst 2 s window)" "p95 $(fnum "$worst_p95" 2), missed $worst_miss (quiet windows: p95 median $(fnum "$QUIET_P95" 2), missed worst $QUIET_MISS of ${#CRASH_QUIET_MISS[@]})" "p95 ≤ quiet median × 1.10, missed ≤ quiet worst + 1" \
+        "$(python3 -c "print(1 if $worst_p95 <= $QUIET_P95 * 1.10 and $worst_miss <= $QUIET_MISS + 1 else 0)")"
     md=$(meter_drops "$t0" "$(now_ms)")
     check "crash loop: $OUT_A tone drops" "$(jq -c '{drops, level_db, max_step_ms}' <<<"$md")" "0" "$(jq -r 'if .drops == 0 then 1 else 0 end' <<<"$md")"
     sleep 0.5
