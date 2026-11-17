@@ -164,3 +164,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0130-video-a-muted-player-opens-no-audio-output-the-rende.patch` | video: a muted player opens no audio output, the render thread never waits on mpv | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0131-render-upload-a-wallpaper-s-JPEG-PNG-textures-on-a-c.patch` | render: upload a wallpaper's JPEG / PNG textures on a context of the host's while it builds | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0132-fs-remember-where-a-path-resolved-so-a-build-asks-th.patch` | fs: remember where a path resolved, so a build asks the filesystem once per path | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0133-render-hoist-a-unit-s-declarations-without-regexes-o.patch` | render: hoist a unit's declarations without regexes, once per text | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

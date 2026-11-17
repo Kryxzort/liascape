@@ -1,0 +1,462 @@
+From ff7cf61b59364af06b351cad99d3c17e8c7e5a8e Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 00:17:06 +0530
+Subject: [PATCH 133/133] render: hoist a unit's declarations without regexes,
+ once per text
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+WERules::hoistDeclarations was most of a unit's preprocessing: per line it ran std::regex (the directive regex on
+every # line, the declaration regex on every line starting with a storage keyword, the identifier regex over the
+#if chains and the line), and libstdc++'s backtracking executor costs microseconds a line. A scene builds the same
+unit texts many times (one effect shader serves many passes): one --lwe-smoke load of 3042492564 called it 508 times
+for 59 distinct texts and spent 79 ms in it, 3516174947 136 ms, 3414858021 112 ms.
+
+It now reads each line with a hand-written scan that accepts exactly what the regexes matched: the directive's
+`[a-z]` run with no word character after it and the rest after its spaces; a declaration as whole words between
+`\s` runs (a storage word, the qualifiers, a type word, a name), one optional `[…]` up to the first `]`, `;`, then
+nothing or a `//` comment; identifiers as sregex_iterator lists them. The lines are views into the text (no copy per
+line), and the result is remembered per text for the process (keyed by the whole text, so a hit is exactly what the
+work would give; the health record of a hoist is reported again on a hit; bounded at 64 MB, about 0.8 MB for the
+largest scene).
+
+Same output, checked three ways: every hoistDeclarations input of the 93 library scenes the corpus plays (366
+distinct texts, 193 of them hoisting something, from both builds with a dump hook) gives byte-identical output and
+the same health records from the old and the new code, in the worker and offline; 2,000,000 generated texts built
+from lines on the regexes' edges (whitespace kinds, qualifiers, near-miss types and names, brackets, comments,
+directives, scope, include markers, #defines a declaration reads) and 300,000 mutants of the 366 real texts, each
+through both: 0 differences (three deliberately broken variants of the scan differ in 315-835 of 20,000 generated
+texts each).
+
+Measured: hoistDeclarations per call 124 -> 14 us (the scan), 0.85 us on a repeat; one load of every corpus scene
+2130 -> 114 ms in all. Apply to first frame on a private headless liascape-player (scene_load.py, medians of 16 warm
+/ 4 cold / 4 after-a-boot loads per core, the cores alternating): 3042492564 warm 473 -> 418 ms, cold 1098 -> 1062,
+boot 517 -> 440; 3163060610 402 -> 357, 731 -> 666, 450 -> 398; 2388299037 437 -> 417, 594 -> 592, 479 -> 443;
+3414858021 637 -> 519, 805 -> 773, 644 -> 554; 3516174947 1005 -> 860, 1476 -> 1378, 1044 -> 945.
+
+Origin: ours
+Why: docs/TODO.md (scene wallpapers load faster: the units' preprocessing)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Render/Shaders/WEShaderRules.cpp          | 343 ++++++++++++++----
+ 1 file changed, 281 insertions(+), 62 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+index 03c7d65..de27a58 100644
+--- a/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
++++ b/src/core/WallpaperEngine/Render/Shaders/WEShaderRules.cpp
+@@ -4,8 +4,12 @@
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include <map>
++#include <mutex>
++#include <optional>
+ #include <regex>
+ #include <sstream>
++#include <string_view>
++#include <unordered_map>
+ #include <vector>
+ 
+ namespace WallpaperEngine::Render::Shaders::WERules {
+@@ -46,17 +50,6 @@ const std::regex& directive () {
+     static const std::regex re (R"(^\s*#\s*([a-z]+)\b\s*([^\n]*)$)");
+     return re;
+ }
+-
+-/** Whether the line's first word is a storage keyword: `^\s*(?:uniform|attribute|varying|in|out)\s+` can match it */
+-bool startsWithStorage (std::string_view line) {
+-    const size_t begin = Scan::skipSpace (line, 0);
+-    size_t end = begin;
+-    while (end < line.size () && Scan::isWord (line[end])) {
+-	end++;
+-    }
+-    const std::string_view word = line.substr (begin, end - begin);
+-    return word == "uniform" || word == "attribute" || word == "varying" || word == "in" || word == "out";
+-}
+ } // namespace
+ 
+ std::string expandIncludes (const std::string& source, const IncludeLoader& load, std::set<std::string>& seen) {
+@@ -96,52 +89,229 @@ std::string expandIncludes (const std::string& source, const IncludeLoader& load
+     return out;
+ }
+ 
+-std::string hoistDeclarations (const std::string& source) {
+-    auto lines = splitLines (source);
+-    static const std::regex declaration (
+-	R"(^\s*(?:uniform|attribute|varying|in|out)\s+(?:(?:lowp|mediump|highp|flat|smooth|noperspective|centroid)\s+)*)"
+-	R"((?:float|int|uint|bool|[biu]?vec[234]|mat[234](?:x[234])?|sampler[A-Za-z0-9]*|float[234](?:x[234])?|int[234])\s+)"
+-	R"([A-Za-z_][A-Za-z0-9_]*\s*(?:\[[^\]]*\])?\s*;\s*(?://[^\n]*)?$)"
+-    );
+-    static const std::regex identifier (R"([A-Za-z_][A-Za-z0-9_]*)");
++namespace {
++/** The lines of `source` split at '\n' as splitLines does, as views into it */
++std::vector<std::string_view> lineViews (std::string_view source) {
++    std::vector<std::string_view> lines;
++    size_t begin = 0;
++    while (true) {
++	const size_t end = source.find ('\n', begin);
++	if (end == std::string_view::npos) {
++	    lines.push_back (source.substr (begin));
++	    return lines;
++	}
++	lines.push_back (source.substr (begin, end - begin));
++	begin = end + 1;
++    }
++}
++
++/** `[A-Za-z_]`: where `[A-Za-z_][A-Za-z0-9_]*` can start */
++bool startsIdentifier (char c) {
++    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
++}
++
++/**
++ * Calls `fn (identifier)` for each match of `[A-Za-z_][A-Za-z0-9_]*` in `text`, in the order an sregex_iterator lists
++ * them (each the longest run from the leftmost place one can start, the next search from its end), until `fn` returns
++ * true; returns whether it did
++ */
++template <typename F> bool anyIdentifier (std::string_view text, F fn) {
++    size_t at = 0;
++    while (at < text.size ()) {
++	if (!startsIdentifier (text[at])) {
++	    at++;
++	    continue;
++	}
++	size_t end = at + 1;
++	while (end < text.size () && Scan::isWord (text[end])) {
++	    end++;
++	}
++	if (fn (text.substr (at, end - at))) {
++	    return true;
++	}
++	at = end;
++    }
++    return false;
++}
++
++/** A line that `directive ()` matches whole: group 1 (`kind`) and group 2 (`rest`) */
++struct DirectiveLine {
++    std::string_view kind;
++    std::string_view rest;
++};
++
++/**
++ * Whether `^\s*#\s*([a-z]+)\b\s*([^\n]*)$` matches the whole line (one without '\n'), and its groups when it does: the
++ * `[a-z]` run after the `#` (no other word character may follow it), then the line after the run and the `\s` after it
++ */
++std::optional<DirectiveLine> readDirective (std::string_view line) {
++    size_t at = Scan::skipSpace (line, 0);
++    if (at >= line.size () || line[at] != '#') {
++	return std::nullopt;
++    }
++    at = Scan::skipSpace (line, at + 1);
++    const size_t begin = at;
++    while (at < line.size () && line[at] >= 'a' && line[at] <= 'z') {
++	at++;
++    }
++    if (at == begin || (at < line.size () && Scan::isWord (line[at]))) {
++	return std::nullopt;
++    }
++    return DirectiveLine { line.substr (begin, at - begin), line.substr (Scan::skipSpace (line, at)) };
++}
++
++bool isStorageWord (std::string_view word) {
++    return word == "uniform" || word == "attribute" || word == "varying" || word == "in" || word == "out";
++}
++
++bool isQualifierWord (std::string_view word) {
++    return word == "lowp" || word == "mediump" || word == "highp" || word == "flat" || word == "smooth"
++	|| word == "noperspective" || word == "centroid";
++}
++
++bool is234 (char c) {
++    return c == '2' || c == '3' || c == '4';
++}
++
++/** Whether `rest` is empty or `x[234]` */
++bool isEmptyOrColumns (std::string_view rest) {
++    return rest.empty () || (rest.size () == 2 && rest[0] == 'x' && is234 (rest[1]));
++}
++
++/**
++ * Whether the word is one of `float|int|uint|bool|[biu]?vec[234]|mat[234](?:x[234])?|sampler[A-Za-z0-9]*|
++ * float[234](?:x[234])?|int[234]` whole
++ */
++bool isTypeWord (std::string_view word) {
++    if (word == "float" || word == "int" || word == "uint" || word == "bool") {
++	return true;
++    }
++    if (word.starts_with ("sampler")) {
++	for (const char c : word.substr (7)) {
++	    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
++		return false;
++	    }
++	}
++	return true;
++    }
++    std::string_view vec = word;
++    if (!vec.empty () && (vec[0] == 'b' || vec[0] == 'i' || vec[0] == 'u')) {
++	vec.remove_prefix (1);
++    }
++    if (vec.size () == 4 && vec.starts_with ("vec") && is234 (vec[3])) {
++	return true;
++    }
++    if (word.size () >= 4 && word.starts_with ("mat") && is234 (word[3])) {
++	return isEmptyOrColumns (word.substr (4));
++    }
++    if (word.size () >= 6 && word.starts_with ("float") && is234 (word[5])) {
++	return isEmptyOrColumns (word.substr (6));
++    }
++    return word.size () == 4 && word.starts_with ("int") && is234 (word[3]);
++}
++
++/**
++ * Whether the declaration regex
++ * `^\s*(?:uniform|attribute|varying|in|out)\s+(?:(?:lowp|mediump|highp|flat|smooth|noperspective|centroid)\s+)*`
++ * `(?:<a type of isTypeWord>)\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:\[[^\]]*\])?\s*;\s*(?://[^\n]*)?$` matches the whole line
++ * (one without '\n'). Every word of its head is followed by `\s+`, so each is a whole `\w` run between spaces, and the
++ * qualifiers are no types: the line's words decide it in order, with no other way for the regex to split them
++ */
++bool isDeclaration (std::string_view line) {
++    size_t at = Scan::skipSpace (line, 0);
++    const auto word = [&] {
++	const size_t begin = at;
++	while (at < line.size () && Scan::isWord (line[at])) {
++	    at++;
++	}
++	return line.substr (begin, at - begin);
++    };
++    const auto spaces = [&] {
++	if (at >= line.size () || !Scan::isSpace (line[at])) {
++	    return false;
++	}
++	at = Scan::skipSpace (line, at);
++	return true;
++    };
++    if (!isStorageWord (word ()) || !spaces ()) {
++	return false;
++    }
++    std::string_view next = word ();
++    while (isQualifierWord (next)) {
++	if (!spaces ()) {
++	    return false;
++	}
++	next = word ();
++    }
++    if (!isTypeWord (next) || !spaces ()) {
++	return false;
++    }
++    if (at >= line.size () || !startsIdentifier (line[at])) {
++	return false;
++    }
++    word ();
++    at = Scan::skipSpace (line, at);
++    if (at < line.size () && line[at] == '[') {
++	const size_t close = line.find (']', at + 1);
++	if (close == std::string_view::npos) {
++	    return false;
++	}
++	at = Scan::skipSpace (line, close + 1);
++    }
++    if (at >= line.size () || line[at] != ';') {
++	return false;
++    }
++    at = Scan::skipSpace (line, at + 1);
++    return at == line.size () || line.substr (at, 2) == "//";
++}
++
++/** What hoistDeclarations returns for a text: `text` is empty when it returns its input */
++struct Hoisted {
++    std::string text;
++    bool moved = false;
++};
+ 
+-    std::vector<std::vector<std::string>> chains; // the open #if chains, outermost first
+-    std::vector<size_t> chainStart;               // the line each chain's #if is on
++Hoisted hoist (const std::string& source) {
++    const auto lines = lineViews (source);
++    std::vector<std::vector<std::string_view>> chains; // the open #if chains, outermost first
++    std::vector<size_t> chainStart;                    // the line each chain's #if is on
+     int braces = 0, parens = 0;
+     bool block = false;
+     long hoistAt = -1;
+-    std::set<std::string> definedSince;
++    std::set<std::string, std::less<>> definedSince;
+     std::string hoisted;
+-    size_t moved = 0;
++    std::vector<bool> moved (lines.size (), false);
++    bool anyMoved = false;
+ 
+     for (size_t i = 0; i < lines.size (); i++) {
+-	const std::string& line = lines[i];
++	const std::string_view line = lines[i];
+ 	const bool topLevel = braces == 0 && parens == 0 && !block;
+-	std::smatch m;
+-	if (!block && Scan::directiveLine (line) && std::regex_match (line, m, directive ())) {
+-	    const std::string kind = m[1].str ();
+-	    if (kind == "if" || kind == "ifdef" || kind == "ifndef") {
+-		chains.push_back ({ line });
+-		chainStart.push_back (i);
+-	    } else if ((kind == "elif" || kind == "else") && !chains.empty ()) {
+-		chains.back ().push_back (line);
+-	    } else if (kind == "endif" && !chains.empty ()) {
+-		chains.pop_back ();
+-		chainStart.pop_back ();
+-	    } else if ((kind == "define" || kind == "undef") && hoistAt >= 0) {
+-		std::smatch name;
+-		const std::string rest = m[2].str ();
+-		if (std::regex_search (rest, name, identifier)) {
+-		    definedSince.insert (name.str ());
++	if (!block) {
++	    if (const auto directive = readDirective (line)) {
++		const std::string_view kind = directive->kind;
++		if (kind == "if" || kind == "ifdef" || kind == "ifndef") {
++		    chains.push_back ({ line });
++		    chainStart.push_back (i);
++		} else if ((kind == "elif" || kind == "else") && !chains.empty ()) {
++		    chains.back ().push_back (line);
++		} else if (kind == "endif" && !chains.empty ()) {
++		    chains.pop_back ();
++		    chainStart.pop_back ();
++		} else if ((kind == "define" || kind == "undef") && hoistAt >= 0) {
++		    anyIdentifier (directive->rest, [&] (std::string_view name) {
++			definedSince.emplace (name);
++			return true;
++		    });
+ 		}
++		continue;
+ 	    }
+-	    continue;
+ 	}
+-	if (hoistAt < 0 && topLevel && line.find ("// begin of include from file ") != std::string::npos) {
++	if (hoistAt < 0 && topLevel && line.find ("// begin of include from file ") != std::string_view::npos) {
+ 	    // the first include: before the outermost #if it is in, so the whole chain stays below
+ 	    hoistAt = chainStart.empty () ? static_cast<long> (i) : static_cast<long> (chainStart.front ());
+ 	    // the chains open at that point are above the hoisted block: a declaration in them keeps only the inner ones
+-	} else if (hoistAt >= 0 && topLevel && startsWithStorage (line) && std::regex_match (line, declaration)) {
++	} else if (hoistAt >= 0 && topLevel && isDeclaration (line)) {
++	    const auto local = [&] (std::string_view name) { return definedSince.contains (name); };
+ 	    // the chains the hoisted copy needs: those opened after the hoist point
+ 	    std::string open, close;
+ 	    bool readsLocalDefine = false;
+@@ -150,37 +320,37 @@ std::string hoistDeclarations (const std::string& source) {
+ 		    continue;
+ 		}
+ 		for (const auto& d : chains[c]) {
+-		    open += d + "\n";
+-		    const std::string text = withoutLineComment (d);
+-		    for (auto it = std::sregex_iterator (text.begin (), text.end (), identifier); it != std::sregex_iterator ();
+-			 ++it) {
+-			readsLocalDefine = readsLocalDefine || definedSince.contains (it->str ());
+-		    }
++		    open += d;
++		    open += '\n';
++		    readsLocalDefine = readsLocalDefine || anyIdentifier (d.substr (0, d.find ("//")), local);
+ 		}
+ 		close += "#endif\n";
+ 	    }
+-	    for (auto it = std::sregex_iterator (line.begin (), line.end (), identifier); it != std::sregex_iterator (); ++it) {
+-		readsLocalDefine = readsLocalDefine || definedSince.contains (it->str ());
+-	    }
++	    readsLocalDefine = readsLocalDefine || anyIdentifier (line, local);
+ 	    if (!readsLocalDefine) {
+-		hoisted += open + line + "\n" + close;
+-		lines[i] = "";
+-		moved++;
++		hoisted += open;
++		hoisted += line;
++		hoisted += '\n';
++		hoisted += close;
++		moved[i] = true;
++		anyMoved = true;
++		// the line is now empty: no scope to track in it
++		continue;
+ 	    }
+ 	}
+ 	// track the scope for the next line
+ 	for (size_t c = 0; c < line.size (); c++) {
+ 	    if (block) {
+-		if (line.compare (c, 2, "*/") == 0) {
++		if (line.substr (c, 2) == "*/") {
+ 		    block = false;
+ 		    c++;
+ 		}
+ 		continue;
+ 	    }
+-	    if (line.compare (c, 2, "//") == 0) {
++	    if (line.substr (c, 2) == "//") {
+ 		break;
+ 	    }
+-	    if (line.compare (c, 2, "/*") == 0) {
++	    if (line.substr (c, 2) == "/*") {
+ 		block = true;
+ 		c++;
+ 		continue;
+@@ -195,13 +365,62 @@ std::string hoistDeclarations (const std::string& source) {
+ 	}
+     }
+ 
+-    if (moved == 0 || hoistAt < 0) {
++    if (!anyMoved || hoistAt < 0) {
++	return {};
++    }
++    Hoisted result { .text = {}, .moved = true };
++    result.text.reserve (source.size () + hoisted.size () + 96);
++    for (size_t i = 0; i < lines.size (); i++) {
++	if (i > 0) {
++	    result.text += '\n';
++	}
++	if (static_cast<long> (i) == hoistAt) {
++	    result.text += "// declarations hoisted as WE's cbuffers and structs are\n";
++	    result.text += hoisted;
++	    result.text += "// end of hoisted declarations\n";
++	}
++	if (!moved[i]) {
++	    result.text += lines[i];
++	}
++    }
++    return result;
++}
++} // namespace
++
++std::string hoistDeclarations (const std::string& source) {
++    // a unit's text repeats: one effect shader serves many passes (3042492564 builds 1025 units from 68 shader
++    // pairs), and the result is a function of the text alone, so each text is worked out once per process
++    static std::mutex lock;
++    static std::unordered_map<std::string, Hoisted> memo;
++    static size_t memoBytes = 0;
++    static constexpr size_t kMemoBytes = 64u << 20;
++
++    Hoisted result;
++    bool known = false;
++    {
++	std::scoped_lock guard (lock);
++	if (const auto it = memo.find (source); it != memo.end ()) {
++	    result = it->second;
++	    known = true;
++	}
++    }
++    if (!known) {
++	result = hoist (source);
++	std::scoped_lock guard (lock);
++	const size_t bytes = source.size () + result.text.size ();
++	if (memoBytes + bytes > kMemoBytes) {
++	    memo.clear ();
++	    memoBytes = 0;
++	}
++	if (memo.emplace (source, result).second) {
++	    memoBytes += bytes;
++	}
++    }
++    if (!result.moved) {
+ 	return source;
+     }
+-    lines[static_cast<size_t> (hoistAt)] = "// declarations hoisted as WE's cbuffers and structs are\n" + hoisted
+-	+ "// end of hoisted declarations\n" + lines[static_cast<size_t> (hoistAt)];
+     WPENGINE_HEALTH ("compat", { { "what", "WE: declarations hoisted above the includes" } });
+-    return joinLines (lines);
++    return std::move (result.text);
+ }
+ 
+ namespace {
