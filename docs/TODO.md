@@ -70,6 +70,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
       monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
       from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
+- [ ] **More wallpaper sources** (owner: support all of them): first one source interface (search, page, details,
+      download, filters/sort) that Browse, the sidebar and the download queue use, with MoeWalls / MotionBGs / DesktopHut
+      moved onto it (overlaps the upstream code rewrite); sources switch on/off in Settings. Then, one at a time: Pexels
+      Videos, Pixabay Videos (official APIs, free licence), Wallhaven, Unsplash (stills), then scraped Wallpaper Waifu,
+      MyLiveWallpapers, Alpha Coders (off by default). Keyed APIs take the user's own free key (never one in the repo);
+      credit the creator where the API asks (Pexels, Unsplash + its download ping); a source that stops answering says so.
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
       makepkg does (`build()` with no network). Left:
