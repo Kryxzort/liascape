@@ -23,6 +23,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 85. [ ] (owner) Previews for the whole library in the background, not only for cards scrolled into view: queue every
        item missing a preview at low priority (CPU/IO-friendly, paused under load or on battery-like holds), visible
        cards first.
+86. [ ] (owner) Watched folders: Settings lists folders to auto-import wallpapers from (videos, gifs, images, and
+       Wallpaper Engine scene/video folders with a project.json); new or changed files are picked up live, removed ones
+       leave the library. Per folder: link or copy (the same choice WE auto-import has). Also let the Import button take
+       a scene folder (today it only picks single files, so a scene can't be imported by hand).
+87. [ ] Bug: Import saves every video and gif as `<name>.mp4` whatever its real format (`src/backend/Helpers/ImportService.cs`
+       `mediaExt`): keep the source's extension.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
