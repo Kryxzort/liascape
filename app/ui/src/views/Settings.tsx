@@ -210,12 +210,15 @@ function Row({ label, hint, disabled, liveChip, rk, wk, def, deviated, deviatedT
     </Tag>
   );
 }
-// a whole section can sit at a level too (`lv`); a section's rows still filter themselves
-function Section({ title, icon, lv, children }: { title: string; icon?: React.ReactNode; lv?: Level; children: React.ReactNode }) {
+// a whole section can sit at a level too (`lv`); a section's rows still filter themselves, and a section none of whose
+// rows the level (or the engine) shows hides with them (index.css `.ssection[data-rows]`), so no heading ever stands
+// alone. `bare` = a section whose content isn't rows (a command block, the monitor list's add button): it always shows.
+// Guard: probe-settings levels:noEmptySection.
+function Section({ title, icon, lv, bare, children }: { title: string; icon?: React.ReactNode; lv?: Level; bare?: boolean; children: React.ReactNode }) {
   const level = useStore((s) => levelOf(s.settings?.settingsLevel));
   if (lv && rank(lv) > rank(level)) return null;
   return (
-    <div className="ssection">
+    <div className="ssection" data-rows={bare ? undefined : ""}>
       <h3>{icon && <span className="ssection-ico">{icon}</span>}{title}</h3>
       {children}
     </div>
@@ -229,7 +232,7 @@ const hiddenChanged = (settings: Record<string, unknown>, level: Level) =>
     && !(PREVIEW_KEYS.includes(k) && presetOf(settings))).map(([k, lv]) => ({ k, lv }));
 
 // Look & feel → what a card shows hovered and not (components/mediaAssets.ts): Basic picks a named pair ("Card previews"),
-// Standard and up also order each list. The preset reads "Custom" when the lists match none. Guard: probe-cardpreview
+// Advanced and up also order each list. The preset reads "Custom" when the lists match none. Guard: probe-cardpreview
 // cardpv:preset, cardpv:order.
 const THUMB_ITEMS: OrderItem[] = [
   { id: "video", label: "Video", icon: <Film size={14} /> },
@@ -242,7 +245,7 @@ function CardPreviewRows({ level }: { level: Level }) {
   const preset = presetOf(settings);
   const isDefault = reach(hover).join() === reach(DEFAULT_ON_HOVER).join() && reach(idle).join() === reach(DEFAULT_NOT_HOVERED).join();
   const pick = (v: string) => { const p = PREVIEW_PRESETS.find((x) => x.value === v); if (p) { set("previewOnHover", p.hover); set("previewNotHovered", p.idle); } };
-  const custom = rank(level) < rank("standard") ? "your own order, set at the Standard level." : "your own order, set in the two lists below.";
+  const custom = rank(level) < rank(LEVEL_OF_KEY.previewOnHover) ? `your own order, set at the ${LEVEL_LABEL[LEVEL_OF_KEY.previewOnHover]} level.` : "your own order, set in the two lists below.";
   return (
     <>
       {/* ffmpeg makes the clips "Not hovered" plays: its warning shows here too, where Basic sees it */}
@@ -505,7 +508,7 @@ export const Settings = memo(function Settings() {
       </Section>
       <TransitionPicker open={trPicker} value={trVal} onChange={trChange} onClose={() => setTrPicker(false)} title="Global Transitions" />
 
-      <Section title="Video" icon={<Cpu size={15} />} lv="standard">
+      <Section title="Video" icon={<Cpu size={15} />}>
         <Row label="Fit to screen" hint="Fill covers the whole screen and trims the edges if the shape differs. Fit shows the whole video, with bars if it differs." rk="videoScale">
           <Select value={g("videoScale", "fill")} onChange={(v) => set("videoScale", v)}
             options={[{ value: "fill", label: "Fill" }, { value: "fit", label: "Fit" }]} />
@@ -588,7 +591,7 @@ export const Settings = memo(function Settings() {
       </Section>
 
       {g("allowScenes", false) && (
-        <Section title="Scene monitors" icon={<MonitorSmartphone size={15} />} lv="standard">
+        <Section title="Scene monitors" icon={<MonitorSmartphone size={15} />} lv="standard" bare>
           <Help>The monitors scenes play on, each with its frame rate limit.{detected.length > 0
             ? <> Found: {detected.map((d) => <code key={d.name} className="kb">{d.name} {d.refreshHz}Hz{d.primary ? " ★" : ""}</code>)}. Type or pick below.</>
             : <> None found automatically. On Hyprland, <code className="kb">hyprctl monitors</code> lists their names.</>}</Help>
@@ -625,7 +628,8 @@ export const Settings = memo(function Settings() {
           <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>
         <Row label="Subscribe with Steam login" hint="another way to subscribe from the app, but you log in to Steam here">
           <input type="radio" data-wsmode="subscribe" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
-        <Row label="Download via steamcmd" hint="just downloads the wallpaper without subscribing, so no updates. Needs steamcmd set up." wk="workshopDownloadMode">
+        <Row label="Download via steamcmd" hint="just downloads the wallpaper without subscribing, so no updates. Needs steamcmd set up." wk="workshopDownloadMode"
+          lv="advanced">
           <input type="radio" data-wsmode="steamcmd" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "steamapp" && (
           <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated.</Help>
@@ -650,12 +654,12 @@ export const Settings = memo(function Settings() {
                     </span></div>}
             </Row>
           : mode === "steamcmd" && <>
-              <Row label="steamcmd path" hint="leave blank to find it automatically" wk="steamCmdPath">
+              <Row label="steamcmd path" hint="leave blank to find it automatically" wk="steamCmdPath" lv="advanced">
                 <input className="text" placeholder="/usr/bin/steamcmd" value={g("steamCmdPath", "")} onChange={(e) => set("steamCmdPath", e.target.value)} />
                 <button className="btn ghost ico" onClick={() => pickInto("steamCmdPath", "file")}><FolderFlap size={14} /> Browse</button>
               </Row>
-              <Row label="Steam username"><input className="text" value={g("steamUsername", "")} onChange={(e) => set("steamUsername", e.target.value)} /></Row>
-              <Row label="Sign in" hint="opens a terminal, and steamcmd remembers you after"><button className="btn accent" onClick={steamcmdSignin}>Sign in</button></Row>
+              <Row label="Steam username" lv="advanced"><input className="text" value={g("steamUsername", "")} onChange={(e) => set("steamUsername", e.target.value)} /></Row>
+              <Row label="Sign in" hint="opens a terminal, and steamcmd remembers you after" lv="advanced"><button className="btn accent" onClick={steamcmdSignin}>Sign in</button></Row>
             </>}
       </Section>
 
@@ -694,24 +698,25 @@ export const Settings = memo(function Settings() {
         {g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics readout" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
       </Section>
 
-      <Section title="mpv command" icon={<Terminal size={15} />} lv="expert">
+      <Section title="mpv command" icon={<Terminal size={15} />} lv="expert" bare>
         <div className="cmd-block"><pre className="mpv">{mpv || "…"}</pre><CopyButton text={mpv} what="mpv command" /></div>
       </Section>
 
-      <Section title="linux-wallpaperengine command" icon={<Terminal size={15} />} lv="expert">
+      <Section title="linux-wallpaperengine command" icon={<Terminal size={15} />} lv="expert" bare>
         <Help>The scene command, one line per monitor; each scene's Workshop ID goes on the end.</Help>
         <div className="cmd-block"><pre className="mpv">{lwe || "…"}</pre><CopyButton text={lwe} what="linux-wallpaperengine command" /></div>
       </Section>
 
-      <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />} lv="standard">
-        <Help>Bind these commands to keys in your compositor's config.</Help>
+      <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />}>
+        {/* Basic shows only Autostart: the bind-these-keys line goes with the command list */}
+        {rank(level) >= rank("standard") && <Help>Bind these commands to keys in your compositor's config.</Help>}
         {actions.map((a) => (
-          <Row key={a} label={a}>
+          <Row key={a} label={a} lv="standard">
             <code className="kb">liascape {a.replace("volume-", "volume ")}</code>
             <CopyButton text={`liascape ${a.replace("volume-", "volume ")}`} what={`liascape ${a.replace("volume-", "volume ")}`} />
           </Row>
         ))}
-        <Row label="Autostart"><code className="kb">liascape restore</code>
+        <Row label="Autostart" hint="run it when you log in, and your wallpapers come back"><code className="kb">liascape restore</code>
           <CopyButton text="liascape restore" what="liascape restore" /></Row>
       </Section>
 
@@ -725,7 +730,7 @@ export const Settings = memo(function Settings() {
             {wipeArm >= 0 && <button className="btn ghost" onClick={() => setWipeArm(-1)}>Cancel</button>}
           </div>
         </Row>
-        <Row label="Forget the whole library" hint="removes every wallpaper from the library. There's no undo." lv="standard">
+        <Row label="Forget the whole library" hint="removes every wallpaper from the library. There's no undo." lv="advanced">
           <div className="hms">
             {clearArm < 0 && <button className="btn danger" onClick={() => setClearArm(5)}>Clear Library</button>}
             {clearArm > 0 && <button className="btn danger" disabled>Clear in {clearArm}s…</button>}

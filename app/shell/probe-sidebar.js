@@ -175,8 +175,8 @@ async function setMotion(on) {
     const cb = row.querySelector("input[type=checkbox]"); if (cb.checked !== ${on}) cb.click(); await m.sleep(500);`);
   await tab("Library");
 }
-// "Wallpaper behind every tab" (the live wallpaper behind the UI → :root.bg-live, the translucent chrome): an Advanced-level row,
-// hidden at the run's Standard level → set it through /settings and reload the page (a POST doesn't reach the open store)
+// "Wallpaper behind every tab" (the live wallpaper behind the UI → :root.bg-live, the translucent chrome): set
+// through /settings and reload the page (a POST doesn't reach the open store)
 async function setBgLive(on) {
   await setSettings({ liveWallpaperBehindAllTabs: on });
   await loadUi(); await tab("Library"); await sleep(600);

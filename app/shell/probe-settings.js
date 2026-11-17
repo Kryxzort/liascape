@@ -23,18 +23,23 @@
 //                     a 0 saved through the API comes back as 1 s
 //   copy:sidebarPill  the Library sidebar's Workshop ID pill, which shares the feedback (hooks/useCopied.ts), still flips and copies
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
-//   nudge:engine      "Full-live sync nudge" (Full-live at Advanced) only while the legacy engine runs — the page is told
+//   nudge:engine      "Full-live sync nudge" (Full-live at Expert) only while the legacy engine runs — the page is told
 //                     "legacy" by a stubbed /player-engine; hidden, its value stays saved
 //   bg:onePoll        the live background behind Settings (components/WallpaperBg.tsx) keeps one /current read open at a
 //                     time while every answer is held 7 s, and reads again once the slow one answered
-//   vram:stopShows    "Stopped scene shows" (Advanced, liascape-player) sits right under the video memory cap and only while the
+//   vram:stopShows    "Stopped scene shows" (Expert, liascape-player) sits right under the video memory cap and only while the
 //                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
-//                     saves sceneVramStopShows; at Standard it hides and the value stays
-//   fonts:rows        "Use Windows fonts in scenes" (Standard, liascape-player only) sits right under "Play scenes", a
-//                     checkbox row on by default that saves useWindowsFonts; "Windows fonts folder" (Advanced) follows it,
+//                     saves sceneVramStopShows; at Advanced it hides and the value stays
+//   fonts:rows        "Use Windows fonts in scenes" (Advanced, liascape-player only) sits right under "Play scenes", a
+//                     checkbox row on by default that saves useWindowsFonts; "Windows fonts folder" (Expert) follows it,
 //                     a text field + Browse that saves windowsFontsFolder as typed, dimmed and disabled (never removed) while
-//                     the toggle is off; both hints keep the Settings words; at Standard the folder hides and keeps its value;
+//                     the toggle is off; both hints keep the Settings words; at Advanced the folder hides and keeps its value;
 //                     pictures settings-fonts-*.png (on, off, hovered, no-glow, bg-live)
+//   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; the
+//                     steamcmd route's setup rows never show where its radio doesn't
+//   levels:noEmptySection:<engine>  at every level, under liascape-player and a stubbed legacy, no section heading shows
+//                     without a row; Video and Keyboard shortcuts open at Basic with one row each; Playback hides at Basic on legacy;
+//                     legacy: "Scene transition delay (ms)" only at Expert
 //   cache:lines       Housekeeping's cache picker: one line per cache (AppOps.CacheCategories) with its words, a themed tick
 //                     and the size of exactly its folder on disk (the shader cache's absent folder reads "Empty"); the
 //                     thumbnails ticked by default, nothing else; /cache/size agrees with the disk
@@ -530,7 +535,7 @@ app.whenReady().then(async () => {
       const IN = `window.__x.row("Loudness target")?.querySelector("input")`;
       const typed = (n) => js(`const el = ${IN}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, String(${n})); el.dispatchEvent(new Event("input", { bubbles: true })); await window.__x.sleep(150); return +el.value`);
       try {
-        await setSettings({ SettingsLevel: "standard", NormalizeAudio: true, NoAudio: false, NormalizeTargetLufs: -14 }); await load();
+        await setSettings({ SettingsLevel: "advanced", NormalizeAudio: true, NoAudio: false, NormalizeTargetLufs: -14 }); await load();
         if (!(await js(`return !!${IN}`))) return ["no Loudness target row with normalization on — proved nothing"];
         if ((await typed(0)) !== 0) v.push("typing 0 doesn't show 0");
         if (!(await waitFor(async () => (await field("normalizeTargetLufs")) === 0, SAVE_MS))) v.push(`0 saved as ${await field("normalizeTargetLufs")}`);
@@ -638,10 +643,10 @@ app.whenReady().then(async () => {
       const v = [];
       const eng = (await http("GET", "/player-engine")).json?.active;
       if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
-      await setSettings({ SettingsLevel: "advanced", TransitionMethod: "full-live", FullLiveSyncOffsetMs: -40 });
+      await setSettings({ SettingsLevel: "expert", TransitionMethod: "full-live", FullLiveSyncOffsetMs: -40 });
       try {
         await load();
-        if (!(await has("Transition style"))) return ['no "Transition style" row at Advanced — proved nothing'];
+        if (!(await has("Transition style"))) return ['no "Transition style" row at Expert — proved nothing'];
         if (await has("Full-live sync nudge")) v.push("liascape-player: the nudge row shows (only the legacy helper reads it)");
         await load({ engine: "legacy" });
         if (!(await has("Full-live sync nudge"))) v.push("legacy, Full-live: no nudge row");
@@ -682,10 +687,10 @@ app.whenReady().then(async () => {
       const eng = (await http("GET", "/player-engine")).json?.active;
       if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
       const ROW = "Stopped scene shows";
-      await setSettings({ SettingsLevel: "advanced", LimitVramPerScene: false, SceneVramStopShows: "last_frame" });
+      await setSettings({ SettingsLevel: "expert", LimitVramPerScene: false, SceneVramStopShows: "last_frame" });
       try {
         await load();
-        if (!(await has("Cap each scene's video memory"))) return ['no "Cap each scene\'s video memory" row at Advanced — proved nothing'];
+        if (!(await has("Cap each scene's video memory"))) return ['no "Cap each scene\'s video memory" row at Expert — proved nothing'];
         if (await has(ROW)) v.push(`the cap off: "${ROW}" shows (it means nothing then)`);
         await setSettings({ LimitVramPerScene: true }); await load();
         const r = await js(`const r = window.__x.row(${J(ROW)}); if (!r) return null;
@@ -704,8 +709,8 @@ app.whenReady().then(async () => {
         if (!(await waitFor(async () => (await field("sceneVramStopShows")) === "nothing", SAVE_MS))) v.push(`a click on Nothing didn't save sceneVramStopShows (${await field("sceneVramStopShows")})`);
         const on = await js(`return window.__x.row(${J(ROW)})?.querySelector('.seg-opt[aria-checked="true"]')?.textContent.trim()`);
         if (on !== "Nothing") v.push(`after the click the switch shows ${J(on)} chosen`);
-        await setSettings({ SettingsLevel: "standard" }); await load();
-        if (await has(ROW)) v.push(`Standard: "${ROW}" shows (it's an Advanced row)`);
+        await setSettings({ SettingsLevel: "advanced" }); await load();
+        if (await has(ROW)) v.push(`Advanced: "${ROW}" shows (it's an Expert row)`);
         if ((await field("sceneVramStopShows")) !== "nothing") v.push(`hiding the row changed the saved value: ${await field("sceneVramStopShows")}`);
       } finally {
         await setSettings({ SettingsLevel: "standard", LimitVramPerScene: false, SceneVramStopShows: "last_frame" });
@@ -718,7 +723,7 @@ app.whenReady().then(async () => {
       const eng = (await http("GET", "/player-engine")).json?.active;
       if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
       const ON = "Use Windows fonts in scenes", DIR = "Windows fonts folder";
-      await setSettings({ SettingsLevel: "advanced", UseWindowsFonts: true, WindowsFontsFolder: "" });
+      await setSettings({ SettingsLevel: "expert", UseWindowsFonts: true, WindowsFontsFolder: "" });
       try {
         await load();
         const read = () => js(`const rows = [...document.querySelectorAll(".settings .srow")].map((x) => window.__x.label(x));
@@ -729,7 +734,7 @@ app.whenReady().then(async () => {
             input: dir?.querySelector("input.text") ? { disabled: dir.querySelector("input.text").disabled, ph: dir.querySelector("input.text").placeholder } : null,
             browse: dir ? [...dir.querySelectorAll("button")].map((b) => ({ t: b.textContent.trim(), disabled: b.disabled, svg: !!b.querySelector("svg") })) : [] }`);
         const r = await read();
-        if (!r.dir && r.label === undefined) return [`no "${ON}" row at Advanced under liascape-player — proved nothing`];
+        if (!r.dir && r.label === undefined) return [`no "${ON}" row at Expert under liascape-player — proved nothing`];
         if (r.before !== "Play scenes") v.push(`"${ON}" follows ${J(r.before)}, want "Play scenes"`);
         if (r.next !== DIR) v.push(`"${ON}" is followed by ${J(r.next)}, want "${DIR}"`);
         if (r.label !== "LABEL") v.push(`"${ON}" isn't a checkbox <label> row (${r.label})`);
@@ -767,15 +772,90 @@ app.whenReady().then(async () => {
         await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await sleep(300);
         await shot("fonts-bglive", at);
         await js(`document.documentElement.classList.remove("bg-live"); return true`); await mv(5, 5);
+        await setSettings({ SettingsLevel: "advanced" }); await load();
+        if (!(await has(ON))) v.push(`Advanced: no "${ON}" row (it's an Advanced row)`);
+        if (await has(DIR)) v.push(`Advanced: "${DIR}" shows (it's an Expert row)`);
         await setSettings({ SettingsLevel: "standard" }); await load();
-        if (!(await has(ON))) v.push(`Standard: no "${ON}" row (it's a Standard row)`);
-        if (await has(DIR)) v.push(`Standard: "${DIR}" shows (it's an Advanced row)`);
+        if (await has(ON)) v.push(`Standard: "${ON}" shows (it's an Advanced row)`);
         if ((await field("windowsFontsFolder")) !== "/mnt/win/Windows/Fonts") v.push(`hiding the folder row changed its value: ${J(await field("windowsFontsFolder"))}`);
       } finally {
         await setSettings({ SettingsLevel: "standard", UseWindowsFonts: true, WindowsFontsFolder: "" });
       }
       return v;
     });
+
+    // ---- Settings levels: the rows the re-tier moved, each shown from exactly its level; never a heading with no row under
+    // it (app/ui/src/settingsLevel.ts, views/Settings.tsx Row / Section)
+    const LEVELS = ["basic", "standard", "advanced", "expert"];
+    // label → the level it shows from (liascape-player; normalization, the scene memory cap and the steamcmd route on)
+    const MOVED = {
+      "Loudness target": "advanced", "Fade out after (ms)": "advanced", "Come back after (ms)": "advanced",
+      "Disable video cache": "expert", "Restart legacy player every (s)": "expert", "Only restart between wallpapers": "expert",
+      "Fit to screen": "basic", "Read-ahead buffer (MiB)": "expert", "Look-back buffer (MiB)": "expert",
+      "Stopped scene shows": "expert",
+      "Thumbnail shape": "basic", "Smooth window animations": "basic", "Text shadow": "advanced", "On hover": "advanced",
+      "Not hovered": "advanced", "Wallpaper behind every tab": "standard",
+      "Use Windows fonts in scenes": "advanced", "Windows fonts folder": "expert",
+      "Download via steamcmd": "advanced", "steamcmd path": "advanced", "Steam username": "advanced", "Sign in": "advanced",
+      "Autostart": "basic", "Forget the whole library": "advanced",
+      // neighbours that stay: their sections' other rows keep their own levels
+      "Video frame rate cap": "standard", "Hardware decoding": "advanced", "toggle-mute": "standard", "Clear cached files": "basic",
+    };
+    // every shown section (a heading on screen) holds a row, a command block or a button; the headings per level
+    const sectionsAt = () => js(`return [...document.querySelectorAll(".settings .ssection")].filter((s) => getComputedStyle(s).display !== "none").map((s) => ({
+      title: s.querySelector("h3")?.textContent.trim(), rows: [...s.querySelectorAll(".srow")].filter((r) => r.getClientRects().length).length,
+      other: [...s.querySelectorAll(".cmd-block, .btn")].filter((e) => e.getClientRects().length).length }))`);
+    const emptyAt = (secs) => secs.filter((s) => !s.rows && !s.other).map((s) => s.title);
+
+    await cell("levels:rows — every row the re-tier moved shows from exactly its level, its section's other rows keep theirs", async () => {
+      const v = [];
+      const eng = (await http("GET", "/player-engine")).json?.active;
+      if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
+      try {
+        await setSettings({ NormalizeAudio: true, NoAudio: false, LimitVramPerScene: true, WorkshopDownloadMode: "steamcmd" });
+        for (const lv of LEVELS) {
+          await setSettings({ SettingsLevel: lv }); await load();
+          const seen = await js(`return Object.fromEntries(${J(Object.keys(MOVED))}.map((l) => [l, !!window.__x.row(l)]))`);
+          for (const [label, from] of Object.entries(MOVED)) {
+            const want = LEVELS.indexOf(lv) >= LEVELS.indexOf(from);
+            if (seen[label] !== want) v.push(`${lv}: "${label}" ${seen[label] ? "shows" : "is missing"} (it's a ${from} row)`);
+          }
+        }
+      } finally {
+        await setSettings({ SettingsLevel: "standard", NormalizeAudio: false, LimitVramPerScene: false, WorkshopDownloadMode: "subscribe" });
+      }
+      return v;
+    });
+
+    for (const engine of ["liascape-player", "legacy"]) {
+      await cell(`levels:noEmptySection:${engine} — at every level no section heading shows without a row under it`, async () => {
+        const v = [];
+        try {
+          for (const lv of LEVELS) {
+            await setSettings({ SettingsLevel: lv }); await load(engine === "legacy" ? { engine } : {});
+            const secs = await sectionsAt();
+            if (secs.length < 5) { v.push(`${lv}: only ${secs.length} sections shown — proved nothing`); continue; }
+            for (const t of emptyAt(secs)) v.push(`${lv}: "${t}" shows its heading with nothing under it`);
+            const titles = secs.map((s) => s.title);
+            // the legacy-only "Scene transition delay (ms)" moved to Expert
+            if (engine === "legacy" && (await has("Scene transition delay (ms)")) !== (lv === "expert"))
+              v.push(`${lv}, legacy: "Scene transition delay (ms)" ${lv === "expert" ? "is missing" : "shows"} (it's an expert row)`);
+            // Basic: the Video and Keyboard shortcuts sections open for their one Basic row each; Playback's only Basic row is
+            // liascape-player's, so under legacy it hides at Basic
+            if (lv === "basic") {
+              for (const [t, row] of [["Video", "Fit to screen"], ["Keyboard shortcuts", "Autostart"]]) {
+                const s = secs.find((x) => x.title === t);
+                if (!s) v.push(`basic: no "${t}" section (its "${row}" row is Basic)`);
+                else if (s.rows !== 1) v.push(`basic: "${t}" shows ${s.rows} rows, want just "${row}"`);
+              }
+              if (engine === "legacy" && titles.includes("Playback")) v.push("basic, legacy: the Playback heading shows (its only Basic row is liascape-player's)");
+              if (engine === "liascape-player" && !titles.includes("Playback")) v.push("basic, liascape-player: no Playback section (Pause behind windows is Basic)");
+            }
+          }
+        } finally { await setSettings({ SettingsLevel: "standard" }); }
+        return v;
+      });
+    }
 
     await cell("cache:lines — one line per cache: its words, a themed tick, its folder's size; the thumbnails ticked", async () => {
       const v = [];

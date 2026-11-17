@@ -768,6 +768,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   box-shadow: 0 0 12px -1px var(--accent); opacity: .55; transition: opacity .25s; }
 .ssection:hover::before { opacity: 1; }
 @keyframes ssection-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+/* a section whose rows the level or the engine all hide goes with them (Settings.tsx Section): never a lone heading */
+.ssection[data-rows]:not(:has(.srow)) { display: none; }
 /* stagger as the tab opens — wider gaps so it actually reads as a cascade. Counted on the page's own children: a section
    wrapped with the card preview (.pv-wrap) takes its wrapper's place */
 .settings > :nth-child(1) { --s-delay: .06s } .settings > :nth-child(2) { --s-delay: .15s }

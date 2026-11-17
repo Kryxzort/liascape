@@ -327,11 +327,12 @@ clip() { ffmpeg -nostdin -loglevel error -y -f lavfi -i "$2=size=320x180:rate=30
            -t "$4" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$1"; }
 clip "$T/k1.mp4" testsrc2 330 30; clip "$T/k2.mp4" smptebars 440 30; clip "$T/k3.mp4" rgbtestsrc 550 30; clip "$T/k4.mp4" testsrc 660 10
 
+# Expert: every Settings row renders, so the cells that drive an Expert row (video cache, buffers, the legacy restart) find it
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"liascape-player","NoAudio":false,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalSwitchWhenVideoEnds":false,"GlobalMaxPlaySeconds":0,
- "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"advanced","RestartMpvpaperEverySeconds":0,
+ "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"expert","RestartMpvpaperEverySeconds":0,
  "AutoAddWeWallpapersToLibrary":false}
 EOF
 

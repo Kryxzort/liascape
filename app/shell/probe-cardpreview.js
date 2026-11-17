@@ -6,8 +6,9 @@
 //   cardpv:size        "Card size" → the cards' width, live, Medium = the Library grid's own card width
 //   cardpv:preset      Basic: "Card previews" (a preset dropdown, no lists) sets both orders, live on the cards (and
 //                      "Always animate" on the Library grid's own: its gif card plays the gif, a video-only one its clip); a hidden
-//                      order a preset names isn't "tucked away"; Standard: the two lists show, an order no preset has
-//                      reads "Custom" (Basic too, and then it is tucked away), a preset picked again puts the lists back
+//                      order a preset names isn't "tucked away"; Advanced: the two lists show, an order no preset has
+//                      reads "Custom" (Standard and Basic too: no lists there, the hint names the Advanced level, and
+//                      at Basic it is tucked away), a preset picked again puts the lists back
 //   cardpv:order       "On hover" / "Not hovered": for several orders, what the video-only and the gif + video card show
 //                      unhovered and hovered (the first one each card has; nothing after "Still image")
 //   cardpv:orderCtl    the lists' control: the move buttons by keyboard (focus stays on a usable button), a drag, the dimmed
@@ -150,7 +151,7 @@ app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
   win.focus();
   try {
-    // Advanced: "Wallpaper behind every tab" (bg-live) is an Advanced row
+    // Advanced: the "On hover" / "Not hovered" order lists are Advanced rows
     await http("POST", "/settings", { SettingsLevel: "advanced", ThumbnailAspect: "1:1", CardSize: "Medium",
       PreviewOnHover: ON_HOVER, PreviewNotHovered: NOT_HOVERED, VideoPreviewQuality: "mid", Glows: true, Morphs: true, LiveWallpaperBehindAllTabs: false });
     await loadSettings();
@@ -220,18 +221,18 @@ app.whenReady().then(async () => {
     const hoverCard = async (kind) => { const b = await pv(`return p.box(p.card(${JSON.stringify(kind)})?.querySelector(".thumb-wrap"))`); if (b) await move(b.x, b.y); return !!b; };
     const unhover = () => move(5, 5);
 
-    await cell("cardpv:preset — Basic's Card previews sets both orders live; Standard shows the lists, and an order no preset has reads Custom", async () => {
+    await cell("cardpv:preset — Basic's Card previews sets both orders live; Advanced shows the lists, and an order no preset has reads Custom", async () => {
       const v = [], J = JSON.stringify;
       const orders = async () => { const s = (await http("GET", "/settings")).json || {}; return [s.previewOnHover, s.previewNotHovered]; };
       const reachOf = (o) => (o || []).slice(0, (o || []).indexOf("image") + 1).join(",");
       // through the top bar's level picker (a body posted behind the page's back loses to the page's next whole-settings save)
       const level = async (lv) => { await pv(`document.querySelector('[data-settings-level] [data-level="${lv}"]')?.click(); await p.sleep(300); return true`);
-        return waitFor(async () => (await pv(`return !!p.row("On hover")`)) === (lv !== "basic"), 4000); };
+        return waitFor(async () => (await pv(`return !!p.row("On hover")`)) === (lv === "advanced" || lv === "expert"), 4000); };
       if (!(await needCards(v, "preset"))) return v;
       if (!(await level("basic"))) v.push("Basic: the On hover / Not hovered rows still show");
       const basic = await pv(`return { preset: !!p.row("Card previews"), val: p.selVal("Card previews"), lists: !!p.row("On hover") || !!p.row("Not hovered") }`);
       if (!basic.preset) return [...v, "Basic: no Card previews row"];
-      if (basic.lists) v.push("Basic: the order lists show (they're Standard rows)");
+      if (basic.lists) v.push("Basic: the order lists show (they're Advanced rows)");
       if (basic.val !== "Animate on hover") v.push(`Basic, the defaults: the preset reads ${J(basic.val)}, want "Animate on hover"`);
       // the "tucked away" count at Basic (the probe's own Advanced choices hide there too): a preset adds nothing to it
       const tucked = () => pv(`return +(document.querySelector("[data-hidden-changed]")?.dataset.hiddenChanged ?? 0)`);
@@ -268,20 +269,25 @@ app.whenReady().then(async () => {
           await pv(`await p.settingsTab(); return true`);
         }
       }
-      // Standard: the lists; an order no preset has → Custom (its hint names the lists); back at Basic it's Custom and tucked away
-      if (!(await level("standard"))) v.push("Standard: no On hover / Not hovered rows");
+      // Advanced: the lists; an order no preset has → Custom (its hint names the lists); at Standard no lists, Custom, the
+      // hint names the Advanced level; back at Basic it's Custom and tucked away
+      if (!(await level("advanced"))) v.push("Advanced: no On hover / Not hovered rows");
       await pv(`await p.toRows(); return true`);
       const lists = await pv(`return [p.ord("On hover"), p.ord("Not hovered")]`);
-      if (J(lists) !== J([ON_HOVER, NOT_HOVERED])) v.push(`Standard, the defaults: the lists read ${J(lists)}, want ${J([ON_HOVER, NOT_HOVERED])}`);
+      if (J(lists) !== J([ON_HOVER, NOT_HOVERED])) v.push(`Advanced, the defaults: the lists read ${J(lists)}, want ${J([ON_HOVER, NOT_HOVERED])}`);
       await pv(`await p.order("Not hovered", ["video", "image", "gif"]); return true`);
       const custom = await waitFor(async () => (await pv(`return p.selVal("Card previews")`)) === "Custom", 3000);
       const hint = await pv(`return p.row("Card previews")?.querySelector(".shint")?.textContent ?? ""`);
       if (!custom) v.push(`Not hovered video, image: the preset reads ${J(await pv(`return p.selVal("Card previews")`))}, want "Custom"`);
-      if (!/lists below/.test(hint)) v.push(`Custom at Standard: hint ${J(hint)} doesn't point at the lists`);
+      if (!/lists below/.test(hint)) v.push(`Custom at Advanced: hint ${J(hint)} doesn't point at the lists`);
       if (!(await waitFor(async () => J((await orders())[1]) === J(["video", "image", "gif"]), 3000))) v.push(`the list's order wasn't saved: ${J(await orders())}`);
-      await level("basic");
-      const b2 = await pv(`return { val: p.selVal("Card previews") }`), n2 = await tucked();
-      if (b2.val !== "Custom") v.push(`Basic with a custom order: the preset reads ${J(b2.val)}, want "Custom"`);
+      for (const lv of ["standard", "basic"]) {
+        if (!(await level(lv))) v.push(`${lv}: the On hover / Not hovered rows still show`);
+        const b2 = await pv(`return { val: p.selVal("Card previews"), hint: p.row("Card previews")?.querySelector(".shint")?.textContent ?? "" }`);
+        if (b2.val !== "Custom") v.push(`${lv} with a custom order: the preset reads ${J(b2.val)}, want "Custom"`);
+        if (!/set at the Advanced level/.test(b2.hint)) v.push(`${lv} with a custom order: hint ${J(b2.hint)} doesn't name the Advanced level`);
+      }
+      const n2 = await tucked();
       // Not hovered differs from its default, On hover doesn't: one more setting tucked away
       if (n2 !== base + 1) v.push(`Basic with a custom Not hovered: ${n2} settings tucked away, want ${base + 1} (the hidden list that holds it)`);
       // a preset picked from Custom puts both lists back, and Custom leaves the choices

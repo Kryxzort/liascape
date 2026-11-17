@@ -283,7 +283,8 @@ app.whenReady().then(async () => {
 
   try {
     await http("POST", "/playlist/state", { videoPaths: K.slice(0, 3), settings: null, name: null });
-    await setSettings({ morphs: true, glows: true, settingsLevel: "standard" });
+    // Advanced: the card preview order lists (Settings → Look & feel → "On hover", whose move buttons act below) are Advanced rows
+    await setSettings({ morphs: true, glows: true, settingsLevel: "advanced" });
     await load();
     const lib = async () => { await closeSide(); await tab("Library"); await mv(3, 3, 300); };
     const bar = (label) => `document.querySelector('.playlist-bar-head [title=${J(label)}]')`;

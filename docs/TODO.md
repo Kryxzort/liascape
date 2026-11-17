@@ -21,9 +21,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        every texture format and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was
        still black 1 s after its first frame in 7 of 181 loads, the baseline build too, five of them in one player
        run: needs mpv's log of a black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.
-60. [ ] (owner) Re-tier every Settings row by the owner's levels: Basic = the basics, simple and familiar; Standard = what
-       makes Liascape Liascape, not too complicated; Advanced = harder to understand or niche; Expert = barely any use
-       case, or a sidelined complication that isn't a feature of its own. Show the owner the full list of moves first.
 88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
        below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
        eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
