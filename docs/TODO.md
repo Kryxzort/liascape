@@ -79,8 +79,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
             bundled `.so` an `$ORIGIN` RUNPATH rather than `LD_LIBRARY_PATH` in AppRun; pass `--no-sandbox` only when
             unprivileged user namespaces are off. Test with `ldd` on every ELF in containers without mpv/FFmpeg/SDL2.
 - [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
-      monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. The player supports it
-      from Phase 1. Decide with it the per-monitor audio mixing policy (Follow-up projects).
+      monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. Design (top-bar screen
+      carousel, follow All, per-screen popover, sound priority list): `docs/superpowers/specs/2026-11-17-multi-monitor-design.md`.
 - [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
       Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
       removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
@@ -122,6 +122,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       need one), 45 calls/min per caller; Pexels' free key = 200 requests/h, 20,000/month, a visible "Photos provided by
       Pexels" link required, and its limit raises may be paused — so no shared project key or proxy, each user's own.
       MyLiveWallpapers stays out: it has a ring of look-alike clone domains.
+- [ ] **Quick switcher** (owner): a keybind (`liascape switcher` for the compositor to bind) opens a stylized popup of
+      wallpapers to switch to — for people who don't run a timer or a playlist. Arrow keys / mouse pick, Enter applies
+      (to the screen it was opened on, or All — the multi-monitor design's rules), Esc closes; works with the app
+      closed, so it's a layer-shell overlay (the player or a small dedicated window), not the main Electron window.
+      Brainstorm first: what it lists (recent, favourites, the playlist, search), and its look.
 
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
