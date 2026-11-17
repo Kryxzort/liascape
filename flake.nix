@@ -193,11 +193,11 @@
       };
 
       # 4) Electron shell sources (plain JS; electron comes from nixpkgs (`electron` above), not the bundled
-      # prebuilt which can't dlopen its libs on NixOS).
+      # prebuilt which can't dlopen its libs on NixOS). Only the runtime files, the same list install.sh stages: the
+      # UI matrix's probes and CDP helpers stay in the repo.
       shellSrc = pkgs.runCommand "liascape-shell-src" { } ''
-        mkdir -p $out
-        cp -r ${./app/shell}/. $out/
-        rm -rf $out/node_modules
+        files="$(bash ${./scripts/shell-runtime-files.sh} ${./app/shell})" || exit 1
+        while read -r f; do install -Dm644 ${./app/shell}/$f $out/$f; done <<< "$files"
       '';
 
       liascape = pkgs.stdenvNoCC.mkDerivation {

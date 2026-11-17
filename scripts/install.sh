@@ -123,7 +123,8 @@ if [ "$NO_SCENES" = 0 ]; then
 fi
 
 echo "==> building React UI"
-(cd "$ROOT/app/ui" && npm install && npm run build)
+# npm ci: exactly the lockfile, so a package build gets the dependency tree the repo was tested with
+(cd "$ROOT/app/ui" && npm ci && npm run build)
 
 echo "==> publishing backend (self-contained) → $LIBDIR/backend"
 rm -rf "$S_LIB/backend"; mkdir -p "$S_LIB" "$S_LIBEXEC"
@@ -136,8 +137,9 @@ rm -rf "$S_LIB/ui"; mkdir -p "$S_LIB/ui"; cp -r "$ROOT/app/ui/dist/." "$S_LIB/ui
 
 echo "==> staging Electron shell (self-contained — no repo dependency at runtime)"
 rm -rf "$S_LIB/shell"; mkdir -p "$S_LIB/shell"
-# electron provides its own runtime; the shell only needs its own JS, not node_modules
-(cd "$ROOT/app/shell" && cp -r $(ls | grep -v '^node_modules$') "$S_LIB/shell/")
+# electron provides its own runtime; the shell needs only its runtime JS, not node_modules or the UI matrix's probes
+shell_files="$(bash "$ROOT/scripts/shell-runtime-files.sh" "$ROOT/app/shell")"
+while read -r f; do install -Dm644 "$ROOT/app/shell/$f" "$S_LIB/shell/$f"; done <<< "$shell_files"
 
 echo "==> staging transition assets (shaders + manifest + preview frames)"
 rm -rf "$S_LIB/transitions"; mkdir -p "$S_LIB/transitions"; cp -r "$ROOT/transitions/." "$S_LIB/transitions/"
@@ -202,7 +204,9 @@ Categories=Utility;
 Keywords=wallpaper;live;wayland;video;
 StartupWMClass=liascape
 EOF
-update-desktop-database "$S_APPS" 2>/dev/null || true
+# only for a direct install: in a package the cache belongs to the system (its package manager rebuilds it), and a staged
+# mimeinfo.cache would clash with the one already on disk
+if [ -z "$DESTDIR" ]; then update-desktop-database "$S_APPS" 2>/dev/null || true; fi
 
 echo ""
 echo "Done. Installed to $PREFIX (bin/liascape, libexec/liascape/, lib/liascape/)."

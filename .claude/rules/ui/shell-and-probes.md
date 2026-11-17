@@ -5,6 +5,7 @@ paths:
   - "scripts/matrix-cells-for.sh"
   - "scripts/freeze-monitor.sh"
   - "scripts/agent-window.sh"
+  - "scripts/shell-runtime-files.sh"
 ---
 
 # Electron shell and UI probes (`app/shell`)
@@ -15,6 +16,7 @@ paths:
 - The shell deletes `serve.token` before starting its own backend (a new token per launch), waits for `serve.port`, and opens `http://127.0.0.1:<port>/?token=…`; with Vite running it opens `http://localhost:5173/?api=5174&token=…`.
 - A renderer that dies (any reason but a clean exit) or stays hung is brought back by `app/shell/renderer-recovery.js`: reloads with backoff, a plain Reload notice after repeated deaths, every event logged to stderr. Reload through its `pageUrl()` (`withToken` fresh), never `webContents.reload()`: the page drops `?token=` from its address. Guard: `--probe probe-recover.js`.
 - GPU: NVIDIA defaults to hardware GL via ANGLE `--use-angle=gles-egl`; `LIASCAPE_SOFTGL=1` forces SwiftShader, `LIASCAPE_ANGLE=<backend>` picks another ANGLE backend. The "'--ozone-platform=wayland' is not compatible with Vulkan" log line is harmless.
+- Load a shell module only through `require("./…")`, or from `main.js` with `path.join(__dirname, "<file>")`: installs ship just what `scripts/shell-runtime-files.sh` finds that way (install.sh and the flake), so the probes and CDP helpers stay out.
 - `LIASCAPE_DEBUG=1` opens CDP on :9222 (`LIASCAPE_CDP_PORT` = another port); anyone local can drive the window meanwhile.
 - Drive the agent window, never the owner's: `bash scripts/agent-window.sh up` (a private headless gamescope compositor, sandboxed backend, Vite and CDP port; `down` stops all of it). `app/shell/cdp.js`, `drive.js` and `scripts/bench-live-ui.mjs` target it by default; `--owner` targets the owner's window (:9222). Never give it an output in the session's Hyprland: removing one snaps the user's cursor to another monitor (the script's header).
 
