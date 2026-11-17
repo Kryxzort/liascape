@@ -479,7 +479,11 @@ observe_switch() {
 stop_legacy_wallpaper() {
   [ "$HERMETIC" = 1 ] && return 0
   # Exact owner instruction (global-constraints.md): stop legacy before any on-machine measurement.
-  curl -s -X POST 127.0.0.1:5174/stop >/dev/null 2>&1
+  # the owner's dev backend wants its per-run token (serve.token beside serve.port)
+  local stop_code
+  stop_code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST \
+    -H "X-Liascape-Token: $(cat "${XDG_CONFIG_HOME:-$HOME/.config}/liascape/serve.token" 2>/dev/null)" 127.0.0.1:5174/stop)
+  [[ $stop_code == 2* ]] || warn "POST /stop on the dev backend answered ${stop_code:-nothing} (not 2xx); mpvpaper may not stop"
   for _ in $(seq 1 30); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
   pgrep -x mpvpaper >/dev/null && warn "mpvpaper still running after /stop -- continuing anyway"
   return 0

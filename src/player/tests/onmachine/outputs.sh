@@ -198,7 +198,10 @@ OTHER=$(hyprctl layers -j | jq -c '[.. | objects | select(.namespace? == "liasca
 
 if pgrep -x mpvpaper >/dev/null; then
     say "stopping the legacy wallpaper (mpvpaper)"
-    curl -s -X POST 127.0.0.1:5174/stop >/dev/null
+    # The owner's dev backend (:5174) wants its per-run token (X-Liascape-Token, serve.token beside serve.port).
+    stop_code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST \
+        -H "X-Liascape-Token: $(cat "${XDG_CONFIG_HOME:-$HOME/.config}/liascape/serve.token" 2>/dev/null)" 127.0.0.1:5174/stop)
+    [[ $stop_code == 2* ]] || printf '[outputs] WARN: POST /stop on the dev backend answered %s (not 2xx); mpvpaper may not stop\n' "$stop_code" >&2
     for _ in $(seq 1 50); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
     pgrep -x mpvpaper >/dev/null && fail "mpvpaper still running after /stop"
 fi

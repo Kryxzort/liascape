@@ -20,6 +20,10 @@ Never prints /settings (it holds SteamRefreshToken); writes it nowhere either.
 import json, os, random, socket, subprocess, sys, threading, time, urllib.request
 
 U = "http://127.0.0.1:5174"
+# The owner's dev backend wants its per-run token (X-Liascape-Token, serve.token beside serve.port); never printed.
+TOKEN_PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "liascape", "serve.token")
+try: TOKEN = open(TOKEN_PATH).read().strip()
+except OSError as e: sys.exit(f"cannot read the dev backend token ({e.strerror}): {TOKEN_PATH}")
 SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "liascape", "liascape-player.sock")
 args = sys.argv[1:]
 OUT = args[0]
@@ -33,12 +37,13 @@ def now(): return round(time.monotonic() - T0, 3)
 
 def http(method, path, body=None, timeout=10):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(U + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(U + path, data=data, method=method, headers={"Content-Type": "application/json", "X-Liascape-Token": TOKEN})
     t = time.monotonic()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read(), time.monotonic() - t
     except urllib.error.HTTPError as e:
+        if e.code in (401, 403): print(f"WARN: {method} {path} -> HTTP {e.code} (API token refused)", file=sys.stderr)
         return e.code, e.read(), time.monotonic() - t
     except Exception as e:  # noqa: BLE001 — record, never crash the storm
         return -1, str(e).encode(), time.monotonic() - t
