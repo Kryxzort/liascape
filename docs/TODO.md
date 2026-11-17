@@ -77,7 +77,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       proves too small), Unsplash (≈ Wallhaven's photos), Wallpaper Waifu / MyLiveWallpapers (≈ MoeWalls), Alpha Coders
       (≈ Wallhaven), Coverr (≈ Pexels). Once the interface lands, compare MoeWalls / MotionBGs / DesktopHut's top 100 for
       duplicates and drop one that adds little. Keyed APIs take the user's own free key (never one in the repo);
-      credit the creator where the API asks (Pexels, Unsplash + its download ping); a source that stops answering says so.
+      credit the creator where the API asks (Pexels); a source that stops answering says so.
       UI (owner's idea): ONE Browse view, no source pills — a Sources section heads the filter column: a checkbox per
       enabled source with its result count (click a name to show only it), 🔑 = needs a key (links to Settings). Results
       from the checked sources merge into one grid, each card badged with its source; each source streams in on its own
