@@ -29,7 +29,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 | Fence-leak mitigation: hand libmpv's render API a `get_proc_address` whose `glFenceSync` always returns a null sync, so mpv's fence bookkeeping for buffer reuse (direct rendering / PBO uploads) turns into a no-op instead of accumulating real GL sync objects — safe only because neither direct rendering nor PBO uploads are enabled here | `src/player/src/sources/mpv.rs:stub_fence_sync` | mpvpaper 1.9, [PR #132](https://github.com/GhostNaN/mpvpaper/pull/132) by manv-3 | GPL-3.0 |
 | One `wlr-layer-shell` surface per output, each independently configurable | `src/player/src/wl.rs:WlState::make_surface` | mpvpaper's per-monitor launch model | GPL-3.0 |
 | Configurable layer-shell layer (background / bottom / top / overlay) | `src/player/src/wl.rs` (`out:<connector>.layer` property, `docs/player/modules/wayland.md` § Wayland) | mpvpaper's `-layer` flag | GPL-3.0 |
-| Auto-pause / auto-stop when the wallpaper is hidden, and pause when a window is fullscreen/maximized/active (`wlr-foreign-toplevel`) | **not implemented yet — Phase 3**, `docs/player/architecture.md` § 6 | mpvpaper's `--auto-pause` / `--auto-stop` | GPL-3.0 |
+| Auto-pause / auto-stop when the wallpaper is hidden, and pause when a window is fullscreen/maximized/active (`wlr-foreign-toplevel`) | pause-when-covered (hypr, sway, `wlr-foreign-toplevel`), `docs/player/modules/signals.md` | mpvpaper's `--auto-pause` / `--auto-stop` | GPL-3.0 |
 
 ### How to resync
 
