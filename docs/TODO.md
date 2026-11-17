@@ -76,6 +76,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       Videos, Pixabay Videos (official APIs, free licence), Wallhaven, Unsplash (stills), then scraped Wallpaper Waifu,
       MyLiveWallpapers, Alpha Coders (off by default). Keyed APIs take the user's own free key (never one in the repo);
       credit the creator where the API asks (Pexels, Unsplash + its download ping); a source that stops answering says so.
+      UI (owner's idea): ONE Browse view, no source pills — a Sources section heads the filter column: a checkbox per
+      enabled source with its result count (click a name to show only it), 🔑 = needs a key (links to Settings). Results
+      from the checked sources merge into one grid, each card badged with its source; each source streams in on its own
+      (a slow or failing one never blocks the grid; it shows a warning by its checkbox). Search + type filter apply to
+      all; source-only filters (Workshop tags / rating, Wallhaven colours…) sit in a section titled with the source,
+      shown while it's checked. Sort: Newest merges by date; Popular interleaves, each source keeping its own ranking.
+      Defaults: Workshop + the licensed API sources checked, scraped rehost sites unchecked.
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
       makepkg does (`build()` with no network). Left:
