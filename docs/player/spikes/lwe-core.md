@@ -3,7 +3,6 @@
 ## Context
 
 - Status: done 2026-10-20.
-- Spec: `docs/superpowers/specs/2026-10-20-utopia-player-design.md` §6.1, §12.
 - Code (throwaway): `spikes/lwe-core/`. It contains `build.sh`, `host.cpp` and `README.md`.
 - Machine: NixOS, Hyprland, RTX 3070 Ti, NVIDIA 595.84 proprietary, gcc 15.2.
 

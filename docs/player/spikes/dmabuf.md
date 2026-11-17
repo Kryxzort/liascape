@@ -3,7 +3,6 @@
 ## Context
 
 - Status: done 2026-10-20.
-- Spec: `docs/superpowers/specs/2026-10-20-utopia-player-design.md` §4.1, §5.2, §6.3, §12.
 - Code (throwaway): `spikes/dmabuf/`. It contains `producer.c`, `consumer.c`, `common.h`, `run.sh` and `README.md`.
 - Machine:
   - NixOS, Hyprland 0.56.2, kernel 7.1.3-cachyos

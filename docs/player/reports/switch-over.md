@@ -1,6 +1,6 @@
 # Switch-over checklist — the design's §11 bar, measured
 
-The design (`docs/superpowers/specs/2026-10-20-utopia-player-design.md` §11) says `PlayerEngine`'s default flips to
+The switch-over bar (`docs/player/architecture.md` § Not built) says `PlayerEngine`'s default flips to
 `liascape-player` and the legacy path is deleted (Phase 5) only when all of its criteria hold **on the owner's
 machine**. This report turns each criterion into rows that can be checked, says how each is measured, and gives the
 latest measured result with its evidence. Status: **pass** (measured, meets the bound), **fail** (measured, misses it

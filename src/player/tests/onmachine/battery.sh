@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# liascape-player Phase 1 on-machine battery (Task 20, docs/superpowers/sdd/2026-10-20-liascape-player-phase0-1/
-# task-20-brief.md). Drives the REAL C# backend (`liascape serve`, PlayerEngine=liascape-player) over
+# liascape-player Phase 1 on-machine battery. Drives the REAL C# backend (`liascape serve`, PlayerEngine=liascape-player) over
 # HTTP exactly like the owner's UI would, and inspects the result with `liascape-player ctl` directly —
 # same split as `scripts/test-liascape-player-adapter.sh` (§ Integration test) and
 # `src/player/tests/onmachine/bus.sh`, whose patterns this reuses (temp dirs for --hermetic, a

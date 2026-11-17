@@ -1,5 +1,5 @@
 // Icon motion probe — `scripts/test-ui-matrix.sh --probe probe-icons.js` (the matrix's hermetic stack). The vocabulary:
-// docs/superpowers/specs/2026-11-12-icon-motion-design.md; the rule: .claude/rules/ui/design.md § Icon motion. Browse / Steam
+// the vocabulary and rule: .claude/rules/ui/design.md § Icon motion. Browse / Steam
 // answers are stubbed in the page (like probe-steam.js: nothing reaches Steam). Per-frame samples of the icon (or its moving
 // part) read in a rAF loop while a REAL pointer (sendInputEvent) hovers / presses its button.
 //   icon:act:<name>     hover → the icon (or its part) animates on transform / opacity only (its animations' keyframes), starts at

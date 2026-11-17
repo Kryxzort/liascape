@@ -2,7 +2,7 @@
 
 Running list of things found while working that aren't done yet. Newest context first within each section.
 Delete an item in the commit that does it (the commit message is the record). Product work only — the repo is public;
-one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design for the new player: `docs/superpowers/specs/2026-10-20-utopia-player-design.md`.
+one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
 72. [ ] (owner) Text is selectable instead of copy buttons: the item sidebars' title (remove its Copy button), the
@@ -50,8 +50,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        clock") — not unless the owner asks.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
-- [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (design spec §12
-      Phase 4), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
+- [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (the player's last phase), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
       Browse and the scrapers; once it plays, take it out of Unplayable and the Browse type filter (its tag then shows
       in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).
 - [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
@@ -81,7 +80,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       unmute delay stops it.
 
 ## Switch-over bar
-- [ ] Resume the switch-over check (design §11: liascape-player becomes the default and the legacy path goes only when
+- [ ] Resume the switch-over check (`docs/player/architecture.md` § Not built: liascape-player becomes the default and the legacy path goes only when
       the bar holds on the owner's machine). The stopped 2026-11-05 draft is committed as WIP on local branch
       `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
       checklist report `docs/player/reports/switch-over.md` with placeholder results. Rebase onto lp-player, measure,
@@ -169,13 +168,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       reason "sources play on mpv's default device" / unknown; summary only, no setting row), adapter IT + self-test +
       probe-health guard it. **Still open:** Intel GPUs have no VRAM probe at all (an Intel-specific one would make the VRAM
       rules work there).
-- [ ] Phases 2–6 per design §12 (scene worker; Programs/Signals in-process — the auto-mute Signal shipped in Phase 3 Task 14; the web
-      worker; the switch-over bar per §11; the ongoing scene-compatibility programme). Roadmap summary:
-      `docs/player/architecture.md` § 6.
-  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): plan `docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md` — Tasks 1–14 done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): **flipped 2026-11-02** after the on-machine parity run (§ 7, owner-approved; criterion 9 read as "reasonable"): the player's Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` = off), `AudioMonitor.AutoMuteParityPassed` is gone, `monitor-daemon` is retired under liascape-player, `FeatureHealth` reports the Signal's needs. Still open: criterion 3 for a new stream under full CPU saturation (harness only, `lia-sysmon` lag, not traced); MPRIS through the backend with a Playing player and a Flatpak player untested; a player without the capability has no auto-mute with the app closed (accepted: the escape hatch / a bus-down player).
-  - Phase 2 scene worker (`docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md`): **all tasks
-    done** (Tasks 1–15, the Task 8 backend wiring, the properties editor and loudness learning). Task 14 — the
-    on-machine battery — ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,
+- [ ] Remaining player phases (the web worker; the switch-over bar; the ongoing scene-compatibility programme). Roadmap:
+      `docs/player/architecture.md` § Not built.
+  - [ ] Pause-when-covered has only the pause action; Wallpaper Engine's "Mute" and "Stop" variants of the cover action are not built.
+  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): all tasks done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): **flipped 2026-11-02** after the on-machine parity run (§ 7, owner-approved; criterion 9 read as "reasonable"): the player's Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` = off), `AudioMonitor.AutoMuteParityPassed` is gone, `monitor-daemon` is retired under liascape-player, `FeatureHealth` reports the Signal's needs. Still open: criterion 3 for a new stream under full CPU saturation (harness only, `lia-sysmon` lag, not traced); MPRIS through the backend with a Playing player and a Flatpak player untested; a player without the capability has no auto-mute with the app closed (accepted: the escape hatch / a bus-down player).
+  - Phase 2 scene worker: **all tasks done**. The on-machine battery ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,
     also `battery.sh scenes`); bar the owner's VT-switch/suspend check (Waiting on owner) only the findings below
     are open.
   - **Phase 2 battery findings (Task 14, `docs/player/reports/phase2.md` § 10).** Fixed with tests: F1 scenes at
@@ -484,7 +481,7 @@ Two bug classes kept recurring; fix the class, not the instance:
 - [ ] **Per-monitor audio mixing policy**: with different wallpapers on two monitors, both are audible at once
       (audio follows the picture). Decide: primary output only / loudest / all / user choice. liascape-player keeps a
       shared wallpaper playing and audible while it's still on another monitor; reveal/frozen hold a snapshot.
-- [ ] Scene compatibility programme (design §12 phase 6): import worthwhile upstream LWE PRs (#625 — closed unmerged, gap audit G06 —, #631, #694 …;
+- [ ] Scene compatibility programme : import worthwhile upstream LWE PRs (#625 — closed unmerged, gap audit G06 —, #631, #694 …;
       #692, #677 and upstream `main`'s other fixes up to `38a5d60` are in since 2026-10-28 — UPSTREAM.md) as
       labelled patches. The corpus runner exists (Phase 2 Task 13:
       `src/player/tests/onmachine/scene_corpus.sh`, report `docs/player/reports/scene-corpus.md` — 92 ok, 1 static

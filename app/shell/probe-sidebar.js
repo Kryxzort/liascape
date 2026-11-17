@@ -1,6 +1,6 @@
 // Wallpaper Engine-style sidebar probe — `scripts/test-ui-matrix.sh --probe probe-sidebar.js` (the matrix's hermetic
 // stack: private backend + headless liascape-player + this tree's UI bundle on a private Xvfb). docs/decisions.md §
-// "Replace the card settings and preview modals with an item sidebar" (docs/superpowers/specs/2026-11-10-we-sidebar-design.md).
+// "Replace the card settings and preview modals with an item sidebar" (.claude/rules/ui/design.md § Item sidebar).
 //   lib:click            a plain click applies the card and nothing else: no sidebar, no focus (docs/decisions.md § "Left click
 //                        does the tab's main action, right click opens the item sidebar")
 //   lib:rightClick       right-click = the sidebar on that card — volume, speed, the actions — nothing applies, no menu; with the
@@ -2239,7 +2239,7 @@ app.whenReady().then(async () => {
       if (h.tr === "none" || h.tr === a.tr) v.push(`hovered, the download button doesn't lift / grow (transform ${a.tr} → ${h.tr})`);
       if (!(h.glow > 0.5) || a.glow > 0.1) v.push(`hovered, no bloom (${a.glow} → ${h.glow})`);
       if (!/drop-shadow/.test(h.filter) || h.filter === a.filter) v.push(`hovered, the arrow doesn't glow (filter ${a.filter} → ${h.filter})`);
-      // the arrow drops once and lands (only progress loops — docs/superpowers/specs/2026-11-12-icon-motion-design.md)
+      // the arrow drops once and lands (only progress loops — .claude/rules/ui/design.md § Icon motion)
       if (!h.anim || h.loop) v.push(`hovered, the arrow doesn't drop once (${h.anim} animations, looping ${h.loop})`);
       if (h.r) await (async () => { const img = await win.webContents.capturePage({ x: Math.max(0, Math.round(c.x - 20)), y: Math.max(0, Math.round(c.y - 20)), width: Math.round(c.w + 40), height: Math.round(c.h + 40) }); fs.writeFileSync(path.join(OUT, "side-look-dlhover.png"), img.toPNG()); })();
       // the Browse sidebar's Download & Apply

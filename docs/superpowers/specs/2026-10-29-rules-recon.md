@@ -1,8 +1,7 @@
 # Rules system — reconnaissance (2026-10-29)
 
 Research only, no design decisions. Input for the rules system (triggers → actions, with exceptions) that runs
-inside `liascape-player`. Read with the Phase 3 plan (`plans/2026-10-29-liascape-player-phase3-programs.md`,
-Task 6 pause-when-covered, Task 14 auto-mute) and `plans/2026-10-29-game-running-signal-DRAFT.md`.
+inside `liascape-player`. Read with `docs/player/modules/signals.md` (pause-when-covered, auto-mute) and `plans/2026-10-29-game-running-signal-DRAFT.md`.
 
 Confidence tags: **[machine]** = checked on the owner's machine (CachyOS, kernel 7.1.3, Hyprland 0.56.2, uwsm,
 DMS + Noctalia shells, PipeWire + pipewire-pulse, NVIDIA, no battery). **[doc]** = from upstream docs or protocol

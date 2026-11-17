@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# liascape-player Phase 3 on-machine battery (plan docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md
-# Task 12): programs (rotation inside the player) and the cover Signal on the REAL outputs (DP-1 143.98 Hz,
+# liascape-player on-machine battery for programs (rotation inside the player) and the cover Signal on the REAL outputs (DP-1 143.98 Hz,
 # DP-2 239.76 Hz). The report is docs/player/reports/phase3.md. Also reachable as `battery.sh programs <step…>`.
 #
 #   bash src/player/tests/onmachine/programs.sh dropout     # step 1: dropout across program switches (5 cells × 3 methods;

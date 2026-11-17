@@ -1,5 +1,5 @@
-// COOL: the magnet — a primary action leans toward a pointer that comes near, before the click (docs/superpowers/specs/
-// 2026-11-12-icon-motion-design.md § The magnet). Opt in with `ref={magnetRef}`; only primary actions, never a list's
+// COOL: the magnet — a primary action leans toward a pointer that comes near, before the click (.claude/rules/ui/design.md
+// § Icon motion). Opt in with `ref={magnetRef}`; only primary actions, never a list's
 // items (a grid of leaning buttons is noise). The lean is the element's `translate` (it composes with a hover lift on
 // `transform`), eased by CSS (index.css `[data-magnet]`: a quick follow while in range, `--spring-soft` home).
 // PERF: written in the pointer's own `pointermove`, never a requestAnimationFrame loop (an idle page asks for no frames —

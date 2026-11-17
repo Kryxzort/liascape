@@ -1,6 +1,6 @@
 // COOL: icons act out their meaning — one delegated `pointerover` listener plays an icon's one-shot when the pointer
 // enters its button (download drops into its tray, the external-link arrow leaves and comes back, refresh spins and lands…).
-// The vocabulary, roles and why: docs/superpowers/specs/2026-11-12-icon-motion-design.md; the rule: .claude/rules/ui/design.md
+// The vocabulary, roles and why: .claude/rules/ui/design.md
 // § Icon motion. Held states (the trash lid, the folder flap, X turning, chevrons), the object tilt and the press squeeze
 // are CSS (index.css § icon motion); this file is only the one-shots, which must play to their end even when the pointer
 // leaves half-way (a CSS :hover animation would snap back). WAAPI on transform / opacity only — an SVG child's transform

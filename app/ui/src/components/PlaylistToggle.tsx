@@ -5,7 +5,7 @@ import { useState } from "react";
 // on hover the square turns the paler `--accent-hover`, and a see-through tick (a mid-grey thumbnail, say) all but
 // vanishes into it (rendered in Electron 42: the masked tick loses its contrast, the square itself stays). A solid dark
 // tick keeps it on any thumbnail.
-// COOL: a change the user makes pops the new state once (toggle role — docs/superpowers/specs/2026-11-12-icon-motion-design.md);
+// COOL: a change the user makes pops the new state once (toggle role — .claude/rules/ui/design.md § Icon motion);
 // a card mounting already on never pops (a page of 170 cards would all bounce). Guard: probe-icons icon:toggle.
 export function PlaylistToggle({ on, size = 18 }: { on: boolean; size?: number }) {
   const [seen, setSeen] = useState(on);

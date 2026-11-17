@@ -19,7 +19,7 @@
   --glow: 0 0 22px -3px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
   /* COOL: the motion springs — one set for every icon (and the magnet), read by components/iconMotion.ts too. Damped springs
      sampled into linear(): --spring ζ ≈ 0.42 (≈ 23 % overshoot, an icon's own gesture), --spring-soft ζ ≈ 0.62 (≈ 8 %, turns and
-     returns). docs/superpowers/specs/2026-11-12-icon-motion-design.md § Physics */
+     returns). .claude/rules/ui/design.md § Icon motion (the springs) */
   --spring: linear(0, .074, .258, .492, .729, .936, 1.091, 1.188, 1.23, 1.228, 1.194, 1.143, 1.086, 1.034, .993, .964, .949, .946,
     .951, .961, .974, .987, .998, 1.006, 1.011, 1.013, 1.012, 1.01, 1.007, 1.004, 1.001, .999, .998, .997, .997, .997, 1);
   --spring-dur: .65s;
@@ -1060,7 +1060,7 @@ input[type=range]:focus-visible { outline: none; }
 .ico { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .ico svg, .mini svg, .del svg, .pl-remove svg, .pl-toggle svg { flex: none; }
 
-/* ---- icon motion: the vocabulary by role (docs/superpowers/specs/2026-11-12-icon-motion-design.md; the rule:
+/* ---- icon motion: the vocabulary by role (the rule:
    .claude/rules/ui/design.md § Icon motion). Here: the held states, the object tilt, the press squeeze, the toggle pop; the
    one-shots (an icon acting its meaning once) are components/iconMotion.ts. Every one settles on the :root springs; transform,
    opacity and the individual rotate / scale properties only — `scale` is the press's alone, so it composes with whatever

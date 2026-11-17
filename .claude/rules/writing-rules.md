@@ -28,6 +28,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - What happened (incidents, who said what, dates, Task/Phase/R-numbers, measurements of a bug now fixed) → the commit message only. `git log -S` finds it.
 - Work not done yet → `docs/TODO.md`: product work only, agreed-but-unstarted work at the top under "Queued", in order;
   delete an item in the commit that does it.
+- A design spec or implementation plan → `docs/superpowers/`, only while its work is open; the commit that finishes the
+  work deletes it and moves its still-true facts to their homes above (git history keeps the file).
 - A zero-exception ban → a hook or a permission rule, not prose.
 - What a user needs to install, start and use the app → `README.md` (see below); never internals or a change log.
 - The README for after the switch-over (liascape-player the only player) → `docs/README-next.md`, same rules as

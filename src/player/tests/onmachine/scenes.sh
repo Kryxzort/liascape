@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# liascape-player Phase 2 on-machine battery (plan docs/superpowers/plans/2026-10-27-liascape-player-phase2-scene-worker.md
-# Task 14): scene workers on the REAL outputs (DP-1 143.98 Hz, DP-2 239.76 Hz). The report is
+# liascape-player on-machine battery for scene workers on the REAL outputs (DP-1 143.98 Hz, DP-2 239.76 Hz). The report is
 # docs/player/reports/phase2.md. Also reachable as `battery.sh scenes <step…>`.
 #
 #   bash src/player/tests/onmachine/scenes.sh outputs        # step 1: pixels, pacing, CPU, pointer, visualiser

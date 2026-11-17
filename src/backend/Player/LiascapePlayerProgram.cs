@@ -9,8 +9,8 @@ using Liascape.Models;
 
 namespace Liascape.Player;
 
-// The adapter's program half (plan docs/superpowers/plans/2026-10-29-liascape-player-phase3-programs.md,
-// player-adapter.md § Rotation). Under PlayerEngine=liascape-player a rotation session — Play / play-from of a playlist,
+// The adapter's program half (`.claude/rules/backend/player-adapter.md` § Rotation,
+// `docs/player/adapter.md`). Under PlayerEngine=liascape-player a rotation session — Play / play-from of a playlist,
 // a timed or advance-on-end one, Play All with more than one item — is ONE player program, `prog:main` on `out:*`:
 // the player keeps its clock, its order, its history and every rule of § Rotation (recipes/program/), and keeps
 // rotating with the app closed. The backend only (a) turns the playlist + the settings into the program's spec

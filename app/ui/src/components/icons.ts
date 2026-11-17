@@ -1,6 +1,6 @@
 import { createLucideIcon } from "lucide-react";
 
-// Two-part icons for the motion vocabulary (docs/superpowers/specs/2026-11-12-icon-motion-design.md): lucide draws these
+// Two-part icons for the motion vocabulary (.claude/rules/ui/design.md § Icon motion): lucide draws these
 // as one path, so a part can't move on its own. Same 24-unit grid and stroke as lucide (they ARE lucide icons, built with
 // its own `createLucideIcon` — `lucide lucide-<name>` classes, size / strokeWidth props).
 

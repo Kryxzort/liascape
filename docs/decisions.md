@@ -277,7 +277,7 @@ the colour the playing item already pulses, not the accent. `hooks/travelToPlayi
 
 ### Replace the card settings and preview modals with an item sidebar — 2026-11-10
 The owner asked for a Wallpaper Engine-style sidebar on focus, holding the right-click menu's options, in Library and
-Browse. Spec: `docs/superpowers/specs/2026-11-10-we-sidebar-design.md`. `components/SidePanel.tsx`.
+Browse. `.claude/rules/ui/design.md` § Item sidebar; `components/SidePanel.tsx`.
 
 ### Default NVIDIA to hardware GL through ANGLE on EGL — 2026-10-28
 SwiftShader cost CPU on every frame; Chromium's native-Wayland path wants Vulkan for the surface and XWayland crashed the

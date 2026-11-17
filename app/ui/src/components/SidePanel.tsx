@@ -12,7 +12,7 @@ import { MuteButton } from "./MuteButton";
 import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPreviewMuted, followWallpaper, unmutePreview, rangeFill } from "./sidePreview";
 
 // COOL: the Wallpaper Engine-style item sidebar (docs/decisions.md § "Replace the card settings and preview modals with an
-// item sidebar"; docs/superpowers/specs/2026-11-10-we-sidebar-design.md). One shell for the Library and
+// item sidebar"; .claude/rules/ui/design.md § Item sidebar). One shell for the Library and
 // the Browse sidebar: an <aside> beside the page (a sibling of `.scroll` inside `.app`), docked at ≥ 900 px — the grid
 // and the playlist bar end at its left edge (index.css `.app:has(> .side-panel…)`) — and floating over the page with a
 // scrim below that. It slides in on a slightly springy curve and its content follows in a quick stagger (picture → hero →

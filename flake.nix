@@ -157,7 +157,7 @@
       };
 
       # 3c) liascape-player (Rust): the compositor that plays wallpapers in place of mpvpaper +
-      # liascape-transition. See docs/superpowers/specs/2026-10-20-utopia-player-design.md and
+      # liascape-transition. See docs/player/architecture.md and
       # .claude/rules/player/core.md. bindgenHook + pkg-config: the libmpv FFI.
       liascape-player = pkgs.rustPlatform.buildRustPackage {
         pname = "liascape-player";

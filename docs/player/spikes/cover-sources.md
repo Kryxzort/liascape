@@ -3,7 +3,7 @@
 What the covered Signal reads on each compositor, checked **read-only** on the owner's session
 (Hyprland 0.56.2, DP-1 + DP-2): `hyprctl -j monitors|clients|workspaces` and the raw IPC socket. No
 `hyprctl dispatch`, no window of the owner's opened, moved or closed. Input: the rules recon
-(`docs/superpowers/specs/2026-10-29-rules-recon.md` §0.1, §1.1–1.4) and the plan's revised designer call 9.
+(`docs/superpowers/specs/2026-10-29-rules-recon.md` §0.1, §1.1–1.4).
 
 ## Why not wlr-foreign-toplevel everywhere
 
