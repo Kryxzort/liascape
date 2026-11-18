@@ -291,13 +291,31 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       alone, so A stays 3 s, and it requests with ≥ 1.5 s of A left: its "A's last iteration" failure (once on a busy
       box, again after a reboot under btrfs-cleaner) was a request in A's last moments); the first-render grace, the
       50 s cap and restart-aware deadlines came after, unproven under IO load (the runs stopped: owner on the desktop,
-      disk 95 % full) — checked with CPU load + unloaded only. **Left for a quiet night (owner's go):** under `bash
+      disk 95 % full) — checked with CPU load + unloaded only. **Run on a quiet night, not green yet:** under `bash
       scripts/test-lock.sh`, 2 writers `while :; do dd if=/dev/zero of=<scratch>/io-N.bin bs=1M count=256
-      conv=fsync,notrunc status=none; done`, plus every 3 s `os.posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)` on
-      `src/player/target/debug/liascape-scene-worker` and each library `ldd` lists for it; run `cargo test --test
-      transition` 2× on 1c6ae31a's `src/worker/mod.rs` + `tests/common/harness.rs` + `tests/transition.rs` (RED: 9–12
-      failures, the family above) and 3× on this change (GREEN: 0); then `--test supervise` and `--test program` once
-      each; delete the writers' files. Under heavier IO (4 writers, eviction every 0.3 s, the test binaries evicted
+      conv=fsync,notrunc status=none; done`, plus every 3 s `os.posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)` on the
+      debug `liascape-scene-worker` (own `CARGO_TARGET_DIR`) and each library `ldd` lists for it (146 files); IO
+      pressure `some` avg10 40–60 %, load ~13 on 24 threads. `cargo test --test transition` 2× on the whole tree at
+      1c6ae31a (its three files alone no longer compile against today's code: `WorkerState::Spare`): RED 13/32 and
+      10/32 failed, the family above (`scene_b_load_error_keeps_a`, `slow_loading_scene_b_is_waited_for`,
+      `s_to_s`/`s_to_v`/`v_to_s_each_method`, …). 3× on the change: 5, 2 and 3 of 32 failed, not 0 —
+      `scene_b_broken_mid_effect_snaps_back` 3/3 (its 8 s effect ended and handed off before the third crash: nothing
+      pauses an effect while B restarts and each cold restart took ~4 s; now a 60 s effect, 2/2 green under the same
+      load), `align_end_video_a_to_scene_b` 3/3 on three different checks (B came up at 5.4 s after A's 3.2 s end;
+      progress 1 at 53.8 ms before A's last frame ended; B came up at 44.9 s — a start near the 50 s cap), once each
+      `align_end_full_live` ("A's last iteration: loop off while waiting" — no ≥ 1.5 s-of-A guard like the V→S
+      test's), `rapid_interrupt_chain` (0 commits: its fixed 100 ms gaps never let a B come up),
+      `v_to_s_each_method` (full-live "A kept playing") and `scene_a_align_end_starts_at_once` (A's own start took
+      ~47 s, past `within`'s `LOADING_CEILING`). `--test supervise` 8/20 failed and `--test program` 21/73, nearly
+      all on wall-clock come-up waits outside the harness: "never came up" / "serve socket never came up" (the
+      15 s `serve` socket wait in `Sup::start` and program.rs's server start, 5 + 19 tests),
+      `gives_up_without_compositor_after_backoff` (110 s for a 1.6 s budget, 10 s allowed),
+      `sigterm_during_compositor_backoff_exits_at_once` ("never entered the backoff", 10 s),
+      `crash_restore_ignores_start_mode` (time_pos 1.367 < 1.5 after the restore), `broken_scene_advances_now`
+      (no broken advance in 30 s), `timer_mode_switches_every_interval` ("step: no frame within 2 s"). Next: make
+      the `serve` come-up waits in `tests/supervise.rs` / `tests/program.rs` start-aware like `Harness::within`
+      (or prove a cold `serve` start that slow is a player bug), guard `align_end_full_live`'s request like the
+      V→S one, give `rapid_interrupt_chain` the mixed chain's condition-based gaps, then rerun this. Under heavier IO (4 writers, eviction every 0.3 s, the test binaries evicted
       too) starts outlast 50 s and frame-timing checks fail: past what the suite can hold.
       `program_survives_a_crash`'s other failure (history with a 4th, requested item: a read landing between the
       timer's request and its commit) now waits for `phase: playing`. Its post-crash "program idle, item 0 from 0"

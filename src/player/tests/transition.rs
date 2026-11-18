@@ -2254,7 +2254,10 @@ fn scene_b_worker_crash_mid_effect_still_hands_off() {
 /// B's worker crash-loops mid-effect (every worker crashes 700 ms after its start): after
 /// the restart budget (3 in 60 s) it is broken before the handoff → `transition.failed`
 /// and the snap-back: A shown, unpaused, at its recorded gains within 30 ms, playing again;
-/// B ramped out and destroyed; one crash record.
+/// B ramped out and destroyed; one crash record. The effect is long (60 s) so the three
+/// crashes land inside it: nothing pauses an effect while B restarts (its held frame shows),
+/// and under IO load each cold restart takes seconds, so in an 8 s effect the third crash
+/// comes after the handoff.
 #[test]
 fn scene_b_broken_mid_effect_snaps_back() {
     for (a_kind, method) in [(Kind::Scene, "reveal"), (Kind::Video, "full-live")] {
@@ -2269,7 +2272,7 @@ fn scene_b_broken_mid_effect_snaps_back() {
         let records0 = harness_crash_records();
         let corr = h.start(json!({
             "outputs": "out:*", "to": {"kind": "scene", "path": s(&dir)},
-            "effect_id": "fade", "duration_ms": 8000, "method": method
+            "effect_id": "fade", "duration_ms": 60000, "method": method
         }));
         let b = h.to_of(&corr);
         h.wait_event(&corr, "transition.started", MS(5000));
