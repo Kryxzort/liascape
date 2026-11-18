@@ -8,7 +8,13 @@
 //                       "In your library"; unticking one makes its group's tick mixed and the button "Import 4"; Import lands
 //                       exactly the four ticked (links: "Copy files instead of linking" off by default) and the dialog leaves
 //   import:cancel       Cancel, Escape and a click outside each close it and land nothing
-//   import:files        the Import's right-click menu has "Import files…"; picked files open the dialog on just them
+//   import:files:<m>    the Import's chevron is in sight beside it (its height, in the top bar, aria-haspopup); a click opens
+//                       its menu ("Import a folder…", "Import files…") with the chevron turned over (motion on: through
+//                       in-between angles while the menu grows in; off / reduced: it flips at once, the menu only fades);
+//                       Import files… opens the dialog on just the picked files
+//   import:files:keys   ↓ on the chevron opens the menu on its first entry, Escape gives the focus back to the chevron,
+//                       Enter opens it again, ↓ Enter picks files: the dialog on just them
+//   import:files:rightClick  a right-click on Import opens the same menu; a plain click on Import still picks a folder
 //   import:drop:<m>     files dragged over the window from a file manager (text/uri-list file:// URIs) show the drop frame
 //                       (motion on: it scales in; off: it fades), leaving the window hides it, a drop opens the dialog on them
 //   import:settings     Settings → "Add folder" opens the dialog as "Watch a folder" with "Keep watching this folder" ticked;
@@ -190,24 +196,117 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("import:files — the Import's right-click: Import files… opens the dialog on just them", async () => {
-      const v = [];
-      await load();
-      const d = tree("f");
-      const files = [path.join(d, "fa.mp4"), path.join(d, "fc.gif")];
-      await stubPicker(d, files);
-      const r = await js(`const b = document.querySelector("[data-import-btn]").getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }`);
-      win.webContents.sendInputEvent({ type: "mouseDown", x: Math.round(r.x), y: Math.round(r.y), button: "right", clickCount: 1 });
-      win.webContents.sendInputEvent({ type: "mouseUp", x: Math.round(r.x), y: Math.round(r.y), button: "right", clickCount: 1 });
-      if (!(await waitFor(() => js(`return [...document.querySelectorAll(".sel-pop button")].some((b) => b.textContent.includes("Import files"))`), 3000)))
-        return ["no \"Import files…\" in the Import's right-click menu"];
-      await js(`[...document.querySelectorAll(".sel-pop button")].find((b) => b.textContent.includes("Import files")).click(); return true`);
+    // the picked files in the dialog: just them, no folder watch offered; then Cancel
+    const filesListed = async (files) => {
       if (!(await found())) return ["the dialog didn't list the picked files"];
+      const v = [];
       const s = await dialog();
       const paths = s.groups.flatMap((g) => g.items.map((i) => i.path)).sort();
       if (J(paths) !== J([...files].sort())) v.push(`listed ${J(paths)}, want just ${J(files)}`);
       if (s.summary !== "1 video, 1 GIF") v.push(`summary ${J(s.summary)}`);
       if (s.watch !== null) v.push("files offered a folder watch");
+      await js(`[...document.querySelectorAll(".imp-actions .btn")].find((b) => b.textContent.trim() === "Cancel").click(); return true`);
+      await gone();
+      return v;
+    };
+    const menuItems = () => js(`return [...document.querySelectorAll(".ctx-pop [data-ctx-item]")].map((b) => b.textContent.trim())`);
+    const menuOpen = () => js(`return !!document.querySelector(".ctx-pop:not(.closing)")`);
+
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`import:files:${mode} — the Import's chevron, in sight: its menu (the chevron turns) has Import files…, which opens the dialog on just them`, async () => {
+        const v = [];
+        await setSettings({ Morphs: mode !== "off" }); await reducedMotion(mode === "reduced"); await load();
+        const noMotion = () => js(`return document.documentElement.classList.contains("no-motion")`);
+        if (!(await waitFor(async () => (await noMotion()) === (mode !== "on"), 5000))) return [`:root.no-motion is ${await noMotion()} under motion ${mode} — proved nothing`];
+        const d = tree(`f${mode}`);
+        const files = [path.join(d, `f${mode}a.mp4`), path.join(d, `f${mode}c.gif`)];
+        await stubPicker(d, files);
+        // in sight: a real box right beside Import, its height, inside the top bar, with its own name and a menu popup
+        const g = await js(`const m = document.querySelector("[data-import-more]"), b = document.querySelector("[data-import-btn]"), t = document.querySelector(".topbar");
+          if (!m) return null; const r = m.getBoundingClientRect(), rb = b.getBoundingClientRect(), rt = t.getBoundingClientRect(), cs = getComputedStyle(m);
+          return { w: r.width, h: r.height, bh: rb.height, adj: Math.abs(r.left - rb.right) < 1.5, inBar: r.top >= rt.top && r.bottom <= rt.bottom,
+            vis: cs.visibility === "visible" && +cs.opacity > 0.9, label: m.getAttribute("aria-label"), pop: m.getAttribute("aria-haspopup"), exp: m.getAttribute("aria-expanded") }`);
+        if (!g) return ["no chevron beside Import"];
+        if (!(g.w >= 20 && g.h === g.bh && g.adj && g.inBar && g.vis)) v.push(`the chevron isn't a visible half of the Import button: ${J(g)}`);
+        if (!g.label || g.pop !== "menu" || g.exp !== "false") v.push(`chevron aria: ${J(g)}`);
+        if (mode === "on") await shot("split", "[data-import-split]");
+        // opened by a click: the caret's turn and the menu's appearance, frame by frame
+        const fr = await js(`const caret = document.querySelector("[data-import-more] .sel-caret"), turns = [];
+          const t0 = performance.now(); const tick = () => { turns.push(getComputedStyle(caret).transform); if (performance.now() - t0 < 700) requestAnimationFrame(tick); };
+          const s = ${SAMPLE({ menu: ".ctx-pop" }, 700)}; requestAnimationFrame(tick); document.querySelector("[data-import-more]").click();
+          const out = await s; await new Promise((r) => setTimeout(r, 50)); return { menu: out.menu, turns }`);
+        const turns = [...new Set(fr.turns)];
+        if (mode === "on") {
+          if (turns.length < 4) v.push(`motion on: the chevron didn't turn through in-between angles (${J(turns.slice(0, 6))})`);
+          const ws = fr.menu.filter((f) => f[1] != null).map((f) => f[4]);
+          if (!(ws.length > 2 && Math.min(...ws) < Math.max(...ws) - 2)) v.push(`motion on: the menu didn't grow in (${brief(fr.menu)})`);
+        } else {
+          if (turns.length > 2) v.push(`motion ${mode}: the chevron turned through ${turns.length} angles, want it to flip at once`);
+          v.push(...judge("the menu", fr.menu, { appear: true }));
+        }
+        if (!/^matrix\(-1, /.test(turns.at(-1) ?? "")) v.push(`the open menu's chevron isn't turned over (${turns.at(-1)})`);
+        if ((await js(`return document.querySelector("[data-import-more]").getAttribute("aria-expanded")`)) !== "true") v.push("aria-expanded isn't true while open");
+        if (J(await menuItems()) !== J(["Import a folder…", "Import files…"])) v.push(`menu ${J(await menuItems())}`);
+        // it hangs under the pair, flush with one of its edges (never beside it)
+        const at = await js(`const p = document.querySelector(".ctx-pop").getBoundingClientRect(), s = document.querySelector("[data-import-split]").getBoundingClientRect();
+          return { below: p.top >= s.bottom, flush: Math.min(Math.abs(p.left - s.left), Math.abs(p.right - s.right)) < 1.5, p: [p.left, p.right], s: [s.left, s.right] }`);
+        if (!at.below || !at.flush) v.push(`the menu isn't under the Import pair, flush with an edge: ${J(at)}`);
+        if (mode === "on") await shot("menu");
+        await js(`document.querySelector('.ctx-pop [data-ctx-item="files"]').click(); return true`);
+        v.push(...await filesListed(files));
+        await reducedMotion(false);
+        return v;
+      });
+    }
+
+    await cell("import:files:keys — the chevron by keyboard: ↓ opens its menu on the first entry, Escape gives focus back, Enter ↓ Enter picks files", async () => {
+      const v = [];
+      await setSettings({ Morphs: true }); await load();
+      const d = tree("k");
+      const files = [path.join(d, "ka.mp4"), path.join(d, "kc.gif")];
+      await stubPicker(d, files);
+      // Enter presses a button on its char event, as a real key does
+      const key = (k) => { win.webContents.sendInputEvent({ type: "keyDown", keyCode: k });
+        if (k === "Return") win.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: k }); };
+      const focused = () => js(`const a = document.activeElement; return a?.dataset.ctxItem ?? (a?.hasAttribute("data-import-more") ? "chevron" : a?.tagName)`);
+      win.webContents.focus();
+      await js(`document.querySelector("[data-import-more]").focus(); return true`);
+      key("Down");
+      if (!(await waitFor(menuOpen, 2000))) return ["↓ on the chevron didn't open its menu"];
+      await sleep(150);
+      if ((await focused()) !== "folder") v.push(`first focus ${J(await focused())}, want the folder entry`);
+      key("Escape");
+      if (!(await waitFor(async () => !(await menuOpen()), 2000))) v.push("Escape didn't close the menu");
+      if ((await focused()) !== "chevron") v.push(`after Escape the focus is on ${J(await focused())}, want the chevron`);
+      key("Return");
+      if (!(await waitFor(menuOpen, 2000))) return [...v, "Enter on the chevron didn't open its menu"];
+      await sleep(150);
+      if (await dialog()) return [...v, "Enter on the chevron also picked the menu's first entry"];
+      if ((await focused()) !== "folder") v.push(`after Enter the focus is on ${J(await focused())}, want the folder entry`);
+      key("Down");
+      await sleep(100);
+      if ((await focused()) !== "files") v.push(`↓ moved the focus to ${J(await focused())}, want the files entry`);
+      key("Return");
+      v.push(...await filesListed(files));
+      return v;
+    });
+
+    await cell("import:files:rightClick — a right-click on Import opens the same menu at the pointer; a click on Import still picks a folder", async () => {
+      const v = [];
+      await load();
+      const d = tree("r");
+      await stubPicker(d, [path.join(d, "ra.mp4")]);
+      const r = await js(`const b = document.querySelector("[data-import-btn]").getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }`);
+      win.webContents.sendInputEvent({ type: "mouseDown", x: Math.round(r.x), y: Math.round(r.y), button: "right", clickCount: 1 });
+      win.webContents.sendInputEvent({ type: "mouseUp", x: Math.round(r.x), y: Math.round(r.y), button: "right", clickCount: 1 });
+      if (!(await waitFor(menuOpen, 3000))) return ["no menu on the Import's right-click"];
+      if (J(await menuItems()) !== J(["Import a folder…", "Import files…"])) v.push(`menu ${J(await menuItems())}`);
+      win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+      await waitFor(async () => !(await menuOpen()), 2000);
+      await js(`document.querySelector("[data-import-btn]").click(); return true`);
+      if (!(await found())) return [...v, "a click on Import didn't open the dialog on the picked folder"];
+      if ((await dialog()).groups.flatMap((g) => g.items).length !== 6) v.push("a click on Import didn't list the folder's six items");
       await js(`[...document.querySelectorAll(".imp-actions .btn")].find((b) => b.textContent.trim() === "Cancel").click(); return true`);
       await gone();
       return v;

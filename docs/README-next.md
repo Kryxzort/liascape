@@ -29,8 +29,8 @@ Wallpaper Engine's web, application and preset wallpapers don't play, so Browse 
 
 **Keeps a library.** Downloads land in your library, and so does anything new in your Wallpaper Engine Workshop folder
 (you can turn that off). Import a folder of your own videos, GIFs and pictures, or a backed-up Workshop folder, with the
-Library tab's Import button or by dropping it on the window: you see what it found before anything lands. A folder you
-keep watched (Settings, Watched folders) brings in new files by itself. Click a card to apply it. Right-click it to open its sidebar, where you can set that wallpaper's own volume and speed, and change a
+Library tab's Import button (its arrow picks single files) or by dropping it on the window: you see what it found before
+anything lands. A folder you keep watched (Settings, Watched folders) brings in new files by itself. Click a card to apply it. Right-click it to open its sidebar, where you can set that wallpaper's own volume and speed, and change a
 scene's own options.
 
 **Plays scenes.** Liascape draws Wallpaper Engine scenes itself, with no separate program. Turn them on in Settings →

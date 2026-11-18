@@ -253,7 +253,7 @@ export default function App() {
             <LocateButton target="library" label="Go to the playing wallpaper" disabled={!s.playingPath}
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
               onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }} />
-            {/* Import: a folder (right-click: files), shown in the import dialog before anything lands */}
+            {/* Import: a folder (its chevron: files), shown in the import dialog before anything lands */}
             <ImportButton narrow={narrow} />
             <TopbarSearch placeholder="Search library…" value={s.libQuery} onChange={s.setLibQuery} />
             <SortFilterButton page="library" scope={s.libraryItems.length ? "library" : null}

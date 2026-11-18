@@ -2152,6 +2152,20 @@ button.side-pill.copy { overflow: hidden; }
 /* while a box is drawn the cards take no pointer: no hover lift or preview under the sweep */
 .marquee-on > .grid { pointer-events: none; }
 
+/* ---- the Library's Import split button (components/ImportButton.tsx): the folder half and a chevron that opens its menu,
+   joined like the filter / sort pair (.ss-split) by a hairline (an inset shadow, so it takes no room from the glyph's
+   margins); the chevron lifts while its menu is open and turns like a dropdown's caret (.sel-caret: its turn and its
+   no-motion rule). A whole-pixel line on Import keeps the pair's height even (32 px, 28 folded to icons), so the
+   chevron's 14 px glyph sits on whole, equal margins (8 | 8 across). Guard: probe-icons icon:centre:*,
+   --probe probe-import.js import:files:* ---- */
+.imp-split > .imp-main { border-radius: 8px 0 0 8px; line-height: 18px; }
+.imp-split > .imp-more { --imp-hair: inset 1px 0 0 color-mix(in srgb, var(--surface1) 70%, transparent);
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; border-radius: 0 8px 8px 0;
+  color: var(--subtext); box-shadow: var(--imp-hair); }
+.imp-split > .imp-more:hover, .imp-split.open > .imp-more { color: var(--text); box-shadow: var(--imp-hair), var(--glow-sm); }
+.imp-split.open > .imp-more { background: color-mix(in srgb, var(--surface1) 75%, transparent); }
+.imp-split.open .sel-caret { transform: rotate(180deg); }
+
 /* ---- the import dialog (components/ImportDialog.tsx) and the window's drop frame (components/ImportButton.tsx) ---- */
 /* the dialog: the playlist modals' stronger fill; its list scrolls inside the body (a backed-up Workshop folder lists
    hundreds), grouped by kind under a heading tick each; an item the library has, or a scene while scenes can't play, sits

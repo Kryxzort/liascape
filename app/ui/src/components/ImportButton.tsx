@@ -1,27 +1,52 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileVideo, Upload } from "lucide-react";
+import { ChevronDown, FileVideo, Upload } from "lucide-react";
 import { useStore } from "../store";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
+import { FolderFlap } from "./icons";
 import { menuAt } from "./menuItems";
 import { useFadeOff } from "./motion";
 import { droppedPaths, hasPicker, importFiles, importFolder, isFileDrag } from "./importPick";
 
-// The Library's Import: a click picks a folder, its right-click menu picks files instead (a control's own menu for a variant
-// of its action, docs/decisions.md § "Left click does the tab's main action, right click opens the item sidebar"); either
-// opens the import dialog (components/ImportDialog.tsx) on what was picked. Guard: --probe probe-import.js import:button
+// The Library's Import, a split button `[⇪ Import │ ▾]` (the top bar's `.ss-split` pair): a click on Import picks a folder; the
+// chevron opens its menu (folder or files), and so do ↓ on the chevron and a right-click on either half (a control's own
+// menu for its variants, components/ContextMenu.tsx; docs/decisions.md § "Left click does the tab's main action, right
+// click opens the item sidebar" bars only item menus). Each opens the import dialog (components/ImportDialog.tsx) on what
+// was picked. The chevron turns while the menu is open (the dropdowns' `.sel-caret`; motion off: at once).
+// Guard: --probe probe-import.js import:button:*, import:files:*
 export function ImportButton({ narrow }: { narrow: boolean }) {
   const [menu, setMenu] = useState<MenuAt | null>(null);
-  const ref = useRef<HTMLButtonElement>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+  const chev = useRef<HTMLButtonElement>(null);
+  // stable: ContextMenu's open effect (first entry focused) re-runs on a new onClose, and the top bar re-renders often
+  const close = useCallback(() => setMenu(null), []);
+  // from the chevron the menu hangs under the pair, flush with its edge on the window's nearer side (ContextMenu opens away
+  // from that side); a right-click opens it at the pointer
+  const openUnder = () => {
+    const r = wrap.current?.getBoundingClientRect();
+    if (r) setMenu({ x: r.left < innerWidth / 2 ? r.left : r.right, y: r.bottom + 4 });
+  };
+  const onChevKey = (e: KeyboardEvent) => { if (e.key === "ArrowDown") { e.preventDefault(); openUnder(); } };
   return (
     <>
-      <button ref={ref} className="btn ghost ico" aria-label="Import" aria-haspopup="menu" title={narrow ? "Import" : undefined} data-import-btn
-        onClick={() => { void importFolder(); }} onContextMenu={(e) => { e.preventDefault(); setMenu(menuAt(e)); }}>
-        <Upload size={14} /><span className="tb-label">Import</span>
-      </button>
-      <ContextMenu at={menu} onClose={() => setMenu(null)} returnTo={ref} label="Import"
-        items={[{ key: "files", label: "Import files…", icon: <FileVideo size={14} />, onPick: () => { void importFiles(); }, disabled: !hasPicker() }]}
+      <div ref={wrap} className={`ss-split imp-split${menu ? " open" : ""}`} data-import-split
+        onContextMenu={(e) => { e.preventDefault(); setMenu(menuAt(e)); }}>
+        <button type="button" className="btn ghost ico imp-main" aria-label="Import" title={narrow ? "Import a folder" : undefined} data-import-btn
+          onClick={() => { void importFolder(); }}>
+          <Upload size={14} /><span className="tb-label">Import</span>
+        </button>
+        <button ref={chev} type="button" className="btn ghost imp-more" aria-label="More ways to import" aria-haspopup="menu"
+          aria-expanded={!!menu} title="Import files or a folder" data-import-more
+          onClick={() => { if (menu) setMenu(null); else openUnder(); }} onKeyDown={onChevKey}>
+          <ChevronDown size={14} className="sel-caret" />
+        </button>
+      </div>
+      <ContextMenu at={menu} onClose={close} returnTo={chev} label="Import"
+        items={[
+          { key: "folder", label: "Import a folder…", icon: <FolderFlap size={14} />, onPick: () => { void importFolder(); } },
+          { key: "files", label: "Import files…", icon: <FileVideo size={14} />, onPick: () => { void importFiles(); }, disabled: !hasPicker() },
+        ]}
         note={hasPicker() ? null : "Picking files needs the app's window. Drop them on it instead."} />
     </>
   );
