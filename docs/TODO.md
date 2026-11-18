@@ -13,7 +13,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        NTFS scan), `player.scene_fonts`, and Settings' "Use Windows fonts in scenes" / "Windows fonts folder". Ship a
        fontconfig alias file for families without a standard metric alias (Consolas → Cascadia Mono, Segoe UI →
        Selawik, Comic Sans → Comic Neue, Tahoma → Wine's Tahoma) and list those open fonts plus Liberation as package
-       dependencies (flake, PKGBUILD). Real Microsoft fonts come from the user's own font install (`corefonts`). A
+       dependencies (flake, PKGBUILD). The real core web fonts (Arial, Verdana, Comic Sans, Times, Courier, Georgia,
+       Impact, Trebuchet) come from the distro's core-fonts package, which fetches Microsoft's own installers: nixpkgs
+       `corefonts` in the flake, AUR `ttf-ms-fonts` as an optdepend. Never commit or bundle Microsoft font files (their
+       licence allows passing them on only inside the original installers; Consolas / Segoe UI / Tahoma not at all). A
        docs/decisions.md entry, so nobody re-adds a Windows-partition reader.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
