@@ -1014,3 +1014,356 @@ fn log_tail_and_crash_records_are_bounded() {
         "records in {crash_dir:?}"
     );
 }
+
+// ---- the spare worker (`worker::spare`, `docs/player/modules/scene-worker.md` § The spare worker)
+
+fn start_at(id: &str, at: f64) -> ToWorker {
+    let mut s = start();
+    if let ToWorker::Start {
+        position, id: sid, ..
+    } = &mut s
+    {
+        *position = at;
+        *sid = id.into();
+    }
+    s
+}
+
+fn is_start_log(e: &WorkerEvent) -> bool {
+    matches!(e, WorkerEvent::Msg(FromWorker::Log { line, .. }, _) if line.contains("start position"))
+}
+
+/// A spare says `Hello` and then waits — no `Start`, pings answered, no hang — until a scene
+/// adopts it: the same process then gets that scene's `Start` (the stub logs it), its `Hello` is
+/// replayed to the adopter, and it is an ordinary running worker. A spec launched differently
+/// (another environment: a fonts setting the spare was started before) isn't adopted.
+#[test]
+fn spare_waits_for_its_scene_and_takes_the_start() {
+    let mut spare_spec = stub_spec("spare", "");
+    spare_spec.hang_timeout = Duration::from_millis(400);
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn_spare(spare_spec.clone()).unwrap();
+    assert!(host.is_spare());
+    assert_eq!(*host.state(), WorkerState::Spare);
+    let pid = host.pid().unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(2), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    assert!(host.said_hello(), "{evs:?}");
+    assert_eq!(
+        *host.state(),
+        WorkerState::Spare,
+        "a Hello doesn't make it a scene's worker"
+    );
+    // Several hang timeouts idle: pinged, never hung, never started.
+    let idle = pump(&mut host, t0, Duration::from_millis(1500), |_| false);
+    assert!(
+        !idle
+            .iter()
+            .any(|(_, e)| matches!(e, WorkerEvent::Hung { .. } | WorkerEvent::Exited { .. })),
+        "an idle spare is alive and answering: {idle:?}"
+    );
+    assert!(
+        !idle.iter().any(|(_, e)| is_start_log(e)),
+        "no Start before the adoption: {idle:?}"
+    );
+    assert_eq!(host.pid(), Some(pid));
+
+    // Another launch (its environment differs) → not adopted, still the spare.
+    let mut other = spare_spec.clone();
+    set_env(&mut other, "LIASCAPE_SCENE_FONTS", "/somewhere/Fonts");
+    other.id = "src9".into();
+    other.start = start_at("src9", 12.5);
+    let back = host
+        .adopt(other)
+        .expect_err("a differently launched spec isn't adopted");
+    assert_eq!(back.id, "src9");
+    assert!(host.is_spare());
+
+    let mut mine = spare_spec.clone();
+    mine.id = "src9".into();
+    mine.start = start_at("src9", 12.5);
+    host.adopt(mine).expect("the spare is adopted");
+    assert!(!host.is_spare());
+    assert_eq!(*host.state(), WorkerState::Running);
+    assert_eq!(host.pid(), Some(pid), "the same process");
+    assert_eq!(host.spec().id, "src9");
+    let evs = pump(&mut host, t0, Duration::from_secs(2), is_start_log);
+    assert!(
+        matches!(&evs.first().map(|e| &e.1), Some(WorkerEvent::Msg(FromWorker::Hello { pid: hp, .. }, _)) if *hp == pid),
+        "the adopter sees the spare's Hello first: {evs:?}"
+    );
+    match &evs.last().unwrap().1 {
+        WorkerEvent::Msg(FromWorker::Log { line, .. }, _) => {
+            assert!(line.ends_with("start position 12.5"), "{line}")
+        }
+        other => panic!("expected the adopted stub's Start log, got {other:?}"),
+    }
+    assert!(
+        host.log_tail()
+            .iter()
+            .any(|l| l.contains("spare worker adopted by src9"))
+    );
+    host.stop();
+}
+
+/// A spare adopted before its `Hello` gets the scene's `Start` at that `Hello`, like any worker.
+#[test]
+fn spare_adopted_before_its_hello_starts_at_the_hello() {
+    let spare_spec = stub_spec("spare-early", "start_sleep_ms:300");
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn_spare(spare_spec.clone()).unwrap();
+    let mut mine = spare_spec;
+    mine.id = "early".into();
+    mine.start = start_at("early", 3.0);
+    host.adopt(mine).expect("a spare still starting is adopted");
+    assert_eq!(*host.state(), WorkerState::Starting);
+    let evs = pump(&mut host, t0, Duration::from_secs(3), is_start_log);
+    assert!(
+        matches!(&evs.last().unwrap().1, WorkerEvent::Msg(FromWorker::Log { line, .. }, _) if line.ends_with("start position 3")),
+        "{evs:?}"
+    );
+    assert_eq!(*host.state(), WorkerState::Running);
+    host.stop();
+}
+
+/// A spare's death is no crash: `Exited`, then nothing — no restart, no budget, no crash
+/// record — and the host is stopped (the pool starts another).
+#[test]
+fn spare_death_is_not_a_crash() {
+    let spec = stub_spec("spare-dies", "crash_after_ms:100");
+    let crash_dir = spec.crash_dir.clone();
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn_spare(spec).unwrap();
+    let evs = pump(&mut host, t0, Duration::from_secs(3), |e| {
+        matches!(e, WorkerEvent::Exited { .. })
+    });
+    assert!(
+        matches!(evs.last().map(|e| &e.1), Some(WorkerEvent::Exited { .. })),
+        "{evs:?}"
+    );
+    let more = pump(&mut host, t0, Duration::from_millis(400), |_| false);
+    assert!(more.is_empty(), "nothing after a spare's death: {more:?}");
+    assert_eq!(*host.state(), WorkerState::Stopped);
+    assert!(host.pid().is_none());
+    assert_eq!(host.restarts(Instant::now()), (0, 0));
+    let records = std::fs::read_dir(&crash_dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .count();
+    assert_eq!(records, 0, "no crash record for a spare");
+}
+
+mod spare_pool {
+    use super::*;
+    use liascape_player::worker::spare::{Launch, Spare, Timing, Want};
+
+    fn launch(knobs: &str, fonts: &str) -> Launch {
+        let s = stub_spec("spare", knobs);
+        let mut l = Launch::of(&s);
+        l.env.push(("LIASCAPE_SCENE_FONTS".into(), fonts.into()));
+        l
+    }
+
+    fn want(launch: &Launch) -> Want {
+        Want {
+            enabled: true,
+            launch: Some(launch.clone()),
+            hang_timeout: Duration::from_secs(2),
+            suspended: false,
+            scenes_hosted: true,
+            quiet: true,
+        }
+    }
+
+    fn scene_spec(launch: &Launch, id: &str) -> WorkerSpec {
+        let mut s = WorkerSpec::new(id, launch.bin.clone(), start_at(id, 0.0));
+        s.args = launch.args.clone();
+        s.env = launch.env.clone();
+        s.crash_dir = tmp_dir(id);
+        s
+    }
+
+    fn fast() -> Timing {
+        Timing {
+            refill_after: Duration::ZERO,
+            idle_after: Duration::from_secs(3600),
+            retry: Duration::from_millis(50),
+            retry_max: Duration::from_millis(200),
+        }
+    }
+
+    fn wait_dead(pid: u32) {
+        let t = Instant::now();
+        while !pid_dead(pid) && t.elapsed() < STOP_GRACE + Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(pid_dead(pid), "pid {pid} still alive");
+    }
+
+    /// The policy: no spare until scenes are in use; then one, and never two; a take hands it
+    /// over and the next sync starts a new one; off, low VRAM, no scenes or `stop` reap it at
+    /// once (and `stop` forgets that scenes were in use); a launch change (a fonts setting)
+    /// replaces it at once, so no scene starts in a stale one; a load or a transition in flight
+    /// postpones a refill.
+    #[test]
+    fn spare_policy_consumed_replaced_never_two_reaped() {
+        let l = launch("", "off");
+        let mut pool = Spare::new(fast());
+        let now = Instant::now;
+        pool.maintain(want(&l), now());
+        assert_eq!(pool.pid(), None, "no spare before a scene worker started");
+        assert_eq!(pool.info(now(), false)["why"], "scenes not in use");
+
+        // The first scene start: nothing to take, but scenes are in use from now on.
+        assert!(pool.take(scene_spec(&l, "a"), now()).is_err(), "no spare to take yet");
+        let mut busy = want(&l);
+        busy.quiet = false;
+        pool.maintain(busy, now());
+        assert_eq!(pool.pid(), None, "a load or a transition postpones the spare");
+        pool.maintain(want(&l), now());
+        let p1 = pool.pid().expect("a spare once scenes are in use");
+        for _ in 0..5 {
+            pool.maintain(want(&l), now());
+        }
+        assert_eq!(pool.pid(), Some(p1), "never a second one");
+        assert_eq!(pool.info(now(), false)["spawned"], 1);
+        assert_eq!(pool.info(now(), false)["state"], "spare");
+
+        // Taken by the next scene: the same process; the pool is empty until the next sync.
+        let mut b = pool
+            .take(scene_spec(&l, "b"), now())
+            .expect("the spare is taken");
+        assert_eq!(b.pid(), Some(p1));
+        assert_eq!(b.spec().id, "b");
+        assert_eq!(pool.pid(), None);
+        pool.maintain(want(&l), now());
+        let p2 = pool.pid().expect("replaced after the take");
+        assert_ne!(p2, p1);
+        assert_eq!(pool.info(now(), false)["adopted"], 1);
+        b.stop();
+
+        // A scene launched differently doesn't take it (and it stays).
+        let other = launch("", "/mnt/c/Windows/Fonts");
+        assert!(pool.take(scene_spec(&other, "c"), now()).is_err());
+        assert_eq!(pool.pid(), Some(p2));
+        // The launch changed (`player.scene_fonts`): the stale one goes at once, so no scene can
+        // take it; its replacement waits like any refill (the setting reloads the playing scene).
+        let mut changed = want(&other);
+        changed.quiet = false;
+        pool.maintain(changed, now());
+        assert_eq!(pool.pid(), None, "the stale spare is gone, the new one waits for quiet");
+        wait_dead(p2);
+        assert_eq!(pool.info(now(), false)["replaced"], 1);
+        pool.maintain(want(&other), now());
+        let p3 = pool.pid().expect("a spare with the new launch");
+        assert_ne!(p3, p2);
+        // `posix_spawn` returns mid-exec (the vfork parent resumes at the mm switch): the new
+        // stack's environment shows a moment later.
+        let t = Instant::now();
+        let env = loop {
+            let env = std::fs::read(format!("/proc/{p3}/environ")).unwrap();
+            if !env.is_empty() || t.elapsed() > Duration::from_secs(2) {
+                break env;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(
+            env.split(|b| *b == 0)
+                .any(|kv| kv == b"LIASCAPE_SCENE_FONTS=/mnt/c/Windows/Fonts"),
+            "the new spare has the new fonts: {:?}",
+            String::from_utf8_lossy(&env)
+        );
+
+        // Off → reaped at once; on again → back.
+        let mut off = want(&other);
+        off.enabled = false;
+        pool.maintain(off, now());
+        assert_eq!(pool.pid(), None);
+        wait_dead(p3);
+        pool.maintain(want(&other), now());
+        let p4 = pool.pid().expect("on again");
+
+        // Low VRAM (`stop` mode) → reaped; released → back.
+        let mut low = want(&other);
+        low.suspended = true;
+        pool.maintain(low, now());
+        assert_eq!(pool.pid(), None);
+        assert_eq!(pool.info(now(), false)["why"], "low VRAM");
+        wait_dead(p4);
+        pool.maintain(want(&other), now());
+        let p5 = pool.pid().expect("back after the low VRAM");
+
+        // Scenes can't play (no assets) → reaped.
+        let mut none = want(&other);
+        none.launch = None;
+        pool.maintain(none, now());
+        assert_eq!(pool.pid(), None);
+        wait_dead(p5);
+
+        // `stop`: reaped, and scenes are no longer in use — no spare until the next scene.
+        pool.maintain(want(&other), now());
+        let p6 = pool.pid().expect("a spare");
+        pool.stop("stop");
+        wait_dead(p6);
+        pool.maintain(want(&other), now());
+        assert_eq!(pool.pid(), None, "no spare after a stop until a scene starts");
+        let _ = pool.take(scene_spec(&other, "d"), now());
+        pool.maintain(want(&other), now());
+        let p7 = pool.pid().expect("a spare once a scene started again");
+        drop(pool);
+        wait_dead(p7);
+    }
+
+    /// No scene source hosted for `idle_after` → scenes are no longer in use: the spare goes.
+    #[test]
+    fn spare_goes_when_no_scene_was_hosted_for_a_while() {
+        let l = launch("", "off");
+        let mut t = fast();
+        t.idle_after = Duration::from_millis(200);
+        let mut pool = Spare::new(t);
+        let _ = pool.take(scene_spec(&l, "a"), Instant::now());
+        pool.maintain(want(&l), Instant::now());
+        let p = pool.pid().expect("a spare");
+        let mut idle = want(&l);
+        idle.scenes_hosted = false;
+        pool.maintain(idle.clone(), Instant::now());
+        assert_eq!(pool.pid(), Some(p), "kept while a scene was hosted lately");
+        std::thread::sleep(Duration::from_millis(250));
+        pool.maintain(idle, Instant::now());
+        assert_eq!(pool.pid(), None, "reaped after no scene for idle_after");
+        wait_dead(p);
+    }
+
+    /// A spare that keeps dying is retried with a doubling backoff and never handed to a scene.
+    #[test]
+    fn failing_spares_back_off_and_are_never_taken() {
+        let l = launch("crash_after_ms:30", "off");
+        let mut pool = Spare::new(fast());
+        let _ = pool.take(scene_spec(&l, "a"), Instant::now());
+        let t0 = Instant::now();
+        let mut pids = Vec::new();
+        let mut taken = 0;
+        while t0.elapsed() < Duration::from_millis(1500) {
+            pool.maintain(want(&l), Instant::now());
+            if let Some(p) = pool.pid()
+                && !pids.contains(&p)
+            {
+                pids.push(p);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // A dead spare is never handed over (the take polls it first).
+        std::thread::sleep(Duration::from_millis(100));
+        if let Ok(mut h) = pool.take(scene_spec(&l, "b"), Instant::now()) {
+            taken += 1;
+            h.stop();
+        }
+        let info = pool.info(Instant::now(), false);
+        assert!(info["failed"].as_u64().unwrap() >= 3, "{info}");
+        // backoff 50, 100, 200, 200, …: over 1.5 s ~8 spawns, not hundreds
+        assert!(pids.len() <= 12, "{} spares in 1.5 s: {info}", pids.len());
+        assert_eq!(taken, 0, "a spare that died isn't taken: {info}");
+    }
+}

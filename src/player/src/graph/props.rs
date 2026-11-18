@@ -182,6 +182,15 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_fonts",
                 def(PropType::Str, false, PropValue::Str(String::new())),
             ),
+            // Keep one spare scene worker started ahead of time while scenes are in use, so a
+            // scene apply skips the worker's spawn and GL setup (`worker::spare`). Off by default
+            // here, like `pause_when_covered`: a raw player starts no process it wasn't asked for;
+            // the backend asserts the user's setting (on by default, `AppSettings.SceneSpareWorker`).
+            // Live: off reaps the spare at once, on starts one once scenes are in use.
+            (
+                "scene_spare",
+                def(PropType::Bool, false, PropValue::Bool(false)),
+            ),
             // The GPU budget is a setting, auto-throttle by default: `true`
             // = a scene whose worker starves its outputs is throttled stepwise and restored
             // (`scene::budget`); `false` = every scene ticks at exactly its outputs'

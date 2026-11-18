@@ -6,9 +6,9 @@
         [--rounds 3] [--warm 3] [--bin src/player/target/release] [--out DIR]
 
 Per round and scene, against one `serve --headless` started with fresh private cache dirs:
-  cold    the first apply ever: empty NVIDIA shader disk cache and toGlsl cache, and the scene's files, WE's
-          assets, the worker and its LWE core dropped from the page cache (posix_fadvise DONTNEED: clean pages
-          only, no root; pages another process maps stay, as after a boot);
+  cold    the first apply ever: the NVIDIA shader disk cache and the toGlsl cache emptied (before each scene's),
+          the scene's files, WE's assets, the worker and its LWE core dropped from the page cache (posix_fadvise
+          DONTNEED: clean pages only, no root; pages another process maps stay, as after a boot);
   warm    the same scene applied again (--warm times), a new worker each time, every cache full;
   boot    the files dropped again with the shader caches kept: the first apply after a reboot.
 Each apply creates the source and shows it on the output (a cut) at t0, then times on the client's clock the
@@ -18,6 +18,13 @@ events the player streams: `worker.spawned`, `worker.ready` (the worker's Hello:
 the wait for it) and `built in`, and, with a core built with phase timers, their JSON lines. A load the hang detector
 killed counts its `restarts` instead of a split. One JSON line per apply goes to <out>/records.jsonl, a summary
 (medians per scene and mode) to stdout.
+
+--spare turns `player.scene_spare` on: each apply waits (≤ 20 s) for the spare worker first, so the scene takes a
+worker whose EGL setup is done (`worker.adopted`, recorded as `spare`; no `spawn` / `exec_egl` phases then). The
+spare only exists once a scene played, so each scene starts with a `prime` apply (not in the summary); the spare is
+started anew after the caches are emptied for the `cold` one, and its memory is recorded then (`spare_idle`: RSS, PSS,
+private dirty from smaps_rollup; VRAM from nvidia-smi's process table). Both modes wait --gap seconds between applies
+(a spare's refill waits 2 s after a take), so neither meets a GPU or CPU the other didn't.
 
 Isolation: own XDG_RUNTIME_DIR / STATE / CACHE / CONFIG and socket under --out, no WAYLAND_DISPLAY / DISPLAY,
 PipeWire and Pulse pointed at nothing, LIASCAPE_PLAYER_VRAM_PROBE=none. HOME stays real (WE's assets are found
@@ -156,6 +163,27 @@ class Player:
         self.sub = Client(self.sock)
         self.sub.call("subscribe", {"topics": ["source.", "worker."]})
 
+    def spare(self, on):
+        self.ctl.call("set", {"path": "player.scene_spare", "value": on})
+
+    def respawn_spare(self):
+        """Reaps the spare (off until the probe shows none) and turns it on again: a new one starts."""
+        self.spare(False)
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end and self.ctl.call("probe", {"name": "workers"}).get("spare", {}).get("state") != "none":
+            time.sleep(0.05)
+        self.spare(True)
+
+    def wait_spare(self, timeout=20.0):
+        """The spare worker's pid once it said Hello, else None after `timeout`."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            sp = self.ctl.call("probe", {"name": "workers"}).get("spare", {})
+            if sp.get("hello") and sp.get("pid"):
+                return sp["pid"]
+            time.sleep(0.05)
+        return None
+
     def apply(self, path, timeout, capture=None):
         """Shows `path` (a scene) on the output; returns the record of its load. `capture`: a PNG path for the
         source's picture 1 s after its first frame."""
@@ -176,6 +204,9 @@ class Player:
                     rec["pid"] = ev.get("pid")
                 elif kind == "worker.ready" and same:
                     rec.setdefault("hello_ms", ms)
+                elif kind == "worker.adopted" and same:
+                    rec["spare"] = True
+                    rec["pid"] = ev.get("pid")
                 elif kind == "worker.restart" and same:
                     rec["restarts"] = rec.get("restarts", 0) + 1
                 elif kind == "source.ready" and same:
@@ -238,6 +269,27 @@ class Player:
         shutil.rmtree(self.run, ignore_errors=True)
 
 
+def spare_memory(pid):
+    """The waiting spare's memory: smaps_rollup's Rss / Pss / Private_Dirty and nvidia-smi's MiB for `pid` (MiB)."""
+    out = {"pid": pid}
+    try:
+        for line in Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
+            k, _, v = line.partition(":")
+            if k in ("Rss", "Pss", "Private_Dirty"):
+                out[k.lower() + "_mib"] = round(int(v.split()[0]) / 1024, 1)
+    except OSError:
+        pass
+    try:
+        smi = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=10).stdout
+        for line in smi.splitlines():
+            f = line.strip("| ").split()
+            if str(pid) in f and f[-1].endswith("MiB"):
+                out["vram_mib"] = float(f[-1][:-3])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return out
+
+
 def phases(rec):
     """The record's split: every phase in ms (None where the record lacks it)."""
     g = rec.get
@@ -284,6 +336,8 @@ def main():
     ap.add_argument("--outputs", default="1920x1080@60")
     ap.add_argument("--timeout", type=float, default=30.0)
     ap.add_argument("--capture", action="store_true", help="a PNG of each load 1 s after its first frame, in <out>/captures")
+    ap.add_argument("--spare", action="store_true", help="player.scene_spare on: each apply takes the spare worker")
+    ap.add_argument("--gap", type=float, default=3.0, help="seconds from one apply's end to the next's start (both modes)")
     a = ap.parse_args()
     if any("steamcmd_workshop" in str(Path(s).resolve()) for s in a.scene):
         raise SystemExit("refusing the steamcmd cache: it is never test media")
@@ -299,12 +353,40 @@ def main():
         if priv.exists():
             raise SystemExit(f"{priv} exists: give a fresh --out")
         p = Player(bindir, priv, a.outputs)
+        p.spare(a.spare)
         files = [bindir / "liascape-scene-worker", Path(p.check["assets_dir"])] + ([core] if core else [])
+        last = time.monotonic()
         try:
             for scene in a.scene:
                 scene = Path(scene).resolve()
                 plan = [("cold", True)] + [("warm", False)] * a.warm + [("boot", True)]
+                if a.spare:
+                    # the spare only comes once a scene played
+                    rec = p.apply(scene, a.timeout)
+                    rec.update(round=r, mode="prime", phases=phases(rec))
+                    records.write(json.dumps(rec) + "\n")
+                    p.destroy(rec)
+                    last = time.monotonic()
                 for mode, cold in plan:
+                    if mode == "cold":
+                        # the first apply ever, in both modes and for every scene: both shader caches empty
+                        for d in (priv / "cache" / "nv", priv / "cache" / "liascape" / "lwe-shaders"):
+                            shutil.rmtree(d, ignore_errors=True)
+                            d.mkdir(parents=True, exist_ok=True)
+                        if a.spare:
+                            # a spare started before the wipe may know the old cache: start one after it
+                            p.respawn_spare()
+                    # the same pause before every apply in both modes (a spare's refill waits 2 s after a take)
+                    time.sleep(max(0.0, a.gap - (time.monotonic() - last)))
+                    if a.spare:
+                        pid = p.wait_spare()
+                        if not pid:
+                            print(f"round {r} {scene.name} {mode}: no spare within 20 s", file=sys.stderr)
+                        elif mode == "cold":
+                            time.sleep(2.0)  # settled: what it holds while it waits
+                            mem = spare_memory(pid)
+                            records.write(json.dumps({"round": r, "mode": "spare_idle", "scene": scene.name} | mem) + "\n")
+                            print(f"round {r} spare idle: {mem}", file=sys.stderr)
                     if cold:
                         evict(files + [scene])
                     cap = None
@@ -318,6 +400,7 @@ def main():
                     print(f"round {r} {scene.name} {mode}: " + " ".join(
                         f"{k}={v:.0f}" for k, v in rec["phases"].items() if v is not None), file=sys.stderr)
                     p.destroy(rec)
+                    last = time.monotonic()
         finally:
             p.quit()
     records.close()
@@ -325,6 +408,8 @@ def main():
     recs = [json.loads(l) for l in open(out / "records.jsonl")]
     summary = {}
     for rec in recs:
+        if rec["mode"] in ("prime", "spare_idle"):
+            continue
         key = f"{rec['scene']} {rec['mode']}"
         for k, v in rec["phases"].items():
             if v is not None:

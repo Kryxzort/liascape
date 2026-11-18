@@ -22,10 +22,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        pixels convert on a shared context's thread while it builds; the worker hands it over through
        `wp_context_set_gl_upload_context`, looked up at run time, so nothing changes until the pin has it) and the
        Container's remembered lookups. Measured with them (warm, cold): 3042492564 571 → 480 ms, 1110 → 945; 3163060610
-       468 → 426, 808 → 695; 2388299037 470 → 424; no scene measurably slower. Left: the worker's spawn → `Hello` (105–125 ms on every apply: exec and the
-       dynamic link of ~145 libraries ~35 ms, EGL ~75–85 ms; a pre-spawned spare worker with its context ready would
-       save about that, less the project load it then can't overlap — owner's call, it costs an idle process and
-       context); the units' preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover
+       468 → 426, 808 → 695; 2388299037 470 → 424; no scene measurably slower (cold here: before `scene_load.py` emptied the caches before each scene's cold
+       apply). The spare worker (`player.scene_spare`) skips the spawn → `Hello` for every apply after a run's first.
+       Left: the units' preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover
        every texture format and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was
        still black 1 s after its first frame in 7 of 181 loads, the baseline build too, five of them in one player
        run: needs mpv's log of a black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.

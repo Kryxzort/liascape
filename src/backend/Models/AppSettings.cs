@@ -180,6 +180,9 @@ public class AppSettings
     // AutoThrottleScenes: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
     // scene at its fixed fps) → `player.scene_throttle`.
     public bool AutoThrottleScenes { get; set; } = true;
+    // Keep one scene renderer (liascape-scene-worker) started ahead of time while scenes are in use, so the next scene
+    // starts ~0.1 s sooner; costs ~60 MB of memory (PSS) while it waits → `player.scene_spare` (only while AllowScenes).
+    public bool SceneSpareWorker { get; set; } = true;
     // The per-scene VRAM guard: a scene worker using more than SceneVramLimitMib of VRAM is stopped (a rotation
     // advances, a single wallpaper shows what SceneVramStopShows says; never marked crashed) →
     // `player.scene_vram_limit_mib` (the MiB while enabled, else 0 = off). The MiB value is kept while off (the

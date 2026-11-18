@@ -58,12 +58,6 @@ back to running locally once the POST was sent: a doubled next skips one, a doub
 
 ## Steam & sources
 
-### Keep the 0600 file fallback for the Steam sign-in — 2026-11-11
-The tokens go to the system keyring (Secret Service); without one they go to `~/.config/liascape/steam-auth.json`
-(0600), never settings.json. Keyring-only was rejected: on a desktop with no Secret Service (bare compositors, no
-gnome-keyring/KWallet) signing in would simply not work. The file is as safe as any 0600 file in the home directory:
-Discord and Chromium-based apps do the same with their "basic" store. `.claude/rules/backend/sources-steam.md` § Secrets.
-
 ### Browse the Workshop over Steam's client protocol, anonymously — 2026-11-11
 Scraping steamcommunity.com's browse page (30 items a page, AND-only tags, a page read per detail for the trailer) trips
 Steam's per-IP limit, which locks the user's browser out for 30+ min too. `PublishedFile.QueryFiles` gives 100 items a
@@ -118,8 +112,10 @@ attempts extend Steam's block. `Web/SteamOps.cs`; `.claude/rules/backend/sources
 
 ### Keep Steam tokens in the system keyring, a 0600 file as fallback — 2026-11-11
 Owner: "steam token is kept in plaintext??" → "system keyring and then fallback to some file other than settings.json".
-settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`; a denied
-keyring means signed out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
+settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`: the Secret
+Service, else `~/.config/liascape/steam-auth.json` (0600). Keyring-only was rejected: with no Secret Service (bare
+compositors) signing in wouldn't work; the file is as safe as Discord's and Chromium's "basic" store. A denied keyring
+means signed out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
 
 ### Ask Steam for a whole library's details in one request; never cache "can't tell" as "none" — 2026-11-12
 Tags and trailers are Workshop listing, not files: auto-imported items lack them. CM `GetDetails` takes 1000 ids, not 100
@@ -242,13 +238,12 @@ YouTube's `loop=1&playlist=<id>` restarted early; `seekTo(0)` + `playVideo` on "
 `components/YouTubeEmbed.tsx`.
 
 ### Filter the Library and the local Wallpaper Engine folder in the page — 2026-11-12
-Owner's call. The same column, toggle, chips and semantics as the Workshop's (`WorkshopTags.Build`), matched in the page against what each item knows: its saved Steam tags,
-else its project.json's genres, age rating and declared features, read at library load (cached by write time), never
-written to the index (Steam updates the file under a `local/<id>` link). Each list keeps its
-own filter: one shared with the Workshop would silently empty a local list with tags it can't know. A local column offers
-only the tags some item has (a project.json never states a resolution, nor most features), not Steam's whole list.
-Not a backend `/library` filter: the page already holds every item, and a request per click is slower than the match.
-`components/workshopFilter.ts` `localMatcher`; guard probe-filters `lib:*`, `local:weFolder`.
+Owner's call. The Workshop's column, toggle, chips and semantics (`WorkshopTags.Build`), matched in the page against each
+item's saved Steam tags, else its project.json's genres, age rating and declared features (read at library load, cached
+by write time, never written to the index: Steam updates the file under a `local/<id>` link). Each list keeps its own
+filter: a shared one would silently empty a local list with tags it can't know. A local column offers only the tags some
+item has (a project.json never states a resolution), not Steam's whole list. Not a backend `/library` filter: the page
+holds every item, and a request per click is slower. `components/workshopFilter.ts` `localMatcher`; guard probe-filters `lib:*`, `local:weFolder`.
 
 ### Filter the Workshop in a column of three-way switches — 2026-11-11
 The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide;
@@ -348,6 +343,10 @@ mpv reports no time remaining around a load; breaking after 500 ms switched scen
 (3 s). `PlayerHelper.DoVideoEndWait`.
 
 ## Player (`liascape-player`)
+
+### Keep one spare scene worker while scenes are in use — 2026-11-17
+Owner's call: an idle worker's ~60 MiB (PSS) is worth 65–135 ms off every scene apply after the first; on by default, a setting turns it off.
+`docs/player/modules/scene-worker.md` § The spare worker.
 
 ### Run one scene worker per scene source, not per output — ~2026-10-27
 Owner's call: one worker halves GPU time and VRAM and keeps the animation in sync across monitors. Per-output frame rate

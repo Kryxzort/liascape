@@ -1229,6 +1229,8 @@ impl Runtime {
                 scene_pids.push((id.clone(), pid));
             }
         }
+        // the spare worker's context is ours too (freed with the rest by a `stop` hold)
+        pids.extend(self.host.spare_pid());
         if pids != self.vram.pids {
             monitor.set_pids(pids.clone());
             self.vram.pids = pids.clone();
@@ -1809,6 +1811,11 @@ impl Runtime {
             exclude.insert(pk.id.clone());
         }
         self.host.set_pause_exclusions(exclude);
+        // The spare scene worker: `player.scene_spare`, and a new spare's start waits for every
+        // transition to finish (its EGL setup would compete with the effect's frames).
+        let spare_on = self.bool_prop("player", "scene_spare");
+        self.host
+            .set_spare_policy(spare_on, self.tr.bounds().0 == 0);
         self.synced_demand_rev = self.graph.demand_rev();
         self.host
             .sync(&self.gfx, &self.graph, &changes, self.player_paused);
@@ -3726,6 +3733,8 @@ impl Runtime {
         // The session ends here — whatever comes next plays (the stop ramps above
         // run on the unpaused clock, so they complete either way).
         let _ = self.graph.set(&p("player.paused"), PropValue::Bool(false));
+        // Nothing plays: scenes aren't in use until the next one starts.
+        self.host.stop_spare("stop");
         self.refresh_srcs();
         log::event(
             "runtime",
@@ -3790,6 +3799,7 @@ impl Runtime {
         }
         self.pending_destroy.clear();
         self.sync_sources();
+        self.host.stop_spare("player stop");
         // a requested capture is still written (each bounded by its encode)
         self.capture.shutdown(&self.gfx);
         let t = Instant::now();

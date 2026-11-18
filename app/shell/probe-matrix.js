@@ -3327,11 +3327,34 @@ for (const [name, prop, want, drive, saved] of [
     }, check(c) {
       const v = [];
       if (!c.ok) v.push(`${prop} ${JSON.stringify(c.was)} → never ${JSON.stringify(want)}`);
-      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ autoThrottleScenes: c.after.s.autoThrottleScenes, limitVramPerScene: c.after.s.limitVramPerScene, sceneVramLimitMib: c.after.s.sceneVramLimitMib, sceneVramStopShows: c.after.s.sceneVramStopShows, vramLowMode: c.after.s.vramLowMode })})`);
+      if (!saved(c.after.s)) v.push(`the setting wasn't saved (${JSON.stringify({ autoThrottleScenes: c.after.s.autoThrottleScenes, sceneSpareWorker: c.after.s.sceneSpareWorker, limitVramPerScene: c.after.s.limitVramPerScene, sceneVramLimitMib: c.after.s.sceneVramLimitMib, sceneVramStopShows: c.after.s.sceneVramStopShows, vramLowMode: c.after.s.vramLowMode })})`);
       if (c.lowActive !== false) v.push(`player.vram_low_active ${c.lowActive} (the fake VRAM sample is healthy)`);
       return [...v, ...samePid(c, SC[0])];
     } };
 }
+
+// "Keep a scene renderer ready" → `player.scene_spare`, live: on by default (with scenes allowed), so once a scene played a
+// spare worker waits (probe `workers` → `spare`); off reaps it at once, the playing scene keeping its own worker. Guard for
+// worker::spare's live off with tests/api.rs spare_worker_is_taken_by_the_next_scene_and_replaced.
+C["settings:sceneSpare"] = { states: ["scene"], async run(c) {
+    const spare = async () => (await ctl.call("probe", { name: "workers" }).catch(() => ({}))).spare || {};
+    c.was = await pget("player.scene_spare");
+    // the spare comes 2 s after the scene's start, once nothing loads
+    await waitFor(async () => { c.sp0 = await spare(); return c.sp0.state === "spare" && c.sp0.hello; }, 10000, 100);
+    await ui(`${settingsRow("Keep a scene renderer ready")} m.setCheck(m.input("Keep a scene renderer ready"), false, "spare worker");`);
+    c.ok = await waitFor(async () => (await pget("player.scene_spare")) === false, 5000, 100);
+    await waitFor(async () => { c.sp1 = await spare(); return c.sp1.state === "none"; }, 3000, 100);
+    c.gone = !c.sp0.pid || await waitFor(() => !procAlive(c.sp0.pid), 3000, 50);
+  }, check(c) {
+    const v = [];
+    if (c.was !== true) v.push(`player.scene_spare ${JSON.stringify(c.was)} before (expected the default, true)`);
+    if (c.sp0?.state !== "spare" || !c.sp0?.hello) v.push(`no spare worker waited while the scene played: ${JSON.stringify(c.sp0)}`);
+    if (!c.ok) v.push(`player.scene_spare never became false`);
+    if (c.sp1?.state !== "none" || c.sp1?.why !== "off") v.push(`the spare after "off": ${JSON.stringify(c.sp1)} — expected none, why off`);
+    if (!c.gone) v.push(`the spare's process ${c.sp0?.pid} still runs after "off"`);
+    if (c.after.s.sceneSpareWorker !== false) v.push(`the setting wasn't saved (sceneSpareWorker ${JSON.stringify(c.after.s.sceneSpareWorker)})`);
+    return [...v, ...samePid(c, SC[0])];
+  } };
 
 // "Use Windows fonts in scenes" → `player.scene_fonts`, live: the playing scene's worker is replaced by one with the new
 // fonts (a worker's fontconfig can't drop fonts), a planned replacement: its picture stays on screen the whole time (sampled

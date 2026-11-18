@@ -118,7 +118,7 @@ invalidation happened is never stored (epoch).
   (`WithResets`): LWE has no reset.
 - Per-monitor `SceneMonitors[].Fps` → `set out:<name>.scene_fps`, the name mapped like the player's
   `output_name`. GPU settings (`GpuProps`) go to their `player.` props, `scene_vram_limit_mib` 0 while
-  `LimitVramPerScene` is off. Cover
+  `LimitVramPerScene` is off, `scene_spare` false while `AllowScenes` is off. Cover
   (`PauseWhenCovered` → `pause_when_covered`; the player's own default is `off`) and auto-mute settings go with them.
   `AssertSceneFps` re-asserts all of these once per player process, since a fresh player has its own defaults.
 - **Loudness storage** (`MergeSceneLoudness`, per audio configuration): a report replaces the stored measurement

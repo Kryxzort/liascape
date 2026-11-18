@@ -20,6 +20,7 @@
 
 pub mod dmabuf;
 pub mod proto;
+pub mod spare;
 
 use std::collections::VecDeque;
 use std::ffi::{CString, OsString};
@@ -223,6 +224,9 @@ impl WorkerSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WorkerState {
+    /// A spare ([`WorkerHost::spawn_spare`]): started or idle with its context ready, holding
+    /// no scene until [`WorkerHost::adopt`].
+    Spare,
     Starting,
     Running,
     Restarting { attempt: u32 },
@@ -300,11 +304,36 @@ pub struct WorkerHost {
     last_poll: Option<Instant>,
     /// The last `waitpid` of a worker that showed no sign of ending ([`REAP_CHECK`]).
     reap_checked: Option<Instant>,
+    /// A spare: no `Start` is sent at its `Hello`, and its death is no crash (no restart, no
+    /// budget, no record) — the [`spare::Spare`] pool replaces it.
+    spare: bool,
+    /// A spare's `Hello`, handed to the adopter at its next poll (it was read before anyone
+    /// owned the worker).
+    hello_replay: Option<FromWorker>,
+    /// Events for the next poll (the adopter's replayed `Hello`).
+    pending: Vec<WorkerEvent>,
 }
 
 impl WorkerHost {
     /// Start the worker. Never waits for it (`Hello` arrives through [`poll`](Self::poll)).
     pub fn spawn(spec: WorkerSpec) -> io::Result<WorkerHost> {
+        WorkerHost::start(spec, false)
+    }
+
+    /// Start a spare worker: launched like a scene's (`spec`'s binary, args and environment)
+    /// but with no scene, so no `--preload`; it sets its GL context up, says `Hello` and waits
+    /// for [`adopt`](Self::adopt) to hand it a scene's spec. Its heartbeat runs as usual (a hung
+    /// spare is killed); its death is reported as [`WorkerEvent::Exited`] and nothing else — no
+    /// restart, no budget, no crash record. `spec.start` is ignored. Guards:
+    /// `tests/worker.rs::spare_waits_for_its_scene_and_takes_the_start`,
+    /// `spare_death_is_not_a_crash`.
+    pub fn spawn_spare(mut spec: WorkerSpec) -> io::Result<WorkerHost> {
+        // Never sent (a spare answers `Hello` with nothing); a `Quit` if a bug ever did.
+        spec.start = ToWorker::Quit;
+        WorkerHost::start(spec, true)
+    }
+
+    fn start(spec: WorkerSpec, spare: bool) -> io::Result<WorkerHost> {
         let epoll = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
         if epoll < 0 {
             return Err(io::Error::last_os_error());
@@ -313,7 +342,11 @@ impl WorkerHost {
             spec,
             epoll: unsafe { OwnedFd::from_raw_fd(epoll) },
             proc_: None,
-            state: WorkerState::Starting,
+            state: if spare {
+                WorkerState::Spare
+            } else {
+                WorkerState::Starting
+            },
             history: VecDeque::new(),
             total_restarts: 0,
             tail: VecDeque::new(),
@@ -323,9 +356,87 @@ impl WorkerHost {
             sync: None,
             last_poll: None,
             reap_checked: None,
+            spare,
+            hello_replay: None,
+            pending: Vec::new(),
         };
         host.proc_ = Some(host.spawn_proc(0)?);
         Ok(host)
+    }
+
+    /// Give this spare a scene: `spec` becomes its spec (id, `Start`, budget, hang timeout,
+    /// crash dir) and it is an ordinary worker from now on, its start timed from now (the
+    /// hello and first-frame grace count from the adoption, not from the spare's spawn). Said
+    /// `Hello` already: the `Start` goes now and the `Hello` is replayed to the caller at its
+    /// next poll; else the `Start` answers its `Hello` as for any worker. `Err(spec)` = not
+    /// adoptable (not a spare, gone or dying, or launched differently: another binary, args or
+    /// environment — a fonts setting it was started before) — the caller spawns its own.
+    pub fn adopt(&mut self, spec: WorkerSpec) -> Result<(), WorkerSpec> {
+        let alive = self
+            .proc_
+            .as_ref()
+            .is_some_and(|p| !p.killed && p.sock.is_some() && p.eof_at.is_none());
+        if !self.spare
+            || !alive
+            || self.state != WorkerState::Spare
+            || spare::Launch::of(&self.spec) != spare::Launch::of(&spec)
+        {
+            return Err(spec);
+        }
+        let now = Instant::now();
+        let p = self.proc_.as_mut().unwrap();
+        if p.hello_at.is_some()
+            && proto::send(p.sock.as_ref().unwrap().as_fd(), &spec.start, &[]).is_err()
+        {
+            return Err(spec);
+        }
+        let hello = p.hello_at.is_some();
+        let (pid, spare_ms) = (p.pid, now.saturating_duration_since(p.started).as_secs_f64() * 1e3);
+        // The load starts now: the start's grace and its cap count from here.
+        p.started = now;
+        p.start_moved_at = now;
+        p.start_activity = None;
+        p.last_beat = now;
+        let prev_id = std::mem::replace(&mut self.spec, spec).id;
+        self.spare = false;
+        self.state = if hello {
+            WorkerState::Running
+        } else {
+            WorkerState::Starting
+        };
+        if let Some(h) = self.hello_replay.take() {
+            self.pending.push(WorkerEvent::Msg(h, Vec::new()));
+        }
+        self.push_line(format!(
+            "--- liascape-player: spare worker adopted by {} ---",
+            self.spec.id
+        ));
+        log::event(
+            "worker",
+            Level::Info,
+            "worker.adopted",
+            Some(self.corr.clone()),
+            json!({"id": self.spec.id, "pid": pid, "was": prev_id, "hello": hello,
+                   "spare_ms": spare_ms}),
+        );
+        Ok(())
+    }
+
+    /// A spare not adopted yet.
+    pub fn is_spare(&self) -> bool {
+        self.spare
+    }
+
+    /// The live worker said `Hello` (its GL context is up).
+    pub fn said_hello(&self) -> bool {
+        self.proc_.as_ref().is_some_and(|p| p.hello_at.is_some())
+    }
+
+    /// Since the live worker's spawn (a spare's age; restarted at an adoption).
+    pub fn age(&self, now: Instant) -> Option<Duration> {
+        self.proc_
+            .as_ref()
+            .map(|p| now.saturating_duration_since(p.started))
     }
 
     /// Readable whenever [`poll`](Self::poll) has something to do (a message, worker output,
@@ -394,7 +505,7 @@ impl WorkerHost {
     /// the hang check and the reaping. F6b: a scene source polls on every frame and every
     /// tick.
     pub fn poll_io(&mut self, now: Instant, io: bool) -> Vec<WorkerEvent> {
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.pending);
         if self.proc_.is_none() {
             return out;
         }
@@ -926,6 +1037,12 @@ impl WorkerHost {
                     return;
                 }
                 self.sync = Some(sync);
+                if self.spare {
+                    // No scene yet: the `Start` goes at the adoption, which replays this.
+                    self.hello_replay = Some(m.clone());
+                    out.push(WorkerEvent::Msg(m, fds));
+                    return;
+                }
                 self.state = WorkerState::Running;
                 let start = self.spec.start.clone();
                 let p = self.proc_.as_mut().unwrap();
@@ -1123,6 +1240,11 @@ impl WorkerHost {
         );
         out.push(WorkerEvent::Exited { signal, code });
         self.sync = None;
+        if self.spare {
+            // A spare holds no scene: its death is no crash of anything (the pool replaces it).
+            self.state = WorkerState::Stopped;
+            return;
+        }
 
         let how = match (signal, code) {
             (Some(s), _) => format!("killed by signal {s}"),
@@ -1565,6 +1687,9 @@ mod tests {
             sync: None,
             last_poll: None,
             reap_checked: None,
+            spare: false,
+            hello_replay: None,
+            pending: Vec::new(),
         };
         host.send(&ToWorker::Paused { paused: true }, &[]).unwrap();
         host.send(

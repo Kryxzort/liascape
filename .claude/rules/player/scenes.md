@@ -68,6 +68,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `tests/api.rs::missing_scene_folder_fails_without_crash_record`.
 - Test gotcha: a sibling test's `posix_spawn` briefly holds copies of every fd (CLOEXEC too) — `poll` for
   the hang-up before reading EOF.
+- Keep ≤ 1 spare worker (`worker::spare`, scene-worker.md § The spare worker); its death is never a crash; adopt it only when launched
+  like the scene (`sources::scene::launch_for`), reap it at once when a setting changes that. Guards: `tests/worker.rs`, `tests/api.rs`, `tests/supervise.rs` `spare_*`.
 
 ## Build (`build.rs`, LWE core)
 - Only `liascape-scene-worker` links LWE (`cargo::rustc-link-arg-bin`); the compositor binary never does.

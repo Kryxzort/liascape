@@ -46,6 +46,7 @@ use crate::scene::budget::Budget;
 use crate::units::{GainSlot, Gains};
 use crate::worker::dmabuf::{ImportedRing, Latch};
 use crate::worker::proto::{AUDIO_INPUT_MAX_FRAMES, AudioInput, AudioRoute, FromWorker, ToWorker};
+use crate::worker::spare::{self, Launch, SharedSpare};
 use crate::worker::{
     HANG_TIMEOUT, RestartBudget, WorkerEvent, WorkerHost, WorkerSpec, WorkerState,
 };
@@ -282,6 +283,9 @@ pub struct SceneOpts {
     /// The scene's audio configuration (`loudness_key`: the offline estimate's fingerprint of
     /// its `scene_props`; "" = unknown) — the measurement is kept per (path, key).
     pub loudness_key: String,
+    /// The spare worker pool (`SourceHost`'s): a worker start takes its spare when it was
+    /// launched the same way. `None` = always spawn (tests driving `open_opts`).
+    pub spare: Option<SharedSpare>,
 }
 
 impl SceneOpts {
@@ -316,6 +320,7 @@ impl SceneOpts {
             loudness_seed: None,
             loudness_book: None,
             loudness_key: String::new(),
+            spare: None,
         }
     }
 
@@ -348,6 +353,8 @@ pub struct SceneStats {
     pub buffer_sets: u64,
     /// Workers spawned for this source (1 + one per `path` change; restarts not counted).
     pub spawns: u64,
+    /// Of those, workers that were the spare (`worker::spare`), started ahead of time.
+    pub spares_taken: u64,
     /// Slots imported in the latched frame's ring (3 once a re-export's old ones went).
     pub slots: usize,
     /// `Pointer` messages sent as a jump (the pointer entered the output).
@@ -583,6 +590,49 @@ fn epoll_drain(ep: &OwnedFd, fd: Option<RawFd>) -> bool {
     fd.is_some_and(|fd| evs[..n as usize].iter().any(|e| e.u64 == fd as u64))
 }
 
+/// The worker binary for `base` (`SourceHost`'s base opts): `scene_worker`, else
+/// [`crate::paths::scene_worker_bin`].
+fn worker_bin_of(base: &Map<String, Value>) -> Option<PathBuf> {
+    base.get("scene_worker")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .or_else(crate::paths::scene_worker_bin)
+}
+
+/// The environment a scene opened under `base` adds for the synthetic test scenes.
+fn synthetic_env_of(base: &Map<String, Value>) -> Vec<(String, String)> {
+    if base.get("allow_synthetic").and_then(Value::as_bool) == Some(true) {
+        vec![("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into())]
+    } else {
+        Vec::new()
+    }
+}
+
+/// The Windows fonts a scene opened under `base` reads: the runtime's resolved choice; a host
+/// without one (harnesses) the environment's.
+fn fonts_of(base: &Map<String, Value>) -> crate::scene::fonts::Choice {
+    match base.get("scene_fonts").and_then(Value::as_str) {
+        Some(f) => crate::scene::fonts::Choice::parse(f),
+        None => crate::scene::fonts::effective(
+            "",
+            std::env::var(crate::scene::fonts::ENV).ok().as_deref(),
+        ),
+    }
+}
+
+/// How a scene opened under `base` launches its worker (binary, args, environment — what
+/// [`SceneSource::open`] and its spawn give it), for the spare worker (`worker::spare`).
+/// `None` = no worker binary. Guard: `tests/api.rs::spare_worker_follows_the_fonts_setting`.
+pub fn launch_for(base: &Map<String, Value>) -> Option<Launch> {
+    let mut env = synthetic_env_of(base);
+    env.push((crate::scene::fonts::ENV.to_string(), fonts_of(base).as_env()));
+    Some(Launch {
+        bin: worker_bin_of(base)?,
+        args: Vec::new(),
+        env,
+    })
+}
+
 impl SceneSource {
     /// Open the scene of graph node `id` (`kind: scene`) from its props (`path`,
     /// `position`, `paused` — the effective one —, `speed`, the rest stored) and `base`
@@ -597,6 +647,7 @@ impl SceneSource {
         node: &[(String, PropValue)],
         base: &Map<String, Value>,
         book: &SharedBook,
+        spare: &SharedSpare,
     ) -> Result<SceneSource, ApiError> {
         let get = |k: &str| node.iter().find(|(n, _)| n == k).map(|(_, v)| v);
         let s = |k: &str| match get(k) {
@@ -609,24 +660,18 @@ impl SceneSource {
         };
         let bs = |k: &str| base.get(k).and_then(Value::as_str).map(str::to_string);
         let bb = |k: &str| base.get(k).and_then(Value::as_bool).unwrap_or(false);
-        let bin = bs("scene_worker")
-            .map(PathBuf::from)
-            .or_else(crate::paths::scene_worker_bin)
-            .ok_or_else(|| {
-                unsupported(
-                    "scenes need liascape-scene-worker: none found (LIASCAPE_SCENE_WORKER_BIN, next to \
-                     liascape-player, PATH)",
-                )
-            })?;
+        let bin = worker_bin_of(base).ok_or_else(|| {
+            unsupported(
+                "scenes need liascape-scene-worker: none found (LIASCAPE_SCENE_WORKER_BIN, next to \
+                 liascape-player, PATH)",
+            )
+        })?;
         let path = s("path");
         let allow_synthetic = bb("allow_synthetic");
         let mut o = SceneOpts::new(&path, bin);
         o.id = id.to_string();
         o.synthetic = allow_synthetic && Path::new(&path).join("liascape-synthetic.json").is_file();
-        if allow_synthetic {
-            o.env
-                .push(("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), "1".into()));
-        }
+        o.env = synthetic_env_of(base);
         o.position = f("position", 0.0);
         o.paused = matches!(get("paused"), Some(PropValue::Bool(true)));
         o.speed = f("speed", 1.0);
@@ -640,14 +685,7 @@ impl SceneSource {
                 bs("scene_assets_error").unwrap_or_else(|| crate::scene::assets::HINT.into())
             )));
         }
-        // the runtime's resolved choice; a host without one (harnesses) the environment's
-        o.fonts = match bs("scene_fonts") {
-            Some(f) => crate::scene::fonts::Choice::parse(&f),
-            None => crate::scene::fonts::effective(
-                "",
-                std::env::var(crate::scene::fonts::ENV).ok().as_deref(),
-            ),
-        };
+        o.fonts = fonts_of(base);
         o.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
             .map(|p| p.to_string_lossy().into_owned());
         if let Some(PropValue::Map(m)) = get("scene_props") {
@@ -671,6 +709,7 @@ impl SceneSource {
             o.loudness_seed = Some(Value::Object(m.clone()));
         }
         o.loudness_book = Some(book.clone());
+        o.spare = Some(spare.clone());
         o.loudness_key = s("loudness_key");
         o.preview = s("preview");
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
@@ -847,7 +886,18 @@ impl SceneSource {
         spec.budget = self.opts.budget;
         spec.hang_timeout = self.opts.hang_timeout;
         spec.crash_dir = self.opts.crash_dir.clone();
-        let host = WorkerHost::spawn(spec).map_err(|e| format!("scene worker: {e}"))?;
+        // The spare, when one launched the same way waits (`worker::spare`), else a new process.
+        let taken = match &self.opts.spare {
+            Some(sp) => spare::lock(sp).take(spec, Instant::now()),
+            None => Err(spec),
+        };
+        let host = match taken {
+            Ok(h) => {
+                self.stats.spares_taken += 1;
+                h
+            }
+            Err(spec) => WorkerHost::spawn(spec).map_err(|e| format!("scene worker: {e}"))?,
+        };
         epoll_ctl(&self.wake, libc::EPOLL_CTL_ADD, host.wake_fd());
         self.host = Some(host);
         self.stats.spawns += 1;
@@ -2279,6 +2329,8 @@ impl SceneSource {
             Some(h) => {
                 let (w, t) = h.restarts(now);
                 let s = match h.state() {
+                    // never held by a source (an adopted spare is starting or running)
+                    WorkerState::Spare => "spare".to_string(),
                     WorkerState::Starting => "starting".to_string(),
                     WorkerState::Running => "running".to_string(),
                     WorkerState::Restarting { attempt } => format!("restarting {attempt}"),
@@ -2346,6 +2398,8 @@ impl SceneSource {
         v["cpu"] = json!(self.pid().and_then(proc_cpu));
         // The GPU budget and the VRAM guard.
         v["fps_demand"] = json!(self.demand_hz);
+        // of `spawns`, the workers that were the spare (`worker::spare`)
+        v["spares_taken"] = json!(st.spares_taken);
         v["gpu_ms_p50"] = json!(gpu_p50);
         v["gpu_ms_p95"] = json!(gpu_p95);
         v["throttle"] = json!(self.budget.cap().map(|cap| json!({

@@ -56,6 +56,34 @@ restarts; `waitpid` runs every poll only once the worker is ending, else every `
 - **Crash record** `<state>/crashes/<scene-id>-<unix_ms>.json` (temp + rename): source id, path, reason,
   signal/code, restarts, uptime, log tail; the oldest beyond `MAX_CRASH_RECORDS` (20) are removed.
 
+## The spare worker (`worker/spare.rs`)
+
+`player.scene_spare` keeps one worker started ahead of time (`WorkerHost::spawn_spare`: no scene, so no `--preload`;
+state `Spare`), its context up after `Hello`, so a scene's spawn takes it (`Spare::take` → `WorkerHost::adopt`: the
+scene's spec, the `Start` sent at once, the `Hello` replayed to the source, the start's grace timed from the adoption)
+instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs each `sync` (at most every 20 ms):
+
+- **When.** Only while scenes are in use: from the first scene worker of the player's run (a restore's included)
+  until `stop`, or until no scene source was hosted for 30 min — a player that only plays videos never starts one.
+  Off, no worker binary or WE assets, or the low-VRAM `stop` hold → reaped at once. At most one.
+- **Refill.** A taken spare is replaced once nothing competes with the new one's start: 2 s after the take, no scene
+  loading, no async open, no transition in flight (the spare's EGL setup is CPU and driver time the scene being
+  waited for would share).
+- **Launch.** A spare serves only a scene launched the same way (binary, args, environment: `sources::scene::launch_for`, the
+  same helpers `SceneSource::open` uses). A base opt change that changes it (`player.scene_fonts`: a worker's
+  fontconfig can't drop fonts) reaps the spare at once, so no scene ever starts with stale settings; the
+  next one starts by the refill rule (the change also reloads the playing scene: no competing with that).
+- **Failure.** A spare that dies, hangs (its heartbeat runs as for any worker) or reports a fatal error is no crash:
+  `Exited` only, no restart, no budget, no record, no scene touched; the next starts after 5 s, doubling to 5 min
+  while failures continue. Once adopted it is the scene's own worker: its crash restarts through that scene's budget.
+  Crash restarts and the fonts replacement (`WorkerHost::replace`) spawn their own process. It dies with its player
+  (`PR_SET_PDEATHSIG`, spawned on the loop); a supervisor restart keeps `player.scene_spare` (snapshot) and starts a
+  new spare once the restored scene's worker started.
+- **Seen in** the `workers` probe's `spare` (state `spare` | `none` with `why`), the source's `spares_taken`, and the
+  `worker.spare_*` / `worker.adopted` events. Test timing: `LIASCAPE_PLAYER_SPARE_TIMING=<refill>,<idle>,<retry>,<retry_max>` (ms).
+
+Measured (`scene_load.py --spare`, release, 3 scenes, medians): an apply 65–135 ms sooner warm, 70–215 cold (no exec or link from a cold disk), 71–108 after a reboot; the waiting spare holds ~168 MiB RSS, ~61 MiB PSS, ~35 MiB private dirty, 3 MiB VRAM.
+
 ## The heartbeat
 
 Every `Tick` (answered by any `Frame` with `seq` ≥ it) and `Ping` is recorded; the oldest unanswered one older than

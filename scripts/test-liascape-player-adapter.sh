@@ -1218,8 +1218,9 @@ restart_player 8 "${VRAM_ENV[@]}"
 pget() { ctl get "{\"path\":\"player.$1\"}" | jq -r '.value | if type == "number" then (. * 1000 | round / 1000) else . end'; }   # 0.0 → 0
 p_is() { [ "$(pget "$1")" = "$2" ]; }
 p_near() { near "$(pget "$1")" "$2" 0.001; }
-gpu_props() { echo "throttle $(pget scene_throttle), limit $(pget scene_vram_limit_mib), shows $(pget scene_vram_stop_shows), low $(pget vram_low_mode)"; }
-[ "$(gpu_props)" = "throttle true, limit 0, shows last_frame, low stop" ] && ok "a fresh player: the defaults ($(gpu_props))" || bad "a fresh player: $(gpu_props)"
+gpu_props() { echo "throttle $(pget scene_throttle), limit $(pget scene_vram_limit_mib), shows $(pget scene_vram_stop_shows), low $(pget vram_low_mode), spare $(pget scene_spare)"; }
+# (the player's own scene_spare default is false: the backend's re-assert turns it on)
+waitfor 15000 eval '[ "$(gpu_props)" = "throttle true, limit 0, shows last_frame, low stop, spare true" ]' && ok "a fresh player: the defaults ($(gpu_props))" || bad "a fresh player: $(gpu_props)"
 post /apply "{\"path\":\"$S1\"}" >/dev/null
 waitfor 5000 scene_ready "$S1" || bad "/apply s1 on the fake-VRAM player → $(basename "$(cur path)") ready $(cur ready)"
 SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
@@ -1227,6 +1228,17 @@ setting '.AutoThrottleScenes = false'
 waitfor $WAIT p_is scene_throttle false && [ "$(wpid "$SID")" = "$WP" ] && ok "AutoThrottleScenes off → player.scene_throttle false live, same worker $WP" || bad "AutoThrottleScenes off → $(gpu_props), pid $WP → $(wpid "$SID")"
 setting '.AutoThrottleScenes = true'
 waitfor $WAIT p_is scene_throttle true && ok "AutoThrottleScenes on → true" || bad "AutoThrottleScenes on → $(gpu_props)"
+# the spare scene worker (SceneSpareWorker, on by default while AllowScenes): one waits beside the playing scene; off
+# reaps it live and the playing scene keeps its worker; on brings one back (docs/player/modules/scene-worker.md § The spare worker)
+spare_of() { ctl probe '{"name":"workers"}' | jq -c '.spare | {state, why, pid, hello}'; }
+spare_is() { [ "$(ctl probe '{"name":"workers"}' | jq -r '.spare | "\(.state) \(.why)"')" = "$1" ]; }
+waitfor $WAIT p_is scene_spare true && waitfor 10000 spare_is "spare " && ok "SceneSpareWorker (default) → player.scene_spare true, a spare waits: $(spare_of)" || bad "SceneSpareWorker default → scene_spare $(pget scene_spare), spare $(spare_of)"
+SPP=$(ctl probe '{"name":"workers"}' | jq -r '.spare.pid // empty')
+setting '.SceneSpareWorker = false'
+waitfor $WAIT p_is scene_spare false && waitfor 3000 spare_is "none off" && waitfor 3000 eval '! [ -d /proc/${SPP:-0} ] || grep -q ") Z" /proc/${SPP:-0}/stat' && [ "$(wpid "$SID")" = "$WP" ] \
+  && ok "SceneSpareWorker off → player.scene_spare false live, the spare ($SPP) reaped, the scene on its worker $WP" || bad "SceneSpareWorker off → scene_spare $(pget scene_spare), spare $(spare_of), scene worker $WP → $(wpid "$SID")"
+setting '.SceneSpareWorker = true'
+waitfor $WAIT p_is scene_spare true && waitfor 10000 spare_is "spare " && ok "SceneSpareWorker on → a spare again" || bad "SceneSpareWorker on → scene_spare $(pget scene_spare), spare $(spare_of)"
 setting '.LimitVramPerScene = true | .SceneVramLimitMib = 1536'
 waitfor $WAIT p_near scene_vram_limit_mib 1536 && [ "$(wpid "$SID")" = "$WP" ] && ok "the VRAM limit on at 1536 MiB → player.scene_vram_limit_mib 1536 live, same worker" || bad "VRAM limit on → $(gpu_props)"
 setting '.SceneVramLimitMib = 2048'
@@ -1243,12 +1255,12 @@ for m in pause off stop; do
 done
 [ "$(pget paused)" = false ] && ok "none of it touched player.paused" || bad "player.paused $(pget paused) after the GPU settings"
 # a fresh player process (not restored: the defaults) gets the backend's values back (the settings re-apply)
-setting '.AutoThrottleScenes = false | .LimitVramPerScene = true | .SceneVramLimitMib = 1536 | .SceneVramStopShows = "nothing" | .VramLowMode = "pause"'
-waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, shows nothing, low pause" ]' || bad "set before the restart: $(gpu_props)"
+setting '.AutoThrottleScenes = false | .LimitVramPerScene = true | .SceneVramLimitMib = 1536 | .SceneVramStopShows = "nothing" | .VramLowMode = "pause" | .SceneSpareWorker = false'
+waitfor $WAIT eval '[ "$(gpu_props)" = "throttle false, limit 1536, shows nothing, low pause, spare false" ]' || bad "set before the restart: $(gpu_props)"
 stop_now
 restart_player 8b "${VRAM_ENV[@]}"
-waitfor 15000 eval '[ "$(gpu_props)" = "throttle false, limit 1536, shows nothing, low pause" ]' && ok "a fresh player gets them re-applied: $(gpu_props)" || bad "after a player restart: $(gpu_props) (want throttle false, limit 1536, shows nothing, low pause)"
-setting '.AutoThrottleScenes = true | .SceneVramStopShows = "last_frame" | .VramLowMode = "stop"'
+waitfor 15000 eval '[ "$(gpu_props)" = "throttle false, limit 1536, shows nothing, low pause, spare false" ]' && ok "a fresh player gets them re-applied: $(gpu_props)" || bad "after a player restart: $(gpu_props) (want throttle false, limit 1536, shows nothing, low pause, spare false)"
+setting '.AutoThrottleScenes = true | .SceneVramStopShows = "last_frame" | .VramLowMode = "stop" | .SceneSpareWorker = true'
 
 # a scene over the limit in a timed playlist: stopped by the player (never a crash) → the rotation advances at once,
 # the UI is told why (WS scene-vram-stopped), the item is NOT marked crashed and stays playable

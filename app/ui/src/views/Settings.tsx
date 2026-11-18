@@ -523,7 +523,7 @@ export const Settings = memo(function Settings() {
       </Section>
 
       {/* liascape-player only (the player owns the GPU budget + both VRAM rules); every row applies live
-          (API: /settings → player.scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode) */}
+          (API: /settings → player.scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode / scene_spare) */}
       {liascapeActive && (
         <Section title="GPU & memory" icon={<Gauge size={15} />} lv="standard">
           <Row label="Ease off heavy scenes" hint="if a scene makes your GPU stutter, it runs at a lower frame rate until things calm down. Off, every scene keeps its set frame rate." rk="autoThrottleScenes">
@@ -538,6 +538,8 @@ export const Settings = memo(function Settings() {
           {g("limitVramPerScene", false) && <Row label="Stopped scene shows" hint="Last frame: its picture stays, still. Nothing: the screen goes black." rk="sceneVramStopShows">
             <Segmented<string> label="Stopped scene shows" value={g<string>("sceneVramStopShows", "last_frame")} onChange={(v) => set("sceneVramStopShows", v)}
               options={[{ value: "last_frame", label: "Last frame" }, { value: "nothing", label: "Nothing" }]} /></Row>}
+          <Row label="Keep a scene renderer ready" hint="while you play scenes, one renderer starts ahead and waits, so the next scene appears about a tenth of a second sooner. It holds about 60 MB of memory while it waits." rk="sceneSpareWorker">
+            <input type="checkbox" checked={g("sceneSpareWorker", true)} onChange={(e) => set("sceneSpareWorker", e.target.checked)} /></Row>
           {engine?.vram?.low_active && <Help>Video memory is low right now — the wallpaper is {engine.vram.mode === "stop" ? "stopped (its memory freed)" : "paused"} until it frees up.</Help>}
         </Section>
       )}

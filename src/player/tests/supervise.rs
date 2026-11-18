@@ -1560,3 +1560,79 @@ fn crash_restore_ignores_start_mode() {
         "item 1 never started"
     );
 }
+
+/// The spare scene worker (`worker::spare`) across a crash of the compositor child: it dies with
+/// its player (no orphan worker waits on), `player.scene_spare` comes back from the snapshot, the
+/// restored scene starts in a worker of its own (no spare yet in a fresh process) and a new spare
+/// follows it.
+#[test]
+fn spare_worker_dies_with_the_player_and_returns_after_the_restore() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let mut sup = Sup::spawn_in(
+        new_root(),
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1"),
+            ("LIASCAPE_PLAYER_SPARE_TIMING", "0,3600000,50,200"),
+        ],
+        Some(serial),
+        true,
+    );
+    let dir = common::synthetic_scene(
+        "sup-spare",
+        &liascape_player::scene::synthetic::SyntheticSpec::default(),
+    );
+    let mut c = sup.client();
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let id = c.create(json!({"kind": "scene", "path": s(&dir)}));
+    c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
+    let spare_up = |c: &mut Client| {
+        let t = Instant::now();
+        loop {
+            let sp = c.ok("probe", json!({"name": "workers"}))["spare"].clone();
+            if sp["hello"] == json!(true) {
+                return sp["pid"].as_u64().unwrap() as u32;
+            }
+            assert!(t.elapsed() < Duration::from_secs(15), "no spare: {sp}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let old_spare = spare_up(&mut c);
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        sn["player"]["scene_spare"] == json!(true)
+            && sn["sources"]
+                .as_object()
+                .is_some_and(|m| m.values().any(|s| s["path"] == s_json(&dir)))
+    });
+    drop(c);
+    sup.crash(libc::SIGSEGV);
+    let t = Instant::now();
+    while alive(old_spare) && t.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!alive(old_spare), "the spare {old_spare} outlived its player");
+    let mut c = sup.client();
+    assert_eq!(c.ok("get", json!({"path": "player.scene_spare"}))["value"], json!(true));
+    let st = wait_state(&mut c, Duration::from_secs(10), |st| {
+        sources(st).iter().any(|(_, n)| n["path"] == s_json(&dir))
+    });
+    let (nid, _) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == s_json(&dir))
+        .unwrap();
+    let new_spare = spare_up(&mut c);
+    assert_ne!(new_spare, old_spare);
+    let w = c.ok("probe", json!({"name": "workers"}))["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == json!(nid))
+        .cloned()
+        .expect("the restored scene's worker");
+    assert_eq!(w["spares_taken"], json!(0), "a fresh player had no spare to give: {w}");
+    assert_eq!(w["state"], json!("running"), "{w}");
+    assert_ne!(w["pid"].as_u64(), Some(new_spare as u64), "{w}");
+}

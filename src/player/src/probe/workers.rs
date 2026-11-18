@@ -12,6 +12,10 @@
 //! limit_mib}` (the per-scene VRAM guard stopped it). `args: {"log_tail": true}` adds
 //! each entry's `log_tail` — the worker's last 50 output lines (stderr + `log` messages, across
 //! restarts, kept after a fatal stop), what a crash record carries, for a scene that didn't crash.
+//! `spare`: the spare worker (`worker::spare`), apart from `workers` (which lists scene sources
+//! only): `{state: spare | none, pid, hello (its context is up), age_ms, why (none: off, scenes
+//! not in use, low VRAM, …), enabled, in_use, failures, retry_in_ms, spawned, adopted, replaced,
+//! failed, reaped}` (+ `log_tail` with the arg).
 
 use serde_json::{Value, json};
 
@@ -30,8 +34,10 @@ pub fn workers(rt: &mut Runtime, args: &Value) -> Result<Value, ApiError> {
             w["log_tail"] = json!(tail);
         }
     }
+    let log_tail = args.get("log_tail").and_then(Value::as_bool) == Some(true);
     Ok(json!({
         "workers": workers,
+        "spare": rt.host.spare_info(log_tail),
         "reaping": crate::worker::reap::pending(),
         // TODO F5 (2): imported frames' EGLImages queued for the `lia-egl-free` thread.
         "images_freeing": crate::gfx::dmabuf::images_pending_free(),

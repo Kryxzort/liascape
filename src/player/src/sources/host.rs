@@ -27,6 +27,7 @@ use crate::graph::ApiError;
 use crate::graph::props::{self, PropValue};
 use crate::graph::{Graph, NodeKind};
 use crate::log::{self, Level};
+use crate::worker::spare::{self, Launch, SharedSpare, Spare};
 
 /// Observed values mirrored into the graph after every `update` (`Graph::set_observed`).
 /// `kind` too: an `MpvSource` infers image/video from the file (and corrects it after
@@ -308,7 +309,24 @@ pub struct SourceHost {
     demand_cache: ((u64, u64), BTreeMap<String, Vec<OutputDemand>>),
     /// How many times `sync` recomputed a scene's demand (the `sources` probe; tests).
     pub(crate) demand_computes: u64,
+    /// The spare scene worker (`worker::spare`), shared with every scene source.
+    spare: SharedSpare,
+    /// `player.scene_spare` and whether no transition is in flight (the runtime's, each sync).
+    spare_enabled: bool,
+    spare_quiet: bool,
+    /// How a scene worker launches under the current base opts (`scene::launch_for`); `None`
+    /// = recompute (a base opt changed: it looks the worker binary up on disk).
+    spare_launch: Option<Option<Launch>>,
+    /// The scene workers' hang timeout (`LIASCAPE_SCENE_WORKER_HANG_MS`): the spare's heartbeat.
+    spare_hang: std::time::Duration,
+    /// The last `maintain_spare` and the inputs it ran with: it runs at most every
+    /// [`SPARE_EVERY`] (`sync` runs after every dispatch — each worker frame is one), at once
+    /// when an input that reaps changed.
+    spare_ran: Option<(std::time::Instant, bool, bool)>,
 }
+
+/// How often `sync` looks after the spare scene worker at most.
+const SPARE_EVERY: std::time::Duration = std::time::Duration::from_millis(20);
 
 impl SourceHost {
     pub fn new(base_opts: Map<String, Value>) -> SourceHost {
@@ -333,7 +351,75 @@ impl SourceHost {
             resume_at: BTreeMap::new(),
             demand_cache: ((0, 0), BTreeMap::new()),
             demand_computes: 0,
+            spare: Spare::shared(),
+            spare_enabled: false,
+            spare_quiet: true,
+            spare_launch: None,
+            spare_hang: super::scene::hang_timeout(
+                std::env::var(super::scene::HANG_ENV).ok().as_deref(),
+            ),
+            spare_ran: None,
         }
+    }
+
+    /// The spare scene worker's policy inputs from the runtime: `player.scene_spare`, and
+    /// `quiet` = no transition in flight (a new spare's start waits for that). Applied at the
+    /// next [`sync`](Self::sync).
+    pub fn set_spare_policy(&mut self, enabled: bool, quiet: bool) {
+        self.spare_enabled = enabled;
+        self.spare_quiet = quiet;
+    }
+
+    /// Stop the spare now (`stop`, quit): scenes count as unused until the next one starts.
+    pub fn stop_spare(&mut self, why: &'static str) {
+        spare::lock(&self.spare).stop(why);
+    }
+
+    /// The spare scene worker's pid, if one runs.
+    pub fn spare_pid(&self) -> Option<u32> {
+        spare::lock(&self.spare).pid()
+    }
+
+    /// The `workers` probe's `spare` entry (`worker::spare::Spare::info`).
+    pub fn spare_info(&self, log_tail: bool) -> Value {
+        spare::lock(&self.spare).info(std::time::Instant::now(), log_tail)
+    }
+
+    /// Keep the spare as its policy says (`worker::spare` module docs). Scenes can play when a
+    /// worker binary resolves and WE's assets do (or the synthetic test scenes are allowed).
+    fn maintain_spare(&mut self) {
+        let now = std::time::Instant::now();
+        if self.spare_ran.is_some_and(|(t, on, sus)| {
+            on == self.spare_enabled
+                && sus == self.suspend_new
+                && now.saturating_duration_since(t) < SPARE_EVERY
+        }) {
+            return;
+        }
+        self.spare_ran = Some((now, self.spare_enabled, self.suspend_new));
+        let launch = self
+            .spare_launch
+            .get_or_insert_with(|| super::scene::launch_for(&self.base_opts))
+            .clone();
+        let playable = self.base_opts.contains_key("scene_assets")
+            || self.base_opts.get("allow_synthetic").and_then(Value::as_bool) == Some(true);
+        let mut scenes_hosted = false;
+        let mut loading = false;
+        for h in self.sources.values() {
+            if let Some(s) = h.src.as_scene() {
+                scenes_hosted = true;
+                loading |= s.loading();
+            }
+        }
+        let want = spare::Want {
+            enabled: self.spare_enabled,
+            launch: launch.filter(|_| playable),
+            hang_timeout: self.spare_hang,
+            suspended: self.suspend_new,
+            scenes_hosted,
+            quiet: self.spare_quiet && !loading && self.opening.is_empty(),
+        };
+        spare::lock(&self.spare).maintain(want, now);
     }
 
     /// The low-VRAM rule, mode `stop`: drop every video/image/scene source's
@@ -885,6 +971,8 @@ impl SourceHost {
                 s.set_demand(d);
             }
         }
+        // After the scenes' spawns, so one that just took the spare is counted as in use.
+        self.maintain_spare();
     }
 
     fn open(
@@ -932,7 +1020,7 @@ impl SourceHost {
                 let mut n = node.to_vec();
                 n.retain(|(k, _)| k != "paused");
                 n.push(("paused".into(), PropValue::Bool(effective_paused)));
-                let src = SceneSource::open(gfx, id, &n, &self.base_opts, &self.loudness)
+                let src = SceneSource::open(gfx, id, &n, &self.base_opts, &self.loudness, &self.spare)
                     .map_err(|e| e.to_string())?;
                 let wake = Some(src.wake_fd());
                 return Ok(Hosted {
@@ -1279,6 +1367,8 @@ impl SourceHost {
     /// Set (`Some`) or remove (`None`) one base opt for sources opened from now on
     /// (`scene_assets` / `scene_assets_error` follow `player.scene_assets` live).
     pub fn set_base_opt(&mut self, key: &str, v: Option<Value>) {
+        // a scene worker's launch may change (`scene_fonts`): the spare follows it
+        self.spare_launch = None;
         match v {
             Some(v) => {
                 self.base_opts.insert(key.to_string(), v);

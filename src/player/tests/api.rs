@@ -8968,6 +8968,11 @@ fn scene_fps_change_is_live_same_pid() {
 /// (`LIASCAPE_PLAYER_VRAM_TIMING` = interval 50, enter 300, resume 600, settle 200, scene 1000 ms).
 /// The file starts at 8 GiB with 6000 MiB free.
 fn vram_serve() -> Option<(Serve, PathBuf)> {
+    vram_serve_with(&[])
+}
+
+/// [`vram_serve`] with `extra` in the server's environment.
+fn vram_serve_with(extra: &[(&str, &Path)]) -> Option<(Serve, PathBuf)> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     if !can_run() {
         return None;
@@ -8976,16 +8981,13 @@ fn vram_serve() -> Option<(Serve, PathBuf)> {
     let file = root.join("vram.json");
     write_vram(&file, 6000.0, &[]);
     let probe = PathBuf::from(format!("fake:{}", file.display()));
-    let srv = Serve::spawn_env(
-        root,
-        &["--clock", "real"],
-        &[
-            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
-            ("LIASCAPE_PLAYER_VRAM_PROBE", &probe),
-            ("LIASCAPE_PLAYER_VRAM_TIMING", Path::new("50,300,600,200,1000")),
-        ],
-        Some(serial),
-    );
+    let mut env: Vec<(&str, &Path)> = vec![
+        ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+        ("LIASCAPE_PLAYER_VRAM_PROBE", &probe),
+        ("LIASCAPE_PLAYER_VRAM_TIMING", Path::new("50,300,600,200,1000")),
+    ];
+    env.extend_from_slice(extra);
+    let srv = Serve::spawn_env(root, &["--clock", "real"], &env, Some(serial));
     Some((srv, file))
 }
 
@@ -11442,4 +11444,378 @@ fn shader_cache_guard_child() {
     let own = common::shader_cache_dir(&srv.root);
     assert!(own.is_dir(), "serve didn't create its own {own:?}");
     println!("SHADER_CACHE_GUARD_SERVED");
+}
+
+// ---- the spare scene worker (`worker::spare`, `docs/player/modules/scene-worker.md`
+// § The spare worker)
+
+/// The spare suites' timing: a refill right after a take, retries 50–200 ms apart.
+const SPARE_TIMING: &str = "0,3600000,50,200";
+
+/// A stepped scene server whose spare refills at once (`LIASCAPE_PLAYER_SPARE_TIMING`).
+fn spare_serve() -> Option<Serve> {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return None;
+    }
+    Some(Serve::spawn_env(
+        new_root(),
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_SPARE_TIMING", Path::new(SPARE_TIMING)),
+        ],
+        Some(serial),
+    ))
+}
+
+/// The `workers` probe's `spare`.
+fn spare_of(c: &mut Client) -> Value {
+    c.ok("probe", json!({"name": "workers"}))["spare"].clone()
+}
+
+/// Step until a spare other than `not` is up (said `Hello`); its pid.
+fn step_until_spare(c: &mut Client, not: Option<u64>) -> u64 {
+    for _ in 0..400 {
+        c.step(16);
+        let sp = spare_of(c);
+        if sp["hello"] == json!(true)
+            && let Some(p) = sp["pid"].as_u64()
+            && Some(p) != not
+        {
+            assert_eq!(sp["state"], json!("spare"), "{sp}");
+            return p;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("no spare worker came up: {}", spare_of(c));
+}
+
+/// Step until `id` is ready.
+fn step_until_ready(c: &mut Client, id: &str) {
+    for _ in 0..400 {
+        c.step(16);
+        if get(c, &format!("{id}.ready"))["result"]["value"] == json!(true) {
+            return;
+        }
+    }
+    panic!("{id} never readied: {}", worker_of(c, id));
+}
+
+/// Live (not zombie) `liascape-scene-worker` children of `parent`.
+fn scene_worker_children(parent: u64) -> Vec<u64> {
+    std::fs::read_dir("/proc")
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u64>().ok())
+        .filter(|pid| {
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                return false;
+            };
+            let Some((comm, rest)) = stat.split_once(") ") else {
+                return false;
+            };
+            let f: Vec<&str> = rest.split_whitespace().collect();
+            comm.ends_with("liascape-scene-")
+                && f.first().is_some_and(|s| *s != "Z" && *s != "X")
+                && f.get(1).and_then(|p| p.parse::<u64>().ok()) == Some(parent)
+        })
+        .collect()
+}
+
+/// `player.scene_spare`: no spare while off, nor before a scene played; after the first scene
+/// one spare comes up (probe `workers` → `spare`, state `spare`); an S→S transition's B takes it
+/// (the same process plays B: `spares_taken` 1, `worker.adopted`) and a new spare follows — never
+/// two; off reaps it at once, on brings it back; `stop` reaps it and no spare comes until a
+/// scene plays again.
+#[test]
+fn spare_worker_is_taken_by_the_next_scene_and_replaced() {
+    let Some(srv) = spare_serve() else { return };
+    let mut c = srv.client();
+    let server = c.ok("hello", json!({}))["pid"].as_u64().unwrap();
+    c.step(16);
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["state"].clone(), sp["why"].clone()), (json!("none"), json!("off")), "{sp}");
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    for _ in 0..5 {
+        c.step(16);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let sp = spare_of(&mut c);
+    assert_eq!(sp["why"], json!("scenes not in use"), "no scene yet: {sp}");
+    assert_eq!(sp["spawned"], json!(0), "{sp}");
+
+    let a = create_scene(&mut c, "spare-a", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &a);
+    step_until_ready(&mut c, &a);
+    let a_pid = worker_of(&mut c, &a)["pid"].as_u64().unwrap();
+    assert_eq!(worker_of(&mut c, &a)["spares_taken"], json!(0), "the first scene starts cold");
+    let p = step_until_spare(&mut c, None);
+    assert_ne!(p, a_pid);
+
+    // S→S: B takes the spare.
+    c.ok("subscribe", json!({"topics": ["transition."]}));
+    let spec_b = SyntheticSpec {
+        pattern: Pattern::Solid,
+        rgb: [30, 160, 220],
+        ..SyntheticSpec::default()
+    };
+    let dir_b = common::synthetic_scene("spare-b", &spec_b);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&dir_b)},
+               "effect_id": "fade", "duration_ms": 200}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    let corr = r["corr"].as_str().unwrap().to_string();
+    c.step_until_event(16, 600, "transition.done", &corr);
+    let wb = worker_of(&mut c, &b);
+    assert_eq!(wb["pid"].as_u64(), Some(p), "B plays in the spare: {wb}");
+    assert_eq!(wb["spares_taken"], json!(1), "{wb}");
+    assert_eq!(wb["state"], json!("running"), "{wb}");
+    // One worker for both outputs: each shows B.
+    for (conn, x, y) in [("VIRTUAL-1", 320, 180), ("VIRTUAL-2", 160, 90)] {
+        let shot = srv.path(&format!("spare-b-{conn}.png"));
+        c.ok("capture", json!({"target": format!("out:{conn}"), "path": s(&shot)}));
+        near(png_pixel(&shot, x, y), [30, 160, 220], 2, &format!("B on {conn}"));
+    }
+    let adopted = logs_of(&mut c, "worker.adopted");
+    assert!(
+        adopted.iter().any(|e| e["pid"] == json!(p) && e["id"] == json!(b)),
+        "{adopted:?}"
+    );
+    let p2 = step_until_spare(&mut c, Some(p));
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["spawned"].clone(), sp["adopted"].clone()), (json!(2), json!(1)), "{sp}");
+    // Never two: B's worker and one spare (A's worker went with A).
+    wait_for(Duration::from_secs(3), "A's worker to go", || {
+        (!pid_alive(a_pid)).then_some(())
+    });
+    let settle = |c: &mut Client| {
+        for _ in 0..10 {
+            c.step(16);
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    };
+    settle(&mut c);
+    let workers_are = |want: &[u64]| {
+        let mut kids = scene_worker_children(server);
+        kids.sort();
+        let mut want = want.to_vec();
+        want.sort();
+        assert_eq!(kids, want, "the scene's worker + one spare, nothing else");
+    };
+    workers_are(&[p, p2]);
+
+    // S→V: the spare waits on through a stretch with no scene (scenes are still in use).
+    let clip = ensure_clip("tr_blue_10s", BLUE_10S);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&clip), "loop": true},
+               "effect_id": "fade", "duration_ms": 200}),
+    );
+    let corr = r["corr"].as_str().unwrap().to_string();
+    c.step_until_event(16, 600, "transition.done", &corr);
+    wait_for(Duration::from_secs(3), "B's worker to go", || {
+        (!pid_alive(p)).then_some(())
+    });
+    settle(&mut c);
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["state"].clone(), sp["pid"].clone()), (json!("spare"), json!(p2)), "{sp}");
+    workers_are(&[p2]);
+
+    // V→S: C takes the same spare; a new one follows.
+    let spec_c = SyntheticSpec {
+        pattern: Pattern::Solid,
+        rgb: [220, 90, 30],
+        ..SyntheticSpec::default()
+    };
+    let dir_c = common::synthetic_scene("spare-c", &spec_c);
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "scene", "path": s(&dir_c)},
+               "effect_id": "fade", "duration_ms": 200}),
+    );
+    let sc = r["to"].as_str().unwrap().to_string();
+    let corr = r["corr"].as_str().unwrap().to_string();
+    c.step_until_event(16, 600, "transition.done", &corr);
+    let wc = worker_of(&mut c, &sc);
+    assert_eq!(wc["pid"].as_u64(), Some(p2), "C plays in the spare: {wc}");
+    assert_eq!(wc["spares_taken"], json!(1), "{wc}");
+    let shot = srv.path("spare-c.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+    near(png_pixel(&shot, 320, 180), [220, 90, 30], 2, "C on screen");
+    let p2b = step_until_spare(&mut c, Some(p2));
+    settle(&mut c);
+    // The GPU budget reads the adopted worker's GPU times like any worker's.
+    let wc = worker_of(&mut c, &sc);
+    assert!(wc["gpu_ms_p50"].is_number(), "no GPU times from the adopted worker: {wc}");
+    workers_are(&[p2, p2b]);
+    assert!(logs_of(&mut c, "worker.restart").is_empty());
+    let p2 = p2b;
+
+    // Off: reaped at once. On: back.
+    c.ok("set", json!({"path": "player.scene_spare", "value": false}));
+    c.step(16);
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["state"].clone(), sp["why"].clone()), (json!("none"), json!("off")), "{sp}");
+    wait_for(Duration::from_secs(2), "the spare to go", || {
+        (!pid_alive(p2)).then_some(())
+    });
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let p3 = step_until_spare(&mut c, Some(p2));
+
+    // `stop`: reaped; nothing plays, so no spare until a scene does.
+    c.ok("stop", json!({}));
+    for _ in 0..10 {
+        c.step(16);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let sp = spare_of(&mut c);
+    assert_eq!(sp["state"], json!("none"), "{sp}");
+    assert_eq!(sp["in_use"], json!(false), "{sp}");
+    wait_for(Duration::from_secs(2), "the spare to go at the stop", || {
+        (!pid_alive(p3)).then_some(())
+    });
+    assert_eq!(crash_files(&srv), 0);
+}
+
+/// A spare's death is nobody's crash: killed again and again it is replaced each time (after a
+/// short backoff), while the playing scene keeps its worker, no restart counted, no crash
+/// record, no `source.broken`. A scene applied while the player is paused takes the spare too.
+#[test]
+fn spare_death_never_marks_a_scene_broken() {
+    let Some(srv) = spare_serve() else { return };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["source."]}));
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let a = create_scene(&mut c, "spare-kill-a", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &a);
+    step_until_ready(&mut c, &a);
+    let a_pid = worker_of(&mut c, &a)["pid"].as_u64().unwrap();
+    let mut p = step_until_spare(&mut c, None);
+    for _ in 0..4 {
+        unsafe { libc::kill(p as i32, libc::SIGKILL) };
+        p = step_until_spare(&mut c, Some(p));
+    }
+    let wa = worker_of(&mut c, &a);
+    assert_eq!(wa["pid"].as_u64(), Some(a_pid), "{wa}");
+    assert_eq!((wa["restarts_60s"].clone(), wa["total_restarts"].clone()), (json!(0), json!(0)), "{wa}");
+    assert_eq!(wa["state"], json!("running"), "{wa}");
+    assert_eq!(wa["broken"], json!(false), "{wa}");
+    assert_eq!(crash_files(&srv), 0, "no crash record");
+    assert!(logs_of(&mut c, "worker.restart").is_empty());
+    assert!(logs_of(&mut c, "source.broken").is_empty());
+    let sp = spare_of(&mut c);
+    assert!(sp["failed"].as_u64().unwrap() >= 4, "{sp}");
+
+    // Paused: a new scene still takes the spare and shows its first frame.
+    c.ok("set", json!({"path": "player.paused", "value": true}));
+    let b = create_scene(&mut c, "spare-kill-b", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &b);
+    step_until_ready(&mut c, &b);
+    let wb = worker_of(&mut c, &b);
+    assert_eq!(wb["pid"].as_u64(), Some(p), "{wb}");
+    assert_eq!(wb["paused"], json!(true), "{wb}");
+    c.ok("set", json!({"path": "player.paused", "value": false}));
+    let evs = c.drain_events();
+    assert!(
+        !evs.iter().any(|e| e["event"] == "source.broken" || e["event"] == "source.error"),
+        "{evs:?}"
+    );
+
+    // Adopted, it is the scene's own worker: its crash is that scene's, a restart counted in its
+    // budget like any worker's.
+    unsafe { libc::kill(p as i32, libc::SIGKILL) };
+    let mut wb = Value::Null;
+    for _ in 0..400 {
+        c.step(16);
+        wb = worker_of(&mut c, &b);
+        if wb["restarts_60s"] == json!(1)
+            && wb["state"] == json!("running")
+            && wb["pid"].as_u64().is_some_and(|q| q != p)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(wb["restarts_60s"], json!(1), "the adopted worker's crash restarts B: {wb}");
+    assert_eq!(wb["state"], json!("running"), "{wb}");
+    let restarts = logs_of(&mut c, "worker.restart");
+    assert!(
+        restarts.iter().any(|e| e["id"] == json!(b) && e["prev_pid"] == json!(p)),
+        "{restarts:?}"
+    );
+    assert_eq!(worker_of(&mut c, &a)["total_restarts"], json!(0));
+}
+
+/// The spare follows the settings that change a worker's launch: a `player.scene_fonts`
+/// change replaces it at once with one carrying the new `LIASCAPE_SCENE_FONTS`, so the next
+/// scene never starts with the old fonts; that scene takes the new spare.
+#[test]
+fn spare_worker_follows_the_fonts_setting() {
+    let Some(srv) = spare_serve() else { return };
+    let mut c = srv.client();
+    let fonts_of = |pid: u64| {
+        std::fs::read(format!("/proc/{pid}/environ"))
+            .ok()?
+            .split(|b| *b == 0)
+            .find_map(|kv| {
+                kv.strip_prefix(b"LIASCAPE_SCENE_FONTS=")
+                    .map(|v| String::from_utf8_lossy(v).into_owned())
+            })
+    };
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let a = create_scene(&mut c, "spare-fonts-a", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &a);
+    step_until_ready(&mut c, &a);
+    let p = step_until_spare(&mut c, None);
+    assert_eq!(fonts_of(p).as_deref(), Some("off"));
+    c.ok("set", json!({"path": "player.scene_fonts", "value": "/mnt/c/Windows/Fonts"}));
+    let q = step_until_spare(&mut c, Some(p));
+    assert_eq!(fonts_of(q).as_deref(), Some("/mnt/c/Windows/Fonts"));
+    wait_for(Duration::from_secs(2), "the stale spare to go", || {
+        (!pid_alive(p)).then_some(())
+    });
+    assert!(spare_of(&mut c)["replaced"].as_u64().unwrap() >= 1);
+    let b = create_scene(&mut c, "spare-fonts-b", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &b);
+    step_until_ready(&mut c, &b);
+    let wb = worker_of(&mut c, &b);
+    assert_eq!(wb["pid"].as_u64(), Some(q), "{wb}");
+    assert_eq!(fonts_of(q).as_deref(), Some("/mnt/c/Windows/Fonts"));
+}
+
+/// The low-VRAM rule's `stop` frees the spare with every source (its context is GPU memory
+/// too) and none starts during the hold; after the resume a spare comes back.
+#[test]
+fn spare_worker_goes_while_vram_is_low() {
+    let Some((srv, file)) = vram_serve_with(&[("LIASCAPE_PLAYER_SPARE_TIMING", Path::new(SPARE_TIMING))])
+    else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let (_v, _sc) = video_and_scene(&mut c, "api-spare-low");
+    c.ok("subscribe", json!({"topics": ["vram."]}));
+    let p = wait_for(Duration::from_secs(10), "a spare", || {
+        let sp = spare_of(&mut c);
+        (sp["hello"] == json!(true)).then(|| sp["pid"].as_u64().unwrap())
+    });
+    let mut seen = Vec::new();
+    write_vram(&file, 300.0, &[]);
+    wait_event(&mut c, &mut seen, "vram.stopped", Duration::from_secs(5));
+    wait_for(Duration::from_secs(2), "the spare to go", || {
+        (!pid_alive(p)).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["state"].clone(), sp["why"].clone()), (json!("none"), json!("low VRAM")), "{sp}");
+    write_vram(&file, 4000.0, &[]);
+    wait_event(&mut c, &mut seen, "vram.resumed", Duration::from_secs(8));
+    let q = wait_for(Duration::from_secs(10), "a spare after the resume", || {
+        let sp = spare_of(&mut c);
+        (sp["hello"] == json!(true)).then(|| sp["pid"].as_u64().unwrap())
+    });
+    assert_ne!(q, p);
 }

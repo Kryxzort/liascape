@@ -25,7 +25,7 @@ export const LEVEL_OF_KEY: Record<string, Level> = {
   autoAddWeWallpapersToLibrary: "standard",
   // advanced
   normalizeTargetLufs: "advanced", autoMuteDelayMs: "advanced", autoUnmuteDelayMs: "advanced", autoMuteMinLevelDb: "advanced",
-  stayPausedWhenSwitching: "advanced", hwDec: "advanced", limitVramPerScene: "advanced", sceneVramLimitMib: "advanced",
+  stayPausedWhenSwitching: "advanced", hwDec: "advanced", limitVramPerScene: "advanced", sceneVramLimitMib: "advanced", sceneSpareWorker: "advanced",
   textShadow: "advanced", previewOnHover: "advanced", previewNotHovered: "advanced",
   useWindowsFonts: "advanced", copyFilesInsteadOfSymlinking: "advanced", replaceDirectWithWorkshop: "advanced",
   playerEngine: "advanced", transitionMethod: "advanced", volumeKeyTarget: "advanced",

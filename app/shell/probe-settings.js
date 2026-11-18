@@ -792,7 +792,7 @@ app.whenReady().then(async () => {
       "Loudness target": "advanced", "Fade out after (ms)": "advanced", "Come back after (ms)": "advanced",
       "Disable video cache": "expert", "Restart legacy player every (s)": "expert", "Only restart between wallpapers": "expert",
       "Fit to screen": "basic", "Read-ahead buffer (MiB)": "expert", "Look-back buffer (MiB)": "expert",
-      "Stopped scene shows": "expert",
+      "Stopped scene shows": "expert", "Keep a scene renderer ready": "advanced",
       "Thumbnail shape": "basic", "Smooth window animations": "basic", "Text shadow": "advanced", "On hover": "advanced",
       "Not hovered": "advanced", "Wallpaper behind every tab": "standard",
       "Use Windows fonts in scenes": "advanced", "Windows fonts folder": "expert",
