@@ -5218,6 +5218,37 @@ fn serve_answers_at_once_while_wireplumber_isnt_up_yet() {
     bus_comes_up_after_a_late_audio_server(true);
 }
 
+/// How long a test waits for `serve` to exit after `quit` before calling it stuck. A quit ends
+/// with the final snapshot's fsync, which takes the disk's time (0.1–11.8 s measured under
+/// heavy I/O; `LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS` stands in for it): a bound on the quit
+/// itself goes on [`quit_timeline`]'s own time.
+const QUIT_EXIT_GUARD: Duration = Duration::from_secs(60);
+
+/// A finished quit's own time in ms — `player.quitting` → `player.exit` minus the final
+/// snapshot's write (its `snapshot_wait_ms`) — and every event from the quit on (ms after it);
+/// infinite when either event is missing.
+fn quit_timeline(srv: &Serve) -> (f64, Vec<String>) {
+    let log = std::fs::read_to_string(srv.path("state/liascape/liascape-player/events.jsonl"))
+        .unwrap_or_default();
+    let evs: Vec<Value> = log
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let at = |kind: &str| evs.iter().find(|e| e["kind"] == kind);
+    let t0 = at("player.quitting").and_then(|e| e["t_mono_ms"].as_f64());
+    let steps = evs
+        .iter()
+        .filter_map(|e| {
+            let ms = e["t_mono_ms"].as_f64()? - t0?;
+            (ms >= 0.0).then(|| format!("{ms:.0} {}", e["kind"].as_str().unwrap_or("?")))
+        })
+        .collect();
+    let own = at("player.exit")
+        .and_then(|e| Some(e["t_mono_ms"].as_f64()? - t0? - e["snapshot_wait_ms"].as_f64()?))
+        .unwrap_or(f64::INFINITY);
+    (own, steps)
+}
+
 /// A quit while the bus's first session still waits for a session manager to link its
 /// loopback exits at once (the setup's waits end on the `Bus` drop), exit 0.
 #[test]
@@ -5249,11 +5280,16 @@ fn quit_while_the_bus_waits_for_wireplumber_is_prompt() {
     );
     let t = Instant::now();
     c.ok("quit", json!({}));
-    let st = srv
-        .wait_exit(Duration::from_secs(3))
-        .expect("serve exits within 3 s of quit");
-    println!("quit during the bus setup: exited in {:?}", t.elapsed());
+    let st = srv.wait_exit(QUIT_EXIT_GUARD);
+    let took = t.elapsed();
+    let (own, steps) = quit_timeline(&srv);
+    println!("quit during the bus setup: exited in {took:?}, {own:.0} ms its own; {steps:?}");
+    let st = st.unwrap_or_else(|| panic!("serve never exited after quit: {steps:?}"));
     assert!(st.success(), "{st}");
+    assert!(
+        own < 3000.0,
+        "the quit took {own:.0} ms (its final snapshot's write aside): {steps:?}"
+    );
 }
 
 /// `animate` on a broadcast alias that matches nothing is a broadcast
@@ -5399,6 +5435,24 @@ fn flash_frame(path: &Path) -> Result<u32, String> {
     Ok(n)
 }
 
+/// How many different Flash frames before the last one target `i` showed, over every pass
+/// (each pass a fresh pair played from frame 0).
+fn distinct_playing(passes: &[([String; 3], Vec<Vec<u32>>)], i: usize) -> usize {
+    passes
+        .iter()
+        .map(|(_, s)| {
+            let mut d: Vec<u32> = s[i]
+                .iter()
+                .copied()
+                .filter(|&n| n < FLASH_FRAMES - 1)
+                .collect();
+            d.sort_unstable();
+            d.dedup();
+            d.len()
+        })
+        .sum()
+}
+
 /// The loop never samples a frame the render worker hasn't finished. Two Flash clips
 /// (every frame one uniform grey, a level per frame) at two sizes play on the two outputs,
 /// one under speed jitter, while the test captures both sources and an output back to back:
@@ -5435,116 +5489,161 @@ fn render_worker_never_composes_a_torn_frame() {
             return;
         };
         let mut c = srv.client();
-        let a = create_src(&mut c, json!({"path": a_clip, "paused": true, "hwdec": hw}));
-        let b = create_src(&mut c, json!({"path": b_clip, "paused": true, "hwdec": hw}));
-        c.ok(
-            "set",
-            json!({"path": "lay:VIRTUAL-1:main.content", "value": a}),
-        );
-        c.ok(
-            "set",
-            json!({"path": "lay:VIRTUAL-2:main.content", "value": b}),
-        );
-        wait_for(Duration::from_secs(10), "both ready", || {
-            let st = c.ok("state", json!({}));
-            (st["graph"][&a]["ready"] == json!(true) && st["graph"][&b]["ready"] == json!(true))
-                .then_some(())
-        });
-        c.ok_batch(&[
-            (
-                "set",
-                json!({"path": format!("{a}.paused"), "value": false}),
-            ),
-            (
-                "set",
-                json!({"path": format!("{b}.paused"), "value": false}),
-            ),
-        ]);
-        // The output composes on its own frame clock: right after the unpause it may not have
-        // composed B yet (a black capture, nothing torn). Wait for its first composed frame.
-        wait_for(Duration::from_secs(5), "the output's first frame", || {
-            let png = srv.path("cap-first.png");
-            c.ok("capture", json!({"target": "out:VIRTUAL-2", "path": png}));
-            flash_frame(&png).ok()
-        });
-        let targets = [a.clone(), b.clone(), "out:VIRTUAL-2".to_string()];
-        let mut seen: Vec<Vec<u32>> = vec![Vec::new(); targets.len()];
-        let mut bad = Vec::new();
+        // The clips run ~2 s; a loaded machine captures only a few times in that (a debug-build
+        // PNG encode per capture; seen 2–11 rounds under 40 busy loops) and mpv drops frames
+        // there, too few to tell playback from a held frame. So the test plays them as often as
+        // it takes — each pass a fresh pair from frame 0 to both clips' end (`source.ended`;
+        // the last frame shown may be a dropped one's predecessor) — until every target showed
+        // MIN_DISTINCT different frames before the last. A fast machine gets them in one pass.
+        const MIN_DISTINCT: usize = 8;
+        let last = FLASH_FRAMES - 1;
         let speeds = [1.4, 0.6, 1.0, 1.25, 0.8, 1.5, 0.7];
-        let t = Instant::now();
+        // per pass: the targets' names and what each capture showed
+        let mut passes: Vec<([String; 3], Vec<Vec<u32>>)> = Vec::new();
+        let mut bad = Vec::new();
         let mut k = 0usize;
-        while t.elapsed() < Duration::from_millis(2600) {
-            if k.is_multiple_of(6) {
-                let v = speeds[(k / 6) % speeds.len()];
-                c.ok("set", json!({"path": format!("{b}.speed"), "value": v}));
+        let mut old: Option<(String, String)> = None;
+        let t_all = Instant::now();
+        loop {
+            let a = create_src(&mut c, json!({"path": a_clip, "paused": true, "hwdec": hw}));
+            let b = create_src(&mut c, json!({"path": b_clip, "paused": true, "hwdec": hw}));
+            c.ok(
+                "set",
+                json!({"path": "lay:VIRTUAL-1:main.content", "value": a}),
+            );
+            c.ok(
+                "set",
+                json!({"path": "lay:VIRTUAL-2:main.content", "value": b}),
+            );
+            if let Some((pa, pb)) = old.take() {
+                c.ok_batch(&[
+                    ("destroy", json!({ "id": pa })),
+                    ("destroy", json!({ "id": pb })),
+                ]);
             }
-            for (i, target) in targets.iter().enumerate() {
-                // The output (320×180, a debug-build PNG encode per capture) every 3rd round.
-                if i == 2 && !k.is_multiple_of(3) {
-                    continue;
+            wait_for(Duration::from_secs(10), "both ready", || {
+                let st = c.ok("state", json!({}));
+                (st["graph"][&a]["ready"] == json!(true) && st["graph"][&b]["ready"] == json!(true))
+                    .then_some(())
+            });
+            c.ok_batch(&[
+                (
+                    "set",
+                    json!({"path": format!("{a}.paused"), "value": false}),
+                ),
+                (
+                    "set",
+                    json!({"path": format!("{b}.paused"), "value": false}),
+                ),
+            ]);
+            // The output composes on its own frame clock: right after the unpause it may not
+            // have composed B yet (a black capture, nothing torn — or, from the second pass,
+            // the previous B held on its last frame). Wait for this B's first composed frame.
+            wait_for(Duration::from_secs(5), "the output's first frame", || {
+                let png = srv.path("cap-first.png");
+                c.ok("capture", json!({"target": "out:VIRTUAL-2", "path": png}));
+                flash_frame(&png).ok().filter(|&n| n < last)
+            });
+            let targets = [a.clone(), b.clone(), "out:VIRTUAL-2".to_string()];
+            let mut seen: Vec<Vec<u32>> = vec![Vec::new(); targets.len()];
+            // until both clips ended — and one capture round after (bounded against a clip that
+            // never ends)
+            let ended = |c: &mut Client| {
+                let evs = c.ok("logs", json!({"kind_prefix": "source.ended", "limit": 100}));
+                let evs = evs["events"].as_array().cloned().unwrap_or_default();
+                [&a, &b]
+                    .iter()
+                    .all(|id| evs.iter().any(|e| e["id"] == json!(id)))
+            };
+            let t = Instant::now();
+            let mut done = false;
+            while !done {
+                done = ended(&mut c);
+                if t.elapsed() > Duration::from_secs(30) {
+                    let logs = c.ok("logs", json!({"limit": 300}));
+                    panic!(
+                        "[{fault} hwdec={hw}] the clips never ended: {seen:?}\n\
+                         a: {}\nb: {}\nlogs: {logs}",
+                        source_probe(&mut c, &a),
+                        source_probe(&mut c, &b)
+                    );
                 }
-                let png = srv.path(&format!("cap-{i}.png"));
-                c.ok("capture", json!({"target": target, "path": png}));
-                match flash_frame(&png) {
-                    Ok(n) => {
-                        if let Some(&prev) = seen[i].last()
-                            && n < prev
-                        {
-                            bad.push(format!("{target} #{k}: frame {n} after {prev}"));
-                        }
-                        seen[i].push(n);
+                if k.is_multiple_of(6) {
+                    let v = speeds[(k / 6) % speeds.len()];
+                    c.ok("set", json!({"path": format!("{b}.speed"), "value": v}));
+                }
+                for (i, target) in targets.iter().enumerate() {
+                    // The output (320×180, a debug-build PNG encode per capture) every 3rd round.
+                    if i == 2 && !k.is_multiple_of(3) {
+                        continue;
                     }
-                    Err(e) => bad.push(format!("{target} #{k}: {e}")),
+                    let png = srv.path(&format!("cap-{i}.png"));
+                    c.ok("capture", json!({"target": target, "path": png}));
+                    match flash_frame(&png) {
+                        Ok(n) => {
+                            if let Some(&prev) = seen[i].last()
+                                && n < prev
+                            {
+                                bad.push(format!("{target} #{k}: frame {n} after {prev}"));
+                            }
+                            seen[i].push(n);
+                        }
+                        Err(e) => bad.push(format!("{target} #{k}: {e}")),
+                    }
                 }
+                k += 1;
             }
-            k += 1;
+            let p = c.ok("probe", json!({"name": "sources"}));
+            println!(
+                "torn-frame [{fault} hwdec={hw}] pass {}: {:?}; worker {}; a {}; b {}",
+                passes.len() + 1,
+                seen.iter().map(Vec::len).collect::<Vec<_>>(),
+                p["render_worker"],
+                source_probe(&mut c, &a)["render"],
+                source_probe(&mut c, &b)["render"],
+            );
+            if passes.is_empty() {
+                let decoders =
+                    [&a, &b].map(|id| source_probe(&mut c, id)["mpv_hwdec_current"].clone());
+                println!("torn-frame [{fault} hwdec={hw}]: decoders {decoders:?}");
+            }
+            passes.push((targets, seen));
+            old = Some((a, b));
+            if (0..3).all(|i| distinct_playing(&passes, i) >= MIN_DISTINCT) || !bad.is_empty() {
+                break;
+            }
+            // The captures follow the playback (not one frame held throughout): a picture that
+            // never moves never gets there.
+            assert!(
+                t_all.elapsed() < Duration::from_secs(150),
+                "[{fault} hwdec={hw}] fewer than {MIN_DISTINCT} different frames per target in \
+                 {} passes: {:?}",
+                passes.len(),
+                passes.iter().map(|(_, s)| s).collect::<Vec<_>>()
+            );
         }
-        let distinct = |v: &Vec<u32>| {
-            let mut d = v.clone();
-            d.dedup();
-            d.len()
-        };
-        let p = c.ok("probe", json!({"name": "sources"}));
+        let total: usize = passes
+            .iter()
+            .map(|(_, s)| s.iter().map(Vec::len).sum::<usize>())
+            .sum();
         println!(
-            "torn-frame [{fault} hwdec={hw}]: {k} rounds; first/last {:?}; distinct {:?}; worker {}; a {}; b {}",
-            seen.iter()
-                .map(|v| (v.first().copied(), v.last().copied()))
-                .collect::<Vec<_>>(),
-            seen.iter().map(distinct).collect::<Vec<_>>(),
-            p["render_worker"],
-            source_probe(&mut c, &a)["render"],
-            source_probe(&mut c, &b)["render"],
+            "torn-frame [{fault} hwdec={hw}]: {k} rounds in {} pass(es), {:.1} s",
+            passes.len(),
+            t_all.elapsed().as_secs_f64()
         );
-        let decoders = [&a, &b].map(|id| source_probe(&mut c, id)["mpv_hwdec_current"].clone());
-        println!("torn-frame [{fault} hwdec={hw}]: decoders {decoders:?}");
         assert!(
             bad.is_empty(),
             "[{fault} hwdec={hw}] {} bad captures of {}: {:#?}",
             bad.len(),
-            seen.iter().map(Vec::len).sum::<usize>() + bad.len(),
+            total + bad.len(),
             &bad[..bad.len().min(20)]
         );
-        // The captures followed the playback (not one frame held throughout): at least half of
-        // the captures taken before the clip's last frame show a frame of their own. Relative
-        // to what was captured — a loaded machine captures fewer times in the window (a
-        // debug-build PNG encode per capture; seen: 25 rounds instead of 37), and a clip that
-        // reached its last frame holds it by design; an absolute count (20, 10) flaked there.
-        // Nor more than half the frames the clip crossed: a fast machine (or a release build)
-        // captures several times per frame — 472 rounds for 56 frames — and repeats are right.
-        for (i, v) in seen.iter().enumerate() {
-            let last = FLASH_FRAMES - 1;
-            let playing: Vec<u32> = v.iter().copied().filter(|&n| n < last).collect();
-            let crossed = match (playing.iter().min(), playing.iter().max()) {
-                (Some(lo), Some(hi)) => (hi - lo + 1) as usize,
-                _ => 0,
-            };
-            let want = (playing.len().min(crossed) / 2).max(5);
-            assert!(
-                distinct(&playing) >= want,
-                "[{fault} hwdec={hw}] {}: {v:?}",
-                targets[i]
-            );
-        }
+        println!(
+            "torn-frame [{fault} hwdec={hw}]: different frames before the last {:?}",
+            (0..3)
+                .map(|i| distinct_playing(&passes, i))
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -5612,13 +5711,16 @@ fn render_worker_quit_is_bounded() {
     std::thread::sleep(Duration::from_millis(15));
     let t = Instant::now();
     c.ok("quit", json!({}));
-    let st = srv
-        .wait_exit(Duration::from_secs(5))
-        .expect("quit with the worker on must exit");
+    let st = srv.wait_exit(QUIT_EXIT_GUARD);
     let took = t.elapsed();
-    println!("render worker quit: exit after {took:?}");
+    let (own, steps) = quit_timeline(&srv);
+    println!("render worker quit: exit after {took:?}, {own:.0} ms its own; {steps:?}");
+    let st = st.unwrap_or_else(|| panic!("quit with the worker on must exit: {steps:?}"));
     assert!(st.success(), "{st}");
-    assert!(took < Duration::from_secs(3), "quit took {took:?}");
+    assert!(
+        own < 3000.0,
+        "quit took {own:.0} ms (its final snapshot's write aside): {steps:?}"
+    );
     let log = std::fs::read_to_string(srv.path("state/liascape/liascape-player/events.jsonl")).unwrap();
     let stopped: Vec<&str> = log
         .lines()

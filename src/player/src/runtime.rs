@@ -3818,7 +3818,11 @@ impl Runtime {
         }
         // Every stream is gone: now the bus can go (nothing gets moved to the default sink).
         self.audio.close();
-        self.snap.writer.finish(); // the final snapshot is on disk
+        // The final snapshot is on disk: its fsync is the disk's time, not the player's (0.1–
+        // 11.8 s under heavy I/O), so `player.exit` reports it apart from the rest.
+        let t_snap = Instant::now();
+        self.snap.writer.finish();
+        let snapshot_wait_ms = t_snap.elapsed().as_secs_f64() * 1000.0;
         if let Some(tok) = self.snap.timer.take() {
             self.handle.remove(tok);
         }
@@ -3827,7 +3831,8 @@ impl Runtime {
             Level::Info,
             "player.exit",
             None,
-            json!({ "reaper_wait_ms": t.elapsed().as_secs_f64() * 1000.0 }),
+            json!({ "reaper_wait_ms": t.elapsed().as_secs_f64() * 1000.0,
+                    "snapshot_wait_ms": snapshot_wait_ms }),
         );
         self.flush_tap();
         for c in self.server.clients.values_mut() {
