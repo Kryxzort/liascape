@@ -12,7 +12,8 @@
 //   steam:row:steamcmd    a "steamcmd" download mode (dropped) saves and reads as "subscribe": its radio checked, the Steam
 //                         row, no steamcmd rows
 //   look:toggles          every Settings checkbox / radio is the themed control: dark when off, accent when on, the tick centred
-//                         (pixels); a click anywhere on a checkbox / radio row ticks it, a slider row's name doesn't
+//                         in its drawn box (pixel-centre.js); a click anywhere on a checkbox / radio row ticks it, a slider
+//                         row's name doesn't
 //                         (shots steam-toggles.png, steam-tick.png)
 //   steam:row:steamApp    the three download-mode radios (steamapp, steampage, subscribe): a click saves each, the
 //                         Steam app's note, the sign-in row only under subscribe
@@ -178,6 +179,7 @@ const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
+const PXC = require("./pixel-centre"); // a glyph centred in its own drawn box, in pixels
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -485,17 +487,20 @@ app.whenReady().then(async () => {
       const white = r.off.filter((c) => c.lum > 0.5);
       if (white.length) v.push(`${white.length} unchecked controls are light (e.g. ${white[0].bg})`);
       if (r.onBox[0] && r.onBox[0].lum < 0.05) v.push(`a ticked checkbox isn't filled (${r.onBox[0].bg})`);
-      // the tick's own pixels, centred in its box — a ticked box, captured
-      // at the device scale, the tick = pixels much darker than the accent fill around it
+      // the tick's own pixels, centred in its box as drawn (pixel-centre.js: the tick = what hiding it changes, the box = what
+      // hiding the whole checkbox changes, both in one capture's device pixels). Never against the layout box mapped into the
+      // capture: the matrix window's ratio isn't whole (~1.05), so the capture's origin and the box's edges round to device
+      // pixels on their own, and a centred tick reads about half a css px off, either side of a ½ px limit by chance.
+      // The tolerance is the ratio's resolution: ½ css px at a whole ratio, a device pixel at a fractional one.
       const box = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked);
-        if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+        if (!e) return null; e.setAttribute("data-tick-probe", ""); e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
       if (!box) v.push("no ticked checkbox in Settings to measure");
       else {
         // the box as drawn: Settings' sections cascade in (index.css ssection-in, up to ~1.4 s from the tab opening, later
         // sections last) and a section mounted late (GPU & memory, once the engine is known) starts its own, so a capture
         // taken on a timer can catch the box at opacity 0. Wait for every animation on it and its ancestors to finish, then
         // for a frame drawn after that.
-        const b2 = await page(`const e = [...document.querySelectorAll('.settings input[type=checkbox]')].find((x) => x.checked);
+        const b2 = await page(`const e = document.querySelector("[data-tick-probe]");
           for (let n = 0; n < 5; n++) {
             const run = [...e.getAnimations({ subtree: true })]; for (let x = e.parentElement; x; x = x.parentElement) run.push(...x.getAnimations());
             const fin = run.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity && a.playState !== "finished");
@@ -504,29 +509,16 @@ app.whenReady().then(async () => {
           }
           await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
           let op = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
-          const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, op };`);
-        const img = await win.webContents.capturePage({ x: Math.floor(b2.x), y: Math.floor(b2.y), width: Math.ceil(b2.w) + 1, height: Math.ceil(b2.h) + 1 });
-        const { width: W, height: H } = img.getSize(), px = img.toBitmap(); // BGRA
-        const sc = W / (Math.ceil(b2.w) + 1);
-        // the fill = the most common colour inside; tick pixels = far from it (≥ 120 in summed channel distance)
-        const at = (x, y) => { const i = (y * W + x) * 4; return [px[i], px[i + 1], px[i + 2]]; };
-        const inset = Math.round(3 * sc), fill = at(Math.round(W / 2), inset);
-        // the tick's BOUNDING box (what the eye holds against the box's edges — its centre of mass sits ~½ px low by shape:
-        // the long arm outweighs the short one)
-        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, sw = 0;
-        for (let y = inset; y < H - inset; y++) for (let x = inset; x < W - inset; x++) {
-          const c = at(x, y), d = Math.abs(c[0] - fill[0]) + Math.abs(c[1] - fill[1]) + Math.abs(c[2] - fill[2]);
-          if (d >= 200) { sw++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-        }
-        // box centre in captured pixels: the element starts at (b2.x − floor(b2.x)) inside the capture
-        const cx = ((b2.x - Math.floor(b2.x)) + b2.w / 2) * sc, cy = ((b2.y - Math.floor(b2.y)) + b2.h / 2) * sc;
-        const tx = sw ? (x0 + x1 + 1) / 2 : NaN, ty = sw ? (y0 + y1 + 1) / 2 : NaN;
-        const dx = (tx - cx) / sc, dy = (ty - cy) / sc;
-        console.log(`        tick's bounding box off the box centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px (${Math.round(sw)} tick px, scale ${sc.toFixed(2)})`);
-        fs.writeFileSync(path.join(OUT, "steam-tick.png"), img.resize({ width: W * 8, quality: "good" }).toPNG());
-        if (!sw) v.push(`no tick pixels found in a ticked box (drawn at opacity ${b2.op}, fill ${J(fill)})`);
-        // ±0.5 css px: at most half a pixel of rounding
-        else if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) v.push(`the tick is off-centre by (${dx.toFixed(2)}, ${dy.toFixed(2)}) css px`);
+          return { op, dpr: devicePixelRatio };`);
+        // against the box itself: its glow off (soft, and a transition would still run between the captures)
+        const r = await PXC.measure(win, { chip: "[data-tick-probe]", glyph: "[data-tick-probe]::after", png: path.join(OUT, "steam-tick.png"),
+          css: "[data-tick-probe], [data-tick-probe]::after { box-shadow: none !important; transition: none !important; }" });
+        // one device pixel at a fractional ratio, without PXC's allowance for a square chip drawn a row short: the tick's box
+        // is a checkbox's fill, and a row short moves its centre half a device pixel, well inside one
+        const tol = PXC.tolerance(null, b2.dpr);
+        console.log(`        the tick off its drawn box's centre by ${r.error ?? `(${r.dx.toFixed(2)}, ${r.dy.toFixed(2)}) css px (tick ${J(r.glyph)}, box ${J(r.box)} device px, ratio ${+b2.dpr.toFixed(3)}, ±${tol.toFixed(2)}, drawn at opacity ${b2.op})`}`);
+        v.push(...PXC.judge("the tick", r, tol));
+        await page(`document.querySelector("[data-tick-probe]")?.removeAttribute("data-tick-probe");`);
       }
       // a click anywhere on a checkbox / radio row ticks it: a real click on a
       // radio row's HINT text picks it, on a checkbox row's NAME flips it (twice: back); a slider row's name changes nothing

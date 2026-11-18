@@ -43,8 +43,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
        all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
        under that load); the printed `cards` count tells.
-91. [ ] Flaky probe: `probe-steam.js` `look:toggles` checks a tick's centring with a 0.5 px limit and measures 0.49–0.51
-       px on the same build (HEAD too). Fix the centring or the measurement (subpixel rounding), not just the limit.
 92. [ ] Flaky probe: `probe-libops.js` `libops:toggle` fails whenever it runs after `libops:backfill` in the same
        probe run (base 1aa78a41 too) and passes alone: a leftover from the backfill cell (a held queue, a pending
        clip, the progress line) leaks into it. Reset that state between cells or make the cell independent of it.

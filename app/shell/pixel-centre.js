@@ -19,8 +19,9 @@
 // Before measuring: settle what moves under the chip (pause a <video>, finish the icon's one-shots); a hover glow is part of
 // the chip's box — pass `css` that removes it (`box-shadow: none`) to measure against the ring itself, and hide anything
 // that overlaps the chip but isn't it (a pill sliding out from under it).
-// The technique comes from probe-steam look:dlCentre. Used by probe-sidebar look:iconCentre, probe-filters wf:emblem:centre
-// and probe-icons icon:centre:* (every icon chip on screen).
+// The technique comes from probe-steam look:dlCentre. Used by probe-sidebar look:iconCentre, probe-filters wf:emblem:centre,
+// probe-icons icon:centre:* (every icon chip on screen) and probe-steam look:toggles (a checkbox's tick: `glyph` may be the
+// chip's own `::after`).
 const fs = require("fs");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -38,7 +39,9 @@ async function once(win, { chip, glyph, css = "", png = null, pad = 6, glyphThre
     document.head.append(s); } s.textContent = ${J(text)}; return true; })()`);
   try {
     await setCss(css); await sleep(120);
-    const b = await wc.executeJavaScript(`(() => { const e = document.querySelector(${J(chip)}); if (!e || !e.querySelector(${J(glyph)}) && !document.querySelector(${J(glyph)})) return null;
+    // a glyph that is the chip's own pseudo-element (`<chip>::after`, a checkbox's tick) exists with its element
+    const el = glyph.replace(/::?(before|after)$/, "");
+    const b = await wc.executeJavaScript(`(() => { const e = document.querySelector(${J(chip)}); if (!e || !e.querySelector(${J(el)}) && !document.querySelector(${J(el)})) return null;
       const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
     if (!b) return { error: `no ${chip} / ${glyph}` };
     const rect = { x: Math.max(0, Math.floor(b.x) - pad), y: Math.max(0, Math.floor(b.y) - pad), width: Math.ceil(b.w) + 2 * pad + 1, height: Math.ceil(b.h) + 2 * pad + 1 };
