@@ -74,7 +74,10 @@ public class AppSettings
         get => _videoPreviewQuality;
         set => _videoPreviewQuality = value?.ToLowerInvariant() is "low" or "mid" or "high" ? value.ToLowerInvariant() : "mid";
     }
-    public bool Morphs { get; set; } = true;                 // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
+    // UI: "Play GIF previews as videos": a card's local .gif preview plays as a clip made from it (Web/ClipStore.cs, the same
+    // clips as a video preview's), which a window blur pauses on its frame (components/MotionThumb.tsx). Off = the gif itself.
+    public bool GifPreviewsAsVideo { get; set; } = false;
+    public bool Morphs { get; set; } = true;               // UI: card -> modal morph flights (off = a plain fade in place, useMorph.ts)
     public bool Glows { get; set; } = true;                  // UI: accent/state glow effects (off = <html class="no-glow">, index.css)
     public bool TextShadow { get; set; } = false;            // UI: a subtitle shadow on all text (on = <html class="text-shadow">, index.css)
     // UI: how much of Settings shows — basic | standard (default) | advanced | expert (.claude/rules/ui/state-and-api.md § Settings page). Hidden

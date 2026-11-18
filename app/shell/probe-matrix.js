@@ -2584,21 +2584,28 @@ C["clip:hoverHandoffNoMotion"] = { states: ["single"], noSwitch: true,
 // another tab and back. Out of sight, Chromium decodes none of its frames (counted in a trace: the gating that keeps a
 // backgrounded window's gifs from draining the decode threads). k1.gif (test-ui-matrix.sh) codes its frame index in its
 // colour: r = 40 + 4·i, g = 200 − 3·i, b = 90, 48 frames at 8 fps.
+// The pixel at k1's card's centre, or (`strip`) at the left end of its name strip, from a screenshot: null = not on screen
+async function k1Pixel(strip = false) {
+  const p = await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return null; const b = e.getBoundingClientRect();
+    return b.width > 8 && b.top >= 0 && b.bottom <= innerHeight ? { x: Math.round(${strip ? "b.x + 6" : "b.x + b.width / 2"}), y: Math.round(${strip ? "b.bottom - 22" : "b.y + b.height / 2"}) } : null;`);
+  if (!p) return null;
+  const img = await win.webContents.capturePage({ x: p.x - 2, y: p.y - 2, width: 4, height: 4 });
+  const s = img.getSize(), px = img.toBitmap(), i = ((s.height >> 1) * s.width + (s.width >> 1)) * 4;
+  return [px[i + 2], px[i + 1], px[i]]; // the bitmap is BGRA
+}
+// the k1.gif frame k1's card shows now: null = not on screen, -1 = not a k1.gif frame
+async function k1Frame() {
+  const c = await k1Pixel();
+  if (!c) return null;
+  const f = Math.round((c[0] - 40) / 4);
+  return f >= 0 && f < 48 && Math.abs(c[2] - 90) <= 8 && Math.abs(c[1] - (200 - 3 * f)) <= 10 ? f : -1;
+}
 C["appear:gifResume"] = { states: ["single"], noSwitch: true,
   // k1 only on its card: the playlist bar's copy would share its decodes
   async pre() { await post("/playlist/state", { videoPaths: [K[1], K[2], K[3]], settings: PS(), name: null }); },
   async run(c) {
     const send = (e) => win.webContents.sendInputEvent(e);
-    // the frame k1's card shows now (from a screenshot of its centre): null = not on screen, -1 = not a k1.gif frame
-    const frame = async () => {
-      const p = await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return null; const b = e.getBoundingClientRect();
-        return b.width > 8 && b.top >= 0 && b.bottom <= innerHeight ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null;`);
-      if (!p) return null;
-      const img = await win.webContents.capturePage({ x: p.x - 2, y: p.y - 2, width: 4, height: 4 });
-      const s = img.getSize(), px = img.toBitmap(), i = ((s.height >> 1) * s.width + (s.width >> 1)) * 4;
-      const f = Math.round((px[i + 2] - 40) / 4);
-      return f >= 0 && f < 48 && Math.abs(px[i] - 90) <= 8 && Math.abs(px[i + 1] - (200 - 3 * f)) <= 10 ? f : -1;
-    };
+    const frame = k1Frame;
     // wait for k1 to play into frames [lo, hi] (far from both the loop's start and its wrap)
     const playTo = async (lo, hi) => { let f = null; await waitFor(async () => { f = await frame(); return f >= lo && f <= hi; }, 9000, 60); return f; };
     // Chromium's own image decodes over `ms`, with a full garbage collection in the page in it when `collect` (Chromium
@@ -2667,6 +2674,115 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
       if (r.decodes > 2) v.push(`${n}: ${r.decodes} gif decodes while out of sight (none expected) ${J(r)}`);
       if (r.fetched) v.push(`${n}: k1's gif was fetched again ${r.fetched}× (its <img> left the page) ${J(r)}`);
     }
+    return v;
+  } };
+
+// "Play GIF previews as videos" (components/MotionThumb.tsx, the gif's clip from Web/ClipStore.cs): k1 playing unhovered
+// ("Not hovered": GIF first). Its Settings row on: Settings' preview card and then the Library's go from the gif to a <video>
+// of it with the gif on every frame until the video has one (never neither); the window inactive pauses the video on the
+// frame it shows (its time and the picture hold, and the name strip over it stays as it was) and active again it goes on from
+// that time, not from 0; off: the gif is back on the next frame. Per-frame samples of what the card shows.
+const GV_SAMPLE = (ms) => `(() => new Promise((res) => { const m = window.__mx, out = [], t0 = performance.now();
+  const step = () => { const w = m.card("k1")?.querySelector(".thumb-wrap"), v = w?.querySelector("video.thumb.anim[data-gif]");
+    const g = w && [...w.querySelectorAll("img.thumb.anim")].find((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
+    // a frame before the tab's page shows has no k1 card to judge: left out
+    if (w) out.push({ t: +(performance.now() - t0).toFixed(1), gif: !!g, vid: !!v && v.readyState >= 2, ct: v ? +v.currentTime.toFixed(3) : null, p: v ? v.paused : null });
+    if (performance.now() - t0 < ${ms}) requestAnimationFrame(step); else res(out); };
+  requestAnimationFrame(step); }))()`;
+const gvBlank = (sm) => sm.filter((x) => !x.gif && !x.vid).length;
+const GV_NOW = `(() => { const v = window.__mx.card("k1")?.querySelector(".thumb-wrap video.thumb.anim[data-gif]");
+  return v ? { ct: +v.currentTime.toFixed(3), p: v.paused, rs: v.readyState } : null; })()`;
+C["appear:gifVideo"] = { states: ["single"], noSwitch: true,
+  async pre() {
+    await post("/playlist/state", { videoPaths: [K[1], K[2], K[3]], settings: PS(), name: null });
+    await post("/settings", { previewNotHovered: ["gif", "image", "video"], gifPreviewsAsVideo: false });
+  },
+  async run(c) {
+
+    c.card = !!(await ui(`const e = m.card("k1")?.querySelector(".thumb-wrap"); if (!e) return false; e.scrollIntoView({ block: "center" }); await m.sleep(300); return true;`));
+    if (!c.card) return;
+    c.offGif = await waitFor(async () => { const s = await js(GV_SAMPLE(50)); return s.every((x) => x.gif && !x.vid); }, 8000, 150);
+    // for the record (no check): the name strip off, as the window goes inactive (the gif hides, the still shows)
+    await waitFor(async () => { const f = await k1Frame(); return f >= 10 && f <= 18; }, 9000, 60);
+    c.offStrip = [await k1Pixel(true)];
+    await js(`document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); true`);
+    await sleep(300);
+    c.offStrip.push(await k1Pixel(true));
+    await js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); true`);
+    await sleep(300);
+    // live, where it changes: its row, beside Settings' card preview (the real cards, components/CardPreview.tsx; the Library
+    // page is hidden meanwhile, so m.card finds the preview's k1): every frame from the click on, then the Library's k1 card
+    // from the frame the tab shows
+    const L = JSON.stringify("Play GIF previews as videos");
+    const toggle = (ms) => ui(`m.tab("Settings"); for (let i = 0; i < 50 && !m.row(${L}); i++) await m.sleep(100);
+      m.row(${L}).scrollIntoView({ block: "center" });
+      const gifUp = () => [...(m.card("k1")?.querySelectorAll("img.thumb.anim") ?? [])].some((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
+      const vidUp = () => (m.card("k1")?.querySelector("video.thumb.anim[data-gif]")?.readyState ?? 0) >= 2;
+      for (let i = 0; i < 80 && !gifUp() && !vidUp(); i++) await m.sleep(100);
+      await m.sleep(300);
+      const p = ${GV_SAMPLE(ms)}; await m.sleep(150); m.click(m.input(${L}), ${L}); return await p;`);
+    const toLibrary = (ms) => ui(`m.tab("Library"); return await ${GV_SAMPLE(ms)};`);
+    c.pvOn = await toggle(6000);
+    c.rowSaved = await waitFor(async () => (await getSettings()).gifPreviewsAsVideo === true, 4000, 100);
+    c.on = await toLibrary(6000);
+    c.playing = await waitFor(async () => { const a = await js(GV_NOW); await sleep(300); const b = await js(GV_NOW); return !!a && !!b && !b.p && b.ct !== a.ct; }, 8000, 100);
+    // the window inactive mid-loop: held on its frame; active again: on from there
+    // frames 10-18: far from frame 0 (what a still would show: its strip ≥ 24 levels off) and from the loop's wrap
+    c.mid = await waitFor(async () => { const f = await k1Frame(); return f >= 10 && f <= 18; }, 9000, 60);
+    c.stripActive = await k1Pixel(true);
+    await js(`document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); true`);
+    await sleep(150);
+    c.blur0 = { ...(await js(GV_NOW)), frame: await k1Frame() };
+    await sleep(1500);
+    c.blur1 = { ...(await js(GV_NOW)), frame: await k1Frame() };
+    c.stripInactive = await k1Pixel(true);
+    await js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); true`);
+    await sleep(400);
+    c.focus = await js(GV_NOW);
+    // off: the gif on the next frame, in the preview, then on the Library's card from its first frame
+    c.pvOff = await toggle(1500);
+    c.rowOff = await waitFor(async () => (await getSettings()).gifPreviewsAsVideo === false, 4000, 100);
+    c.off = await toLibrary(1500);
+    await post("/settings", { previewNotHovered: ["image", "gif", "video"] });
+  }, check(c) {
+    const v = [], J = JSON.stringify;
+    if (!c.card) return ["no k1 card on screen"];
+    // for the record: the name strip as the window goes inactive, off (the still replaces the gif) and on (the video holds)
+    console.log(`appear:gifVideo strip: off ${J(c.offStrip)}, on ${J([c.stripActive, c.stripInactive])}; paused ${J([c.blur0, c.blur1])}, resumed ${J(c.focus)}`);
+    if (!c.offGif) v.push("off: k1's card never showed its gif alone");
+    if (!c.rowSaved || !c.rowOff) v.push(`the Settings row "Play GIF previews as videos" didn't save it (on ${c.rowSaved}, off ${c.rowOff})`);
+    // on: the gif on every frame until the video's first, then the video alone; never neither
+    for (const [n, sm] of [["on, Settings' preview card", c.pvOn], ["on, the Library's card", c.on]]) {
+      const at = sm.findIndex((x) => x.vid);
+      if (at < 0) { v.push(`${n}: never showed a video of its gif in 6 s (${J(sm.slice(-3))})`); continue; }
+      if (!sm.slice(0, at).every((x) => x.gif)) v.push(`${n}: the gif wasn't there on every frame before the video's first (${J(sm.slice(0, at).filter((x) => !x.gif).slice(0, 3))})`);
+      if (gvBlank(sm)) v.push(`${n}: ${gvBlank(sm)} frame(s) with neither the gif nor the video ${J(sm.filter((x) => !x.gif && !x.vid).slice(0, 3))}`);
+      if (sm.slice(at + 10).some((x) => x.gif)) v.push(`${n}: the gif stayed shown under the playing video`);
+    }
+    if (!c.pvOn?.[0]?.gif || c.pvOn[0].vid) v.push(`on, Settings' preview card: it didn't start on its gif alone (${J(c.pvOn?.[0])}) — proved nothing`);
+    if (!c.playing) v.push("on: the gif's video never played");
+    const b0 = c.blur0, b1 = c.blur1;
+    if (!b0?.p || !b1?.p) v.push(`inactive: the video didn't pause (${J([b0, b1])})`);
+    else {
+      if (b1.ct !== b0.ct) v.push(`inactive: its time moved while paused ${b0.ct} → ${b1.ct}`);
+      if (!(b0.frame >= 0) || b1.frame !== b0.frame) v.push(`inactive: the picture changed while paused (frame ${b0.frame} → ${b1.frame})`);
+      if (!(b0.ct > 0.5)) v.push(`inactive: paused at ${b0.ct} s, not mid-loop — proved nothing`);
+    }
+    if (!c.mid) v.push("the video never played into frames 10-18 — the pause proved nothing");
+    // the frame or two it played between the two reads moves the strip by ≤ 5 levels (60 % of 4 per frame)
+    if (!c.stripActive || !c.stripInactive || c.stripActive.some((x, i) => Math.abs(x - c.stripInactive[i]) > 6))
+      v.push(`inactive: the name strip changed ${J(c.stripActive)} → ${J(c.stripInactive)}`);
+    const f = c.focus;
+    if (!f || f.p) v.push(`active again: the video didn't play on (${J(f)})`);
+    else if (!(f.ct > b1.ct && f.ct - b1.ct < 0.8)) v.push(`active again: at ${f.ct} s, not on from ${b1.ct} s (restarted or jumped)`);
+    // off: the video goes and the gif is there from the same frame on; the Library's card shows its gif from its first frame
+    if (!c.pvOff?.[0]?.vid) v.push(`off, Settings' preview card: no video before the click (${J(c.pvOff?.[0])}) — proved nothing`);
+    const offAt = c.pvOff.findIndex((x) => !x.vid);
+    if (offAt < 0) v.push("off, Settings' preview card: the video never went");
+    else if (!c.pvOff.slice(offAt).every((x) => x.gif)) v.push(`off, Settings' preview card: the gif wasn't back on every frame after the video went (${J(c.pvOff.slice(offAt).filter((x) => !x.gif).slice(0, 3))})`);
+    if (gvBlank(c.pvOff)) v.push(`off, Settings' preview card: ${gvBlank(c.pvOff)} frame(s) with neither`);
+    if (c.off.length < 20 || c.on.length < 20) v.push(`the Library's k1 card on ${c.off.length} / ${c.on.length} sampled frames — proved nothing`);
+    if (c.off.some((x) => x.vid || !x.gif)) v.push(`off, the Library's card: not its gif alone on every frame (${J(c.off.filter((x) => x.vid || !x.gif).slice(0, 3))})`);
     return v;
   } };
 

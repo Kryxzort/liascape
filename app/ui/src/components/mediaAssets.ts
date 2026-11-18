@@ -45,6 +45,19 @@ export const useHoverOrder = () => asOrder(useStore((s) => keyOf(s.settings?.pre
 // nothing plays by itself while the window is inactive (App.tsx appActive): no decode drain behind other windows
 export const useIdleOrder = () => asOrder(useStore((s) => (s.appActive ? keyOf(s.settings?.previewNotHovered, DEFAULT_NOT_HOVERED) : "image")));
 
+// "Not hovered" as it reads with the window active, whatever it is now: a gif preview played as a video stays on its paused
+// frame while the window is inactive (components/MotionThumb.tsx), so it needs the order the inactive window hides
+export const useIdleOrderActive = () => asOrder(useStore((s) => keyOf(s.settings?.previewNotHovered, DEFAULT_NOT_HOVERED)));
+
+// Settings → "Play GIF previews as videos" (`gifPreviewsAsVideo`): the local .gif this item's gif preview plays as a clip
+// made from it (the backend's Web/ClipStore.cs, the same clips as a video preview's), or null: the setting is off, the item
+// has no gif, or its animation is a remote url or an animated webp (they play as they are).
+export const useGifVideo = (item: LibraryItem): string | null => {
+  const on = useStore((s) => s.settings?.gifPreviewsAsVideo === true);
+  const a = item.animatedThumbnailPath;
+  return on && a && /\.gif$/i.test(a) && !/^https?:/i.test(a) ? a : null;
+};
+
 // What a library card / playlist-bar item shows hovered and not. Not hovered, a scene never plays a video (its clip isn't
 // made); hovered, a scene's video preview asset plays.
 export function usePreviewKinds(item: LibraryItem | undefined): { hoverKind: ThumbKind; idleKind: ThumbKind } {

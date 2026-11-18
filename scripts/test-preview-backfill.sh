@@ -10,6 +10,9 @@
 #  5. "On hover" reaches the gif: every gif is trimmed, live (no restart).
 #  6. "Not hovered" reaches the video: every item's clip at the card's box (after a restart the page reports it again),
 #     every ffmpeg niced (19); a hold mid-way stops the running encode and starts nothing more; released, the rest is made.
+#  7. "Play GIF previews as videos": off, no gif's clip was made; on (live), every gif's clip instead of its trimmed gif, a
+#     card asking for one gets it at once while the queue is held, the queue's niced; the black lead cut; after a restart
+#     nothing made again and the card gets the same clip; off again (live), the trimmed gifs come back, the clips stay.
 # Never touches ~/.config/liascape, ~/.cache or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-preview-backfill.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -173,6 +176,47 @@ check "9 clips, one each" "$(ls "$CD" | grep -c '_full\.mp4$')" 9
 check "every ffmpeg niced 19" "$(sort -u "$T/nice" | tr '\n' ' ')" "19 "
 check "the running encode was stopped by the hold (and made after)" "$(grep -c 'previews: stopped the clip of .*(game)' "$LOG")" 1
 check "no unfinished encode left" "$(ls "$CD" | grep -c '\.tmp$')" 0
+stopbe
+
+echo "== 7. \"Play GIF previews as videos\": each gif's clip instead of its trimmed gif, a card's first, niced, kept, live both ways"
+G() { echo "$LIB/imported/$1/$1.gif"; }
+gifclips() { local c=0 f; for f in "$CD"/*.src; do grep -q '\.gif$' "$f" && c=$((c + 1)); done; echo $c; }
+start run3; seen a
+check "off (steps 5-6): no gif's clip made" "$(gifclips)" 0
+rm -f "$PC"/*_trim.gif
+echo "test hold" > "$T/hold"
+settings '{"gifPreviewsAsVideo":true}'
+waitlog 'previews: .* item(s) to make (settings)' 1 10 || bad "no plan after the switch"
+check "on: every gif's clip missing, never its trimmed gif" "$(missing $ITEMS)" "a:gifclip b:gifclip c:gifclip d:gifclip e:gifclip f:gifclip g:gifclip h:gifclip x:"
+# a card asking makes its own at once, the queue held (a ≤ 10 s gif's full clip is as quick as a stand-in)
+r=$(api "$U/clip?path=$(uri "$(G a)")&w=400&h=240&q=low&info=1")
+check "a card's gif clip, made on its request while the queue is held" "$(jq -c '[.full, (.v != null)]' <<< "$r")" "[true,true]"
+check "a: nothing missing" "$(missing a)" "a:"
+check "the queue made nothing while held" "$(grep -c 'previews: made' "$LOG")" 0
+( for _ in $(seq 1 1200); do ps -eo ni=,args= | grep "[f]fmpeg .*$T" | awk '{print $1}'; sleep 0.05; done > "$T/nice7" ) & NP=$!
+rm -f "$T/hold"
+for _ in $(seq 1 300); do [ "$(missing $ITEMS)" = "$NONE" ] && break; sleep 0.2; done
+kill $NP 2>/dev/null; wait $NP 2>/dev/null
+check "every gif's clip made" "$(missing $ITEMS)" "$NONE"
+check "8 gif clips" "$(gifclips)" 8
+check "7 by the queue (a's was the card's)" "$(grep -c 'previews: made gif clip for' "$LOG")" 7
+check "the queue's ffmpeg niced 19" "$(sort -u "$T/nice7" | tr '\n' ' ')" "19 "
+check "no trimmed gif made while on" "$(ls "$PC" | grep -c '_trim\.gif$')" 0
+# the gif's 0.3 s fade-from-black is cut, as /anim's trim cuts it: the clip starts on a picture and runs ~1.5 s
+ac=$(ls -t "$CD"/*_full.mp4 | while read -r f; do b=$(basename "$f"); src=$(cat "$CD/${b%%_*}.src" 2>/dev/null); [ "$src" = "$(G a)" ] && { echo "$f"; break; }; done)
+y=$(ffmpeg -nostdin -hide_banner -i "$ac" -vf signalstats,metadata=print:key=lavfi.signalstats.YAVG -frames:v 1 -f null - 2>&1 | grep -o 'YAVG=[0-9.]*' | head -1 | cut -d= -f2)
+d=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$ac")
+if awk -v y="${y:-0}" -v d="${d:-0}" 'BEGIN { exit !(y > 30 && d > 1.3 && d < 1.65) }'; then ok "a's clip starts past the black (first frame Y $y, $d s)"
+else bad "a's clip: first frame Y ${y:-?}, ${d:-?} s (want > 30, 1.3-1.65 s: the black lead cut)"; fi
+stopbe; start run4; seen a
+sleep 5
+check "after a restart: nothing made again" "$(grep -c 'previews: made\|item(s) to make' "$LOG")" 0
+check "the card gets the same clip" "$(api "$U/clip?path=$(uri "$(G a)")&w=400&h=240&q=low&info=1" | jq -r .v)" "$(jq -r .v <<< "$r")"
+settings '{"gifPreviewsAsVideo":false}'
+for _ in $(seq 1 300); do [ "$(ls "$PC" | grep -c '_trim\.gif$')" -ge 8 ] && break; sleep 0.2; done
+check "off again, live: the 8 trimmed gifs made" "$(ls "$PC" | grep -c '_trim\.gif$')" 8
+check "off: nothing missing" "$(missing $ITEMS)" "$NONE"
+check "the gif clips stay (on again shows them at once)" "$(gifclips)" 8
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

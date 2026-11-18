@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
 import { useStore } from "../store";
-import { hasGifAsset, previewVideo, type ThumbKind } from "./mediaAssets";
+import { firstPreview, hasGifAsset, previewVideo, useGifVideo, useIdleOrderActive, type ThumbKind } from "./mediaAssets";
 import { PreviewPlayer } from "./PreviewPlayer";
 import { useBoxSize, useClipSrc } from "./clipSource";
+import { useAutoplayVideo } from "./autoplay";
 
 // PERF: a gif <img> that leaves the document makes its gif restart: once no <img> of it is left, the next garbage
 // collection drops the image, and the next <img> fetches it again and plays it from frame 0. So a gif stays mounted once
@@ -52,13 +53,31 @@ export function MotionThumb({ item, hover, hoverKind, idleKind, autoVideo = fals
   // alone, handed over from the clip at the same moment and back again (components/PreviewPlayer.tsx). The clip is asked
   // for only while "Not hovered" shows the video: nothing else makes one.
   const boxRef = useRef<HTMLImageElement>(null);
-  const box = useBoxSize(boxRef, autoVideo && !!vid);
+  // COOL: Settings → "Play GIF previews as videos": the gif this card would show plays as a clip made from it, the same
+  // clips as a video preview's (sized to this box, "Video preview quality", made once and kept: Web/ClipStore.cs). Unlike a
+  // gif it can stop on its frame: while the window is inactive (or a hovered video covers it) it holds the frame it shows
+  // and goes on from it after, where a gif can only hide (the still shows) and come back elsewhere in its loop. Paused, it
+  // decodes nothing. The gif shows until the video's first frame (never an empty card) and comes back at once when the
+  // setting goes off: it stays mounted, hidden (keepHidden). On screen only, like any playing preview.
+  // Guard: matrix appear:gifVideo.
+  const gifVid = useGifVideo(item);
+  const active = useStore((s) => s.appActive);
+  const idleOrder = useIdleOrderActive();
+  const idleOn = firstPreview(idleOrder, { video: !!vid && !item.isScene, gif });
+  const gvWant = !!gifVid && (hover ? hoverKind === "gif" || (hoverKind === "video" && idleOn === "gif") : idleOn === "gif");
+  const gvSeen = useAutoplayVideo(boxRef, gvWant);
+  const [gvShown, setGvShown] = useState(false);
+  // a card the inactive window didn't show playing stays as it is (its still) until the window is back
+  const gvOn = gvWant && gvSeen && (active || gvShown);
+  if (!gvOn && gvShown) setGvShown(false);
+  const box = useBoxSize(boxRef, (autoVideo && !!vid) || (gvWant && gvSeen));
   const { src: clipSrc, retry: retryClip } = useClipSrc(autoVideo ? vid : null, box);
+  const { src: gvSrc, retry: retryGv } = useClipSrc(gvOn ? gifVid : null, box);
   const realSrc = vid && hover && hoverKind === "video" ? media(vid) : null;
   const videoSrc = realSrc ?? (vid && autoVideo && shown === "video" ? clipSrc : null);
   // a gif that plays unhovered stays shown under the hovered video: it never restarts, and nothing but the gif shows until
-  // the video's first frame
-  const showGif = gif && (shown === "gif" || (hover && hoverKind === "video" && idleKind === "gif"));
+  // the video's first frame. It steps aside once its own video shows.
+  const showGif = gif && !gvShown && (shown === "gif" || (hover && hoverKind === "video" && idleKind === "gif"));
   // the gif this card has shown (kept mounted, hidden, while it shouldn't play — keepHidden above)
   const [heldGif, setHeldGif] = useState<string | null>(null);
   if (showGif && heldGif !== anim) setHeldGif(anim!);
@@ -79,6 +98,8 @@ export function MotionThumb({ item, hover, hoverKind, idleKind, autoVideo = fals
         <img className="thumb anim" src={animUrl(anim!)} decoding="async" alt=""
           style={{ backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center", visibility: showGif ? undefined : "hidden" }} />
       )}
+      {gvOn && gvSrc && <PreviewPlayer src={gvSrc} real={false} gif paused={!active || !!realSrc} onError={retryGv}
+        onShown={() => setGvShown(true)} />}
       {videoSrc && <PreviewPlayer src={videoSrc} real={videoSrc === realSrc} onError={realSrc ? undefined : retryClip} />}
     </>
   );

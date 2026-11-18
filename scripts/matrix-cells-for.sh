@@ -106,9 +106,9 @@ for f in $FILES; do
     app/ui/src/components/mediaAssets.ts|app/ui/src/components/autoplay.ts|app/ui/src/components/OrderList.tsx)
       add "appear|clip:|$CARD" "$f (+ --probe probe-cardpreview.js — cardpv:preset, cardpv:order, cardpv:orderCtl)" ;;
     # the preview clips: the backend's store, the card's clip and its hand-overs
-    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f (+ --probe probe-cardpreview.js; ClipStore: bash scripts/test-clip-sweep.sh, --probe probe-libops.js)" ;;
+    app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:(video|gifVideo)|clip:" "$f (+ --probe probe-cardpreview.js; ClipStore: bash scripts/test-clip-sweep.sh, --probe probe-libops.js)" ;;
     # the previews made ahead of their cards (the backend's queue on ClipStore's worker, the page's report of what is on screen)
-    src/backend/Web/PreviewBackfill.cs|app/ui/src/components/previewQueue.ts) add "appear:(previewOrder|gifResume)\$|cardApply\$" "$f (+ bash scripts/test-preview-backfill.sh, --probe probe-libops.js libops:backfill)" ;;
+    src/backend/Web/PreviewBackfill.cs|app/ui/src/components/previewQueue.ts) add "appear:(previewOrder|gifResume|gifVideo)\$|cardApply\$" "$f (+ bash scripts/test-preview-backfill.sh, --probe probe-libops.js libops:backfill)" ;;
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
     app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;

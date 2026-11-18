@@ -565,6 +565,8 @@ export const Settings = memo(function Settings() {
         <Row label="Video preview quality" hint="scales with card size. Higher quality gives sharper, smoother clips but uses more storage and processing." rk="videoPreviewQuality">
           <Segmented<ClipQuality> label="Video preview quality" value={g<ClipQuality>("videoPreviewQuality", "mid")} onChange={(v) => set("videoPreviewQuality", v)}
             options={(["low", "mid", "high"] as const).map((v) => ({ value: v, label: QUALITY_LABEL[v] }))} /></Row>
+        <Row label="Play GIF previews as videos" hint="smaller, pauses with the window. Made once per GIF." rk="gifPreviewsAsVideo">
+          <input type="checkbox" checked={g("gifPreviewsAsVideo", false)} onChange={(e) => set("gifPreviewsAsVideo", e.target.checked)} /></Row>
         </div>
         <Row label="Wallpaper behind every tab" hint="shows the live wallpaper behind Browse and Library too" rk="liveWallpaperBehindAllTabs"><input type="checkbox" checked={g("liveWallpaperBehindAllTabs", false)} onChange={(e) => set("liveWallpaperBehindAllTabs", e.target.checked)} /></Row>
       </Section>

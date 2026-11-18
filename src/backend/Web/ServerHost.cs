@@ -219,14 +219,8 @@ public static class ServerHost
         await File.WriteAllBytesAsync(tmp, data);
         try
         {
-            double ss = 0;
-            // blackdetect → stderr lines: "black_start:0 black_end:0.4 ..."
-            var det = RunFfmpeg(["-hide_banner", "-i", tmp, "-vf", "blackdetect=d=0.03:pix_th=0.10", "-an", "-f", "null", "-"], background);
-            var m = _blackRe.Match(det);
-            if (m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture, out var bs)
-                && bs < 0.15 && double.TryParse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture, out var be))
-                ss = be;
-            if (ss > 0.02)
+            double ss = LeadingBlack(tmp, background);
+            if (ss > 0)
             {
                 RunFfmpeg(["-y", "-ss", ss.ToString(System.Globalization.CultureInfo.InvariantCulture), "-i", tmp,
                     "-vf", "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", "-loop", "0", outPath], background);
@@ -235,6 +229,23 @@ public static class ServerHost
         }
         catch { }
         try { File.Move(tmp, outPath, true); } catch { try { await File.WriteAllBytesAsync(outPath, data); File.Delete(tmp); } catch { } }
+    }
+
+    // Where a gif's leading fade-from-black ends (s), or 0 without one. Shared with the gif previews played as videos
+    // (ClipStore.cs), which cut the same lead so their loop has no black seam either.
+    internal static double LeadingBlack(string gif, bool background)
+    {
+        try
+        {
+            // blackdetect → stderr lines: "black_start:0 black_end:0.4 ..."
+            var det = RunFfmpeg(["-hide_banner", "-i", gif, "-vf", "blackdetect=d=0.03:pix_th=0.10", "-an", "-f", "null", "-"], background);
+            var m = _blackRe.Match(det);
+            if (m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture, out var bs)
+                && bs < 0.15 && double.TryParse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture, out var be) && be > 0.02)
+                return be;
+        }
+        catch { }
+        return 0;
     }
 
     // A non-black/white STILL for the card thumbnail (so a card whose gif isn't playing doesn't show the gif's
@@ -507,7 +518,8 @@ public static class ServerHost
             if (prev.VideoPreviewQuality != s.VideoPreviewQuality) ClipStore.QualityChanged(s.VideoPreviewQuality);
             // what every card shows changed: the previews made ahead of the cards follow it (planned off this thread)
             if (prev.VideoPreviewQuality != s.VideoPreviewQuality || !prev.PreviewOnHover.SequenceEqual(s.PreviewOnHover)
-                || !prev.PreviewNotHovered.SequenceEqual(s.PreviewNotHovered)) PreviewBackfill.Kick("settings");
+                || !prev.PreviewNotHovered.SequenceEqual(s.PreviewNotHovered) || prev.GifPreviewsAsVideo != s.GifPreviewsAsVideo)
+                PreviewBackfill.Kick("settings");
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFpsCap, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
             if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }

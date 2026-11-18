@@ -26,10 +26,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        found first ("12 videos, 3 scenes, 2 already in your library", each ticked) before anything lands. Settings lists
        watched folders: new or changed files picked up live, removed ones leave the library. Link or copy per folder
        (the choice WE auto-import already has).
-82. [ ] (owner) Play GIF previews as converted videos — a setting, default off: each gif preview is transcoded once
-       (ffmpeg, cached beside the preview cache) to a small video, which pauses on window blur and resumes on the same frame,
-       decodes in hardware, and is smaller. Off = today's gif. The screenshot-freeze trial was tried and dropped (owner:
-       "the gif freeze sucks").
 81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
        hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
 67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist

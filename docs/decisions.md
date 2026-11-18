@@ -188,12 +188,12 @@ makes panels and menus pop. Hover holds and pointer feedback just stay still; hi
 stand still but the spinner. Enforced: `.claude/rules/ui/design.md` § Motion off; the motion-off probe cells
 (`app/shell/motion-off.js`).
 
-### Let a hidden gif preview keep its own clock; don't resume it on a canvas — 2026-11-12
-A gif preview that goes out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and
-undecoded, and shows again at the frame Chromium's clock for it is on, as if it had played meanwhile; never from frame 0.
-Resuming at the exact frame it stopped on needs our own ImageDecoder-to-canvas player: 40 gifs cost about twice the
-renderer CPU of Chromium's gif animation (67–74 % vs 35 % of a core), ~400 MB more, and 22 % of the main thread when drawn
-there. Guard: matrix `appear:gifResume`; `.claude/rules/ui/design.md` § Performance.
+### Let a hidden gif preview keep its own clock; hold its frame only as a video — 2026-11-18
+A gif preview out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and undecoded,
+and comes back where Chromium's clock for it is, never at frame 0. Holding its frame on a canvas needs our own ImageDecoder
+player (40 gifs: twice the renderer CPU, ~400 MB more); a frozen screenshot was dropped ("the gif freeze sucks"). Only "Play
+GIF previews as videos" (off by default) holds it: the gif plays as its clip, paused while the window is inactive.
+Guard: matrix `appear:gifResume`, `appear:gifVideo`; `.claude/rules/ui/design.md` § Performance.
 
 ### Play every on-screen video preview, each as a small clip — 2026-11-18
 Every video preview on screen plays a clip the backend makes (`Web/ClipStore.cs`), never the wallpaper's file (it holds one

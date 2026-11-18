@@ -33,6 +33,8 @@ namespace Liascape.Web;
 //     /clip/shrink`), never for a card on screen.
 //   - always at exactly the quality Settings names, up AND down (a lower one frees its space): a change settles first, then
 //     the sweep re-makes the whole library (§ the library follows "Video preview quality").
+//   - a card's local .gif preview, under "Play GIF previews as videos", is a source like a video: its clips are made, sized,
+//     kept and removed the same way (Lead cuts its fade-from-black).
 //   - a replaced file goes after GRACE, so a card still playing it can hand over to the new one first.
 //   - deleted with its library item (trash, delete, clear) and at start-up when its source is gone; clips of items outside
 //     the library (Browse's Wallpaper Engine folder) share a size-capped LRU (OUTSIDE_CAP).
@@ -121,6 +123,14 @@ public static class ClipStore
         }
         catch { return null; }
     });
+
+    // A gif preview played as a video ("Play GIF previews as videos", AppSettings.GifPreviewsAsVideo) is a clip like any other,
+    // made from the .gif: it starts where the gif's leading fade-from-black ends, as /anim's trimmed gif does
+    // (ServerHost.LeadingBlack), or its loop flashes black. Looked for once per version of the file; a video has none.
+    private static readonly ConcurrentDictionary<string, double> _lead = new();
+    private static double Lead(string path, string stamp, bool background) =>
+        !path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ? 0
+            : _lead.GetOrAdd(path + "|" + stamp, _ => ServerHost.LeadingBlack(path, background));
 
     // the clip width a box of boxW × boxH device pixels needs (object-fit: cover of the source's shape), snapped up to WIDTHS,
     // never wider than the source
@@ -254,11 +264,13 @@ public static class ClipStore
     private static string NameFor(string item, string stamp, int w, int q, bool full) => $"{item}_{stamp}_{w}_{q}_{(full ? "full" : "short")}.mp4";
 
     // ---- encoding ---------------------------------------------------------------------------------------------------------
-    private static List<string> Args(string src, string dst, int seconds, int w, int q)
+    // `lead`: the seconds cut from the start (Lead: a gif's fade-from-black)
+    private static List<string> Args(string src, string dst, int seconds, int w, int q, double lead)
     {
         var (_, fps, crf, _) = QUALITY[q];
         var ci = CultureInfo.InvariantCulture;
-        return ["-nostdin", "-hide_banner", "-loglevel", "error", "-t", seconds.ToString(ci), "-i", src,
+        string[] seek = lead > 0 ? ["-ss", lead.ToString("0.###", ci)] : [];
+        return ["-nostdin", "-hide_banner", "-loglevel", "error", .. seek, "-t", seconds.ToString(ci), "-i", src,
             "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", $"scale={w.ToString(ci)}:-2",
             // -fpsmax caps a faster source without padding a slower one with duplicate frames (each one still a decode)
             "-fpsmax", fps.ToString(ci), "-c:v", "libx264", "-preset", "veryfast", "-crf", crf.ToString(ci),
@@ -290,6 +302,14 @@ public static class ClipStore
         try { return new FileInfo(dst).Length > 0; } catch { return false; }
     }
 
+    // `tmp` becomes `dst` unless `dst` appeared meanwhile (the same clip made by a card's request and the worker at once): a
+    // card may be playing that one, and a file replaced under a playing <video> breaks it mid-play. False: it was there.
+    private static bool Publish(string tmp, string dst)
+    {
+        try { File.Move(tmp, dst, false); return true; }
+        catch (IOException) when (File.Exists(dst)) { try { File.Delete(tmp); } catch { } return false; }
+    }
+
     // stand-ins (and the full clip of a video no longer than one) are made on the request: a card waits for them. A cap of
     // a quarter of the cores (2–4): x264 already threads each encode — measured on 24 cores, 8 stand-ins (10 s, 480 px):
     // 1 at a time 3.0 s, 2 2.1 s, 4 1.9 s, 6 2.0 s, 8 1.9 s; more at once only adds CPU contention
@@ -308,10 +328,11 @@ public static class ClipStore
                 var dst = Path.Combine(Dir, name);
                 if (!File.Exists(dst))
                 {
-                    var tmp = dst + ".tmp";
+                    // its own temporary: the worker may encode the same clip at once (a short source's full clip, ahead of its card)
+                    var tmp = dst + ".now.tmp";
                     // PERF: a scroll onto new cards makes several at once; below normal priority they yield to the UI's frames
-                    if (Encode(Args(path, tmp, full ? CAP_SECONDS : SHORT_SECONDS, w, q), tmp, false, TimeSpan.FromSeconds(60), CancellationToken.None))
-                        File.Move(tmp, dst, true);
+                    if (Encode(Args(path, tmp, full ? CAP_SECONDS : SHORT_SECONDS, w, q, Lead(path, stamp, false)), tmp, false, TimeSpan.FromSeconds(60), CancellationToken.None))
+                        Publish(tmp, dst);
                     else try { File.Delete(tmp); } catch { }
                 }
                 if (!File.Exists(dst)) return null;
@@ -481,7 +502,7 @@ public static class ClipStore
         var tmp = dst + ".tmp";
         var t0 = Stopwatch.StartNew();
         // a 5 min clip from a 4K source takes about a minute niced on an idle machine; past this something is wrong
-        if (Encode(Args(j.Path, tmp, CAP_SECONDS, w, j.Q), tmp, true, TimeSpan.FromMinutes(20), ct))
+        if (Encode(Args(j.Path, tmp, CAP_SECONDS, w, j.Q, Lead(j.Path, stamp, true)), tmp, true, TimeSpan.FromMinutes(20), ct))
         {
             File.Move(tmp, dst, true);
             WriteSrc(j.Item, j.Path);
@@ -534,12 +555,12 @@ public static class ClipStore
         var dst = Path.Combine(Dir, name);
         var tmp = dst + ".tmp";
         var t0 = Stopwatch.StartNew();
-        if (!Encode(Args(path, tmp, CAP_SECONDS, w, q), tmp, true, TimeSpan.FromMinutes(20), ct))
+        if (!Encode(Args(path, tmp, CAP_SECONDS, w, q, Lead(path, stamp, true)), tmp, true, TimeSpan.FromMinutes(20), ct))
         {
             try { File.Delete(tmp); } catch { }
             return ct.IsCancellationRequested ? BackfillClip.Stopped : BackfillClip.Failed;
         }
-        File.Move(tmp, dst, true);
+        if (!Publish(tmp, dst)) return BackfillClip.Had;
         WriteSrc(item, path);
         Console.WriteLine($"clips: made {w} px {QUALITY[q].Name} ({new FileInfo(dst).Length / 1024} KB, {t0.Elapsed.TotalSeconds:0.0} s) for {Path.GetFileName(path)} ahead of its card");
         Superseded(item, name);

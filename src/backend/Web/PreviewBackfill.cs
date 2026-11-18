@@ -18,8 +18,9 @@ namespace Liascape.Web;
 //   - what: exactly what the card would show with the user's "On hover" / "Not hovered" orders
 //     (app/ui/src/components/mediaAssets.ts usePreviewKinds, ported in Kinds): its still at the card's width (always: every
 //     card shows it), its trimmed gif (when an order reaches the gif before the image), its video preview clip (when "Not
-//     hovered" reaches the video: at the card's box, which the page reports, and "Video preview quality"). A change of
-//     either order or the quality plans again at once (Kick from POST /settings).
+//     hovered" reaches the video: at the card's box, which the page reports, and "Video preview quality"). Under "Play GIF
+//     previews as videos" a local .gif's clip (ClipStore, at the same box and quality) instead of its trimmed gif: GifClip.
+//     A change of either order, the quality or that switch plans again at once (Kick from POST /settings).
 //   - where it runs: ClipStore's background worker, one job at a time, behind the cards' own clips, their stand-ins, every
 //     /still or /anim a card waits for (ServerHost.CardWaits) and the quality sweep. Every ffmpeg under `nice -n 19 ionice -c3`.
 //   - the order: the item open in the sidebar, then the cards on screen (POST /previews/seen), then the Library's own order
@@ -38,7 +39,9 @@ namespace Liascape.Web;
 // Guard: scripts/test-preview-backfill.sh; --probe probe-libops.js libops:backfill.
 public static class PreviewBackfill
 {
-    [Flags] public enum Kind { None = 0, Still = 1, Gif = 2, Clip = 4 }
+    // GifClip: the clip of the gif (`Todo.Gif`), Clip: the clip of the video (`Todo.Video`)
+    [Flags] public enum Kind { None = 0, Still = 1, Gif = 2, Clip = 4, GifClip = 8 }
+    private const Kind Clips = Kind.Clip | Kind.GifClip;
     // an item's missing previews and the files they come from
     public sealed record Todo(string Path, Kind Kinds, string? Still, string? Gif, string? Video);
     public enum Result { Done, Stopped }
@@ -121,7 +124,7 @@ public static class PreviewBackfill
         if (cached > ServerHost.PREVIEW_CACHE_CAP * 3 / 4 && list.Any(t => (t.Kinds & (Kind.Still | Kind.Gif)) != 0))
         {
             Console.WriteLine($"previews: the preview cache holds {cached / 1048576} MB: no more stills or gifs ahead of their cards");
-            list = list.Select(t => t with { Kinds = t.Kinds & Kind.Clip }).Where(t => t.Kinds != Kind.None).ToList();
+            list = list.Select(t => t with { Kinds = t.Kinds & Clips }).Where(t => t.Kinds != Kind.None).ToList();
         }
         int n;
         lock (_lock)
@@ -157,9 +160,17 @@ public static class PreviewBackfill
         string? video = PreviewVideo(it);
         var hover = FirstPreview(s.PreviewOnHover, video != null, gif);
         var idle = FirstPreview(s.PreviewNotHovered, video != null && !it.IsScene, gif);
-        // only a .gif is trimmed (/anim); an animated webp plays as it is
+        // only a .gif is trimmed (/anim) or played as a video; an animated webp plays as it is
         string? g = gif && (hover == "gif" || idle == "gif") && anim!.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ? Usable(anim) : null;
-        if (g != null && !File.Exists(ServerHost.LocalTrimFile(g)))
+        if (g != null && s.GifPreviewsAsVideo)
+        {
+            // its clip, the card's box known (components/MotionThumb.tsx plays it; the gif only until it exists)
+            if (boxKnown && !clips.Contains(ClipStore.ClipKey(g)))
+            {
+                if (Failed(fails, Kind.GifClip, g)) failed |= Kind.GifClip; else k |= Kind.GifClip;
+            }
+        }
+        else if (g != null && !File.Exists(ServerHost.LocalTrimFile(g)))
         {
             if (Failed(fails, Kind.Gif, g)) failed |= Kind.Gif; else k |= Kind.Gif;
         }
@@ -242,27 +253,36 @@ public static class PreviewBackfill
             if (!File.Exists(f)) try { ServerHost.MakeLocalTrim(t.Gif, background: true).GetAwaiter().GetResult(); } catch { }
             if (File.Exists(f)) made.Add("gif"); else Fail(Kind.Gif, t.Gif);
         }
-        if ((t.Kinds & Kind.Clip) != 0 && t.Video != null)
+        // the clips: the gif's (short, quick) first, then the video's
+        var left = t.Kinds & Clips;
+        foreach (var (kind, file) in new[] { (Kind.GifClip, t.Gif), (Kind.Clip, t.Video) })
         {
-            (int W, int H)? box; lock (_lock) box = _box;
-            if (box is { } b)
-            {
-                int q = ClipStore.ParseQuality(SettingsService.Load().VideoPreviewQuality);
-                // a hold that comes while the clip encodes (a game starting) stops it: it goes back in the queue
-                using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                using var watch = new Timer(_ => { if (RefreshHold() != null) try { stop.Cancel(); } catch (ObjectDisposedException) { } },
-                    null, HOLD_POLL, HOLD_POLL);
-                var r = ClipStore.MakeBackfillClip(t.Video, b.W, b.H, q < 0 ? 1 : q, stop.Token);
-                if (r == ClipStore.BackfillClip.Stopped)
-                {
-                    Console.WriteLine($"previews: stopped the clip of {Path.GetFileName(t.Video)} ({(ct.IsCancellationRequested ? "the quality changed" : _held ?? "stopped")})");
-                    // what is made stays made; the clip is all that's left
-                    return Finish(t with { Kinds = Kind.Clip }, Result.Stopped, made);
-                }
-                if (r == ClipStore.BackfillClip.Failed) Fail(Kind.Clip, t.Video); else made.Add("clip");
-            }
+            if ((t.Kinds & kind) == 0) continue;
+            if (file != null && MakeClip(kind, file, ct, made) == Result.Stopped)
+                // what is made stays made; the clips not made yet are all that's left
+                return Finish(t with { Kinds = left }, Result.Stopped, made);
+            left &= ~kind;
         }
         return Finish(t, Result.Done, made);
+    }
+    private static Result MakeClip(Kind kind, string file, CancellationToken ct, List<string> made)
+    {
+        (int W, int H)? box; lock (_lock) box = _box;
+        if (box is not { } b) return Result.Done;
+        int q = ClipStore.ParseQuality(SettingsService.Load().VideoPreviewQuality);
+        // a hold that comes while the clip encodes (a game starting) stops it: it goes back in the queue
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var watch = new Timer(_ => { if (RefreshHold() != null) try { stop.Cancel(); } catch (ObjectDisposedException) { } },
+            null, HOLD_POLL, HOLD_POLL);
+        var r = ClipStore.MakeBackfillClip(file, b.W, b.H, q < 0 ? 1 : q, stop.Token);
+        if (r == ClipStore.BackfillClip.Stopped)
+        {
+            Console.WriteLine($"previews: stopped the clip of {Path.GetFileName(file)} ({(ct.IsCancellationRequested ? "the quality changed" : _held ?? "stopped")})");
+            return Result.Stopped;
+        }
+        // Had: a card's own request made it meanwhile, nothing made here
+        if (r == ClipStore.BackfillClip.Failed) Fail(kind, file); else if (r == ClipStore.BackfillClip.Made) made.Add(kind == Kind.GifClip ? "gif clip" : "clip");
+        return Result.Done;
     }
     private static Result Finish(Todo t, Result r, List<string> made)
     {
@@ -307,7 +327,7 @@ public static class PreviewBackfill
         {
             bool boxKnown; lock (_lock) boxKnown = _box != null;
             var t = Missing(it, SettingsService.Load(), boxKnown, ClipStore.FullClipKeys(), Failures(), out var failed);
-            static List<string> Names(Kind k) => [.. new[] { Kind.Still, Kind.Gif, Kind.Clip }.Where(x => (k & x) != 0).Select(x => x.ToString().ToLowerInvariant())];
+            static List<string> Names(Kind k) => [.. new[] { Kind.Still, Kind.Gif, Kind.Clip, Kind.GifClip }.Where(x => (k & x) != 0).Select(x => x.ToString().ToLowerInvariant())];
             item = new { missing = Names(t.Kinds), failed = Names(failed) };
         }
         lock (_lock)

@@ -244,7 +244,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 500, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
   autoThrottleScenes: true, sceneSpareWorker: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop",
-  thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", glows: true, textShadow: false, morphs: true,
+  thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", gifPreviewsAsVideo: false, glows: true, textShadow: false, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],
   workshopDownloadMode: "subscribe",
   theme: "Catppuccin Mocha",

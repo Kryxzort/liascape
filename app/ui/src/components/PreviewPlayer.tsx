@@ -19,13 +19,14 @@ function useReleaseOnUnmount(ref: React.RefObject<HTMLVideoElement | null>) {
     return () => { if (v) { v.removeAttribute("src"); v.load(); } };
   }, [ref]);
 }
-function Layer({ src, shown, vref, onError, onFrame }: { src: string; shown: boolean; vref: (v: HTMLVideoElement | null) => void;
-  onError?: () => void; onFrame?: () => void }) {
+function Layer({ src, shown, play, gif, vref, onError, onFrame }: { src: string; shown: boolean; play: boolean; gif?: boolean;
+  vref: (v: HTMLVideoElement | null) => void; onError?: () => void; onFrame?: () => void }) {
   const ref = useRef<HTMLVideoElement>(null);
   useReleaseOnUnmount(ref);
   const set = (v: HTMLVideoElement | null) => { ref.current = v; vref(v); };
   // the incoming layer isn't `.anim` (what the page and its probes read as the card's video) and sits under the shown one
-  return <video ref={set} className={shown ? "thumb anim" : "thumb"} src={src} muted loop autoPlay={shown} playsInline preload="auto"
+  return <video ref={set} className={shown ? "thumb anim" : "thumb"} data-gif={gif ? "" : undefined} src={src} muted loop autoPlay={play}
+    playsInline preload="auto"
     style={shown ? undefined : { position: "absolute", inset: 0 }} onError={onError} onLoadedData={onFrame} />;
 }
 
@@ -34,7 +35,11 @@ function Layer({ src, shown, vref, onError, onFrame }: { src: string; shown: boo
 const seekCost = { real: 0.15, clip: 0.02 };
 const FRAME = 1 / 30; // the clips' coarsest frame step (Low is 24 fps: a frame and a half of tolerance covers it)
 
-export function PreviewPlayer({ src, real, onError }: { src: string; real: boolean; onError?: () => void }) {
+// `paused`: hold on the frame it shows (a gif preview played as a video while the window is inactive, or under the hovered
+// card's video: components/MotionThumb.tsx); unpaused it goes on from that frame. A new source waits until it plays again: a
+// hand-over meets a moving video. `gif`: marks its <video> (`data-gif`) for the probes. `onShown`: a frame of it is on screen.
+export function PreviewPlayer({ src, real, paused = false, gif, onError, onShown }:
+  { src: string; real: boolean; paused?: boolean; gif?: boolean; onError?: () => void; onShown?: () => void }) {
   const motion = useMotion();
   const [shownSrc, setShownSrc] = useState(src);
   const [next, setNext] = useState<{ src: string; real: boolean } | null>(null);
@@ -43,10 +48,22 @@ export function PreviewPlayer({ src, real, onError }: { src: string; real: boole
   const cur = useRef<HTMLVideoElement | null>(null);
   const inc = useRef<HTMLVideoElement | null>(null);
   // a new source: hand over to it (or, motion off or nothing shown yet, swap at once); back to what shows: drop the hand-over
-  if (src !== shownSrc && next?.src !== src) {
+  if (paused) { if (next) setNext(null); }
+  else if (src !== shownSrc && next?.src !== src) {
     if (!motion || !curReady) { setShownSrc(src); setCurReady(false); if (next) setNext(null); }
     else setNext({ src, real });
   } else if (src === shownSrc && next) setNext(null);
+  // held or playing; unheld it goes on from its own frame (autoPlay only starts a fresh one). Guard: matrix appear:gifVideo
+  const held = useRef(false);
+  useEffect(() => {
+    const v = cur.current;
+    if (!v) return;
+    if (paused) { held.current = true; v.pause(); }
+    else if (held.current) { held.current = false; void v.play().catch(() => {}); }
+  }, [paused, shownSrc]);
+  const shownCb = useRef(onShown);
+  useEffect(() => { shownCb.current = onShown; });
+  useEffect(() => { if (curReady) shownCb.current?.(); }, [curReady, shownSrc]);
 
   useEffect(() => {
     if (!next) return;
@@ -105,9 +122,10 @@ export function PreviewPlayer({ src, real, onError }: { src: string; real: boole
 
   return (
     <>
-      {next && <Layer key={next.src} src={next.src} shown={false} vref={(v) => { inc.current = v; }}
+      {next && <Layer key={next.src} src={next.src} shown={false} play={false} gif={gif} vref={(v) => { inc.current = v; }}
         onError={() => { setNext(null); if (!next.real) onError?.(); }} />}
-      <Layer key={shownSrc} src={shownSrc} shown vref={(v) => { cur.current = v; }} onError={onError} onFrame={() => setCurReady(true)} />
+      <Layer key={shownSrc} src={shownSrc} shown play={!paused} gif={gif} vref={(v) => { cur.current = v; }} onError={onError}
+        onFrame={() => setCurReady(true)} />
     </>
   );
 }
