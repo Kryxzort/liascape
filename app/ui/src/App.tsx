@@ -1,7 +1,7 @@
-import { Activity, memo, useCallback, useDeferredValue, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { Activity, memo, useCallback, useDeferredValue, useEffect, useState, lazy, Suspense } from "react";
 import { LEVELS, LEVEL_LABEL, levelOf } from "./settingsLevel";
 import { LayoutGroup } from "framer-motion";
-import { Square, Undo2, Upload } from "lucide-react";
+import { Square, Undo2 } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
 import { useStableFn } from "./hooks/useStableFn";
 import { useStore } from "./store";
@@ -23,6 +23,7 @@ import LibraryOpsLine from "./components/LibraryOpsLine";
 import { TopbarStatus } from "./components/TopbarStatus";
 import { TopbarSearch } from "./components/TopbarSearch";
 import { BrowseLocate, LocateButton } from "./components/LocateButton";
+import { ImportButton, ImportDrop } from "./components/ImportButton";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
@@ -37,6 +38,7 @@ const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").
 const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
 const SteamTodoPanel = lazy(() => import("./components/SteamTodoPanel").then((m) => ({ default: m.SteamTodoPanel })));
 const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ default: m.ErrorModal })));
+const ImportDialog = lazy(() => import("./components/ImportDialog").then((m) => ({ default: m.ImportDialog })));
 const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m.DebugHud })));
 
 type Tab = "browse" | "library" | "settings";
@@ -47,7 +49,7 @@ const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Sc
 export default function App() {
   // PERF: only what App reads (useShallow: the store's actions are stable, so the state fields decide), never the whole
   // store: a Library filter change or a selection re-rendered App and its top bar's ~30 icons. Guard: probe-filters lib:interplay
-  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, importFile: st.importFile, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setUnsub: st.setUnsub, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort })));
+  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setUnsub: st.setUnsub, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort })));
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
   const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
@@ -86,7 +88,6 @@ export default function App() {
   if (tab === "library" && !libKept) setLibKept(true);
   const showInLibrary = useStableFn((p: string) => { s.focusLib(p); setTab("library"); });
   const showInBrowse = useStableFn(() => setTab("browse"));
-  const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
   useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/liascape/freeze.log (catches the wedge)
@@ -203,13 +204,6 @@ export default function App() {
       if (a.pending && a instanceof CSSAnimation && a.effect?.getTiming().iterations !== Infinity) a.finish();
   }, [motion]);
 
-  // Library-tab Import (parity: library action lives here, not buried in Settings).
-  const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] as (File & { path?: string }) | undefined;
-    if (f?.path) s.importFile(f.path, f.name.replace(/\.[^.]+$/, ""));
-    e.target.value = "";
-  };
-
   const src = s.sources[s.activeSource];
   const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);
   return (
@@ -259,9 +253,8 @@ export default function App() {
             <LocateButton target="library" label="Go to the playing wallpaper" disabled={!s.playingPath}
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
               onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }} />
-            <button className="btn ghost ico" aria-label="Import" title={narrow ? "Import" : undefined} onClick={() => importRef.current?.click()}><Upload size={14} /><span className="tb-label">Import</span></button>
-            <input ref={importRef} type="file" accept=".mp4,.webm,.mov,.mkv,.avi,.gif,.png,.jpg,.jpeg,.webp"
-              style={{ display: "none" }} onChange={onImportFile} />
+            {/* Import: a folder (right-click: files), shown in the import dialog before anything lands */}
+            <ImportButton narrow={narrow} />
             <TopbarSearch placeholder="Search library…" value={s.libQuery} onChange={s.setLibQuery} />
             <SortFilterButton page="library" scope={s.libraryItems.length ? "library" : null}
               sort={{ value: String(s.libSort), options: SORTS, onChange: (v) => s.setLibSort(+v) }} />
@@ -287,8 +280,10 @@ export default function App() {
         <DrainToast />
         <SteamTodoPanel />
         <ErrorModal />
+        <ImportDialog />
         <DebugHud setTab={(t) => setTab(t as Tab)} getScroll={() => document.querySelector<HTMLElement>(".scroll")} />
       </Suspense>
+      <ImportDrop />
     </div>
   );
 }

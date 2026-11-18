@@ -53,4 +53,6 @@ public class LibraryItem
     // Steam's servers said they have no public item with its id (removed, private: LibMeta.TagsCheckedAt): nothing to
     // subscribe to
     public bool OffWorkshop { get; init; }
+    // the watched folder that brought it in (LibMeta.WatchedFrom): Settings counts each folder's wallpapers by it
+    public string? WatchedFrom { get; init; }
 }

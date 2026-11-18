@@ -509,25 +509,36 @@ public static class LibraryService
             // see PlayerHelper.IsScenePath); VIDEO/IMAGE = folder holding a media file. local/<id> is a
             // symlink, still a directory entry. Scene-ness: the index flag, else project.json type / scene.pkg.
             foreach (var itemDir in SafeDirs(dir))
-            {
-                var key = Path.GetFileName(itemDir);
-                var m = idx.GetValueOrDefault(key);
-                if ((m?.IsScene ?? false) || IsSceneFolder(itemDir))
-                {
-                    // the library's own copy of a scene: a `workshop/<id>` download, or a `local/<id>` that is no longer a link
-                    // (KeepOwnCopy) — Steam's folder for it may be gone
-                    bool owned = source == LibraryStore.Workshop || (source == LibraryStore.Local && !IsSymlink(itemDir));
-                    items.Add(Build(itemDir, key, m, isScene: true, assetDir: itemDir, workshopId: key,
-                        copiedSceneDir: owned ? itemDir : null));
-                    continue;
-                }
-                var media = ResolveItemMedia(itemDir, key, imported: source == LibraryStore.Imported);
-                if (media == null) continue;
-                if (!File.Exists(media)) { if (m == null) TryDeleteDir(itemDir); continue; } // dangling symlink
-                items.Add(Build(media, key, m, isScene: false, itemDir));
-            }
+                if (BuildItem(source, itemDir, idx.GetValueOrDefault(Path.GetFileName(itemDir))) is { } item) items.Add(item);
         }
         return items;
+    }
+
+    // one item as LoadAll lists it (null: not in the library, or its media is gone)
+    public static LibraryItem? LoadOne(string source, string key)
+    {
+        var itemDir = Path.Combine(LibraryStore.SourceDir(source), key);
+        if (!Directory.Exists(itemDir)) return null;
+        return BuildItem(source, itemDir, LibraryStore.LoadIndex(source).GetValueOrDefault(key));
+    }
+
+    private static LibraryItem? BuildItem(string source, string itemDir, LibMeta? m)
+    {
+        var key = Path.GetFileName(itemDir);
+        if ((m?.IsScene ?? false) || IsSceneFolder(itemDir))
+        {
+            // the library's own copy of a scene: a `workshop/<id>` download, a `local/<id>` that is no longer a link
+            // (KeepOwnCopy) — Steam's folder for it may be gone — or an imported Wallpaper Engine folder (its own copy, or a link
+            // to the user's folder: revealed as the item's folder, which the file manager follows)
+            bool owned = source is LibraryStore.Workshop or LibraryStore.Imported || (source == LibraryStore.Local && !IsSymlink(itemDir));
+            // the folder name is a Workshop id only under workshop/ and local/; an imported folder's id is its index entry's
+            return Build(itemDir, key, m, isScene: true, assetDir: itemDir,
+                workshopId: source is LibraryStore.Workshop or LibraryStore.Local ? key : null, copiedSceneDir: owned ? itemDir : null);
+        }
+        var media = ResolveItemMedia(itemDir, key, imported: source == LibraryStore.Imported);
+        if (media == null) return null;
+        if (!File.Exists(media)) { if (m == null) TryDeleteDir(itemDir); return null; } // dangling symlink
+        return Build(media, key, m, isScene: false, itemDir);
     }
 
     // A workshop/local folder is a scene when project.json says type=scene (authoritative when present),
@@ -612,6 +623,7 @@ public static class LibraryService
             AuthorName = m.AuthorName, Description = m.Description, FileSizeBytes = m.FileSizeBytes, DiskBytes = m.DiskBytes,
             Subscriptions = m.Subscriptions, Favorites = m.Favorites, Tags = tags,
             OffWorkshop = steamTags == null && m.TagsCheckedAt != null,
+            WatchedFrom = m.WatchedFrom,
         };
     }
 
@@ -895,7 +907,7 @@ public static class LibraryService
     }
 
     // a folder's files by content, its sub-folders recursively; a linked sub-folder stays a link (following one could loop)
-    private static void CopyTree(string src, string dest)
+    internal static void CopyTree(string src, string dest)
     {
         Directory.CreateDirectory(dest);
         foreach (var file in Directory.GetFiles(src))
@@ -956,10 +968,10 @@ public static class LibraryService
     {
         var loc = LibraryStore.Locate(item.VideoPath);
         if (loc == null) return;
-        // scene → the folder IS VideoPath; video → its parent. Directory.Delete unlinks a local/ symlink
-        // without touching the WE target (verified on .NET 9: recursive delete of a symlinked dir unlinks).
+        // scene → the folder IS VideoPath; video → its parent. A `local/<id>` or an imported folder may be a link into the
+        // user's own folder: TryDeleteDir unlinks it, never touching what it points to.
         var assetDir = item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath)!;
-        try { if (Directory.Exists(assetDir)) Directory.Delete(assetDir, recursive: true); } catch { }
+        if (Directory.Exists(assetDir) || IsSymlink(assetDir)) TryDeleteDir(assetDir); // a link whose target is gone too
         LibraryStore.Remove(item.VideoPath);
     }
 
@@ -978,7 +990,13 @@ public static class LibraryService
     { try { return Directory.GetDirectories(dir); } catch { return Array.Empty<string>(); } }
     private static IEnumerable<string> SafeFiles(string dir, string pat)
     { try { return Directory.GetFiles(dir, pat); } catch { return Array.Empty<string>(); } }
-    private static void TryDeleteDir(string dir) { try { Directory.Delete(dir, recursive: true); } catch { } }
+    // A link is unlinked (File.Delete never follows one), never deleted through: a library folder that links to the user's
+    // own folder (local/<id>, an imported Wallpaper Engine folder) must leave every file there. Guard:
+    // scripts/test-folder-import.sh § delete
+    internal static void TryDeleteDir(string dir)
+    {
+        try { if (IsSymlink(dir)) File.Delete(dir); else Directory.Delete(dir, recursive: true); } catch { }
+    }
 
     internal static bool IsSymlink(string path)
     { try { return new FileInfo(path).LinkTarget != null || new DirectoryInfo(path).LinkTarget != null; } catch { return false; } }

@@ -25,12 +25,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
        seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
        progress-bar area is needed or the status bar can carry it.
-86. [ ] (owner) Import folders, once or watched — one scanner for both: a folder with a project.json = one Wallpaper
-       Engine item (scene or video); loose videos / gifs / images = one wallpaper each; subfolders scanned the same way
-       (a backed-up Workshop folder imports every item). Import (button or a folder dropped on the window) shows what it
-       found first ("12 videos, 3 scenes, 2 already in your library", each ticked) before anything lands. Settings lists
-       watched folders: new or changed files picked up live, removed ones leave the library. Link or copy per folder
-       (the choice WE auto-import already has).
 81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
        hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
 67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist
@@ -80,7 +74,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).
       The same web player then serves Lively Wallpaper's web wallpapers (next item).
 - [ ] **Lively Wallpaper wallpapers** (owner): import Lively's shared packages — a `.zip` or folder with
-      `LivelyInfo.json` at its root (title, type, file name, preview) — through Import and the folder import (#86); no
+      `LivelyInfo.json` at its root (title, type, file name, preview) — through Import and the folder import (`Helpers/FolderScanner.cs`); no
       Browse source (Lively has no central catalogue; the look-alike "Lively" gallery sites aren't the project's).
       Video / gif / stream types play with what exists. Web type (HTML/WebGL, Lively's richest wallpapers; it has no
       scene format) needs the web player above: map `LivelyProperties.json` (slider, textbox, dropdown, colour, checkbox,

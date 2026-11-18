@@ -13,6 +13,7 @@ namespace Liascape.Web;
 //   facts  LibraryFactsOps: Steam's tags (phase steam), trailer pages (trailers), frame sizes (sizes)
 //   scene-loudness  SceneLoudnessOps' queue (phase measure)
 //   video-loudness  LibraryService.BackfillLoudnessAsync, the library's videos not yet measured (phase measure)
+//   import  FolderImportOps: a folder import's ticked items and a watched folder's new ones landing (phase import)
 // WS `library-ops {ops: [{id, phase, done, total}]}` carries the whole list on every change: a start, a phase change and an
 // end at once, a count at most every EVERY (a frame-size pass reads dozens of files a second). GET /library/ops: the same
 // list, for a page that (re)connects mid-operation (store.resync). Guard: scripts/test-clip-sweep.sh, --probe probe-libops.js.

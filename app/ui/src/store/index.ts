@@ -141,6 +141,9 @@ interface State {
   // statusPlaying: `status` is the persistent now-playing line (refreshPlayingStatus), not a message (setStatus) — the top
   // bar's slot lets a running library operation show over the first, never over the second (components/TopbarStatus.tsx)
   status: string; statusPlaying: boolean; error: string | null;
+  // the import dialog (components/ImportDialog.tsx): what it scans (picked or dropped paths) and whether the folder is
+  // offered as watched from the start (Settings' "Add folder"); null = closed. A new object = a new scan.
+  importAt: { paths: string[]; watch: boolean } | null;
   // the item sidebar (WE-style): the focused Library item's path / Browse
   // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
   // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
@@ -196,7 +199,7 @@ interface State {
   // settings
   setSetting(key: string, value: unknown): void; mergeSettings(p: Record<string, unknown>): void;
   clearLibrary(): Promise<void>; clearCache(ids: string[]): Promise<{ categories: CacheCleared[]; freedBytes: number; count: number } | null>;
-  importFile(path: string, title: string): Promise<void>;
+  openImport(paths: string[], watch?: boolean): void; closeImport(): void;
   // steam / workshop
   loadSteam(): Promise<void>; startQr(): Promise<void>; cancelQr(): Promise<void>; signoutSteam(): Promise<void>;
   deleteFromSource(items: LibraryItem[]): Promise<void>;
@@ -295,7 +298,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
-  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, wallpaperPaused: false, status: "", statusPlaying: true, error: null,
+  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -600,10 +603,8 @@ export const useStore = create<State>((set, get) => ({
     try { const r = await api.clearCache(ids); get().setStatus(`Cache cleared — freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB (${r.count} files)`); return r; }
     catch { get().setStatus("Failed to clear cache"); return null; }
   },
-  async importFile(path, title) {
-    try { await api.importFile(path, title); await get().loadLibrary(); get().setStatus(`Imported: ${title}`); }
-    catch (e) { get().setStatus(`Import failed: ${(e as Error).message}`); }
-  },
+  openImport(paths, watch = false) { set({ importAt: { paths, watch } }); },
+  closeImport() { set({ importAt: null }); },
 
   // ---- steam / workshop ----
   async loadSteam() { set({ steam: await api.steamStatus() }); },

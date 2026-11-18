@@ -119,17 +119,22 @@ app.on("web-contents-created", (_e, wc) => {
   wc.on("will-attach-webview", (e) => e.preventDefault());
 });
 
-// Native folder picker for Settings (the Wallpaper Engine folder) — only for the app's own page.
-// Each one opens where the last pick was made: without a defaultPath Electron opens Downloads every time.
+// Native folder picker (Settings' folders, the Library's Import) — only for the app's own page. `kind` "files": wallpaper
+// files instead (the Import's right-click), several at once → their paths. Each one opens where the last pick was made:
+// without a defaultPath Electron opens Downloads every time.
 let lastPickDir = null;
-ipcMain.handle("liascape:pick", async (e) => {
+const MEDIA_EXTS = ["mp4", "webm", "mov", "mkv", "avi", "m4v", "gif", "png", "jpg", "jpeg", "webp"];
+ipcMain.handle("liascape:pick", async (e, kind) => {
   if (!isAppUrl(e.senderFrame?.url ?? "")) return null;
+  const files = kind === "files";
   const r = await dialog.showOpenDialog({
-    properties: ["openDirectory"], ...(lastPickDir ? { defaultPath: lastPickDir } : {}),
+    properties: files ? ["openFile", "multiSelections"] : ["openDirectory"],
+    ...(files ? { filters: [{ name: "Wallpapers", extensions: MEDIA_EXTS }] } : {}),
+    ...(lastPickDir ? { defaultPath: lastPickDir } : {}),
   });
   if (r.canceled || !r.filePaths.length) return null;
   lastPickDir = path.dirname(r.filePaths[0]);
-  return r.filePaths[0];
+  return files ? r.filePaths : r.filePaths[0];
 });
 
 // Chromium restarts a GPU process that dies; log each one (a run of them is the NVIDIA crash-loop above)

@@ -58,6 +58,11 @@ for f in $FILES; do
     # the library's Steam tags / trailers / frame sizes: the filter column's data
     src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:'; the size on disk: --probe probe-steam.js --only lib:ws:size; its progress: --probe probe-libops.js)" >&2 ;;
     scripts/agent-window.sh|scripts/bench-live-ui.mjs|app/shell/cdp.js|app/shell/drive.js) echo "  $f → nothing (the agent window and its drivers — run: bash scripts/agent-window.sh up)" >&2 ;;
+    # folder import and watched folders: their own script + probe (the matrix imports single files through /library/import)
+    src/backend/Helpers/FolderScanner.cs|src/backend/Web/FolderImportOps.cs|src/backend/Web/FolderWatch.cs|src/backend/Models/WatchedFolder.cs|scripts/test-folder-import.sh)
+      echo "  $f → nothing in the matrix (bash scripts/test-folder-import.sh + --probe probe-import.js)" >&2 ;;
+    app/ui/src/components/ImportDialog.tsx|app/ui/src/components/ImportButton.tsx|app/ui/src/components/importPick.ts)
+      echo "  $f → nothing in the matrix (--probe probe-import.js; the top bar's widths: --probe probe-layout.js resize:)" >&2 ;;
     src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
     src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET|cover|plStart|parked|expert" "$f" ;;
@@ -135,7 +140,7 @@ for f in $FILES; do
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts|app/ui/src/components/SortFilterButton.tsx|app/ui/src/hooks/filterMorph.ts)
       echo "  $f → nothing in the matrix (run LIASCAPE_MATRIX_SCREEN=2560x1440 scripts/test-ui-matrix.sh --probe probe-filters.js; probe-layout.js resize:)" >&2 ;;
-    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js|app/shell/probe-icons.js|app/shell/probe-steam.js|app/shell/probe-settings.js)
+    app/shell/probe-filters.js|app/shell/probe-sidebar.js|app/shell/probe-plbar.js|app/shell/probe-layout.js|app/shell/probe-preview.js|app/shell/probe-plmenu.js|app/shell/probe.js|app/shell/probe-health.js|app/shell/probe-expert.js|app/shell/probe-select.js|app/shell/probe-icons.js|app/shell/probe-steam.js|app/shell/probe-settings.js|app/shell/probe-import.js)
       echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     app/shell/probe-matrix.js)
       # the cells whose definitions the diff touches: each changed line's enclosing top-level statement must

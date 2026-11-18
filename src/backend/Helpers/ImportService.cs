@@ -9,8 +9,11 @@ using Liascape.Models;
 
 namespace Liascape.Helpers;
 
-// Imports a user-provided video into imported/<name>/: copies the file, generates a thumbnail
-// with ffmpeg, and records it in the source index so re-imports dedupe.
+// Imports a user-provided video, gif or picture into imported/<name>/ (a copy of the file, or a link to it), or a Wallpaper
+// Engine item folder as imported/<name> itself (a copy of the folder, or a link to it); generates a video's or picture's
+// thumbnail with ffmpeg and records the source in the index (SourceUrl "import:<path>") so a re-import is the same item.
+// A link is the user's own file seen in place: deleting the item removes only the link (LibraryService.Delete), never the
+// file. Guard: scripts/test-item-actions.sh § import, scripts/test-folder-import.sh
 public static class ImportService
 {
     // Serialize the filename-selection + copy/move + index-write critical
@@ -20,14 +23,18 @@ public static class ImportService
     // inside the helper itself makes the contract self-contained.
     private static readonly SemaphoreSlim _importLock = new(1, 1);
 
-    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
+    public static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp"];
 
     private static bool IsImage(string path) =>
         ImageExtensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
-    public static async Task<LibraryItem?> ImportAsync(string sourcePath, string title)
+    // `link`: the item's media is a link to the source instead of a copy (a picture that isn't a png is still converted: the
+    // library finds a still as <key>.png). A re-import keeps the form the item has (a copy stays a copy). `meta` sets more of
+    // the item's index entry in the same write (a watched folder's mark).
+    public static async Task<LibraryItem?> ImportAsync(string sourcePath, string title, bool link = false, Action<LibMeta>? meta = null)
     {
         if (!File.Exists(sourcePath)) return null;
+        sourcePath = Path.GetFullPath(sourcePath);
         var importedDir = LibraryStore.SourceDir(LibraryStore.Imported);
         Directory.CreateDirectory(importedDir);
 
@@ -65,6 +72,12 @@ public static class ImportService
                 try { var ok = await RunFfmpegAsync("-y", "-i", sourcePath, "-frames:v", "1", tmp); if (!ok || !File.Exists(tmp)) throw new Exception("image conversion failed"); File.Move(tmp, videoPath, overwrite: true); }
                 catch { try { File.Delete(tmp); } catch { } throw; }
             }
+            else if (!samePath && (File.Exists(videoPath) ? LibraryService.IsSymlink(videoPath) : link))
+            {
+                var tmp = $"{videoPath}.{Guid.NewGuid():N}.tmp";
+                try { File.CreateSymbolicLink(tmp, sourcePath); File.Move(tmp, videoPath, overwrite: true); }
+                catch { try { File.Delete(tmp); } catch { } throw; }
+            }
             else if (!samePath)
             {
                 var tmp = $"{videoPath}.{Guid.NewGuid():N}.tmp";
@@ -72,7 +85,7 @@ public static class ImportService
                 catch { try { File.Delete(tmp); } catch { } throw; }
             }
             // write the index entry before the slow thumbnail extraction so a concurrent LoadAll sees it
-            LibraryStore.SetMeta(videoPath, m => { m.Title = key; m.SourceUrl = sourceId; });
+            LibraryStore.SetMeta(videoPath, m => { m.Title = key; m.SourceUrl = sourceId; meta?.Invoke(m); });
         }
         finally { _importLock.Release(); }
 
@@ -85,6 +98,59 @@ public static class ImportService
             ThumbnailPath = File.Exists(thumbPath) ? thumbPath : null,
             SourceId = sourceId,
         };
+    }
+
+    // A Wallpaper Engine item folder (a scene, or a video with its project.json) → imported/<key>: a link to the folder, or a
+    // copy made in a staging folder under the trash (purged at start and close) and swapped in, so a copy cut short never
+    // shows. A re-import keeps the form the item has; a copy is made again (the folder changed). null when the folder is no
+    // such item any more.
+    public static async Task<LibraryItem?> ImportFolderAsync(FolderScanner.Found f, bool link, Action<LibMeta>? meta = null)
+    {
+        if (!f.Folder || !Directory.Exists(f.Path)) return null;
+        var src = Path.GetFullPath(f.Path);
+        var sourceId = FolderScanner.ImportPrefix + src;
+        var importedDir = LibraryStore.SourceDir(LibraryStore.Imported);
+        Directory.CreateDirectory(importedDir);
+        string key;
+        await _importLock.WaitAsync();
+        try
+        {
+            var idx = LibraryStore.LoadIndex(LibraryStore.Imported);
+            key = idx.FirstOrDefault(kv => kv.Value.SourceUrl == sourceId).Key
+                  ?? UniqueImportedKey(importedDir, SanitizeName(f.Title) is { Length: > 0 } t ? t : "imported");
+            var dest = Path.Combine(importedDir, key);
+            bool exists = Directory.Exists(dest) || File.Exists(dest);
+            if (exists ? LibraryService.IsSymlink(dest) : link)
+            {
+                if (!exists) File.CreateSymbolicLink(dest, src);
+            }
+            else
+            {
+                var stage = Path.Combine(LibraryService.TrashPath, "import-" + Guid.NewGuid().ToString("N")[..8]);
+                Directory.CreateDirectory(LibraryService.TrashPath);
+                try { await Task.Run(() => LibraryService.CopyTree(src, stage)); }
+                catch { LibraryService.TryDeleteDir(stage); throw; }
+                if (exists)
+                {
+                    var old = stage + "-old";
+                    Directory.Move(dest, old);
+                    try { Directory.Move(stage, dest); } catch { Directory.Move(old, dest); LibraryService.TryDeleteDir(stage); throw; }
+                    LibraryService.TryDeleteDir(old);
+                }
+                else Directory.Move(stage, dest);
+            }
+            bool scene = f.Kind == "scene";
+            LibraryStore.UpdateIndex(LibraryStore.Imported, i =>
+            {
+                var m = i.GetValueOrDefault(key) ?? new LibMeta();
+                m.Title = f.Title; m.SourceUrl = sourceId; m.IsScene = scene; m.WorkshopId = f.WorkshopId;
+                meta?.Invoke(m);
+                i[key] = m;
+                return true;
+            });
+        }
+        finally { _importLock.Release(); }
+        return LibraryService.LoadOne(LibraryStore.Imported, key);
     }
 
     private static string UniqueImportedKey(string importedDir, string baseTitle)

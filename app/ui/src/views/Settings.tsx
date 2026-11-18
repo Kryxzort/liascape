@@ -2,10 +2,11 @@ import { isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState
 import {
   X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
-  Film, ImagePlay, Image as ImageIcon,
+  Film, ImagePlay, Image as ImageIcon, FolderSync,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
-import { api, type FeatureHealth, type ClipQuality } from "../api/client";
+import { api, type FeatureHealth, type ClipQuality, type WatchedFolder } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Segmented } from "../components/Segmented";
@@ -23,7 +24,8 @@ import { WarnIcon } from "../components/FeatureWarn";
 import { HealthCtx, healthWarnings } from "../components/featureHealth";
 import { CopyButton } from "../components/CopyButton";
 import { MuteButton } from "../components/MuteButton";
-import { useMotion } from "../components/motion";
+import { useMotion, useFadeOff } from "../components/motion";
+import { importFolder } from "../components/importPick";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
@@ -165,6 +167,56 @@ function CachePicker() {
         <button className="btn ghost" data-cache-clear disabled={!canClear} onClick={clear}>Clear selected</button>
       </div>
     </div>
+  );
+}
+
+// Settings → Watched folders (AppSettings.WatchedFolders, backend-owned: edited through /library/watched, never by the settings
+// save): a row per folder, its path, how many wallpapers it brought in, its own "Copy files instead of linking" (the
+// Workshop folder's wording; it applies to what the folder imports from then on) and a remove that stops the watching (what it
+// brought in stays). "Add folder" picks one and opens the import dialog with "Keep watching" ticked: the folder's wallpapers
+// are shown before anything lands. Rows glide in and out (motion off: they fade). Guard: --probe probe-import.js import:settings*
+function WatchedFolders() {
+  const folders = useStore((s) => (s.settings?.watchedFolders as WatchedFolder[] | undefined) ?? []);
+  const items = useStore((s) => s.libraryItems);
+  const mergeSettings = useStore((s) => s.mergeSettings);
+  const fadeOff = useFadeOff();
+  const motionOn = useMotion();
+  const counts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of items) if (i.watchedFrom) m.set(i.watchedFrom, (m.get(i.watchedFrom) ?? 0) + 1);
+    return m;
+  }, [items]);
+  // API: the backend broadcasts settings-changed {watchedFolders}; the page shows the edit at once
+  const edit = (path: string, change: { copy?: boolean; remove?: boolean }) => {
+    mergeSettings({ watchedFolders: change.remove ? folders.filter((w) => w.path !== path) : folders.map((w) => w.path === path ? { ...w, ...change } : w) });
+    api.editWatched({ path, ...change }).catch(() => {});
+  };
+  return (
+    <Section title="Watched folders" icon={<FolderSync size={15} />} bare>
+      <Help>New or changed files in these folders come into your library by themselves, and removed ones leave it.</Help>
+      <AnimatePresence initial={false}>
+        {folders.map((w) => {
+          const c = counts.get(w.path) ?? 0;
+          return (
+            <motion.div key={w.path} className="srow watched-row" data-watched={w.path} layout={motionOn ? "position" : false}
+              {...fadeOff({ initial: { opacity: 0, y: -6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.2 } })}>
+              <div className="slabel">
+                <span className="slabel-row watched-path" title={w.path}>{w.path}</span>
+                <span className="shint">{c === 1 ? "1 wallpaper" : `${c} wallpapers`}{w.skip.length ? `, ${w.skip.length} left out` : ""}</span>
+              </div>
+              <div className="sctl">
+                <label className="inline watched-copy"><input type="checkbox" checked={w.copy} data-watched-copy
+                  onChange={(e) => edit(w.path, { copy: e.target.checked })} /> Copy files instead of linking</label>
+                <button className="mini ico" aria-label="Stop watching" title="Stop watching (its wallpapers stay)" data-watched-remove
+                  onClick={() => edit(w.path, { remove: true })}><X size={14} /></button>
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+      <motion.button className="btn ghost ico watched-add" layout={motionOn ? "position" : false} data-watched-add
+        onClick={() => { void importFolder(true); }}><FolderFlap size={14} /> Add folder</motion.button>
+    </Section>
   );
 }
 
@@ -585,6 +637,8 @@ export const Settings = memo(function Settings() {
         {liascapeActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
           <Help>Scenes can't play right now: {engine.scenes.reason}</Help>}
       </Section>
+
+      <WatchedFolders />
 
       {g("allowScenes", false) && (
         <Section title="Scene monitors" icon={<MonitorSmartphone size={15} />} lv="standard" bare>

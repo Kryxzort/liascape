@@ -6,6 +6,10 @@ paths:
   - "src/backend/Helpers/SceneLoudnessPlanner.cs"
   - "src/backend/Helpers/DownloadHelper.cs"
   - "src/backend/Helpers/ImportService.cs"
+  - "src/backend/Helpers/FolderScanner.cs"
+  - "src/backend/Web/FolderImportOps.cs"
+  - "src/backend/Web/FolderWatch.cs"
+  - "scripts/test-folder-import.sh"
   - "src/backend/Helpers/WorkshopUnsubQueue.cs"
   - "src/backend/Models/LibraryItem.cs"
   - "src/backend/Web/LibraryFactsOps.cs"
@@ -61,6 +65,14 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - Auto-import snapshots `pending ∪ blocked` once per pass (`SnapshotBlockedSet`), never a per-folder check.
 - Undo of a Delete from Source re-subscribes when Steam already unsubscribed it (`Withdraw` → `Unsubscribed` → `WorkshopDownloader.ResubscribeAsync`). Guard: `scripts/test-steam-signin.sh` § 3.
 - An Undo the backend accepts always wins over the drain: a drain claims each id right before it reaches Steam (after its turn at the Steam client; `WorkshopUnsubQueue.Claim`) and Undo takes a batch's ids back in one step under the same lock (`Withdraw`). Withdrawn first = never sent; claimed first = Undo answers `ok: false` with "Too late to undo…", changes nothing and keeps the batch (Undo again once Steam answered). Never check pending, then send. Guard: `scripts/test-steam-signin.sh` § 3 i. "an Undo while…".
+
+## Folder import and watched folders
+- One scanner for both (`Helpers/FolderScanner.cs`): a folder with a `project.json` is one WE item (scene, or video whose file is there), never looked into; a loose video / gif / picture is one item; other folders recurse. Each real folder once (link loops), dot-entries and the library skipped, an unreadable folder reported. It only lists and reads `project.json`.
+- Import shows the scan first (`/library/scan`); only the ticked paths land (`/library/import-found`, identified again). "Already in your library" = the same source (`SourceUrl` `import:<path>`) or Workshop id.
+- Everything lands in `imported/<name>`: a link to the source (a WE folder's link is the item folder; a file's is `<key>.<ext>`) or a copy (a WE folder through a staging folder under `.trash`). A re-import keeps the item's form. Never move one under `local/` or `workshop/`: those mean Steam's folder.
+- Delete or trash through `LibraryService.TryDeleteDir`: a link is unlinked, never deleted through. Never write, move or delete a user's source. Guard: `scripts/test-folder-import.sh` § delete.
+- Watched folders (`AppSettings.WatchedFolders`, `Web/FolderWatch.cs`): inotify, debounced, plus a periodic pass; a file younger than the stable time waits. Every import runs through `FolderImportOps`' one gate. Items carry `LibMeta.WatchedFrom` + `SourceSig`; a deleted or trashed one joins the folder's `Skip`.
+- A source gone from its watched folder removes the item only when it is a link (`AppOps.Trash(…, undoable: false)`: the playlist follows); a copy stays, unmarked. Nothing leaves while the folder is missing, reads as empty, or the source sits under an unreadable folder. Why: `docs/decisions.md` § "Remove only the link when a watched folder's file goes". Guard: `scripts/test-folder-import.sh` § watch.
 
 ## WE auto-import
 - `LibraryService.SyncWallpaperEngine` creates `local/<id>` links + index entries; it runs at `serve` start (then WS `library-synced`) and in `liascape restore` before playback. Steam's tags for what it adds: § Steam tags, trailers and frame sizes.

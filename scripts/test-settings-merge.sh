@@ -145,7 +145,7 @@ snap s0
 [ "$(f 'has("lweSilent")' s0)" = false ] && ok "GET /settings has no lweSilent" || bad "GET /settings still has lweSilent"
 # no "Wait for video to end after interval", and no separate minimum: it is the interval field (= the minimum under
 # advance-on-end; docs/decisions.md § "Use one interval field: "Switch every" or "Minimum play time"") — an old file's
-# keys load as unknown ones, no migration (§ "Drop removed settings without migration code")
+# keys load as unknown ones, no migration (.claude/rules/backend/state-files.md § Writing)
 [ "$(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")] | any' s0)" = false ] \
   && ok "GET /settings has no globalWaitForVideoEnd / playlistWaitForVideoEnd / globalMinPlaySeconds (removed)" \
   || bad "GET /settings still has a removed rotation key: $(f '[has("globalWaitForVideoEnd"), has("playlistWaitForVideoEnd"), has("globalMinPlaySeconds")]' s0)"

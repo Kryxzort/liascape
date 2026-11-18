@@ -204,6 +204,8 @@ export interface LibraryItem {
   subscribed?: boolean | null;
   // Steam's servers said there's no public item with its id (removed, private): nothing to subscribe to
   offWorkshop?: boolean;
+  // API: the watched folder that brought it in (Web/FolderWatch.cs); null = not a watched folder's
+  watchedFrom?: string | null;
   // a scene's loudness under liascape-player (its current audio configuration): the applied LUFS, estimated (the
   // offline estimate — not played in this configuration yet) or measured (loudnessSeconds of audible play), the
   // estimate's confidence and, when low, its first note. null for a video / nothing known.
@@ -217,6 +219,15 @@ export interface LibraryItem {
 // preview quality" (phase low | mid | high) or the cards' own first clips (make), `facts` = Steam's tags (steam), trailer
 // pages (trailers), frame sizes (sizes)
 export interface LibraryOp { id: string; phase: string; done: number; total: number }
+// API: POST /library/scan (Helpers/FolderScanner.cs): kind video | gif | image | scene; folder = a Wallpaper Engine item
+// folder; dir = its folder under the scanned one ("" at its top); inLibrary = the library has it (the same source, or the
+// same Workshop id). roots = the paths scanned, folders = those that are folders, watched = those already watched.
+export interface FoundItem { path: string; kind: "video" | "gif" | "image" | "scene"; title: string; folder: boolean;
+  workshopId: string | null; inLibrary: boolean; dir: string }
+export interface ImportScan { roots: string[]; folders: string[]; items: FoundItem[]; unreadable: string[]; unsupported: number; duplicates: number;
+  truncated: boolean; scenesOff: boolean; watched: string[]; copy: boolean }
+// AppSettings.WatchedFolders (backend-owned: POST /settings never changes it)
+export interface WatchedFolder { path: string; copy: boolean; skip: string[] }
 export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }
 export interface PlaylistSettings {
   order: 0 | 1; overrideGlobalSettings: boolean; intervalSeconds: number;
@@ -271,7 +282,13 @@ export const api = {
   // settings keys whose rows get a warning icon. ok null = not known yet.
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
   lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
-  importFile: (path: string, title: string) => jpost<LibraryItem>("/library/import", { path, title }),
+  // API: a folder's (or dropped files') wallpapers listed before anything lands (Web/FolderImportOps.cs Scan), then the ticked
+  // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked there)
+  scanImport: (paths: string[]) => jpost<ImportScan>("/library/scan", { paths }),
+  importFound: (body: { paths: string[]; copy: boolean; watch?: string | null; skip?: string[] }) =>
+    jpost<{ queued: number }>("/library/import-found", body),
+  // API: a watched folder added, its link / copy choice changed, or no longer watched (settings-changed {watchedFolders})
+  editWatched: (body: { path: string; copy?: boolean; remove?: boolean }) => jpost("/library/watched", body),
   libraryClear: () => jpost("/library/clear"),
   // API: the caches Settings → Housekeeping clears (ServerHost /cache/size, /cache/clear; ids and folders: AppOps.CacheCategories).
   // A clear names its ids (an unknown one → 400); each answer says what it freed and what the cache still holds.

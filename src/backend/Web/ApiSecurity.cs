@@ -342,7 +342,7 @@ public static class ApiSecurity
     [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)] private static extern int open(string path, int flags);
     private const int O_RDONLY = 0, O_NONBLOCK = 0x800, O_CLOEXEC = 0x80000; // the same on x86-64 and arm64
 
-    private static string? RealPath(string path)
+    internal static string? RealPath(string path)
     {
         if (string.IsNullOrEmpty(path) || path.Contains('\0')) return null;
         IntPtr p = realpath(path, IntPtr.Zero);

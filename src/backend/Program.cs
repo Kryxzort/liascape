@@ -148,26 +148,38 @@ sealed class Program
             if (!settings.AutoAddWeWallpapersToLibrary) return;
             var newPaths = LibraryService.SyncWallpaperEngine(
                 settings.WorkshopFolder, settings.AllowScenes, settings.CopyFilesInsteadOfSymlinking);
-            if (newPaths.Count == 0) return;
-            if (!settings.AutoAddLibraryToPlaylist) return;
-
-            var state = PlaylistService.LoadCurrentState() ?? new Liascape.Models.CustomPlaylist();
-            var existing = new System.Collections.Generic.HashSet<string>(state.VideoPaths);
-            foreach (var p in newPaths)
-                if (existing.Add(p)) state.VideoPaths.Add(p);
-            PlaylistService.SaveCurrentState(state);
-
-            var session = settings.LastSession;
-            if (session != null && (session.IsPlaylist || session.IsTimedPlaylist))
-            {
-                var sessExisting = new System.Collections.Generic.HashSet<string>(session.Paths);
-                var merged = new System.Collections.Generic.List<string>(session.Paths);
-                foreach (var p in newPaths)
-                    if (sessExisting.Add(p)) merged.Add(p);
-                session.Paths = merged;
-                SettingsService.Update(s => s.LastSession = session);
-            }
+            AddToPlaylist(newPaths, live: false);
         }
         catch { }
+    }
+
+    // "Add new wallpapers to the playlist" (AutoAddLibraryToPlaylist): items new to the library join the playlist bar and a
+    // playlist session's LastSession. `live`: saved through AppOps (a running rotation takes them at once) and every open page
+    // re-reads the bar (a watched folder's or a folder import's items, mid-session).
+    internal static void AddToPlaylist(System.Collections.Generic.List<string> newPaths, bool live)
+    {
+        var settings = SettingsService.Load();
+        if (newPaths.Count == 0 || !settings.AutoAddLibraryToPlaylist) return;
+        var state = PlaylistService.LoadCurrentState() ?? new Liascape.Models.CustomPlaylist();
+        var existing = new System.Collections.Generic.HashSet<string>(state.VideoPaths);
+        foreach (var p in newPaths)
+            if (existing.Add(p)) state.VideoPaths.Add(p);
+        if (live)
+        {
+            Liascape.Web.AppOps.SavePlaylistState(state);
+            Liascape.Web.EventBus.Broadcast("playlist-changed", new { client = (string?)null });
+        }
+        else PlaylistService.SaveCurrentState(state);
+
+        var session = settings.LastSession;
+        if (session != null && (session.IsPlaylist || session.IsTimedPlaylist))
+        {
+            var sessExisting = new System.Collections.Generic.HashSet<string>(session.Paths);
+            var merged = new System.Collections.Generic.List<string>(session.Paths);
+            foreach (var p in newPaths)
+                if (sessExisting.Add(p)) merged.Add(p);
+            session.Paths = merged;
+            SettingsService.Update(s => s.LastSession = session);
+        }
     }
 }

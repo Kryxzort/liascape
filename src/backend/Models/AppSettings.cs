@@ -42,6 +42,10 @@ public class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".local/share/Steam/steamapps/workshop/content/431960");
     public bool CopyFilesInsteadOfSymlinking { get; set; } = false;
+    // Folders the library follows (Web/FolderWatch.cs): what lands in them is imported, what changes is imported again, what
+    // goes leaves (a link; a copy stays). Owned by the backend like LastSession: POST /settings keeps the saved list whatever
+    // the body says, and /library/watched edits it.
+    public List<WatchedFolder> WatchedFolders { get; set; } = [];
     public bool AllowScenes { get; set; } = false;
     public int LweVolume { get; set; } = 100;
     public List<SceneMonitor> SceneMonitors { get; set; } = [];

@@ -80,6 +80,11 @@ public sealed class LibMeta
     // turned into the library's own copy: LibraryService.KeepOwnCopy), so it keeps its place in "date added"; absent = the
     // media file's own date.
     public long? AddedAt { get; set; }
+    // An item a watched folder brought in (Web/FolderWatch.cs): that folder (its source = SourceUrl "import:<path>"), and its
+    // source's state at the last import (FolderScanner.Found.Sig: a change imports it again). Only an item that carries the
+    // mark ever leaves the library with its source; absent = imported once, never touched by a watch.
+    public string? WatchedFrom { get; set; }
+    public string? SourceSig { get; set; }
 }
 
 // A font a scene asks for (Font, a family) and the family fontconfig showed it with (Shown).

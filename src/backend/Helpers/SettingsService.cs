@@ -112,6 +112,7 @@ public static class SettingsService
             s.SteamId = prev.SteamId;
             s.SteamAccountName = prev.SteamAccountName;
             s.SteamSignInRejected = prev.SteamSignInRejected;
+            s.WatchedFolders = prev.WatchedFolders; // /library/watched edits it (Web/FolderWatch.cs)
             Save(s);
             return (prev, s);
         }

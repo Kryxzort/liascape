@@ -145,6 +145,7 @@ public static class ServerHost
         {
             var s = SettingsService.Load();
             AudioMonitor.Shutdown();
+            FolderWatch.Stop(); // no pass starts while the app stops
             // legacy: hand auto-mute to a detached monitor-daemon (retired under liascape-player: the player's Signal goes on)
             if (s.AutoMute && !Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
             // Release timer ownership, then hand the timed playlist back to a detached `timer-daemon`
@@ -170,6 +171,7 @@ public static class ServerHost
             SceneLoudnessOps.AfterImport("startup");
             LibraryFactsOps.Kick("startup"); // Steam tags, trailers and frame sizes the library doesn't have yet
             PreviewBackfill.Kick("startup"); // every card's previews it doesn't have yet
+            FolderWatch.Start(); // the watched folders: what changed while the app was closed, then live
         });
 
         // the preview clips no card can ask for any more (sources gone or changed, replaced variants, unfinished encodes)
@@ -513,6 +515,8 @@ public static class ServerHost
             // when normalization is on, (re)start the background measurement backfill so all clips get measured
             // while open — off this thread (it was 0.15–0.5 s of every no-op save: the whole library scan ran here)
             if (s.NormalizeAudio) LibraryService.KickLoudnessBackfill(force: !prev.NormalizeAudio);
+            // "Play scenes" turned on: the scenes in the watched folders come in now
+            if (s.AllowScenes && !prev.AllowScenes) FolderWatch.KickAll();
             Mark("backfill");
             // the library's preview clips follow the quality, up and down, once the choice settles (off this thread)
             if (prev.VideoPreviewQuality != s.VideoPreviewQuality) ClipStore.QualityChanged(s.VideoPreviewQuality);
@@ -588,10 +592,19 @@ public static class ServerHost
             return item == null ? Results.BadRequest("import failed") : Results.Json(item);
         });
 
+        // a folder's (or a dropped file's) wallpapers, listed before anything lands; then the ticked ones imported in the
+        // background, the folder watched from then on if asked (Web/FolderImportOps.cs, Web/FolderWatch.cs)
+        app.MapPost("/library/scan", async (FolderImportOps.ScanReq r) => r.Paths is { Count: > 0 } p
+            ? Results.Json(await Task.Run(() => FolderImportOps.Scan(p))) : Results.BadRequest(new { error = "paths: name a folder or a file" }));
+        app.MapPost("/library/import-found", (FolderImportOps.ImportFoundReq r) => Results.Json(FolderImportOps.ImportFound(r)));
+        app.MapPost("/library/watched", (FolderImportOps.WatchedReq r) => FolderImportOps.EditWatched(r) is { } ok
+            ? Results.Json(ok) : Results.BadRequest(new { error = "path: an absolute path to a folder" }));
+
         // ---- library ----------------------------------------------------------------------
         app.MapGet("/library", () => Results.Json(WorkshopSubOps.MarkSubscribed(LibraryService.LoadAll())));
         app.MapPost("/library/delete", (LibraryItem item) =>
         {
+            FolderImportOps.Forget([item]); // a watched folder never brings it back
             LibraryService.Delete(item);
             ClipStore.ForgetUnder(item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath) ?? item.VideoPath);
             return Results.Ok();
@@ -648,7 +661,7 @@ public static class ServerHost
         app.MapGet("/library/scene-loudness/status", () => Results.Json(SceneLoudnessOps.Status()));
 
         // ---- trash / undo (soft delete) ---------------------------------------------------
-        app.MapPost("/library/trash", (TrashReq r) => Results.Json(new { batch = AppOps.Trash(r.Items) }));
+        app.MapPost("/library/trash", (TrashReq r) => { FolderImportOps.Forget(r.Items); return Results.Json(new { batch = AppOps.Trash(r.Items) }); });
         app.MapPost("/library/undo", () => { var u = AppOps.Undo(); return Results.Json(new { ok = u.Ok, count = u.Count, title = u.Title, message = u.Message }); });
         app.MapGet("/library/undo-depth", () => Results.Json(new { depth = AppOps.UndoDepth() }));
         app.MapGet("/library/duration", (string path) => ApiSecurity.MediaAllowed(path)

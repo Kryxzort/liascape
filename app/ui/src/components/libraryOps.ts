@@ -15,6 +15,8 @@ export function opLabel(op: LibraryOp): string {
     : op.phase === "disk" ? "Measuring sizes on disk" : "Reading frame sizes";
   if (op.id === "scene-loudness") return "Measuring scene loudness";
   if (op.id === "video-loudness") return "Measuring video loudness";
+  // API: Web/FolderImportOps.cs, a folder import's or a watched folder's items landing
+  if (op.id === "import") return "Importing";
   return "Updating the library";
 }
 // the full wording of every shown operation: the line's accessible name and the status slot's tooltip

@@ -24,6 +24,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Legacy engine: a cold launch's late announce and one auto-mute monitor (stub mpvpaper, own PID namespace): `bash scripts/test-legacy-launch.sh`
 - `serve` exits within 3 s of SIGTERM (idle, an open page's WebSocket, playing, a stalled /media download, the clip sweep): `bash scripts/test-backend-stop.sh`
 - The sidebar's crash-mark Clear and "open in your default app" (a stub xdg-open; what /open/media refuses): `bash scripts/test-item-actions.sh`
+- Folder import and watched folders (the scan, link / copy, live pickup, removals; sources never touched): `bash scripts/test-folder-import.sh`
 - Settings' cache clear (per-category sizes, 400s, nothing outside the ticked folders deleted): `bash scripts/test-cache-clear.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`

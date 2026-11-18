@@ -129,6 +129,11 @@ the local Wallpaper Engine source sorts client-side.
 
 ## Library
 
+### Remove only the link when a watched folder's file goes — 2026-11-18
+A source gone from a watched folder takes out its item only when the library links to it; a copy stays as the user's
+own. Nothing leaves while the folder is missing or empty (an unmounted drive); a source is never deleted.
+`.claude/rules/backend/library.md` § Folder import and watched folders.
+
 ### Normalize video loudness with one fixed gain capped by the true peak — 2026-11-11
 `g = min(target − I, −1 − TP)` (Spotify's rule): a quiet item with big peaks plays under the target rather than through a
 limiter; the owner checked the worst two (~14 and ~7.5 dB under) by ear and kept it. ffmpeg's `loudnorm` at playback was
@@ -144,9 +149,6 @@ measurements refine the stored value for the next play. Gain moving mid-play is 
 `scenetexture`, `file` and `directory` need a file picker and `usershortcut` launches a Windows app: they are listed
 with a reason, not editable. `Helpers/SceneProperties.cs`.
 
-### Drop removed settings without migration code — 2026-10-28
-A removed setting's key loads as an unknown one and disappears on the next save; the owner's own files were converted
-once by a script. `AppSettings` carries no legacy branches. `.claude/rules/backend/state-files.md` § Writing.
 
 ## Settings & state
 

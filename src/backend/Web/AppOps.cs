@@ -475,7 +475,9 @@ public static class AppOps
     // Soft-delete to trash. The items leave the playlist too (an undo puts them back where they were) —
     // live, so a running rotation never plays a trashed file — and when one was on screen (or about to
     // be: the incoming side of a switch), playback advances to the next survivor or stops.
-    public static string Trash(List<LibraryItem> items)
+    // `undoable` false: a removal the user didn't make (a watched folder's link whose file is gone, Web/FolderWatch.cs): the
+    // items are deleted (LibraryService.Delete: a link is unlinked, its target never touched) with no Undo to offer.
+    public static string Trash(List<LibraryItem> items, bool undoable = true)
     {
         if (items.Count == 0) return "";
         string batchDir = Path.Combine(LibraryService.TrashPath, Guid.NewGuid().ToString("N")[..8]);
@@ -485,14 +487,14 @@ public static class AppOps
 
         foreach (var item in items)
         {
-            try { LibraryService.Trash(item, batchDir); done.Add(item); } catch { }
+            try { if (undoable) LibraryService.Trash(item, batchDir); else LibraryService.Delete(item); done.Add(item); } catch { }
         }
         if (done.Count == 0) return batchDir;
         // their preview clips live as long as they are in the library (an undo makes them again)
         foreach (var i in done) ClipStore.ForgetUnder(i.IsScene ? i.VideoPath : Path.GetDirectoryName(i.VideoPath) ?? i.VideoPath);
         var del = new HashSet<string>(done.Select(i => i.VideoPath));
         var removed = pl?.VideoPaths.Select((p, i) => (p, i)).Where(x => del.Contains(x.p)).ToList() ?? [];
-        lock (_undoLock) _undo.Add(new UndoBatch(batchDir, done, removed));
+        if (undoable) lock (_undoLock) _undo.Add(new UndoBatch(batchDir, done, removed));
 
         var playing = shown.FirstOrDefault(del.Contains);
         if (playing != null) StopOrAdvanceAfterDelete(playing, del, pl);
