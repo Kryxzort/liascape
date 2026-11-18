@@ -179,12 +179,35 @@ public static class SteamSelfTest
             return (FakeJwt(76561190000000001), 76561190000000001UL, user + "-acct");
         };
 
+    // The Browse warm-up (SteamAnonymous.Warm) never reaches Steam from a test: while a fixture answers for Steam, or the
+    // Workshop fallback is forced, it does nothing at all. This self-test isn't network-isolated, so only those gates run here.
+    private static void WarmUp()
+    {
+        string? fx = Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE"), fb = Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK");
+        try
+        {
+            Environment.SetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK", null);
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", "/nonexistent/steam-cm.json");
+            var a = SteamAnonymous.Warm(); var b = SteamAnonymous.Warm();
+            Check(a == "test" && b == "test", $"warm-up: a Steam fixture → nothing, every time ({a}, {b})");
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", null);
+            Environment.SetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK", "1");
+            Check(SteamAnonymous.Warm() == "test", "warm-up: the forced Workshop fallback → nothing");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", fx);
+            Environment.SetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK", fb);
+        }
+    }
+
     private static async Task RunAll()
     {
         Check(SecretStore.Backend == ExpectBackend, $"secrets: the {ExpectBackend} backend is in use ({SecretStore.Backend})");
         ActionRule();
         OneOffRoutes();
         ReconcileSkipsBlocked();
+        WarmUp();
         SteamOps.SignOut();
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000009));
         SettingsService.Update(s => { s.SteamId = 76561190000000009; s.SteamAccountName = "old"; s.SteamSignInRejected = true; });

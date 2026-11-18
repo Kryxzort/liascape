@@ -748,6 +748,8 @@ public static class ServerHost
 
         // ---- steam / workshop -------------------------------------------------------------
         app.MapGet("/steam/status", () => Results.Json(SteamOps.Status()));
+        // the UI expects a Workshop Browse request soon: connect the anonymous session ahead of it (never waits, never fails)
+        app.MapPost("/steam/warm", () => Results.Json(new { warm = SteamAnonymous.Warm() }));
         app.MapPost("/steam/qr/start", () => { SteamOps.StartQr(); return Results.Ok(); });
         app.MapPost("/steam/qr/cancel", () => { SteamOps.CancelQr(); return Results.Ok(); });
         app.MapPost("/steam/signout", () => { SteamOps.SignOut(); return Results.Ok(); });

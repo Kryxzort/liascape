@@ -20,8 +20,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
        seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
        progress-bar area is needed or the status bar can carry it.
-81. [ ] Browse's first page: connect the anonymous Steam session in the background when the app opens (or Browse is
-       hovered), so the first page skips the 1.2–2.7 s connect + logon (`src/backend/Helpers/SteamAnonymous.cs`).
 67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist
        bar while the backend played k2) and hasn't come back in five full runs since. Ruled out: the keybind touches no
        playlist state, playlist_state.json is written atomically, and a stalled player's /current no longer reads

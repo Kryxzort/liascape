@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { RefreshCw, Star, X } from "lucide-react";
 import { useStore } from "../store";
+import { api } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
@@ -49,14 +50,17 @@ export function SourcePills() {
         {sources.filter((x) => x.available).map((x) => {
           const ws = x.supportsTagFilter && active === x.index;
           const into = (e: React.MouseEvent<HTMLElement>) => e.currentTarget.scrollIntoView({ inline: "nearest", block: "nearest", behavior: motion ? "smooth" : "instant" });
+          // API: a Workshop pill hovered or focused: Steam's anonymous session connects ahead of its page (api.steamWarm).
+          // Guard: probe-steam browse:warm
+          const warm = x.supportsTagFilter ? { onPointerEnter: api.steamWarm, onFocus: api.steamWarm } : null;
           return [
             <button key={x.index} className={`pill${active === x.index && !(ws && wsList) ? " active" : ""}`}
-              onClick={(e) => { into(e); setSource(x.index); }}>{x.name}</button>,
+              {...warm} onClick={(e) => { into(e); setSource(x.index); }}>{x.name}</button>,
             // the Workshop's lists, beside its pill (store wsList): the signed-in account's favourites, and the creator the
             // sidebar's creator row picked — its avatar + name, × back to the whole Workshop. Guard: probe-steam ws:pills
             x.supportsTagFilter && (
               <button key="ws-fav" className={`pill ico ws-pill${ws && wsList?.kind === "favorites" ? " active" : ""}`} data-ws-pill="favorites"
-                onClick={(e) => { into(e); setWsList({ kind: "favorites" }); }}><Star size={14} /> Favourites</button>
+                {...warm} onClick={(e) => { into(e); setWsList({ kind: "favorites" }); }}><Star size={14} /> Favourites</button>
             ),
             x.supportsTagFilter && creator.value && (
               <span key="ws-creator" className={`ws-pill-pair${creator.closing ? " closing" : ""}`} data-ws-pill="creator">

@@ -127,6 +127,7 @@ export type SteamTodo =
       // the current subscribe entry moves on by itself once Steam's files for it appear (they weren't there when its page opened)
       autoNext?: boolean };
 
+let steamWarmedAt = 0;
 async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method: "POST",
@@ -345,6 +346,14 @@ export const api = {
   playFrom: (paths: string[], startIndex: number, settings: PlaylistSettings) =>
     jpost<{ message: string }>("/playlist/play-from", { paths, startIndex, settings }),
   steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean }>("/steam/status"),
+  // API: the Workshop's Browse pages ride one anonymous Steam session the backend drops after a few idle minutes; this asks
+  // it to connect ahead of a page the user is about to ask for (SteamAnonymous.Warm). Fire and forget: it never fails
+  // visibly, and a hover sends it at most every 20 s. Guard: probe-steam browse:warm
+  steamWarm: () => {
+    if (Date.now() - steamWarmedAt < 20_000) return;
+    steamWarmedAt = Date.now();
+    jpost("/steam/warm").catch(() => {});
+  },
   qrStart: () => jpost("/steam/qr/start"),
   qrCancel: () => jpost("/steam/qr/cancel"),
   signout: () => jpost("/steam/signout"),

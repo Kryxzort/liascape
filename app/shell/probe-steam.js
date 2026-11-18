@@ -156,7 +156,10 @@
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
 //   ws:pills              the Favourites pill: signed out the grid's "Sign in …" note, signed in the list; the Workshop pill back
 //                         Shots steam-ws-*.png
-//   lib:ws:order          a Workshop item's Library sidebar: its counts in the hero row, the creator under it, then Playback, the
+//   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
+//                         (Steam's session connects ahead of the page), at most one per 20 s; none from the tab while another
+//                         source shows there, none from another source's pill
+//   lib:ws:order         a Workshop item's Library sidebar: its counts in the hero row, the creator under it, then Playback, the
 //                         scene properties, the favourite and the comments, last, 12 px apart; none off the Workshop, for a plain
 //                         item, for a multi-selection
 //   lib:ws:pillRow        a Workshop scene's and a Workshop video's counts are hero pills beside the others (same row box and
@@ -2844,6 +2847,45 @@ app.whenReady().then(async () => {
       const n3 = await page(`return { active: [...document.querySelectorAll(".pill-strip .pill.active")].map((e) => e.textContent.trim()), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
       if (J(n3.active) !== J([wsName]) || n3.cards !== 6) v.push(`back on the whole Workshop: ${J(n3)}`);
       if (b3?.list) v.push("the whole Workshop still sent a list");
+      return v;
+    });
+
+    // the Browse warm-up (api.steamWarm → POST /steam/warm, SteamAnonymous.Warm): a hover or focus on the Browse tab while it
+    // shows the Workshop, or on a Workshop pill, asks the backend to connect Steam's session ahead of the page; at most one
+    // ask per 20 s; nothing from the tab while another source shows, nothing from the other sources' pills
+    await cell("browse:warm", async () => {
+      const v = [];
+      const srcs = (await http("GET", "/sources")).json;
+      const wsName = srcs.find((s) => s.supportsTagFilter && s.available)?.name, other = srcs.find((s) => s.supportsLocalFilter && s.available)?.name;
+      if (!wsName || !other) return [`no Workshop source (${wsName}) or no other source (${other}) — proved nothing`];
+      const warms = async () => (await calls()).filter((c) => c.p === "/steam/warm").length;
+      const at = (sel, text) => page(`const e = [...document.querySelectorAll(${J(sel)})].find((x) => x.textContent.trim() === ${J(text)}); if (!e) return null;
+        const r = e.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };`);
+      const away = async () => { send({ type: "mouseMove", x: 700, y: 600 }); await sleep(150); };
+      const hover = async (sel, text) => { const p = await at(sel, text); if (!p) return false; send({ type: "mouseMove", ...p }); await sleep(400); return true; };
+      // the Workshop shown on Browse, then a fresh page on the Library (the source is remembered; the throttle starts over)
+      await browseWs(SIGNED_OUT);
+      await away(); await load(SIGNED_OUT); await away();
+      if (await warms()) v.push(`${await warms()} warm-up(s) before any hover`);
+      if (!(await hover(".tab", "Browse"))) return [...v, "no Browse tab — proved nothing"];
+      if (await warms() !== 1) v.push(`the Browse tab hovered (the Workshop shown there): ${await warms()} warm-ups, want 1`);
+      await away(); await hover(".tab", "Browse");
+      if (await warms() !== 1) v.push(`hovered again within 20 s: ${await warms()} warm-ups, want still 1`);
+      // another source on Browse (the local Wallpaper Engine folder, the stub's: nothing leaves the stack): the tab's hover
+      // asks nothing; the Workshop pill's does, the other pill's doesn't
+      await js(`localStorage.setItem("__probe_we_local", "1"); true`);
+      try {
+        await tab("Browse");
+        await page(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(other)})?.click();`); await sleep(400);
+        await away(); await load(SIGNED_OUT); await away();
+        await hover(".tab", "Browse");
+        if (await warms()) v.push(`the Browse tab hovered while ${other} shows there: ${await warms()} warm-up(s), want none`);
+        await tab("Browse"); await away();
+        if (!(await hover(".pill-strip > .pill", other))) v.push(`no ${other} pill`);
+        if (await warms()) v.push(`the ${other} pill hovered: ${await warms()} warm-up(s), want none`);
+        if (!(await hover(".pill-strip > .pill", wsName))) return [...v, "no Workshop pill — proved nothing"];
+        if (await warms() !== 1) v.push(`the Workshop pill hovered: ${await warms()} warm-ups, want 1`);
+      } finally { await js(`localStorage.removeItem("__probe_we_local"); true`); }
       return v;
     });
 

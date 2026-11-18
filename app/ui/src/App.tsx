@@ -11,7 +11,7 @@ import { Browse } from "./views/Browse";
 import { Library } from "./views/Library";
 import { PlaylistBar as PlaylistBarView } from "./components/PlaylistBar";
 import { useMotion } from "./components/motion";
-import { CLIENT_ID, clipSweepHold } from "./api/client";
+import { api, CLIENT_ID, clipSweepHold } from "./api/client";
 import { startFreezeLog } from "./debug/freezeLog";
 import { WallpaperBg } from "./components/WallpaperBg";
 import { SortFilterButton } from "./components/SortFilterButton";
@@ -44,7 +44,10 @@ const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m
 type Tab = "browse" | "library" | "settings";
 const TAB_ORDER: Tab[] = ["browse", "library", "settings"];
 const SORTS = ["Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"].map((l, i) => ({ value: String(i), label: l }));
-const BROWSE_SORTS = ["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"].map((l, i) => ({ value: String(i), label: l }));
+// API: the Browse tab hovered or focused while it shows the Workshop: Steam's anonymous session connects ahead of the page the
+// user is about to ask for (api.steamWarm). Guard: probe-steam browse:warm
+const warmWorkshop = () => { if (useStore.getState().isWorkshop()) api.steamWarm(); };
+const BROWSE_SORTS =["Default", "Name A–Z", "Name Z–A", "Videos first", "Scenes first", "Newest", "Oldest"].map((l, i) => ({ value: String(i), label: l }));
 
 export default function App() {
   // PERF: only what App reads (useShallow: the store's actions are stable, so the state fields decide), never the whole
@@ -214,7 +217,8 @@ export default function App() {
         <div className="tabs" style={{ "--tab-i": TAB_ORDER.indexOf(picked.tab) } as React.CSSProperties}>
           <span className="tab-pill" aria-hidden />
           {TAB_ORDER.map((t) => (
-            <button key={t} className={`tab${picked.tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
+            <button key={t} className={`tab${picked.tab === t ? " active" : ""}`} onClick={() => setTab(t)}
+              onPointerEnter={t === "browse" ? warmWorkshop : undefined} onFocus={t === "browse" ? warmWorkshop : undefined}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
