@@ -45,6 +45,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `dropout_analysis_never_skips_bus_cycles` (its recording file was missing) and `outbox_is_bounded` (timed out
        waiting for `outbox.dropped`); both pass alone with `--exact`. Find what each waits on and make the wait
        event-driven or the deadline load-proof, not longer.
+96. [ ] (owner) Copy WE's frame-rate quirks: wallpaper authors tuned their scenes on WE, so WE's behaviour is the look.
+       First: `cursorripple` (3184155462) is ~10x weaker in WE at 120 fps than at 30 (`timeAmt = min(1/30, g_Frametime) /
+       0.02` × the per-frame pointer delta; see docs/player/reports/scene-we-ref.md § Focus) — give the scene WE's
+       `g_Frametime` and pointer-update cadence at every FPS cap. Then sweep the corpus for other `g_Frametime` /
+       frame-count dependent effects and match WE at 30, 60 and 144 fps (we-ref captures at each).
+97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
+       we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
+       the scene-worker numbers.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
