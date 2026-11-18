@@ -46,6 +46,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `imported/` link into Steam's folder; unsubscribing that item later makes Steam delete the files behind the link.
        The scanner should recognise Steam's Workshop folders: their items are subscriptions (the WE auto-import's job),
        so the dialog lists them as "from your Steam subscriptions" and imports nothing of them, or copies only.
+99. [ ] Hermetic tests: the UI matrix doesn't stub `/browse` for the Workshop's own queries, so a probe that opens the
+       Workshop source without probe-steam's stub reaches real Steam. Stub it for every probe (the CM fixture), and make
+       a real-network call from the matrix fail loudly.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
