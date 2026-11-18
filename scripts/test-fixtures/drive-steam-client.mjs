@@ -5,6 +5,12 @@ const TOKEN = fs.readFileSync(`${process.env.XDG_CONFIG_HOME}/liascape/serve.tok
 const realFetch = globalThis.fetch;
 globalThis.fetch = (u, o = {}) => realFetch(u, { ...o, headers: { ...(o.headers || {}), "X-Liascape-Token": TOKEN } });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Waits on what the fake Steam client or the backend reports, never on a time: each Steam-client helper is a new process, and
+// on a loaded or freshly booted machine it can take seconds to start (FAKE_UGC_OPEN_DELAY_MS replays that). The ceiling only
+// ends a run where it never comes. True = it came.
+// a race's give-up time (null): unref'd, so a request that answered in time leaves nothing to keep node running at the end
+const ceiling = (ms) => new Promise((r) => setTimeout(() => r(null), ms).unref());
+const until = async (pred, ms = 60000) => { for (let i = 0; i < ms / 50; i++) { if (await pred()) return true; await sleep(50); } return !!(await pred()); };
 const out = (ok, name, extra = "") => console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? " — " + extra : ""}`);
 const urls = () => fs.readFileSync(`${T}/xdg-open.urls`, "utf8").trim().split("\n").filter(Boolean);
 const ev = {}; // page URL → its download-progress payloads
@@ -26,7 +32,7 @@ const released = () => fs.existsSync(`${T}/steamlib/released`) ? fs.readFileSync
 
 // a. the Steam client does it
 let n0 = urls().length;
-let r = await Promise.race([download("710000001"), sleep(20000).then(() => null)]);
+let r = await Promise.race([download("710000001"), ceiling(60000)]);
 let body = r ? await r.json() : null;
 out(r?.status === 200 && body?.workshopId === "710000001", "through the Steam client: the download finishes", r ? `${r.status} ${JSON.stringify(body).slice(0, 140)}` : "timed out");
 const pct = (ev[pageUrl("710000001")] ?? []).filter((e) => e.value > 0 && e.value < 1).map((e) => +e.value.toFixed(3));
@@ -38,7 +44,7 @@ out(sts.includes("Subscribing through Steam…") && firstBytes >= 0 && !seq.slic
   "the steps: Subscribing through Steam… → Steam is downloading it…, never back to waiting", sts.join(" | "));
 out(urls().length === n0, "nothing opened in the Steam app", `${urls().length - n0} opened`);
 out((await lib()).some((i) => i.workshopId === "710000001"), "/library has it (from the folder Steam reported — not the Workshop folder)");
-await sleep(500);
+await until(() => !alive(childPid()) && released().includes("user") && released().includes("pipe"));
 let rel = released();
 out(!alive(childPid()) && rel.includes("user") && rel.includes("pipe"), "the helper released its Steam user + pipe and exited", `pid ${childPid()} alive ${alive(childPid())}, released [${rel}]`);
 
@@ -46,7 +52,7 @@ out(!alive(childPid()) && rel.includes("user") && rel.includes("pipe"), "the hel
 // to-do / a sign-in (a failure, not a fallback)
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
-r = await Promise.race([download("710000002"), sleep(20000).then(() => null)]);
+r = await Promise.race([download("710000002"), ceiling(60000)]);
 body = r ? await r.json().catch(() => null) : null;
 const todoB = await (await fetch(U + "/steam-todo")).json();
 out(r?.status === 500 && /Couldn't use the Steam app/.test(body?.error ?? "") && urls().length === n0 && todoB.finished === true,
@@ -58,8 +64,8 @@ fs.rmSync(`${T}/steamlib/fail-init`);
 const r0 = released().length;
 const ac = new AbortController();
 const pc = download("710000003", ac.signal).catch(() => "aborted");
-for (let i = 0; i < 60 && !(ev[pageUrl("710000003")] ?? []).some((e) => e.value > 0); i++) await sleep(50);
-ac.abort(); await pc; await sleep(1500);
+await until(() => (ev[pageUrl("710000003")] ?? []).some((e) => e.value > 0));
+ac.abort(); await pc; await until(() => !alive(childPid()) && released().length >= r0 + 2);
 const pid3 = childPid();
 out(!alive(pid3) && released().length >= r0 + 2 && !(await lib()).some((i) => i.workshopId === "710000003"),
   "cancelled mid-download: the child released Steam + exited, nothing imported", `pid ${pid3} alive ${alive(pid3)}, released +${released().length - r0}`);
@@ -76,7 +82,7 @@ const st4 = (ev[pageUrl("710000004")] ?? []).map((e) => e.status).filter(Boolean
 out(st4.includes("Click Subscribe in Steam, then it downloads by itself…"), "…its status says to click Subscribe", st4.join(" | "));
 const d4 = `${T}/ws3/431960/710000004`; fs.mkdirSync(d4, { recursive: true });
 fs.copyFileSync(`${T}/clip.mp4`, `${d4}/v.mp4`); fs.writeFileSync(`${d4}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000004" }));
-r = await Promise.race([pd, sleep(20000).then(() => null)]);
+r = await Promise.race([pd, ceiling(60000)]);
 out(r?.status === 200, "…and finishes once Steam has it", r ? String(r.status) : "timed out");
 await post("/steam-todo/next"); // the Steam to-do's entry waits for the user's Next even after Steam delivered
 // e. no duplicate copy: the WE folder setting names Steam's folder THROUGH A SYMLINK, the Steam client
@@ -84,7 +90,7 @@ await post("/steam-todo/next"); // the Steam to-do's entry waits for the user's 
 fs.symlinkSync(`${T}/steamlib`, `${T}/wslink`);
 const cur = await (await fetch(U + "/settings")).json();
 await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...cur, workshopDownloadMode: "steamapp", workshopFolder: `${T}/wslink` }) });
-r = await Promise.race([download("710000005"), sleep(20000).then(() => null)]);
+r = await Promise.race([download("710000005"), ceiling(60000)]);
 body = r ? await r.json() : null;
 const vp = body?.videoPath ?? "";
 const linked = /\/library\/local\/710000005(\/|$)/.test(vp) && fs.lstatSync(vp.replace(/\/[^/]*$/, "")).isSymbolicLink();
@@ -98,7 +104,7 @@ const dropAndDrain = async (id) => {
   await fetch(U + "/workshop/delete-from-source", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: [it] }) });
   unsub.length = 0;
   await fetch(U + "/workshop/drain", { method: "POST" });
-  for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100);
+  await until(() => unsub.some((e) => e.finished));
   return true;
 };
 n0 = urls().length;
@@ -121,7 +127,7 @@ fs.rmSync(`${T}/steamlib/fail-init`);
 // Steam reachable again → the next drain finishes it through the Steam client
 unsub.length = 0;
 await fetch(U + "/workshop/drain", { method: "POST" });
-for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100);
+await until(() => unsub.some((e) => e.finished));
 out(!fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001"),
   "…and the next drain (Steam back) unsubscribes it through the Steam client", `still subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}`);
 
@@ -132,9 +138,9 @@ const undo = async () => (await (await fetch(U + "/library/undo", { method: "POS
 // 710000001: Steam reachable → the Steam client subscribes it again
 const relBefore = released().length;
 await undo();
-for (let i = 0; i < 100 && !fs.existsSync(`${T}/steamlib/sub-710000001`); i++) await sleep(100);
+await until(() => fs.existsSync(`${T}/steamlib/sub-710000001`));
 // the re-subscribe's helper runs until Steam reports it installed — let it finish before Steam goes "unreachable" below
-for (let i = 0; i < 100 && released().length < relBefore + 2; i++) await sleep(100);
+await until(() => released().length >= relBefore + 2);
 out(fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001") && !!(await item("710000001")),
   "Undo after Steam unsubscribed it: subscribed again through the Steam client, back in the library, off the queue",
   `subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}, in library ${!!(await item("710000001"))}`);
@@ -143,7 +149,7 @@ out(fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("7
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length; unsub.length = 0;
 await undo();
-for (let i = 0; i < 100 && !unsub.some((e) => e.message); i++) await sleep(100);
+await until(() => unsub.some((e) => e.message));
 const msg = unsub.find((e) => e.message)?.message ?? "";
 out(urls().length === n0 && /^Undone, but couldn't use the Steam app/.test(msg) && !!(await item("710000005")),
   "…Steam unreachable: back in the library, the re-subscribe fails with the reason, nothing opens", `opened ${urls().length - n0} | ${msg}`);
@@ -159,7 +165,7 @@ const waitTodo = async (pred, ms = 5000) => { for (let i = 0; i < ms / 50 && !pr
 const waitUrl = async (id, from, ms = 5000) => { for (let i = 0; i < ms / 50; i++) { if (urls().slice(from).some((x) => x.includes(id))) return true; await sleep(50); } return false; };
 const dropItem = (id) => { const d = `${T}/steamlib/${id}`; /* the WE folder setting is $T/wslink → steamlib since e. */ fs.mkdirSync(d, { recursive: true });
   fs.copyFileSync(`${T}/clip.mp4`, `${d}/v.mp4`); fs.writeFileSync(`${d}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: `ws-${id}` })); };
-const settle = (p, ms = 15000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), sleep(ms).then(() => null)]);
+const settle = (p, ms = 15000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), ceiling(ms)]);
 const statuses = (id) => (ev[pageUrl(id)] ?? []).map((e) => e.status).filter(Boolean);
 
 await setMode("steampage");
@@ -237,7 +243,7 @@ out(!!ru.error && t?.total === 2 && t?.remaining === 2 && /couldn't be reached/.
   "Let the Steam app do all 2 — Steam unreachable: the panel says so, the to-do stays as it was", `${JSON.stringify(ru)} | ${JSON.stringify(t)}`);
 fs.rmSync(`${T}/steamlib/fail-init`);
 ru = await (await post("/steam-todo/use-steam-app")).json();
-const ra = await Promise.all(dlU.map((p) => settle(p, 20000)));
+const ra = await Promise.all(dlU.map((p) => settle(p, 60000)));
 out(!ru.error && ra.every((x, i) => x?.status === 200 && x.body?.workshopId === idsU[i]) && idsU.every((id) => fs.existsSync(`${T}/steamlib/sub-${id}`)),
   "…Steam reachable: both downloads finish through the Steam client (subscribed there)", JSON.stringify(ra.map((x) => x?.status)));
 out(lastTodo()?.finished === true && urls().length === n0 + 1, "…the to-do finished, no further page opened", JSON.stringify(lastTodo()));
@@ -250,7 +256,7 @@ await post("/workshop/delete-from-source", { items: [await item("730000001"), aw
 await post("/workshop/drain");
 await waitTodo((x) => x?.total === 2 && x.action === "unsubscribe");
 await post("/steam-todo/use-steam-app");
-for (let i = 0; i < 100 && idsU.some((id) => fs.existsSync(`${T}/steamlib/sub-${id}`) || false); i++) await sleep(100);
+await until(() => idsU.every((id) => !fs.existsSync(`${T}/steamlib/sub-${id}`)));
 await sleep(300);
 const qU = await queue();
 out(idsU.every((id) => !fs.existsSync(`${T}/steamlib/sub-${id}`) && !qU.includes(id)) && lastTodo()?.finished === true,
@@ -259,7 +265,7 @@ out(idsU.every((id) => !fs.existsSync(`${T}/steamlib/sub-${id}`) && !qU.includes
 // "Use the Steam app" (steamapp) bulk: ONE helper child at a time, app-wide — no two subscribe/unsubscribe helpers connected at once
 await setMode("steamapp");
 const idsC = ["740000001", "740000002", "740000003"];
-const rc = await Promise.all(idsC.map((id) => settle(download(id), 30000)));
+const rc = await Promise.all(idsC.map((id) => settle(download(id), 60000)));
 out(rc.every((x) => x?.status === 200), "steamapp: 3 downloads at once all finish", JSON.stringify(rc.map((x) => x?.status)));
 const spans = {}; const users = new Set();
 for (const l of helpersLog()) { const [k, pid, ts] = l.split(" "); if (k === "use") users.add(pid); else (spans[pid] ??= {})[k] = +ts; }
@@ -274,7 +280,10 @@ out(idsC.filter((id) => statuses(id).includes("Waiting for the Steam app…")).l
 const subEv = []; ws.addEventListener("message", (m) => { const e = JSON.parse(m.data); if (e.type === "subscribe-progress") subEv.push(e.payload); });
 const state = async (ids) => (await post("/workshop/state", { ids })).json();
 const undoDepth = async () => (await (await fetch(U + "/library/undo-depth")).json()).depth;
-const unsubDone = async () => { for (let i = 0; i < 100 && !unsub.some((e) => e.finished); i++) await sleep(100); };
+// the drain ended (its finishing event); each cell waits for its own, so none is left running into the next cell
+const unsubDone = () => until(() => unsub.some((e) => e.finished));
+// every Steam-client helper so far let go of Steam (a "close" per "open" in the fake's helpers.log) and exited
+const helpersDone = () => until(() => { const l = helpersLog(); return l.filter((x) => x.startsWith("open ")).length === l.filter((x) => x.startsWith("close ")).length && !alive(childPid()); });
 // Open on Steam → the Steam CLIENT (steam://), its own route; /open stays http(s)-only
 n0 = urls().length;
 const ro = await post("/steam/open-page", { workshopId: "760000001" });
@@ -340,15 +349,15 @@ const tU = Date.now();
 await post("/workshop/delete-from-source", { items: [await item(wid)] });
 await sleep(3000);
 const at3 = { sub: fs.existsSync(wSub), helpers: helpersLog().length - hw0 };
-for (let i = 0; i < 150 && fs.existsSync(wSub); i++) await sleep(100);
+await until(() => !fs.existsSync(wSub));
 const tGone = Date.now() - tU;
 await unsubDone();
 out(at3.sub && at3.helpers === 0 && !fs.existsSync(wSub) && tGone >= 5000,
   "Undo window: no Undo — still subscribed at 3 s, then unsubscribed through the Steam client after 5 s", `at 3 s ${JSON.stringify(at3)}, unsubscribed after ${tGone} ms`);
 await post("/library/undo");
-for (let i = 0; i < 100 && !fs.existsSync(wSub); i++) await sleep(100);
+await until(() => fs.existsSync(wSub));
 out(!!(await item(wid)) && fs.existsSync(wSub), "…Undo after the window: back in the library and subscribed again", `in library ${!!(await item(wid))}, sub ${fs.existsSync(wSub)}`);
-await sleep(1500); // the re-subscribe's helper lets go
+await helpersDone(); // the re-subscribe's helper lets go
 
 // An Undo the backend accepts always wins over the window's drain (WorkshopUnsubQueue.Claim / Withdraw). The fake's control
 // files pin each side of the race in place, so neither depends on timing:
@@ -362,16 +371,16 @@ const logSince = (n) => fs.readFileSync(`${T}/backend3.log`, "utf8").slice(n);
 const waitUnsub = async (pred, ms) => { for (let i = 0; i < ms / 50 && !unsub.some(pred); i++) await sleep(50); return unsub.some(pred); };
 fs.writeFileSync(`${T}/steamlib/hold-install`, "");
 const busy = settle(post("/workshop/subscribe", { workshopId: "760000009", title: "busy" }), 60000);
-for (let i = 0; i < 200 && !fs.existsSync(`${T}/steamlib/sub-760000009`); i++) await sleep(50);
+await until(() => fs.existsSync(`${T}/steamlib/sub-760000009`));
 let c0 = callsOf(wid).length, log0 = fs.readFileSync(`${T}/backend3.log`, "utf8").length;
 unsub.length = 0;
 await post("/workshop/delete-from-source", { items: [await item(wid)] });
-const drainHasIt = await waitUnsub((e) => !e.finished && e.currentId === wid, 20000); // past the window: the drain picked it up
+const drainHasIt = await waitUnsub((e) => !e.finished && e.currentId === wid, 60000); // past the window: the drain picked it up
 const rw = await (await post("/library/undo")).json().catch(() => null);
 const backAtUndo = !!(await item(wid));
 fs.rmSync(`${T}/steamlib/hold-install`);
 const busyR = await busy;
-await waitUnsub((e) => e.finished, 20000);
+await waitUnsub((e) => e.finished, 60000);
 await sleep(1500); // what the drain would send once its turn comes
 out(drainHasIt && rw?.ok === true && backAtUndo && busyR?.status === 200 && callsOf(wid).length === c0 && fs.existsSync(wSub) && !(await queue()).includes(wid),
   "Undo window: an Undo while the drain waits for the Steam client — back in the library, Steam never asked to unsubscribe or subscribe again",
@@ -381,13 +390,13 @@ fs.writeFileSync(`${T}/steamlib/hold-unsub`, "");
 c0 = callsOf(wid).length; log0 = fs.readFileSync(`${T}/backend3.log`, "utf8").length;
 ud = await undoDepth(); unsub.length = 0;
 await post("/workshop/delete-from-source", { items: [await item(wid)] });
-for (let i = 0; i < 300 && !fs.existsSync(`${T}/steamlib/unsub-held`); i++) await sleep(50);
+await until(() => fs.existsSync(`${T}/steamlib/unsub-held`));
 const held = fs.existsSync(`${T}/steamlib/unsub-held`);
 const rl = await post("/library/undo"); const bl = await rl.json().catch(() => null);
 const lateState = { inLib: !!(await item(wid)), depth: await undoDepth() };
 fs.rmSync(`${T}/steamlib/hold-unsub`);
-await waitUnsub((e) => e.finished, 20000);
-for (let i = 0; i < 100 && fs.existsSync(wSub); i++) await sleep(100);
+await waitUnsub((e) => e.finished, 60000);
+await until(() => !fs.existsSync(wSub));
 const after = { sub: fs.existsSync(wSub), inLib: !!(await item(wid)), queued: (await queue()).includes(wid) };
 out(held && rl.status === 200 && bl?.ok === false && /too late/i.test(bl?.message ?? "") && !lateState.inLib && lateState.depth === ud + 1
   && !after.sub && !after.inLib && !after.queued && callsOf(wid).slice(c0).join() === "unsubscribe",
@@ -395,10 +404,10 @@ out(held && rl.status === 200 && bl?.ok === false && /too late/i.test(bl?.messag
   `held ${held}, undo ${rl.status} ${JSON.stringify(bl)}, then ${JSON.stringify(lateState)}, after ${JSON.stringify(after)}, Steam asked [${callsOf(wid).slice(c0)}] | ${logSince(log0).split("\n").filter((l) => l.includes(wid)).join(" / ")}`);
 fs.rmSync(`${T}/steamlib/unsub-held`, { force: true });
 const rAgain = await (await post("/library/undo")).json().catch(() => null);
-for (let i = 0; i < 100 && !fs.existsSync(wSub); i++) await sleep(100);
+await until(() => fs.existsSync(wSub));
 out(rAgain?.ok === true && !!(await item(wid)) && fs.existsSync(wSub) && (await undoDepth()) === ud,
   "…Undo again once it's done: back in the library and subscribed again", `${JSON.stringify(rAgain)}, in library ${!!(await item(wid))}, sub ${fs.existsSync(wSub)}`);
-await sleep(1500); // the re-subscribe's helper lets go
+await helpersDone(); // the re-subscribe's helper lets go
 
 // Unsubscribe of a library item = Delete from source: trashed + unsubscribed, undoable; Undo subscribes it again
 ud = await undoDepth();
@@ -409,10 +418,10 @@ await unsubDone();
 out(bu?.inLibrary === true && !!bu.batch && !(await item("740000001")) && !fs.existsSync(`${T}/steamlib/sub-740000001`) && (await undoDepth()) === ud + 1,
   "Unsubscribe (in the library): trashed like Delete from source + unsubscribed through the Steam client, one undo batch", `${JSON.stringify(bu)}, sub ${fs.existsSync(`${T}/steamlib/sub-740000001`)}`);
 await post("/library/undo");
-for (let i = 0; i < 100 && !fs.existsSync(`${T}/steamlib/sub-740000001`); i++) await sleep(100);
+await until(() => fs.existsSync(`${T}/steamlib/sub-740000001`));
 out(!!(await item("740000001")) && fs.existsSync(`${T}/steamlib/sub-740000001`) && !(await queue()).includes("740000001"),
   "…Undo: back in the library and subscribed again through the Steam client", `in library ${!!(await item("740000001"))}, sub ${fs.existsSync(`${T}/steamlib/sub-740000001`)}`);
-await sleep(1500); // the re-subscribe's helper lets go before the mode changes
+await helpersDone(); // the re-subscribe's helper lets go before the mode changes
 
 // Unsubscribe WITHOUT deleting (the Unsubscribe button's right-click menu; WorkshopSubOps.UnsubscribeKeepAsync). Its own route:
 // nothing trashed or deleted. A local/<id> LINK into Steam's folder (which Steam removes after an unsubscribe) becomes the
@@ -473,7 +482,7 @@ await post("/settings", { autoAddWeWallpapersToLibrary: true });
 const kBefore = await item(kid), wasOwn = !isLink(kLink) && fs.existsSync(kLink);
 rs = await post("/workshop/subscribe", { workshopId: kid, title: "ws-740000003" });
 bs = await rs.json().catch(() => null);
-for (let i = 0; i < 150 && !isLink(kLink); i++) await sleep(100);
+await until(() => isLink(kLink));
 const kNow = (await lib()).filter((i) => i.workshopId === kid);
 out(wasOwn && rs.status === 200 && bs?.subscribed === true && !!kBefore && kBefore.subscribed === false && isLink(kLink) && kNow.length === 1
   && kNow[0].videoPath === kBefore.videoPath && kNow[0].subscribed === true && fs.existsSync(kNow[0].videoPath),
@@ -557,7 +566,7 @@ const route1 = await (await fetch(U + "/workshop/one-off")).json();
 out(route1.route === "steamapp" && route1.missing == null, "one-off route (Use the Steam app): the Steam client's own", JSON.stringify(route1));
 n0 = urls().length; h0 = helpersLog().length;
 const unsub0 = fakeLines("unsubscribed").length;
-let ro1 = await settle(oneOff("770000001"), 20000);
+let ro1 = await settle(oneOff("770000001"), 60000);
 const own1 = ownCopy(ro1?.body, "770000001");
 out(ro1?.status === 200 && own1 === true, "one-off (Use the Steam app): the library's own workshop/<id> copy", `${JSON.stringify(ro1)?.slice(0, 160)} | ${own1}`);
 out(fakeLines("downloads").includes("770000001") && !fs.existsSync(`${T}/steamlib/sub-770000001`) && fakeLines("unsubscribed").length === unsub0,
@@ -569,9 +578,9 @@ out(st["770000001"]?.subscribed === false && st["770000001"].onDisk === true && 
   "…Steam's folder for it lingers: not called subscribed, kept out of auto-import (blocked), no unsubscribe queued", JSON.stringify(st["770000001"]));
 // an item the user is subscribed to: the client's copy is copied, the subscription untouched
 await post("/workshop/subscribe", { workshopId: "770000002", title: "ws-770000002" });
-await sleep(1500); // the subscribe's helper lets go
+await helpersDone(); // the subscribe's helper lets go
 const sub2 = fs.existsSync(`${T}/steamlib/sub-770000002`);
-let ro2 = await settle(oneOff("770000002"), 20000);
+let ro2 = await settle(oneOff("770000002"), 60000);
 st = await state(["770000002"]);
 out(sub2 && ro2?.status === 200 && ownCopy(ro2.body, "770000002") === true && fs.existsSync(`${T}/steamlib/sub-770000002`) && st["770000002"]?.subscribed === true
   && !blockedIds().includes("770000002") && fakeLines("unsubscribed").length === unsub0,
@@ -579,10 +588,12 @@ out(sub2 && ro2?.status === 200 && ownCopy(ro2.body, "770000002") === true && fs
 // the client won't download an unsubscribed item: subscribe → copy → unsubscribe through the client, no Undo window
 fs.writeFileSync(`${T}/steamlib/refuse-download`, "");
 unsub.length = 0;
-const t3 = Date.now();
-let ro3 = await settle(oneOff("770000003"), 20000);
-for (let i = 0; i < 100 && fs.existsSync(`${T}/steamlib/sub-770000003`); i++) await sleep(100);
-const tUnsub3 = Date.now() - t3;
+let ro3 = await settle(oneOff("770000003"), 60000);
+const t3 = Date.now(); // copied: an Undo window would hold the unsubscribe ≥ 5 s from here
+await until(() => !fs.existsSync(`${T}/steamlib/sub-770000003`));
+// when the backend started the unsubscribe's helper (the fake's "start" stamp, before any FAKE_UGC_OPEN_DELAY_MS): the
+// subscribe, the download and the helper's own connect are not part of the window
+const tUnsub3 = Math.round(+(helpersLog().filter((l) => l.startsWith("start ")).at(-1)?.split(" ")[2] ?? Infinity) * 1000 - t3);
 await unsubDone();
 st = await state(["770000003"]);
 out(ro3?.status === 200 && ownCopy(ro3.body, "770000003") === true && !fakeLines("downloads").includes("770000003"),
@@ -597,7 +608,7 @@ out(!fs.existsSync(`${T}/steamlib/sub-770000003`) && fakeLines("unsubscribed").l
 fs.rmSync(`${T}/steamlib/refuse-download`);
 // Steam unreachable: fails with the reason, nothing imported, nothing blocked
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
-let ro4 = await settle(oneOff("770000004"), 20000);
+let ro4 = await settle(oneOff("770000004"), 60000);
 fs.rmSync(`${T}/steamlib/fail-init`);
 out(ro4 && ro4.status >= 400 && /Couldn't use the Steam app/.test(ro4.body?.error ?? "") && !(await item("770000004")) && !blockedIds().includes("770000004") && urls().length === n0,
   "one-off, Steam unreachable (Use the Steam app): fails with the reason, nothing imported, opened or blocked", JSON.stringify(ro4)?.slice(0, 200));

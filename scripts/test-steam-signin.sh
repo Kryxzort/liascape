@@ -59,6 +59,8 @@
 #
 # Usage: scripts/test-steam-signin.sh [--no-build]     Needs: dotnet (or DOTNET=…), node (≥ 22: WebSocket), ffmpeg, curl, jq.
 #   LIASCAPE_KEEP_TMP=1 keeps the temp folder; a failed run keeps only its logs / screenshots and prints where (last line).
+#   FAKE_UGC_OPEN_DELAY_MS=<ms>: every § 3 Steam-client helper takes that long to connect — a loaded or freshly booted machine,
+#   where starting one takes seconds, made repeatable (§ 3 waits on events, never on a time; 5500 outlasts the Undo window).
 # Last line `RESULT pass=N fail=M`, exit 0 = pass.
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
@@ -414,7 +416,7 @@ for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
 for _ in $(seq 1 50); do curl -sf -m 2 "$U3/health" >/dev/null && break; sleep 0.1; done
 cp "$ROOT/scripts/test-fixtures/drive-steam-client.mjs" "$T/drive3.mjs"
-(cd "$T" && U=$U3 T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 300 node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
+(cd "$T" && U=$U3 T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout $((300 + 50 * ${FAKE_UGC_OPEN_DELAY_MS:-0} / 1000)) node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
 sed 's/^/      /' "$T/drive3.log"
 p=$(grep -c '^PASS' "$T/drive3.log"); f=$(grep -c '^FAIL' "$T/drive3.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))

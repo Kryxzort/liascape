@@ -45,10 +45,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 99. [ ] Hermetic tests: the UI matrix doesn't stub `/browse` for the Workshop's own queries, so a probe that opens the
        Workshop source without probe-steam's stub reaches real Steam. Stub it for every probe (the CM fixture), and make
        a real-network call from the matrix fail loudly.
-100. [ ] Watch: `scripts/test-steam-signin.sh` failed 3 Steam-client unsubscribe / Undo-window cells ("sub true") once at
-       load 7–9 right after a reboot (2026-11-18, while verifying #98), 132/0 on a rerun at load 2.7. Those are the cells
-       05c9ce82 (Undo always wins) touched: rerun them under a niced CPU load ≥ 10 times and check the failures aren't the
-       race back (the backend log's "unsubscribed after an Undo" / claim lines); fix the wait if it's only timing.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

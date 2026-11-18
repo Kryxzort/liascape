@@ -11,12 +11,15 @@
 //   $FAKE_UGC_DIR/hold-install exists → a download stays at 50 % until it's removed (its helper keeps the one Steam-client turn)
 //   $FAKE_UGC_DIR/calls ← a line "subscribe <id>" / "unsubscribe <id>" per SubscribeItem / UnsubscribeItem Steam took
 //   $FAKE_UGC_DIR/hold-unsub exists → UnsubscribeItem writes $FAKE_UGC_DIR/unsub-held and waits until it's removed, then unsubscribes
+//   $FAKE_UGC_OPEN_DELAY_MS (env) → every helper takes that long to connect (CreateInterface): a loaded or cold machine, where
+//   starting a helper takes seconds, made repeatable (a rerun of the suite with it shows which waits assume a fast helper)
 //   SteamAppId must be 431960 (the helper sets it in its child only) — else ConnectToGlobalUser returns 0
 //   $FAKE_UGC_DIR/child.pid ← the caller's pid; $FAKE_UGC_DIR/released ← a line per pipe released
 //   $FAKE_UGC_DIR/sub-<id> = subscribed (a file: each helper run is a NEW process — an unsubscribe run must see what an
 //   earlier download subscribed); UnsubscribeItem deletes it
-//   $FAKE_UGC_DIR/helpers.log ← "open <pid> <unix s>" (CreateInterface), "use <pid>" (Subscribe/Unsubscribe/DownloadItem), "close <pid>
-//   <unix s>" (BReleaseSteamPipe) — the test checks that no two subscribe/unsubscribe helpers were connected at once
+//   $FAKE_UGC_DIR/helpers.log ← "start <pid> <unix s>" (CreateInterface called), "open <pid> <unix s>" (it returned), "use <pid>"
+//   (Subscribe/Unsubscribe/DownloadItem), "close <pid> <unix s>" (BReleaseSteamPipe) — the test checks that no two
+//   subscribe/unsubscribe helpers were connected at once
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -110,6 +113,8 @@ static bool install_info(Obj *s, uint64_t id, uint64_t *size, char *folder, uint
 void *CreateInterface(const char *ver, int *ret) {
   (void)ret;
   if (strcmp(ver, "SteamClient020") != 0) return NULL;
+  helper_log("start", 1);
+  const char *slow = getenv("FAKE_UGC_OPEN_DELAY_MS"); if (slow && atoi(slow) > 0) usleep((useconds_t)atoi(slow) * 1000);
   client_vt[0] = (void *)create_pipe; client_vt[1] = (void *)release_pipe; client_vt[2] = (void *)connect_user;
   client_vt[4] = (void *)release_user; client_vt[12] = (void *)generic;
   ugc_vt[68] = (void *)subscribe; ugc_vt[69] = (void *)unsubscribe; ugc_vt[72] = (void *)item_state; ugc_vt[73] = (void *)install_info; ugc_vt[74] = (void *)download_info;
