@@ -15,6 +15,8 @@
 #          leaves the library and the playlist, a removed copy stays; a folder that is gone or reads as empty removes
 #          nothing; an item the user deletes never comes back; a scene waits for "Play scenes"; "Add new wallpapers to the
 #          playlist" adds what a watch brings; unwatching keeps the items and stops the pickup.
+#  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
+#          every root nor a watched folder's file by its own path, and no longer once the folder is unwatched.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
@@ -58,6 +60,10 @@ H=$T/home
 mkdir -p "$H/.config/liascape" "$H/.cache" "$H/.local/share" "$H/rt" "$H/st"
 export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME=$H/.local/share XDG_RUNTIME_DIR=$H/rt XDG_STATE_HOME=$H/st
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# the backend's xdg-open (POST /open/media): records each call's argv, opens nothing
+mkdir -p "$T/bin"; OPENED=$T/xdg-open.log; : > "$OPENED"
+printf '#!/bin/sh\n{ printf "argc=%%s\\n" "$#"; for a; do printf "arg=%%s\\n" "$a"; done; } >> %s\n' "'$OPENED'" > "$T/bin/xdg-open"
+chmod +x "$T/bin/xdg-open"; export PATH=$T/bin:$PATH
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
 bad() { echo "FAIL  $1"; FAIL=$((FAIL + 1)); }
@@ -255,8 +261,20 @@ if wait_for 8 bash -c "cmp -s '$W2/h.mp4' '$IMP/h/h.mp4'"; then ok "a copy follo
 rm "$W2/i.mp4"
 if wait_for 8 bash -c "[ \"\$(jq -r '.i.watchedFrom' '$IMP/index.json')\" = null ]"; then ok "a removed file's copy is no longer the folder's"; else bad "a removed file's copy is no longer the folder's"; fi
 check "…and stays in the library" "$(item i | jq -r .videoPath)" "$IMP/i/i.mp4"
+echo "== open: a watched folder's linked file in the user's own app"
+# POST /open/media: the watched folders count as roots for where a library link resolves (xdg-open: the stub on PATH)
+openst() { : > "$OPENED"; api -o /dev/null -w '%{http_code}' -X POST "$U/open/media" -d "$(jq -nc --arg p "$1" '{path: $p}')"; }
+opened() { for _ in $(seq 1 30); do [ -s "$OPENED" ] && break; sleep 0.1; done; tr '\n' '|' < "$OPENED"; }
+check "a watched folder's linked file opens" "$(openst "$IMP/a/a.mp4")" 200
+check "…xdg-open got its file in the watched folder" "$(opened)" "argc=1|arg=$W/a.mp4|"
+mkdir -p "$T/outside/media" "$IMP/manual"; vid "$T/outside/media/o.mp4"; ln -s "$T/outside/media/o.mp4" "$IMP/manual/o.mp4"
+check "a library link to a file outside every root is still refused" "$(openst "$IMP/manual/o.mp4")" 403
+check "a watched folder's file asked for by its own path is refused (only library paths)" "$(openst "$W/a.mp4")" 403
+sleep 0.5; check "…nothing was opened" "$(tr '\n' '|' < "$OPENED")" ""
 # unwatching keeps the items and stops the pickup
 post /library/watched "$(jq -nc --arg w "$W" '{path: $w, remove: true}')" > /dev/null
+check "a folder no longer watched is no longer a root" "$(openst "$IMP/a/a.mp4")" 403
+rm -rf "$IMP/manual"
 vid "$W/j.mp4"; sleep 2
 check "unwatched: nothing new comes in" "$(item j)" null
 check "…its items stay" "$(item a | jq -r .videoPath)" "$IMP/a/a.mp4"

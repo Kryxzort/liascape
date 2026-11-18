@@ -283,7 +283,8 @@ public static class ApiSecurity
     // so only a video or a picture (a GIF included), decided by name AND by content, under the media roots once every
     // symlink is resolved:
     //  • MediaAllowed (the lexical check), then realpath() of the whole path re-checked against the roots' own realpaths
-    //    (a link inside the library may point anywhere; a root that is itself a link — ~/.steam/steam — still matches);
+    //    and the watched folders' (a link inside the library may point anywhere; a root that is itself a link —
+    //    ~/.steam/steam — still matches);
     //  • a regular file (opened O_NONBLOCK: a FIFO can't hang the request), its extension — and its resolved name's — in one
     //    family below;
     //  • its first bytes that family's: a video container's for a video name, a PNG / JPEG / WebP / GIF header for a picture
@@ -302,7 +303,8 @@ public static class ApiSecurity
         if (RealPath(path!) is not { } real) return null;
         // the real file's own name must pass too: a link named .mp4 to a .desktop is still a .desktop to xdg-open's MIME lookup
         if (!(image ? OpenImageExts : OpenVideoExts).Contains(Path.GetExtension(real).ToLowerInvariant())) return null;
-        bool under = MediaRoots(fresh: true).Select(RealPath).Any(r => r != null && r.Length > 1 && real.StartsWith(r + "/", StringComparison.Ordinal));
+        bool under = MediaRoots(fresh: true).Concat(WatchedRoots()).Select(RealPath)
+            .Any(r => r != null && r.Length > 1 && real.StartsWith(r + "/", StringComparison.Ordinal));
         if (!under) return null;
         var head = ReadHead(real, 4096);
         if (head == null) return null;
@@ -310,6 +312,14 @@ public static class ApiSecurity
         if (Contains(head, "[Desktop") || Contains(head, "[KDE Desktop")) return null;
         return real;
     }
+
+    // An item a watched folder brought in is a link into that folder (Web/FolderWatch.cs), so the folders the user keeps in
+    // the library count as roots for where a library path may resolve, like the library's own. Read per call: a folder taken
+    // off the list stops counting at once. Only the resolved target widens: the path asked for is still a library path
+    // (MediaAllowed), and a one-off import's link to anywhere else still resolves outside every root.
+    // Guard: scripts/test-folder-import.sh § open
+    private static IEnumerable<string> WatchedRoots() =>
+        SettingsService.Load().WatchedFolders.Select(w => w.Path).Where(p => p.StartsWith('/'));
 
     private static bool IsImage(byte[] b)
     {
