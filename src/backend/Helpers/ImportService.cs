@@ -36,7 +36,13 @@ public static class ImportService
         var sourceId = "import:" + sourcePath;
 
         bool isImage = IsImage(sourcePath);
-        string mediaExt = isImage ? ".png" : ".mp4";
+        // a still becomes a png; a video or gif keeps its own extension, so everything that tells a format by its name (the
+        // card's gif vs video preview, /media's content type, "open in your default app"'s check of the file's magic)
+        // sees what the file really is. An extension the library doesn't list (LibraryService.ImportedMediaExts) is stored as
+        // .mp4, which the player plays whatever the container: under any other name the library wouldn't find the item.
+        // Guard: scripts/test-item-actions.sh § import.
+        string srcExt = Path.GetExtension(sourcePath).ToLowerInvariant();
+        string mediaExt = isImage ? ".png" : LibraryService.ImportedMediaExts.Contains(srcExt) ? srcExt : ".mp4";
 
         string key, itemDir, videoPath, thumbPath;
         await _importLock.WaitAsync();

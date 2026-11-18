@@ -225,7 +225,11 @@ public static class LiascapePlayerSelfTest
             if (got != want) fails.Add($"ItemPlayRule({kind}, min {min}, max {max}, separate {sep}, scenes after {after}) = {got}, want {want}");
         }
         foreach (var (path, want) in new[] { ("/x/a.mp4", PlayerHelper.PlayKind.Video), ("/x/a.PNG", PlayerHelper.PlayKind.Image),
-                                             ("/x/b.webp", PlayerHelper.PlayKind.Image), ("/lib/workshop/900000001", PlayerHelper.PlayKind.Scene) })
+                                             ("/x/b.webp", PlayerHelper.PlayKind.Image), ("/lib/workshop/900000001", PlayerHelper.PlayKind.Scene),
+                                             // an import keeps its source's extension (Helpers/ImportService.cs): a gif plays
+                                             // as a video (mpv loops it), so do the other containers
+                                             ("/lib/imported/g/g.gif", PlayerHelper.PlayKind.Video), ("/lib/imported/w/w.webm", PlayerHelper.PlayKind.Video),
+                                             ("/lib/imported/m/m.mkv", PlayerHelper.PlayKind.Video) })
             if (PlayerHelper.PlayKindOf(path) != want) fails.Add($"PlayKindOf({path}) = {PlayerHelper.PlayKindOf(path)}, want {want}");
         // NeverMs never reached, never overflows the hold's arithmetic
         if (PlayerHelper.SceneMinReached(true, true, true, 359999_000L, N) || PlayerHelper.MinPlayReached(359999_000L, 12_000, N))
@@ -466,6 +470,10 @@ public static class LiascapePlayerSelfTest
             if (P("gain.normalize") is var gn && (gn == "<absent>" || Math.Abs(Convert.ToDouble(props["gain.normalize"])) > 1e-9))
                 fails.Add($"SourceProps(unlearned scene).gain.normalize = {gn}, want 0");
             if (vid.ContainsKey("gain.normalize")) fails.Add("SourceProps(.mp4) carries gain.normalize — a video normalizes through af");
+            // an imported gif / webm / mkv keeps its own name (Helpers/ImportService.cs) and the player opens each as a video
+            foreach (var f in new[] { "x.gif", "x.webm", "x.mkv" })
+                if (LiascapePlayerMedia.SourceProps(Path.Combine(dir, f), new AppSettings())["kind"] as string is var k && k != "video")
+                    fails.Add($"SourceProps({f}) = kind {k}; want video");
         }
         finally { try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(dir))!, true); } catch { } }
         SceneLoudnessAssertions(fails);

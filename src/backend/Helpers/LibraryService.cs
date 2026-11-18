@@ -8,7 +8,8 @@ using Liascape.Models;
 namespace Liascape.Helpers;
 
 // Per-source, per-item-folder library. Layout (see LibraryStore):
-//   <source>/<key>/<key>.mp4|png (+ <key>.jpg/.gif)        web/imported video — folder named after the item
+//   <source>/<key>/<key>.<videoext>|png (+ <key>.jpg/.gif)  web/imported video — folder named after the item; an
+//       imported one keeps its source's extension, .gif included (then <key>.gif is the media AND its animated preview)
 //   workshop/<id>/{file.mp4, preview.*, project.json}      direct-DL video (owned, Steam-mirror)
 //   local/<id> -> symlink into the user's WE dir           subscribed/WE-local video
 //   workshop/<id> | local/<id>                             SCENE — the item FOLDER itself is the play path.
@@ -20,6 +21,10 @@ public static class LibraryService
 {
     private static readonly string[] VideoExts = { ".mp4", ".webm", ".mov", ".mkv", ".avi" };
     private static bool IsVideoFile(string p) => VideoExts.Contains(Path.GetExtension(p).ToLowerInvariant());
+    // An imported item keeps its source's own extension (Helpers/ImportService.cs): a video container or an animated gif,
+    // which the player plays as a video. Only these: the library finds an imported item's media by `<key>.<ext>`, so an
+    // extension it doesn't look for would hide the item. Guard: scripts/test-item-actions.sh § import.
+    public static readonly string[] ImportedMediaExts = [.. VideoExts, ".gif"];
 
     // ---------- read overrides / flags (now from the source index) ----------
     public static int? ReadVolumeOverride(string mediaPath) => LibraryStore.GetMeta(mediaPath)?.Volume;
@@ -487,7 +492,7 @@ public static class LibraryService
                         copiedSceneDir: owned ? itemDir : null));
                     continue;
                 }
-                var media = ResolveItemMedia(itemDir, key);
+                var media = ResolveItemMedia(itemDir, key, imported: source == LibraryStore.Imported);
                 if (media == null) continue;
                 if (!File.Exists(media)) { if (m == null) TryDeleteDir(itemDir); continue; } // dangling symlink
                 items.Add(Build(media, key, m, isScene: false, itemDir));
@@ -514,8 +519,11 @@ public static class LibraryService
         return File.Exists(Path.Combine(itemDir, "scene.pkg"));
     }
 
-    // the playable media inside an item folder: web/imported = <key>.<videoext>|png; workshop/local = project.json "file"
-    private static string? ResolveItemMedia(string itemDir, string key)
+    // the playable media inside an item folder: web/imported = <key>.<videoext>|png; workshop/local = project.json "file".
+    // imported: also <key>.gif (an imported animated gif), but only when nothing else is there: a URL download from an
+    // unknown site lands in imported/ too, where <key>.gif is the preview of a video beside it (DownloadHelper), and a
+    // video link that broke must still read as broken, never as its preview.
+    private static string? ResolveItemMedia(string itemDir, string key, bool imported = false)
     {
         var pj = Path.Combine(itemDir, "project.json");
         if (File.Exists(pj))
@@ -534,7 +542,9 @@ public static class LibraryService
             if (File.Exists(p)) return p;
         }
         // fall back to the first video file in the folder (workshop folder may name the file arbitrarily)
-        return SafeFiles(itemDir, "*").FirstOrDefault(IsVideoFile);
+        if (SafeFiles(itemDir, "*").FirstOrDefault(IsVideoFile) is { } video) return video;
+        var gif = Path.Combine(itemDir, key + ".gif");
+        return imported && File.Exists(gif) ? gif : null;
     }
 
     private static LibraryItem Build(string media, string key, LibMeta? m, bool isScene,

@@ -41,7 +41,9 @@ public static class ServerHost
 
     // remote thumbnails / gifs the page names (/img, /anim, /still): public addresses only (ApiSecurity.PublicOnlyHttp)
     private static readonly HttpClient Http = ApiSecurity.PublicOnlyHttp(TimeSpan.FromSeconds(30));
-    private static readonly FileExtensionContentTypeProvider Mime = new();
+    // the provider's table lacks Matroska: an .mkv (an import keeps its own extension, Helpers/ImportService.cs) would go out
+    // as application/octet-stream. Guard: scripts/test-item-actions.sh "/media serves each as its own type"
+    private static readonly FileExtensionContentTypeProvider Mime = new() { Mappings = { [".mkv"] = "video/x-matroska" } };
 
     private static string ConfigDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape");

@@ -8,6 +8,11 @@
 #         escaping it, a `..` path, a .desktop renamed .mp4 or .png, a .desktop behind a forged MP4 box, a script renamed
 #         .png, a GIF named .mp4, a video named .png, a link named .mp4 to a .bin, a non-media extension, a directory and a
 #         FIFO (without hanging). ApiSecurity.OpenableMedia.
+#  import: POST /library/import of a .gif, a .webm and a .MKV stores each under its own (lowercased) extension, its bytes
+#         as they were, with a thumbnail; a container the library doesn't name (.ts) as .mp4. /library lists the gif as its
+#         own animated preview and the videos without one, /media serves each as its own type, the gif and the mkv open in
+#         the user's app, a re-import is the same item, delete takes it away; a URL download's <key>.gif beside its video
+#         stays its preview, and never stands in for a broken video link. Helpers/ImportService.cs, LibraryService.ResolveItemMedia.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
@@ -191,6 +196,49 @@ open_no "a directory named .mp4" "$LIB/imported/bad/dir.mp4"
 open_no "a FIFO named .mp4 (answered, not hung)" "$LIB/imported/bad/fifo.mp4"
 open_no "a relative path" "imported/v1/v1.mp4"
 check "nothing ran the planted .desktop" "$([ -e "$T/pwned" ] && echo ran || echo no)" no
+
+echo "== import: a gif and videos keep their own format"
+SRC=$T/src; mkdir -p "$SRC"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=64x36:rate=4:duration=1" "$SRC/ig.gif"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=blue:s=64x36" -frames:v 2 -c:v libvpx-vp9 "$SRC/iw.webm"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=blue:s=64x36" -frames:v 2 -c:v libx264 -pix_fmt yuv420p -f matroska "$SRC/im.MKV"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=blue:s=64x36:rate=4:duration=1" -c:v libx264 -pix_fmt yuv420p -f mpegts "$SRC/it.ts"
+# $1 the source, $2 the title, $3 the extension it must be stored under
+imp() {
+  local want=$LIB/imported/$2/$2.$3 got
+  got=$(postc /library/import "$(jq -nc --arg p "$1" --arg t "$2" '{path: $p, title: $t}')"; echo " $(jq -r .videoPath "$T/body")")
+  check "import $(basename "$1") → stored as $2.$3" "$got" "200 $want"
+  check "…the source's own bytes" "$(cmp -s "$1" "$want" && echo same || echo differ)" same
+  check "…its thumbnail extracted" "$(item "$2" | jq -r .thumbnailPath)" "$LIB/imported/$2/$2.jpg"
+}
+imp "$SRC/ig.gif" ig gif
+imp "$SRC/iw.webm" iw webm
+imp "$SRC/im.MKV" im mkv
+# a container the library doesn't name (LibraryService.ImportedMediaExts): .mp4, which the player plays whatever is inside
+imp "$SRC/it.ts" it mp4
+# what the UI tells a gif from a video by (components/mediaAssets.ts): the gif is its own animated preview, a video has none
+check "the gif lists as its own animated preview (a card plays it as a gif)" "$(item ig | jq -c '[.videoPath == .animatedThumbnailPath, .isScene]')" '[true,false]'
+check "the webm and mkv list as videos, with no gif" "$(item iw | jq -c '[.videoPath, .animatedThumbnailPath]') $(item im | jq -c '[.videoPath, .animatedThumbnailPath]')" \
+  "[\"$LIB/imported/iw/iw.webm\",null] [\"$LIB/imported/im/im.mkv\",null]"
+ctype() { api -o /dev/null -w '%{content_type}' "$U/media?path=$(jq -rn --arg p "$1" '$p|@uri')"; }
+check "/media serves each as its own type" "$(ctype "$LIB/imported/ig/ig.gif") $(ctype "$LIB/imported/iw/iw.webm") $(ctype "$LIB/imported/im/im.mkv")" \
+  "image/gif video/webm video/x-matroska"
+open_ok "the imported gif in the user's own app (a GIF named .mp4 is refused)" "$LIB/imported/ig/ig.gif" "$(realpath "$LIB/imported/ig/ig.gif")"
+open_ok "the imported mkv in the user's own app" "$LIB/imported/im/im.mkv" "$(realpath "$LIB/imported/im/im.mkv")"
+# importing the same file again reuses its folder and name
+check "importing the gif again → the same item" "$(postc /library/import "$(jq -nc --arg p "$SRC/ig.gif" '{path: $p, title: "ig"}')") $(jq -r .videoPath "$T/body") $(ls "$LIB/imported" | grep -c '^ig')" \
+  "200 $LIB/imported/ig/ig.gif 1"
+check "delete takes the gif item away" "$(postc /library/delete "$(item ig)") $(item ig) $([ -e "$LIB/imported/ig" ] && echo left || echo gone)" "200 null gone"
+# a URL download from an unknown site lands in imported/ too, its <key>.gif the PREVIEW of the video beside it
+# (Helpers/DownloadHelper.cs): the video stays the media, and a video link that broke never turns into its preview
+mkdir -p "$LIB/imported/dl1" "$LIB/imported/dl2"
+vid "$LIB/imported/dl1/dl1.webm"; cp "$SRC/ig.gif" "$LIB/imported/dl1/dl1.gif"
+ln -s "$T/gone.mp4" "$LIB/imported/dl2/dl2.mp4"; cp "$SRC/ig.gif" "$LIB/imported/dl2/dl2.gif"
+jq -c '. + {"dl1": {"title": "dl1"}, "dl2": {"title": "dl2"}}' "$LIB/imported/index.json" > "$T/idx" && mv "$T/idx" "$LIB/imported/index.json"
+check "a download's video stays its media, its gif the preview" "$(item dl1 | jq -c '[.videoPath, .animatedThumbnailPath]')" \
+  "[\"$LIB/imported/dl1/dl1.webm\",\"$LIB/imported/dl1/dl1.gif\"]"
+check "a download whose video link broke still names that link, never its preview gif" "$(item dl2 | jq -c '[.videoPath, .animatedThumbnailPath]')" \
+  "[\"$LIB/imported/dl2/dl2.mp4\",\"$LIB/imported/dl2/dl2.gif\"]"
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"
