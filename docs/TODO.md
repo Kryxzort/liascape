@@ -40,6 +40,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 92. [ ] Flaky probe: `probe-libops.js` `libops:toggle` fails whenever it runs after `libops:backfill` in the same
        probe run (base 1aa78a41 too) and passes alone: a leftover from the backfill cell (a held queue, a pending
        clip, the progress line) leaks into it. Reset that state between cells or make the cell independent of it.
+94. [ ] Folder import follow-ups (after 5a7ff7ff): (a) importing single files is only on the Import button's right-click
+       menu, which nobody finds: give it a visible control (e.g. a split button's chevron) and keep a plain click = pick a
+       folder; (b) a Workshop item imported from a backup and later subscribed with WE auto-import on gets a second
+       `local/<id>` link: "already in your library" by Workshop id applies to the auto-import too (one item, no
+       duplicate); (c) "Open in your default app" refuses a linked file inside a watched folder (outside the library
+       roots): the watched folders count as allowed roots, like the library's own.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
