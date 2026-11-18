@@ -403,6 +403,7 @@ public static class ServerHost
             var p = Providers[r.Source];
             ConfigureProvider(p, SettingsService.Load(), r.Filter, r.List); // refresh AllowScenes/path/filter from live settings
             var page = r.Page <= 0 ? 1 : r.Page;
+            if (WebSourcesFixture.Page(p, page, r.Query) is { } stub) return Results.Json(stub); // a hermetic test's (LIASCAPE_WEB_SOURCES_FIXTURE)
             try
             {
                 var list = !string.IsNullOrWhiteSpace(r.Query) && p.SupportsSearch

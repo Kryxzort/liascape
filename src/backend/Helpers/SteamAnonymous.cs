@@ -109,6 +109,8 @@ public static class SteamAnonymous
     {
         var c = _conn;
         if (c is { Dead: false }) return c;
+        try { TestNetwork.Check($"steam-cm: connect to Steam's client protocol{(warm ? " (warm-up)" : "")}"); }
+        catch (System.Net.Http.HttpRequestException) { return null; }
         c = _conn = new Conn();
         var t0 = Environment.TickCount64;
         bool ok;

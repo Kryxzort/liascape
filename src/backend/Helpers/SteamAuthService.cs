@@ -26,6 +26,7 @@ public static class SteamAuthService
     public static async Task<(string RefreshToken, ulong SteamId, string AccountName)> LoginViaQrAsync(
         Action<string> onQrUrl, CancellationToken ct)
     {
+        TestNetwork.Check("steam: the QR sign-in's connection");
         var steamClient = new SteamClient();
         var manager = new CallbackManager(steamClient);
         var tcs = new TaskCompletionSource<(string, ulong, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -88,6 +89,7 @@ public static class SteamAuthService
     public static async Task<(string RefreshToken, ulong SteamId, string AccountName)> LoginViaCredentialsAsync(
         string username, Func<string> takePassword, ILoginPrompt prompt, CancellationToken ct)
     {
+        TestNetwork.Check("steam: the password sign-in's connection");
         var steamClient = new SteamClient();
         var manager = new CallbackManager(steamClient);
         var tcs = new TaskCompletionSource<(string, ulong, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -371,6 +373,7 @@ public static class SteamAuthService
 
     private static async Task TryRenewAsync(string refreshToken, ulong steamId, string accountName)
     {
+        TestNetwork.Check("steam: the sign-in's token renewal");
         var steamClient = new SteamClient();
         var manager = new CallbackManager(steamClient);
         var steamUser = steamClient.GetHandler<SteamUser>()!;

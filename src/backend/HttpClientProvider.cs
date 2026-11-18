@@ -6,9 +6,11 @@ public static class HttpClientProvider
 {
     public const string UserAgent = "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0";
 
-    private static readonly HttpClientHandler _handler = new()
+    private static readonly SocketsHttpHandler _handler = new()
     {
-        AutomaticDecompression = System.Net.DecompressionMethods.All
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        // a hermetic test's guard (Helpers/TestNetwork.cs); null = the default connect
+        ConnectCallback = Liascape.Helpers.TestNetwork.ConnectCallback,
     };
 
     private static readonly HttpClient _client = new(_handler)

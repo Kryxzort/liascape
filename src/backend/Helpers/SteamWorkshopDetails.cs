@@ -26,7 +26,9 @@ namespace Liascape.Helpers;
 // Both return null when Steam's servers can't be reached / refuse (the caller falls back to page reading).
 // LIASCAPE_STEAM_CM_FIXTURE=<file.json> (tests): GetDetailsAsync answers from that file instead of Steam — `{"<id>": {"tags":
 // [...], "youtube": "<id>"|null, "creator", "subscriptions", "favorited"}}` (the last three optional), an id not in it = no
-// such public item, no file = Steam unreachable; each request is logged with its ids.
+// such public item, no file = Steam unreachable; each request is logged with its ids. QueryAsync (Browse's Workshop
+// pages) answers from its "@query" list and UserFilesAsync from "@userfiles" the same way, so a test's Browse never
+// opens a session to Steam.
 public static class SteamWorkshopDetails
 {
     public const uint AppId = 431960;
@@ -128,6 +130,12 @@ public static class SteamWorkshopDetails
             req.taggroups.Add(tg);
         }
         req.excludedtags.AddRange(plan.Excluded);
+        if (Fixture is { } fx)
+        {
+            var r = QueryFromFixture(fx, req);
+            Console.WriteLine($"steam-cm: QueryFiles page {req.page} — " + (r == null ? "no answer" : $"{r.Count} item(s) (fixture)"));
+            return Task.FromResult(r);
+        }
         return SteamAnonymous.UseAsync(async (pub) =>
         {
             var resp = await pub.QueryFiles(req); // an AsyncJob (no ConfigureAwait)
@@ -180,6 +188,24 @@ public static class SteamWorkshopDetails
             if (req.sortmethod == "score") items = items.OrderByDescending((d) => d.vote_data?.score ?? 0).ToList();
             var page = items.Skip((int)((req.page - 1) * req.numperpage)).Take((int)req.numperpage).Select(ToDetail).ToList();
             return new UserFilesPage(page, (uint)items.Count);
+        }
+        catch { return null; } // no fixture file = Steam unreachable
+    }
+
+    // the fixture's `"@query": [ {publishedfileid, title, tags, …} ]` (the user files' item shape): the whole Workshop as
+    // Browse lists it, in that order; Steam's own matching done roughly here (the search text in the title, one tag of each
+    // tag group, no excluded tag) so a filter or a search still narrows the list. No "@query" = an empty Workshop.
+    private static List<PublishedFileDetail>? QueryFromFixture(string file, CPublishedFile_QueryFiles_Request req)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
+            if (!doc.RootElement.TryGetProperty("@query", out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array) return [];
+            bool Has(PublishedFileDetails d, string t) => d.tags.Any((x) => string.Equals(x.tag, t, StringComparison.OrdinalIgnoreCase));
+            return arr.EnumerateArray().Select(FixtureDetails)
+                .Where((d) => string.IsNullOrEmpty(req.search_text) || d.title.Contains(req.search_text, StringComparison.OrdinalIgnoreCase))
+                .Where((d) => req.taggroups.All((g) => g.tags.Any((t) => Has(d, t))) && !req.excludedtags.Any((t) => Has(d, t)))
+                .Skip((int)((req.page - 1) * req.numperpage)).Take((int)req.numperpage).Select(ToDetail).ToList();
         }
         catch { return null; } // no fixture file = Steam unreachable
     }

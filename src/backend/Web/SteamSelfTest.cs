@@ -201,6 +201,56 @@ public static class SteamSelfTest
         }
     }
 
+    // A hermetic stack's Browse: the Workshop's pages from the fixture's "@query" (Steam's matching done roughly: search,
+    // tag groups, page), and with LIASCAPE_TEST_NO_NETWORK=1 every real connection refused before it is made — the shared
+    // HTTP connect (loopback still connects: the tests' fake servers) and Steam's client protocol (no fixture → null, no
+    // session). Guard for the UI matrix's hermetic Browse (probe-steam browse:fixture).
+    private static async Task NoNetwork()
+    {
+        string? fx = Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE"), nn = Environment.GetEnvironmentVariable("LIASCAPE_TEST_NO_NETWORK");
+        string file = Path.Combine(Environment.GetEnvironmentVariable("HOME")!, "steam-cm-query.json");
+        File.WriteAllText(file, """
+            {"@query": [{"publishedfileid": "1001", "title": "Query One", "tags": ["Video", "Everyone", "Nature"]},
+                        {"publishedfileid": "1002", "title": "Query Two", "tags": ["Video", "Mature", "Anime"]},
+                        {"publishedfileid": "1003", "title": "Query Scene", "tags": ["Scene", "Everyone", "Anime"]}]}
+            """);
+        var t = TimeSpan.FromSeconds(5);
+        async Task<string> Q(WorkshopFilter f, bool scenes, string? q, int page) =>
+            await SteamWorkshopDetails.QueryAsync(f, WorkshopTags.Build(f, scenes), q, page, 100, t) is { } r ? string.Join(",", r.Select((d) => d.Id)) : "null";
+        try
+        {
+            Environment.SetEnvironmentVariable("LIASCAPE_TEST_NO_NETWORK", "1");
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", file);
+            var all = new WorkshopFilter();
+            Check(await Q(all, true, null, 1) == "1001,1002,1003", $"fixture query: the whole list in order ({await Q(all, true, null, 1)})");
+            Check(await Q(all, false, null, 1) == "1001,1002", $"fixture query: scenes off drops the scene ({await Q(all, false, null, 1)})");
+            Check(await Q(all, true, "two", 1) == "1002", $"fixture query: a search matches titles ({await Q(all, true, "two", 1)})");
+            var anime = new WorkshopFilter { Include = ["Anime"] };
+            Check(await Q(anime, true, null, 1) == "1002,1003", $"fixture query: an included tag ({await Q(anime, true, null, 1)})");
+            Check(await Q(all, true, null, 2) == "", $"fixture query: page 2 is empty ({await Q(all, true, null, 2)})");
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", Path.Combine(Path.GetDirectoryName(file)!, "no-such-fixture.json"));
+            Check(await Q(all, true, null, 1) == "null", "fixture query: no fixture file = Steam unreachable (the fallback's cue)");
+            // no fixture at all: the client protocol's session is refused before it connects
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", null);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var q = await Q(all, true, null, 1);
+            Check(q == "null" && sw.ElapsedMilliseconds < 2000, $"no network: Steam's client protocol refused at once ({q}, {sw.ElapsedMilliseconds} ms)");
+            using var http = new System.Net.Http.HttpClient(new System.Net.Http.SocketsHttpHandler { ConnectCallback = TestNetwork.ConnectCallback });
+            string Err(Exception? e) => e == null ? "connected" : e.ToString();
+            Exception? real = null, loop = null;
+            try { await http.GetAsync("https://steamcommunity.com/"); } catch (Exception e) { real = e; }
+            try { await http.GetAsync("http://127.0.0.1:1/"); } catch (Exception e) { loop = e; }
+            Check(real is System.Net.Http.HttpRequestException && real.Message.Contains("LIASCAPE_TEST_NO_NETWORK"), $"no network: a real host is refused ({Err(real)})");
+            Check(loop != null && !Err(loop).Contains("LIASCAPE_TEST_NO_NETWORK"), $"no network: loopback still connects (refused by the port, not the guard: {Err(loop)})");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", fx);
+            Environment.SetEnvironmentVariable("LIASCAPE_TEST_NO_NETWORK", nn);
+            File.Delete(file);
+        }
+    }
+
     private static async Task RunAll()
     {
         Check(SecretStore.Backend == ExpectBackend, $"secrets: the {ExpectBackend} backend is in use ({SecretStore.Backend})");
@@ -208,6 +258,7 @@ public static class SteamSelfTest
         OneOffRoutes();
         ReconcileSkipsBlocked();
         WarmUp();
+        await NoNetwork();
         SteamOps.SignOut();
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000009));
         SettingsService.Update(s => { s.SteamId = 76561190000000009; s.SteamAccountName = "old"; s.SteamSignInRejected = true; });

@@ -23,6 +23,7 @@ paths:
 ## Probes and the UI matrix
 - Probes load pages with `withToken(U + "/")` and send `authHeaders()` from `app/shell/api-auth.js`; in-page fetches read `sessionStorage.liascape_token`.
 - `scripts/test-ui-matrix.sh` is hermetic (own HOME/XDG dirs, backend, player, PulseAudio, Xvfb); never point a probe at the owner's running app. Usage, `--only`, `--jobs`, `--changed`, `--fuzz`, `--probe` and `LIASCAPE_MATRIX_SCREEN`: the script's header.
+- A matrix run reaches no real server: Browse's sources answer from the stack's fixtures (the Workshop: `LIASCAPE_STEAM_CM_FIXTURE` `"@query"`; the web sources: `LIASCAPE_WEB_SOURCES_FIXTURE`, `src/backend/Services/WebSourcesFixture.cs`), and the backend refuses anything else (`LIASCAPE_TEST_NO_NETWORK`, `.claude/rules/backend/sources-steam.md`); a refused call fails the run ("FAIL real network", naming it). Give a probe that needs other answers its own in-page stub or extend a fixture; never lift the guard.
 - Use `--changed` before a commit; the full run before a merge or a release build.
 - The matrix window is SHOWN on the private Xvfb and focused: a hidden BrowserWindow renders no frames (rAF never fires — exits never finish, `appActive` stays false). Drags that need real hit-testing go through `webContents.sendInputEvent`.
 - Find items by `data-*` attributes and labels (`data-title`, `m.row(label)`), never by a tooltip; a renamed label updates the probes.

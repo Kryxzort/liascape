@@ -156,6 +156,8 @@
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
 //   ws:pills              the Favourites pill: signed out the grid's "Sign in …" note, signed in the list; the Workshop pill back
 //                         Shots steam-ws-*.png
+//   browse:fixture        a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
+//                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
 //                         (Steam's session connects ahead of the page), at most one per 20 s; none from the tab while another
 //                         source shows there, none from another source's pill
@@ -2886,6 +2888,42 @@ app.whenReady().then(async () => {
         if (!(await hover(".pill-strip > .pill", wsName))) return [...v, "no Workshop pill — proved nothing"];
         if (await warms() !== 1) v.push(`the Workshop pill hovered: ${await warms()} warm-ups, want 1`);
       } finally { await js(`localStorage.removeItem("__probe_we_local"); true`); }
+      return v;
+    });
+
+    // browse:fixture — a page WITHOUT this probe's stub (a second window) on Browse → the Workshop: the stack's own Steam
+    // fixture answers (LIASCAPE_STEAM_CM_FIXTURE "@query", scripts/test-ui-matrix.sh), never Steam; the backend opened no
+    // session to Steam's servers and refused no call to a real one (LIASCAPE_TEST_NO_NETWORK, Helpers/TestNetwork.cs)
+    await cell("browse:fixture", async () => {
+      const v = [], LOG = E.LIASCAPE_BACKEND_LOG;
+      if (!LOG || !fs.existsSync(LOG)) return [`no backend log (${LOG}) — proved nothing`];
+      if (E.LIASCAPE_TEST_NO_NETWORK !== "1") v.push("the stack doesn't set LIASCAPE_TEST_NO_NETWORK=1");
+      const wsName = (await http("GET", "/sources")).json.find((s) => s.supportsTagFilter && s.available)?.name;
+      if (!wsName) return ["no Workshop source in /sources — proved nothing"];
+      const from = fs.statSync(LOG).size;
+      const w2 = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
+      const p2 = (code) => w2.webContents.executeJavaScript(`(async () => { ${code} })()`);
+      try {
+        await w2.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100 && (await p2(`return document.querySelectorAll(".tab").length`)) < 3; i++) await sleep(100);
+        await p2(`[...document.querySelectorAll(".tab")].find((e) => e.textContent.trim() === "Browse")?.click();`); await sleep(500);
+        await p2(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
+        let titles = [];
+        for (let i = 0; i < 100; i++) {
+          titles = await p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title);`);
+          if (titles.length) break;
+          await sleep(100);
+        }
+        console.log(`        ${J(titles)}`);
+        const want = ["Fixture Workshop One", "Fixture Workshop Two"]; // the scene needs "allow scenes" (off here)
+        if (J(titles) !== J(want)) v.push(`the Workshop's cards ${J(titles)} (want the fixture's ${J(want)})`);
+      } finally { w2.destroy(); }
+      const since = () => fs.readFileSync(LOG).subarray(from).toString("utf8").split("\n"); // a byte offset: the log holds "—"
+      const asked = (l) => /steam-cm: QueryFiles page 1 — \d+ item\(s\) \(fixture\)/.test(l);
+      for (let i = 0; i < 30 && !since().some(asked); i++) await sleep(100);
+      const log = since();
+      if (!log.some(asked)) v.push(`no fixture QueryFiles in the backend log since the cell began: ${J(log.slice(-8))}`);
+      for (const l of log.filter((l) => /steam-cm: connected|test-network: REFUSED|browse: Workshop via Workshop page/.test(l))) v.push(`backend: ${l}`);
       return v;
     });
 

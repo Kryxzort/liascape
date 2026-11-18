@@ -1687,7 +1687,8 @@ app.whenReady().then(async () => {
       // what Steam's servers answer for it (the stack's fixture) — its project.json knows only its genre
       const fx = E.LIASCAPE_STEAM_CM_FIXTURE;
       if (!fx) return ["no LIASCAPE_STEAM_CM_FIXTURE in the probe's environment"];
-      fs.writeFileSync(fx + ".tmp", JSON.stringify({ [ID]: { tags: ["Video", "Questionable", "3840 x 2160", "Retro"] } })); fs.renameSync(fx + ".tmp", fx);
+      const fx0 = JSON.parse(fs.readFileSync(fx, "utf8")); // the stack's own entries ("@query") stay
+      fs.writeFileSync(fx + ".tmp", JSON.stringify({ ...fx0, [ID]: { tags: ["Video", "Questionable", "3840 x 2160", "Retro"] } })); fs.renameSync(fx + ".tmp", fx);
       const we = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "steam-tags-we"), d = path.join(we, ID);
       fs.mkdirSync(d, { recursive: true });
       fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ type: "video", file: "v.mp4", title: "st-a", preview: "preview.jpg", tags: ["Retro"] }));

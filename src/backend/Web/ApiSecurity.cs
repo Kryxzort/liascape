@@ -386,6 +386,7 @@ public static class ApiSecurity
         UseProxy = false,
         ConnectCallback = async (ctx, ct) =>
         {
+            Liascape.Helpers.TestNetwork.Check($"fetch {ctx.InitialRequestMessage.RequestUri}", ctx.DnsEndPoint.Host);
             var addrs = await ResolvePublic(ctx.DnsEndPoint.Host, ct)
                 ?? throw new HttpRequestException($"refused: {ctx.DnsEndPoint.Host} is not a public address");
             Exception? last = null;

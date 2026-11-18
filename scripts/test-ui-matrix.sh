@@ -230,6 +230,7 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   cat "$OUTROOT"/shard-*/cells.jsonl >"$OUTROOT/cells.jsonl" 2>/dev/null
   echo "== failures (all shards)"
   jq -r 'select(.result != "PASS" and .result != "SKIP") | "\(.result) \(.state) × \(.control)" + ((.violations // []) | map("\n        - " + .) | join(""))' "$OUTROOT/cells.jsonl"
+  grep -h -A12 '^FAIL real network' "$OUTROOT"/shard-*.log 2>/dev/null | grep -v '^--$'
   crashed=0
   for i in $(seq 0 $((JOBS - 1))); do
     grep -q '^MATRIX ' "$OUTROOT/shard-$i.log" || { crashed=$((crashed + 1)); echo "shard $i/$JOBS ended without a summary:"; tail -n 8 "$OUTROOT/shard-$i.log" | sed 's/^/     /'; }
@@ -257,10 +258,23 @@ else
 fi
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
-# Steam's servers for the library's tag / trailer look-ups (Helpers/SteamWorkshopDetails.cs): this file, never Steam — {}
-# = no Workshop item has a public listing; probe-filters lib:steamTags adds one
+# Steam's servers for the library's tag / trailer look-ups and Browse's Workshop pages (Helpers/SteamWorkshopDetails.cs):
+# this file, never Steam — no id keys = no Workshop item has a public listing (probe-filters lib:steamTags adds one);
+# "@query" = the Workshop Browse lists to a page that doesn't stub /browse itself (no preview: /img would go out)
 export LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
-printf '{}' > "$LIASCAPE_STEAM_CM_FIXTURE"
+cat > "$LIASCAPE_STEAM_CM_FIXTURE" <<'EOF'
+{"@query": [
+  {"publishedfileid": "910000001", "title": "Fixture Workshop One", "tags": ["Video", "Everyone", "1920 x 1080", "Nature"], "subscriptions": 30},
+  {"publishedfileid": "910000002", "title": "Fixture Workshop Two", "tags": ["Video", "Everyone", "3840 x 2160", "Abstract"], "subscriptions": 20},
+  {"publishedfileid": "910000003", "title": "Fixture Workshop Three", "tags": ["Scene", "Everyone", "1920 x 1080", "Anime"], "subscriptions": 10}]}
+EOF
+# Browse's web sources (Services/WebSourcesFixture.cs): {} = each lists nothing — the page reads the first source at
+# every load, which would otherwise scrape a real site
+export LIASCAPE_WEB_SOURCES_FIXTURE=$T/web-sources.json
+printf '{}' > "$LIASCAPE_WEB_SOURCES_FIXTURE"
+# and nothing else reaches a real server: the backend refuses any outbound connection but loopback with a
+# "test-network: REFUSED <call>" line (Helpers/TestNetwork.cs), and the run fails on one (the end of this script)
+export LIASCAPE_TEST_NO_NETWORK=1
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
 # per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
@@ -466,4 +480,12 @@ if [ $MODE = FUZZ ]; then echo "== fuzz${FREPLAY:+ (replay)}"; else echo "== mat
   "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
 rc=$?
 echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
+# a call to a real server (LIASCAPE_TEST_NO_NETWORK above refused it): the run fails, naming each — the probe that made it
+# needs a stub or a fixture
+grep -h 'test-network: REFUSED' "$T/backend.log" 2>/dev/null | sed 's/^.*REFUSED //' | sort | uniq -c > "$T/refused.txt"
+if [ -s "$T/refused.txt" ]; then
+  echo "FAIL real network: the backend refused $(awk '{n += $1} END {print n}' "$T/refused.txt") call(s) to real servers:"
+  sed 's/^/     /' "$T/refused.txt"
+  rc=1
+fi
 exit $rc

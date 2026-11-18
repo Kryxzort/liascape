@@ -41,7 +41,8 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Prefetch the next page only after the current one and only on the CM path; compare filters by value (`Key()`).
 - Fallback (CM unreachable, or `LIASCAPE_WORKSHOP_FALLBACK=1`): the browse page via `SteamGate`, filtering the rest client-side with `WorkshopTags.Matches`.
 - `QueryFiles` pages hold 100 (Steam's cap); `GetDetails` takes up to 1000 ids a request (both measured: docs/decisions.md § "Ask Steam for a whole library's details in one request").
-- Tests never reach Steam's servers for item details: `LIASCAPE_STEAM_CM_FIXTURE=<file.json>` answers `GetDetailsAsync` from a file (the UI matrix, `scripts/test-library-facts.sh`).
+- Tests never reach Steam's servers: `LIASCAPE_STEAM_CM_FIXTURE=<file.json>` answers `GetDetailsAsync` (item ids), `QueryAsync` (Browse's Workshop pages, `"@query"`) and `UserFilesAsync` (`"@userfiles"`) from a file (the UI matrix, `scripts/test-library-facts.sh`, `scripts/test-workshop-social.sh`). Guard: steam-selftest "fixture query", probe-steam `browse:fixture`.
+- `LIASCAPE_TEST_NO_NETWORK=1` (`src/backend/Helpers/TestNetwork.cs`, set by the UI matrix) refuses every outbound connection but loopback before it is made, logging `test-network: REFUSED <call>`: the shared `HttpClientProvider` connect, `ApiSecurity.PublicOnlyHttp`, `SteamAnonymous`' session and the sign-in's `SteamClient`s. A new way out (another HttpClient, a socket, a SteamKit2 client) calls `TestNetwork.Check` first. Guard: steam-selftest "no network".
 
 ## Secrets (`Helpers/SecretStore.cs`)
 - Every reader/writer of the Steam tokens goes through `SteamAuthService` → `SecretStore` (`steam-refresh-token`, `steam-access-token`, `steam-login-secure`).
