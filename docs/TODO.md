@@ -17,17 +17,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        licence allows passing them on only inside the original installers; Consolas / Segoe UI / Tahoma not at all). A
        docs/decisions.md entry, so nobody re-adds a Windows-partition reader.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
-       player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
-       and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
-       pixels convert on a shared context's thread while it builds; the worker hands it over through
-       `wp_context_set_gl_upload_context`, looked up at run time, so nothing changes until the pin has it) and the
-       Container's remembered lookups. Measured with them (warm, cold): 3042492564 571 → 480 ms, 1110 → 945; 3163060610
-       468 → 426, 808 → 695; 2388299037 470 → 424; no scene measurably slower (cold here: before `scene_load.py` emptied the caches before each scene's cold
-       apply). The spare worker (`player.scene_spare`) skips the spawn → `Hello` for every apply after a run's first.
-       Left: the units' preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover
-       every texture format and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was
-       still black 1 s after its first frame in 7 of 181 loads, the baseline build too, five of them in one player
-       run: needs mpv's log of a black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.
+       player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
+       and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
+       spawn → `Hello` for every apply after a run's first: warm 65–135 ms, cold 70–215 ms faster). Left: the units'
+       preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover every texture format
+       and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was still black 1 s after
+       its first frame in 7 of 181 loads, the baseline build too, five of them in one player run: needs mpv's log of a
+       black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.
 88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
        below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
        eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
