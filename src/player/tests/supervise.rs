@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use common::come_up::ComeUp;
 use common::{ClipSpec, ensure_clip, headless_gl};
 use serde_json::{Value, json};
 
@@ -148,7 +149,7 @@ impl Sup {
             _serial: serial,
         };
         if wait_up {
-            let t = Instant::now();
+            let mut up = ComeUp::new(s.supervisor_pid());
             loop {
                 if let Some(h) = s.hello() {
                     s.pid = h["pid"].as_u64().unwrap() as u32;
@@ -158,8 +159,9 @@ impl Sup {
                     panic!("supervisor exited early ({st}): {}", s.stderr());
                 }
                 assert!(
-                    t.elapsed() < Duration::from_secs(15),
-                    "never came up: {}",
+                    up.waiting(Duration::from_secs(15)),
+                    "never came up ({}): {}",
+                    up.describe(),
                     s.stderr()
                 );
                 std::thread::sleep(Duration::from_millis(20));
@@ -246,6 +248,7 @@ impl Sup {
     fn crash(&mut self, sig: i32) -> (Value, Duration) {
         let old = self.pid;
         let t = Instant::now();
+        let mut up = ComeUp::new(self.supervisor_pid());
         assert_eq!(unsafe { libc::kill(old as i32, sig) }, 0, "kill {old}");
         loop {
             if let Some(h) = self.hello()
@@ -255,8 +258,9 @@ impl Sup {
                 return (h, t.elapsed());
             }
             assert!(
-                t.elapsed() < Duration::from_secs(10),
-                "no restarted player 10 s after signal {sig}: {}",
+                up.waiting(Duration::from_secs(10)),
+                "no restarted player after signal {sig} ({}): {}",
+                up.describe(),
                 self.stderr()
             );
             std::thread::sleep(Duration::from_millis(5));
@@ -402,6 +406,45 @@ fn frame_index() -> PathBuf {
 }
 
 // ---------------------------------------------------------------- tests
+
+/// The come-up waits (`common::come_up`) outlast their deadline only while the process moves: a
+/// process that does nothing (a start stuck on a lock) fails [`QUIET`] after the deadline, a
+/// busy one (a start paging in) is still waited for then, and nothing past [`CEILING`].
+#[test]
+fn come_up_waits_for_progress_not_for_a_stuck_start() {
+    use common::come_up::{CEILING, QUIET};
+    let spawn = |script: &str| {
+        Command::new("sh")
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap()
+    };
+    let mut idle = spawn("exec sleep 60");
+    let mut busy = spawn("while :; do :; done");
+    let limit = Duration::from_secs(1);
+    let (mut w_idle, mut w_busy) = (ComeUp::new(idle.id()), ComeUp::new(busy.id()));
+    let t = Instant::now();
+    let mut idle_gave_up = None;
+    while t.elapsed() < limit + QUIET + Duration::from_secs(3) {
+        if idle_gave_up.is_none() && !w_idle.waiting(limit) {
+            idle_gave_up = Some(t.elapsed());
+        }
+        assert!(
+            w_busy.waiting(limit),
+            "a busy start given up: {}",
+            w_busy.describe()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = (idle.kill(), busy.kill(), idle.wait(), busy.wait());
+    let gave_up = idle_gave_up.expect("an idle start waited for past its deadline + QUIET");
+    assert!(
+        gave_up >= QUIET,
+        "an idle start given up before QUIET: {gave_up:?}"
+    );
+    assert!(CEILING > limit + QUIET, "the ceiling bounds a moving start");
+}
 
 /// A SEGV of the compositor → the supervisor restarts it with
 /// `--restore` → within 1.5 s `hello` answers from a new pid, the same clip plays on both
@@ -771,14 +814,27 @@ fn gives_up_without_compositor_after_backoff() {
         .env("WAYLAND_DISPLAY", "no-such-wayland-9")
         .env(TEST_COMPOSITOR_WAIT_ENV, "1600")
         .env_remove("WAYLAND_SOCKET")
-        .stdin(Stdio::null());
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
     let t = Instant::now();
-    let out = c.output().expect("run liascape-player");
+    let mut child = c.spawn().expect("run liascape-player");
+    // Each attempt is a cold child start (seconds when paging in from a busy disk): a hang is a
+    // supervisor that stops moving, not one whose children start slowly.
+    let mut up = ComeUp::new(child.id());
+    while child.try_wait().unwrap().is_none() {
+        assert!(
+            up.waiting(Duration::from_secs(10)),
+            "no hang ({})",
+            up.describe()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().expect("liascape-player's output");
     let elapsed = t.elapsed();
     println!("gave up without a compositor after {elapsed:?}");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(EXIT_GAVE_UP), "{err}");
-    assert!(elapsed < Duration::from_secs(10), "no hang: {err}");
 
     let events: Vec<Value> = std::fs::read_to_string(state_dir(&root).join("events.jsonl"))
         .unwrap_or_default()
@@ -841,7 +897,7 @@ fn sigterm_during_compositor_backoff_exits_at_once() {
         .stderr(Stdio::null());
     let mut child = c.spawn().expect("spawn liascape-player");
     let log = state_dir(&root).join("events.jsonl");
-    let t = Instant::now();
+    let mut up = ComeUp::new(child.id());
     loop {
         let waiting = std::fs::read_to_string(&log)
             .unwrap_or_default()
@@ -854,8 +910,9 @@ fn sigterm_during_compositor_backoff_exits_at_once() {
             break;
         }
         assert!(
-            t.elapsed() < Duration::from_secs(10),
-            "never entered the backoff"
+            up.waiting(Duration::from_secs(10)),
+            "never entered the backoff ({})",
+            up.describe()
         );
         std::thread::sleep(Duration::from_millis(20));
     }

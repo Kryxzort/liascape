@@ -312,10 +312,31 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `gives_up_without_compositor_after_backoff` (110 s for a 1.6 s budget, 10 s allowed),
       `sigterm_during_compositor_backoff_exits_at_once` ("never entered the backoff", 10 s),
       `crash_restore_ignores_start_mode` (time_pos 1.367 < 1.5 after the restore), `broken_scene_advances_now`
-      (no broken advance in 30 s), `timer_mode_switches_every_interval` ("step: no frame within 2 s"). Next: make
-      the `serve` come-up waits in `tests/supervise.rs` / `tests/program.rs` start-aware like `Harness::within`
-      (or prove a cold `serve` start that slow is a player bug), guard `align_end_full_live`'s request like the
-      V→S one, give `rapid_interrupt_chain` the mixed chain's condition-based gaps, then rerun this. Under heavier IO (4 writers, eviction every 0.3 s, the test binaries evicted
+      (no broken advance in 30 s), `timer_mode_switches_every_interval` ("step: no frame within 2 s"). **Cold `serve` start under IO load is paging, not the player
+      (measured):** one `serve --headless` start + one synthetic scene, `strace -f` and `/proc` stats
+      (delayacct): unloaded socket 0.04 s, `hello` 0.25–0.29 s, scene ready +0.2 s; 2 writers alone no slower;
+      binaries + libraries evicted cold, no writers: 151 major faults cost 0.05 s; cold + writers + the 3 s evicter:
+      socket 0.95–5.2 s, the player's block-IO wait 0.96–4.93 s against 0.3 s CPU. In the slowest (5.2 s) 4.90 s
+      is exec → the Rust runtime's first syscall (the loader mapping 141 libraries: 0.17 s of syscalls, the rest
+      relocation page faults), 0.20 s `serve` → `bind` with no syscall ≥ 20 ms; the loop never waits on IO before
+      `hello` (the startup snapshot's `fsync`s run on `lia-snapshot`, 65–170 ms each); the scene worker's start is
+      `filemap_fault` (kernel stack samples). So the come-up waits are start-aware now
+      (`tests/common/come_up.rs`: past its deadline a start is waited for while the process tree moves — CPU, a
+      major fault, a thread in `D` — ≤ 120 s; guard `come_up_waits_for_progress_not_for_a_stuck_start`, RED with a
+      wait that never gives up): `Sup::start`, `Sup::crash`, program.rs's `spawn`, and the two compositor-backoff
+      tests; `align_end_full_live` requests with ≥ 1.5 s of A left, `rapid_interrupt_chain` has the mixed chain's
+      condition-based gaps, `scene_a_align_end_starts_at_once` and `bad_target_keeps_a` time their wait from the
+      request, not from A's own start. Rerun under the same load (IO `some` avg60 44 %): transition 3, 1 and 2 of
+      32 failed, supervise 5/21 and 2/21 (was 8/20), program 4/73 (was 21/73), no come-up failure left. Left, all
+      slow IO against a product deadline, not a test's wait: `align_end_video_a_to_scene_b` 3/3 ("B came up at 47 s
+      / 4.7 s / 3.1 s, after its effect was due": a check of the alignment needs B's cold start inside A's last 3 s
+      iteration), `scene_b_broken_mid_effect_snaps_back` once (B's three cold restarts outlasted its 60 s effect),
+      `cancel_waiting_restores_a` (a 10 s video's "no first frame within 34 s", the recipe's own
+      ready timeout), `crash_restores` (hello 2.4 s after the crash, 1.5 s budget), `clean_quit_not_restarted`
+      (no exit 5 s after `quit`: the final snapshot's `fsync`), `fourth_restart_in_a_minute_starts_without_program`
+      (snapshot not matched in 20 s), `spare_worker_dies_with_the_player_and_returns_after_the_restore` (no spare in
+      15 s), `program_survives_a_crash` (the history above), program.rs's stepped "step: no frame within 2 s" (3
+      tests) and `vram_stopped_scene_advances_without_broken_flag` (8 s). Under heavier IO (4 writers, eviction every 0.3 s, the test binaries evicted
       too) starts outlast 50 s and frame-timing checks fail: past what the suite can hold.
       `program_survives_a_crash`'s other failure (history with a 4th, requested item: a read landing between the
       timer's request and its commit) now waits for `phase: playing`. Its post-crash "program idle, item 0 from 0"

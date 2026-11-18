@@ -2,6 +2,7 @@
 //! tasks — effect shaders, layer composition, mpv textures — extend this module rather
 //! than duplicating it).
 
+pub mod come_up;
 pub mod harness;
 pub mod pw;
 

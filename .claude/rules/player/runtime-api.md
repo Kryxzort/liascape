@@ -133,6 +133,9 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   Pure state-machine rules are unit-tested graph-only in `recipes/transition.rs`.
 - Bound a harness wait with `tick_until` / `Harness::within`, not an `h.now() < …` assert: neither counts the
   time a source is still coming up (`any_coming_up`), seconds per cold worker start on a busy box.
+- Bound a spawned process's come-up (a `serve`, a supervisor's restarted child) with `src/player/tests/common/come_up.rs`
+  `ComeUp::waiting`, never a fixed wall-clock wait: a cold debug start pages ~140 libraries in before `serve` runs
+  (5 s in the loader alone under fsync writers). Guard: `src/player/tests/supervise.rs::come_up_waits_for_progress_not_for_a_stuck_start`.
 
 ## Programs (`recipes/program/`)
 - A program is a graph node `prog:<name>` that only issues `transition` requests through

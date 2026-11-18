@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use common::come_up::ComeUp;
 use common::{ClipSpec, ensure_clip, headless_gl};
 use serde_json::{Value, json};
 
@@ -115,8 +116,8 @@ impl Serve {
             c.env(k, v);
         }
         self.child = Some(c.spawn().expect("spawn liascape-player serve"));
-        let t = Instant::now();
-        while t.elapsed() < Duration::from_secs(15) {
+        let mut up = ComeUp::new(self.child.as_ref().unwrap().id());
+        while up.waiting(Duration::from_secs(15)) {
             if UnixStream::connect(&self.sock).is_ok() {
                 return;
             }
@@ -125,7 +126,11 @@ impl Serve {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        panic!("serve socket never came up: {}", self.stderr());
+        panic!(
+            "serve socket never came up ({}): {}",
+            up.describe(),
+            self.stderr()
+        );
     }
 
     /// After a `quit`: wait for the player to exit, then start it again in the same root.

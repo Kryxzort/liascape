@@ -270,6 +270,11 @@ fn align_end_full_live() {
         json!({"loop": true}),
         &["VIRTUAL-1"],
     );
+    // Request with over a second of A's iteration left (as `align_end_video_a_to_scene_b`): one
+    // in A's last moments can see A end before the loop check below, and on a busy box `play`
+    // can return that late in a 3 s clip.
+    let ok = h.tick_until(MS(4000), |h| h.f64(&format!("{a}.time_pos")) < 1.5);
+    assert!(ok, "A never wrapped");
     let t_req = h.now();
     let m_req = h.mark();
     let remaining_ms = (h.f64(&format!("{a}.duration")) - h.f64(&format!("{a}.time_pos"))) * 1000.0;
@@ -470,6 +475,8 @@ fn bad_target_keeps_a() {
         ("/nonexistent/liascape-player-tr-missing.mkv".to_string(), "now"),
         (s(&empty).to_string(), "end"),
     ] {
+        // from the request: A's own cold start (seconds on a disk-bound box) is `play`'s wait
+        let m_req = h.mark();
         let corr = h.start(json!({
             "outputs": "out:*", "to": {"path": path, "loop": true},
             "effect_id": "fade", "duration_ms": 500, "method": "reveal", "align": align
@@ -482,13 +489,13 @@ fn bad_target_keeps_a() {
             );
         }
         let mut failed = None;
-        for _ in 0..2000 {
+        loop {
             h.tick();
             assert_eq!(h.cur("*"), vec![a.clone()], "A stays current ({path})");
             assert_eq!(h.gain(&a), gain0, "A's gain never changes ({path})");
             assert!(!h.bool(&format!("{a}.paused")), "A never paused ({path})");
             failed = h.event(&corr, "transition.failed");
-            if failed.is_some() || h.now() > MS(30_000) {
+            if failed.is_some() || !h.within(m_req, MS(30_000)) {
                 break;
             }
         }
@@ -520,8 +527,10 @@ fn rapid_interrupt_chain() {
         return;
     };
     h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
-    // Videos load in ~100 ms (so a start 100 ms later mostly supersedes); a colour is
-    // ready in one tick (so the next start commits it) — both paths get exercised.
+    // The gap before the next start is a condition, never a timing alone (on a disk-bound box a
+    // video's open takes seconds, and fixed 100 ms gaps then only ever supersede): one tick
+    // after a video (not ready yet — superseded), 100 ms after a colour (ready in a tick —
+    // either), until the effect runs after the next video (the next start commits it).
     let targets = [
         json!({"path": s(&blue10()), "loop": true}),
         json!({"kind": "color", "color": [0, 255, 0]}),
@@ -555,11 +564,17 @@ fn rapid_interrupt_chain() {
             "effect_id": "fade", "duration_ms": 1000, "method": methods[(i + 1) % 3]
         }));
         last_b = h.to_of(&corr);
+        let c = corr.clone();
         let until = h.now() + MS(100);
-        while h.now() < until {
-            h.tick_toward(until);
-            check(&h, &format!("after start #{i}"));
-        }
+        let ok = h.tick_until(MS(5000), |h| {
+            check(h, &format!("after start #{i}"));
+            match i % 3 {
+                0 => true,
+                1 => h.now() >= until,
+                _ => h.event(&c, "transition.started").is_some(),
+            }
+        });
+        assert!(ok, "#{i} never started: {:?}", h.tr_events);
     }
     let ok = h.tick_until(MS(5000), |h| {
         check(h, "settling");
@@ -1900,6 +1915,8 @@ fn scene_a_align_end_starts_at_once() {
             json!({"kind": "scene", "loop": true}),
             &["VIRTUAL-1"],
         );
+        // from the request: A's own cold start (seconds on a disk-bound box) is `play`'s wait
+        let m_req = h.mark();
         let corr = h.start(json!({
             "outputs": "out:*", "to": to_props(b_kind, "t9-end-b"),
             "effect_id": effect, "duration_ms": 300, "method": method, "align": "end"
@@ -1913,7 +1930,7 @@ fn scene_a_align_end_starts_at_once() {
         let mut started_tick = None;
         while started_tick.is_none() {
             assert!(
-                h.within(Mark::default(), MS(8000)),
+                h.within(m_req, MS(8000)),
                 "{what}: never started: {:?}",
                 h.tr_events
             );
