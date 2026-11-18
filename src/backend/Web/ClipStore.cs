@@ -335,6 +335,9 @@ public static class ClipStore
         // the sweep's (W 0 = the stored clip's width carried over to Q's factor), of sweep generation Gen
         public bool Sweep;
         public int Gen;
+        // the preview backfill's: one library item's missing previews (PreviewBackfill.cs)
+        public PreviewBackfill.Todo? Backfill;
+        public PreviewBackfill.Result BackfillResult = PreviewBackfill.Result.Stopped;
     }
     private static readonly object _lock = new();
     private static readonly Dictionary<string, Job> _jobs = new();
@@ -399,13 +402,15 @@ public static class ClipStore
         {
             var now = DateTime.UtcNow;
             foreach (var k in _jobs.Where(kv => !kv.Value.Shrink && now - kv.Value.Asked > ASK_WINDOW).Select(kv => kv.Key).ToList()) _jobs.Remove(k);
-            // the card asked for most recently first: the one the user is looking at now; then the sweep; shrinks last
+            // the card asked for most recently first: the one the user is looking at now; then the sweep; then the previews of
+            // the cards nobody looks at yet (PreviewBackfill); shrinks last
             var j = _jobs.Values.Where(x => !x.Shrink).OrderByDescending(x => x.Asked).FirstOrDefault()
                     ?? NextSweep(now)
+                    ?? NextBackfill(now)
                     ?? (_idle ? _jobs.Values.FirstOrDefault(x => x.Shrink) : null);
             if (j != null)
             {
-                if (!j.Sweep) _jobs.Remove(j.Item);
+                if (!j.Sweep && j.Backfill == null) _jobs.Remove(j.Item);
                 _running = j;
                 _runningCts = new CancellationTokenSource();
             }
@@ -421,8 +426,10 @@ public static class ClipStore
             await _wake.WaitAsync(TimeSpan.FromSeconds(10));
             while (true)
             {
-                // behind every stand-in: a card on screen waits for those
-                while (Volatile.Read(ref _nowInFlight) > 0) await Task.Delay(200);
+                // behind every stand-in, every still or gif a card waits for: a card on screen waits for those
+                while (Volatile.Read(ref _nowInFlight) > 0 || ServerHost.CardWaits > 0) await Task.Delay(200);
+                // the backfill's hold, looked at again on every round (a hold that ended resumes it within 10 s)
+                if (PreviewBackfill.HasWork()) { PreviewBackfill.RefreshHold(); lock (_lock) ReportLocked(); }
                 var j = Pick();
                 if (j == null) break;
                 try { Run(j, _runningCts!.Token); }
@@ -435,7 +442,8 @@ public static class ClipStore
                         // count), or of the cards' own clips (a stopped one doesn't: its card asks again at the new quality)
                         bool stopped = _runningCts?.IsCancellationRequested == true;
                         _running = null; _runningCts?.Dispose(); _runningCts = null;
-                        if (j.Sweep) { if (j.Gen == _gen) _swDone++; }
+                        if (j.Backfill != null) PreviewBackfill.Finished(j.Backfill, j.BackfillResult);
+                        else if (j.Sweep) { if (j.Gen == _gen) _swDone++; }
                         else if (!j.Shrink && !stopped) _ownDone++;
                         ReportLocked();
                     }
@@ -446,6 +454,7 @@ public static class ClipStore
 
     private static void Run(Job j, CancellationToken ct)
     {
+        if (j.Backfill != null) { j.BackfillResult = PreviewBackfill.Make(j.Backfill, ct); return; }
         var fi = new FileInfo(j.Path);
         if (!fi.Exists) return;
         var stamp = StampOf(fi);
@@ -486,6 +495,55 @@ public static class ClipStore
             if (!ct.IsCancellationRequested) lock (_lock) _failed[j.Sweep ? $"{j.Item}|sweep|{j.Q}" : $"{j.Item}|{j.W}|{j.Q}"] = DateTime.UtcNow;
             else if (j.Sweep) Console.WriteLine($"clips: stopped re-making {Path.GetFileName(j.Path)} at {QUALITY[j.Q].Name}");
         }
+    }
+
+    // the next item of the preview backfill (null: none, or it waits: PreviewBackfill.RefreshHold), as a job of the quality
+    // the setting names now (a change of it stops the job: Settle)
+    private static Job? NextBackfill(DateTime now)
+    {
+        if (_settling || PreviewBackfill.Take() is not { } t) return null;
+        return new Job { Path = t.Path, Item = ItemId(t.Video ?? t.Path), Q = _target >= 0 ? _target : 1, Asked = now, Backfill = t };
+    }
+
+    // PreviewBackfill planned (or the page said what is on screen): count it, and start the worker
+    internal static void Wake()
+    {
+        lock (_lock) { ReportLocked(); _worker ??= Task.Run(Work); }
+        _wake.Release();
+    }
+
+    // every item's full clip as `<item>_<stamp>` (one listing of the folder), and the key of `path`'s current file
+    internal static HashSet<string> FullClipKeys() =>
+        SafeFiles("*_full.mp4").Select(Parse).OfType<Clip>().Select(c => c.Item + "_" + c.Stamp).ToHashSet(StringComparer.Ordinal);
+    internal static string ClipKey(string path) { try { return ItemId(path) + "_" + StampOf(new FileInfo(path)); } catch { return ""; } }
+
+    // The backfill's clip for a card of w × h device pixels (before the quality's factor) at quality q, when the item has no
+    // full clip yet: the same clip a card on screen would get (Info), made on this worker at once (no stand-in first).
+    internal enum BackfillClip { Made, Had, Failed, Stopped }
+    internal static BackfillClip MakeBackfillClip(string path, int boxW, int boxH, int q, CancellationToken ct)
+    {
+        var fi = new FileInfo(path);
+        if (!fi.Exists) return BackfillClip.Had; // gone meanwhile: nothing to make
+        Directory.CreateDirectory(Dir);
+        string item = ItemId(path), stamp = StampOf(fi);
+        if (ClipsOf(item).Any(c => c.Full && c.Stamp == stamp)) return BackfillClip.Had; // a card's own job made it
+        var src = Probe(path, stamp);
+        if (src == null) return BackfillClip.Failed;
+        int w = Math.Min(TargetWidth(src, (int)Math.Round(boxW * FACTOR[q]), (int)Math.Round(boxH * FACTOR[q])), src.W & ~1);
+        var name = NameFor(item, stamp, w, q, true);
+        var dst = Path.Combine(Dir, name);
+        var tmp = dst + ".tmp";
+        var t0 = Stopwatch.StartNew();
+        if (!Encode(Args(path, tmp, CAP_SECONDS, w, q), tmp, true, TimeSpan.FromMinutes(20), ct))
+        {
+            try { File.Delete(tmp); } catch { }
+            return ct.IsCancellationRequested ? BackfillClip.Stopped : BackfillClip.Failed;
+        }
+        File.Move(tmp, dst, true);
+        WriteSrc(item, path);
+        Console.WriteLine($"clips: made {w} px {QUALITY[q].Name} ({new FileInfo(dst).Length / 1024} KB, {t0.Elapsed.TotalSeconds:0.0} s) for {Path.GetFileName(path)} ahead of its card");
+        Superseded(item, name);
+        return BackfillClip.Made;
     }
 
     // `keep` is the item's clip now: every other file of the item goes after GRACE (a card still playing one hands over to
@@ -681,16 +739,20 @@ public static class ClipStore
     private static void ReportLocked()
     {
         int own = _jobs.Values.Count(j => !j.Shrink), items = own;
-        if (_running is { Shrink: false, Sweep: false } r) { own++; if (!_jobs.ContainsKey(r.Item)) items++; }
+        if (_running is { Shrink: false, Sweep: false, Backfill: null } r) { own++; if (!_jobs.ContainsKey(r.Item)) items++; }
+        // the backfill's items count with the cards' own (phase make): left (none while it waits) + the one running
+        var (bfLeft, bfDone) = PreviewBackfill.Counts();
+        int bf = bfLeft + (_running is { Backfill: not null } ? 1 : 0);
+        items += bf;
         bool sweep = _target >= 0 && (_todo.Count > 0 || _running is { Sweep: true });
         // a change of the setting waiting to settle (not a flip back to the quality the library already follows)
         bool change = _target >= 0 && _settling && _pendingQ >= 0 && _pendingQ != _target;
-        _sweepShown = sweep || (_sweepShown && own > 0);
-        if (own == 0 && !_sweepShown && !change) { _ownDone = 0; _ownBatch = false; }
+        _sweepShown = sweep || (_sweepShown && own + bf > 0);
+        if (own == 0 && bf == 0 && !_sweepShown && !change) { _ownDone = 0; _ownBatch = false; PreviewBackfill.ResetDone(); bfDone = 0; }
         if (items > 1) _ownBatch = true;
         _phaseQ = change ? _pendingQ : _sweepShown || (_ownBatch && _phaseQ >= 0) ? _target : -1;
         if (!_sweepShown && !_ownBatch) { LibraryOps.End("clips"); return; }
-        int done = _ownDone + (_sweepShown ? _swDone : 0), total = _ownDone + own + (_sweepShown ? Math.Max(_swTotal, _swDone) : 0);
+        int done = _ownDone + bfDone + (_sweepShown ? _swDone : 0), total = _ownDone + own + bfDone + bf + (_sweepShown ? Math.Max(_swTotal, _swDone) : 0);
         LibraryOps.Set("clips", _phaseQ >= 0 ? QUALITY[_phaseQ].Name : "make", done, total);
     }
 

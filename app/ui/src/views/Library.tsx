@@ -18,6 +18,7 @@ import { useMarquee } from "../hooks/useMarquee";
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
 import { unsubBlocked } from "../components/subscribeMode";
+import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -104,6 +105,10 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   }, [filterKey, filtered]);
 
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
+  // the order the backend makes the cards' missing previews in: the sidebar's item, the cards on screen, then this
+  // (components/previewQueue.ts)
+  useEffect(() => setPreviewOrder(filtered.map((i) => i.videoPath)), [filtered]);
+  useEffect(() => setPreviewSide(libFocus), [libFocus]);
 
   // selection status — "{n} selected — {x video, y scene}", reverts to now-playing on clear.
   useEffect(() => {

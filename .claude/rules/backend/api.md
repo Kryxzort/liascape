@@ -6,6 +6,7 @@ paths:
   - "src/backend/Web/EventBus.cs"
   - "src/backend/Web/ActionForward.cs"
   - "src/backend/Web/SceneLoudnessOps.cs"
+  - "src/backend/Web/PreviewBackfill.cs"
   - "src/backend/Helpers/FeatureHealth.cs"
   - "src/backend/Program.cs"
 ---
@@ -65,3 +66,7 @@ paths:
 ## Scene loudness queue (`Web/SceneLoudnessOps.cs` + `Helpers/SceneLoudnessPlanner.cs`)
 - One background `liascape-player scene-loudness` child at a time under `nice -n 19 ionice -c3`, `LD_LIBRARY_PATH` dropped, 600 s bound, never on a request thread, never touching playback.
 - Store a result atomically (`SetMeta`) only when its child succeeded; cancel kills the child and drops the queue.
+
+## Preview backfill (`Web/PreviewBackfill.cs`)
+- Every card's missing previews (what its preview orders would show) run as jobs on ClipStore's one worker and count in its "clips" operation; never a queue, a worker or a progress line of their own. Why: `docs/decisions.md` § "Play every on-screen video preview, each as a small clip".
+- Start nothing while `RefreshHold` names a reason or a card waits (`ServerHost.CardWaits`, ClipStore's stand-ins); a failed file waits for its file to change. Guard: `scripts/test-preview-backfill.sh`.

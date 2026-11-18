@@ -290,6 +290,7 @@ public static class AppOps
             if (item.WorkshopId is string wid && !oneOff) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
             SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
             LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
+            PreviewBackfill.Kick("download"); // its card's previews
             EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
             return item;
         }

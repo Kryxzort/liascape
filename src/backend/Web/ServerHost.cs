@@ -169,6 +169,7 @@ public static class ServerHost
             // incomplete then, or a run cancelled / cut short by a restart) — one nice'd child at a time
             SceneLoudnessOps.AfterImport("startup");
             LibraryFactsOps.Kick("startup"); // Steam tags, trailers and frame sizes the library doesn't have yet
+            PreviewBackfill.Kick("startup"); // every card's previews it doesn't have yet
         });
 
         // the preview clips no card can ask for any more (sources gone or changed, replaced variants, unfinished encodes)
@@ -211,7 +212,8 @@ public static class ServerHost
     // Detect the leading black segment with ffmpeg blackdetect, trim from its end, re-encode (palette).
     // Falls back to the raw bytes on any failure / no leading black. One-time per gif (then cached).
     private static readonly Regex _blackRe = new(@"black_start:([\d.]+)\s+black_end:([\d.]+)", RegexOptions.Compiled);
-    private static async Task CacheGifTrimmed(byte[] data, string outPath)
+    // `background`: the preview backfill's (PreviewBackfill.cs): nice'd ffmpeg outside the cards' gate
+    private static async Task CacheGifTrimmed(byte[] data, string outPath, bool background = false)
     {
         var tmp = outPath + ".src.gif";
         await File.WriteAllBytesAsync(tmp, data);
@@ -219,7 +221,7 @@ public static class ServerHost
         {
             double ss = 0;
             // blackdetect → stderr lines: "black_start:0 black_end:0.4 ..."
-            var det = RunFfmpeg(["-hide_banner", "-i", tmp, "-vf", "blackdetect=d=0.03:pix_th=0.10", "-an", "-f", "null", "-"]);
+            var det = RunFfmpeg(["-hide_banner", "-i", tmp, "-vf", "blackdetect=d=0.03:pix_th=0.10", "-an", "-f", "null", "-"], background);
             var m = _blackRe.Match(det);
             if (m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture, out var bs)
                 && bs < 0.15 && double.TryParse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture, out var be))
@@ -227,7 +229,7 @@ public static class ServerHost
             if (ss > 0.02)
             {
                 RunFfmpeg(["-y", "-ss", ss.ToString(System.Globalization.CultureInfo.InvariantCulture), "-i", tmp,
-                    "-vf", "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", "-loop", "0", outPath]);
+                    "-vf", "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", "-loop", "0", outPath], background);
                 if (new FileInfo(outPath).Length > 0) { File.Delete(tmp); return; }
             }
         }
@@ -237,7 +239,7 @@ public static class ServerHost
 
     // A non-black/white STILL for the card thumbnail (so a card whose gif isn't playing doesn't show the gif's
     // black frame-0). First frame with YAVG 30–225, else frame 1, else frame 0.
-    private static void ExtractStill(string gifPath, string outJpg, int width = 0)
+    private static void ExtractStill(string gifPath, string outJpg, int width = 0, bool background = false)
     {
         string tmp = outJpg + ".tmp.jpg";
         bool Ok() => File.Exists(tmp) && new FileInfo(tmp).Length > 0;
@@ -247,11 +249,11 @@ public static class ServerHost
         // The enlarged modal asks for the native still (width=0) so it stays crisp → no quality loss.
         // lanczos = sharp downscale; -q:v 2 = near-lossless JPEG (the default mjpeg qscale was ugly).
         string scale = width > 0 ? $",scale='min({width},iw)':-2:flags=lanczos" : "";
-        try { RunFfmpeg(["-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less" + scale, "-frames:v", "1", "-q:v", "2", tmp, "-y"]); if (Ok()) { File.Move(tmp, outJpg, true); return; } } catch { }
+        try { RunFfmpeg(["-i", gifPath, "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=30:function=greater,metadata=select:key=lavfi.signalstats.YAVG:value=225:function=less" + scale, "-frames:v", "1", "-q:v", "2", tmp, "-y"], background); if (Ok()) { File.Move(tmp, outJpg, true); return; } } catch { }
         Del();
-        try { RunFfmpeg(["-i", gifPath, "-vf", @"select=eq(n\,1)" + scale, "-frames:v", "1", "-q:v", "2", tmp, "-y"]); if (Ok()) { File.Move(tmp, outJpg, true); return; } } catch { }
+        try { RunFfmpeg(["-i", gifPath, "-vf", @"select=eq(n\,1)" + scale, "-frames:v", "1", "-q:v", "2", tmp, "-y"], background); if (Ok()) { File.Move(tmp, outJpg, true); return; } } catch { }
         Del();
-        try { RunFfmpeg(["-i", gifPath, "-vf", "select=eq(n\\,0)" + scale, "-frames:v", "1", "-q:v", "2", tmp, "-y"]); if (Ok()) File.Move(tmp, outJpg, true); } catch { }
+        try { RunFfmpeg(["-i", gifPath, "-vf", "select=eq(n\\,0)" + scale, "-frames:v", "1", "-q:v", "2", tmp, "-y"], background); if (Ok()) File.Move(tmp, outJpg, true); } catch { }
         Del();
     }
 
@@ -259,13 +261,16 @@ public static class ServerHost
     // requests at once; ungated, each spawns up to 3 ffmpeg → CPU meltdown + slow thumbnails. Bound to
     // ~half the cores (min 2, max 6). Measured on 24 cores, 24 gif stills: 2 at once 456 ms, 4 250 ms, 6 183 ms, 8 135 ms,
     // 12 115 ms — past 6 a card waits a few ms less for twice the CPU the UI's frames share.
+    // `background` (the preview backfill, one at a time already): under `nice -n 19 ionice -c3`, and outside the gate, so it
+    // never takes a slot a card on screen waits for.
     private static readonly SemaphoreSlim _ffmpegGate = new(Math.Clamp(Environment.ProcessorCount / 2, 2, 6));
-    private static string RunFfmpeg(string[] args)
+    private static string RunFfmpeg(string[] args, bool background = false)
     {
-        _ffmpegGate.Wait();
+        if (!background) _ffmpegGate.Wait();
         try
         {
-            var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            var psi = new ProcessStartInfo(background ? "nice" : "ffmpeg") { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+            if (background) foreach (var a in new[] { "-n", "19", "ionice", "-c3", "ffmpeg" }) psi.ArgumentList.Add(a);
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi)!;
             // drain both pipes concurrently — a full stderr buffer while we block reading stdout (or vice
@@ -276,7 +281,7 @@ public static class ServerHost
             p.WaitForExit(15000);
             return err;
         }
-        finally { _ffmpegGate.Release(); }
+        finally { if (!background) _ffmpegGate.Release(); }
     }
 
     // In-flight dedup: concurrent requests for the SAME output file share one extraction Task (instead
@@ -294,6 +299,53 @@ public static class ServerHost
     // an extraction in flight owns `file`: its output, or a temporary named after it (`<out>.tmp.jpg`, `<out>.src.gif`, a
     // remote /anim's `<hash>.<ext>` under the key `<hash>`), so a cache clear leaves it to finish
     internal static bool Extracting(string file) => _extracting.Keys.Any(k => file.StartsWith(k, StringComparison.Ordinal));
+
+    // how many /still and /anim requests wait for their file now: a card on screen. The preview backfill starts nothing
+    // while one does (ClipStore's worker), so the cards scrolled into view go first.
+    private static int _cardWaits;
+    internal static int CardWaits => Volatile.Read(ref _cardWaits);
+    private static async Task CardWait(Task t)
+    {
+        Interlocked.Increment(ref _cardWaits);
+        try { await t; } finally { Interlocked.Decrement(ref _cardWaits); }
+    }
+
+    // ---- a library file's card still and trimmed gif: the names /still and /anim keep them under, and making them ----
+    // Shared by the endpoints (a card asking) and the preview backfill (PreviewBackfill.cs, every library item ahead of its
+    // card), so both find the same file. Keyed on path + mtime: a replaced file makes a new one.
+    internal const long PREVIEW_CACHE_CAP = 1024L * 1024 * 1024; // the LRU cap of PreviewCacheDir (PruneAnimCache)
+    private static string LocalHash(string u)
+    {
+        string key = u; try { key = u + "|" + new FileInfo(u).LastWriteTimeUtc.Ticks; } catch { }
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..24];
+    }
+    // decode-to-size: bucketed to 64 px so a handful of cache entries cover all card sizes; 0 = native
+    internal static int StillWidth(int? w) => w is > 0 ? Math.Min(2048, ((w.Value + 63) / 64) * 64) : 0;
+    internal static string LocalStillFile(string u, int width) => Path.Combine(PreviewCacheDir, LocalHash(u) + (width > 0 ? $"_still{width}.jpg" : "_still.jpg"));
+    internal static string LocalTrimFile(string gif) => Path.Combine(PreviewCacheDir, LocalHash(gif) + "_trim.gif");
+    internal static Task MakeLocalStill(string u, int width, bool background = false)
+    {
+        var jpg = LocalStillFile(u, width);
+        Directory.CreateDirectory(PreviewCacheDir);
+        return File.Exists(jpg) ? Task.CompletedTask : ExtractOnce(jpg, () =>
+        {
+            if (File.Exists(jpg)) return Task.CompletedTask; // won the race already
+            ExtractStill(u, jpg, width, background); // ffmpeg reads the local file directly
+            PruneAnimCache(PreviewCacheDir, PREVIEW_CACHE_CAP);
+            return Task.CompletedTask;
+        });
+    }
+    internal static Task MakeLocalTrim(string gif, bool background = false)
+    {
+        var trimmed = LocalTrimFile(gif);
+        Directory.CreateDirectory(PreviewCacheDir);
+        return File.Exists(trimmed) ? Task.CompletedTask : ExtractOnce(trimmed, async () =>
+        {
+            if (File.Exists(trimmed)) return;
+            await CacheGifTrimmed(await File.ReadAllBytesAsync(gif), trimmed, background); // strip leading fade-from-black
+            PruneAnimCache(PreviewCacheDir, PREVIEW_CACHE_CAP);
+        });
+    }
 
     // LRU-bound the animated-preview cache by total SIZE (gifs vary 0.3–1MB+, so size is more
     // predictable than a file count). Keep the most-recently-used up to maxBytes; delete the rest.
@@ -453,6 +505,9 @@ public static class ServerHost
             Mark("backfill");
             // the library's preview clips follow the quality, up and down, once the choice settles (off this thread)
             if (prev.VideoPreviewQuality != s.VideoPreviewQuality) ClipStore.QualityChanged(s.VideoPreviewQuality);
+            // what every card shows changed: the previews made ahead of the cards follow it (planned off this thread)
+            if (prev.VideoPreviewQuality != s.VideoPreviewQuality || !prev.PreviewOnHover.SequenceEqual(s.PreviewOnHover)
+                || !prev.PreviewNotHovered.SequenceEqual(s.PreviewNotHovered)) PreviewBackfill.Kick("settings");
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFpsCap, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
             if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
@@ -517,7 +572,7 @@ public static class ServerHost
         {
             var item = await ImportService.ImportAsync(r.Path, r.Title);
             SceneLoudnessOps.Imported(item, "import");
-            if (item != null) LibraryFactsOps.Kick("import"); // its frame size
+            if (item != null) { LibraryFactsOps.Kick("import"); PreviewBackfill.Kick("import"); } // its frame size; its card's previews
             return item == null ? Results.BadRequest("import failed") : Results.Json(item);
         });
 
@@ -570,6 +625,7 @@ public static class ServerHost
             EventBus.Broadcast("library-synced", new { count = added.Count });
             SceneLoudnessOps.AfterImport("sync"); // new scenes + any whose folder was incomplete last time
             LibraryFactsOps.Kick("sync");
+            PreviewBackfill.Kick("sync");
             return Results.Json(new { added });
         });
         // a scene's offline loudness estimate (Settings → Sound → "Pre-measure scenes"; .claude/rules/backend/api.md § Scene loudness queue):
@@ -860,6 +916,11 @@ public static class ServerHost
         app.MapGet("/clip", (HttpContext ctx, string? path) => ClipStore.Handle(ctx, path));
         // What each preview quality costs (fps, MB per wallpaper): the caption under Settings' card preview.
         app.MapGet("/clip/qualities", () => Results.Json(new { qualities = ClipStore.Qualities() }));
+        // the page's cards: which are on screen, the sidebar's item, the Library's order, a card's box in device px — the
+        // order the previews are made ahead of their cards in (Web/PreviewBackfill.cs)
+        app.MapPost("/previews/seen", (PreviewBackfill.SeenBody body) => { PreviewBackfill.Seen(body); return Results.Ok(); });
+        // the preview backfill's queue (why it waits, left, done, the card box) and, with ?path=, what that item's card lacks
+        app.MapGet("/previews/status", (string? path) => Results.Json(PreviewBackfill.Status(path)));
         // the library's background operations running now, with their counts (the top bar's progress line; WS library-ops)
         app.MapGet("/library/ops", () => Results.Json(LibraryOps.Snapshot()));
         // the Settings tab shows (a quality change waits; renewed while it shows) or was left (the sweep may start)
@@ -891,16 +952,8 @@ public static class ServerHost
                     if (!File.Exists(u)) return Results.NotFound();
                     if (!u.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
                         return Results.Stream(File.OpenRead(u), Mime.TryGetContentType(u, out var lt) ? lt : "image/gif", enableRangeProcessing: true);
-                    string lkey = u; try { lkey = u + "|" + new FileInfo(u).LastWriteTimeUtc.Ticks; } catch { }
-                    var lhash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(lkey)))[..24];
-                    var trimmed = Path.Combine(dir, lhash + "_trim.gif");
-                    if (!File.Exists(trimmed))
-                        await ExtractOnce(trimmed, async () =>
-                        {
-                            if (File.Exists(trimmed)) return;
-                            await CacheGifTrimmed(await File.ReadAllBytesAsync(u), trimmed); // strip leading fade-from-black
-                            PruneAnimCache(dir, 1024L * 1024 * 1024);
-                        });
+                    var trimmed = LocalTrimFile(u);
+                    if (!File.Exists(trimmed)) await CardWait(MakeLocalTrim(u));
                     try { File.SetLastAccessTimeUtc(trimmed, DateTime.UtcNow); } catch { }
                     return Results.Stream(File.OpenRead(trimmed), "image/gif", enableRangeProcessing: true);
                 }
@@ -924,7 +977,7 @@ public static class ServerHost
                         var bytes = await resp.Content.ReadAsByteArrayAsync();
                         if (ext == ".gif") await CacheGifTrimmed(bytes, outp); // strip leading fade-from-black
                         else await File.WriteAllBytesAsync(outp, bytes);
-                        PruneAnimCache(dir, 1024L * 1024 * 1024); // ~1 GB LRU cap (an updated preview = a new immutable URL → new file)
+                        PruneAnimCache(dir, PREVIEW_CACHE_CAP); // ~1 GB LRU cap (an updated preview = a new immutable URL → new file)
                     });
                     existing = Directory.GetFiles(dir, hash + ".*").FirstOrDefault();
                 }
@@ -946,36 +999,37 @@ public static class ServerHost
             {
                 // decode-to-size: card layer asks for w=<card px> (small texture); enlarged modal omits w
                 // → native still. Bucket to 64px so a handful of cache entries cover all card sizes.
-                int width = w is > 0 ? Math.Min(2048, ((w.Value + 63) / 64) * 64) : 0;
+                int width = StillWidth(w);
                 var dir = PreviewCacheDir;
                 Directory.CreateDirectory(dir);
                 bool remote = Uri.TryCreate(u, UriKind.Absolute, out var uri) && (uri.Scheme == "http" || uri.Scheme == "https");
-                // local: key the cache on path+mtime so a replaced file re-extracts; remote URLs are immutable
-                string key = u;
-                if (!remote) { try { key = u + "|" + new FileInfo(u).LastWriteTimeUtc.Ticks; } catch { } }
-                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..24];
+                if (!remote)
+                {
+                    if (!ApiSecurity.MediaAllowed(u)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
+                    if (!File.Exists(u)) return Results.NotFound();
+                    var ljpg = LocalStillFile(u, width);
+                    if (!File.Exists(ljpg)) await CardWait(MakeLocalStill(u, width));
+                    if (!File.Exists(ljpg)) return Results.StatusCode(502);
+                    try { File.SetLastAccessTimeUtc(ljpg, DateTime.UtcNow); } catch { }
+                    return Results.Stream(File.OpenRead(ljpg), "image/jpeg", enableRangeProcessing: true);
+                }
+                // remote URLs are immutable: keyed on the URL alone
+                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(u)))[..24];
                 var jpg = Path.Combine(dir, hash + (width > 0 ? $"_still{width}.jpg" : "_still.jpg"));
-                if (!remote && !ApiSecurity.MediaAllowed(u)) return Results.Json(new { error = "not a library path" }, statusCode: 403);
-                if (remote && await ApiSecurity.CheckPublicUrl(u) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
-                if (!remote && !File.Exists(u)) return Results.NotFound();
+                if (await ApiSecurity.CheckPublicUrl(u) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
                 if (!File.Exists(jpg))
                     await ExtractOnce(jpg, async () =>
                     {
                         if (File.Exists(jpg)) return; // won the race already
-                        string srcGif; bool tempSrc = false;
-                        if (remote)
-                        {
-                            using var msg = new HttpRequestMessage(HttpMethod.Get, u);
-                            msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
-                            using var resp = await Http.SendAsync(msg);
-                            resp.EnsureSuccessStatusCode();
-                            srcGif = jpg + ".src.gif"; tempSrc = true;
-                            await File.WriteAllBytesAsync(srcGif, await resp.Content.ReadAsByteArrayAsync());
-                        }
-                        else srcGif = u; // ffmpeg reads the local gif/webp directly
+                        using var msg = new HttpRequestMessage(HttpMethod.Get, u);
+                        msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
+                        using var resp = await Http.SendAsync(msg);
+                        resp.EnsureSuccessStatusCode();
+                        var srcGif = jpg + ".src.gif";
+                        await File.WriteAllBytesAsync(srcGif, await resp.Content.ReadAsByteArrayAsync());
                         ExtractStill(srcGif, jpg, width);
-                        if (tempSrc) { try { File.Delete(srcGif); } catch { } }
-                        PruneAnimCache(dir, 1024L * 1024 * 1024);
+                        try { File.Delete(srcGif); } catch { }
+                        PruneAnimCache(dir, PREVIEW_CACHE_CAP);
                     });
                 if (!File.Exists(jpg)) return Results.StatusCode(502);
                 try { File.SetLastAccessTimeUtc(jpg, DateTime.UtcNow); } catch { }

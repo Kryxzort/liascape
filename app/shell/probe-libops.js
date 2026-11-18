@@ -32,8 +32,13 @@
 //                    three; counts moving never switch the named one; when it ends the words cross-fade to the next
 //   libops:previews  the cards' own first clips (ClipStore's queue, "clips" phase make): the slot reads "Making previews
 //                    n / total", the line names it and fills to its count
+//   libops:backfill  the previews made ahead of their cards (Web/PreviewBackfill.cs): six videos imported at once below the fold
+//                    of a small window with "Not hovered" on the video: the real line shows "Making previews n / total" and
+//                    goes; every card never scrolled into view has its still and its clip; a card scrolled into view mid-run
+//                    plays its preview within a few seconds (logged: how long)
 // Pictures (looked at, not only counted): libops-appear.png, libops-steady.png, libops-noglow-bglive.png, libops-nomotion.png,
 // libops-browse-mid.png, libops-status-*.png, libops-combined*.png, libops-previews.png in $LIASCAPE_OUT. Exit 1 on any FAIL.
+// LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
 const path = require("path");
@@ -157,7 +162,9 @@ async function sweep(q, pics) {
 }
 
 const results = [];
+const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const cell = async (name, fn) => {
+  if (ONLY && !ONLY.test(name)) return;
   let v;
   try { v = await fn(); } catch (e) { v = [`ERROR ${e.message}`]; }
   results.push({ name, v });
@@ -432,6 +439,104 @@ app.whenReady().then(async () => {
       if (Math.abs(l.scale - 3 / 16) > 0.01) v.push(`the fill is ${l.scale}, want ${(3 / 16).toFixed(3)}`);
       await shot("previews");
       await dbg(`ops([])`); await sleep(900);
+      return v;
+    });
+
+    // the previews made ahead of their cards: six new videos land below the fold at once; with "Not hovered" on the video each
+    // needs its still and its clip (seconds each, so the line has time to show). Nothing scrolls to them but one card, scrolled
+    // into view mid-run: its preview must not wait behind the queue.
+    await cell("libops:backfill — cards never scrolled into view get their still and clip in the background; the line shows \"Making previews\" and goes; a card scrolled in mid-run plays promptly", async () => {
+      const v = [];
+      await opsIdle();
+      const size = win.getSize();
+      let cardSize = "Medium";
+      try {
+        win.setSize(900, 560); await sleep(400);
+        // Large cards: few columns, so the six span two rows and one row can stay out of view
+        cardSize = (await http("GET", "/settings")).json?.cardSize ?? "Medium";
+        await http("POST", "/settings", { previewNotHovered: ["video", "gif", "image"], videoPreviewQuality: "low", cardSize: "Large" });
+        await loadLibrary();
+        await opsIdle();
+        // fillers first (short, small: their own previews are quick): the Library lists the newest last, so the six land below
+        // the fold of this window
+        const fill = [];
+        for (let i = 0; i < 16; i++) {
+          const f = path.join(OUT, `bfFill${i}.mp4`);
+          if (!fs.existsSync(f)) cp.execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `testsrc2=size=320x180:rate=10`,
+            "-t", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", f], { timeout: 60000 });
+          const r = await http("POST", "/library/import", { path: f, title: `bfFill${i}` });
+          if (r.json?.videoPath) fill.push(r.json.videoPath);
+        }
+        await opsIdle();
+        await js(`document.querySelector(".lib-scroll").scrollTop = 0; return true`);
+        const files = [];
+        for (const t of ["bfA", "bfB", "bfC", "bfD", "bfE", "bfF"]) {
+          const f = path.join(OUT, `${t}.mp4`);
+          if (!fs.existsSync(f)) cp.execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30",
+            "-t", "60", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", f], { timeout: 60000 });
+          files.push([t, f]);
+        }
+        const sm = js(`return ${LINE_SAMPLE(150000)}`);
+        // at once: one plan for all six (an import plans again; plans coalesce)
+        const paths = (await Promise.all(files.map(([t, f]) => http("POST", "/library/import", { path: f, title: t })))).map((r) => r.json?.videoPath).filter(Boolean);
+        if (paths.length !== 6) return [`imported ${paths.length} of 6 — proved nothing`];
+        // which new cards the viewport shows (never: the backfill's own work)
+        // (inside the grid's scroll box and the window both)
+        const onScreen = () => js(`const sc = document.querySelector(".lib-scroll").getBoundingClientRect(), top = Math.max(0, sc.top), bottom = Math.min(innerHeight, sc.bottom);
+          return ${J(paths)}.filter((p) => { const c = document.querySelector('.thumb-wrap[data-morph-id="lib-' + CSS.escape(p) + '"]'); if (!c) return false;
+            const r = c.getBoundingClientRect(); return r.bottom > top && r.top < bottom && r.width > 0; })`);
+        const seen = new Set();
+        await waitFor(async () => (await js(`return document.querySelectorAll(".card.lib").length`)) > 0, 5000);
+        await sleep(600);
+        for (const p of await onScreen()) seen.add(p);
+        console.log(`        the grid: ${J(await js(`const sc = document.querySelector(".lib-scroll"), r = sc.getBoundingClientRect(), c = document.querySelectorAll(".card.lib");
+          return { cards: c.length, scroll: [Math.round(r.top), Math.round(r.bottom), sc.scrollHeight, sc.clientHeight], win: [innerWidth, innerHeight], last: Math.round(c[c.length - 1]?.getBoundingClientRect().top) }`))}`);
+        // mid-run: the grid scrolled down until all but the six's last row show; the last card that comes into view must play
+        // its preview (its clip) promptly, and the last row stays out of view
+        let promptMs = null;
+        if (await waitFor(async () => js(`return !!document.querySelector(".libops")`), 30000, 50)) {
+          await sleep(800);
+          const rows = await js(`const sc = document.querySelector(".lib-scroll"), top0 = sc.getBoundingClientRect().top - sc.scrollTop;
+            return ${J(paths)}.map((p) => Math.round(document.querySelector('.thumb-wrap[data-morph-id="lib-' + CSS.escape(p) + '"]').getBoundingClientRect().top - top0))`);
+          const lastRow = Math.max(...rows);
+          const last = paths.filter((p, i) => rows[i] < lastRow).at(-1);
+          if (!last) return [...v, `the six share one row (${J(rows)}): none can stay out of view — proved nothing`];
+          const t0 = Date.now();
+          await js(`const sc = document.querySelector(".lib-scroll"); sc.scrollTo({ top: ${lastRow} - sc.clientHeight - 2, behavior: "instant" }); return true`);
+          await sleep(100);
+          for (const p of await onScreen()) seen.add(p);
+          const played = await waitFor(async () => js(`const c = document.querySelector('.thumb-wrap[data-morph-id="lib-' + CSS.escape(${J(last)}) + '"]');
+            const i = c?.querySelector("img.thumb"), vd = c?.querySelector("video"); return !!(i && i.complete && i.naturalWidth > 0 && vd && vd.readyState >= 2)`), 15000, 50);
+          promptMs = played ? Date.now() - t0 : null;
+          console.log(`        a card scrolled into view mid-run: its still + clip playing after ${promptMs ?? "> 15000"} ms`);
+          if (!played) v.push("a card scrolled into view mid-run had no playing preview after 15 s");
+          await js(`document.querySelector(".lib-scroll").scrollTop = 0; return true`);
+        } else v.push("the line never showed");
+        const fr = await sm;
+        const away = paths.filter((p) => !seen.has(p));
+        console.log(`        line texts ${J(fr.texts)}, names ${J(fr.aria.slice(0, 2))}; ${away.length} of 6 new cards never on screen`);
+        if (!away.length) return [...v, "every new card was on screen — proved nothing"];
+        // a window this narrow folds the slot's words to the count; the line's own name says what it is
+        if (!fr.texts.length || !fr.texts.every((t) => /^(Making previews)?\d+ \/ \d+$/.test(t || ""))) v.push(`the status slot read ${J(fr.texts)}, want ("Making previews") "n / total"`);
+        if (!fr.aria.length || !fr.aria.every((a) => /^progressbar\|Making previews\|Making previews: \d+ of \d+$/.test(a))) v.push(`the line's name ${J(fr.aria)}, want "Making previews"`);
+        if (!fr.line.some((f) => f[1] != null)) v.push("the line never showed");
+        else if (fr.line.at(-1)[1] != null) v.push("the line was still there at the end");
+        // every card never scrolled into view: its still and its clip, nothing missing or failed
+        await waitFor(async () => (await Promise.all(away.map((p) => http("GET", `/previews/status?path=${encodeURIComponent(p)}`))))
+          .every((r) => r.json?.item && !r.json.item.missing.length), 60000, 500);
+        for (const p of away) {
+          const st = (await http("GET", `/previews/status?path=${encodeURIComponent(p)}`)).json;
+          if (!st?.item) { v.push(`${path.basename(p)}: no status`); continue; }
+          if (st.item.missing.length || st.item.failed.length) v.push(`${path.basename(p)} (never on screen): missing ${J(st.item.missing)}, failed ${J(st.item.failed)}`);
+        }
+        if (((await http("GET", "/library/ops")).json?.ops ?? [1]).length) v.push("an operation still listed at the end");
+        // gone again: the cells after this one count the library's videos
+        const mine = ((await http("GET", "/library")).json ?? []).filter((i) => paths.includes(i.videoPath) || fill.includes(i.videoPath));
+        if (mine.length) await http("POST", "/library/trash", { items: mine });
+      } finally {
+        await http("POST", "/settings", { previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "high", cardSize });
+        win.setSize(size[0], size[1]); await sleep(300);
+      }
       return v;
     });
 

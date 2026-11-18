@@ -8,7 +8,8 @@ import { QUALITY_LABEL } from "./clipSource";
 // the top bar shows them: the line (LibraryOpsLine.tsx) and the words in its status slot (TopbarStatus.tsx). Guard: --probe
 // probe-libops.js (libops:*).
 export function opLabel(op: LibraryOp): string {
-  // API: ClipStore's queue: phase make = the cards' own first clips, else the quality a change of the setting makes
+  // API: ClipStore's queue: phase make = the cards' own first clips and the previews made ahead of their cards
+  // (PreviewBackfill), else the quality a change of the setting makes
   if (op.id === "clips") return op.phase === "make" ? "Making previews" : `Making ${QUALITY_LABEL[op.phase as ClipQuality] ?? op.phase} previews`;
   if (op.id === "facts") return op.phase === "steam" ? "Asking Steam for tags" : op.phase === "trailers" ? "Looking for trailers"
     : op.phase === "disk" ? "Measuring sizes on disk" : "Reading frame sizes";

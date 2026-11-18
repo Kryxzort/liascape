@@ -56,6 +56,13 @@ export const clipFile = (path: string, v: string) => withToken(`${MEDIA}/clip?pa
 export const clipShrink = (idle: boolean, items: { path: string; w: number; h: number; q: ClipQuality }[]) =>
   fetch(`${API}/clip/shrink`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
     body: JSON.stringify({ idle, items }) }).catch(() => undefined);
+// API: POST /previews/seen — the previews made ahead of their cards (the backend's Web/PreviewBackfill.cs) go in this order:
+// `side` (the sidebar's item), the `visible` cards, then `order` (the Library's own; sent only when it changed). `box`: a
+// card's box in device px, which sizes the clips made for cards off screen.
+export type PreviewsSeen = { visible: string[]; side: string | null; order?: string[]; box?: { w: number; h: number } };
+export const previewsSeen = (body: PreviewsSeen) =>
+  fetch(`${API}/previews/seen`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
+    body: JSON.stringify(body) }).then((r) => r.ok, () => false);
 // API: POST /clip/sweep-hold — a held quality change waits (ClipStore.HoldSweep); the hold is a lease the caller renews
 export const clipSweepHold = (hold: boolean) =>
   fetch(`${API}/clip/sweep-hold`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),

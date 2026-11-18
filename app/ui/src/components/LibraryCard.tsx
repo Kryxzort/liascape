@@ -5,6 +5,7 @@ import { PlaylistToggle } from "./PlaylistToggle";
 import { MotionThumb } from "./MotionThumb";
 import { usePreviewKinds } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
+import { useSeenCard } from "./previewQueue";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
@@ -28,6 +29,8 @@ export const LibraryCard = memo(function LibraryCard({
   // unhovered showing its video: on screen it plays a clip of it (components/autoplay.ts)
   const wrapRef = useRef<HTMLDivElement>(null);
   const autoVideo = useAutoplayVideo(wrapRef, idleKind === "video");
+  // on screen: its previews are made first if the backend still lacks them (components/previewQueue.ts)
+  useSeenCard(wrapRef, item.videoPath);
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed ? " crashed" : ""}`;
   return (
     <div className={cls}>

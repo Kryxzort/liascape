@@ -20,9 +20,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
        seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
        progress-bar area is needed or the status bar can carry it.
-85. [ ] (owner) Previews for the whole library in the background, not only for cards scrolled into view: queue every
-       item missing a preview at low priority (CPU/IO-friendly, paused under load or on battery-like holds), visible
-       cards first.
 80. [ ] (owner) Drop the "Download via steamcmd" Workshop mode: three modes cover every level of trust (Open in the
        Steam app = none; Use the Steam app = no login given to Liascape; Subscribe with Steam login = full). steamcmd needs
        a Steam login too (typed into a terminal), and sign-in mode already downloads without subscribing. Remove its

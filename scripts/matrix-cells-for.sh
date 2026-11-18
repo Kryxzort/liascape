@@ -44,7 +44,7 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|\
+    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-preview-backfill.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|\
     scripts/test-steam-signin.sh|scripts/test-fixtures/drive-steam-client.mjs|scripts/test-fixtures/fake_steamclient.c|src/backend/Web/SteamSelfTest.cs) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
     src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
@@ -107,6 +107,8 @@ for f in $FILES; do
       add "appear|clip:|$CARD" "$f (+ --probe probe-cardpreview.js — cardpv:preset, cardpv:order, cardpv:orderCtl)" ;;
     # the preview clips: the backend's store, the card's clip and its hand-overs
     app/ui/src/components/PreviewPlayer.tsx|app/ui/src/components/clipSource.ts|src/backend/Web/ClipStore.cs) add "appear:video|clip:" "$f (+ --probe probe-cardpreview.js; ClipStore: bash scripts/test-clip-sweep.sh, --probe probe-libops.js)" ;;
+    # the previews made ahead of their cards (the backend's queue on ClipStore's worker, the page's report of what is on screen)
+    src/backend/Web/PreviewBackfill.cs|app/ui/src/components/previewQueue.ts) add "appear:(previewOrder|gifResume)\$|cardApply\$" "$f (+ bash scripts/test-preview-backfill.sh, --probe probe-libops.js libops:backfill)" ;;
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
     app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;

@@ -195,13 +195,13 @@ Resuming at the exact frame it stopped on needs our own ImageDecoder-to-canvas p
 renderer CPU of Chromium's gif animation (67–74 % vs 35 % of a core), ~400 MB more, and 22 % of the main thread when drawn
 there. Guard: matrix `appear:gifResume`; `.claude/rules/ui/design.md` § Performance.
 
-### Play every on-screen video preview, each as a small clip — 2026-11-12
-Video previews have no cap: every one on screen plays a clip the backend makes (`/clip`, `Web/ClipStore.cs`), never the
-wallpaper's own file (a full-size `<video>` keeps one of Chromium's 6 connections while it plays). Owner's terms: no
-storage options; one clip per item, as wide as its widest card needs (box × dpr × "Video preview quality"), up to 5 min,
-kept while the item is in the library; re-made for a wider box, shrunk when 2× too wide in idle time. The whole library
-follows the quality, down too, once it settles (4 s) and Settings is left. A hover hands over to the real file and back
-at once (`components/PreviewPlayer.tsx`). Guard: matrix `appear:videoThumbs`, `clip:*`; `scripts/test-clip-sweep.sh`.
+### Play every on-screen video preview, each as a small clip — 2026-11-18
+Every video preview on screen plays a clip the backend makes (`Web/ClipStore.cs`), never the wallpaper's file (it holds one
+of Chromium's 6 connections). Owner's terms: no storage options; one clip per item, box × dpr × "Video preview quality",
+up to 5 min; re-made wider, shrunk when 2× too wide while idle; the library follows a settled quality. Each card's still,
+gif and clip (as its preview orders reach) is made ahead of it on the same worker and line, never a second queue; it waits
+while the PC is busy, not for a maximized window (the app's own often is). Guard: `scripts/test-clip-sweep.sh`,
+`scripts/test-preview-backfill.sh`, matrix `clip:*`.
 
 ### Keep the Library page mounted across tab switches; don't virtualise the grid — 2026-11-12
 The Library page and the playlist bar stay mounted once shown (React `<Activity>`, hidden = display none); Browse and
