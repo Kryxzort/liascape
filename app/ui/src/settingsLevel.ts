@@ -27,11 +27,11 @@ export const LEVEL_OF_KEY: Record<string, Level> = {
   normalizeTargetLufs: "advanced", autoMuteDelayMs: "advanced", autoUnmuteDelayMs: "advanced", autoMuteMinLevelDb: "advanced",
   stayPausedWhenSwitching: "advanced", hwDec: "advanced", limitVramPerScene: "advanced", sceneVramLimitMib: "advanced", sceneSpareWorker: "advanced",
   textShadow: "advanced", previewOnHover: "advanced", previewNotHovered: "advanced",
-  useWindowsFonts: "advanced", copyFilesInsteadOfSymlinking: "advanced", replaceDirectWithWorkshop: "advanced",
+  copyFilesInsteadOfSymlinking: "advanced", replaceDirectWithWorkshop: "advanced",
   playerEngine: "advanced", transitionMethod: "advanced", volumeKeyTarget: "advanced",
   // expert
   disableCache: "expert", restartMpvpaperEverySeconds: "expert", restartOnlyAtPlaylistChangeover: "expert",
-  demuxerMaxMib: "expert", demuxerMaxBackMib: "expert", sceneVramStopShows: "expert", windowsFontsFolder: "expert",
+  demuxerMaxMib: "expert", demuxerMaxBackMib: "expert", sceneVramStopShows: "expert",
   sceneTransitionDelayMs: "expert", fullLiveSyncOffsetMs: "expert",
   rotateWhileParked: "expert", debugMode: "expert", debugOverlay: "expert",
 };

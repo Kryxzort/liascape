@@ -296,7 +296,6 @@ public static class LiascapePlayerMedia
     {
         foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
-        SetPlayerProp(client, "scene_fonts", SceneFontsProp(s));
         SetPlayerProp(client, "pause_when_covered", AppSettings.CoverMode(s.PauseWhenCovered));
         if (AudioMonitor.AutoMuteInPlayer) foreach (var (prop, v) in AutoMuteProps(s)) SetPlayerProp(client, prop, v);
         _sceneFpsGen = client.Generation;
@@ -323,22 +322,6 @@ public static class LiascapePlayerMedia
         var had = GpuProps(prev);
         foreach (var (prop, v) in GpuProps(cur))
             if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
-    }
-
-    // Windows fonts for scene text: `player.scene_fonts` ← "off" unless UseWindowsFonts, else WindowsFontsFolder ("" = the
-    // player finds a mounted Windows install's fonts; a leading ~ is the user's home). Live: the player replaces each playing
-    // scene's worker with one that has the new fonts (its picture held); a new player process gets it from AssertSceneFps.
-    public static string SceneFontsProp(AppSettings s)
-    {
-        if (!s.UseWindowsFonts) return "off";
-        var f = (s.WindowsFontsFolder ?? "").Trim();
-        if (f == "~" || f.StartsWith("~/")) f = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + f[1..];
-        return f;
-    }
-
-    public static void ApplySceneFonts(AppSettings prev, AppSettings cur)
-    {
-        if (SceneFontsProp(prev) != SceneFontsProp(cur)) QueuePlayerProp("scene_fonts", SceneFontsProp(cur));
     }
 
     // Pause when covered: `player.pause_when_covered` ← PauseWhenCovered, live (coalescible per prop); a new
@@ -409,6 +392,18 @@ public static class LiascapePlayerMedia
             StoreLive(e, "OnSceneLoudness", () => { if (SceneLoudnessOf(e) is { } r) OnSceneLoudness(r.Path, r.Key, r.Lufs, r.Peak, r.Seconds, r.Complete, r.State); });
             return;
         }
+        if (kind == "scene.fonts")
+        {
+            // a scene loaded: which of its fonts this machine shows with stand-ins — no source changed; stored off this callback
+            var fp = Str(e, "path");
+            var list = FontStandInsOf(e);
+            if (fp.Length > 0 && list != null) _ = Task.Run(() =>
+            {
+                try { OnSceneFonts(fp, list); }
+                catch (Exception ex) { LiascapePlayerClient.Log($"OnSceneFonts threw: {ex.Message}"); }
+            });
+            return;
+        }
         if (kind == "source.rejected")
         {
             // a value a source refused (it keeps playing; e.g. an `af` mpv couldn't build → it plays without it,
@@ -469,6 +464,34 @@ public static class LiascapePlayerMedia
             try { store(); C.OutboxHandled(e); }
             catch (Exception ex) { LiascapePlayerClient.Log($"{what} threw: {ex.Message}"); }
         });
+
+    // a `scene.fonts` event's `stand_ins` ([{font, shown}], every entry with both names); null = not a usable event
+    public static List<FontStandIn>? FontStandInsOf(JsonElement e)
+    {
+        if (!e.TryGetProperty("stand_ins", out var a) || a.ValueKind != JsonValueKind.Array) return null;
+        var list = new List<FontStandIn>();
+        foreach (var x in a.EnumerateArray())
+            if (x.ValueKind == JsonValueKind.Object && Str(x, "font") is { Length: > 0 } f && Str(x, "shown") is { Length: > 0 } sh)
+                list.Add(new FontStandIn { Font = f, Shown = sh });
+        return list;
+    }
+
+    // `scene.fonts`: keep the stand-ins with the item (the item sidebar's "Uses Consolas, shown with Cascadia Mono" line) and
+    // tell the pages when they changed; a path the library doesn't hold changes nothing. Guard: player-selftest
+    // "scene.fonts reaches the backend", probe-sidebar lib:fontStandIn
+    private static void OnSceneFonts(string path, List<FontStandIn> list)
+    {
+        _lastSceneFonts = (path, list);
+        if (!LibraryService.StoreFontStandIns(path, list)) return;
+        LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} fonts: "
+            + (list.Count == 0 ? "every one installed" : string.Join(", ", list.Select(s => $"{s.Font} shown with {s.Shown}"))));
+        Liascape.Web.EventBus.Broadcast("library-item-changed",
+            new { path, fontStandIns = list.Count == 0 ? null : list.Select(s => new { font = s.Font, shown = s.Shown }).ToList() });
+    }
+
+    private static (string Path, List<FontStandIn> List)? _lastSceneFonts;
+    // the last `scene.fonts` report handled (self-test evidence)
+    public static (string Path, List<FontStandIn> List)? LastSceneFonts => _lastSceneFonts;
 
     // a `scene.loudness` report's fields (live or from the outbox); null = not a usable one
     private sealed record LoudnessReport(string Path, string Key, double Lufs, double? Peak, double Seconds, bool Complete, JsonElement? State);

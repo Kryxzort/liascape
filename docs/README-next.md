@@ -63,8 +63,10 @@ is affected: it restarts, and after three crashes in a minute it shows a still p
   running Steam app, by opening the item's page in Steam, by subscribing with a Steam login inside Liascape (the
   default), or by downloading with `steamcmd`.
 
-Scenes that name a Windows font (Arial, Consolas and so on) look closest to Windows when a Windows drive is mounted:
-Liascape finds its Fonts folder by itself (or you pick one) and reads the fonts where they are. Nothing is copied.
+Scenes that name a Windows font (Arial, Consolas and so on) use your installed fonts, like any app. The packages bring
+open look-alikes (Liberation, Cascadia Mono, Selawik, Comic Neue and others), and the real Arial, Verdana, Comic Sans and
+the other core web fonts come from your distro's package (`ttf-ms-fonts` from the AUR, `corefonts` in the Nix package).
+When a scene's font isn't installed, its sidebar says which one stands in for it.
 
 ## Install
 

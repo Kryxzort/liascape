@@ -30,11 +30,8 @@
 //   vram:stopShows    "Stopped scene shows" (Expert, liascape-player) sits right under the video memory cap and only while the
 //                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
 //                     saves sceneVramStopShows; at Advanced it hides and the value stays
-//   fonts:rows        "Use Windows fonts in scenes" (Advanced, liascape-player only) sits right under "Play scenes", a
-//                     checkbox row on by default that saves useWindowsFonts; "Windows fonts folder" (Expert) follows it,
-//                     a text field + Browse that saves windowsFontsFolder as typed, dimmed and disabled (never removed) while
-//                     the toggle is off; both hints keep the Settings words; at Advanced the folder hides and keeps its value;
-//                     pictures settings-fonts-*.png (on, off, hovered, no-glow, bg-live)
+//   fonts:gone        no "Use Windows fonts in scenes" / "Windows fonts folder" row at any level under liascape-player, old
+//                     keys in settings.json bring none back (scene fonts come from fontconfig)
 //   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; the
 //                     steamcmd route's setup rows never show where its radio doesn't
 //   levels:noEmptySection:<engine>  at every level, under liascape-player and a stubbed legacy, no section heading shows
@@ -718,68 +715,26 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("fonts:rows — \"Use Windows fonts in scenes\" under Play scenes saves useWindowsFonts; the folder row dims while it's off", async () => {
+    // fonts:gone — scene fonts come from fontconfig like any app's (docs/decisions.md § "Scene fonts come from fontconfig, not a
+    // Windows install"): no Windows-fonts row at any level under liascape-player, and old keys a settings.json still carries
+    // bring none back. Proves something only where "Play scenes" (the rows' old neighbour) shows.
+    await cell("fonts:gone — no \"Use Windows fonts in scenes\" / \"Windows fonts folder\" row at any level", async () => {
       const v = [];
       const eng = (await http("GET", "/player-engine")).json?.active;
       if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
-      const ON = "Use Windows fonts in scenes", DIR = "Windows fonts folder";
-      await setSettings({ SettingsLevel: "expert", UseWindowsFonts: true, WindowsFontsFolder: "" });
       try {
-        await load();
-        const read = () => js(`const rows = [...document.querySelectorAll(".settings .srow")].map((x) => window.__x.label(x));
-          const on = window.__x.row(${J(ON)}), dir = window.__x.row(${J(DIR)});
-          return { before: rows[rows.indexOf(${J(ON)}) - 1], next: rows[rows.indexOf(${J(ON)}) + 1], label: on?.tagName,
-            ticked: on?.querySelector("input[type=checkbox]")?.checked, onHint: on?.querySelector(".shint")?.textContent ?? "",
-            dir: !!dir, dirHint: dir?.querySelector(".shint")?.textContent ?? "", dirOff: dir?.classList.contains("disabled"),
-            input: dir?.querySelector("input.text") ? { disabled: dir.querySelector("input.text").disabled, ph: dir.querySelector("input.text").placeholder } : null,
-            browse: dir ? [...dir.querySelectorAll("button")].map((b) => ({ t: b.textContent.trim(), disabled: b.disabled, svg: !!b.querySelector("svg") })) : [] }`);
-        const r = await read();
-        if (!r.dir && r.label === undefined) return [`no "${ON}" row at Expert under liascape-player — proved nothing`];
-        if (r.before !== "Play scenes") v.push(`"${ON}" follows ${J(r.before)}, want "Play scenes"`);
-        if (r.next !== DIR) v.push(`"${ON}" is followed by ${J(r.next)}, want "${DIR}"`);
-        if (r.label !== "LABEL") v.push(`"${ON}" isn't a checkbox <label> row (${r.label})`);
-        if (r.ticked !== true) v.push(`on by default: the box shows ${r.ticked}`);
-        for (const [n, h] of [[ON, r.onHint], [DIR, r.dirHint]]) {
-          if (/—|;|·/.test(h)) v.push(`${n}: the hint breaks the Settings words (em dash, semicolon or ·): ${J(h)}`);
-          if (!/^[a-z]/.test(h)) v.push(`${n}: the hint doesn't start lowercase: ${J(h)}`);
+        await setSettings({ UseWindowsFonts: true, WindowsFontsFolder: "/mnt/win/Windows/Fonts" });
+        for (const lv of ["basic", "standard", "advanced", "expert"]) {
+          await setSettings({ SettingsLevel: lv });
+          await load();
+          if (!(await has("Play scenes"))) { v.push(`${lv}: no "Play scenes" row — proved nothing`); continue; }
+          for (const gone of ["Use Windows fonts in scenes", "Windows fonts folder"])
+            if (await has(gone)) v.push(`${lv}: the "${gone}" row still shows`);
+          const words = await js(`return [...document.querySelectorAll(".settings .srow")].map((r) => r.textContent).filter((t) => /windows fonts/i.test(t))`);
+          if (words.length) v.push(`${lv}: a row still talks about Windows fonts: ${J(words)}`);
         }
-        if (!r.input || r.input.disabled || r.dirOff) v.push(`the toggle on: the folder field is off (${J(r)})`);
-        if (!r.input?.ph) v.push("the empty folder field says nothing (no placeholder)");
-        const br = r.browse.find((b) => b.t === "Browse");
-        if (!br || !br.svg || br.disabled) v.push(`the folder row's Browse button (icon, enabled): ${J(r.browse)}`);
-        await js(`await window.__x.show(window.__x.row(${J(ON)})); return true`);
-        const at = await js(`const r = window.__x.row(${J(ON)}).getBoundingClientRect(), d = window.__x.row(${J(DIR)}).getBoundingClientRect();
-          return { x: Math.round(r.x) - 8, y: Math.round(r.y) - 8, width: Math.round(r.width) + 16, height: Math.round(d.bottom - r.y) + 16 }`);
-        await shot("fonts-on", at);
-        // the folder, typed: saved as it is
-        await js(`const i = window.__x.row(${J(DIR)}).querySelector("input.text"); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-          set.call(i, "/mnt/win/Windows/Fonts"); i.dispatchEvent(new Event("input", { bubbles: true })); return true`);
-        if (!(await waitFor(async () => (await field("windowsFontsFolder")) === "/mnt/win/Windows/Fonts", SAVE_MS))) v.push(`typing the folder didn't save windowsFontsFolder (${J(await field("windowsFontsFolder"))})`);
-        // a click on the row's name unticks it: saved, and the folder row stays but dims and turns off
-        const p = await js(`return await window.__x.show(window.__x.row(${J(ON)}).querySelector(".slabel-row"))`);
-        await clickAt(p.x, p.y);
-        if (!(await waitFor(async () => (await field("useWindowsFonts")) === false, SAVE_MS))) v.push(`a click on "${ON}" didn't save useWindowsFonts false (${await field("useWindowsFonts")})`);
-        await sleep(300);
-        const off = await read();
-        if (!off.dir) v.push(`the toggle off: "${DIR}" left the page (it dims, never pops out)`);
-        else if (!off.dirOff || !off.input?.disabled || !off.browse.find((b) => b.t === "Browse")?.disabled) v.push(`the toggle off: the folder row isn't dimmed and disabled (${J(off)})`);
-        await mv(5, 5, 300);
-        await shot("fonts-off", at);
-        await clickAt(p.x, p.y);
-        if (!(await waitFor(async () => (await field("useWindowsFonts")) === true, SAVE_MS))) v.push(`a second click didn't save useWindowsFonts true`);
-        await mv(p.x, p.y, 400); await shot("fonts-hover", at);
-        await js(`document.documentElement.classList.add("no-glow"); return true`); await sleep(300); await shot("fonts-hover-noglow", at);
-        await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await sleep(300);
-        await shot("fonts-bglive", at);
-        await js(`document.documentElement.classList.remove("bg-live"); return true`); await mv(5, 5);
-        await setSettings({ SettingsLevel: "advanced" }); await load();
-        if (!(await has(ON))) v.push(`Advanced: no "${ON}" row (it's an Advanced row)`);
-        if (await has(DIR)) v.push(`Advanced: "${DIR}" shows (it's an Expert row)`);
-        await setSettings({ SettingsLevel: "standard" }); await load();
-        if (await has(ON)) v.push(`Standard: "${ON}" shows (it's an Advanced row)`);
-        if ((await field("windowsFontsFolder")) !== "/mnt/win/Windows/Fonts") v.push(`hiding the folder row changed its value: ${J(await field("windowsFontsFolder"))}`);
       } finally {
-        await setSettings({ SettingsLevel: "standard", UseWindowsFonts: true, WindowsFontsFolder: "" });
+        await setSettings({ SettingsLevel: "standard" });
       }
       return v;
     });
@@ -795,7 +750,6 @@ app.whenReady().then(async () => {
       "Stopped scene shows": "expert", "Keep a scene renderer ready": "advanced",
       "Thumbnail shape": "basic", "Smooth window animations": "basic", "Text shadow": "advanced", "On hover": "advanced",
       "Not hovered": "advanced", "Wallpaper behind every tab": "standard",
-      "Use Windows fonts in scenes": "advanced", "Windows fonts folder": "expert",
       "Download via steamcmd": "advanced", "steamcmd path": "advanced", "Steam username": "advanced", "Sign in": "advanced",
       "Autostart": "basic", "Forget the whole library": "advanced",
       // neighbours that stay: their sections' other rows keep their own levels

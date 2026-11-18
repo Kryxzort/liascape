@@ -28,6 +28,58 @@
         libsecret # secret-tool: the Steam sign-in in the system keyring (Helpers/SecretStore.cs; no keyring → a 0600 file)
       ];
 
+      # Fonts for scenes' text: a scene's `systemfont_consolas` asks fontconfig for Consolas like any app does, and the scene
+      # worker adds its alias rules (src/player/fontconfig/liascape-scene-fonts.conf, compiled in) plus these folders
+      # (LIASCAPE_SCENE_FONT_DIRS, set on the player's wrapper; the worker inherits it). Open stand-ins for the Windows
+      # families (docs/decisions.md § "Scene fonts come from fontconfig, not a Windows install"): Liberation (Arial, Times
+      # New Roman, Courier New), Carlito / Caladea (Calibri, Cambria), Cascadia Mono (Consolas), Selawik (Segoe UI),
+      # Comic Neue (Comic Sans MS), Wine's Tahoma. nixpkgs has no Selawik or Wine fonts package: fetched here from their
+      # own releases (OFL, LGPL).
+      selawik = pkgs.stdenvNoCC.mkDerivation {
+        pname = "selawik";
+        version = "1.01";
+        src = pkgs.fetchzip {
+          url = "https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip";
+          hash = "sha256-BbjXJ8HFXrRklMOnGXyZIZeQ5Oksda4AqQXHmNqN6AQ=";
+          stripRoot = false;
+        };
+        installPhase = "install -Dm644 -t $out/share/fonts/truetype *.ttf";
+        meta.license = lib.licenses.ofl;
+      };
+      wine-tahoma = pkgs.runCommand "wine-tahoma-10.0" { meta.license = lib.licenses.lgpl21Plus; } ''
+        install -Dm644 ${
+          pkgs.fetchurl {
+            url = "https://gitlab.winehq.org/wine/wine/-/raw/wine-10.0/fonts/tahoma.ttf";
+            hash = "sha256-kPGrrU2gzgPaXSJ37nWpYAzoEtN8kOq3bgg4/6eTflU=";
+          }
+        } $out/share/fonts/truetype/tahoma.ttf
+        install -Dm644 ${
+          pkgs.fetchurl {
+            url = "https://gitlab.winehq.org/wine/wine/-/raw/wine-10.0/fonts/tahomabd.ttf";
+            hash = "sha256-wpNCupmgT5gxk3VvAett6Ub9TTO6C7cGGv8R5whxtvI=";
+          }
+        } $out/share/fonts/truetype/tahomabd.ttf
+      '';
+      openSceneFonts = [
+        pkgs.liberation_ttf
+        pkgs.carlito
+        pkgs.caladea
+        pkgs.cascadia-code
+        selawik
+        pkgs.comic-neue
+        wine-tahoma
+      ];
+      # The real core web fonts (Arial, Verdana, Comic Sans MS, Times New Roman, Courier New, Georgia, Impact, Trebuchet MS):
+      # nixpkgs' corefonts unpacks Microsoft's own installers, the only form their licence lets anyone pass on, so nothing
+      # here ships a Microsoft font. It is unfree: this one package (and nothing else) is allowed for the app's fonts, so
+      # `nix build` works without `allowUnfree`; it builds locally (no binary cache serves unfree packages).
+      corefonts =
+        (import nixpkgs {
+          inherit system;
+          config.allowUnfreePredicate = p: lib.getName p == "corefonts";
+        }).corefonts;
+      fontDirs = fonts: lib.concatMapStringsSep ":" (p: "${p}/share/fonts") fonts;
+
       # 1) React UI → static dist/.
       ui = pkgs.buildNpmPackage {
         pname = "liascape-ui";
@@ -186,9 +238,11 @@
         # GPU-driver mount `hardware.nvidia` provides) — buildInputs can't express that. --prefix
         # (not --set) so a caller's own LD_LIBRARY_PATH is extended, not clobbered; harmless on
         # non-NVIDIA machines (the path simply doesn't exist, so the prefix contributes nothing).
+        # LIASCAPE_SCENE_FONT_DIRS: the scene fonts above, for every scene worker the player starts (a caller's own value wins).
         postInstall = ''
           wrapProgram $out/bin/liascape-player --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib \
-            --suffix PATH : ${pkgs.ffmpeg}/bin
+            --suffix PATH : ${pkgs.ffmpeg}/bin \
+            --set-default LIASCAPE_SCENE_FONT_DIRS ${fontDirs (openSceneFonts ++ [ corefonts ])}
         '';
       };
 
@@ -309,6 +363,9 @@
         # Patch work on LWE: `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build`, then
         # LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core for cargo (UPSTREAM.md § linux-wallpaperengine).
         LIASCAPE_LWE_CORE_DIR = "${lwe-core}";
+        # a dev build's scene workers get the package's open scene fonts; corefonts stays out (entering the shell would
+        # fetch Microsoft's installers first), so a dev player shows Arial with Liberation Sans unless the system has it
+        LIASCAPE_SCENE_FONT_DIRS = fontDirs openSceneFonts;
       };
     };
 }

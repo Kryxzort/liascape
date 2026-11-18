@@ -202,6 +202,9 @@ export interface LibraryItem {
   // estimate's confidence and, when low, its first note. null for a video / nothing known.
   loudnessLufs?: number | null; loudnessEstimated?: boolean | null; loudnessSeconds?: number | null;
   loudnessConfidence?: string | null; loudnessNote?: string | null;
+  // a scene's fonts this machine showed with another family at its last load under liascape-player (the player's
+  // `scene.fonts`: Consolas shown with Cascadia Mono); null = every one installed, or never loaded there
+  fontStandIns?: { font: string; shown: string }[] | null;
 }
 // a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips' queue: following "Video
 // preview quality" (phase low | mid | high) or the cards' own first clips (make), `facts` = Steam's tags (steam), trailer

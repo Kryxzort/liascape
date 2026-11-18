@@ -109,22 +109,29 @@ parent doesn't exist) loads, then its build throws — the deterministic broken-
 ## Fonts
 
 The core's text asks fontconfig for every font (fork patch 0091, `TextLayout.cpp`): a `systemfont_*` name is WE's
-Windows file, looked up by its family then the stand-ins fontconfig commonly has (`systemfont_consolas`: Consolas,
-Inconsolata, DejaVu Sans Mono, monospace), and a character the font lacks goes down WE's fallback chain (Arial,
-Segoe UI Emoji, Arial Unicode MS, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic). A stand-in's
-metrics change wrapping (3354740764's notepad: Inconsolata fits 24 characters on a line where Consolas fits 21).
-So the worker gives fontconfig the user's own Windows fonts where they are, nothing shipped or copied
-(`scene::fonts`, `render::windows_fonts`): `player.scene_fonts` (the backend's "Use Windows fonts in scenes" and
-"Windows fonts folder") reaches each worker as `LIASCAPE_SCENE_FONTS` (`auto`, `off` or a folder; an auto prop takes
-the compositor's own variable, which the test suites set to `off`). Auto is the first `Windows/Fonts`, any case, at
-the root of an NTFS mount in `/proc/self/mountinfo`. The worker resolves it itself on `lia-scene-fonts`, beside the
-EGL setup and the project load, so a sleeping disk or a stuck FUSE mount delays that scene, never the compositor's
-loop; it adds the folder with `FcConfigAppFontAddDir` (looked up with `dlsym`), and the build waits for it before
-the text layers are set up. fontconfig caches the folder's scan in its own cache dir: about 0.5 s the first time for
-a Windows 11 install, 0.17 s after (mostly fontconfig's own start). A change is live: a worker's fontconfig can't drop
-fonts it was given, so each scene source whose choice changed replaces its running worker
-(`SceneSource::set_fonts` → `WorkerHost::replace`, a planned replacement: no restart budget, no crash record), holding
-its frame and resuming at its time as after a crash restart. The worker's log says what it read (`fonts: …`), and LWE's
+Windows file, looked up as one pattern of its family then the metric twins the core lists itself (`systemfont_consolas`:
+Consolas, Inconsolata, DejaVu Sans Mono, monospace; WE knows eight names, any other is Arial), and a character the font
+lacks goes down WE's fallback chain (Arial, Segoe UI Emoji, Arial Unicode MS, Segoe UI, Twemoji, Segoe UI Symbol,
+Microsoft YaHei, Malgun Gothic). Scene fonts are fonts like any app's (`docs/decisions.md` § "Scene fonts come from
+fontconfig, not a Windows install"): the real family when it is installed (the core web fonts come from the distro's
+package), else an open stand-in. A stand-in's metrics change wrapping (3354740764's notepad: Inconsolata fits 24
+characters on a line where Consolas fits 21), so the worker adds, before the build sets the text layers up
+(`render::scene_fonts`): the alias rules compiled in from
+`src/player/fontconfig/liascape-scene-fonts.conf` (`scene::fonts::ALIASES`, `FcConfigParseAndLoadFromMemory`: an
+`<accept>` per family fontconfig has no metric alias for, Consolas → Cascadia Mono, Segoe UI → Selawik, Comic Sans MS →
+Comic Neue, so an installed original still wins), and each folder of `LIASCAPE_SCENE_FONT_DIRS` as an application font
+dir (the flake's wrapper names its font packages; a distro install has them system-wide). Both live in the worker's own
+fontconfig configuration only: no other app sees them, and a spare worker started earlier carries the same ones (they
+come with the binary and the compositor's environment). fontconfig is looked up with `dlsym`, never linked (it is the
+core's dependency). Only a scene with a text object starts fontconfig (`render::SceneText`, from its `scene.json`): building
+the configuration takes about 0.17 s, which the core's own text setup would pay at that point anyway, and a scene without
+text never touches fontconfig or its cache.
+
+After the build the worker asks fontconfig the same question for each system font the scene's text objects name
+(`scene::fonts::requested`, `stand_ins`) and reports the ones shown with another family in `Ready.fonts`; the source
+logs `scene.fonts` at every load (an empty list clears an old report), the backend keeps it with the item
+(`LibMeta.FontStandIns`) and the Library sidebar shows "Uses Consolas, shown with Cascadia Mono". The worker's log says
+what it added (`fonts: aliases added; …`) and each stand-in (`fonts: Consolas shown with Cascadia Mono`), and LWE's
 `CText: '<layer>' (<id>) font <name> -> <file>` which face each text took.
 
 ## Diagnosing a scene

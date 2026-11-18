@@ -37,6 +37,9 @@ public sealed class LibMeta
     // never takes a scene's.
     public Dictionary<string, SceneLoudnessEntry>? SceneLoudness { get; set; }
     public string? SceneLoudnessFp { get; set; }
+    // A scene's system fonts this machine showed with another family at its last load under liascape-player (the player's
+    // `scene.fonts`: "Consolas" shown with "Cascadia Mono"); absent = every one installed, or never played there.
+    public List<FontStandIn>? FontStandIns { get; set; }
     public bool Crashed { get; set; }
     public bool Whitelist { get; set; }
     // A scene's user-property overrides (project.json general.properties → name → value in WE's encoding:
@@ -77,6 +80,13 @@ public sealed class LibMeta
     // turned into the library's own copy: LibraryService.KeepOwnCopy), so it keeps its place in "date added"; absent = the
     // media file's own date.
     public long? AddedAt { get; set; }
+}
+
+// A font a scene asks for (Font, a family) and the family fontconfig showed it with (Shown).
+public sealed class FontStandIn
+{
+    public string Font { get; set; } = "";
+    public string Shown { get; set; } = "";
 }
 
 // One audio configuration's loudness (LibMeta.SceneLoudness[fingerprint]).

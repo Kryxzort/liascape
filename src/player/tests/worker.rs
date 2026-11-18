@@ -1036,7 +1036,7 @@ fn is_start_log(e: &WorkerEvent) -> bool {
 /// A spare says `Hello` and then waits — no `Start`, pings answered, no hang — until a scene
 /// adopts it: the same process then gets that scene's `Start` (the stub logs it), its `Hello` is
 /// replayed to the adopter, and it is an ordinary running worker. A spec launched differently
-/// (another environment: a fonts setting the spare was started before) isn't adopted.
+/// (another environment: the synthetic test scenes switched since the spare started) isn't adopted.
 #[test]
 fn spare_waits_for_its_scene_and_takes_the_start() {
     let mut spare_spec = stub_spec("spare", "");
@@ -1071,7 +1071,7 @@ fn spare_waits_for_its_scene_and_takes_the_start() {
 
     // Another launch (its environment differs) → not adopted, still the spare.
     let mut other = spare_spec.clone();
-    set_env(&mut other, "LIASCAPE_SCENE_FONTS", "/somewhere/Fonts");
+    set_env(&mut other, "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "0");
     other.id = "src9".into();
     other.start = start_at("src9", 12.5);
     let back = host
@@ -1159,10 +1159,10 @@ mod spare_pool {
     use super::*;
     use liascape_player::worker::spare::{Launch, Spare, Timing, Want};
 
-    fn launch(knobs: &str, fonts: &str) -> Launch {
+    fn launch(knobs: &str, synthetic: &str) -> Launch {
         let s = stub_spec("spare", knobs);
         let mut l = Launch::of(&s);
-        l.env.push(("LIASCAPE_SCENE_FONTS".into(), fonts.into()));
+        l.env.push(("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES".into(), synthetic.into()));
         l
     }
 
@@ -1204,12 +1204,12 @@ mod spare_pool {
 
     /// The policy: no spare until scenes are in use; then one, and never two; a take hands it
     /// over and the next sync starts a new one; off, low VRAM, no scenes or `stop` reap it at
-    /// once (and `stop` forgets that scenes were in use); a launch change (a fonts setting)
+    /// once (and `stop` forgets that scenes were in use); a launch change (the synthetic test scenes switched)
     /// replaces it at once, so no scene starts in a stale one; a load or a transition in flight
     /// postpones a refill.
     #[test]
     fn spare_policy_consumed_replaced_never_two_reaped() {
-        let l = launch("", "off");
+        let l = launch("", "1");
         let mut pool = Spare::new(fast());
         let now = Instant::now;
         pool.maintain(want(&l), now());
@@ -1245,11 +1245,11 @@ mod spare_pool {
         b.stop();
 
         // A scene launched differently doesn't take it (and it stays).
-        let other = launch("", "/mnt/c/Windows/Fonts");
+        let other = launch("", "0");
         assert!(pool.take(scene_spec(&other, "c"), now()).is_err());
         assert_eq!(pool.pid(), Some(p2));
-        // The launch changed (`player.scene_fonts`): the stale one goes at once, so no scene can
-        // take it; its replacement waits like any refill (the setting reloads the playing scene).
+        // The launch changed (another environment): the stale one goes at once, so no scene can
+        // take it; its replacement waits like any refill.
         let mut changed = want(&other);
         changed.quiet = false;
         pool.maintain(changed, now());
@@ -1271,8 +1271,8 @@ mod spare_pool {
         };
         assert!(
             env.split(|b| *b == 0)
-                .any(|kv| kv == b"LIASCAPE_SCENE_FONTS=/mnt/c/Windows/Fonts"),
-            "the new spare has the new fonts: {:?}",
+                .any(|kv| kv == b"LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=0"),
+            "the new spare has the new launch: {:?}",
             String::from_utf8_lossy(&env)
         );
 
@@ -1319,7 +1319,7 @@ mod spare_pool {
     /// No scene source hosted for `idle_after` → scenes are no longer in use: the spare goes.
     #[test]
     fn spare_goes_when_no_scene_was_hosted_for_a_while() {
-        let l = launch("", "off");
+        let l = launch("", "1");
         let mut t = fast();
         t.idle_after = Duration::from_millis(200);
         let mut pool = Spare::new(t);
@@ -1339,7 +1339,7 @@ mod spare_pool {
     /// A spare that keeps dying is retried with a doubling backoff and never handed to a scene.
     #[test]
     fn failing_spares_back_off_and_are_never_taken() {
-        let l = launch("crash_after_ms:30", "off");
+        let l = launch("crash_after_ms:30", "1");
         let mut pool = Spare::new(fast());
         let _ = pool.take(scene_spec(&l, "a"), Instant::now());
         let t0 = Instant::now();

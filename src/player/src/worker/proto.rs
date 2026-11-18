@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change; `Hello.protocol` must equal it.
-pub const PROTOCOL: u32 = 5;
+pub const PROTOCOL: u32 = 6;
 /// Largest datagram either side sends or accepts.
 pub const MAX_MSG: usize = 64 * 1024;
 /// Most fds one datagram may carry (a 4-plane buffer + a fence, with room to spare).
@@ -174,11 +174,14 @@ pub enum FromWorker {
     },
     /// The scene loaded and built; its ring is exported. `wants_audio_input` = it reacts to
     /// audio (`project.json` `general.supportsaudioprocessing`): the compositor then feeds
-    /// `Tick.input`.
+    /// `Tick.input`. `fonts` = the system fonts its text asks for that this machine shows with
+    /// another family (`scene::fonts::stand_ins`; the item sidebar says so).
     Ready {
         native: [u32; 2],
         has_audio: bool,
         wants_audio_input: bool,
+        #[serde(default)]
+        fonts: Vec<crate::scene::fonts::StandIn>,
     },
     /// The outcome of a `SetProperty` (or of a `Start.properties` entry): `ok` = LWE took it;
     /// else `reason` (unknown property, a value of the wrong shape).

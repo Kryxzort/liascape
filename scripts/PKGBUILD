@@ -15,8 +15,13 @@ license=('GPL-3.0-only' 'MIT')
 # The backend is published self-contained (it bundles .NET), so there is no dotnet-runtime dependency.
 # libpulse: pactl and parec (auto-mute, the player's audio routing) and the legacy liascape-audio.
 # libsecret: secret-tool keeps the Steam sign-in in the system keyring (src/backend/Helpers/SecretStore.cs).
+# The fonts scenes' text asks for by Windows name, as open stand-ins fontconfig finds like any app's (docs/decisions.md §
+# "Scene fonts come from fontconfig, not a Windows install"): Liberation (Arial, Times New Roman, Courier New),
+# Carlito / Caladea (Calibri, Cambria), Cascadia Mono (Consolas), Selawik (Segoe UI), Comic Neue (Comic Sans MS) and
+# Wine's Tahoma; the last three are AUR packages. The real core web fonts are ttf-ms-fonts below.
 depends=('electron45' 'mpv' 'ffmpeg' 'libpipewire' 'libpulse' 'wayland' 'libglvnd' 'libxkbcommon'
-         'sdl2' 'freetype2' 'fontconfig' 'harfbuzz' 'lz4' 'zlib' 'libsecret' 'gcc-libs' 'glibc')
+         'sdl2' 'freetype2' 'fontconfig' 'harfbuzz' 'lz4' 'zlib' 'libsecret' 'gcc-libs' 'glibc'
+         'ttf-liberation' 'ttf-carlito' 'ttf-caladea' 'ttf-cascadia-code' 'ttf-selawik' 'ttf-comic-neue' 'ttf-tahoma')
 # the toolchains install.sh preflights, plus the LWE core's (scripts/lwe.sh deps lists the same Arch packages)
 makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'rust' 'clang' 'cmake' 'pkgconf' 'wayland-protocols' 'glm')
 # mpvpaper and linux-wallpaperengine run the legacy engine, still the default PlayerEngine: without mpvpaper it plays
@@ -26,7 +31,8 @@ optdepends=('mpvpaper: video wallpapers under the legacy engine (AUR)'
             'playerctl: MPRIS-aware auto-mute'
             'steamcmd: Steam Workshop downloads (AUR)'
             'xdg-utils: open a wallpaper in your default app'
-            'nvidia-utils: NVDEC decoding and the scene VRAM budget on NVIDIA')
+            'nvidia-utils: NVDEC decoding and the scene VRAM budget on NVIDIA'
+            'ttf-ms-fonts: the real Arial, Verdana, Comic Sans MS and the other core web fonts in scenes (AUR; unpacks the Microsoft installers)')
 provides=('liascape')
 conflicts=('liascape')
 # !strip: the self-contained .NET publish is left as dotnet published it

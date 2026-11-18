@@ -872,6 +872,7 @@ impl Renderer {
             native: [scene.native.0, scene.native.1],
             has_audio: scene.has_audio,
             wants_audio_input: scene.wants_audio_input,
+            fonts: scene.fonts.clone(),
         };
         if let Some((x, y, b)) = self.pointer {
             scene.set_pointer(x, y, b);
@@ -947,6 +948,7 @@ impl Renderer {
             native: [native.0, native.1],
             has_audio: spec.has_audio,
             wants_audio_input: spec.pattern == Pattern::InputLevel,
+            fonts: spec.fonts.clone(),
         };
         let spec_audio = (spec.has_audio, spec.tone_hz, spec.tone_dbfs);
         let mut scene = match synthetic::Synthetic::new(&self.gfx, spec) {
@@ -1341,8 +1343,6 @@ struct StartArgs {
 /// The real renderer (synthetic, or LWE).
 fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
     // The project load needs no GL: it runs while the driver sets the context up below.
-    #[cfg(feature = "lwe")]
-    render::windows_fonts_early();
     #[cfg(feature = "lwe")]
     let preload = Preload::start(preload);
     #[cfg(not(feature = "lwe"))]

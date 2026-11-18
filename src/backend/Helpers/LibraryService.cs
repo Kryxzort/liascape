@@ -114,6 +114,35 @@ public static class LibraryService
         return cleared;
     }
 
+    // A scene's font stand-ins from its last load (the player's `scene.fonts`) into its entry: an empty list clears them.
+    // Returns whether the entry changed (only then is the file written).
+    public static bool MergeFontStandIns(LibMeta m, IReadOnlyList<FontStandIn> list)
+    {
+        var want = list.Count == 0 ? null : list.Select(s => new FontStandIn { Font = s.Font, Shown = s.Shown }).ToList();
+        static string Key(List<FontStandIn>? l) => l == null ? "" : string.Join("\n", l.Select(s => s.Font + "\t" + s.Shown));
+        if (Key(m.FontStandIns) == Key(want)) return false;
+        m.FontStandIns = want;
+        return true;
+    }
+
+    // MergeFontStandIns on the item's entry (created only when there is something to keep); false = nothing changed or a
+    // path the library doesn't hold.
+    public static bool StoreFontStandIns(string mediaPath, IReadOnlyList<FontStandIn> list)
+    {
+        if (LibraryStore.Locate(mediaPath) is not { } loc) return false;
+        bool changed = false;
+        LibraryStore.UpdateIndex(loc.Source, idx =>
+        {
+            if (!idx.TryGetValue(loc.Key, out var m))
+            {
+                if (list.Count == 0 || !Directory.Exists(Path.Combine(LibraryStore.SourceDir(loc.Source), loc.Key))) return false;
+                m = new LibMeta(); idx[loc.Key] = m;
+            }
+            return changed = MergeFontStandIns(m, list);
+        });
+        return changed;
+    }
+
     // ---------- loudness (EBU R128) measurement, cached in the index ----------
     public readonly record struct Loudness(double I, double TP, double LRA, double Thresh);
 
@@ -572,6 +601,7 @@ public static class LibraryService
             WorkshopId = m.WorkshopId ?? workshopId,
             CopiedSceneDir = copiedSceneDir,
             HasCrashed = m.Crashed,
+            FontStandIns = isScene || m.IsScene ? m.FontStandIns : null,
             IsWhitelisted = m.Whitelist,
             VolumeOverride = m.Volume,
             SpeedOverride = m.Speed,

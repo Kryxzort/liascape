@@ -848,8 +848,6 @@ pub struct Runtime {
     pub(crate) sysmon: Option<crate::audio::sysmon::SysMon>,
     /// The `player.scene_assets` value the scene base opts were resolved for.
     scene_assets_for: Option<String>,
-    /// The `player.scene_fonts` value the scene base opts carry.
-    scene_fonts_for: Option<String>,
     /// When the scenes' GPU budgets are fed next (`budget::OBSERVE_EVERY`).
     next_budget: Instant,
     /// VRAM measurement, the per-scene limit and the low-VRAM rule.
@@ -1761,7 +1759,6 @@ impl Runtime {
         // `tick`/`begin_step` already called this for `now`'s sake this iteration).
         self.update_player_paused();
         self.update_scene_assets();
-        self.update_scene_fonts();
         let changes = self.graph.drain_changes();
         if !changes.is_empty() || self.graph.picture_rev() != self.snap.seen_rev {
             self.snap.seen_rev = self.graph.picture_rev();
@@ -2932,38 +2929,6 @@ impl Runtime {
             .graph
             .set_observed(&p("player.scene_assets_resolved"), PropValue::Str(resolved));
         self.scene_assets_for = Some(want);
-    }
-
-    /// `player.scene_fonts` → the scenes' base opt `scene_fonts` ([`crate::scene::fonts::effective`]:
-    /// an auto prop takes the compositor's own `LIASCAPE_SCENE_FONTS`), which each scene worker
-    /// gets and resolves itself (`scene::fonts`: no file-system work on the loop). Live: every
-    /// scene source whose choice differs replaces its running worker now, holding its frame
-    /// (`SceneSource::set_fonts`).
-    pub(crate) fn update_scene_fonts(&mut self) {
-        let want = match self.graph.get(&p("player.scene_fonts")) {
-            Ok(PropValue::Str(s)) => s,
-            _ => String::new(),
-        };
-        if self.scene_fonts_for.as_ref() == Some(&want) {
-            return;
-        }
-        let env = std::env::var(crate::scene::fonts::ENV).ok();
-        let choice = crate::scene::fonts::effective(&want, env.as_deref());
-        self.host
-            .set_base_opt("scene_fonts", Some(json!(choice.as_env())));
-        log::event(
-            "scene",
-            Level::Info,
-            "scene.fonts",
-            None,
-            json!({ "requested": want, "effective": choice.as_env() }),
-        );
-        for id in self.host.scene_ids() {
-            if let Some(sc) = self.host.scene_mut(&id) {
-                sc.set_fonts(choice.clone());
-            }
-        }
-        self.scene_fonts_for = Some(want);
     }
 
     /// Whether `kind: scene` sources can play here: the worker binary resolves, and WE's
@@ -5201,7 +5166,6 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         gain_timer_armed: false,
         sysmon: None,
         scene_assets_for: None,
-        scene_fonts_for: None,
         next_budget: Instant::now(),
         vram: VramState {
             monitor: None,
@@ -5226,7 +5190,6 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         runner.map(|r| Box::new(move |f| r.run(f)) as crate::outbox::Spawner),
     ));
     rt.update_scene_assets();
-    rt.update_scene_fonts();
     rt.start_cover();
     rt.start_desktop_pointer();
     rt.start_automute();

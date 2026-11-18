@@ -15,7 +15,7 @@ import { keepMenuItem, menuAt } from "./menuItems";
 import { SubToggle } from "./SubToggle";
 import { useLinger } from "../hooks/useLinger";
 import { WorkshopIdPill } from "./WorkshopIdPill";
-import { snapFlip, glideFlip } from "./flipGlide";
+import { snapFlip, glideFlip, glideY } from "./flipGlide";
 import { CommentsSection, CreatorRow, FavoriteTile, WorkshopStats } from "./WorkshopSocial";
 import { SizePill } from "./sidePills";
 
@@ -220,6 +220,26 @@ export function LibrarySide({
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
   const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
   const showLoud = !!loud && at("standard");
+  // "Uses Consolas, shown with Cascadia Mono" (each stand-in of the scene's last load under liascape-player, one line)
+  const fontLine = item.isScene && sceneSpeed && !multi && item.fontStandIns?.length
+    ? "Uses " + item.fontStandIns.map((f) => `${f.font}, shown with ${f.shown}`).join("; ") : null;
+  // a report that lands while the sidebar is open (the scene just loaded) fades in; one that clears it fades out; what sits
+  // below the Playback section glides by the line's height either way (motion off: it takes its place at once)
+  const fontNote = useLinger(fontLine, CRASH_OUT_MS, motion);
+  const fontShown = useRef(fontNote.value != null);
+  const fontFlip = useRef<ReturnType<typeof snapFlip>>(null);
+  useLayoutEffect(() => { if (fontNote.closing && motion) fontFlip.current = snapFlip(bodyRef.current, CRASH_FLIP); }, [fontNote.closing, motion]);
+  useLayoutEffect(() => {
+    const shown = fontNote.value != null, was = fontShown.current;
+    fontShown.current = shown;
+    if (!shown && fontFlip.current) { glideFlip(fontFlip.current, bodyRef.current, CRASH_FLIP); fontFlip.current = null; return; }
+    if (!shown || was || !motion) return;
+    const line = bodyRef.current?.querySelector<HTMLElement>("[data-scene-fonts]");
+    const sec = line?.closest(".side-sec");
+    if (!line || !sec) return;
+    const h = line.offsetHeight + parseFloat(getComputedStyle(line).marginBottom || "0");
+    for (let el = sec.nextElementSibling; el; el = el.nextElementSibling) glideY(el, -h);
+  }, [fontNote.value, motion]);
   const workshop = item.workshopId && !item.offWorkshop && !multi ? item.workshopId : null;
   const steam = item.pageUrl ?? (item.workshopId ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.workshopId}` : null);
 
@@ -323,6 +343,10 @@ export function LibrarySide({
           {showLoud && item.loudnessEstimated && item.loudnessNote && (
             <div className="shint side-note" data-scene-loudness-note>Estimate may be off: {item.loudnessNote}</div>
           )}
+          {/* a font the scene asks for that this machine doesn't have, and the family fontconfig drew it with (the player's
+              scene.fonts at its last load; docs/decisions.md § "Scene fonts come from fontconfig, not a Windows install"):
+              one muted line, no setting. Guard: probe-sidebar lib:fontStandIn */}
+          {fontNote.value && <div className={`shint side-note side-fonts${fontNote.closing ? " leaving" : ""}`} data-scene-fonts>{fontNote.value}</div>}
         </SideSection>
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
         {sceneProps && <ScenePropsEditor key={p} path={p} onReady={() => setReady(true)} />}

@@ -36,6 +36,10 @@
 //   lib:clearCrash:on|off  s2 marked crashed: a notice block (the section cards' material, a danger stripe, a .mini Clear) in the
 //                        body's 12 px rhythm; Clear → the notice and the whitelist row fade out, what follows glides into their room
 //                        (off: fade only, at once), the index mark and the card's go, s2 plays. Screenshots side-crash-*.png
+//   lib:fontStandIn:on|off  s2 plays with a font stand-in (its synthetic Ready reports Consolas shown with Cascadia Mono): the
+//                        player's scene.fonts → the index → its open sidebar gets one muted line "Uses Consolas, shown with
+//                        Cascadia Mono" in Playback, fading in (off: opacity only); a play with every font installed clears it
+//                        and the line fades out. Screenshots side-fonts-*.png
 //   look:strip:<w>x<h>   the preview switch is the segmented control's strip fused to the picture: 0 px gap, the same left /
 //                        right edges, the unit as wide as the content (full width at 16:9), rounded strip top + picture bottom,
 //                        shorter than the old pills; the highlight glides (per frame) and lands centred, jumps with motion off;
@@ -1187,6 +1191,88 @@ app.whenReady().then(async () => {
           if (cur !== SC[1]) v.push(`after Clear, s2 doesn't play (/current ${T(cur)})`);
         }
       } finally {
+        writeIdx(idx0);
+        await setSettings({ allowScenes: false });
+        if (cur0) await post("/apply", { path: cur0 }); else await post("/stop");
+        await sleep(800);
+        await mv(5, 5); if (mode === "off") await setMotion(true);
+        await loadUi();
+      }
+      return v;
+    });
+
+    // lib:fontStandIn:<on|off> — a scene font this machine doesn't have, end to end (LibrarySide.tsx fontNote): s2's synthetic
+    // worker reports "Consolas shown with Cascadia Mono" in its Ready (its spec's `fonts`, as a real scene's fontconfig match
+    // would), the player's scene.fonts reaches the backend, the index keeps it and library-item-changed tells the page. With
+    // s2's sidebar open, a play of s2 brings one muted line "Uses Consolas, shown with Cascadia Mono" in the Playback section
+    // (the loudness note's style: the theme's muted text, no glow), fading in where it stays (motion off: opacity only, nothing
+    // moves); a later play whose fonts are all installed (an empty report) clears the index and the line fades out.
+    // Screenshots side-fonts-*.png (on, no-glow, bg-live).
+    for (const mode of ["on", "off"]) await cell(`lib:fontStandIn:${mode}`, async () => {
+      const v = [], J = JSON.stringify;
+      const spec = path.join(SC[1], "liascape-synthetic.json"), spec0 = fs.readFileSync(spec, "utf8");
+      const scIdx = path.join(path.dirname(SC[1]), "index.json"), key = path.basename(SC[1]), idx0 = fs.readFileSync(scIdx, "utf8");
+      const writeIdx = (s) => { fs.writeFileSync(scIdx + ".pb", s); fs.renameSync(scIdx + ".pb", scIdx); };
+      const cur0 = await current();
+      const playFresh = async () => {
+        // another scene first: s2's next play is a new worker load (its Ready reports its fonts)
+        for (const p of [SC[0], SC[1]]) {
+          const r = await post("/apply", { path: p });
+          if (r.status >= 400) v.push(`/apply ${T(p)} answered ${r.status} ${J(r.json)}`);
+          let cur = null; for (let i = 0; i < 50 && (cur = await current()) !== p; i++) await sleep(200);
+          if (cur !== p) v.push(`${T(p)} doesn't play (/current ${T(cur)})`);
+        }
+      };
+      const S = (sel) => `.side-panel:not(.closing) ${sel}`;
+      try {
+        const j = JSON.parse(idx0); if (j[key]) delete j[key].fontStandIns; writeIdx(JSON.stringify(j));
+        fs.writeFileSync(spec, J({ ...JSON.parse(spec0), fonts: [{ font: "Consolas", shown: "Cascadia Mono" }] }));
+        await setSettings({ allowScenes: true });
+        await loadUi(); if (mode === "off") await setMotion(false);
+        await page(`await m.closeAll(); await m.openSide("s2"); await m.sleep(700);`);
+        if (await page(`return !!m.side()?.querySelector("[data-scene-fonts]")`)) return ["s2 shows a font line before any report — proved nothing"];
+        const inF = js(MO.SAMPLE({ line: S("[data-scene-fonts]"), vol: S('[data-side-row="volume"]') }, 9000));
+        await sleep(40); await playFresh();
+        const fr = await inF;
+        console.log(`        motion ${mode}: line ${MO.brief(fr.line)}`);
+        v.push(...MO.judge("the font line", fr.line, { appear: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        if (mode === "on") {
+          // it rises into place as it fades in (index.css side-pill-in), never jumps
+          const ys = fr.line.filter((f) => f[1] != null && f[1] > 0.02).map((f) => f[3]);
+          if (ys.length < 2 || !(ys[0] > ys[ys.length - 1] + 1)) v.push(`motion on: the line didn't rise into place (${J(ys.slice(0, 6))} … ${ys[ys.length - 1]})`);
+        }
+        await mv(5, 5); await sleep(300);
+        const got = await page(`const s = m.side(), l = s?.querySelector("[data-scene-fonts]"); if (!l) return { none: true };
+          const sec = l.closest(".side-sec"), note = document.createElement("div"); note.className = "shint side-note"; sec.appendChild(note);
+          const ref = getComputedStyle(note).color; note.remove(); const cs = getComputedStyle(l);
+          return { text: l.textContent.trim(), sec: sec?.dataset.sec ?? null, color: cs.color, ref, shadow: cs.boxShadow, tshadow: cs.textShadow };`);
+        console.log(`        ${J(got)}`);
+        if (got.none) return [...v, "no font line after s2 played with a stand-in"];
+        if (got.text !== "Uses Consolas, shown with Cascadia Mono") v.push(`the line says ${J(got.text)}`);
+        if (got.sec !== "playback") v.push(`the line sits in the ${J(got.sec)} section, want Playback`);
+        if (got.color !== got.ref) v.push(`the line's colour ${got.color} isn't the muted note's ${got.ref}`);
+        if (got.shadow !== "none") v.push(`the line glows (${got.shadow})`);
+        const m1 = JSON.parse(fs.readFileSync(scIdx, "utf8"))[key];
+        if (J(m1?.fontStandIns) !== J([{ font: "Consolas", shown: "Cascadia Mono" }])) v.push(`s2's index entry keeps ${J(m1?.fontStandIns)}`);
+        const it = await libItem(SC[1]);
+        if (J(it?.fontStandIns) !== J([{ font: "Consolas", shown: "Cascadia Mono" }])) v.push(`GET /library's s2 says ${J(it?.fontStandIns)}`);
+        if (mode === "on") {
+          await shot("fonts-on");
+          await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("fonts-noglow");
+          await page(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live");`); await sleep(250);
+          await shot("fonts-bglive"); await page(`document.documentElement.classList.remove("bg-live");`);
+        }
+        // every font installed now: the next play reports none, the line leaves
+        fs.writeFileSync(spec, spec0);
+        const outF = js(MO.SAMPLE({ line: S("[data-scene-fonts]") }, 9000));
+        await sleep(40); await playFresh();
+        const fo = await outF;
+        v.push(...MO.judge("the font line", fo.line, { leave: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        if (await page(`return !!m.side()?.querySelector("[data-scene-fonts]")`)) v.push("the line stays after a play with every font installed");
+        const m2 = JSON.parse(fs.readFileSync(scIdx, "utf8"))[key];
+        if (m2?.fontStandIns) v.push(`an empty report left s2's index with ${J(m2.fontStandIns)}`);
+      } finally {
+        fs.writeFileSync(spec, spec0);
         writeIdx(idx0);
         await setSettings({ allowScenes: false });
         if (cur0) await post("/apply", { path: cur0 }); else await post("/stop");

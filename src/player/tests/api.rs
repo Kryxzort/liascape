@@ -6224,6 +6224,7 @@ fn losing_the_x_server_never_kills_the_player() {
 
 // ---------------------------------------------------------------- scenes
 
+use liascape_player::scene::fonts::StandIn;
 use liascape_player::scene::synthetic::{Pattern, SyntheticSpec, marker_rgb};
 
 /// A server whose scene sources may play the synthetic renderer
@@ -6325,104 +6326,44 @@ fn scene_capability_state_and_workers_probe() {
     assert_eq!(src["step_status"], json!("Done"));
 }
 
-/// `player.scene_fonts` reaches every scene worker started after the `set` (its
-/// `LIASCAPE_SCENE_FONTS`, which the worker resolves and hands to fontconfig): auto takes the
-/// compositor's own environment (this suite's says `off`, `tests/common`), a folder goes as it
-/// is. (The running ones: [`scene_fonts_change_replaces_the_running_worker`].)
+/// The stand-ins a scene worker reports in its `Ready` (the system fonts its text shows with
+/// another family) reach the backend's sidebar data: a `scene.fonts` event naming the scene's
+/// path at every load (an empty list too, so an old report is cleared), and the `workers` probe.
 #[test]
-fn scene_fonts_reach_the_next_scene_worker() {
+fn scene_font_stand_ins_reach_the_event_and_probe() {
     let Some(srv) = scene_serve(&[]) else { return };
     let mut c = srv.client();
-    let fonts_of = |pid: u64| {
-        std::fs::read(format!("/proc/{pid}/environ"))
-            .unwrap()
-            .split(|b| *b == 0)
-            .find_map(|kv| {
-                kv.strip_prefix(b"LIASCAPE_SCENE_FONTS=")
-                    .map(|v| String::from_utf8_lossy(v).into_owned())
-            })
-    };
-    let worker = |c: &mut Client, name: &str| {
-        let id = create_scene(c, name, &synth(Pattern::FrameIndex), json!({}));
-        show_all(c, &id);
-        c.step(16);
-        worker_of(c, &id)["pid"].as_u64().expect("a worker pid")
-    };
-    let a = worker(&mut c, "fonts-a");
-    assert_eq!(fonts_of(a).as_deref(), Some("off"), "auto under LIASCAPE_SCENE_FONTS=off");
-    c.ok("set", json!({"path": "player.scene_fonts", "value": "/mnt/c/Windows/Fonts"}));
-    let b = worker(&mut c, "fonts-b");
-    assert_eq!(fonts_of(b).as_deref(), Some("/mnt/c/Windows/Fonts"));
-    c.ok("set", json!({"path": "player.scene_fonts", "value": "off"}));
-    let d = worker(&mut c, "fonts-d");
-    assert_eq!(fonts_of(d).as_deref(), Some("off"));
-    let ev = logs_of(&mut c, "scene.fonts");
-    assert!(
-        ev.iter().any(|e| e["effective"] == json!("/mnt/c/Windows/Fonts")),
-        "no scene.fonts event for the folder: {ev:?}"
-    );
-}
-
-/// A `player.scene_fonts` change reaches the scene already playing at once: its running worker
-/// is replaced by one with the new `LIASCAPE_SCENE_FONTS` (a planned replacement, never a crash:
-/// no `worker.restart`, no crash record), the screen keeps showing the scene's frame throughout
-/// (never black), the new worker takes over and the frame stays; setting the value it already
-/// has replaces nothing.
-#[test]
-fn scene_fonts_change_replaces_the_running_worker() {
-    let Some(srv) = scene_serve(&[]) else { return };
-    let mut c = srv.client();
-    let fonts_of = |pid: u64| {
-        std::fs::read(format!("/proc/{pid}/environ"))
-            .ok()?
-            .split(|b| *b == 0)
-            .find_map(|kv| {
-                kv.strip_prefix(b"LIASCAPE_SCENE_FONTS=")
-                    .map(|v| String::from_utf8_lossy(v).into_owned())
-            })
-    };
-    let rgb = [40u8, 200, 90];
     let spec = SyntheticSpec {
-        pattern: Pattern::Solid,
-        rgb,
-        ..SyntheticSpec::default()
+        fonts: vec![StandIn {
+            font: "Consolas".into(),
+            shown: "Cascadia Mono".into(),
+        }],
+        ..synth(Pattern::FrameIndex)
     };
-    let id = create_scene(&mut c, "fonts-live", &spec, json!({}));
-    show_all(&mut c, &id);
-    c.step(16);
-    let shows = |c: &mut Client, what: &str| {
-        let p = srv.path(&format!("fonts-{what}.png"));
-        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&p)}));
-        near(png_pixel(&p, 320, 180), rgb, 2, what);
-    };
-    shows(&mut c, "before");
-    let a = worker_of(&mut c, &id)["pid"].as_u64().expect("a worker pid");
-    assert_eq!(fonts_of(a).as_deref(), Some("off"));
-    c.ok("set", json!({"path": "player.scene_fonts", "value": "/mnt/c/Windows/Fonts"}));
-    // at once, before the new worker has drawn anything: the old frame is still on screen
-    shows(&mut c, "replacing");
-    let b = worker_of(&mut c, &id)["pid"].as_u64().expect("a worker pid");
-    assert_ne!(b, a, "the running worker wasn't replaced");
-    assert_eq!(fonts_of(b).as_deref(), Some("/mnt/c/Windows/Fonts"));
-    for _ in 0..20 {
-        c.step(16);
-        shows(&mut c, "taking over");
-    }
-    let w = worker_of(&mut c, &id);
-    assert_eq!(w["pid"].as_u64(), Some(b), "{w}");
-    assert_eq!(w["state"], json!("running"), "{w}");
-    assert_eq!(get(&mut c, &format!("{id}.ready"))["result"]["value"], json!(true));
-    let replaced = logs_of(&mut c, "worker.replaced");
-    assert!(
-        replaced.iter().any(|e| e["prev_pid"] == json!(a) && e["pid"] == json!(b)),
-        "{replaced:?}"
+    let a = create_scene(&mut c, "fonts-standin", &spec, json!({}));
+    show_all(&mut c, &a);
+    let b = create_scene(&mut c, "fonts-none", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &b);
+    step_until_ready(&mut c, &a);
+    step_until_ready(&mut c, &b);
+    let path_of = |c: &mut Client, id: &str| get(c, &format!("{id}.path"))["result"]["value"].clone();
+    let (pa, pb) = (path_of(&mut c, &a), path_of(&mut c, &b));
+    let ev = logs_of(&mut c, "scene.fonts");
+    let of = |p: &Value| ev.iter().find(|e| e["path"] == *p).cloned();
+    let ea = of(&pa).unwrap_or_else(|| panic!("no scene.fonts for {pa}: {ev:?}"));
+    assert_eq!(ea["id"], json!(a), "{ea}");
+    assert_eq!(
+        ea["stand_ins"],
+        json!([{"font": "Consolas", "shown": "Cascadia Mono"}]),
+        "{ea}"
     );
-    assert!(logs_of(&mut c, "worker.restart").is_empty(), "a replacement isn't a crash restart");
-    assert_eq!(crash_files(&srv), 0, "no crash record");
-    // the same value again: nothing to replace
-    c.ok("set", json!({"path": "player.scene_fonts", "value": "/mnt/c/Windows/Fonts"}));
-    c.step(16);
-    assert_eq!(worker_of(&mut c, &id)["pid"].as_u64(), Some(b));
+    let eb = of(&pb).unwrap_or_else(|| panic!("no scene.fonts for {pb} (an empty one clears): {ev:?}"));
+    assert_eq!(eb["stand_ins"], json!([]), "{eb}");
+    assert_eq!(
+        worker_of(&mut c, &a)["font_stand_ins"],
+        json!([{"font": "Consolas", "shown": "Cascadia Mono"}])
+    );
+    assert_eq!(worker_of(&mut c, &b)["font_stand_ins"], json!([]));
 }
 
 /// The soft `RLIMIT_CORE` of process `pid` (`/proc/<pid>/limits`; "unlimited" = u64::MAX).
@@ -11747,43 +11688,6 @@ fn spare_death_never_marks_a_scene_broken() {
         "{restarts:?}"
     );
     assert_eq!(worker_of(&mut c, &a)["total_restarts"], json!(0));
-}
-
-/// The spare follows the settings that change a worker's launch: a `player.scene_fonts`
-/// change replaces it at once with one carrying the new `LIASCAPE_SCENE_FONTS`, so the next
-/// scene never starts with the old fonts; that scene takes the new spare.
-#[test]
-fn spare_worker_follows_the_fonts_setting() {
-    let Some(srv) = spare_serve() else { return };
-    let mut c = srv.client();
-    let fonts_of = |pid: u64| {
-        std::fs::read(format!("/proc/{pid}/environ"))
-            .ok()?
-            .split(|b| *b == 0)
-            .find_map(|kv| {
-                kv.strip_prefix(b"LIASCAPE_SCENE_FONTS=")
-                    .map(|v| String::from_utf8_lossy(v).into_owned())
-            })
-    };
-    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
-    let a = create_scene(&mut c, "spare-fonts-a", &synth(Pattern::FrameIndex), json!({}));
-    show_all(&mut c, &a);
-    step_until_ready(&mut c, &a);
-    let p = step_until_spare(&mut c, None);
-    assert_eq!(fonts_of(p).as_deref(), Some("off"));
-    c.ok("set", json!({"path": "player.scene_fonts", "value": "/mnt/c/Windows/Fonts"}));
-    let q = step_until_spare(&mut c, Some(p));
-    assert_eq!(fonts_of(q).as_deref(), Some("/mnt/c/Windows/Fonts"));
-    wait_for(Duration::from_secs(2), "the stale spare to go", || {
-        (!pid_alive(p)).then_some(())
-    });
-    assert!(spare_of(&mut c)["replaced"].as_u64().unwrap() >= 1);
-    let b = create_scene(&mut c, "spare-fonts-b", &synth(Pattern::FrameIndex), json!({}));
-    show_all(&mut c, &b);
-    step_until_ready(&mut c, &b);
-    let wb = worker_of(&mut c, &b);
-    assert_eq!(wb["pid"].as_u64(), Some(q), "{wb}");
-    assert_eq!(fonts_of(q).as_deref(), Some("/mnt/c/Windows/Fonts"));
 }
 
 /// The low-VRAM rule's `stop` frees the spare with every source (its context is GPU memory

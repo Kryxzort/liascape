@@ -17,6 +17,9 @@ public class LibraryItem
     // Contains the full path to the copied workshop directory inside LibraryPath.
     public string? CopiedSceneDir { get; init; }
     public bool HasCrashed { get; init; }
+    // A scene's fonts this machine showed with another family at its last load under liascape-player (LibMeta.FontStandIns;
+    // the sidebar's "Uses Consolas, shown with Cascadia Mono"). Null = none, or never loaded there.
+    public System.Collections.Generic.List<Liascape.Helpers.FontStandIn>? FontStandIns { get; init; }
     public bool IsWhitelisted { get; init; }
     public int? VolumeOverride { get; init; }
     public double? SpeedOverride { get; init; }

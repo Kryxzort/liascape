@@ -82,6 +82,9 @@ pub struct SyntheticSpec {
     /// the GPU waking after one). The compositor latches nothing, soon holds every slot, and
     /// the worker starves — the false hang a suspend can cause, hermetically.
     pub gpu_stall: Option<[u64; 2]>,
+    /// Test-only: the font stand-ins its `Ready` reports, as a real scene's text would after
+    /// fontconfig matched other families (`scene::fonts::stand_ins`).
+    pub fonts: Vec<super::fonts::StandIn>,
 }
 
 impl Default for SyntheticSpec {
@@ -104,6 +107,7 @@ impl Default for SyntheticSpec {
             report_gpu_ms: None,
             context_lost_after_ms: None,
             gpu_stall: None,
+            fonts: Vec::new(),
         }
     }
 }

@@ -425,14 +425,6 @@ public static class LiascapePlayerSelfTest
             (new AppSettings { AllowScenes = true }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop scene_spare=True"),
             (new AppSettings { AllowScenes = true, SceneSpareWorker = false }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop scene_spare=False") })
             if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
-        // AppSettings → `player.scene_fonts`: "off" while the toggle is off, else the folder ("" = find a mounted Windows install's)
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        foreach (var (s, want) in new (AppSettings, string)[] {
-            (new AppSettings(), ""),
-            (new AppSettings { UseWindowsFonts = false, WindowsFontsFolder = "/mnt/c/Windows/Fonts" }, "off"),
-            (new AppSettings { WindowsFontsFolder = " /mnt/c/Windows/Fonts " }, "/mnt/c/Windows/Fonts"),
-            (new AppSettings { WindowsFontsFolder = "~/fonts" }, home + "/fonts") })
-            if (LiascapePlayerMedia.SceneFontsProp(s) != want) fails.Add($"SceneFontsProp → {LiascapePlayerMedia.SceneFontsProp(s)}, want {want}");
         // ScenesPlayable: AllowScenes × engine × (liascape-player: the player's `scene` capability | legacy: LWE)
         foreach (var allow in new[] { false, true })
         foreach (var onPlayer in new[] { false, true })
@@ -479,10 +471,26 @@ public static class LiascapePlayerSelfTest
         }
         finally { try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(dir))!, true); } catch { } }
         SceneLoudnessAssertions(fails);
+        FontStandInAssertions(fails);
     }
 
     // Scene loudness learned on first play (`scene.loudness` → LibMeta → `gain.normalize`): what's stored when, and
     // the gain the resolver gives a scene.
+    // `scene.fonts` → the index entry (LiascapePlayerMedia.FontStandInsOf, LibraryService.MergeFontStandIns): parsed, stored
+    // once, unchanged on a repeat, cleared by an empty report; a malformed event stores nothing
+    private static void FontStandInAssertions(List<string> fails)
+    {
+        JsonElement Ev(string json) => JsonDocument.Parse(json).RootElement.Clone();
+        var one = LiascapePlayerMedia.FontStandInsOf(Ev("{\"path\":\"/x\",\"stand_ins\":[{\"font\":\"Consolas\",\"shown\":\"Cascadia Mono\"},{\"font\":\"\",\"shown\":\"y\"}]}"));
+        if (one is not [{ Font: "Consolas", Shown: "Cascadia Mono" }]) fails.Add($"FontStandInsOf → {JsonSerializer.Serialize(one)}, want one Consolas → Cascadia Mono (a nameless entry dropped)");
+        if (LiascapePlayerMedia.FontStandInsOf(Ev("{\"path\":\"/x\"}")) != null) fails.Add("FontStandInsOf(no stand_ins) isn't null");
+        var m = new LibMeta();
+        if (!LibraryService.MergeFontStandIns(m, one ?? [])) fails.Add("MergeFontStandIns: the first report didn't change the entry");
+        if (LibraryService.MergeFontStandIns(m, [new FontStandIn { Font = "Consolas", Shown = "Cascadia Mono" }])) fails.Add("MergeFontStandIns: the same report again changed the entry");
+        if (!LibraryService.MergeFontStandIns(m, []) || m.FontStandIns != null) fails.Add($"MergeFontStandIns: an empty report didn't clear ({JsonSerializer.Serialize(m.FontStandIns)})");
+        if (LibraryService.MergeFontStandIns(new LibMeta(), [])) fails.Add("MergeFontStandIns: an empty report on an empty entry changed it");
+    }
+
     private static void SceneLoudnessAssertions(List<string> fails)
     {
         // MergeSceneLoudness (refined across plays, per audio configuration): the report covering
@@ -1138,7 +1146,7 @@ public static class LiascapePlayerSelfTest
                 // a scene folder plays as `kind: scene` (a synthetic one), takes the
                 // settings like a video, and the per-monitor scene fps reaches its output live
                 var scene = Path.Combine(tmp, "workshop", "900000001");
-                SyntheticScene(scene);
+                SyntheticScene(scene, "{\"pattern\":\"solid\",\"rgb\":[0,128,255],\"native\":[640,360],\"fonts\":[{\"font\":\"Consolas\",\"shown\":\"Cascadia Mono\"}]}");
                 using (var to = new CancellationTokenSource(20000))
                 {
                     bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(scene, s, cfg, alignEnd: false, to.Token).GetAwaiter().GetResult();
@@ -1148,6 +1156,14 @@ public static class LiascapePlayerSelfTest
                 if (Cur("kind") != "scene" || Cur("ready") != "true" || Cur("preview") != Path.Combine(scene, "preview.png"))
                     fails.Add($"the scene folder plays as kind={Cur("kind")} ready={Cur("ready")} preview={Cur("preview")}, want scene/true/its preview.png");
                 else Phase("clip→scene fade: kind scene, ready, preview set");
+                // scene.fonts reaches the backend: the synthetic scene's Ready reports a stand-in (its spec's `fonts`), the
+                // player's `scene.fonts` names its path, and OnSceneFonts parses it (the path is outside the library: no write)
+                var fontsBy = DateTime.UtcNow.AddSeconds(5);
+                while (LiascapePlayerMedia.LastSceneFonts?.Path != scene && DateTime.UtcNow < fontsBy) Thread.Sleep(50);
+                if (LiascapePlayerMedia.LastSceneFonts is not { } lf || lf.Path != scene || lf.List.Count != 1
+                    || lf.List[0].Font != "Consolas" || lf.List[0].Shown != "Cascadia Mono")
+                    fails.Add($"scene.fonts never reached the backend for {scene} (last: {JsonSerializer.Serialize(LiascapePlayerMedia.LastSceneFonts?.List)} for {LiascapePlayerMedia.LastSceneFonts?.Path})");
+                else Phase("scene.fonts reaches the backend: Consolas shown with Cascadia Mono");
                 LiascapePlayerMedia.ApplySceneFps([], [new SceneMonitor { Name = "VIRTUAL-1", Fps = 45 }]);
                 LiascapePlayerMedia.Drain().Wait(2000);
                 double Fps() => client.Call("get", new Dictionary<string, object?> { ["path"] = "out:VIRTUAL-1.scene_fps" }).GetProperty("value").GetDouble();
@@ -1166,13 +1182,6 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.ApplyGpuSettings(g1, g0); LiascapePlayerMedia.Drain().Wait(2000);
                 if (Gpu() != "true 0.0 last_frame stop false" && Gpu() != "true 0 last_frame stop false") fails.Add($"ApplyGpuSettings back to the defaults → {Gpu()}, want true 0 last_frame stop false");
                 else Phase("ApplyGpuSettings: scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode / scene_spare live and back");
-                // the Windows fonts setting → player.scene_fonts, live, diffed
-                var f1 = new AppSettings { UseWindowsFonts = false };
-                LiascapePlayerMedia.ApplySceneFonts(g0, f1); LiascapePlayerMedia.Drain().Wait(2000);
-                if (PlayerProp("scene_fonts") != "off") fails.Add($"ApplySceneFonts(off) → player.scene_fonts {PlayerProp("scene_fonts")}, want off");
-                LiascapePlayerMedia.ApplySceneFonts(f1, g0); LiascapePlayerMedia.Drain().Wait(2000);
-                if (PlayerProp("scene_fonts") != "") fails.Add($"ApplySceneFonts back to the default → player.scene_fonts {PlayerProp("scene_fonts")}, want \"\"");
-                else Phase("ApplySceneFonts: player.scene_fonts off live and back to auto");
                 // pause when covered → player.pause_when_covered, live, diffed (the player's own default is off)
                 LiascapePlayerMedia.ApplyCoverSetting(g0, new AppSettings { PauseWhenCovered = "fullscreen" }); LiascapePlayerMedia.Drain().Wait(2000);
                 if (PlayerProp("pause_when_covered") != "fullscreen") fails.Add($"ApplyCoverSetting(fullscreen) → {PlayerProp("pause_when_covered")}");

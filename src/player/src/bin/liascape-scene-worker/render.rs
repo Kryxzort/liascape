@@ -39,6 +39,8 @@ pub struct LweScene {
     /// (the worker's log line: `src/player/tests/onmachine/scene_load.py` splits a load with them).
     pub load_ms: f64,
     pub build_ms: f64,
+    /// The system fonts its text shows with another family (`Ready.fonts`).
+    pub fonts: Vec<fonts::StandIn>,
     gl_errors: u32,
 }
 
@@ -95,51 +97,70 @@ pub struct Project {
 // `Arc`s and atomics.
 unsafe impl Send for Project {}
 
-/// The Windows fonts this process's text may use, once per process, before the first text layer
-/// is set up (`docs/player/modules/scene-lwe-core.md` § Fonts): the folder `LIASCAPE_SCENE_FONTS`
-/// resolves to (`scene::fonts`, unset = auto) joins fontconfig's fonts as an application font dir,
-/// read where it is. LWE's text asks fontconfig for each `systemfont_*` family and its fallback
-/// chain, so a scene naming Consolas gets the real Consolas when the user's Windows has it.
-/// fontconfig keeps the folder's scan in its own cache: only a first load (or a changed folder)
-/// scans it (about 0.5 s for a Windows 11 install's 400 files; 0.17 s from the cache, most of it
-/// fontconfig's own start, which a text layer pays anyway). The worker starts it on its own
-/// thread at once ([`windows_fonts_early`]) and the build waits for it here. Returns the line saying
-/// what was read (printed into the worker's log). Guard: tests/scene.rs
-/// `scene_text_takes_its_system_font_from_the_fonts_folder`.
-pub fn windows_fonts() -> &'static str {
+/// The scene fonts' fontconfig setup, once per process, before the first text layer is set up
+/// (`docs/player/modules/scene-lwe-core.md` § Fonts): the alias rules (`scene::fonts::ALIASES`)
+/// join the system's configuration and each folder of `LIASCAPE_SCENE_FONT_DIRS` (the package's
+/// fonts) joins its fonts as an application font dir. Only a scene with text runs it
+/// ([`SceneText`]): building the configuration is most of the time (about 0.17 s, fontconfig's own
+/// start, which the core's text setup pays at that point anyway), and a scene without text never
+/// starts fontconfig (nor writes its cache). Returns the line saying what was added (printed into
+/// the worker's log). Guards: tests/scene.rs `scene_text_reports_the_family_fontconfig_matched`,
+/// `real_workers_keep_the_shader_cache_in_the_tests_dir` (nothing under the caller's cache).
+pub fn scene_fonts() -> &'static str {
     static NOTE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     NOTE.get_or_init(|| {
-        let choice = fonts::Choice::parse(&std::env::var(fonts::ENV).unwrap_or_default());
-        let r = fonts::resolve(&choice);
-        let note = match &r.dir {
-            Some(d) => {
-                let t = std::time::Instant::now();
-                match lwe::add_app_font_dir(d) {
-                    Ok(()) => format!(
-                        "fonts: {} ({:.0} ms)",
-                        r.note,
-                        t.elapsed().as_secs_f64() * 1e3
-                    ),
-                    Err(e) => format!("fonts: {}: {e}", r.note),
-                }
+        let t = std::time::Instant::now();
+        let mut parts = vec![match lwe::fc::add_rules(fonts::ALIASES) {
+            Ok(()) => "aliases added".to_string(),
+            Err(e) => format!("aliases: {e}"),
+        }];
+        let dirs = std::env::var(fonts::DIRS_ENV).unwrap_or_default();
+        let dirs: Vec<&str> = dirs.split(':').filter(|d| !d.is_empty()).collect();
+        for d in &dirs {
+            if let Err(e) = lwe::fc::add_app_font_dir(Path::new(d)) {
+                parts.push(format!("{d}: {e}"));
             }
-            None => format!("fonts: {}", r.note),
-        };
+        }
+        let note = format!(
+            "fonts: {}; {} package font folder(s) ({:.0} ms)",
+            parts.join("; "),
+            dirs.len(),
+            t.elapsed().as_secs_f64() * 1e3
+        );
         eprintln!("{note}");
         note
     })
 }
 
-/// [`windows_fonts`] on `lia-scene-fonts`, beside the EGL setup and the project load (neither touches
-/// fontconfig); the build's own call then only waits for it.
-pub fn windows_fonts_early() {
-    if let Err(e) = std::thread::Builder::new()
-        .name("lia-scene-fonts".into())
-        .spawn(|| {
-            windows_fonts();
-        })
-    {
-        eprintln!("fonts: start the fonts thread: {e}");
+/// The scene's text, read from its `scene.json` (the folder's or its `scene.pkg`'s): `None` = no
+/// text object (no fontconfig at all), else the system fonts it asks for.
+pub struct SceneText(pub Option<Vec<String>>);
+
+impl SceneText {
+    pub fn of(dir: &Path) -> SceneText {
+        match liascape_player::scene::loudness_estimate::SceneDir::open(dir, None) {
+            Ok(sd) if fonts::text_objects(&sd.scene).is_empty() => SceneText(None),
+            Ok(sd) => SceneText(Some(fonts::requested(&sd.scene))),
+            Err(e) => {
+                // can't tell: set fontconfig up as for a text, report nothing
+                eprintln!("fonts: can't read the scene's text: {e}");
+                SceneText(Some(Vec::new()))
+            }
+        }
+    }
+
+    /// The system fonts its text asks for that this machine shows with another family
+    /// (`scene::fonts::stand_ins`), each logged. Asked after the build: the core made the same
+    /// lookups by then, against the same configuration.
+    pub fn stand_ins(&self) -> Vec<fonts::StandIn> {
+        let Some(requested) = &self.0 else {
+            return Vec::new();
+        };
+        let out = fonts::stand_ins(requested, lwe::fc::matched_families);
+        for s in &out {
+            eprintln!("fonts: {} shown with {}", s.font, s.shown);
+        }
+        out
     }
 }
 
@@ -210,8 +231,11 @@ impl LweScene {
             on_prop(name, scene.set_property(name, value));
         }
         scene.hint_screen(o.screen.0, o.screen.1);
-        // before the build sets its text layers up
-        windows_fonts();
+        // before the build sets its text layers up; a scene without text never starts fontconfig
+        let text = SceneText::of(o.dir);
+        if text.0.is_some() {
+            scene_fonts();
+        }
         let t1 = std::time::Instant::now();
         // Without it every texture uploads here, on the render thread: slower, never wrong.
         match gfx.share_recipe() {
@@ -230,6 +254,7 @@ impl LweScene {
         let tex = gfx.tex(w, h);
         let fbo = gfx.fbo(&tex);
         Ok(LweScene {
+            fonts: text.stand_ins(),
             load_ms,
             build_ms,
             has_audio: scene.audio_streams() > 0,

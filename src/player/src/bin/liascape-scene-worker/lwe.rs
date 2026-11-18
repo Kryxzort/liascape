@@ -622,22 +622,103 @@ impl Drop for Scene {
     }
 }
 
-/// Adds `dir` to fontconfig's current configuration as an application font dir
-/// (`FcConfigAppFontAddDir`), for every later lookup in this process — LWE's text included.
-/// Looked up, not linked: fontconfig is the core's dependency, not the worker's.
-pub fn add_app_font_dir(dir: &Path) -> Result<(), String> {
-    type AddDir = unsafe extern "C" fn(*mut c_void, *const u8) -> c_int;
-    let sym = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"FcConfigAppFontAddDir".as_ptr()) };
-    if sym.is_null() {
-        return Err("fontconfig isn't loaded (no FcConfigAppFontAddDir)".into());
+/// fontconfig, looked up rather than linked: it is the core's dependency, not the worker's, and the
+/// core has loaded it by the time anything here runs (`render::scene_fonts`).
+pub mod fc {
+    use std::ffi::{CStr, CString, c_char, c_int, c_void};
+    use std::path::Path;
+
+    fn sym(name: &CStr) -> Result<*mut c_void, String> {
+        let s = unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+        if s.is_null() {
+            return Err(format!("fontconfig isn't loaded (no {})", name.to_string_lossy()));
+        }
+        Ok(s)
     }
-    let add: AddDir = unsafe { std::mem::transmute(sym) };
-    let c = CString::new(dir.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
-    // config NULL = the current one (made here if no lookup made it yet)
-    if unsafe { add(std::ptr::null_mut(), c.as_ptr().cast()) } == 0 {
-        return Err("fontconfig refused the folder".into());
+
+    /// The current configuration (built here, from the system's files and `FONTCONFIG_FILE`, if no
+    /// lookup built it yet).
+    fn current() -> Result<*mut c_void, String> {
+        type GetCurrent = unsafe extern "C" fn() -> *mut c_void;
+        let get: GetCurrent = unsafe { std::mem::transmute(sym(c"FcConfigGetCurrent")?) };
+        let c = unsafe { get() };
+        if c.is_null() {
+            return Err("fontconfig has no configuration".into());
+        }
+        Ok(c)
     }
-    Ok(())
+
+    /// Adds the rules of a fontconfig XML document to the current configuration, after the
+    /// system's: every later lookup in this process applies them, LWE's text included.
+    pub fn add_rules(xml: &str) -> Result<(), String> {
+        type Parse = unsafe extern "C" fn(*mut c_void, *const u8, c_int) -> c_int;
+        let parse: Parse = unsafe { std::mem::transmute(sym(c"FcConfigParseAndLoadFromMemory")?) };
+        let doc = CString::new(xml).map_err(|e| e.to_string())?;
+        if unsafe { parse(current()?, doc.as_ptr().cast(), 1) } == 0 {
+            return Err("fontconfig refused the rules".into());
+        }
+        Ok(())
+    }
+
+    /// Adds `dir` to the current configuration as an application font dir
+    /// (`FcConfigAppFontAddDir`), for every later lookup in this process.
+    pub fn add_app_font_dir(dir: &Path) -> Result<(), String> {
+        type AddDir = unsafe extern "C" fn(*mut c_void, *const u8) -> c_int;
+        let add: AddDir = unsafe { std::mem::transmute(sym(c"FcConfigAppFontAddDir")?) };
+        let c = CString::new(dir.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
+        if unsafe { add(current()?, c.as_ptr().cast()) } == 0 {
+            return Err("fontconfig refused the folder".into());
+        }
+        Ok(())
+    }
+
+    /// The family names (one per language) of the font fontconfig matches for one pattern of
+    /// `families`, built as the core's `TextFonts::systemFont` builds it (the families in order,
+    /// the configuration's substitutions, the defaults); `None` = no match or no fontconfig.
+    pub fn matched_families(families: &[&str]) -> Option<Vec<String>> {
+        type Create = unsafe extern "C" fn() -> *mut c_void;
+        type AddString = unsafe extern "C" fn(*mut c_void, *const c_char, *const u8) -> c_int;
+        type Substitute = unsafe extern "C" fn(*mut c_void, *mut c_void, c_int) -> c_int;
+        type Default = unsafe extern "C" fn(*mut c_void);
+        type Match = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_int) -> *mut c_void;
+        type GetString = unsafe extern "C" fn(*mut c_void, *const c_char, c_int, *mut *const u8) -> c_int;
+        type Destroy = unsafe extern "C" fn(*mut c_void);
+        unsafe {
+            let create: Create = std::mem::transmute(sym(c"FcPatternCreate").ok()?);
+            let add: AddString = std::mem::transmute(sym(c"FcPatternAddString").ok()?);
+            let substitute: Substitute = std::mem::transmute(sym(c"FcConfigSubstitute").ok()?);
+            let defaults: Default = std::mem::transmute(sym(c"FcDefaultSubstitute").ok()?);
+            let font_match: Match = std::mem::transmute(sym(c"FcFontMatch").ok()?);
+            let get: GetString = std::mem::transmute(sym(c"FcPatternGetString").ok()?);
+            let destroy: Destroy = std::mem::transmute(sym(c"FcPatternDestroy").ok()?);
+            let pattern = create();
+            if pattern.is_null() {
+                return None;
+            }
+            for f in families {
+                if let Ok(c) = CString::new(*f) {
+                    add(pattern, c"family".as_ptr(), c.as_ptr().cast());
+                }
+            }
+            // FcMatchPattern = 0
+            substitute(std::ptr::null_mut(), pattern, 0);
+            defaults(pattern);
+            let mut res: c_int = 0;
+            let m = font_match(std::ptr::null_mut(), pattern, &mut res);
+            destroy(pattern);
+            if m.is_null() {
+                return None;
+            }
+            let mut names = Vec::new();
+            let mut s: *const u8 = std::ptr::null();
+            // FcResultMatch = 0
+            while get(m, c"family".as_ptr(), names.len() as c_int, &mut s) == 0 && !s.is_null() {
+                names.push(CStr::from_ptr(s.cast()).to_string_lossy().into_owned());
+            }
+            destroy(m);
+            Some(names)
+        }
+    }
 }
 
 /// `liascape-scene-worker --shader-sweep <request.json> --assets <dir> --out <results.jsonl>`: compiles shaders
@@ -957,8 +1038,8 @@ fn run_smoke(
     use liascape_player::gfx::Gfx;
 
     let gfx = Gfx::new_offscreen()?;
-    // the fonts the worker's load gives the scene (`LIASCAPE_SCENE_FONTS`, unset = auto)
-    crate::render::windows_fonts();
+    // the scene fonts' rules and folders, as a played scene gets them
+    crate::render::scene_fonts();
     let t0 = std::time::Instant::now();
     // a smoke run keeps the scene's localStorage with its PNGs, not in the user's state
     if std::env::var_os("LIASCAPE_SCENE_STORAGE_DIR").is_none() {

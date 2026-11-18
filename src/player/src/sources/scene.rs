@@ -253,9 +253,6 @@ pub struct SceneOpts {
     pub steam_dir: Option<String>,
     /// The scene's user properties (`scene_props`), applied at every (re)start.
     pub properties: Map<String, Value>,
-    /// The Windows fonts its worker reads (`scene::fonts`, sent as `LIASCAPE_SCENE_FONTS`): the
-    /// runtime's base opt `scene_fonts` (`player.scene_fonts`); off by default here.
-    pub fonts: crate::scene::fonts::Choice,
     pub audio: AudioRoute,
     pub env: Vec<(String, String)>,
     pub budget: RestartBudget,
@@ -290,8 +287,7 @@ pub struct SceneOpts {
 
 impl SceneOpts {
     /// Defaults: 30 ticks/s, a 1920×1080 demand, LWE (not synthetic), position 0,
-    /// playing at 1×, production restart budget / hang timeout / crash dir, spawned at open,
-    /// no Windows fonts.
+    /// playing at 1×, production restart budget / hang timeout / crash dir, spawned at open.
     pub fn new(path: impl Into<PathBuf>, worker_bin: impl Into<PathBuf>) -> SceneOpts {
         SceneOpts {
             id: "scene".into(),
@@ -307,7 +303,6 @@ impl SceneOpts {
             assets_dir: None,
             steam_dir: None,
             properties: Map::new(),
-            fonts: crate::scene::fonts::Choice::Off,
             audio: AudioRoute::Null,
             env: Vec::new(),
             budget: RestartBudget::default(),
@@ -417,6 +412,9 @@ pub struct SceneSource {
     latch_times: VecDeque<Instant>,
     /// The scene reacts to audio (`Ready.wants_audio_input`) — the runtime feeds it.
     wants_audio_input: bool,
+    /// The system fonts its text shows with another family (`Ready.fonts`); `None` = no worker
+    /// has loaded it yet.
+    fonts: Option<Vec<crate::scene::fonts::StandIn>>,
     /// The system audio for the next tick: interleaved stereo f32 at `audio::bus::RATE`, every
     /// frame since the last tick's (newest [`AUDIO_INPUT_MAX_FRAMES`] kept), and this scene's
     /// cursor in `SysMon::visual_since`.
@@ -608,28 +606,14 @@ fn synthetic_env_of(base: &Map<String, Value>) -> Vec<(String, String)> {
     }
 }
 
-/// The Windows fonts a scene opened under `base` reads: the runtime's resolved choice; a host
-/// without one (harnesses) the environment's.
-fn fonts_of(base: &Map<String, Value>) -> crate::scene::fonts::Choice {
-    match base.get("scene_fonts").and_then(Value::as_str) {
-        Some(f) => crate::scene::fonts::Choice::parse(f),
-        None => crate::scene::fonts::effective(
-            "",
-            std::env::var(crate::scene::fonts::ENV).ok().as_deref(),
-        ),
-    }
-}
-
 /// How a scene opened under `base` launches its worker (binary, args, environment — what
 /// [`SceneSource::open`] and its spawn give it), for the spare worker (`worker::spare`).
-/// `None` = no worker binary. Guard: `tests/api.rs::spare_worker_follows_the_fonts_setting`.
+/// `None` = no worker binary. Guard: `tests/worker.rs` `spare_policy_consumed_replaced_never_two_reaped`.
 pub fn launch_for(base: &Map<String, Value>) -> Option<Launch> {
-    let mut env = synthetic_env_of(base);
-    env.push((crate::scene::fonts::ENV.to_string(), fonts_of(base).as_env()));
     Some(Launch {
         bin: worker_bin_of(base)?,
         args: Vec::new(),
-        env,
+        env: synthetic_env_of(base),
     })
 }
 
@@ -685,7 +669,6 @@ impl SceneSource {
                 bs("scene_assets_error").unwrap_or_else(|| crate::scene::assets::HINT.into())
             )));
         }
-        o.fonts = fonts_of(base);
         o.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
             .map(|p| p.to_string_lossy().into_owned());
         if let Some(PropValue::Map(m)) = get("scene_props") {
@@ -810,6 +793,7 @@ impl SceneSource {
             latency_ms: VecDeque::new(),
             latch_times: VecDeque::new(),
             wants_audio_input: false,
+            fonts: None,
             pending_input: Vec::new(),
             input_cursor: None,
             input_dbfs: None,
@@ -882,7 +866,7 @@ impl SceneSource {
         self.meter_on = !self.loudness_capped();
         self.gain_sent = Some(self.gains.effective_db());
         let mut spec = WorkerSpec::new(self.opts.id.clone(), self.opts.worker_bin.clone(), start);
-        spec.env = self.worker_env();
+        spec.env = self.opts.env.clone();
         spec.budget = self.opts.budget;
         spec.hang_timeout = self.opts.hang_timeout;
         spec.crash_dir = self.opts.crash_dir.clone();
@@ -1236,9 +1220,8 @@ impl SceneSource {
         }
     }
 
-    /// A new worker process took over (a crash restart, or [`set_fonts`](Self::set_fonts)'s
-    /// planned replacement, `attempt` 0): the shown frame stays (never released: the new worker
-    /// never had its slot) and the scene resumes at its `t`.
+    /// A new worker process took over after a crash: the shown frame stays (never released: the
+    /// new worker never had its slot) and the scene resumes at its `t`.
     fn on_new_worker(&mut self, now: Instant, attempt: u32) {
         self.latch.forget_worker();
         self.worker_ready = false;
@@ -1265,38 +1248,6 @@ impl SceneSource {
             );
         }
         self.want_preview_if_blank();
-    }
-
-    /// The Windows fonts its worker reads (`player.scene_fonts`, live): a changed choice replaces
-    /// the running worker at once (a planned replacement, never a crash: no restart budget, no
-    /// crash record), the shown frame held and the scene resuming at its time, as after a crash
-    /// restart; a worker's fontconfig can't drop fonts it was given, so a new process is the only
-    /// way. A source not spawned yet, broken or stopped just keeps the choice for its next start.
-    /// Guard: `tests/api.rs::scene_fonts_change_replaces_the_running_worker`.
-    pub fn set_fonts(&mut self, fonts: crate::scene::fonts::Choice) {
-        if fonts == self.opts.fonts {
-            return;
-        }
-        self.opts.fonts = fonts;
-        let env = self.worker_env();
-        let Some(h) = self.host.as_mut() else {
-            return;
-        };
-        match h.replace(env, "Windows fonts changed") {
-            Ok(true) => self.on_new_worker(Instant::now(), 0),
-            Ok(false) => {}
-            Err(e) => self.fail(format!("scene worker: {e}")),
-        }
-    }
-
-    /// The environment a worker of this source gets on top of the compositor's.
-    fn worker_env(&self) -> Vec<(String, String)> {
-        let mut env = self.opts.env.clone();
-        env.push((
-            crate::scene::fonts::ENV.to_string(),
-            self.opts.fonts.as_env(),
-        ));
-        env
     }
 
     /// The worker is gone with a frame on screen — stop the scene clock at that
@@ -1518,11 +1469,23 @@ impl SceneSource {
                 native,
                 has_audio,
                 wants_audio_input,
+                fonts,
             } => {
                 self.native = Some(native);
                 self.has_audio = Some(has_audio);
                 self.wants_audio_input = wants_audio_input;
                 self.worker_ready = true;
+                // Which of its fonts this machine shows with stand-ins, at every load (an empty list
+                // clears what an earlier play reported): the backend keeps it for the item sidebar.
+                // Guard: tests/api.rs `scene_font_stand_ins_reach_the_event_and_probe`.
+                log::event(
+                    "scene",
+                    Level::Info,
+                    "scene.fonts",
+                    None,
+                    json!({"id": self.opts.id, "path": self.opts.path, "stand_ins": fonts}),
+                );
+                self.fonts = Some(fonts);
                 if self.next_tick.is_none() || !self.paused {
                     self.next_tick = Some(now);
                 }
@@ -1882,6 +1845,12 @@ impl SceneSource {
     /// The scene reacts to audio (its `Ready` said so): the runtime feeds it system audio.
     pub fn wants_audio_input(&self) -> bool {
         self.wants_audio_input && self.worker_ready && self.error.is_none()
+    }
+
+    /// The system fonts its text shows with another family, as its last `Ready` said; `None`
+    /// before a worker loaded it.
+    pub fn font_stand_ins(&self) -> Option<&[crate::scene::fonts::StandIn]> {
+        self.fonts.as_deref()
     }
 
     /// This scene's cursor in the system-audio mix (`SysMon::visual_since`).
@@ -2398,6 +2367,8 @@ impl SceneSource {
         v["cpu"] = json!(self.pid().and_then(proc_cpu));
         // The GPU budget and the VRAM guard.
         v["fps_demand"] = json!(self.demand_hz);
+        // the system fonts its text shows with another family (its last `Ready`; null before one)
+        v["font_stand_ins"] = json!(self.fonts);
         // of `spawns`, the workers that were the spare (`worker::spare`)
         v["spares_taken"] = json!(st.spares_taken);
         v["gpu_ms_p50"] = json!(gpu_p50);

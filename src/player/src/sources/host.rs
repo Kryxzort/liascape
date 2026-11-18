@@ -1367,7 +1367,7 @@ impl SourceHost {
     /// Set (`Some`) or remove (`None`) one base opt for sources opened from now on
     /// (`scene_assets` / `scene_assets_error` follow `player.scene_assets` live).
     pub fn set_base_opt(&mut self, key: &str, v: Option<Value>) {
-        // a scene worker's launch may change (`scene_fonts`): the spare follows it
+        // a base opt may change how a scene worker launches: the spare's launch is worked out again
         self.spare_launch = None;
         match v {
             Some(v) => {

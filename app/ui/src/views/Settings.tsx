@@ -577,13 +577,6 @@ export const Settings = memo(function Settings() {
           <button className="btn ghost ico" onClick={() => pickInto("workshopFolder", "folder")}><FolderFlap size={14} /> Browse</button>
         </Row>
         <Row label="Play scenes" hint="Wallpaper Engine's interactive scene wallpapers. They need Wallpaper Engine installed for its assets." rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
-        {/* liascape-player only (API: /settings → player.scene_fonts, live: a playing scene's worker is replaced, its picture held) */}
-        {liascapeActive && <Row label="Use Windows fonts in scenes" hint="scenes that ask for a Windows font (Arial, Consolas, Comic Sans…) draw with the real one from your own Windows install, read where it is." rk="useWindowsFonts">
-          <input type="checkbox" checked={g("useWindowsFonts", true)} onChange={(e) => set("useWindowsFonts", e.target.checked)} /></Row>}
-        {liascapeActive && <Row label="Windows fonts folder" hint="left empty, the Fonts folder of a mounted Windows drive is found by itself." disabled={!g("useWindowsFonts", true)} rk="windowsFontsFolder">
-          <input className="text" placeholder="Found on a mounted Windows drive" disabled={!g("useWindowsFonts", true)} value={g("windowsFontsFolder", "")} onChange={(e) => set("windowsFontsFolder", e.target.value)} />
-          <button className="btn ghost ico" disabled={!g("useWindowsFonts", true)} onClick={() => pickInto("windowsFontsFolder", "folder")}><FolderFlap size={14} /> Browse</button>
-        </Row>}
         <Row label="Import new Workshop wallpapers" hint="anything new in the Workshop folder lands in your library by itself" rk="autoAddWeWallpapersToLibrary"><input type="checkbox" checked={g("autoAddWeWallpapersToLibrary", true)} onChange={(e) => set("autoAddWeWallpapersToLibrary", e.target.checked)} /></Row>
         <Row label="Copy files instead of linking" hint="copies Workshop files into the library instead of linking to them (uses more disk)" rk="copyFilesInsteadOfSymlinking"><input type="checkbox" checked={g("copyFilesInsteadOfSymlinking", false)} onChange={(e) => set("copyFilesInsteadOfSymlinking", e.target.checked)} /></Row>
         <Row label="Replace direct downloads with Workshop copies" hint="when a wallpaper you downloaded directly shows up in the Workshop folder, it switches to that one and frees the duplicate's disk space" rk="replaceDirectWithWorkshop"><input type="checkbox" checked={g("replaceDirectWithWorkshop", false)} onChange={(e) => set("replaceDirectWithWorkshop", e.target.checked)} /></Row>

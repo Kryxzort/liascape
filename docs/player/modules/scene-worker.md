@@ -70,9 +70,9 @@ instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs eac
   loading, no async open, no transition in flight (the spare's EGL setup is CPU and driver time the scene being
   waited for would share).
 - **Launch.** A spare serves only a scene launched the same way (binary, args, environment: `sources::scene::launch_for`, the
-  same helpers `SceneSource::open` uses). A base opt change that changes it (`player.scene_fonts`: a worker's
-  fontconfig can't drop fonts) reaps the spare at once, so no scene ever starts with stale settings; the
-  next one starts by the refill rule (the change also reloads the playing scene: no competing with that).
+  same helpers `SceneSource::open` uses). A change of it (another worker binary, the synthetic test scenes switched)
+  reaps the spare at once, so no scene ever starts in a stale one; the next one starts by the refill rule. The scene
+  fonts are no launch input: their rules come with the binary, their folders with the compositor's environment.
 - **Failure.** A spare that dies, hangs (its heartbeat runs as for any worker) or reports a fatal error is no crash:
   `Exited` only, no restart, no budget, no record, no scene touched; the next starts after 5 s, doubling to 5 min
   while failures continue. Once adopted it is the scene's own worker: its crash restarts through that scene's budget.

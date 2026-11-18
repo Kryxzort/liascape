@@ -1438,6 +1438,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel :is(.ws-avatar > img, .ws-creator-name) { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .ws-creator { transform: none !important; }
 :root.no-motion .side-hero > [data-side-row="size"]:last-child { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-fonts { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-fonts.leaving { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .ws-stats > .side-pill { transform: none !important; transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .ws-pill-pair { animation: nm-in var(--fade-dur) linear both; }
 :root.no-motion .ws-pill-pair.closing { animation: nm-out var(--fade-dur) linear forwards; }
@@ -1797,6 +1799,10 @@ button.side-pill.copy { overflow: hidden; }
 /* the Library sidebar's size on disk, measured in the background: a late one fades in at the hero row's end (LibrarySide.tsx) */
 .side-hero > [data-side-row="size"]:last-child { animation: side-pill-in .28s ease-out; }
 @keyframes side-pill-in { from { opacity: 0; transform: translateY(4px); } }
+/* the scene's font stand-ins (LibrarySide.tsx fontNote): a report landing while the sidebar shows fades in rising a little, a
+   cleared one fades out (motion off: the fades only, under the no-motion block). Guard: probe-sidebar lib:fontStandIn */
+.side-panel .side-fonts { animation: side-pill-in .28s ease-out; }
+.side-panel .side-fonts.leaving { pointer-events: none; animation: side-crash-out .22s ease-in forwards; }
 /* COOL: the Library sidebar's stat pills (WorkshopSocial.tsx WorkshopStats), in its hero row: held unseen while Steam is asked,
    then they fade in where they stay, rising a little (motion off: only the fade, under the no-motion block).
    Guard: probe-steam lib:ws:counts, lib:ws:pillRow */

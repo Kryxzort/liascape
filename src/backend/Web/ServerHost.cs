@@ -434,8 +434,6 @@ public static class ServerHost
                 if (!SameMonitors(prev.SceneMonitors, s.SceneMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.SceneMonitors, s.SceneMonitors);
                 // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
                 Liascape.Player.LiascapePlayerMedia.ApplyGpuSettings(prev, s);
-                // Windows fonts for scene text: a player-level prop (diffed), read by the next scene worker started
-                Liascape.Player.LiascapePlayerMedia.ApplySceneFonts(prev, s);
                 // pause when covered: a player-level prop, live (diffed)
                 Liascape.Player.LiascapePlayerMedia.ApplyCoverSetting(prev, s);
             }

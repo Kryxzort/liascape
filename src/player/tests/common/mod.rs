@@ -88,9 +88,9 @@ extern "C" fn private_process_shader_cache() {
     unsafe {
         std::env::set_var(shader_cache::PATH_ENV, &dir);
         std::env::set_var(shader_cache::LWE_DIR_ENV, dir.join("lwe"));
-        // and no Windows fonts: auto would read the machine's own mounted Windows install, and
-        // each fresh fontconfig cache would rescan it at every scene load
-        std::env::set_var(liascape_player::scene::fonts::ENV, "off");
+        // and none of the package's scene fonts (the devShell names the flake's): a font test sees
+        // only its own fixture fonts
+        std::env::remove_var(liascape_player::scene::fonts::DIRS_ENV);
     }
 }
 

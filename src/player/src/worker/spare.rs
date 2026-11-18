@@ -14,8 +14,8 @@
 //! A taken spare is replaced once nothing competes with the new one's start: no scene loading,
 //! no transition in flight, [`Timing::refill_after`] since the last take — the spare's own EGL
 //! setup is CPU and driver time the scene the user waits for would otherwise share. A spare
-//! launched differently from what a scene would launch now (`player.scene_fonts` changed: the
-//! worker hands its fonts to fontconfig at start; another worker binary) is reaped at once, so
+//! launched differently from what a scene would launch now (another worker binary, the synthetic
+//! test scenes turned on or off) is reaped at once, so
 //! no scene ever starts in a stale one, and replaced by the same rule. A spare that dies, hangs or can't make a context is
 //! no crash of anything: no restart budget, no crash record, no scene marked broken; the next
 //! one starts after a backoff ([`Timing::retry`], doubling to [`Timing::retry_max`]).
@@ -39,7 +39,7 @@ pub fn lock(s: &SharedSpare) -> std::sync::MutexGuard<'_, Spare> {
 }
 
 /// What a worker process is started with — a spare serves only a scene whose launch is the
-/// same, since a running worker can't take another environment (its fonts are fontconfig's).
+/// same, since a running worker can't take another binary, arguments or environment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Launch {
     pub bin: PathBuf,

@@ -87,6 +87,7 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 ## Scenes and loudness (adapter side)
 - `ScenesPlayable(s)` = `AllowScenes` && the running player's `scene` capability (else `liascape-player scene-check`, cached 30 s). A non-playable scene is skipped everywhere; a crashed-and-not-whitelisted one by every picker and rotation (`IsSkippedPath`) while a user's apply still plays it (`Apply`); an all-unplayable library answers 409, never 500.
 - `source.broken` → `MarkCrashed` + WS `scene-crashed` + advance if it was playing. `scene.vram_exceeded` → WS `scene-vram-stopped` + advance, never `MarkCrashed`.
+- `scene.fonts` (each scene load) → `LibraryService.StoreFontStandIns` (written only when it changed, an empty list clears) + `library-item-changed {fontStandIns}`; a live fact only, never the outbox (the next load reports again). Guard: self-test "scene.fonts reaches the backend".
 - Scene normalization is set once per play: each source keeps a pin (`NormalizePin`); re-pin only on the first complete 60 s window, a normalization-setting change, or a new audio configuration (`loudness_key`). Self-test `SceneLoudnessAssertions`.
 - Send `loudness_key` only to a player whose `hello.capabilities` has `scene_loudness_key`.
 - A scene props commit must leave `scene_props` out of its pass when a preview of the item was queued meanwhile (it would revert the preview).

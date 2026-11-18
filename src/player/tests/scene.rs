@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use glow::HasContext;
 use liascape_player::gfx::{Gfx, Tex};
+use liascape_player::scene::fonts::StandIn;
 use liascape_player::scene::synthetic::{MARKER, PROBE, Pattern, SyntheticSpec, grad_rgb, marker_rgb};
 use liascape_player::sources::Source;
 use liascape_player::sources::scene::{SceneOpts, SceneSource};
@@ -1690,15 +1691,18 @@ fn real_scene_project_loads_beside_the_egl_setup() {
     );
 }
 
-/// A scene's text naming Windows system fonts gets them from the worker's fonts folder
-/// (`scene::fonts`, `render::windows_fonts`): the worker's fontconfig is given no fonts of its own (an
-/// empty `FONTCONFIG_FILE`), and the folder holds two freely licensed faces copied from this
-/// system (DejaVu Sans and DejaVu Sans Mono, never a Microsoft font). `systemfont_consolas` takes
-/// DejaVu Sans Mono and `systemfont_verdana` DejaVu Sans from the folder (each the first family
-/// of its stand-in list the folder has); with the fonts off the same text finds none. The text
-/// layers can't draw without WE's assets (none here), so the proof is LWE's own font line.
+/// A scene's `systemfont_consolas` asks fontconfig for Consolas like any app, through the
+/// system's configuration plus the worker's alias rules (`scene::fonts::ALIASES`), and the worker
+/// reports in its `Ready` which family it was shown with (`render::font_stand_ins`). Hermetic: the
+/// worker's fontconfig sees only a test configuration (`FONTCONFIG_FILE`) whose one folder holds
+/// two freely licensed faces copied from this system (DejaVu Sans Mono and DejaVu Sans, never a
+/// Microsoft font), renamed as they are scanned. With the mono one named "Cascadia Mono" and the
+/// other "Inconsolata" (the core's own second choice), the alias puts Cascadia Mono first: the
+/// text draws with it (LWE's font line) and the report says "Consolas shown with Cascadia Mono".
+/// With the other named "Consolas", the real family wins over the alias and nothing is reported.
+/// The text layers can't draw without WE's assets (none here); the core still picks their font.
 #[test]
-fn scene_text_takes_its_system_font_from_the_fonts_folder() {
+fn scene_text_reports_the_family_fontconfig_matched() {
     let _g = gpu_lock();
     let Some(gfx) = common::headless_gl() else {
         return;
@@ -1723,20 +1727,32 @@ fn scene_text_takes_its_system_font_from_the_fonts_folder() {
         return;
     };
     let root = empty_dir("fonts");
-    let fonts = root.join("Fonts");
+    let fonts = root.join("fonts");
     std::fs::create_dir_all(&fonts).unwrap();
     for f in [&mono, &sans] {
         std::fs::copy(f, fonts.join(f.file_name().unwrap())).unwrap();
     }
-    let conf = root.join("fonts.conf");
-    std::fs::write(
-        &conf,
+    let rename = |from: &str, to: &str| {
         format!(
-            "<?xml version=\"1.0\"?>\n<fontconfig><cachedir>{}</cachedir></fontconfig>\n",
-            root.join("fc-cache").display()
-        ),
-    )
-    .unwrap();
+            "<match target=\"scan\"><test name=\"family\"><string>{from}</string></test>\
+             <edit name=\"family\" mode=\"assign\" binding=\"same\"><string>{to}</string></edit></match>"
+        )
+    };
+    let conf = |name: &str, sans_as: &str| {
+        let p = root.join(format!("{name}.conf"));
+        std::fs::write(
+            &p,
+            format!(
+                "<?xml version=\"1.0\"?>\n<fontconfig><dir>{}</dir><cachedir>{}</cachedir>{}{}</fontconfig>\n",
+                fonts.display(),
+                root.join(format!("fc-cache-{name}")).display(),
+                rename("DejaVu Sans Mono", "Cascadia Mono"),
+                rename("DejaVu Sans", sans_as),
+            ),
+        )
+        .unwrap();
+        p
+    };
     let scene = root.join("scene");
     std::fs::create_dir_all(&scene).unwrap();
     std::fs::write(
@@ -1748,14 +1764,12 @@ fn scene_text_takes_its_system_font_from_the_fonts_folder() {
         scene.join("scene.json"),
         r#"{"camera":{"center":"0 0 -1","eye":"0 0 0","up":"0 1 0"},
             "general":{"clearcolor":"0.2 0.4 0.6","orthogonalprojection":{"width":64,"height":32}},
-            "objects":[{"id":1,"name":"mono","text":"Consolas","font":"systemfont_consolas","pointsize":12},
-                       {"id":2,"name":"sans","text":"Verdana","font":"systemfont_verdana","pointsize":12}]}"#,
+            "objects":[{"id":1,"name":"mono","text":"Consolas","font":"systemfont_consolas","pointsize":12}]}"#,
     )
     .unwrap();
     let assets = empty_dir("fonts-assets");
-    let run = |name: &str, choice: liascape_player::scene::fonts::Choice| {
+    let run = |name: &str, conf: &Path| {
         let mut src = open_real(&gfx, name, &scene, Some(&assets), |o| {
-            o.fonts = choice;
             o.env
                 .push(("FONTCONFIG_FILE".into(), conf.display().to_string()));
         });
@@ -1766,33 +1780,37 @@ fn scene_text_takes_its_system_font_from_the_fonts_folder() {
             src.log_tail()
         );
         assert!(src.error().is_none(), "{name}: {:?} {:?}", src.error(), src.log_tail());
-        src.log_tail().join("\n")
+        let tail = src.log_tail().join("\n");
+        let got = src
+            .font_stand_ins()
+            .unwrap_or_else(|| panic!("{name}: no fonts in the Ready:\n{tail}"))
+            .to_vec();
+        (got, tail)
     };
-    let tail = run(
-        "fonts-folder",
-        liascape_player::scene::fonts::Choice::Folder(fonts.clone()),
-    );
-    for (layer, font, file) in [
-        ("mono", "systemfont_consolas", fonts.join(mono.file_name().unwrap())),
-        ("sans", "systemfont_verdana", fonts.join(sans.file_name().unwrap())),
-    ] {
-        let want = format!("font {font} -> {}", file.display());
-        assert!(
-            tail.lines().any(|l| l.contains(&format!("'{layer}'")) && l.ends_with(&want)),
-            "{layer}: not drawn with {} from the fonts folder:\n{tail}",
-            file.display()
-        );
-    }
+    let mono_file = fonts.join(mono.file_name().unwrap());
+    let (got, tail) = run("fonts-alias", &conf("alias", "Inconsolata"));
     assert!(
         tail.lines()
-            .any(|l| l.starts_with("fonts: Windows fonts from ") && l.contains("(the setting)")),
-        "no fonts line in the worker's log:\n{tail}"
+            .any(|l| l.contains("'mono'") && l.ends_with(&format!("font systemfont_consolas -> {}", mono_file.display()))),
+        "the text isn't drawn with the alias's Cascadia Mono ({}):\n{tail}",
+        mono_file.display()
     );
-    let off = run("fonts-off", liascape_player::scene::fonts::Choice::Off);
+    assert_eq!(
+        got,
+        [StandIn {
+            font: "Consolas".into(),
+            shown: "Cascadia Mono".into()
+        }],
+        "{tail}"
+    );
     assert!(
-        off.lines()
-            .any(|l| l.contains("no usable font for 'mono' (systemfont_consolas)")),
-        "with the fonts off the text still found a font (the folder's proof proves nothing):\n{off}"
+        tail.lines().any(|l| l == "fonts: Consolas shown with Cascadia Mono"),
+        "no stand-in line in the worker's log:\n{tail}"
+    );
+    let (got, tail) = run("fonts-real", &conf("real", "Consolas"));
+    assert!(
+        got.is_empty(),
+        "an installed Consolas lost to its stand-in (`accept`, never `prefer`): {got:?}\n{tail}"
     );
     let _ = std::fs::remove_dir_all(&root);
 }

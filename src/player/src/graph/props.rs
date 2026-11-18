@@ -173,15 +173,6 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_assets_resolved",
                 def(PropType::Str, true, PropValue::Str(String::new())),
             ),
-            // The Windows fonts a scene's text may use (`scene::fonts`): "" = auto
-            // (`LIASCAPE_SCENE_FONTS` when the environment sets it, else a mounted Windows
-            // install's `Windows/Fonts`), "off", or a folder. Live: each scene source whose choice
-            // changes replaces its running worker, its frame held (`SceneSource::set_fonts`: a
-            // worker's fontconfig can't drop fonts it was given).
-            (
-                "scene_fonts",
-                def(PropType::Str, false, PropValue::Str(String::new())),
-            ),
             // Keep one spare scene worker started ahead of time while scenes are in use, so a
             // scene apply skips the worker's spawn and GL setup (`worker::spare`). Off by default
             // here, like `pause_when_covered`: a raw player starts no process it wasn't asked for;

@@ -3356,36 +3356,6 @@ C["settings:sceneSpare"] = { states: ["scene"], async run(c) {
     return [...v, ...samePid(c, SC[0])];
   } };
 
-// "Use Windows fonts in scenes" → `player.scene_fonts`, live: the playing scene's worker is replaced by one with the new
-// fonts (a worker's fontconfig can't drop fonts), a planned replacement: its picture stays on screen the whole time (sampled
-// until the new worker runs), it is no crash restart, and the same scene stays on. Guard for SceneSource::set_fonts with
-// tests/api.rs scene_fonts_change_replaces_the_running_worker.
-C["settings:windowsFonts"] = { states: ["scene"], async run(c) {
-    c.was = await pget("player.scene_fonts");
-    c.pid0 = workerOf(c.before.st, SC[0])?.pid;
-    c.restarts0 = (await scLogs("worker.restart")).length;
-    c.px0 = await scPixel(SC[0]);
-    await ui(`${settingsRow("Use Windows fonts in scenes")} m.setCheck(m.input("Use Windows fonts in scenes"), false, "Windows fonts");`);
-    c.ok = await waitFor(async () => (await pget("player.scene_fonts")) === "off", 5000, 100);
-    c.px = [];
-    c.replaced = await waitFor(async () => { c.px.push(await scPixel(SC[0])); const w = await scWorker(SC[0]); return !!w?.pid && w.pid !== c.pid0 && w.state === "running"; }, 10000, 100);
-    c.px.push(await scPixel(SC[0]));
-    c.restarts = (await scLogs("worker.restart")).length - c.restarts0;
-    c.replacedEv = (await scLogs("worker.replaced")).some((e) => e.prev_pid === c.pid0);
-  }, check(c) {
-    const v = [];
-    if (!c.ok) v.push(`player.scene_fonts ${JSON.stringify(c.was)} → never "off"`);
-    if (c.after.s.useWindowsFonts !== false) v.push(`the setting wasn't saved (useWindowsFonts ${c.after.s.useWindowsFonts})`);
-    if (!c.pid0) return [...v, "no scene worker before the change — proved nothing"];
-    if (!c.px0 || c.px0 === "0 0 0") return [...v, `the scene showed no picture before the change (${c.px0}) — proved nothing`];
-    if (!c.replaced) v.push(`the playing scene's worker ${c.pid0} was never replaced by a running one (the fonts would wait for its next load)`);
-    if (!c.replacedEv) v.push("no worker.replaced event naming the old worker");
-    const blank = c.px.filter((x) => !x || x === "0 0 0");
-    if (blank.length) v.push(`the scene's picture went blank ${blank.length} of ${c.px.length} samples while its worker was replaced (${JSON.stringify(c.px)})`);
-    if (c.restarts) v.push(`${c.restarts} worker.restart event(s): a fonts change is a planned replacement, not a crash restart`);
-    return [...v, ...sceneShown(c, SC[0])];
-  } };
-
 // a scene over the per-scene VRAM limit (the fake probe reports its worker at 2000 MiB > 1536): the player stops it,
 // the rotation advances at once, the UI says why — and it is NOT marked crashed
 C["vram:exceeded"] = { states: ["sceneS"], switch: true,
@@ -4698,7 +4668,7 @@ const offGlobal = (vol, spd) => (x) => (vol === undefined || ![].concat(vol).inc
 const FUZZ_RULES = [
   [/^race:|^plState:partial$/, { exclude: "backend-only HTTP stress (no UI) that rewrites the playlist / index under the run" }],
   [/^apply:broken$/, { exclude: "a switch that FAILS on purpose (expectFail): its transition.failed would fail every later step" }],
-  [/[sS]cene|^vram:|^settings:(vram|windowsFonts)|^next:[sv]→/, { exclude: "the scene controls: scene support on + their own scene fixtures (a crashing scene, the fake VRAM probe, a backend restart)" }],
+  [/[sS]cene|^vram:|^settings:vram|^next:[sv]→/, { exclude: "the scene controls: scene support on + their own scene fixtures (a crashing scene, the fake VRAM probe, a backend restart)" }],
   [/autoMute/, { exclude: "synthetic streams on the private audio server + Auto-Mute's delays outlive a step" }],
   [/^shuffle:/, { exclude: "their own idle / playlist4 fixtures (a 4-item playlist, 12-switch chains)" }],
   [/^set:normalizeFresh$/, { exclude: "forgets every measurement in the index file + a 30 s backfill" }],

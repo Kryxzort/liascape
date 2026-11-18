@@ -6,15 +6,15 @@ Choices that ruled out a tempting alternative, so nobody "fixes" them back. Form
 ## Backend/API
 
 ### Run the agent window in a private compositor, not an output of the session's Hyprland — 2026-11-12
-Agents drive their own Liascape window (`scripts/agent-window.sh`) inside a headless gamescope (no seat, no input, no DRM,
-sandboxed in bwrap with its own network namespace), never a headless output added to the owner's Hyprland: removing an
+Agents drive their own Liascape window (`scripts/agent-window.sh`) in a headless gamescope (no seat, input or DRM; bwrap,
+its own network namespace), never a headless output added to the owner's Hyprland: removing an
 output always warps the cursor to another monitor's centre and focuses it (`CMonitor::onDisconnect`, a forced warp that
 `cursor:no_warps` doesn't stop), and an output that stays is a workspace the owner's keys can land on. The script only
-reads Hyprland; its watcher aborts on any owner-side event. Rule: `.claude/rules/ui/shell-and-probes.md`.
+reads Hyprland; its watcher aborts on any owner-side event. `.claude/rules/ui/shell-and-probes.md`.
 
 ### Serve media from a second listener — 2026-11-12
-Chromium opens 6 HTTP/1.1 connections per origin; slow `/img` `/media` `/clip` `/anim` `/still` loads held all six and
-every API call (a search, a reload) queued behind them. Media gets its own listener at the API's port + 1
+Chromium opens 6 HTTP/1.1 connections per origin; slow media loads held all six and every API call queued
+behind them. Media gets its own listener at the API's port + 1
 (`ApiSecurity.PickPorts`): its own origin and pool, answering only token-carrying GETs of the media routes; the page derives
 it from the API's port (`api/client.ts` `MEDIA`). Rejected: `localhost:<port>` on the same listener (Chromium tries `[::1]`
 first, where another local user could listen and collect the token; `localhost` is already the API's own origin), HTTP/2
@@ -249,7 +249,7 @@ holds every item, and a request per click is slower. `components/workshopFilter.
 The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide;
 clicking the name toggles include only (a cycle through hide surprised users), so hiding is always deliberate (✕ or
 right-click). `components/WorkshopFilterColumn.tsx`.
-Placement (the owner's pick from live mockups): on the right, one panel at a time with the item sidebar and in its shape
+Placement (the owner's pick): on the right, one panel at a time with the item sidebar and in its shape
 (width, 900 px dock, slide: a swap moves no card), toggled by the left half of the top bar's split sort button
 (`components/SortFilterButton.tsx`). Rejected: a left column under a "Filters · N" pill above the grid (it scrolled away),
 that pill in the top bar (it wrapped it), an edge handle (it cost grid width), a sticky row. Guard
@@ -344,6 +344,11 @@ mpv reports no time remaining around a load; breaking after 500 ms switched scen
 
 ## Player (`liascape-player`)
 
+### Scene fonts come from fontconfig, not a Windows install — 2026-11-18
+Owner's call: `systemfont_consolas` asks fontconfig for Consolas like any app.
+Microsoft's fonts pass on only inside their installers (Consolas, Segoe UI never): nothing ships or reads them from a
+Windows partition. `docs/player/modules/scene-lwe-core.md` § Fonts.
+
 ### Keep one spare scene worker while scenes are in use — 2026-11-17
 Owner's call: an idle worker's ~60 MiB (PSS) is worth 65–135 ms off every scene apply after the first; on by default, a setting turns it off.
 `docs/player/modules/scene-worker.md` § The spare worker.
@@ -367,11 +372,9 @@ Even an innocent reset: the protocol carries no reset kind, so a separate allowa
 Not from a spawn thread: the pid would arrive late for every kill and reap path. A fence-waiting `Frame` thread was tried
 and dropped. `posix_spawn` (`clone(CLONE_VM|CLONE_VFORK)`), never `fork`, so the player's memory is never copied. `src/player/src/worker/mod.rs`.
 
-### Don't lower a slow scene load's CPU priority — ~2026-10-27
-`nice` / `SCHED_IDLE` stretched a load about 10× under contention. The player waits up to 50 s while the worker says `loading` instead.
-
-### Lower only the scene worker's GL context priority — ~2026-10-27
-`High` on the compositor's own contexts was indistinguishable from load in measurements; only the worker's is lowered.
+### Lower only the scene worker's GL context priority, never a load's CPU priority — ~2026-10-27
+`High` on the compositor's own contexts was indistinguishable from load. `nice` / `SCHED_IDLE` stretched a
+load 10× under contention: the player waits up to 50 s while the worker says `loading` instead.
 
 ### Default `__NV_DISABLE_EXPLICIT_SYNC=1` and drain libwayland's default queue every iteration — 2026-10-25
 egl-wayland2 ≤ 1.0.2 leaks one `wl_closure` per present otherwise. Cost: loop p99 ≈ 1.6 ms. A value the caller set wins.

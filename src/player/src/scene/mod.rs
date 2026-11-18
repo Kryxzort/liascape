@@ -2,8 +2,8 @@
 //! size of a scene's frame ring ([`cover_size`]), the synthetic test scene's spec
 //! ([`synthetic`]), WE's assets dir ([`assets`]), the pointer → scene mapping
 //! ([`pointer`]), the worker GPU budget ([`budget`]), the `scene.pkg` reader
-//! ([`pkg`]), the offline loudness estimate ([`loudness_estimate`]) and the Windows fonts
-//! folder a worker reads ([`fonts`]). No GPU.
+//! ([`pkg`]), the offline loudness estimate ([`loudness_estimate`]) and which font families a
+//! scene's text asks fontconfig for ([`fonts`]). No GPU.
 
 pub mod assets;
 pub mod budget;
