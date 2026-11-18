@@ -38,11 +38,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.
-101. [ ] Flaky under load (2026-11-18, the full crate suite beside other agents' tests; each passes alone ×2):
-       `tests/api.rs` `quit_while_the_bus_waits_for_wireplumber_is_prompt`, `render_worker_never_composes_a_torn_frame`,
-       `render_worker_quit_is_bounded`; and probe-filters `local:weFolder` fails when run in a subset (`--only` with
-       wf:workshopOnly / wf:post / lib:steamTags) and passes alone — it leans on an earlier cell's state. Same method as
-       #95: reproduce under niced load, wait on the event not the clock; make the cell self-contained.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

@@ -846,7 +846,7 @@ app.whenReady().then(async () => {
     // the page to search on: the Library, or the Workshop (its fake list) with its filter panel closed (the bar's room)
     const toPage = async (pg) => { if (pg === "Library") await tab("Library"); else await toWorkshop(false); await page(`await m.open(false);`); await fold(); };
     // the control left of the search that glides aside, the split right of it that must not move
-    const LEFT = { Library: ".topbar > .btn.ghost[aria-label=Import]", Workshop: ".topbar > .pills > .mini" };
+    const LEFT = { Library: ".topbar [data-import-split]", Workshop: ".topbar > .pills > .mini" };
     const glides = (fr) => fr.filter((f, i) => i > 0 && i < fr.length - 1 && f[1] != null && fr[i - 1][1] != null && fr[i + 1][1] != null
       && Math.abs(f[2] - fr[i - 1][2]) > 0.3 && Math.abs(fr[i + 1][2] - f[2]) > 0.3 && Math.sign(f[2] - fr[i - 1][2]) === Math.sign(fr[i + 1][2] - f[2])).length;
     const stillX = (fr) => fr.filter((f, i) => i > 0 && f[1] != null && fr[i - 1][1] != null && Math.abs(f[2] - fr[i - 1][2]) > 0.75).length;
@@ -1653,6 +1653,10 @@ app.whenReady().then(async () => {
         if (r.row) v.push("a sort / filter row above the WE folder's grid");
         if (!r.tog || r.sorts !== 1 || r.sort !== "Default") v.push(`the WE folder's split: toggle ${r.tog}, ${r.sorts} select(s), menu starting "${r.sort}" (want its client sort)`);
         const n0 = await page(`return window.__browse.length + window.__more.length;`);
+        // the Workshop's saved filter as this cell found it (an earlier cell may have left one on): the WE folder's clicks
+        // must leave it exactly so
+        const wsSaved = () => page(`return localStorage.getItem("liascape.browseFilter");`);
+        const ws0 = await wsSaved();
         const steps = [[["Anime", "inc"]], ["we-a", "we-c"], [["Everyone", "inc"]], ["we-a"], [["Everyone", "off"], ["Anime", "off"], ["Questionable", "exc"]], ["we-a", "we-own"],
           [["Questionable", "off"], ["@library", "inc"]], ["we-own"], [["@library", "exc"]], ["we-a", "we-b", "we-c"]];
         for (let i = 0; i < steps.length; i += 2) {
@@ -1661,8 +1665,10 @@ app.whenReady().then(async () => {
           if (J(got) !== J(steps[i + 1])) v.push(`${steps[i].map((x) => x.join(":")).join(" + ")} → ${J(got)} (want ${J(steps[i + 1])})`);
         }
         await shot("local-we");
-        const ls = await page(`return [JSON.parse(localStorage.getItem("liascape.weLocalFilter"))?.exclude, JSON.parse(localStorage.getItem("liascape.browseFilter"))?.exclude ?? []];`);
-        if (J(ls) !== J([["@library"], []])) v.push(`saved: WE folder ${J(ls[0])}, Workshop ${J(ls[1])}`);
+        const we1 = await page(`return JSON.parse(localStorage.getItem("liascape.weLocalFilter"))?.exclude;`);
+        if (J(we1) !== J(["@library"])) v.push(`saved: WE folder exclude ${J(we1)} (want ["@library"])`);
+        const ws1 = await wsSaved();
+        if (ws1 !== ws0) v.push(`the WE folder's filter changed the Workshop's saved one: ${ws0} → ${ws1}`);
         const n1 = await page(`return window.__browse.length + window.__more.length;`);
         if (n1 !== n0) v.push(`${n1 - n0} filtered /browse request(s) for the WE folder (want none)`);
         await page(`m.q("[data-wf-clear]")?.click(); await m.sleep(300);`);
