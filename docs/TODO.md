@@ -47,6 +47,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.
+98. [ ] Bug: importing Steam's own Workshop folder (`steamapps/workshop/content/431960/…`) with linking makes an
+       `imported/` link into Steam's folder; unsubscribing that item later makes Steam delete the files behind the link.
+       The scanner should recognise Steam's Workshop folders: their items are subscriptions (the WE auto-import's job),
+       so the dialog lists them as "from your Steam subscriptions" and imports nothing of them, or copies only.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
