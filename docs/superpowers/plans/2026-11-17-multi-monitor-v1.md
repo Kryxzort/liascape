@@ -18,7 +18,7 @@
 - Defaults: every screen follows All ("same wallpaper on each screen, each shown whole"); keybind reach = All screens; carousel selection = All.
 - The most recent action wins: Apply / Play on a screen → that screen becomes own, others unchanged; Apply / Play on All → every screen rejoins All. No undo.
 - Specificity wins, nothing multiplies: the wallpaper's own value > the screen's > the global, for volume, speed, fit and FPS cap. All live (`CLAUDE.md` § Hard rules).
-- Followers share one source (one decoder, in sync), so a follower's volume / mute / speed / FPS cap are All's (= the global settings); only an own screen has its own. Fit is per screen for followers too (a layer prop).
+- Followers share one source (one decoder, in sync), so a follower's volume / mute / speed / FPS cap are All's (owner-confirmed 2026-11-18) (= the global settings); only an own screen has its own. Fit is per screen for followers too (a layer prop).
 - While any follower has scenes off, All plays no scenes: All's rotation skips them and a scene applied on All is refused with `"<name> doesn't allow scenes"`; on an own screen with scenes off, scenes are refused with the same words.
 - Screens are remembered by make + model + connector, and by serial where one is reported; a new screen is used at once, following All; an unplugged screen's setup is kept.
 - Arranging screens changes only Liascape's view (carousel order, the All preview); never the compositor's layout.

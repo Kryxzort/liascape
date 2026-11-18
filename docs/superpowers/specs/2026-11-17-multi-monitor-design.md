@@ -124,6 +124,9 @@ rarely come back to it ("they just put a playlist on them and rarely open it"). 
   properties) are either the same on every screen or set per screen — a choice in the item sidebar; per screen adds
   one more level on top: this wallpaper on this screen > this wallpaper > the screen > global. A spanned picture uses
   All's values. All live (CLAUDE.md hard rule).
+- **A follower's volume, speed and frame-rate cap (owner, 2026-11-18):** screens following All share one decoded
+  source (that's what keeps them in sync and costs about one screen), so a follower uses All's values; those popover
+  rows are disabled with the reason until the screen has its own wallpaper. Fit stays per screen.
 - **Scenes off on a screen that follows All (owner):** a desync is worse than a missing scene, so while any follower
   has scenes off, All plays no scenes: All's rotation skips scenes and applying a scene on All is disabled with the
   reason ("Left doesn't allow scenes"). On that screen alone (own), scenes are simply not offered. The global "Allow
