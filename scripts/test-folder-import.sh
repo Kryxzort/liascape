@@ -15,6 +15,9 @@
 #          leaves the library and the playlist, a removed copy stays; a folder that is gone or reads as empty removes
 #          nothing; an item the user deletes never comes back; a scene waits for "Play scenes"; "Add new wallpapers to the
 #          playlist" adds what a watch brings; unwatching keeps the items and stops the pickup.
+#  subscribed: a backed-up Workshop folder imported, then its subscription's folder synced (the WE auto-import): one item,
+#          no local/ link beside it; deleting either leaves the other's files, and the subscription comes in once the
+#          imported item is gone.
 #  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
 #          every root nor a watched folder's file by its own path, and no longer once the folder is unwatched.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
@@ -184,6 +187,29 @@ check "deleted: the links and the copy are gone" "$(ls "$IMP" | grep -cE '^(loos
 rm -rf "$S/withlink"
 check "every source file is where it was, unchanged" "$(cd "$S" && find . -path ./locked -prune -o -type f -print0 2>/dev/null | sort -z | xargs -0 sha1sum | sha1sum)" "$SRC_SUM"
 check "the folder a copy linked to is untouched" "$(cat "$T/outside/keep/k.txt")" keep
+
+echo "== subscribed: an imported Workshop item and Steam's copy of it"
+# A backed-up Workshop folder imported, then subscribed to (Steam's folder appears, the WE auto-import runs): one item, the
+# imported one; deleting either touches only its own files, and once the imported one is gone the subscription comes in.
+BK=$S/backup/4444444444
+BK_SUM=$(cd "$BK" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
+post /library/import-found "$(jq -nc --argjson p "$(P "$BK")" '{paths: $p, copy: false}')" > /dev/null
+wait_for 30 idle; wait_for 10 has "Backed Scene"
+mkdir -p "$WE/4444444444"; cp -a "$BK/." "$WE/4444444444/"
+WE_SUM=$(cd "$WE/4444444444" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
+post /library/sync '{}' > /dev/null
+bywid() { lib | jq -c --arg w "$1" '[.[] | select(.workshopId == $w) | .videoPath]'; }
+check "subscribed after an import: one item, the imported one" "$(bywid 4444444444)" "[\"$IMP/Backed Scene\"]"
+check "…no local/ link beside it" "$([ -e "$LIB/local/4444444444" ] || [ -L "$LIB/local/4444444444" ] && echo there || echo none)" none
+post /library/delete "$(item "Backed Scene")" > /dev/null
+check "the imported one deleted: its source and Steam's folder untouched" \
+  "$(cd "$BK" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum) $(cd "$WE/4444444444" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)" "$BK_SUM $WE_SUM"
+post /library/sync '{}' > /dev/null
+check "…then the subscription comes in as itself" "$(bywid 4444444444) $(readlink "$LIB/local/4444444444")" "[\"$LIB/local/4444444444\"] $WE/4444444444"
+post /library/delete "$(item "Backed Scene")" > /dev/null
+check "Steam's one deleted: both folders untouched" \
+  "$([ -L "$LIB/local/4444444444" ] && echo link) $(cd "$BK" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum) $(cd "$WE/4444444444" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)" " $BK_SUM $WE_SUM"
+rm -rf "$WE/4444444444"
 
 echo "== watch"
 W=$T/watched; mkdir -p "$W/sub"

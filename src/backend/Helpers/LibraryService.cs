@@ -800,13 +800,20 @@ public static class LibraryService
         return ResolveItemMedia(dir, id) is { } media && File.Exists(media);
     }
 
-    // workshop/ + local/ folder names = the set of workshop IDs already present
+    // the Workshop ids the library already has: workshop/ + local/ folder names, and an imported item's Workshop id (a
+    // backed-up Workshop folder brought in by the folder import). A subscription to an item imported that way adds no
+    // `local/<id>` beside it: the imported item stays the one item (its files the user's own: a link to their folder or a
+    // copy, never Steam's), and Steam's folder is the subscription's alone. Deleting or unsubscribing either side touches
+    // only its own files (a link is unlinked, Steam removes its folder); once the imported item is gone, the next pass
+    // links Steam's folder as usual. Guard: scripts/test-folder-import.sh § subscribed
     private static HashSet<string> ExistingWorkshopIds()
     {
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var src in new[] { LibraryStore.Workshop, LibraryStore.Local })
             foreach (var d in SafeDirs(LibraryStore.SourceDir(src)))
                 ids.Add(Path.GetFileName(d));
+        foreach (var m in LibraryStore.LoadIndex(LibraryStore.Imported).Values)
+            if (m.WorkshopId is { Length: > 0 } w) ids.Add(w);
         return ids;
     }
 
