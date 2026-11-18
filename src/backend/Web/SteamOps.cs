@@ -227,8 +227,9 @@ public static class SteamOps
     }
 
     // How long an Unsubscribe (the Library's, the Browse sidebar's) waits before it reaches Steam: its Undo window. An Undo
-    // inside it takes the id out of the queue, so Steam is never asked (nor asked to subscribe again: WorkshopUnsubQueue.Restore
-    // sees it still pending); after it, Undo re-subscribes as before. Another unsubscribe inside the window restarts the wait.
+    // inside it takes the id out of the queue, so Steam is never asked (nor asked to subscribe again: WorkshopUnsubQueue.Withdraw
+    // sees it still pending), and so does one after it until the drain claims the id; while Steam is unsubscribing it, Undo is
+    // too late and says so; after, Undo re-subscribes. Another unsubscribe inside the window restarts the wait.
     // Guard: test-steam-signin.sh § 3 i (the Undo window)
     public static readonly TimeSpan UnsubUndoWindow = TimeSpan.FromSeconds(5);
     static Timer? _undoWindowTimer;

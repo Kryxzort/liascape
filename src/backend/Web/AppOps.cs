@@ -466,7 +466,7 @@ public static class AppOps
     {
         var ids = items.Where(i => i.WorkshopId != null).Select(i => i.WorkshopId!).Distinct().ToList();
         foreach (var i in items) if (i.WorkshopId != null) SteamTodo.RememberTitle(i.WorkshopId, i.Title); // its Steam to-do entry's name
-        WorkshopUnsubQueue.AddPending(ids);
+        WorkshopUnsubQueue.AddPending(ids, hold: SteamOps.UnsubUndoWindow);
         var batch = Trash(items);
         if (ids.Count > 0) SteamOps.DrainAfterUndoWindow(ids);
         return batch;
@@ -566,16 +566,33 @@ public static class AppOps
         EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
     }
 
-    public record UndoResult(bool Ok, int Count, string? Title);
+    public record UndoResult(bool Ok, int Count, string? Title, string? Message = null);
+
+    // An Undo of a Delete from source takes its unsubscribes back first, in one step against the drain
+    // (WorkshopUnsubQueue.Withdraw): one the drain is already sending makes it too late. Then nothing changes, the batch stays
+    // on the stack and the words say so, never the item shown back while Steam unsubscribes it; Undo again once Steam has
+    // answered brings it back and subscribes it again. Guard: test-steam-signin.sh § 3 i. "an Undo while the Steam client is
+    // unsubscribing it"
     public static UndoResult Undo()
     {
         UndoBatch? batch;
+        WorkshopUnsubQueue.Withdrawal w;
         lock (_undoLock)
         {
             if (_undo.Count == 0) return new(false, 0, null);
-            batch = _undo[^1]; _undo.RemoveAt(_undo.Count - 1);
+            batch = _undo[^1];
+            w = WorkshopUnsubQueue.Withdraw(batch.Items.Select(i => i.WorkshopId).OfType<string>());
+            if (w.Sending.Count > 0)
+            {
+                var title = batch.Items.FirstOrDefault(i => i.WorkshopId == w.Sending[0])?.Title;
+                Console.WriteLine($"workshop: undo of {string.Join(", ", w.Sending)}: too late, its unsubscribe is out — nothing changed");
+                return new(false, 0, null, w.Sending.Count == 1 && title != null
+                    ? $"Too late to undo: Steam is unsubscribing {title} right now. Undo again in a moment to get it back and subscribe it again."
+                    : "Too late to undo: Steam is unsubscribing them right now. Undo again in a moment to get them back and subscribe them again.");
+            }
+            _undo.RemoveAt(_undo.Count - 1);
         }
-        RestoreUndo(batch, whole: true);
+        RestoreUndo(batch, whole: true, w.Unsubscribed);
         return new(true, batch.Items.Count, batch.Items.Count > 0 ? batch.Items[0].Title : null);
     }
 
@@ -607,8 +624,9 @@ public static class AppOps
         return back.Sum(x => x.Part.Items.Count);
     }
 
-    // puts a trash batch's items back (`whole` = the batch; else only `batch.Items`, the rest stays in the trash)
-    private static void RestoreUndo(UndoBatch batch, bool whole)
+    // puts a trash batch's items back (`whole` = the batch; else only `batch.Items`, the rest stays in the trash). `withdrawn`:
+    // Undo took the unsubscribes back already (WorkshopUnsubQueue.Withdraw), these ones Steam had done; null = take them back here
+    private static void RestoreUndo(UndoBatch batch, bool whole, IReadOnlyCollection<string>? withdrawn = null)
     {
         if (whole) LibraryService.RestoreBatch(batch.BatchDir);
         else
@@ -633,7 +651,7 @@ public static class AppOps
         {
             if (i.WorkshopId is not string wid) continue;
             titles[wid] = i.Title;
-            if (WorkshopUnsubQueue.Restore(wid)) resub.Add(wid);
+            if (withdrawn != null ? withdrawn.Contains(wid) && !resub.Contains(wid) : WorkshopUnsubQueue.Restore(wid)) resub.Add(wid);
             SteamTodo.DropUnsubscribe(wid); // its unsubscribe still waited in the Steam to-do: nothing to click any more
         }
         if (resub.Count > 0)

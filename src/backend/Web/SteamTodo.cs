@@ -236,11 +236,12 @@ public static class SteamTodo
                 {
                     if (unsubs.Count > 0)
                     {
-                        var (done, fallback) = await SteamClientUgc.UnsubscribeAsync(unsubs, settings, id =>
+                        // claimed once the Steam client's turn is ours: one undone by then isn't sent (WorkshopUnsubQueue.Claim)
+                        var (sent, done, fallback) = await SteamClientUgc.UnsubscribeAsync(() => WorkshopUnsubQueue.Claim(unsubs, dueOnly: false), settings, id =>
                         {
-                            if (!WorkshopUnsubQueue.MarkBlocked(id)) Resubscribe(id); // undone meanwhile → back
+                            if (!WorkshopUnsubQueue.MarkBlocked(id)) Resubscribe(id); // wanted again meanwhile (a Subscribe) → back
                         }, CancellationToken.None);
-                        var left = unsubs.Where(id => !done.Contains(id)).ToList();
+                        var left = sent.Where(id => !done.Contains(id)).ToList();
                         if (left.Count > 0) // still pending: the next drain tries them again
                             Console.WriteLine($"workshop: the Steam app didn't confirm unsubscribing {string.Join(", ", left)}{(fallback != null ? $" — {fallback}" : "")} — left for the next try");
                     }

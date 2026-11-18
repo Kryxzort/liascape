@@ -518,7 +518,7 @@ export const useStore = create<State>((set, get) => ({
   },
   async undo() {
     const r = await api.undo();
-    if (!r.ok) return;
+    if (!r.ok) { if (r.message) get().setStatus(r.message); return; }
     await Promise.all([get().loadLibrary(), get().syncPlaylist()]);
     get().setStatus(r.count > 1 ? `Restored ${r.count} wallpapers` : `Restored: ${r.title ?? ""}`);
   },

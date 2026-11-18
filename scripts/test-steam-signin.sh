@@ -39,7 +39,9 @@
 #     subscribe entry whose files weren't on disk when its page opened finishes by itself once Steam delivers (no Next); one
 #     whose folder was already there waits for Next. Then (i.) the Browse sidebar: POST /steam/open-page → steam://url/
 #     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
-#     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes) and of a non-library one,
+#     client; the to-do), Unsubscribe of a library item (trash + unsubscribe + Undo re-subscribes; an Undo while the drain
+#     waits for the Steam client never reaches Steam, one while the client unsubscribes it is too late, says so and changes
+#     nothing: the fake's hold-install / hold-unsub pin each side of that race) and of a non-library one,
 #     and Unsubscribe without deleting (POST /workshop/unsubscribe-keep: the local/<id> link becomes the library's own copy at
 #     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing; GET /library's
 #     `subscribed` true before, false after). Then (j.) "Download without subscribing" through the client: DownloadItem, no

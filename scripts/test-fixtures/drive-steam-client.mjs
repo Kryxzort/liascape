@@ -350,6 +350,56 @@ for (let i = 0; i < 100 && !fs.existsSync(wSub); i++) await sleep(100);
 out(!!(await item(wid)) && fs.existsSync(wSub), "…Undo after the window: back in the library and subscribed again", `in library ${!!(await item(wid))}, sub ${fs.existsSync(wSub)}`);
 await sleep(1500); // the re-subscribe's helper lets go
 
+// An Undo the backend accepts always wins over the window's drain (WorkshopUnsubQueue.Claim / Withdraw). The fake's control
+// files pin each side of the race in place, so neither depends on timing:
+// - the drain has the item but waits for its turn at the Steam client (another helper holds it: a subscribe held at 50 %):
+//   an Undo then takes it back and Steam is never asked to unsubscribe (nor to subscribe again)
+// - the Steam client is already unsubscribing it (held inside UnsubscribeItem): too late, and the Undo says so instead of
+//   showing the item back while the unsubscribe goes out; once it's done, Undo brings it back and subscribes it again
+// what the fake Steam client was asked for this item: "subscribe" / "unsubscribe" per call
+const callsOf = (id) => (fs.existsSync(`${T}/steamlib/calls`) ? fs.readFileSync(`${T}/steamlib/calls`, "utf8").split("\n") : []).filter((l) => l.endsWith(` ${id}`)).map((l) => l.split(" ")[0]);
+const logSince = (n) => fs.readFileSync(`${T}/backend3.log`, "utf8").slice(n);
+const waitUnsub = async (pred, ms) => { for (let i = 0; i < ms / 50 && !unsub.some(pred); i++) await sleep(50); return unsub.some(pred); };
+fs.writeFileSync(`${T}/steamlib/hold-install`, "");
+const busy = settle(post("/workshop/subscribe", { workshopId: "760000009", title: "busy" }), 60000);
+for (let i = 0; i < 200 && !fs.existsSync(`${T}/steamlib/sub-760000009`); i++) await sleep(50);
+let c0 = callsOf(wid).length, log0 = fs.readFileSync(`${T}/backend3.log`, "utf8").length;
+unsub.length = 0;
+await post("/workshop/delete-from-source", { items: [await item(wid)] });
+const drainHasIt = await waitUnsub((e) => !e.finished && e.currentId === wid, 20000); // past the window: the drain picked it up
+const rw = await (await post("/library/undo")).json().catch(() => null);
+const backAtUndo = !!(await item(wid));
+fs.rmSync(`${T}/steamlib/hold-install`);
+const busyR = await busy;
+await waitUnsub((e) => e.finished, 20000);
+await sleep(1500); // what the drain would send once its turn comes
+out(drainHasIt && rw?.ok === true && backAtUndo && busyR?.status === 200 && callsOf(wid).length === c0 && fs.existsSync(wSub) && !(await queue()).includes(wid),
+  "Undo window: an Undo while the drain waits for the Steam client — back in the library, Steam never asked to unsubscribe or subscribe again",
+  `drain had it ${drainHasIt}, undo ${JSON.stringify(rw)}, back ${backAtUndo}, busy ${busyR?.status}, Steam asked [${callsOf(wid).slice(c0)}], sub ${fs.existsSync(wSub)} | ${logSince(log0).split("\n").filter((l) => l.includes(wid)).join(" / ")}`);
+// too late: the Steam client is unsubscribing it
+fs.writeFileSync(`${T}/steamlib/hold-unsub`, "");
+c0 = callsOf(wid).length; log0 = fs.readFileSync(`${T}/backend3.log`, "utf8").length;
+ud = await undoDepth(); unsub.length = 0;
+await post("/workshop/delete-from-source", { items: [await item(wid)] });
+for (let i = 0; i < 300 && !fs.existsSync(`${T}/steamlib/unsub-held`); i++) await sleep(50);
+const held = fs.existsSync(`${T}/steamlib/unsub-held`);
+const rl = await post("/library/undo"); const bl = await rl.json().catch(() => null);
+const lateState = { inLib: !!(await item(wid)), depth: await undoDepth() };
+fs.rmSync(`${T}/steamlib/hold-unsub`);
+await waitUnsub((e) => e.finished, 20000);
+for (let i = 0; i < 100 && fs.existsSync(wSub); i++) await sleep(100);
+const after = { sub: fs.existsSync(wSub), inLib: !!(await item(wid)), queued: (await queue()).includes(wid) };
+out(held && rl.status === 200 && bl?.ok === false && /too late/i.test(bl?.message ?? "") && !lateState.inLib && lateState.depth === ud + 1
+  && !after.sub && !after.inLib && !after.queued && callsOf(wid).slice(c0).join() === "unsubscribe",
+  "Undo window: an Undo while the Steam client is unsubscribing it — too late and says so, the item stays out (never shown back while the unsubscribe goes out)",
+  `held ${held}, undo ${rl.status} ${JSON.stringify(bl)}, then ${JSON.stringify(lateState)}, after ${JSON.stringify(after)}, Steam asked [${callsOf(wid).slice(c0)}] | ${logSince(log0).split("\n").filter((l) => l.includes(wid)).join(" / ")}`);
+fs.rmSync(`${T}/steamlib/unsub-held`, { force: true });
+const rAgain = await (await post("/library/undo")).json().catch(() => null);
+for (let i = 0; i < 100 && !fs.existsSync(wSub); i++) await sleep(100);
+out(rAgain?.ok === true && !!(await item(wid)) && fs.existsSync(wSub) && (await undoDepth()) === ud,
+  "…Undo again once it's done: back in the library and subscribed again", `${JSON.stringify(rAgain)}, in library ${!!(await item(wid))}, sub ${fs.existsSync(wSub)}`);
+await sleep(1500); // the re-subscribe's helper lets go
+
 // Unsubscribe of a library item = Delete from source: trashed + unsubscribed, undoable; Undo subscribes it again
 ud = await undoDepth();
 unsub.length = 0;

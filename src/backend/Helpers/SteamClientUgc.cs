@@ -168,15 +168,24 @@ public static class SteamClientUgc
         return new(accepted, folder, error, refused, wasSubscribed);
     }
 
-    /// Unsubscribe through the running Steam client. Done = the ids Steam confirmed (no longer subscribed); Fallback = why the
-    /// Steam client couldn't be used at all (the caller carries on the old way for every id); ids neither done nor failed-
-    /// with-a-connection are the caller's to retry the old way too.
-    public static async Task<(HashSet<string> Done, string? Fallback)> UnsubscribeAsync(IReadOnlyList<string> ids, AppSettings s,
-        Action<string>? onDone, CancellationToken ct)
+    /// Unsubscribe through the running Steam client. `claim` names the ids to send, asked once this caller has the Steam
+    /// client's turn (WorkshopUnsubQueue.Claim): an Undo while it waited for the turn takes its id back and Steam never hears
+    /// of it. Sent = what was claimed; Done = the ids Steam confirmed (no longer subscribed); Fallback = why the Steam client
+    /// couldn't be used at all. `onDone` runs per confirmed id (WorkshopUnsubQueue.MarkBlocked ends its claim); the claim of
+    /// one sent but not confirmed ends here, so it stays queued for a later drain.
+    public static async Task<(IReadOnlyList<string> Sent, HashSet<string> Done, string? Fallback)> UnsubscribeAsync(
+        Func<IReadOnlyList<string>> claim, AppSettings s, Action<string>? onDone, CancellationToken ct)
     {
         await TakeTurnAsync(null, ct);
-        try { return await UnsubscribeCoreAsync(ids, s, onDone, ct); }
-        finally { Turn.Release(); }
+        IReadOnlyList<string> ids = [];
+        try
+        {
+            ids = claim();
+            if (ids.Count == 0) return (ids, [], null);
+            var (done, fallback) = await UnsubscribeCoreAsync(ids, s, onDone, ct);
+            return (ids, done, fallback);
+        }
+        finally { WorkshopUnsubQueue.Release(ids); Turn.Release(); }
     }
 
     /// Can the Steam client be used right now (running, signed in to an account that owns Wallpaper Engine)? A helper that only

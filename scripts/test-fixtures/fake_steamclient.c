@@ -8,6 +8,9 @@
 //   $FAKE_UGC_DIR/refuse-download exists → DownloadItem returns false for an item that isn't subscribed
 //   $FAKE_UGC_DIR/downloads ← a line "<id>" per DownloadItem Steam took
 //   $FAKE_UGC_DIR/fail-init exists → ConnectToGlobalUser returns 0 (Steam not running / WE not owned)
+//   $FAKE_UGC_DIR/hold-install exists → a download stays at 50 % until it's removed (its helper keeps the one Steam-client turn)
+//   $FAKE_UGC_DIR/calls ← a line "subscribe <id>" / "unsubscribe <id>" per SubscribeItem / UnsubscribeItem Steam took
+//   $FAKE_UGC_DIR/hold-unsub exists → UnsubscribeItem writes $FAKE_UGC_DIR/unsub-held and waits until it's removed, then unsubscribes
 //   SteamAppId must be 431960 (the helper sets it in its child only) — else ConnectToGlobalUser returns 0
 //   $FAKE_UGC_DIR/child.pid ← the caller's pid; $FAKE_UGC_DIR/released ← a line per pipe released
 //   $FAKE_UGC_DIR/sub-<id> = subscribed (a file: each helper run is a NEW process — an unsubscribe run must see what an
@@ -50,7 +53,12 @@ static void install(uint64_t id) {
     if (a && b) { char buf[65536]; size_t n; while ((n = fread(buf, 1, sizeof buf, a)) > 0) fwrite(buf, 1, n, b); }
     if (a) fclose(a); if (b) fclose(b); }
 }
-static double frac(uint64_t id) { if (t_sub < 0 || id != sub_id) return -1; double e = now() - t_sub - 0.3; return e < 0 ? 0 : e > 1.2 ? 1 : e / 1.2; }
+static bool exists(const char *file) { char p[4096]; snprintf(p, sizeof p, "%s/%s", dir(), file); return access(p, F_OK) == 0; }
+static double frac(uint64_t id) {
+  if (t_sub < 0 || id != sub_id) return -1; double e = now() - t_sub - 0.3;
+  if (exists("hold-install") && e > 0.6) e = 0.6;
+  return e < 0 ? 0 : e > 1.2 ? 1 : e / 1.2;
+}
 
 static int32_t create_pipe(Obj *s) { (void)s; return 7; }
 static bool release_pipe(Obj *s, int32_t pipe) { (void)s; (void)pipe; note("released", "pipe\n"); helper_log("close", 1); return true; }
@@ -66,10 +74,14 @@ static void *generic(Obj *s, int32_t user, int32_t pipe, const char *ver) {
 }
 static void subfile(uint64_t id, char *p, size_t n) { snprintf(p, n, "%s/sub-%llu", dir(), (unsigned long long)id); }
 static uint64_t subscribe(Obj *s, uint64_t id) {
-  (void)s; helper_log("use", 0); sub_id = id; t_sub = now(); char p[4096]; subfile(id, p, sizeof p); FILE *f = fopen(p, "w"); if (f) fclose(f); return 1;
+  (void)s; helper_log("use", 0); sub_id = id; t_sub = now(); char p[4096]; subfile(id, p, sizeof p); FILE *f = fopen(p, "w"); if (f) fclose(f);
+  char line[48]; snprintf(line, sizeof line, "subscribe %llu\n", (unsigned long long)id); note("calls", line); return 1;
 }
 static uint64_t unsubscribe(Obj *s, uint64_t id) {
-  (void)s; helper_log("use", 0); char p[4096]; subfile(id, p, sizeof p); unlink(p); if (id == sub_id) t_sub = -1; note("unsubscribed", "x\n"); return 2;
+  (void)s; helper_log("use", 0);
+  if (exists("hold-unsub")) { note("unsub-held", "x\n"); while (exists("hold-unsub")) usleep(50000); }
+  char p[4096]; subfile(id, p, sizeof p); unlink(p); if (id == sub_id) t_sub = -1; note("unsubscribed", "x\n");
+  char line[48]; snprintf(line, sizeof line, "unsubscribe %llu\n", (unsigned long long)id); note("calls", line); return 2;
 }
 static uint32_t item_state(Obj *s, uint64_t id) {
   (void)s; double f = frac(id); char p[4096]; subfile(id, p, sizeof p);

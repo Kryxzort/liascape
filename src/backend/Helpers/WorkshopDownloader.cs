@@ -634,13 +634,15 @@ public static class WorkshopDownloader
         {
             if (shown > 0 && !quiet.Contains(id)) progress?.Report((Math.Min(done, shown), shown, id));
         }
-        var undone = new System.Collections.Generic.List<string>(); // unsubscribed after an Undo restored them → re-subscribed at the end
+        // wanted again (a Subscribe: WorkshopUnsubQueue.Unblock) while its unsubscribe was out → subscribed again at the end. Never
+        // an Undo: from an id's claim on, Undo is too late and says so (WorkshopUnsubQueue.Withdraw)
+        var undone = new System.Collections.Generic.List<string>();
         try { return await DrainCoreAsync(); }
         finally
         {
             if (undone.Count > 0)
             {
-                Console.WriteLine($"workshop: {string.Join(", ", undone)}: unsubscribed after an Undo restored it — subscribing again");
+                Console.WriteLine($"workshop: {string.Join(", ", undone)}: subscribed again while its unsubscribe was out — subscribing again");
                 _ = ResubscribeAsync(undone, SettingsService.Load(), CancellationToken.None);
             }
         }
@@ -652,14 +654,16 @@ public static class WorkshopDownloader
         {
             int total0 = pending.Count, n = 0;
             Report(0, total0, pending[0]);
-            var (confirmed, fallback) = await SteamClientUgc.UnsubscribeAsync(pending, settings, id =>
+            // claimed once the Steam client's turn is ours, not at the snapshot: an Undo while another helper held the turn
+            // takes the id back and Steam never hears of it
+            var (sent, confirmed, fallback) = await SteamClientUgc.UnsubscribeAsync(() => WorkshopUnsubQueue.Claim(pending), settings, id =>
             {
-                // unsubscribed → Steam removes the folder; AutoImport keeps out meanwhile. Not pending any more = undone
+                // unsubscribed → Steam removes the folder; AutoImport keeps out meanwhile. Not pending any more = wanted again
                 // while this ran → subscribe it again
                 if (!WorkshopUnsubQueue.MarkBlocked(id)) lock (undone) undone.Add(id);
                 Report(++n, total0, id);
             }, ct);
-            pending = pending.Where(id => !confirmed.Contains(id)).ToList();
+            pending = sent.Where(id => !confirmed.Contains(id)).ToList();
             if (pending.Count == 0 || ct.IsCancellationRequested) return new DrainResult();
             // a failure, never the sign-in / the to-do instead: what's left stays queued for the next drain
             Console.WriteLine($"workshop: unsubscribe {string.Join(", ", pending)}: the Steam app couldn't — {fallback ?? "Steam didn't confirm it"}");
@@ -677,26 +681,31 @@ public static class WorkshopDownloader
         {
             var id = pending[i];
             if (ct.IsCancellationRequested) break;
+            // claimed right before it's sent: an Undo since the snapshot (or during an earlier id's request) took it back
+            if (WorkshopUnsubQueue.Claim([id]).Count == 0) { done++; continue; }
             Report(done, total, id);
             try
             {
                 await SetSubscribedAsync(id, settings, subscribe: false, ct);
-                if (!WorkshopUnsubQueue.MarkBlocked(id)) undone.Add(id); // unsubscribed → Steam deletes the folder; undone meanwhile → back
+                if (!WorkshopUnsubQueue.MarkBlocked(id)) undone.Add(id); // unsubscribed → Steam deletes the folder; wanted again meanwhile → back
             }
             catch (SteamSignInRejectedException)
             {
                 // Steam ended the sign-in mid-drain: the rest isn't sent (the ones done before it stay done)
+                WorkshopUnsubQueue.Release([id]);
                 return Dropped(pending.GetRange(i, pending.Count - i), "Steam turned the sign-in down", UnsubSignIn);
             }
             catch (SteamRateLimitException)
             {
                 // Steam is limiting us — the rest of the queue would just fail too. Stop now; the
                 // remaining ids stay pending (and blocked) and resume on the next drain.
+                WorkshopUnsubQueue.Release([id]);
                 return new DrainResult(0, "Steam is limiting requests from this connection — the rest is unsubscribed on a later try.");
             }
             catch
             {
                 // Leave queued — retry on a later drain (e.g. after sign-in / next launch).
+                WorkshopUnsubQueue.Release([id]);
             }
             done++;
             Report(done, total, id);

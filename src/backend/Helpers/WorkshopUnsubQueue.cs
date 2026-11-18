@@ -61,16 +61,20 @@ public static class WorkshopUnsubQueue
     // `quiet`: the unsubscribe is part of something else the user asked for (a "Download without subscribing" letting go of the
     // subscription that fetched it), not an unsubscribe of their own: the drain does it without any `unsub-progress` the UI shows
     // (SteamOps.StartDrain, WorkshopDownloader.DrainUnsubQueueAsync). An id queued again as the user's own is no longer quiet.
-    public static void AddPending(IEnumerable<string> ids, bool quiet = false)
+    //
+    // `hold`: its Undo window, set in the same step: a drain running meanwhile (another item's) never finds it pending and due.
+    public static void AddPending(IEnumerable<string> ids, bool quiet = false, TimeSpan? hold = null)
     {
         lock (_gate)
         {
             var s = Load();
             bool changed = false;
+            var until = DateTime.UtcNow + (hold ?? TimeSpan.Zero);
             foreach (var id in ids)
             {
                 if (string.IsNullOrWhiteSpace(id)) continue;
                 if (quiet) _quiet.Add(id); else _quiet.Remove(id);
+                if (hold != null) _holdUntil[id] = until;
                 if (!s.Pending.Contains(id)) { s.Pending.Add(id); changed = true; }
                 if (!s.Blocked.Contains(id)) { s.Blocked.Add(id); changed = true; }
             }
@@ -120,24 +124,74 @@ public static class WorkshopUnsubQueue
         }
     }
 
-    // Undo → pull ids out of pending (no unsubscribe ran for them).
-    public static void RemovePending(IEnumerable<string> ids)
+    // The ids a drain is sending, from its claim until Steam answered (MarkBlocked) or the send ended without it (Release). The
+    // claim and Undo's Withdraw take the same lock, so each id goes one way only: claimed first = it is sent and an Undo is
+    // too late (it says so and changes nothing); withdrawn first = no claim finds it and Steam is never asked. A drain claims
+    // an id right before it reaches Steam (after waiting its turn at the Steam client), never at its snapshot. In memory
+    // only: a backend restart ends every send. Guard: test-steam-signin.sh § 3 i. "an Undo while the drain waits…",
+    // "an Undo while the Steam client is unsubscribing it"
+    private static readonly HashSet<string> _sending = new(StringComparer.Ordinal);
+
+    // Claims the ids that are still pending (and, `dueOnly`, past their Undo window) and not already being sent; the caller
+    // sends exactly these.
+    public static List<string> Claim(IEnumerable<string> ids, bool dueOnly = true)
     {
         lock (_gate)
         {
-            var s = Load();
-            bool changed = false;
-            foreach (var id in ids) { changed |= s.Pending.Remove(id); _quiet.Remove(id); }
-            if (changed) Save(s);
+            var pending = Load().Pending.ToHashSet(StringComparer.Ordinal);
+            var now = DateTime.UtcNow;
+            var got = new List<string>();
+            foreach (var id in ids.Distinct(StringComparer.Ordinal))
+            {
+                if (!pending.Contains(id) || _sending.Contains(id)) continue;
+                if (dueOnly && _holdUntil.TryGetValue(id, out var t) && t > now) continue;
+                _sending.Add(id); got.Add(id);
+            }
+            return got;
         }
     }
 
-    // Drain step succeeded: unsubscribed → block (Steam will delete the folder on its next sync). False = it wasn't pending any
-    // more — an Undo restored the item while this unsubscribe was running: nothing is blocked, the caller re-subscribes it.
+    // a claimed id whose send ended without Steam's answer: back to plain pending (a later drain tries it again)
+    public static void Release(IEnumerable<string> ids)
+    {
+        lock (_gate) foreach (var id in ids) _sending.Remove(id);
+    }
+
+    public sealed record Withdrawal(List<string> Sending, List<string> Unsubscribed);
+
+    // Undo of a Delete from source, all of its ids at once: when a drain is sending any of them (Sending non-empty) it's too
+    // late and nothing changes; else each leaves pending and blocked (wanted again), and Unsubscribed names the ones Steam had
+    // already unsubscribed (blocked, no longer pending): the caller subscribes them again.
+    public static Withdrawal Withdraw(IEnumerable<string> ids)
+    {
+        lock (_gate)
+        {
+            var list = ids.Distinct(StringComparer.Ordinal).ToList();
+            var sending = list.Where(_sending.Contains).ToList();
+            if (sending.Count > 0) return new(sending, []);
+            var s = Load();
+            var done = new List<string>();
+            bool changed = false;
+            foreach (var id in list)
+            {
+                if (s.Blocked.Contains(id) && !s.Pending.Contains(id)) done.Add(id);
+                _holdUntil.Remove(id);
+                _quiet.Remove(id);
+                changed |= s.Pending.Remove(id) | s.Blocked.Remove(id);
+            }
+            if (changed) Save(s);
+            return new([], done);
+        }
+    }
+
+    // Drain step succeeded: unsubscribed → block (Steam will delete the folder on its next sync); the claim ends. False = it
+    // wasn't pending any more: wanted again while it was being sent (a Subscribe: Unblock): nothing is blocked, the caller
+    // re-subscribes it.
     public static bool MarkBlocked(string id)
     {
         lock (_gate)
         {
+            _sending.Remove(id);
             var s = Load();
             if (!s.Pending.Remove(id)) return false;
             _quiet.Remove(id);
@@ -147,8 +201,8 @@ public static class WorkshopUnsubQueue
         }
     }
 
-    // Undo of a Delete from source: wanted again → out of both lists. True = Steam had ALREADY unsubscribed it (blocked, no
-    // longer pending): the caller re-subscribes it, so an Undo restores the subscription as well as the item.
+    // An unsubscribe dropped like its Undo (AppOps.DropUnsubscribes: no usable sign-in): out of both lists. True = Steam had
+    // ALREADY unsubscribed it (blocked, no longer pending). Undo itself goes through Withdraw.
     public static bool Restore(string id)
     {
         lock (_gate)

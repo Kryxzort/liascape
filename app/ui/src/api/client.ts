@@ -302,7 +302,9 @@ export const api = {
   sceneLoudnessCancel: () => jpost<{ cancelled: boolean }>("/library/scene-loudness/cancel"),
   sceneLoudnessStatus: () => jget<SceneLoudnessStatus>("/library/scene-loudness/status"),
   trash: (items: LibraryItem[]) => jpost<{ batch: string }>("/library/trash", { items }),
-  undo: () => jpost<{ ok: boolean; count: number; title: string | null }>("/library/undo"),
+  // API: ok false + `message` = too late (a Delete from source's unsubscribe is reaching Steam right now): nothing changed and
+  // the batch stays, so Undo again once it's done brings it back and subscribes it again (AppOps.Undo)
+  undo: () => jpost<{ ok: boolean; count: number; title: string | null; message?: string | null }>("/library/undo"),
   undoDepth: () => jget<{ depth: number }>("/library/undo-depth"),
   libraryOps: () => jget<{ ops: LibraryOp[] }>("/library/ops").then((r) => r.ops),
   // API: `oneOff` = a Workshop item's "Download without subscribing" (a one-off copy, never a subscription; the backend's

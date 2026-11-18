@@ -179,7 +179,7 @@ public static class WorkshopSubOps
         _subscribedHere.TryRemove(id, out _);
         string? batch = null;
         if (items.Count > 0) batch = AppOps.DeleteFromSource(items);
-        else { WorkshopUnsubQueue.AddPending([id]); SteamOps.DrainAfterUndoWindow([id]); }
+        else { WorkshopUnsubQueue.AddPending([id], hold: SteamOps.UnsubUndoWindow); SteamOps.DrainAfterUndoWindow([id]); }
         Console.WriteLine($"workshop: {id}: unsubscribe from the Browse sidebar{(items.Count > 0 ? $" — {items.Count} library item(s) moved to the trash (undoable)" : "")}, in {SteamOps.UnsubUndoWindow.TotalSeconds:0} s");
         return new { inLibrary = items.Count > 0, batch, unsubscribeInMs = (int)SteamOps.UnsubUndoWindow.TotalMilliseconds };
     }

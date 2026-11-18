@@ -649,7 +649,7 @@ public static class ServerHost
 
         // ---- trash / undo (soft delete) ---------------------------------------------------
         app.MapPost("/library/trash", (TrashReq r) => Results.Json(new { batch = AppOps.Trash(r.Items) }));
-        app.MapPost("/library/undo", () => { var u = AppOps.Undo(); return Results.Json(new { ok = u.Ok, count = u.Count, title = u.Title }); });
+        app.MapPost("/library/undo", () => { var u = AppOps.Undo(); return Results.Json(new { ok = u.Ok, count = u.Count, title = u.Title, message = u.Message }); });
         app.MapGet("/library/undo-depth", () => Results.Json(new { depth = AppOps.UndoDepth() }));
         app.MapGet("/library/duration", (string path) => ApiSecurity.MediaAllowed(path)
             ? Results.Json(new { seconds = AppOps.GetDurationSeconds(path) }) : Results.Json(new { error = "not a library path" }, statusCode: 403));
