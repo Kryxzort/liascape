@@ -41,6 +41,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `local/<id>` link: "already in your library" by Workshop id applies to the auto-import too (one item, no
        duplicate); (c) "Open in your default app" refuses a linked file inside a watched folder (outside the library
        roots): the watched folders count as allowed roots, like the library's own.
+95. [ ] Flaky under load (2026-11-18, the full crate suite at --test-threads=4 beside the UI build): `tests/api.rs`
+       `dropout_analysis_never_skips_bus_cycles` (its recording file was missing) and `outbox_is_bounded` (timed out
+       waiting for `outbox.dropped`); both pass alone with `--exact`. Find what each waits on and make the wait
+       event-driven or the deadline load-proof, not longer.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
