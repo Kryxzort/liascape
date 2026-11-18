@@ -271,9 +271,9 @@ public static class LiascapePlayerSelfTest
         using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null},"automute":{"ok":true,"reason":null},"bus":{"ok":true,"reason":null,"state":"up"}}""");
         using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause behind windows\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
         FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
-        var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, true, false));
+        var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, false));
         foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");
-        var none = FeatureHealth.Build(new(true, null, bad.RootElement, (false, "liascape-scene-worker not found"), t => t is not ("pactl" or "playerctl" or "ffprobe"), false, false));
+        var none = FeatureHealth.Build(new(true, null, bad.RootElement, (false, "liascape-scene-worker not found"), t => t is not ("pactl" or "playerctl" or "ffprobe"), false));
         void Want(string id, bool? ok, string? inReason, string affects)
         {
             var x = F(none, id);
@@ -292,27 +292,26 @@ public static class LiascapePlayerSelfTest
         Want("auto-mute", false, "pactl", "autoMute");
         Want("mpris", false, "playerctl", "autoMuteOnlyIfMprisActive");
         Want("ffmpeg", false, "ffprobe", "normalizeAudio");
-        Want("steamcmd", false, "steamcmd", "workshopDownloadMode");
         if ((F(none, "auto-mute").reason ?? "").Contains("parec")) fails.Add("health: auto-mute names parec, which is present");
         if (!(F(none, "auto-mute").reason ?? "").Contains("only while the app is open")) fails.Add($"health: a player without automute doesn't say the app-closed limit: {F(none, "auto-mute").reason}");
         // the Signal: pactl / parec / playerctl all missing don't matter; MPRIS needs a session bus; no player ran → unknown
-        var sig = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not ("pactl" or "parec" or "playerctl"), true, false, SessionBus: false));
+        var sig = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not ("pactl" or "parec" or "playerctl"), false, SessionBus: false));
         if (F(sig, "auto-mute").ok != true) fails.Add($"health: the Signal without pactl/parec: auto-mute ok={F(sig, "auto-mute").ok} ({F(sig, "auto-mute").reason})");
         if (F(sig, "mpris").ok != false || !(F(sig, "mpris").reason ?? "").Contains("session bus")) fails.Add($"health: the Signal without a session bus: mpris ok={F(sig, "mpris").ok} ({F(sig, "mpris").reason})");
-        var sigBus = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not "playerctl", true, false));
+        var sigBus = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not "playerctl", false));
         if (F(sigBus, "mpris").ok != true) fails.Add($"health: the Signal with a session bus, no playerctl: mpris ok={F(sigBus, "mpris").ok} ({F(sigBus, "mpris").reason})");
         using var gateOn = JsonDocument.Parse("""{"automute":{"ok":null,"reason":null}}""");
-        var unk = FeatureHealth.Build(new(true, null, gateOn.RootElement, (true, null), _ => false, true, false));
+        var unk = FeatureHealth.Build(new(true, null, gateOn.RootElement, (true, null), _ => false, false));
         if (F(unk, "audio-bus").ok != null || F(unk, "audio-bus").reason != null) fails.Add($"health: no bus answer: audio-bus ok={F(unk, "audio-bus").ok} ({F(unk, "audio-bus").reason}), want unknown without a reason");
         if (F(unk, "auto-mute").ok != null || F(unk, "mpris").ok != null) fails.Add($"health: no player ran (the gate on): auto-mute ok={F(unk, "auto-mute").ok}, mpris ok={F(unk, "mpris").ok}, want unknown");
-        var leg = FeatureHealth.Build(new(false, null, good.RootElement, (true, null), t => t is not ("parec" or "playerctl"), true, true));
+        var leg = FeatureHealth.Build(new(false, null, good.RootElement, (true, null), t => t is not ("parec" or "playerctl"), true));
         if (F(leg, "auto-mute").ok != false || !(F(leg, "auto-mute").reason ?? "").Contains("parec") || F(leg, "mpris").ok != false)
             fails.Add($"health: legacy without parec/playerctl: auto-mute ok={F(leg, "auto-mute").ok} ({F(leg, "auto-mute").reason}), mpris ok={F(leg, "mpris").ok}");
-        var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, true, false));
+        var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, false));
         if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram" || x.id == "audio-bus")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
         if (leg.Any(x => x.id == "audio-bus")) fails.Add("health: the legacy engine has no player audio bus row");
         var d = new AppSettings();
-        foreach (var (id, want) in new[] { ("steamcmd", false), ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true) })
+        foreach (var (id, want) in new[] { ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
     }
 
@@ -767,7 +766,7 @@ public static class LiascapePlayerSelfTest
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
 
-        // the real corpus (read-only; skipped without it) — never the steamcmd cache
+        // the real corpus (read-only; skipped without it) — never a copy elsewhere
         var corpus = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local/share/Steam/steamapps/workshop/content/431960");
         if (!Directory.Exists(corpus)) return;
         int scenes = 0, n = 0, conds = 0;

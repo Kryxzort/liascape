@@ -44,7 +44,7 @@ public static class WorkshopSubOps
     }
 
     /// `{<id>: {subscribed, pending: "subscribe" | "unsubscribe" | null, inLibrary}}`. Subscribed = its folder is in one of
-    /// Steam's Workshop roots (not our steamcmd cache) or it was subscribed here this session, and it isn't blocked / pending in
+    /// Steam's Workshop roots or it was subscribed here this session, and it isn't blocked / pending in
     /// the unsubscribe queue — or a subscribe is under way (the Steam to-do / a download / this toggle).
     public static Dictionary<string, object> State(IEnumerable<string> ids)
     {

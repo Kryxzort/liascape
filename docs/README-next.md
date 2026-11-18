@@ -59,9 +59,9 @@ is affected: it restarts, and after three crashes in a minute it shows a still p
 - PipeWire as your sound server, for auto-mute. Most current distros use it already.
 - For Wallpaper Engine scenes: Wallpaper Engine installed through Steam. Liascape uses its asset files and looks for
   it in your Steam libraries.
-- For Workshop downloads: Steam. Settings → Getting Workshop wallpapers offers four ways to get them: through the
-  running Steam app, by opening the item's page in Steam, by subscribing with a Steam login inside Liascape (the
-  default), or by downloading with `steamcmd`.
+- For Workshop downloads: Steam. Settings → Getting Workshop wallpapers offers three ways to get them: through the
+  running Steam app, by opening the item's page in Steam, or by subscribing with a Steam login inside Liascape (the
+  default).
 
 Scenes that name a Windows font (Arial, Consolas and so on) use your installed fonts, like any app. The packages bring
 open look-alikes (Liberation, Cascadia Mono, Selawik, Comic Neue and others), and the real Arial, Verdana, Comic Sans and
@@ -135,7 +135,6 @@ If your distro has no .NET 10 package, Microsoft's `dotnet-install.sh` installs 
 - `ffmpeg` (with `ffprobe`): thumbnails, imports, video previews, video lengths and loudness measuring.
 - Optional: `secret-tool` (libsecret) keeps your Steam sign-in in the system keyring. Without it, the sign-in is kept
   in `~/.config/liascape/steam-auth.json`, readable only by you.
-- Optional: `steamcmd`, for the "Download via steamcmd" mode.
 
 If something a feature you use needs is missing, Settings says so at the top: what doesn't work and why.
 

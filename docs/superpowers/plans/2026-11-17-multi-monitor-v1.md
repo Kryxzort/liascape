@@ -350,7 +350,7 @@ Independent of screens: the Library's now-playing / status line moves into the p
   | `download`'s "Applied / Downloaded / Subscribed: …", `setDownload`'s step words, "Cancelled: …", "Skipped: …" | dropped (the card and the sidebar show the step; the Library shows the result on Apply) |
   | a download that failed (`download`'s catch) | `downloadFailed[pageUrl]`: the card shows the error (2 lines) + a Retry button (`RotateCw`, the act motion), the sidebar the full error + Retry; Retry calls `download(source, w, apply)` again and clears it |
   | `reload`'s failed search (store line ~430), the sources' `off` reason (~437) | `browse:grid` (a centred line in the grid, `.grid-msg`) |
-  | `steam-qr-error`, `onSignedIn`'s "Signed in to Steam", `steamcmdSignin`'s line | `steam:signin` inside `SteamModal` / the Steam row |
+  | `steam-qr-error`, `onSignedIn`'s "Signed in to Steam" | `steam:signin` inside `SteamModal` / the Steam row |
   | `SteamTodoPanel`'s failure | `steam:todo` in the panel |
   | ws subscribe failed (App ~101), unsubscribe results / failures (`unsubStatus`, App ~119/120, store ~618–689) | Browse: the card / sidebar of the item (`downloadFailed`); Library: `setStatus` |
   | "Settings cleared — reset to defaults" | `settings:reset` beside its button |

@@ -32,9 +32,9 @@ The dev UI on :5173 is a foreign origin; it is allowed only when `LIASCAPE_UI_DI
 never in production. Vite's dev-only `/__liascape/token` answers only a `Sec-Fetch-Site: same-origin` request (set by the
 browser, not forgeable by another site), and the served HTML never contains the token. `app/ui/vite.config.ts`.
 
-### Run the `SteamCmdPath` setting as a program, by design — 2026-11-11
-A setting that names an executable is a code-execution path. It stays (users point it at their own steamcmd) and is
-protected by the API token like every other write, not by an allow-list. Every other spawn passes an argument list.
+### Load the `SteamClientLibPath` setting's library, by design — 2026-11-11
+A setting that names code to run is a code-execution path. It stays (users point it at their own Steam client) and is
+protected by the API token like every other write, not by an allow-list. Every spawn passes an argument list.
 
 ### Report a missing dependency with a warning, never hide the control — 2026-10-28
 Owner: "make missing libraries fail loudly". `/health/features` lists each dependency that silently degrades a feature and
@@ -79,11 +79,11 @@ Owner: "a 'everyone' user encountering a untagged 'mature' is a tragedy". Any ag
 of the allowed ages, which drops the few hundred items with no age tag; other groups' excludes keep untagged items.
 `WorkshopTags.Build`.
 
-### Offer four Workshop download modes, the user's choice — 2026-11-11
-`steamapp`, `steampage`, `subscribe` (default), `steamcmd`: the owner wanted a fourth that opens items in the Steam app.
+### Offer three Workshop download modes, the user's choice — 2026-11-18
+`steampage` (no login), `steamapp` (none given to Liascape), `subscribe` (default, the sign-in): one per level of trust.
+It replaced a steamcmd mode, dropped: it needs a Steam login too and the sign-in already downloads without subscribing.
 A mode never uses another's way (owner: "we dont switch modes when user haven't chose it!"): what it can't do is disabled
-with why (steamcmd can't subscribe, a page can't fetch a one-off); steamcmd unsubscribes through the item's page (owner:
-"make it open steam page"); the to-do's "Let the Steam app do all N" is the user's own switch. `subscribe` signed out reaches Steam for nothing. `.claude/rules/backend/sources-steam.md`.
+with why; the to-do's "Let the Steam app do all N" is the user's own switch. `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
 `libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a copy
@@ -102,7 +102,7 @@ on a large item. The poll reports "Steam is downloading it…" / "Steam is finis
 `steamapp` has Steam's real byte counts. `Helpers/WorkshopDownloader.cs`.
 
 ### Open an unsubscribe page only for items in a Steam Workshop folder — 2026-11-11
-"Open in the Steam app"'s unsubscribe: a `local/<id>` link is a subscription, an owned `workshop/<id>` copy (steamcmd)
+"Open in the Steam app"'s unsubscribe: a `local/<id>` link is a subscription, an owned `workshop/<id>` copy (a one-off)
 never one, so ids without a folder are blocked at once, no page. `WorkshopDownloader.UnsubscribeInSteamApp`.
 
 ### Offer a password sign-in beside the QR — 2026-11-11

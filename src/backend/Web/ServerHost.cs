@@ -732,16 +732,7 @@ public static class ServerHost
         app.MapPost("/steam/login/code", async (CodeReq r) =>
             await SteamOps.SubmitLoginCode(r.Code) is { } why ? Results.Json(new { error = why }, statusCode: 409) : Results.Ok());
         app.MapPost("/steam/login/cancel", () => { SteamOps.CancelPasswordLogin(); return Results.Ok(); });
-        // steamcmd one-time interactive sign-in (caches sentry; later runs non-interactive).
-        app.MapPost("/steam/steamcmd-signin", () =>
-        {
-            var s = SettingsService.Load();
-            var exe = WorkshopDownloader.FindSteamCmd(s.SteamCmdPath);
-            if (exe == null) return Results.BadRequest("steamcmd not found");
-            WorkshopDownloader.LaunchSteamCmdSignIn(exe, s.SteamUsername);
-            return Results.Ok();
-        });
-        // an action the download mode can't do now (WorkshopDownloader.Blocked: signed out, steamcmd's subscribe / unsubscribe) →
+        // an action the download mode can't do now (WorkshopDownloader.Blocked: signed out, a page's one-off) →
         // 400 {error} before anything is trashed, copied, queued or sent, so the CLI / API can't get round the UI's disabled
         // controls. Guard: test-steam-signin.sh § 2 (refused)
         static IResult? Refused(WorkshopDownloader.WorkshopAction a) => WorkshopDownloader.Blocked(SettingsService.Load(), a) is { } why
@@ -761,7 +752,7 @@ public static class ServerHost
             Console.WriteLine($"workshop: {r.WorkshopId}: Open on Steam — {(ok ? "opened its page in the Steam app" : "the Steam app couldn't be opened")}");
             return Results.Json(new { ok });
         });
-        // how "Download without subscribing" (POST /download {oneOff}) would get an item: {route: "steamapp" | "subscribe" | "steamcmd" | null, missing}
+        // how "Download without subscribing" (POST /download {oneOff}) would get an item: {route: "steamapp" | "subscribe" | null, missing}
         // (WorkshopDownloader.OneOffRouteFor) — the Browse sidebar's right-click menu asks as it opens. Local only: no Steam request
         app.MapGet("/workshop/one-off", () => Results.Json(WorkshopDownloader.OneOffRouteFor(SettingsService.Load())));
         // the Browse sidebar's Subscribe / Unsubscribe toggle (Web/WorkshopSubOps.cs)

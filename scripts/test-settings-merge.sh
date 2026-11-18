@@ -85,8 +85,8 @@ C1=$T/c1.mp4; C2=$T/c2.mp4
 clip "$C1" testsrc2 440 6; clip "$C2" smptebars 550 6
 [ -s "$C1" ] && [ -s "$C2" ] || { echo "ABORT: ffmpeg made no clips"; exit 2; }
 
-# Non-default values everywhere, so a reset to a C# default shows; LweSilent = the removed setting, still
-# in older files; the Steam fields are dummies (still never printed — the real file holds a real token).
+# Non-default values everywhere, so a reset to a C# default shows; LweSilent, SteamUsername and SteamCmdPath = removed
+# settings, still in older files, and "steamcmd" a removed download mode; the Steam fields are dummies (still never printed — the real file holds a real token).
 SJ=$XDG_CONFIG_HOME/liascape/settings.json
 # the Steam tokens live in steam-auth.json (Helpers/SecretStore.cs, LIASCAPE_SECRETS=file), seeded there: settings.json
 # never held them since the pre-release cleanup (no migration from it)
@@ -101,7 +101,8 @@ cat > "$SJ" <<EOF
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
  "TransitionMethod":"full-live","AdvancedSettings":true,"ResumeFromLast":false,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
  "AllowScenes":true,"WorkshopDownloadMode":"steamcmd","AutoPlayGifs":true,"AutoPlayVideoThumbs":true,"PreferVideoThumbs":true,
- "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd"}
+ "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd",
+ "SteamClientLibPath":"/nonexistent/steamclient.so"}
 EOF
 
 (cd /tmp && exec "$B" serve --headless --outputs 640x360@60 --clock real --ao null > "$T/serve.log" 2>&1) & SP=$!
@@ -171,6 +172,12 @@ snap s0
   && ok "a file with the old toggles on: previewOnHover gif,video,image and previewNotHovered image,gif,video (the defaults)" \
   || bad "preview orders after loading an old file: $(f '[.previewOnHover, .previewNotHovered]' s0)"
 
+# the dropped "steamcmd" download mode reads as the default; its two settings are unknown keys (no migration)
+[ "$(f .workshopDownloadMode s0)" = '"subscribe"' ] && ok "an old file's WorkshopDownloadMode \"steamcmd\" loads as \"subscribe\" (the default)" \
+  || bad "WorkshopDownloadMode \"steamcmd\" loaded as $(f .workshopDownloadMode s0)"
+[ "$(f '[has("steamUsername"), has("steamCmdPath")] | any' s0)" = false ] && ok "GET /settings has no steamUsername / steamCmdPath (removed with the steamcmd mode)" \
+  || bad "GET /settings still has a steamcmd setting: $(f '[has("steamUsername"), has("steamCmdPath")]' s0)"
+
 echo "== a partial body changes only its own fields (nothing playing)"
 post /settings '{"Theme":"Nord"}' >/dev/null && ok "POST {\"Theme\":\"Nord\"} → 200" || bad "POST {\"Theme\":\"Nord\"} failed"
 snap s1
@@ -205,9 +212,9 @@ same s2 s3 '["sceneMonitors"]' "{SceneMonitors}"
 post /settings '{"globalTransitionEffectIds":["wipeLeft"]}' >/dev/null; snap s4
 [ "$(f .globalTransitionEffectIds s4)" = '["wipeLeft"]' ] && ok "globalTransitionEffectIds replaced whole" || bad "effect ids → $(f .globalTransitionEffectIds s4)"
 same s3 s4 '["globalTransitionEffectIds"]' "{globalTransitionEffectIds}"
-post /settings '{"SteamUsername":null}' >/dev/null; snap s5
-[ "$(f .steamUsername s5)" = null ] && ok "an explicit null sets null (steamUsername)" || bad "steamUsername → $(f .steamUsername s5)"
-same s4 s5 '["steamUsername"]' "{SteamUsername: null}"
+post /settings '{"SteamClientLibPath":null}' >/dev/null; snap s5
+[ "$(f .steamClientLibPath s5)" = null ] && ok "an explicit null sets null (steamClientLibPath)" || bad "steamClientLibPath → $(f .steamClientLibPath s5)"
+same s4 s5 '["steamClientLibPath"]' "{SteamClientLibPath: null}"
 post /settings '{"NoSuchSetting":1,"LweSilent":true,"Volume":65}' >/dev/null && ok "unknown keys → 200" || bad "unknown keys → an error"
 snap s6
 [ "$(f .volume s6)" = 65 ] && [ "$(f 'has("noSuchSetting") or has("NoSuchSetting") or has("lweSilent")' s6)" = false ] \

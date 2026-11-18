@@ -314,7 +314,7 @@ export function LibrarySide({
               <span className="side-tile-ico"><CloudOff size={15} /></span>Delete and unsubscribe</button>
           )}
         </div>
-        {/* a Workshop item the library holds unsubscribed (its own copy after "Unsubscribe without deleting", a steamcmd copy):
+        {/* a Workshop item the library holds unsubscribed (its own copy after "Unsubscribe without deleting", a one-off copy):
             the Browse sidebar's subscription card, shown until it's subscribed (then the tile above is its Unsubscribe); with
             auto-import on Steam's copy then takes the own copy's place (WorkshopSubOps.AfterSubscribeAsync). Not for an item
             the Workshop no longer has. Guard: probe-steam side:resub:* */}

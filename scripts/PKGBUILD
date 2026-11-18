@@ -29,7 +29,6 @@ makedepends=('git' 'dotnet-sdk' 'nodejs' 'npm' 'rust' 'clang' 'cmake' 'pkgconf' 
 optdepends=('mpvpaper: video wallpapers under the legacy engine (AUR)'
             'linux-wallpaperengine: Wallpaper Engine scenes under the legacy engine (AUR)'
             'playerctl: MPRIS-aware auto-mute'
-            'steamcmd: Steam Workshop downloads (AUR)'
             'xdg-utils: open a wallpaper in your default app'
             'nvidia-utils: NVDEC decoding and the scene VRAM budget on NVIDIA'
             'ttf-ms-fonts: the real Arial, Verdana, Comic Sans MS and the other core web fonts in scenes (AUR; unpacks the Microsoft installers)')

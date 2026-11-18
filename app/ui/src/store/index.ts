@@ -181,7 +181,7 @@ interface State {
   setDownload(id: string, v: number, status?: string): void;
   stop(): Promise<void>; resetAllSettings(): void;
   addManyToPlaylist(paths: string[]): void; removeManyFromPlaylist(paths: string[]): void;
-  steamcmdSignin(): void; setError(e: string): void; dismissError(): void;
+  setError(e: string): void; dismissError(): void;
   // library
   loadLibrary(): Promise<void>; applyItem(path: string): Promise<void>;
   patchLibraryItem(path: string, partial: Partial<LibraryItem>): void;
@@ -246,7 +246,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   autoThrottleScenes: true, sceneSpareWorker: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", glows: true, textShadow: false, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],
-  workshopDownloadMode: "subscribe", steamCmdPath: "", steamUsername: "",
+  workshopDownloadMode: "subscribe",
   theme: "Catppuccin Mocha",
   // pause when covered, the playlist start, while parked
   pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", rotateWhileParked: true,
@@ -482,7 +482,6 @@ export const useStore = create<State>((set, get) => ({
     const rm = new Set(paths);
     set({ playlist: get().playlist.filter((p) => !rm.has(p)) }); savePlaylistDebounced(get);
   },
-  steamcmdSignin() { api.steamcmdSignin().then(() => get().setStatus("steamcmd sign-in launched in terminal")).catch((e) => get().setError(String(e))); },
   setError(e) { set({ error: e }); },
   dismissError() { set({ error: null }); },
 

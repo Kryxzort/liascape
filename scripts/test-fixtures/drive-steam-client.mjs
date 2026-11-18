@@ -203,7 +203,7 @@ out(helpersLog().length === h0, "…the page route never started a Steam-client 
 
 // Delete from source of 3 (Open in the Steam app): the two Steam has in its Workshop folder (720000001 dropped there, 710000001
 // installed by the fake during g.) get their pages, one at a time; 710000004 has no folder in any Steam root now (it came from
-// $T/ws3, not the WE folder setting since e. — like an owned steamcmd copy, never a subscription) →
+// $T/ws3, not the WE folder setting since e. — like an owned one-off copy, never a subscription) →
 // no page, blocked at once. Next = unsubscribed (blocked), Skip = kept subscribed (out of pending + blocked).
 const delItems = [await item("720000001"), await item("710000004"), await item("710000001")].filter(Boolean);
 h0 = helpersLog().length; n0 = urls().length; todo.length = 0; unsub.length = 0;
@@ -214,7 +214,7 @@ await sleep(600);
 out(delItems.length === 3 && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/720000001" && lastTodo()?.action === "unsubscribe" && lastTodo()?.total === 2,
   "bulk Delete from source of 3 (Open in the Steam app): ONE page — the first item's, never the subscriptions list; Unsubscribe 1 of 2", `${urls().slice(n0).join(" ")} | ${JSON.stringify(lastTodo())}`);
 out(!(await queue()).includes("710000004") && !urls().slice(n0).some((x) => x.includes("710000004")),
-  "…the one with no Steam folder (a steamcmd-style copy): no page, no entry, off pending");
+  "…the one with no Steam folder (an owned one-off copy): no page, no entry, off pending");
 out((await queue()).includes("720000001"), "…the current one's id stays pending until Next");
 await post("/steam-todo/next");
 out(await waitUrl("710000001", n0) && !(await queue()).includes("720000001") && lastTodo()?.index === 2,

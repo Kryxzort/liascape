@@ -222,8 +222,14 @@ public class AppSettings
     // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one click, Steam's
     // own progress; it FAILS when Steam can't be reached, never a fallback — WorkshopDownloader), "subscribe" (real
     // Steam subscription via the community endpoint with the sign-in, or the item's page in the Steam app without one),
-    // "steampage" (always the item's page in the Steam app — the user clicks Subscribe there) or "steamcmd" (direct download).
-    public string WorkshopDownloadMode { get; set; } = "subscribe";
+    // or "steampage" (always the item's page in the Steam app — the user clicks Subscribe there). Any other stored value reads
+    // as the default. Guard: steam-selftest "stored mode", test-settings-merge.sh, probe-steam steam:row:steamcmd
+    private string _workshopDownloadMode = "subscribe";
+    public string WorkshopDownloadMode
+    {
+        get => _workshopDownloadMode;
+        set => _workshopDownloadMode = value is "steamapp" or "steampage" or "subscribe" ? value : "subscribe";
+    }
     // The Steam client's steamclient.so for "steamapp"; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
     public string SteamClientLibPath { get; set; } = "";
     // The Steam sign-in's SECRETS (refresh token, cached web cookie, pasted steamLoginSecure) live in Helpers/SecretStore.cs —
@@ -234,8 +240,6 @@ public class AppSettings
     // Steam refused the stored refresh token (finalizelogin AccessDenied — signed out on Steam's side: a password change, "sign
     // out of all devices"). Backend-owned (SettingsService.Patch keeps it); cleared by a new QR sign-in or a sign-out.
     public bool SteamSignInRejected { get; set; }
-    public string SteamCmdPath { get; set; } = "";
-    public string SteamUsername { get; set; } = "";
     public LastSession? LastSession { get; set; }
 
     public string BuildMpvOptions()

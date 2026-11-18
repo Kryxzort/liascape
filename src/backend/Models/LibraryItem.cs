@@ -48,7 +48,7 @@ public class LibraryItem
     public string[]? Tags { get; init; }
     // A Workshop item Steam keeps subscribed (WorkshopSubOps.MarkSubscribed: its folder in a Steam Workshop root, no
     // unsubscribe queued); set by GET /library only. False for the library's own copy after "Unsubscribe without
-    // deleting" and for a steamcmd copy Steam doesn't have: those delete like any local item.
+    // deleting" and for a one-off copy Steam doesn't have: those delete like any local item.
     public bool? Subscribed { get; set; }
     // Steam's servers said they have no public item with its id (removed, private: LibMeta.TagsCheckedAt): nothing to
     // subscribe to

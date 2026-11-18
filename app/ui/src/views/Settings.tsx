@@ -27,7 +27,7 @@ import { useMotion } from "../components/motion";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
-const bridge = (window as unknown as { liascape?: { pickFolder?: () => Promise<string | null>; pickFile?: () => Promise<string | null> } }).liascape;
+const bridge = (window as unknown as { liascape?: { pickFolder?: () => Promise<string | null> } }).liascape;
 
 // reads/writes go through the store's settings object (camelCase, mirrors AppSettings).
 function useS() {
@@ -298,7 +298,6 @@ export const Settings = memo(function Settings() {
   const signoutSteam = useStore((s) => s.signoutSteam);
   const openPwLogin = useStore((s) => s.openPwLogin);
   const resetAllSettings = useStore((s) => s.resetAllSettings);
-  const steamcmdSignin = useStore((s) => s.steamcmdSignin);
   const themes = useStore((s) => s.themes);
   const themeName = useStore((s) => s.theme?.name ?? "");
   const applyTheme = useStore((s) => s.applyTheme);
@@ -360,7 +359,7 @@ export const Settings = memo(function Settings() {
     return () => clearInterval(t);
   }, [liascapeActive]);
   // missing build pieces / tools (API: /health/features) → warning icons on the rows they break + the summary;
-  // re-read after a change that can move them (engine, scenes, steamcmd) and every 15 s while open (a player that
+  // re-read after a change that can move them (engine, scenes) and every 15 s while open (a player that
   // started meanwhile reports its GPU interop / VRAM probe)
   const [features, setFeatures] = useState<FeatureHealth[]>([]);
   useEffect(() => {
@@ -368,7 +367,7 @@ export const Settings = memo(function Settings() {
     const read = () => api.featureHealth().then((r) => alive && setFeatures(r.features ?? [])).catch(() => {});
     const t0 = setTimeout(read, 300), t = setInterval(read, 15000);
     return () => { alive = false; clearTimeout(t0); clearInterval(t); };
-  }, [g("playerEngine", "legacy"), g("allowScenes", false), g("steamCmdPath", ""), g("workshopDownloadMode", "subscribe")]); // eslint-disable-line
+  }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
   const warnings = useMemo(() => healthWarnings(features), [features]);
   // the summary: what breaks something switched on / selected now (the row icons show regardless)
   const broken = features.filter((f) => f.ok === false && f.inUse !== false);
@@ -405,8 +404,8 @@ export const Settings = memo(function Settings() {
 
   // (live wallpaper bg is now rendered at App level via <WallpaperBg> — Settings always shows it, and
   // the "Live wallpaper behind all tabs" advanced toggle extends it to Browse/Library)
-  const pickInto = async (key: string, kind: "folder" | "file") => {
-    const p = await (kind === "folder" ? bridge?.pickFolder?.() : bridge?.pickFile?.());
+  const pickInto = async (key: string) => {
+    const p = await bridge?.pickFolder?.();
     if (p) set(key, p);
   };
 
@@ -574,7 +573,7 @@ export const Settings = memo(function Settings() {
       <Section title="Wallpaper Engine" icon={<Layers size={15} />}>
         <Row label="Workshop folder" hint="where Steam keeps your Wallpaper Engine downloads">
           <input className="text" value={g("workshopFolder", "")} onChange={(e) => set("workshopFolder", e.target.value)} />
-          <button className="btn ghost ico" onClick={() => pickInto("workshopFolder", "folder")}><FolderFlap size={14} /> Browse</button>
+          <button className="btn ghost ico" onClick={() => pickInto("workshopFolder")}><FolderFlap size={14} /> Browse</button>
         </Row>
         <Row label="Play scenes" hint="Wallpaper Engine's interactive scene wallpapers. They need Wallpaper Engine installed for its assets." rk="allowScenes"><input type="checkbox" checked={g("allowScenes", false)} onChange={(e) => set("allowScenes", e.target.checked)} /></Row>
         <Row label="Import new Workshop wallpapers" hint="anything new in the Workshop folder lands in your library by itself" rk="autoAddWeWallpapersToLibrary"><input type="checkbox" checked={g("autoAddWeWallpapersToLibrary", true)} onChange={(e) => set("autoAddWeWallpapersToLibrary", e.target.checked)} /></Row>
@@ -615,7 +614,7 @@ export const Settings = memo(function Settings() {
       )}
 
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
-        {/* four ways, one radio group (docs/decisions.md § "Offer four Workshop download modes, the user's choice") — each
+        {/* three ways, one radio group (docs/decisions.md § "Offer three Workshop download modes, the user's choice") — each
             route its own radio, never a switch inside another or a silent fallback */}
         <Row label="Use the Steam app" hint="like Wallpaper Engine does it, with a live progress bar. Needs Wallpaper Engine, and Steam shows you playing it for a few seconds." wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
@@ -623,17 +622,14 @@ export const Settings = memo(function Settings() {
           <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>
         <Row label="Subscribe with Steam login" hint="another way to subscribe from the app, but you log in to Steam here">
           <input type="radio" data-wsmode="subscribe" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
-        <Row label="Download via steamcmd" hint="just downloads the wallpaper without subscribing, so no updates. Needs steamcmd set up." wk="workshopDownloadMode"
-          lv="advanced">
-          <input type="radio" data-wsmode="steamcmd" checked={mode === "steamcmd"} onChange={() => set("workshopDownloadMode", "steamcmd")} /></Row>
         {mode === "steamapp" && (
           <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated.</Help>
         )}
-        {mode === "subscribe"
+        {mode === "subscribe" &&
           /* Signing in is optional: without a usable
              sign-in a Download opens the item in the Steam app, where the user clicks Subscribe (WorkshopDownloader) — so the
              row says what happens either way. Sign in with QR (the Steam mobile app) or with a password (SteamPasswordModal). */
-          ? <Row label="Steam">
+          <Row label="Steam">
               {steam?.signedIn && !steam.rejected
                 ? <div className="hms" data-steam-state="signed-in"><span className="shint">Signed in as <b>{steam.accountName}</b> · ~{steam.daysLeft}d left</span>
                     <button className="btn ghost" onClick={signoutSteam}>Sign out</button></div>
@@ -647,15 +643,7 @@ export const Settings = memo(function Settings() {
                       <button className="btn accent" onClick={startQr} data-steam-signin="qr">Sign in with QR</button>
                       <button className="btn ghost" onClick={openPwLogin} data-steam-signin="password">Sign in with password</button>
                     </span></div>}
-            </Row>
-          : mode === "steamcmd" && <>
-              <Row label="steamcmd path" hint="leave blank to find it automatically" wk="steamCmdPath" lv="advanced">
-                <input className="text" placeholder="/usr/bin/steamcmd" value={g("steamCmdPath", "")} onChange={(e) => set("steamCmdPath", e.target.value)} />
-                <button className="btn ghost ico" onClick={() => pickInto("steamCmdPath", "file")}><FolderFlap size={14} /> Browse</button>
-              </Row>
-              <Row label="Steam username" lv="advanced"><input className="text" value={g("steamUsername", "")} onChange={(e) => set("steamUsername", e.target.value)} /></Row>
-              <Row label="Sign in" hint="opens a terminal, and steamcmd remembers you after" lv="advanced"><button className="btn accent" onClick={steamcmdSignin}>Sign in</button></Row>
-            </>}
+            </Row>}
       </Section>
 
       <Section title="Under the hood" icon={<Wrench size={15} />} lv="advanced">

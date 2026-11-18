@@ -13,11 +13,6 @@ namespace Liascape.Helpers;
 
 public static class WorkshopDownloader
 {
-    public static string SteamCmdWorkshopContentDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".cache", "liascape", "steamcmd_workshop",
-        "steamapps", "workshop", "content", "431960");
-
     public static async Task<string> AcquireAsync(
         string workshopId,
         AppSettings settings,
@@ -27,7 +22,7 @@ public static class WorkshopDownloader
     {
         // the one rule (Blocked): a mode that can't download now refuses before anything reaches Steam
         if (Blocked(settings, WorkshopAction.Download) is { } blocked) throw new InvalidOperationException(blocked);
-        // Already present (WE/Steam downloaded it, or a prior steamcmd run) — skip re-download.
+        // Already present (WE/Steam downloaded it) — skip re-download.
         // Subscribe mode still subscribes below so the item is tracked online even if present.
         bool alreadyHave = false;
         foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
@@ -35,46 +30,29 @@ public static class WorkshopDownloader
             if (IsWorkshopDirReady(dir)) { alreadyHave = true; break; }
         }
 
-        if (settings.WorkshopDownloadMode == "steamcmd")
-        {
-            if (alreadyHave)
-                foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
-                    if (IsWorkshopDirReady(dir)) return dir;
-            return await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct);
-        }
-
         return await AcquireViaSubscribeAsync(workshopId, title, settings, alreadyHave, progress, ct);
     }
 
-    /// How "Download without subscribing" would get an item: `Route` = the download mode's own way ("steamapp", "subscribe",
-    /// "steamcmd"), or null with `Missing` = why not, in the user's words (the menu shows it on the disabled entries).
+    /// How "Download without subscribing" would get an item: `Route` = the download mode's own way ("steamapp", "subscribe"),
+    /// or null with `Missing` = why not, in the user's words (the menu shows it on the disabled entries).
     public sealed record OneOffRoute(string? Route, string? Missing);
 
-    public const string SteamCmdWhere = "Settings → Getting Workshop wallpapers → Download via steamcmd";
     public const string OneOffSignIn = "Sign in to Steam to download without subscribing";
     public const string OneOffPageOnly = "A Steam page can only subscribe";
 
     /// The way a one-off copy is fetched (the Browse sidebar's right-click "Download without subscribing"): the chosen download
     /// mode's own, never another's (Blocked). "Use the Steam app": the running client's DownloadItem. "Subscribe with Steam
-    /// login": the sign-in's subscribe → Steam's copy → unsubscribe, so none signed out. steamcmd: steamcmd once found and given
-    /// an account (its one-time sign-in in a terminal caches the login). "Open in the Steam app": none, a page can only
-    /// subscribe. Pure: the caller reads the disk, the settings and the secret store.
+    /// login": the sign-in's subscribe → Steam's copy → unsubscribe, so none signed out. "Open in the Steam app": none, a page
+    /// can only subscribe. Pure: the caller reads the settings and the secret store.
     /// Guard: steam-selftest "one-off route", test-steam-signin.sh § 2 (one-off), probe-steam side:oneOff:modes
-    public static OneOffRoute OneOffRouteOf(string mode, bool steamCmdFound, bool steamCmdAccount, bool steamSignIn)
-    {
-        if (BlockedFor(mode, steamSignIn, WorkshopAction.OneOff) is { } why) return new(null, why);
-        if (mode == "steamapp") return new("steamapp", null);
-        if (mode == "subscribe") return new("subscribe", null);
-        if (steamCmdFound && steamCmdAccount) return new("steamcmd", null);
-        return new(null, !steamCmdFound
-            ? $"Needs steamcmd: install it, then sign in to it under {SteamCmdWhere}."
-            : $"Needs steamcmd signed in: {SteamCmdWhere} → Sign in.");
-    }
+    public static OneOffRoute OneOffRouteOf(string mode, bool steamSignIn) =>
+        BlockedFor(mode, steamSignIn, WorkshopAction.OneOff) is { } why ? new(null, why)
+        : mode == "steamapp" ? new("steamapp", null)
+        : new("subscribe", null);
 
-    public static OneOffRoute OneOffRouteFor(AppSettings s) => OneOffRouteOf(s.WorkshopDownloadMode,
-        FindSteamCmd(s.SteamCmdPath) != null, !string.IsNullOrWhiteSpace(s.SteamUsername), SteamAuthService.HasUsableSignIn(s));
+    public static OneOffRoute OneOffRouteFor(AppSettings s) => OneOffRouteOf(s.WorkshopDownloadMode, SteamAuthService.HasUsableSignIn(s));
 
-    /// A one-off's fetched folder (Steam's or our steamcmd cache's), for the library to copy. `Subscribed` = the route subscribed
+    /// A one-off's fetched folder (Steam's), for the library to copy. `Subscribed` = the route subscribed
     /// to fetch it: once the library's copy is made the caller hands that back (LetGoOfOneOff) — the copy first, since Steam
     /// deletes its folder after the unsubscribe.
     public sealed record OneOffFetch(string Dir, bool Subscribed);
@@ -97,8 +75,7 @@ public static class WorkshopDownloader
         return route.Route switch
         {
             "steamapp" => await OneOffViaSteamAppAsync(workshopId, settings, progress, ct),
-            "subscribe" => await OneOffViaSignInAsync(workshopId, settings, progress, ct),
-            _ => new(await AcquireViaSteamCmdAsync(workshopId, settings, progress, ct), false),
+            _ => await OneOffViaSignInAsync(workshopId, settings, progress, ct),
         };
     }
 
@@ -160,7 +137,7 @@ public static class WorkshopDownloader
     {
         const string waiting = "Waiting for Steam to download it…";
         if (WorkshopSubOps.IsSubscribed(workshopId))
-            return new(await WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null, steamRootsOnly: true), false);
+            return new(await WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null), false);
         bool blockedHere = WorkshopUnsubQueue.Block(workshopId);
         string? failed = null;
         try
@@ -184,7 +161,7 @@ public static class WorkshopDownloader
             Console.WriteLine($"workshop: {workshopId}: not downloaded without subscribing — {failed}");
             throw new InvalidOperationException(failed);
         }
-        try { return new(await WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null, steamRootsOnly: true), true); }
+        try { return new(await WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null), true); }
         catch { LetGoOfOneOff(workshopId); throw; }
     }
 
@@ -205,7 +182,7 @@ public static class WorkshopDownloader
     // Real Steam subscription. "Subscribe with Steam login": the community AJAX endpoint (the same call the website's Subscribe
     // button makes) with the sign-in; without a usable one (none, one Steam signed out or couldn't use, a subscribe Steam
     // turned down) it FAILS with why and what to do (SignInFailure) — never the item's page instead: that is the "Open in the
-    // Steam app" mode's whole job, the user's pick (docs/decisions.md § "Offer four Workshop download modes, the user's
+    // Steam app" mode's whole job, the user's pick (docs/decisions.md § "Offer three Workshop download modes, the user's
     // choice"). "Open in the Steam app": the item's page (steam://url/CommunityFilePage/<id>) through the Steam to-do, the user
     // clicks Subscribe there. Either way Steam then syncs + auto-updates the item like any normal subscription, and the running
     // Steam client downloads it to a workshop/content/431960 dir which we poll for. Guard: test-steam-signin.sh § 2
@@ -235,7 +212,7 @@ public static class WorkshopDownloader
         }
 
         string? why = null; // set = the item's page in the Steam app ("Open in the Steam app"), and this is why
-        // "Open in the Steam app" (docs/decisions.md § "Offer four Workshop download modes, the user's choice"): always the
+        // "Open in the Steam app" (docs/decisions.md § "Offer three Workshop download modes, the user's choice"): always the
         // item's page in Steam — never the sign-in, even when there is one
         bool pageMode = settings.WorkshopDownloadMode == "steampage";
         if (pageMode) why = "Set to open items in the Steam app";
@@ -293,14 +270,13 @@ public static class WorkshopDownloader
             Console.WriteLine($"workshop: {workshopId}: {why} — in the Steam to-do, waiting for the download");
         }
 
-        return await WaitForSteamCopyAsync(workshopId, settings, progress, ct, todo, waitingFor, why, steamRootsOnly: false);
+        return await WaitForSteamCopyAsync(workshopId, settings, progress, ct, todo, waitingFor, why);
     }
 
-    // Waits for Steam's copy of the item: its media in a Workshop root, steady across two polls, then that folder (steamRootsOnly:
-    // Steam's own roots, never our steamcmd cache). `todo` = its Steam to-do entry (its Skip / Stop / "Let the Steam app do all
+    // Waits for Steam's copy of the item: its media in a Workshop root, steady across two polls, then that folder. `todo` = its Steam to-do entry (its Skip / Stop / "Let the Steam app do all
     // N" end the wait; ended here either way); `why` = it waits on the user's click in the Steam app (the timeout says so).
     private static async Task<string> WaitForSteamCopyAsync(string workshopId, AppSettings settings, IProgress<(double, string)>? progress,
-        CancellationToken ct, SteamTodo.Entry? todo, string waitingFor, string? why, bool steamRootsOnly)
+        CancellationToken ct, SteamTodo.Entry? todo, string waitingFor, string? why)
     {
         const int maxWaitMs = 600_000;
         int pollMs = PollMs;
@@ -338,7 +314,6 @@ public static class WorkshopDownloader
                 bool arrived = false;
                 foreach (var dir in ExistingWorkshopDirs(settings.WorkshopFolder, workshopId))
                 {
-                    if (steamRootsOnly && dir.StartsWith(SteamCmdWorkshopContentDir + "/", StringComparison.Ordinal)) continue;
                     var media = TryGetMediaPath(dir);
                     if (media == null) continue;
                     arrived = true;
@@ -479,7 +454,7 @@ public static class WorkshopDownloader
         public SteamRateLimitException() : base("Steam rate-limited the request.") { }
     }
 
-    // Roots (…/431960) of every place workshop content can live: configured WE path, steamcmd cache,
+    // Roots (…/431960) of every place workshop content can live: configured WE path,
     // standard + Flatpak Steam, and each libraryfolders.vdf library. Parse the vdf once and reuse
     // across many ids (the prune pass does this).
     private static System.Collections.Generic.List<string> WorkshopContentRoots(string workshopBasePath)
@@ -487,7 +462,6 @@ public static class WorkshopDownloader
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var roots = new System.Collections.Generic.List<string>();
         if (!string.IsNullOrEmpty(workshopBasePath)) roots.Add(workshopBasePath); // already …/431960
-        roots.Add(SteamCmdWorkshopContentDir);
         roots.Add(Path.Combine(home, ".local/share/Steam/steamapps/workshop/content/431960"));
         roots.Add(Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"));
         foreach (var libRoot in ReadSteamLibraryRoots())
@@ -495,14 +469,9 @@ public static class WorkshopDownloader
         return roots;
     }
 
-    /// The Workshop roots that are STEAM's (the WE folder setting, standard + Flatpak Steam, every library) — not our steamcmd
-    /// cache: an item there is an owned download, never a subscription. Its folder in one of them = Steam has it subscribed
-    /// (until an unsubscribe makes Steam delete it).
-    public static System.Collections.Generic.List<string> SteamWorkshopRoots(string workshopBasePath)
-    {
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return WorkshopContentRoots(workshopBasePath).FindAll(r => !r.StartsWith(Path.Combine(home, ".cache", "liascape"), StringComparison.Ordinal));
-    }
+    /// The Workshop roots, all Steam's (the WE folder setting, standard + Flatpak Steam, every library). Its folder in one of
+    /// them = Steam has it subscribed (until an unsubscribe makes Steam delete it).
+    public static System.Collections.Generic.List<string> SteamWorkshopRoots(string workshopBasePath) => WorkshopContentRoots(workshopBasePath);
 
     /// Is the item on disk in Steam's hands: its folder in a Steam Workshop root, or Steam's staging folder for it (a download
     /// under way)? The Steam to-do's "Steam delivered it" signal (Web/SteamTodo.cs) — disk only, never the Steam client.
@@ -519,8 +488,8 @@ public static class WorkshopDownloader
     /// Subscribe WITHOUT importing anything into the library (the sidebar's subscribe/unsubscribe button) — the download mode's
     /// own way only: `steamapp` → the Steam client (it waits for the install, reporting Steam's bytes), `subscribe` → the
     /// website's subscribe call with the sign-in (done — Steam downloads it by itself), `steampage` → a Steam to-do subscribe
-    /// entry without a download (the user clicks Subscribe on its page, then Next). steamcmd can't subscribe, so it never
-    /// borrows the sign-in: refused like a signed-out `subscribe` (Blocked). Unblocks the id (wanted again). A rate limit throws
+    /// entry without a download (the user clicks Subscribe on its page, then Next). A signed-out `subscribe` never borrows
+    /// another mode's way: refused (Blocked). Unblocks the id (wanted again). A rate limit throws
     /// (no page — it's steamcommunity.com from the same connection).
     public static async Task<SubscribeOnlyResult> SubscribeOnlyAsync(string workshopId, string? title, AppSettings settings,
         IProgress<(double, string)>? progress, CancellationToken ct)
@@ -572,7 +541,7 @@ public static class WorkshopDownloader
         return new(false, msg, todo);
     }
 
-    // All places a downloaded workshop item might already live (every Steam library + steamcmd).
+    // All places a downloaded workshop item might already live (every Steam library).
     private static System.Collections.Generic.IEnumerable<string> ExistingWorkshopDirs(
         string workshopBasePath, string workshopId)
     {
@@ -593,16 +562,6 @@ public static class WorkshopDownloader
         return false;
     }
 
-    // Delete a steamcmd-downloaded workshop item (the "unsubscribe" equivalent on library delete).
-    // Only touches our own steamcmd cache — never the user's real Steam libraries.
-    public static void RemoveDownloadedItem(string workshopId)
-    {
-        if (string.IsNullOrWhiteSpace(workshopId)) return;
-        var dir = Path.Combine(SteamCmdWorkshopContentDir, workshopId);
-        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
-        catch { }
-    }
-
     /// What a drain did beyond the queue: how many items it opened in the Steam app, and what the user should hear.
     public sealed record DrainResult(int OpenedInSteam = 0, string? Message = null);
 
@@ -610,16 +569,13 @@ public static class WorkshopDownloader
     public enum WorkshopAction { Download, Subscribe, Unsubscribe, OneOff }
 
     public const string UnsubSignIn = "Sign in to Steam to unsubscribe";
-    public const string SteamCmdNoSubscribe = "Download via steamcmd can't subscribe";
 
     /// Why a Workshop action can't happen in the chosen download mode, else null: THE rule every action's endpoint refuses with
     /// (400, these words) and the UI mirrors up front, disabled with the same words (components/subscribeMode.ts actionBlocked).
-    /// Each mode does an action only its own way, never another mode's (docs/decisions.md § "Offer four Workshop download modes,
+    /// Each mode does an action only its own way, never another mode's (docs/decisions.md § "Offer three Workshop download modes,
     /// the user's choice"): "Subscribe with Steam login" without a usable sign-in reaches Steam for nothing (the app stays
-    /// disconnected); steamcmd can't subscribe (it unsubscribes through the item's Steam page, like "Open in the Steam app":
-    /// DrainUnsubQueueAsync); a Steam page can only subscribe; "Use the Steam app" does
-    /// everything through the running client (it fails at the click when the client can't). Whether steamcmd is set up for a
-    /// one-off is OneOffRouteFor's (it reads the disk). Pure. Guard: steam-selftest "action rule", "unsub allowed",
+    /// disconnected); a Steam page can only subscribe; "Use the Steam app" does everything through the running client (it
+    /// fails at the click when the client can't). Pure. Guard: steam-selftest "action rule", "unsub allowed",
     /// test-steam-signin.sh § 2 (refused), probe-steam side:blocked:*, side:unsub:signedOut, side:oneOff:modes
     public static string? BlockedFor(string mode, bool usableSignIn, WorkshopAction a) => mode switch
     {
@@ -630,7 +586,6 @@ public static class WorkshopDownloader
             WorkshopAction.Unsubscribe => UnsubSignIn,
             _ => OneOffSignIn,
         },
-        "steamcmd" => a == WorkshopAction.Subscribe ? SteamCmdNoSubscribe : null,
         "steampage" => a == WorkshopAction.OneOff ? OneOffPageOnly : null,
         _ => null,
     };
@@ -712,10 +667,8 @@ public static class WorkshopDownloader
                 ? SteamClientUgc.FailureMessage(fallback) + " The unsubscribe stays queued."
                 : $"Steam didn't confirm unsubscribing {pending.Count} item{(pending.Count == 1 ? "" : "s")} — they stay queued; try again.");
         }
-        // "Open in the Steam app" and steamcmd (which has no unsubscribe of its own) unsubscribe through each item's Steam page,
-        // signed in or not: never the sign-in
+        // "Open in the Steam app" unsubscribes through each item's Steam page, signed in or not: never the sign-in
         if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
-        if (settings.WorkshopDownloadMode == "steamcmd") return UnsubscribeInSteamApp(settings, pending, "steamcmd can't unsubscribe");
         // the sign-in's mode without a usable sign-in: dropped, never another mode's way
         if (UnsubscribeBlocked(settings) is { } blockedWhy)
             return Dropped(pending, settings.SteamSignInRejected ? "Steam turned the sign-in down" : "not signed in to Steam", blockedWhy);
@@ -756,7 +709,7 @@ public static class WorkshopDownloader
     /// Subscribe again to items an Undo brought back after Steam had already unsubscribed them — the way the download mode
     /// subscribes: the Steam client (steamapp), the sign-in (subscribe), the item's page in the Steam app (steampage). Null = all
     /// done; else what the user should know (the status bar shows it). Like every other action, never another mode's way: a
-    /// mode that can't subscribe now (Blocked: signed out, steamcmd) sends nothing and the words say why.
+    /// mode that can't subscribe now (Blocked: signed out) sends nothing and the words say why.
     /// Guard: steam-selftest "undo's re-subscribe", test-steam-signin.sh § 3 g.
     public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? titles = null)
@@ -821,7 +774,7 @@ public static class WorkshopDownloader
     /// one's page opens in the Steam app, one at a time, for the user to click Unsubscribe, then Next (never the subscriptions
     /// list of hundreds of items). Only those: the unsubscribe queue holds items deleted from the LIBRARY, and a library
     /// Workshop item is either a `local/<id>` link into Steam's folder (a subscription — its folder exists) or an owned
-    /// `workshop/<id>` copy (a steamcmd download, never a subscription; our steamcmd cache isn't a Steam root here; docs/decisions.md
+    /// `workshop/<id>` copy (a "Download without subscribing", never a subscription; docs/decisions.md
     /// § "Open an unsubscribe page only for items in a Steam Workshop folder"). The rest are blocked at once, no page. A queued id stays `pending` until the user's Next marks it blocked
     /// (AutoImport keeps the folder out until Steam removes it); Skip / Stop = kept subscribed (`Unblock`).
     private static DrainResult UnsubscribeInSteamApp(AppSettings settings, System.Collections.Generic.List<string> ids, string why)
@@ -845,79 +798,6 @@ public static class WorkshopDownloader
     {
         var roots = WorkshopContentRoots(settings.WorkshopFolder);
         WorkshopUnsubQueue.PruneBlocked(id => WorkshopFolderExists(roots, id));
-    }
-
-    private static async Task<string> AcquireViaSteamCmdAsync(
-        string workshopId,
-        AppSettings settings,
-        IProgress<(double, string)>? progress,
-        CancellationToken ct)
-    {
-        string? steamcmdPath = FindSteamCmd(settings.SteamCmdPath);
-        if (string.IsNullOrEmpty(steamcmdPath))
-            throw new InvalidOperationException(
-                $"steamcmd not found. Install it, or set its path under {SteamCmdWhere}.");
-
-        if (string.IsNullOrEmpty(settings.SteamUsername))
-            throw new InvalidOperationException(
-                $"steamcmd isn't signed in: {SteamCmdWhere} → Sign in.");
-
-        string installDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".cache", "liascape", "steamcmd_workshop");
-        Directory.CreateDirectory(installDir);
-
-        progress?.Report((0, "Starting steamcmd…"));
-
-        var psi = new ProcessStartInfo(steamcmdPath)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        psi.ArgumentList.Add("+force_install_dir");
-        psi.ArgumentList.Add(installDir);
-        psi.ArgumentList.Add("+login");
-        psi.ArgumentList.Add(settings.SteamUsername);
-        psi.ArgumentList.Add("+workshop_download_item");
-        psi.ArgumentList.Add("431960");
-        psi.ArgumentList.Add(workshopId);
-        psi.ArgumentList.Add("+quit");
-
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start steamcmd.");
-
-        proc.OutputDataReceived += (_, e) =>
-        {
-            if (string.IsNullOrEmpty(e.Data)) return;
-            if (e.Data.Contains("Downloading item", StringComparison.OrdinalIgnoreCase))
-                progress?.Report((-1, "Downloading via steamcmd…"));
-            else if (e.Data.Contains("Success", StringComparison.OrdinalIgnoreCase))
-                progress?.Report((1.0, "Download complete!"));
-        };
-        proc.BeginOutputReadLine();
-        proc.BeginErrorReadLine();
-
-        try { await proc.WaitForExitAsync(ct); }
-        catch (OperationCanceledException)
-        {
-            try { proc.Kill(entireProcessTree: true); } catch { }
-            throw;
-        }
-
-        if (proc.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"steamcmd exited with code {proc.ExitCode}. " +
-                $"You may need to sign in to it again: {SteamCmdWhere} → Sign in.");
-
-        string itemDir = Path.Combine(SteamCmdWorkshopContentDir, workshopId);
-        if (!IsWorkshopDirReady(itemDir))
-            throw new InvalidOperationException(
-                $"steamcmd completed but workshop item {workshopId} was not found. " +
-                "The item may not be available for download with your account.");
-
-        return itemDir;
     }
 
     public static async Task<string?> ResolveVideoFileAsync(string workshopDir)
@@ -1009,97 +889,4 @@ public static class WorkshopDownloader
     }
 
     private static long SafeLen(string path) { try { return new FileInfo(path).Length; } catch { return -1; } }
-
-    public static string? FindSteamCmd(string? configured)
-    {
-        if (!string.IsNullOrEmpty(configured) && File.Exists(configured))
-            return configured;
-
-        string[] candidates =
-        [
-            "/usr/bin/steamcmd",
-            "/usr/games/steamcmd",
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".local/share/Steam/steamcmd/steamcmd.sh"),
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "steamcmd/steamcmd.sh")
-        ];
-
-        foreach (var c in candidates)
-            if (File.Exists(c)) return c;
-
-        // Let the shell find it in PATH
-        try
-        {
-            var which = Process.Start(new ProcessStartInfo("which")
-            {
-                ArgumentList = { "steamcmd" },
-                UseShellExecute = false,
-                RedirectStandardOutput = true
-            });
-            var output = which?.StandardOutput.ReadToEnd().Trim();
-            which?.WaitForExit();
-            if (!string.IsNullOrEmpty(output) && File.Exists(output)) return output;
-        }
-        catch { }
-
-        return null;
-    }
-
-    public static void LaunchSteamCmdSignIn(string steamcmdExe, string username)
-    {
-        string installDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".cache", "liascape", "steamcmd_workshop");
-        Directory.CreateDirectory(installDir);
-
-        // Wrap in a shell command so the terminal stays open after steamcmd exits. The values are the script's positional
-        // arguments ($1–$3), never pasted into its text: the username (and the steamcmd path) come from the settings, and
-        // pasted in quotes a `"; …` in them ran as shell commands (.claude/rules/backend/api.md § Security).
-        const string innerCmd =
-            "\"$1\" +force_install_dir \"$2\" +login \"$3\" +quit" +
-            "; echo; echo 'Sign-in complete. Press Enter to close.'; read";
-        string[] shArgs = ["sh", "-c", innerCmd, "liascape-steamcmd-signin", steamcmdExe, installDir, username];
-
-        string[] terminals = ["kitty", "alacritty", "foot", "wezterm", "xterm", "gnome-terminal", "konsole"];
-
-        foreach (var term in terminals)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo(term) { UseShellExecute = false };
-                switch (term)
-                {
-                    case "wezterm":
-                        psi.ArgumentList.Add("start"); psi.ArgumentList.Add("--");
-                        foreach (var a in shArgs) psi.ArgumentList.Add(a);
-                        break;
-                    case "foot":
-                        foreach (var a in shArgs) psi.ArgumentList.Add(a);
-                        break;
-                    case "gnome-terminal":
-                        psi.ArgumentList.Add("--"); foreach (var a in shArgs) psi.ArgumentList.Add(a);
-                        break;
-                    case "konsole":
-                        psi.ArgumentList.Add("-e"); foreach (var a in shArgs) psi.ArgumentList.Add(a);
-                        break;
-                    default:
-                        psi.ArgumentList.Add("-e"); foreach (var a in shArgs) psi.ArgumentList.Add(a);
-                        break;
-                }
-                var proc = Process.Start(psi);
-                if (proc != null) return;
-            }
-            catch { }
-        }
-
-        // Last resort: run headlessly and hope for cached creds
-        Process.Start(new ProcessStartInfo(steamcmdExe)
-        {
-            ArgumentList = { "+force_install_dir", installDir, "+login", username, "+quit" },
-            UseShellExecute = false
-        });
-    }
 }

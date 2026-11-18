@@ -75,7 +75,7 @@ public static class DownloadHelper
         {
             if (source == LibraryStore.Local)                                  // subscribe / WE-dir → symlink the folder
             { try { if (!Directory.Exists(itemDir) && !File.Exists(itemDir)) File.CreateSymbolicLink(itemDir, weSteamDir); } catch { } }
-            else                                                               // steamcmd snapshot → own copy (Steam-mirror)
+            else                                                               // a one-off → the library's own copy
             { if (!Directory.Exists(itemDir)) await Task.Run(() => CopyDirectory(weSteamDir, itemDir)); }
 
             if (detail.IsScene)

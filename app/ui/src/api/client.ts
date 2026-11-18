@@ -116,8 +116,8 @@ async function apiError(path: string, r: Response): Promise<ApiError> {
 // reached; `busy` = "Let the Steam app do all N" is asking Steam.
 // POST /workshop/state: a Workshop item's subscription as the Browse sidebar shows it (disk + the unsubscribe queue + the to-do)
 // GET /workshop/one-off: how "Download without subscribing" would get an item in the chosen download mode (the Steam client,
-// the sign-in's subscribe-copy-unsubscribe, steamcmd), or null + why not (WorkshopDownloader.OneOffRouteOf)
-export type OneOffRoute = { route: "steamapp" | "subscribe" | "steamcmd" | null; missing: string | null };
+// the sign-in's subscribe-copy-unsubscribe), or null + why not (WorkshopDownloader.OneOffRouteOf)
+export type OneOffRoute = { route: "steamapp" | "subscribe" | null; missing: string | null };
 export type WorkshopSubState = { subscribed: boolean; pending: "subscribe" | "unsubscribe" | null; inLibrary: boolean; onDisk: boolean };
 export const steamPageUrl = (workshopId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`;
 export type SteamTodo =
@@ -310,7 +310,6 @@ export const api = {
   download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal, oneOff = false) =>
     // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure
     jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string }>("/download", { source, result, apply, oneOff }, signal),
-  steamcmdSignin: () => jpost("/steam/steamcmd-signin"),
   transitions: () => jget<TransitionEffect[]>("/transitions"),
   // cache-bust frag/vert: the GLSL is regenerated during dev, and a stale Electron HTTP-cache
   // entry would replay an old (possibly broken) shader. Tiny text, fetched once per picker open.
@@ -344,7 +343,7 @@ export const api = {
   openSteamPage: (workshopId: string) => jpost<{ ok: boolean }>("/steam/open-page", { workshopId }),
   // API: the Browse sidebar's subscription toggle (Web/WorkshopSubOps.cs) — state from disk + the queue + the to-do only
   workshopState: (ids: string[]) => jpost<Record<string, WorkshopSubState>>("/workshop/state", { ids }),
-  // API: how "Download without subscribing" would get an item: steamcmd, or none + what the user is missing (in their words)
+  // API: how "Download without subscribing" would get an item: the mode's own route, or none + why (in their words)
   workshopOneOff: () => jget<OneOffRoute>("/workshop/one-off"),
   workshopSubscribe: (workshopId: string, title: string) =>
     jpost<{ subscribed: boolean; inSteamTodo: boolean; message: string }>("/workshop/subscribe", { workshopId, title }),

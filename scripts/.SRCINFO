@@ -43,7 +43,6 @@ pkgbase = liascape-git
 	optdepends = mpvpaper: video wallpapers under the legacy engine (AUR)
 	optdepends = linux-wallpaperengine: Wallpaper Engine scenes under the legacy engine (AUR)
 	optdepends = playerctl: MPRIS-aware auto-mute
-	optdepends = steamcmd: Steam Workshop downloads (AUR)
 	optdepends = xdg-utils: open a wallpaper in your default app
 	optdepends = nvidia-utils: NVDEC decoding and the scene VRAM budget on NVIDIA
 	optdepends = ttf-ms-fonts: the real Arial, Verdana, Comic Sans MS and the other core web fonts in scenes (AUR; unpacks the Microsoft installers)

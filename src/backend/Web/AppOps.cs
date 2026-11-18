@@ -239,7 +239,7 @@ public static class AppOps
         return 0;
     }
 
-    // Web-source download OR workshop acquire (subscribe/steamcmd) then import into the library. `oneOff` (a Workshop item's
+    // Web-source download OR workshop acquire (the download mode's way) then import into the library. `oneOff` (a Workshop item's
     // "Download without subscribing"): WorkshopDownloader.AcquireOneOffAsync by the download mode's own route, the library's own
     // workshop/<id> copy, and a queued unsubscribe of it stays queued (the copy is the library's own, not a subscription's); a
     // subscription the route made only to fetch it is let go once the copy is made (or the import failed).
@@ -267,8 +267,8 @@ public static class AppOps
                     if (got.Subscribed) letGo = detail.WorkshopId;
                 }
                 else
-                    // the Browse sidebar's toggle says "Subscribing…" meanwhile (steamcmd: no subscription)
-                    using (s.WorkshopDownloadMode != "steamcmd" ? WorkshopSubOps.Subscribing(detail.WorkshopId) : null)
+                    // the Browse sidebar's toggle says "Subscribing…" meanwhile
+                    using (WorkshopSubOps.Subscribing(detail.WorkshopId))
                         dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
                 string url = dir;
                 if (!detail.IsScene)

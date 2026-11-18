@@ -227,7 +227,7 @@ app.whenReady().then(async () => {
       return v;
     });
     // the summary: exactly the broken features that are in use (the stack: transitions on, AllowScenes / AutoMute off,
-    // VRAM low mode "stop" → transitions, vram, ffmpeg in it; scenes / auto-mute / mpris / steamcmd only as row icons)
+    // VRAM low mode "stop" → transitions, vram, ffmpeg in it; scenes / auto-mute / mpris only as row icons)
     await cell("missing: the summary lists the broken features in use (and only those)", async () => {
       if (!s2.summary) return ["no [data-health-summary]"];
       const want = f2.filter((f) => f.ok === false && f.inUse !== false).map((f) => f.id).sort();

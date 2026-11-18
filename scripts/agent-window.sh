@@ -25,7 +25,7 @@
 #   sandbox: the whole filesystem read-only except this state dir, with private copies of the user's settings, library
 #   index, playlists and preview caches bound over the user's own liascape dirs (same paths, so every stored path
 #   resolves), a private /tmp and an empty /run/user/<uid> (no Wayland, Hyprland, D-Bus or audio server). The media
-#   stays where it is, read-only; Steam client and steamcmd paths are cleared, secrets stay in a private file.
+#   stays where it is, read-only; the Steam client path is cleared, secrets stay in a private file.
 # - A watcher (read-only) for the whole of `up` / `down`: the session Hyprland's events and, at 20 Hz, the cursor, the
 #   focused monitor and the active window, in log/watch-*.log. Any of those changing during one of this script's steps
 #   aborts it: nothing here may show up on the user's side.
@@ -238,12 +238,12 @@ prepare_state() {
   # the private copies are overwritten in place (nothing deleted): the user's current files replace the last run's; files
   # only the agent backend wrote stay, and an item the user has since removed keeps a dead link
   : >"$LOG/up.log"
-  # settings: the user's, minus every way out to their Steam account (the Steam app's client library, steamcmd); the
+  # settings: the user's, minus every way out to their Steam account (the Steam app's client library); the
   # engine pinned to liascape-player (the legacy engine draws on the session's outputs)
   local c=$H/.config/liascape d=$H/.local/share/liascape f
   mkdir -p "$c" "$d/library"
   if [ -f "$OCFG/settings.json" ]; then
-    jq '.SteamClientLibPath = "" | .SteamCmdPath = "" | .PlayerEngine = "liascape-player"' "$OCFG/settings.json" >"$c/settings.json.tmp"
+    jq '.SteamClientLibPath = "" | .PlayerEngine = "liascape-player"' "$OCFG/settings.json" >"$c/settings.json.tmp"
     mv "$c/settings.json.tmp" "$c/settings.json"
   fi
   for f in playlist_state.json user_mute.state; do if [ -f "$OCFG/$f" ]; then cp -p "$OCFG/$f" "$c/$f"; fi; done

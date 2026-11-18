@@ -2,12 +2,12 @@ import type { Wallpaper } from "../api/client";
 
 // Auto-import on + the "subscribe" download mode: every subscription lands in the library, so a Workshop item's download IS
 // its subscription and its download controls say Subscribe (the Browse sidebar's buttons, the card's button, the selection
-// toolbar, the status line). The other modes (the Steam app / page, a steamcmd copy) keep Download.
+// toolbar, the status line). The other modes (the Steam app / page) keep Download.
 // Guard: probe-steam steam:subMerge:*
 export const subscribeIsDownload = (settings: Record<string, unknown> | null | undefined) =>
   !!settings?.autoAddWeWallpapersToLibrary && settings?.workshopDownloadMode === "subscribe";
 // What a Workshop item's Download / "Download & Apply" do in the chosen mode, the line under them in the Browse sidebar, so
-// they and the subscription card's Subscribe below never read as contradicting: every mode but steamcmd subscribes to get it.
+// they and the subscription card's Subscribe below never read as contradicting: every mode subscribes to get it.
 // Merged (the buttons say Subscribe) and unknown modes: no line. Guard: probe-steam side:getHint
 export function downloadHint(settings: Record<string, unknown> | null | undefined): string | null {
   if (subscribeIsDownload(settings)) return null;
@@ -15,7 +15,6 @@ export function downloadHint(settings: Record<string, unknown> | null | undefine
     case "subscribe": return "Subscribes with your Steam login, then adds it to your library";
     case "steamapp": return "Subscribes through the Steam app, then adds it to your library";
     case "steampage": return "Opens its Steam page for you to subscribe, then adds it to your library";
-    case "steamcmd": return "Downloads a copy with steamcmd, no subscription";
     default: return null;
   }
 }
@@ -24,8 +23,8 @@ export const isWorkshopItem = (w: Pick<Wallpaper, "workshopId" | "pageUrl">) => 
 
 // THE rule for every Workshop action, the backend's WorkshopDownloader.Blocked (its endpoints refuse with the same words): why
 // the chosen download mode can't do it now, else null. Each mode only its own way, never another's: "Subscribe with Steam
-// login" without a usable sign-in reaches Steam for nothing (every action off, "Sign in to Steam to …"), steamcmd can't
-// subscribe (it unsubscribes through the item's Steam page), a Steam page can only subscribe (no one-off), "Use the Steam app"
+// login" without a usable sign-in reaches Steam for nothing (every action off, "Sign in to Steam to …"), a Steam page can
+// only subscribe (no one-off), "Use the Steam app"
 // does all of it through the client. Merged (auto-import on + "subscribe") a Download is the subscription and says so. Unknown yet (the status not read):
 // not blocked, the backend has the last word. Every control of the action shows the reason, disabled, up front: Download (the
 // Browse sidebar's buttons, the card's button, the selection toolbar, Enter / double-click via the store), Subscribe
@@ -43,7 +42,6 @@ export function actionBlocked(settings: Record<string, unknown> | null | undefin
   const mode = settings?.workshopDownloadMode;
   if (a === "download" && subscribeIsDownload(settings)) a = "subscribe";
   if (mode === "subscribe") return !steam || (steam.usable ?? (steam.signedIn && !steam.rejected)) ? null : SIGN_IN[a];
-  if (mode === "steamcmd") return a === "subscribe" ? "Download via steamcmd can't subscribe" : null;
   if (mode === "steampage") return a === "oneOff" ? "A Steam page can only subscribe" : null;
   return null;
 }

@@ -87,7 +87,7 @@ the floor; a new element is designed to delight within the toggles and the frame
 - A hint exists only when it adds something the name doesn't: no hint that repeats its name, a default, or the obvious.
 - A hint starts lowercase and runs one plain sentence, or two or three short ones ("when reached, switches even
   mid-video. A pause stops it. 0 turns the limit off."): what it does or when, then what 0 / off means, then a cost
-  or a need ("needs steamcmd set up", "the heaviest, noticeable at 4K").
+  or a need ("needs Wallpaper Engine", "the heaviest, noticeable at 4K").
 - No em dashes, semicolons or `·` lists; commas and periods only. Examples go in parentheses, an open list ends in
   `…` ("(Spotify, Strawberry, browsers, VLC…)").
 - No reassurance or decoration ("so switching never blasts your ears", "peeking through between the cards"), no

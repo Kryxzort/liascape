@@ -72,7 +72,7 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
   // signed out the Unsubscribe is disabled: its sub-line and tooltip say why, its right-click entry too (the menu's note).
   // Guard: probe-steam steam:subToggle:signedOut
   const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
-  // a Subscribe the mode can't do now (signed out, steamcmd): disabled the same way, its sub-line says why
+  // a Subscribe the mode can't do now (signed out): disabled the same way, its sub-line says why
   const subOff = useStore((s) => actionBlocked(s.settings, s.steam, "subscribe"));
   // the Subscribe's hint says it subscribes only (the Browse sidebar's Download above subscribes too, then imports): with
   // "Import new Workshop wallpapers" on the subscription reaches the library by itself. Guard: probe-steam side:getHint

@@ -67,7 +67,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const openOnSteam = useStore((s) => s.openOnSteam);
   // auto-import on + the "subscribe" download mode: a subscription lands in the library anyway, so Download IS Subscribe —
   // the buttons say so, and the subscription card shows only once subscribed (SubToggle only="subscribed"). The other modes
-  // (the Steam app / page, a steamcmd copy) keep Download and the card. Guard: probe-steam steam:subMerge:*
+  // (the Steam app / page) keep Download and the card. Guard: probe-steam steam:subMerge:*
   const subIsDownload = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
   const GetIcon = subIsDownload ? CloudDownload : Download;
   // a download the mode can't do now (components/subscribeMode.ts actionBlocked: signed out under "Subscribe with Steam

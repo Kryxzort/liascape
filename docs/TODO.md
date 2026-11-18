@@ -20,11 +20,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
        seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
        progress-bar area is needed or the status bar can carry it.
-80. [ ] (owner) Drop the "Download via steamcmd" Workshop mode: three modes cover every level of trust (Open in the
-       Steam app = none; Use the Steam app = no login given to Liascape; Subscribe with Steam login = full). steamcmd needs
-       a Steam login too (typed into a terminal), and sign-in mode already downloads without subscribing. Remove its
-       setting, downloader route, "Needs steamcmd" messages, Settings rows, README line, tests and probes; a stored
-       "steamcmd" mode reads as the default (pre-release, no migration). One docs/decisions.md entry.
 86. [ ] (owner) Import folders, once or watched — one scanner for both: a folder with a project.json = one Wallpaper
        Engine item (scene or video); loose videos / gifs / images = one wallpaper each; subfolders scanned the same way
        (a backed-up Workshop folder imports every item). Import (button or a folder dropped on the window) shows what it

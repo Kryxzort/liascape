@@ -69,12 +69,11 @@ public static class SteamSelfTest
     private static void Check(bool ok, string what) { if (!ok) Fails.Add(what); else Console.WriteLine($"ok   {what}"); }
 
     // THE rule (WorkshopDownloader.BlockedFor), per mode × sign-in × action: each mode only its own way. "Subscribe with
-    // Steam login" without a usable sign-in: every action off, "Sign in to Steam to …"; steamcmd: no subscribe (it unsubscribes
-    // through pages);
-    // a Steam page: no one-off; "Use the Steam app": nothing off
+    // Steam login" without a usable sign-in: every action off, "Sign in to Steam to …"; a Steam page: no one-off; "Use the
+    // Steam app": nothing off
     private static void ActionRule()
     {
-        foreach (var mode in new[] { "steamapp", "steampage", "subscribe", "steamcmd" })
+        foreach (var mode in new[] { "steamapp", "steampage", "subscribe" })
             foreach (bool signIn in new[] { false, true })
                 foreach (var a in Enum.GetValues<WorkshopDownloader.WorkshopAction>())
                 {
@@ -84,7 +83,6 @@ public static class SteamSelfTest
                         ("subscribe", false, WorkshopDownloader.WorkshopAction.Subscribe) => "Sign in to Steam to subscribe",
                         ("subscribe", false, WorkshopDownloader.WorkshopAction.Unsubscribe) => "Sign in to Steam to unsubscribe",
                         ("subscribe", false, WorkshopDownloader.WorkshopAction.OneOff) => "Sign in to Steam to download without subscribing",
-                        ("steamcmd", _, WorkshopDownloader.WorkshopAction.Subscribe) => "Download via steamcmd can't subscribe",
                         ("steampage", _, WorkshopDownloader.WorkshopAction.OneOff) => "A Steam page can only subscribe",
                         _ => null,
                     };
@@ -93,34 +91,31 @@ public static class SteamSelfTest
                 }
     }
 
-    // "Download without subscribing"'s route (WorkshopDownloader.OneOffRouteOf), per mode × steamcmd × sign-in: the mode's own
-    // way — the Steam client, the sign-in (none signed out: "Sign in to Steam…"), steamcmd once found and signed in; never in
-    // the page mode (a page can only subscribe, and it never borrows steamcmd); a missing route names what's missing and where
+    // "Download without subscribing"'s route (WorkshopDownloader.OneOffRouteOf), per mode × sign-in: the mode's own way — the
+    // Steam client, the sign-in (none signed out: "Sign in to Steam…"); never in the page mode (a page can only subscribe)
     private static void OneOffRoutes()
     {
-        foreach (var mode in new[] { "steamapp", "subscribe", "steamcmd", "steampage" })
-            foreach (bool found in new[] { false, true })
-                foreach (bool account in new[] { false, true })
-                    foreach (bool signIn in new[] { false, true })
-                    {
-                        var r = WorkshopDownloader.OneOffRouteOf(mode, found, account, signIn);
-                        string? want = mode switch
-                        {
-                            "steamapp" => "steamapp",
-                            "subscribe" => signIn ? "subscribe" : null,
-                            "steamcmd" => found && account ? "steamcmd" : null,
-                            _ => null,
-                        };
-                        bool ok = r.Route == want && (want == null) == (r.Missing != null);
-                        if (want == null && mode == "subscribe") ok &= r.Missing == "Sign in to Steam to download without subscribing";
-                        if (want == null && mode == "steampage") ok &= r.Missing == "A Steam page can only subscribe";
-                        if (want == null && mode == "steamcmd")
-                        {
-                            string sc = !found ? "Needs steamcmd: install it" : "Needs steamcmd signed in";
-                            ok &= r.Missing!.Contains(sc) && r.Missing.Contains(WorkshopDownloader.SteamCmdWhere);
-                        }
-                        Check(ok, $"one-off route: {mode}, steamcmd {(found ? "found" : "missing")}{(account ? " + account" : "")}, sign-in {(signIn ? "usable" : "none")} → {r.Route ?? "none"} ({r.Missing ?? "-"})");
-                    }
+        foreach (var mode in new[] { "steamapp", "subscribe", "steampage" })
+            foreach (bool signIn in new[] { false, true })
+            {
+                var r = WorkshopDownloader.OneOffRouteOf(mode, signIn);
+                string? want = mode switch
+                {
+                    "steamapp" => "steamapp",
+                    "subscribe" => signIn ? "subscribe" : null,
+                    _ => null,
+                };
+                bool ok = r.Route == want && (want == null) == (r.Missing != null);
+                if (want == null && mode == "subscribe") ok &= r.Missing == "Sign in to Steam to download without subscribing";
+                if (want == null && mode == "steampage") ok &= r.Missing == "A Steam page can only subscribe";
+                Check(ok, $"one-off route: {mode}, sign-in {(signIn ? "usable" : "none")} → {r.Route ?? "none"} ({r.Missing ?? "-"})");
+            }
+        // a mode no longer offered (the dropped "steamcmd") or any unknown one reads as the default
+        foreach (var stored in new[] { "steamcmd", "bogus" })
+        {
+            var s = JsonSerializer.Deserialize<AppSettings>($$"""{"WorkshopDownloadMode":"{{stored}}"}""")!;
+            Check(s.WorkshopDownloadMode == "subscribe", $"stored mode \"{stored}\" reads as {s.WorkshopDownloadMode}, the default");
+        }
     }
 
     private static async Task<(string Type, JsonElement Payload)> NextEvent(string? type = null, int ms = 5000)
@@ -470,7 +465,7 @@ public static class SteamSelfTest
         tp = Todo();
         Check(!Pending("800000001") && Blocked("800000001") && tp is { } f1 && f1.TryGetProperty("finished", out _), $"Next: pending → blocked, the to-do finished ({Show(tp)})");
 
-        // three Steam has (+1 it hasn't — an owned steamcmd-style copy, never a subscription: no page, blocked at once): one page at
+        // three Steam has (+1 it hasn't — an owned one-off copy, never a subscription: no page, blocked at once): one page at
         // a time, Next / Open again / Skip / Stop. Signed in, the mode still opens pages (it never switches to the sign-in)
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000001));
         SettingsService.Update(x => { x.SteamId = 76561190000000001; x.SteamSignInRejected = false; });
@@ -513,28 +508,14 @@ public static class SteamSelfTest
         await Task.Delay(300);
         Check(r.OpenedInSteam == 0 && r.Message == null && (await Urls(0)).Count == 5 && Todo() == null, "unsub of an item Steam doesn't have: nothing opens, no to-do, no message");
 
-        // "Download via steamcmd" has no unsubscribe of its own: the item's Steam page, the same Steam to-do, signed in or not —
-        // never the sign-in
-        SettingsService.Update(x => x.WorkshopDownloadMode = "steamcmd");
         SteamOps.SignOut();
-        Directory.CreateDirectory(Path.Combine(steamWs, "800000031"));
-        int u0 = (await Urls(0)).Count;
-        WorkshopUnsubQueue.AddPending(["800000031"]);
-        r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
-        var opened = await Urls(u0 + 1);
-        Check(r.OpenedInSteam == 1 && (r.Message ?? "").StartsWith("steamcmd can't unsubscribe") && opened.Count == u0 + 1
-            && opened[^1] == "steam://url/CommunityFilePage/800000031" && Pending("800000031"),
-            $"unsub, Download via steamcmd, signed out: the item's page in the Steam to-do, pending until Next ({r.Message})");
-        SteamTodo.Stop();
-        await Task.Delay(200);
-        SettingsService.Update(x => x.WorkshopDownloadMode = "steampage");
         await ResubscribeSignedOut(Urls);
         SteamOps.SignOut();
         SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
     }
 
     // WorkshopDownloader.UnsubscribeBlocked, per mode × sign-in: "Use the Steam app" (the running client is its sign-in),
-    // "Open in the Steam app" and steamcmd (the item's Steam page) always may; the sign-in's mode only with a usable sign-in
+    // "Open in the Steam app" (the item's Steam page) always may; the sign-in's mode only with a usable sign-in
     private static void UnsubAllowed()
     {
         foreach (var (state, setUp) in new (string, Action)[]
@@ -546,7 +527,7 @@ public static class SteamSelfTest
         {
             setUp();
             bool usable = state == "signed in";
-            foreach (var mode in new[] { "steamapp", "steampage", "subscribe", "steamcmd" })
+            foreach (var mode in new[] { "steamapp", "steampage", "subscribe" })
             {
                 SettingsService.Update(x => x.WorkshopDownloadMode = mode);
                 var why = WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load());

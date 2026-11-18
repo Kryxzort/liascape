@@ -119,13 +119,13 @@ app.on("web-contents-created", (_e, wc) => {
   wc.on("will-attach-webview", (e) => e.preventDefault());
 });
 
-// Native folder/file picker for Settings (Wallpaper Engine folder + steamcmd path) — only for the app's own page.
+// Native folder picker for Settings (the Wallpaper Engine folder) — only for the app's own page.
 // Each one opens where the last pick was made: without a defaultPath Electron opens Downloads every time.
 let lastPickDir = null;
-ipcMain.handle("liascape:pick", async (e, opts) => {
+ipcMain.handle("liascape:pick", async (e) => {
   if (!isAppUrl(e.senderFrame?.url ?? "")) return null;
   const r = await dialog.showOpenDialog({
-    properties: [opts?.folder === true ? "openDirectory" : "openFile"], ...(lastPickDir ? { defaultPath: lastPickDir } : {}),
+    properties: ["openDirectory"], ...(lastPickDir ? { defaultPath: lastPickDir } : {}),
   });
   if (r.canceled || !r.filePaths.length) return null;
   lastPickDir = path.dirname(r.filePaths[0]);

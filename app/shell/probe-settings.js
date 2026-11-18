@@ -32,8 +32,8 @@
 //                     saves sceneVramStopShows; at Advanced it hides and the value stays
 //   fonts:gone        no "Use Windows fonts in scenes" / "Windows fonts folder" row at any level under liascape-player, old
 //                     keys in settings.json bring none back (scene fonts come from fontconfig)
-//   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; the
-//                     steamcmd route's setup rows never show where its radio doesn't
+//   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; a
+//                     stored "steamcmd" download mode (dropped) brings back none of its rows at any level
 //   levels:noEmptySection:<engine>  at every level, under liascape-player and a stubbed legacy, no section heading shows
 //                     without a row; Video and Keyboard shortcuts open at Basic with one row each; Playback hides at Basic on legacy;
 //                     legacy: "Scene transition delay (ms)" only at Expert
@@ -742,7 +742,7 @@ app.whenReady().then(async () => {
     // ---- Settings levels: the rows the re-tier moved, each shown from exactly its level; never a heading with no row under
     // it (app/ui/src/settingsLevel.ts, views/Settings.tsx Row / Section)
     const LEVELS = ["basic", "standard", "advanced", "expert"];
-    // label → the level it shows from (liascape-player; normalization, the scene memory cap and the steamcmd route on)
+    // label → the level it shows from (liascape-player; normalization and the scene memory cap on)
     const MOVED = {
       "Loudness target": "advanced", "Fade out after (ms)": "advanced", "Come back after (ms)": "advanced",
       "Disable video cache": "expert", "Restart legacy player every (s)": "expert", "Only restart between wallpapers": "expert",
@@ -750,11 +750,12 @@ app.whenReady().then(async () => {
       "Stopped scene shows": "expert", "Keep a scene renderer ready": "advanced",
       "Thumbnail shape": "basic", "Smooth window animations": "basic", "Text shadow": "advanced", "On hover": "advanced",
       "Not hovered": "advanced", "Wallpaper behind every tab": "standard",
-      "Download via steamcmd": "advanced", "steamcmd path": "advanced", "Steam username": "advanced", "Sign in": "advanced",
       "Autostart": "basic", "Forget the whole library": "advanced",
       // neighbours that stay: their sections' other rows keep their own levels
       "Video frame rate cap": "standard", "Hardware decoding": "advanced", "toggle-mute": "standard", "Clear cached files": "basic",
     };
+    // the dropped steamcmd mode's rows: none at any level, even with "steamcmd" stored (it reads as the default)
+    const GONE = ["Download via steamcmd", "steamcmd path", "Steam username", "Sign in"];
     // every shown section (a heading on screen) holds a row, a command block or a button; the headings per level
     const sectionsAt = () => js(`return [...document.querySelectorAll(".settings .ssection")].filter((s) => getComputedStyle(s).display !== "none").map((s) => ({
       title: s.querySelector("h3")?.textContent.trim(), rows: [...s.querySelectorAll(".srow")].filter((r) => r.getClientRects().length).length,
@@ -769,11 +770,12 @@ app.whenReady().then(async () => {
         await setSettings({ NormalizeAudio: true, NoAudio: false, LimitVramPerScene: true, WorkshopDownloadMode: "steamcmd" });
         for (const lv of LEVELS) {
           await setSettings({ SettingsLevel: lv }); await load();
-          const seen = await js(`return Object.fromEntries(${J(Object.keys(MOVED))}.map((l) => [l, !!window.__x.row(l)]))`);
+          const seen = await js(`return Object.fromEntries(${J([...Object.keys(MOVED), ...GONE])}.map((l) => [l, !!window.__x.row(l)]))`);
           for (const [label, from] of Object.entries(MOVED)) {
             const want = LEVELS.indexOf(lv) >= LEVELS.indexOf(from);
             if (seen[label] !== want) v.push(`${lv}: "${label}" ${seen[label] ? "shows" : "is missing"} (it's a ${from} row)`);
           }
+          for (const label of GONE) if (seen[label]) v.push(`${lv}: the dropped steamcmd mode's "${label}" row shows`);
         }
       } finally {
         await setSettings({ SettingsLevel: "standard", NormalizeAudio: false, LimitVramPerScene: false, WorkshopDownloadMode: "subscribe" });

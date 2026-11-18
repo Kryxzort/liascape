@@ -28,7 +28,6 @@ public static class FeatureHealth
         JsonElement? PlayerHealth,     // hello.health / `liascape-player health` (null: no answer)
         (bool ok, string? reason) Scenes,
         Func<string, bool> OnPath,
-        bool SteamCmdFound,
         bool LegacyTransitions,        // legacy: liascape-transition + the catalogue resolve
         bool SessionBus = true);       // a D-Bus session bus is reachable (the Signal's MPRIS check reads it)
 
@@ -51,7 +50,7 @@ public static class FeatureHealth
         else if (onPlayer) scenes = (false, missing);
         else scenes = PlayerHelper.IsLweAvailable() ? (true, null) : (false, "linux-wallpaperengine not found in PATH — install it to use scenes");
         bool legacyTr = !onPlayer && TransitionService.ResolveDir() != null && TransitionService.ResolveBinary() != null;
-        return Build(new Inputs(onPlayer, missing, ph, scenes, OnPath, WorkshopDownloader.FindSteamCmd(s.SteamCmdPath) != null, legacyTr,
+        return Build(new Inputs(onPlayer, missing, ph, scenes, OnPath, legacyTr,
                 SessionBusReachable()))
             .Select(f => f with { inUse = InUse(f.id, s) }).ToList();
     }
@@ -66,7 +65,6 @@ public static class FeatureHealth
         "hwdec-interop" => !string.Equals(s.HwDec, "no", StringComparison.OrdinalIgnoreCase),
         "auto-mute" => s.AutoMute,
         "mpris" => s.AutoMute && s.AutoMuteOnlyIfMprisActive,
-        "steamcmd" => s.WorkshopDownloadMode == "steamcmd",
         _ => true, // ffmpeg: imports, thumbnails, durations — always
     };
 
@@ -165,9 +163,6 @@ public static class FeatureHealth
         f.Add(new("ffmpeg", "ffmpeg", ff.Length == 0,
             ff.Length == 0 ? null : $"{string.Join(" and ", ff)} not found in PATH — loudness can't be measured (Even out loudness), and imports, thumbnails, video previews and video durations fail",
             ["normalizeAudio", "previewNotHovered"]));
-        f.Add(new("steamcmd", "steamcmd", i.SteamCmdFound,
-            i.SteamCmdFound ? null : "steamcmd not found (set its path, or install it) — \"Download via steamcmd\" can't download",
-            ["workshopDownloadMode", "steamCmdPath"]));
         return f;
     }
 }
