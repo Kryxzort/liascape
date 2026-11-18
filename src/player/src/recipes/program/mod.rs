@@ -351,6 +351,9 @@ struct Prog {
     failed: BTreeSet<String>,
     /// Items whose source broke (a broken scene; passed over from then on).
     broken: BTreeSet<String>,
+    /// Some item it can still play is a scene ([`Prog::refresh_scenes`]): the spare scene
+    /// worker's "a scene is coming" (`Programs::rotation_scenes`).
+    has_scene: bool,
     empty_logged: bool,
     parked: bool,
     /// The play order changed by itself (a cycle's reshuffle): `program.json` is due.
@@ -427,7 +430,7 @@ impl Prog {
             .collect();
         let order = Order::new(cfg.paths(), 0, cfg.shuffle);
         let rng = Rng::new(cfg.seed);
-        Prog {
+        let mut p = Prog {
             cfg,
             skips,
             order,
@@ -447,12 +450,32 @@ impl Prog {
             backoff_until: None,
             failed: BTreeSet::new(),
             broken: BTreeSet::new(),
+            has_scene: false,
             empty_logged: false,
             parked: false,
             def_changed: false,
             playing_key: None,
             start_position: None,
-        }
+        };
+        p.refresh_scenes();
+        p
+    }
+
+    /// Recompute [`Prog::has_scene`] after the items, the defaults, a skip or a broken mark
+    /// changed: an item is a scene by its own `kind` prop, else the defaults' (the backend
+    /// sends `kind: scene` with each scene item); skipped and broken ones never play. A failed
+    /// mark doesn't count: it is cleared again when every item failed.
+    fn refresh_scenes(&mut self) {
+        let kind_of = |it: &ProgramItem| {
+            it.props
+                .get("kind")
+                .or_else(|| self.cfg.defaults.get("kind"))
+                .and_then(Value::as_str)
+                == Some("scene")
+        };
+        self.has_scene = self.cfg.items.iter().any(|it| {
+            kind_of(it) && !self.skips.contains(&it.path) && !self.broken.contains(&it.path)
+        });
     }
 
     fn can_rotate(&self) -> bool {
@@ -721,6 +744,7 @@ impl Prog {
 
     fn mark_broken(&mut self, id: &str, path: &str, why: &str) {
         if self.broken.insert(path.to_string()) {
+            self.refresh_scenes();
             log::event(
                 "program",
                 Level::Info,
@@ -1291,6 +1315,7 @@ impl Programs {
         p.last_effect = sn.last_effect.clone();
         p.failures = sn.failures;
         p.broken = sn.broken.iter().cloned().collect();
+        p.refresh_scenes();
         log::event(
             "program",
             Level::Info,
@@ -1519,6 +1544,16 @@ impl Programs {
         self.progs.keys().cloned().collect()
     }
 
+    /// Whether a scene is coming, for the spare scene worker (`worker::spare::Want::rotation`):
+    /// `Some(true)` = some program can still play a scene item, `Some(false)` = programs run and
+    /// none can, `None` = no program (the player can't tell what comes next).
+    pub fn rotation_scenes(&self) -> Option<bool> {
+        if self.progs.is_empty() {
+            return None;
+        }
+        Some(self.progs.values().any(|p| p.has_scene))
+    }
+
     /// After a create or any `set` on `id`'s node: (re)read its configuration. Live: a new
     /// interval keeps the elapsed time (`retime_remaining`), new items or order reorder the
     /// play order (`Order::reorder`, the current item kept); the rest is read where it is
@@ -1630,6 +1665,7 @@ impl Programs {
                         p.rearm = None;
                     }
                 }
+                p.refresh_scenes();
                 p.set_observed(id, g);
             }
             None => {

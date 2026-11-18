@@ -63,12 +63,17 @@ state `Spare`), its context up after `Hello`, so a scene's spawn takes it (`Spar
 scene's spec, the `Start` sent at once, the `Hello` replayed to the source, the start's grace timed from the adoption)
 instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs each `sync` (at most every 20 ms):
 
-- **When.** Only while scenes are in use: from the first scene worker of the player's run (a restore's included)
-  until `stop`, or until no scene source was hosted for 30 min — a player that only plays videos never starts one.
-  Off, no worker binary or WE assets, or the low-VRAM `stop` hold → reaped at once. At most one.
-- **Refill.** A taken spare is replaced once nothing competes with the new one's start: 2 s after the take, no scene
-  loading, no async open, no transition in flight (the spare's EGL setup is CPU and driver time the scene being
-  waited for would share).
+- **When.** Only while scenes are in use: while a rotation can still play a scene item (`Programs::rotation_scenes`:
+  an item's `kind` prop, else the program's `defaults`, is `scene`, and it isn't skipped or marked broken), so the
+  rotation's first scene takes a spare too; or from the first scene worker of the player's run (a restore's included)
+  until `stop`, or until no scene source was hosted for 30 min. A rotation that holds no scene ends it at once once no
+  scene shows (an edit removing the last scene, a video-only playlist started): it knows none comes, so waiting out
+  the 30 min would only charge a video-only user. With no rotation (a single wallpaper) the next apply is anyone's
+  guess and the 30 min stand, counted from the last scene shown or in a rotation. A player that only plays videos
+  never starts one. Off, no worker binary or WE assets, or the low-VRAM `stop` hold → reaped at once. At most one.
+- **Refill.** A spare starts (after a take: is replaced) once nothing competes with its start: 2 s after a take, no
+  scene loading, no async open, no video before its first frame, no transition in flight (the spare's EGL setup is
+  CPU and driver time the picture being waited for would share). At player start that is once the restore shows.
 - **Launch.** A spare serves only a scene launched the same way (binary, args, environment: `sources::scene::launch_for`, the
   same helpers `SceneSource::open` uses). A change of it (another worker binary, the synthetic test scenes switched)
   reaps the spare at once, so no scene ever starts in a stale one; the next one starts by the refill rule. The scene
@@ -76,13 +81,15 @@ instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs eac
 - **Failure.** A spare that dies, hangs (its heartbeat runs as for any worker) or reports a fatal error is no crash:
   `Exited` only, no restart, no budget, no record, no scene touched; the next starts after 5 s, doubling to 5 min
   while failures continue. Once adopted it is the scene's own worker: its crash restarts through that scene's budget.
-  Crash restarts and the fonts replacement (`WorkerHost::replace`) spawn their own process. It dies with its player
-  (`PR_SET_PDEATHSIG`, spawned on the loop); a supervisor restart keeps `player.scene_spare` (snapshot) and starts a
-  new spare once the restored scene's worker started.
+  Crash restarts spawn their own process. It dies with its player (`PR_SET_PDEATHSIG`, spawned on the loop); a
+  supervisor restart keeps `player.scene_spare` (snapshot) and starts a new spare once the restored scene's worker
+  started, or once the restore shows when the restored rotation holds a scene.
 - **Seen in** the `workers` probe's `spare` (state `spare` | `none` with `why`), the source's `spares_taken`, and the
   `worker.spare_*` / `worker.adopted` events. Test timing: `LIASCAPE_PLAYER_SPARE_TIMING=<refill>,<idle>,<retry>,<retry_max>` (ms).
 
 Measured (`scene_load.py --spare`, release, 3 scenes, medians): an apply 65–135 ms sooner warm, 70–215 cold (no exec or link from a cold disk), 71–108 after a reboot; the waiting spare holds ~168 MiB RSS, ~61 MiB PSS, ~35 MiB private dirty, 3 MiB VRAM.
+A fresh player's first scene with that scene in its rotation (`--first`, 5 rounds): 380–445 → 320–360 ms (59–114 sooner)
+with the files cached, 415–465 → 370–415 ms (49–78 sooner) with them dropped (`first_boot`).
 
 ## The heartbeat
 

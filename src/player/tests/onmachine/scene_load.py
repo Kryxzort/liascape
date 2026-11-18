@@ -26,6 +26,13 @@ started anew after the caches are emptied for the `cold` one, and its memory is 
 private dirty from smaps_rollup; VRAM from nvidia-smi's process table). Both modes wait --gap seconds between applies
 (a spare's refill waits 2 s after a take), so neither meets a GPU or CPU the other didn't.
 
+--first replaces cold / warm / boot with the first scene of a fresh player whose rotation holds that scene (a
+`prog:main` with the scene as its item, never played; the scene applied as above). Per round and scene a prime
+player applies it once (the shader caches filled, as for a scene played before), then two fresh players in the same
+private dirs each create the rotation, wait --gap seconds (and, with --spare, for the spare) and apply it: `first`
+with the files in the page cache (a player restart), `first_boot` with them dropped (a reboot). Without --spare it is
+the first scene as it was before a rotation started the spare.
+
 Isolation: own XDG_RUNTIME_DIR / STATE / CACHE / CONFIG and socket under --out, no WAYLAND_DISPLAY / DISPLAY,
 PipeWire and Pulse pointed at nothing, LIASCAPE_PLAYER_VRAM_PROBE=none. HOME stays real (WE's assets are found
 through Steam). It kills only the serve it started.
@@ -324,6 +331,45 @@ def phases(rec):
     return out
 
 
+def first_round(a, bindir, out, r, records, core):
+    """--first: per scene, a prime player, then `first` and `first_boot` on fresh players (module docs)."""
+    for scene in a.scene:
+        scene = Path(scene).resolve()
+        priv = out / f"round{r}-{scene.name}"
+        if priv.exists():
+            raise SystemExit(f"{priv} exists: give a fresh --out")
+        p = Player(bindir, priv, a.outputs)
+        try:
+            rec = p.apply(scene, a.timeout)
+            rec.update(round=r, mode="prime", phases=phases(rec))
+            records.write(json.dumps(rec) + "\n")
+        finally:
+            p.quit()
+        for mode, cold in (("first", False), ("first_boot", True)):
+            p = Player(bindir, priv, a.outputs)
+            try:
+                p.spare(a.spare)
+                p.ctl.call("create", {"kind": "program", "id": "prog:main", "props": {
+                    "items": [{"path": str(scene), "props": {"kind": "scene"}}], "interval_ms": 3600000}})
+                time.sleep(a.gap)
+                spare = None
+                if a.spare:
+                    spare = p.wait_spare()
+                    if not spare:
+                        print(f"round {r} {scene.name} {mode}: no spare within 20 s", file=sys.stderr)
+                if cold:
+                    files = [bindir / "liascape-scene-worker", Path(p.check["assets_dir"])] + ([core] if core else [])
+                    evict(files + [scene])
+                rec = p.apply(scene, a.timeout)
+                rec.update(round=r, mode=mode, phases=phases(rec), spare_ready=bool(spare))
+                records.write(json.dumps(rec) + "\n")
+                records.flush()
+                print(f"round {r} {scene.name} {mode}: " + " ".join(
+                    f"{k}={v:.0f}" for k, v in rec["phases"].items() if v is not None), file=sys.stderr)
+            finally:
+                p.quit()
+
+
 def main():
     # a SIGTERM (a timeout, a VRAM watchdog) unwinds through `finally`, so the private serve and its workers quit too
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -338,6 +384,8 @@ def main():
     ap.add_argument("--capture", action="store_true", help="a PNG of each load 1 s after its first frame, in <out>/captures")
     ap.add_argument("--spare", action="store_true", help="player.scene_spare on: each apply takes the spare worker")
     ap.add_argument("--gap", type=float, default=3.0, help="seconds from one apply's end to the next's start (both modes)")
+    ap.add_argument("--first", action="store_true",
+                    help="the first scene of a fresh player whose rotation holds it (first, first_boot) instead")
     a = ap.parse_args()
     if any("steamcmd_workshop" in str(Path(s).resolve()) for s in a.scene):
         raise SystemExit("refusing the steamcmd cache: it is never test media")
@@ -349,6 +397,9 @@ def main():
     records = open(out / "records.jsonl", "a")
     core = core_of(bindir / "liascape-scene-worker")
     for r in range(a.rounds):
+        if a.first:
+            first_round(a, bindir, out, r, records, core)
+            continue
         priv = out / f"round{r}"
         if priv.exists():
             raise SystemExit(f"{priv} exists: give a fresh --out")

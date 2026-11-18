@@ -6,11 +6,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 
 ## Queued (in order — the next thing to pick up)
 83. [ ] (owner) Bug: a card whose preview is a gif gets a darker name strip while the window is unfocused.
-93. [ ] (owner) Spare scene worker from player start when the rotation has a scene: once the player has started, its
-       restore is done and nothing is loading (the spare's existing refill rule), start the spare if scenes are allowed
-       and the running playlist / rotation contains a scene, instead of waiting for the run's first scene. A video-only
-       rotation still starts none; a playlist edit that adds or removes the last scene starts or reaps it live. Measure
-       the first scene after start (today 410 ms vs ~320 with a spare in `scene_load.py`'s boot column).
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips

@@ -351,9 +351,9 @@ Owner's call: `systemfont_consolas` asks fontconfig for Consolas like any app.
 Microsoft's fonts pass on only inside their installers (Consolas, Segoe UI never): nothing ships or reads them from a
 Windows partition. `docs/player/modules/scene-lwe-core.md` § Fonts.
 
-### Keep one spare scene worker while scenes are in use — 2026-11-17
-Owner's call: an idle worker's ~60 MiB (PSS) is worth 65–135 ms off every scene apply after the first; on by default, a setting turns it off.
-`docs/player/modules/scene-worker.md` § The spare worker.
+### Keep a spare scene worker while scenes play or are in the rotation — 2026-11-18
+Owner's call: an idle worker's ~60 MiB PSS is worth 65–135 ms off each scene apply; a rotation
+without scenes reaps it at once (video-only users pay nothing). `docs/player/modules/scene-worker.md` § The spare worker.
 
 ### Run one scene worker per scene source, not per output — ~2026-10-27
 Owner's call: one worker halves GPU time and VRAM and keeps the animation in sync across monitors. Per-output frame rate

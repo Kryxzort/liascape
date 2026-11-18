@@ -1636,3 +1636,70 @@ fn spare_worker_dies_with_the_player_and_returns_after_the_restore() {
     assert_eq!(w["state"], json!("running"), "{w}");
     assert_ne!(w["pid"].as_u64(), Some(new_spare as u64), "{w}");
 }
+
+/// A rotation that holds a scene starts the spare before its first scene (`worker::spare`,
+/// `Programs::rotation_scenes`); after a crash of the compositor child the restore brings the
+/// rotation back and a new spare follows it, with still no scene played.
+#[test]
+fn spare_worker_follows_a_restored_rotation_with_a_scene() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let mut sup = Sup::spawn_in(
+        new_root(),
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1"),
+            ("LIASCAPE_PLAYER_SPARE_TIMING", "0,3600000,50,200"),
+        ],
+        Some(serial),
+        true,
+    );
+    let dir = common::synthetic_scene(
+        "sup-spare-rot",
+        &liascape_player::scene::synthetic::SyntheticSpec::default(),
+    );
+    let video = prog_clip("spare_rot", 10.0);
+    let mut c = sup.client();
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    c.ok(
+        "create",
+        json!({"kind": "program", "id": "prog:main", "props": {
+            "items": [{"path": video}, {"path": s(&dir), "props": {"kind": "scene"}}],
+            "seed": 1, "interval_ms": 3_600_000}}),
+    );
+    c.ok("program.play", json!({"id": "prog:main"}));
+    let spare_up = |c: &mut Client| {
+        let t = Instant::now();
+        loop {
+            let sp = c.ok("probe", json!({"name": "workers"}))["spare"].clone();
+            if sp["hello"] == json!(true) {
+                return sp["pid"].as_u64().unwrap() as u32;
+            }
+            assert!(t.elapsed() < Duration::from_secs(15), "no spare: {sp}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let no_scene = |st: &Value| sources(st).iter().all(|(_, n)| n["kind"] != json!("scene"));
+    let old_spare = spare_up(&mut c);
+    assert!(no_scene(&c.state()), "no scene played");
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_program(sn, &video, 0.0));
+    drop(c);
+    sup.crash(libc::SIGSEGV);
+    let t = Instant::now();
+    while alive(old_spare) && t.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!alive(old_spare), "the spare {old_spare} outlived its player");
+    let mut c = sup.client();
+    wait_state(&mut c, Duration::from_secs(10), |st| {
+        st["programs"][0]["path"] == json!(video)
+    });
+    let new_spare = spare_up(&mut c);
+    assert_ne!(new_spare, old_spare);
+    let st = c.state();
+    assert!(no_scene(&st), "still no scene played");
+    let sp = c.ok("probe", json!({"name": "workers"}))["spare"].clone();
+    assert_eq!(sp["rotation_scenes"], json!(true), "{sp}");
+}

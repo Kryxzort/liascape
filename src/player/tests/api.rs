@@ -11621,6 +11621,111 @@ fn spare_worker_is_taken_by_the_next_scene_and_replaced() {
     assert_eq!(crash_files(&srv), 0);
 }
 
+/// A rotation tells the spare what comes (`Programs::rotation_scenes`): a video-only one starts
+/// none; an edit that adds a scene starts one with no scene ever played, and the rotation's first
+/// scene takes it; an edit that removes the last scene keeps it while that scene still shows and
+/// reaps it the moment the rotation moves on to a video; the setting off still reaps it.
+#[test]
+fn spare_worker_follows_the_scenes_in_the_rotation() {
+    let Some(srv) = spare_serve() else { return };
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    c.ok("subscribe", json!({"topics": ["program."]}));
+    let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
+    let video = json!({"path": s(&clip)});
+    let mut spec = synth(Pattern::Solid);
+    spec.rgb = [40, 200, 90];
+    let dir = common::synthetic_scene("spare-rot", &spec);
+    let scene = json!({"path": s(&dir), "props": {"kind": "scene"}});
+    let steps = |c: &mut Client, n: usize| {
+        for _ in 0..n {
+            c.step(16);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let scene_src = |c: &mut Client| {
+        let st = c.ok("state", json!({}));
+        st["graph"].as_object().and_then(|g| {
+            g.iter()
+                .find(|(_, n)| n["kind"] == json!("scene") && n["path"] == json!(s(&dir)))
+                .map(|(id, _)| id.clone())
+        })
+    };
+
+    // A video-only rotation, its video playing: no spare.
+    c.ok(
+        "create",
+        json!({"kind": "program", "id": "prog:main",
+               "props": {"items": [video.clone()], "seed": 1, "interval_ms": 3_600_000}}),
+    );
+    c.ok("program.play", json!({"id": "prog:main"}));
+    steps(&mut c, 30);
+    let sp = spare_of(&mut c);
+    assert_eq!(sp["state"], json!("none"), "{sp}");
+    assert_eq!(sp["why"], json!("no scene in the rotation"), "{sp}");
+    assert_eq!(sp["spawned"], json!(0), "{sp}");
+
+    // An edit adds a scene: a spare, before any scene played.
+    c.ok("set", json!({"path": "prog:main.items", "value": [video.clone(), scene.clone()]}));
+    let p = step_until_spare(&mut c, None);
+    assert_eq!(scene_src(&mut c), None, "no scene played yet");
+    assert_eq!(spare_of(&mut c)["rotation_scenes"], json!(true));
+
+    // The rotation's first scene takes it; a new one follows.
+    c.ok("program.next", json!({"id": "prog:main"}));
+    let sc = wait_for(Duration::from_secs(10), "the rotation's scene", || {
+        c.step(16);
+        scene_src(&mut c)
+    });
+    step_until_ready(&mut c, &sc);
+    let w = worker_of(&mut c, &sc);
+    assert_eq!(w["pid"].as_u64(), Some(p), "the first scene plays in the spare: {w}");
+    assert_eq!(w["spares_taken"], json!(1), "{w}");
+    let p2 = step_until_spare(&mut c, Some(p));
+
+    // The last scene leaves the rotation while it still shows: kept…
+    c.ok("set", json!({"path": "prog:main.items", "value": [video.clone()]}));
+    steps(&mut c, 10);
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["state"].clone(), sp["pid"].clone()), (json!("spare"), json!(p2)), "{sp}");
+    // …and reaped at once when the rotation moves on to its video (no 30 min idle wait: the
+    // suite's idle_after is an hour).
+    c.ok("program.next", json!({"id": "prog:main"}));
+    wait_for(Duration::from_secs(10), "the scene to go", || {
+        c.step(16);
+        scene_src(&mut c).is_none().then_some(())
+    });
+    steps(&mut c, 5);
+    let sp = spare_of(&mut c);
+    assert_eq!((sp["state"].clone(), sp["why"].clone()), (json!("none"), json!("no scene in the rotation")), "{sp}");
+    wait_for(Duration::from_secs(2), "the spare to go", || {
+        (!pid_alive(p2)).then_some(())
+    });
+
+    // Added back: one again. Off reaps it; on brings it back.
+    c.ok("set", json!({"path": "prog:main.items", "value": [video.clone(), scene.clone()]}));
+    let p3 = step_until_spare(&mut c, Some(p2));
+    c.ok("set", json!({"path": "player.scene_spare", "value": false}));
+    c.step(16);
+    assert_eq!(spare_of(&mut c)["why"], json!("off"));
+    wait_for(Duration::from_secs(2), "the spare to go when off", || {
+        (!pid_alive(p3)).then_some(())
+    });
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let p4 = step_until_spare(&mut c, Some(p3));
+
+    // `stop` ends the rotation and reaps it.
+    c.ok("stop", json!({}));
+    steps(&mut c, 10);
+    let sp = spare_of(&mut c);
+    assert_eq!(sp["state"], json!("none"), "{sp}");
+    assert_eq!(sp["rotation_scenes"], json!(null), "{sp}");
+    wait_for(Duration::from_secs(2), "the spare to go at the stop", || {
+        (!pid_alive(p4)).then_some(())
+    });
+    assert_eq!(crash_files(&srv), 0);
+}
+
 /// A spare's death is nobody's crash: killed again and again it is replaced each time (after a
 /// short backoff), while the playing scene keeps its worker, no restart counted, no crash
 /// record, no `source.broken`. A scene applied while the player is paused takes the spare too.

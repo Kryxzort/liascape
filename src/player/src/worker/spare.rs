@@ -6,14 +6,17 @@
 //! **Policy** ([`Spare::maintain`], run from `SourceHost::sync`): at most one, and only while
 //! - `player.scene_spare` is on and scenes can play here (a worker binary, WE's assets or the
 //!   synthetic test scenes);
-//! - scenes are in use: a scene worker was started since the player started or last stopped
-//!   (`stop`), and a scene source was hosted within [`Timing::idle_after`] — a player that only
-//!   ever plays videos never pays for a spare;
+//! - scenes are in use: a running rotation can still play a scene item (the spare is ready for
+//!   the run's first scene too), or a scene worker was started since the player started or
+//!   last stopped (`stop`) and a scene source was hosted within [`Timing::idle_after`]. A
+//!   rotation that holds no scene, with no scene hosted, ends it at once: a player that only
+//!   plays videos never pays for a spare;
 //! - media aren't suspended by the low-VRAM rule's `stop` mode.
 //!
-//! A taken spare is replaced once nothing competes with the new one's start: no scene loading,
-//! no transition in flight, [`Timing::refill_after`] since the last take — the spare's own EGL
-//! setup is CPU and driver time the scene the user waits for would otherwise share. A spare
+//! A spare starts (a taken one is replaced) once nothing competes with its start: no scene
+//! loading, no video before its first frame, no transition in flight, [`Timing::refill_after`]
+//! since the last take — the spare's own EGL setup is CPU and driver time the picture the user
+//! waits for would otherwise share. A spare
 //! launched differently from what a scene would launch now (another worker binary, the synthetic
 //! test scenes turned on or off) is reaped at once, so
 //! no scene ever starts in a stale one, and replaced by the same rule. A spare that dies, hangs or can't make a context is
@@ -112,7 +115,11 @@ pub struct Want {
     pub suspended: bool,
     /// A scene source is hosted now.
     pub scenes_hosted: bool,
-    /// Nothing competes with a new spare's start: no scene loading, no transition in flight.
+    /// The running rotations (`Programs::rotation_scenes`): `Some(true)` = one can still play a
+    /// scene item, `Some(false)` = none can, `None` = no rotation runs.
+    pub rotation: Option<bool>,
+    /// Nothing competes with a new spare's start: no scene loading, no async open, no video
+    /// before its first frame, no transition in flight.
     pub quiet: bool,
 }
 
@@ -202,6 +209,22 @@ impl Spare {
         if want.scenes_hosted {
             self.last_scene = Some(now);
         }
+        // A rotation knows what comes: a scene in it keeps scenes in use (and the idle clock
+        // reset, so a rotation that goes away is treated like a scene that just stopped); one
+        // without, while no scene shows, means none comes — waiting out the idle rule would
+        // keep a video-only rotation's spare for nothing. With no rotation the next apply is
+        // anyone's guess, and the idle rule stands. Guards: `tests/worker.rs`
+        // `spare_follows_the_scenes_in_the_rotation`, `tests/api.rs`
+        // `spare_worker_follows_the_scenes_in_the_rotation`, `tests/supervise.rs`
+        // `spare_worker_follows_a_restored_rotation_with_a_scene`.
+        match want.rotation {
+            Some(true) => {
+                self.in_use = true;
+                self.last_scene = Some(now);
+            }
+            Some(false) if !want.scenes_hosted => self.in_use = false,
+            _ => {}
+        }
         if self.in_use
             && !want.scenes_hosted
             && self
@@ -216,6 +239,8 @@ impl Spare {
             Some("scenes can't play")
         } else if want.suspended {
             Some("low VRAM")
+        } else if !self.in_use && want.rotation == Some(false) {
+            Some("no scene in the rotation")
         } else if !self.in_use {
             Some("scenes not in use")
         } else {
@@ -381,6 +406,7 @@ impl Spare {
             "why": if h.is_some() { "" } else { self.why_none },
             "enabled": self.last.enabled,
             "in_use": self.in_use,
+            "rotation_scenes": self.last.rotation,
             "failures": self.failures,
             "retry_in_ms": self.retry_at.map(|t| t.saturating_duration_since(now).as_secs_f64() * 1e3),
             "spawned": self.stats.spawned,

@@ -1808,11 +1808,15 @@ impl Runtime {
             exclude.insert(pk.id.clone());
         }
         self.host.set_pause_exclusions(exclude);
-        // The spare scene worker: `player.scene_spare`, and a new spare's start waits for every
-        // transition to finish (its EGL setup would compete with the effect's frames).
+        // The spare scene worker: `player.scene_spare`, a new spare's start waits for every
+        // transition to finish (its EGL setup would compete with the effect's frames), and a
+        // rotation holding a scene starts one before its first scene plays.
         let spare_on = self.bool_prop("player", "scene_spare");
-        self.host
-            .set_spare_policy(spare_on, self.tr.bounds().0 == 0);
+        self.host.set_spare_policy(
+            spare_on,
+            self.tr.bounds().0 == 0,
+            self.programs.rotation_scenes(),
+        );
         self.synced_demand_rev = self.graph.demand_rev();
         self.host
             .sync(&self.gfx, &self.graph, &changes, self.player_paused);

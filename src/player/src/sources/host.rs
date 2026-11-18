@@ -311,9 +311,11 @@ pub struct SourceHost {
     pub(crate) demand_computes: u64,
     /// The spare scene worker (`worker::spare`), shared with every scene source.
     spare: SharedSpare,
-    /// `player.scene_spare` and whether no transition is in flight (the runtime's, each sync).
+    /// `player.scene_spare`, whether no transition is in flight and whether the running
+    /// rotations hold a scene (the runtime's, each sync: `set_spare_policy`).
     spare_enabled: bool,
     spare_quiet: bool,
+    spare_rotation: Option<bool>,
     /// How a scene worker launches under the current base opts (`scene::launch_for`); `None`
     /// = recompute (a base opt changed: it looks the worker binary up on disk).
     spare_launch: Option<Option<Launch>>,
@@ -322,7 +324,7 @@ pub struct SourceHost {
     /// The last `maintain_spare` and the inputs it ran with: it runs at most every
     /// [`SPARE_EVERY`] (`sync` runs after every dispatch — each worker frame is one), at once
     /// when an input that reaps changed.
-    spare_ran: Option<(std::time::Instant, bool, bool)>,
+    spare_ran: Option<(std::time::Instant, bool, bool, Option<bool>)>,
 }
 
 /// How often `sync` looks after the spare scene worker at most.
@@ -354,6 +356,7 @@ impl SourceHost {
             spare: Spare::shared(),
             spare_enabled: false,
             spare_quiet: true,
+            spare_rotation: None,
             spare_launch: None,
             spare_hang: super::scene::hang_timeout(
                 std::env::var(super::scene::HANG_ENV).ok().as_deref(),
@@ -362,12 +365,13 @@ impl SourceHost {
         }
     }
 
-    /// The spare scene worker's policy inputs from the runtime: `player.scene_spare`, and
-    /// `quiet` = no transition in flight (a new spare's start waits for that). Applied at the
-    /// next [`sync`](Self::sync).
-    pub fn set_spare_policy(&mut self, enabled: bool, quiet: bool) {
+    /// The spare scene worker's policy inputs from the runtime: `player.scene_spare`,
+    /// `quiet` = no transition in flight (a new spare's start waits for that), and `rotation`
+    /// = `Programs::rotation_scenes`. Applied at the next [`sync`](Self::sync).
+    pub fn set_spare_policy(&mut self, enabled: bool, quiet: bool, rotation: Option<bool>) {
         self.spare_enabled = enabled;
         self.spare_quiet = quiet;
+        self.spare_rotation = rotation;
     }
 
     /// Stop the spare now (`stop`, quit): scenes count as unused until the next one starts.
@@ -389,14 +393,15 @@ impl SourceHost {
     /// worker binary resolves and WE's assets do (or the synthetic test scenes are allowed).
     fn maintain_spare(&mut self) {
         let now = std::time::Instant::now();
-        if self.spare_ran.is_some_and(|(t, on, sus)| {
+        if self.spare_ran.is_some_and(|(t, on, sus, rot)| {
             on == self.spare_enabled
                 && sus == self.suspend_new
+                && rot == self.spare_rotation
                 && now.saturating_duration_since(t) < SPARE_EVERY
         }) {
             return;
         }
-        self.spare_ran = Some((now, self.spare_enabled, self.suspend_new));
+        self.spare_ran = Some((now, self.spare_enabled, self.suspend_new, self.spare_rotation));
         let launch = self
             .spare_launch
             .get_or_insert_with(|| super::scene::launch_for(&self.base_opts))
@@ -409,6 +414,10 @@ impl SourceHost {
             if let Some(s) = h.src.as_scene() {
                 scenes_hosted = true;
                 loading |= s.loading();
+            } else if let Some(m) = h.src.as_mpv() {
+                // a video still on its way to its first frame (a restore's, a switch's B):
+                // the spare's EGL setup would share the CPU and driver with that decode
+                loading |= m.is_loading();
             }
         }
         let want = spare::Want {
@@ -417,6 +426,7 @@ impl SourceHost {
             hang_timeout: self.spare_hang,
             suspended: self.suspend_new,
             scenes_hosted,
+            rotation: self.spare_rotation,
             quiet: self.spare_quiet && !loading && self.opening.is_empty(),
         };
         spare::lock(&self.spare).maintain(want, now);

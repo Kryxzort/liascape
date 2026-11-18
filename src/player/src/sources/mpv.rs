@@ -1142,6 +1142,11 @@ impl MpvSource {
         self.ready
     }
 
+    /// The current load is on its way to its first frame: not `Ready` and not failed.
+    pub fn is_loading(&self) -> bool {
+        !self.ready && self.load_failed.is_none()
+    }
+
     /// Stepped mode: show the frame at media time `t` — `seek <t> absolute exact`
     /// with mpv paused. [`MpvSource::step_status`] says when that frame is the texture.
     /// Only call once the source [`is_ready`](Self::is_ready).

@@ -14,8 +14,9 @@
 //! restarts, kept after a fatal stop), what a crash record carries, for a scene that didn't crash.
 //! `spare`: the spare worker (`worker::spare`), apart from `workers` (which lists scene sources
 //! only): `{state: spare | none, pid, hello (its context is up), age_ms, why (none: off, scenes
-//! not in use, low VRAM, …), enabled, in_use, failures, retry_in_ms, spawned, adopted, replaced,
-//! failed, reaped}` (+ `log_tail` with the arg).
+//! not in use, no scene in the rotation, low VRAM, …), enabled, in_use, rotation_scenes (a rotation
+//! holds a scene: true | false, null = no rotation), failures, retry_in_ms, spawned, adopted,
+//! replaced, failed, reaped}` (+ `log_tail` with the arg).
 
 use serde_json::{Value, json};
 

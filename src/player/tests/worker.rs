@@ -1173,6 +1173,7 @@ mod spare_pool {
             hang_timeout: Duration::from_secs(2),
             suspended: false,
             scenes_hosted: true,
+            rotation: None,
             quiet: true,
         }
     }
@@ -1334,6 +1335,76 @@ mod spare_pool {
         pool.maintain(idle, Instant::now());
         assert_eq!(pool.pid(), None, "reaped after no scene for idle_after");
         wait_dead(p);
+    }
+
+    /// A rotation that holds a scene puts scenes in use before any scene worker started (the
+    /// spare is ready for the run's first scene) and keeps them in use past `idle_after`; a
+    /// video-only rotation starts none; a rotation that loses its last scene reaps the spare at
+    /// once — but only once no scene shows; with no rotation the idle rule stands.
+    #[test]
+    fn spare_follows_the_scenes_in_the_rotation() {
+        let l = launch("", "1");
+        let mut t = fast();
+        t.idle_after = Duration::from_millis(200);
+        let mut pool = Spare::new(t);
+        let now = Instant::now;
+        let with = |rotation: Option<bool>, hosted: bool| {
+            let mut w = want(&l);
+            w.rotation = rotation;
+            w.scenes_hosted = hosted;
+            w
+        };
+
+        // A video-only rotation: none, and the probe says why.
+        pool.maintain(with(Some(false), false), now());
+        assert_eq!(pool.pid(), None);
+        assert_eq!(pool.info(now(), false)["why"], "no scene in the rotation");
+        assert_eq!(pool.info(now(), false)["rotation_scenes"], false);
+
+        // A scene in the rotation, none played yet: a spare (still waiting for quiet first).
+        let mut busy = with(Some(true), false);
+        busy.quiet = false;
+        pool.maintain(busy, now());
+        assert_eq!(pool.pid(), None, "a load in flight postpones it");
+        pool.maintain(with(Some(true), false), now());
+        let p1 = pool.pid().expect("a spare before the rotation's first scene");
+        assert_eq!(pool.info(now(), false)["in_use"], true);
+        // Kept past idle_after while the rotation holds a scene, though none is hosted.
+        std::thread::sleep(Duration::from_millis(250));
+        pool.maintain(with(Some(true), false), now());
+        assert_eq!(pool.pid(), Some(p1), "the rotation's scene is still coming");
+
+        // The last scene leaves the rotation while one still shows: kept until it goes…
+        pool.maintain(with(Some(false), true), now());
+        assert_eq!(pool.pid(), Some(p1), "a scene still shows");
+        // …then reaped at once, no idle wait.
+        pool.maintain(with(Some(false), false), now());
+        assert_eq!(pool.pid(), None, "reaped at once");
+        assert_eq!(pool.info(now(), false)["why"], "no scene in the rotation");
+        wait_dead(p1);
+
+        // A scene added back: a spare again.
+        pool.maintain(with(Some(true), false), now());
+        let p2 = pool.pid().expect("the edit that adds a scene starts one");
+
+        // The rotation goes (a single wallpaper replaced it): the idle rule, counted from the
+        // last moment a scene was coming.
+        pool.maintain(with(None, false), now());
+        assert_eq!(pool.pid(), Some(p2), "kept within idle_after");
+        std::thread::sleep(Duration::from_millis(250));
+        pool.maintain(with(None, false), now());
+        assert_eq!(pool.pid(), None, "reaped after idle_after with no rotation");
+        wait_dead(p2);
+
+        // Off still reaps a rotation's spare.
+        pool.maintain(with(Some(true), false), now());
+        let p3 = pool.pid().expect("a spare");
+        let mut off = with(Some(true), false);
+        off.enabled = false;
+        pool.maintain(off, now());
+        assert_eq!(pool.pid(), None);
+        assert_eq!(pool.info(now(), false)["why"], "off");
+        wait_dead(p3);
     }
 
     /// A spare that keeps dying is retried with a doubling backoff and never handed to a scene.
