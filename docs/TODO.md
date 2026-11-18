@@ -8,6 +8,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 83. [ ] (owner) Bug: a card whose preview is a gif gets a darker name strip while the window is unfocused.
 87. [ ] Bug: Import saves every video and gif as `<name>.mp4` whatever its real format (`src/backend/Helpers/ImportService.cs`
        `mediaExt`): keep the source's extension.
+89. [ ] (owner) Scene fonts like any other font: a scene's `systemfont_<name>` asks fontconfig for that family
+       ("Consolas", "Arial" …), like every app does; delete the Windows-drive lookup (`src/player/src/scene/fonts.rs`'s
+       NTFS scan), `player.scene_fonts`, and Settings' "Use Windows fonts in scenes" / "Windows fonts folder". Ship a
+       fontconfig alias file for families without a standard metric alias (Consolas → Cascadia Mono, Segoe UI →
+       Selawik, Comic Sans → Comic Neue, Tahoma → Wine's Tahoma) and list those open fonts plus Liberation as package
+       dependencies (flake, PKGBUILD). Real Microsoft fonts come from the user's own font install (`corefonts`). A
+       docs/decisions.md entry, so nobody re-adds a Windows-partition reader.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). The worker now loads the project beside its EGL setup (`--preload`); two fork commits wait to be pushed
        and pinned (`UPSTREAM.md` § How to resync, steps 3–5): the texture upload context (a wallpaper's JPEG / PNG
