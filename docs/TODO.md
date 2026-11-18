@@ -30,10 +30,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
        all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
        under that load); the printed `cards` count tells.
-95. [ ] Flaky under load (2026-11-18, the full crate suite at --test-threads=4 beside the UI build): `tests/api.rs`
-       `dropout_analysis_never_skips_bus_cycles` (its recording file was missing) and `outbox_is_bounded` (timed out
-       waiting for `outbox.dropped`); both pass alone with `--exact`. Find what each waits on and make the wait
-       event-driven or the deadline load-proof, not longer.
 96. [ ] (owner) Copy WE's frame-rate quirks: wallpaper authors tuned their scenes on WE, so WE's behaviour is the look.
        First: `cursorripple` (3184155462) is ~10x weaker in WE at 120 fps than at 30 (`timeAmt = min(1/30, g_Frametime) /
        0.02` × the per-frame pointer delta; see docs/player/reports/scene-we-ref.md § Focus) — give the scene WE's
