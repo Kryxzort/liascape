@@ -102,13 +102,33 @@ const opsIdle = () => {
     return calm >= 2;
   }, 180000, 1000);
 };
-// `debug`: the page with the liascapeDbg bridge (fake operations, a status message)
+// `debug`: the page with the liascapeDbg bridge (fake operations, a status message), deaf to the backend's own library-ops
+// events (FAKE_OPS_ONLY): each of them replaces the page's whole list, so a real operation starting or ending mid-cell
+// would wipe the fake ones. The page itself starts real ones whenever its cards ask for clips at a box and quality not made
+// yet (after a cell that changed the window, the card size or the quality: libops:backfill, then libops:toggle), and
+// opsIdle can't see those before the page is open.
 const loadLibrary = async (debug = false) => {
-  await win.loadURL(withToken(U + "/") + (debug ? "&debug" : ""));
+  await win.loadURL(withToken(U + "/") + (debug ? "&debug&fakeOpsOnly" : ""));
   for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
   await js(`[...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Library")?.click(); return true`);
   await sleep(800);
 };
+// runs before the page's own scripts (every load): on a page opened with `fakeOpsOnly` the events socket drops library-ops
+// and GET /library/ops (the page's reads at start and on a reconnect) answers none, so no real operation gets in, and none
+// stays drawn after its end event was dropped
+const FAKE_OPS_ONLY = `(() => {
+  if (!new URLSearchParams(location.search).has("fakeOpsOnly")) return;
+  const f = window.fetch.bind(window);
+  window.fetch = (u, o = {}) => String(u).split("?")[0].endsWith("/library/ops") && (o.method || "GET").toUpperCase() === "GET"
+    ? Promise.resolve(new Response(JSON.stringify({ ops: [] }), { headers: { "Content-Type": "application/json" } })) : f(u, o);
+  const W = window.WebSocket;
+  window.WebSocket = class extends W {
+    set onmessage(f) {
+      super.onmessage = f && ((m) => { try { if (JSON.parse(m.data).type === "library-ops") return; } catch { /* not JSON */ } return f.call(this, m); });
+    }
+    get onmessage() { return super.onmessage; }
+  };
+})()`;
 
 // the words in the top bar's status slot (the one coming in, not one fading out)
 const WORDS = ".topbar > .status .st-op:not(.out)";
@@ -176,6 +196,11 @@ app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
   win.focus();
   try {
+    // the debugger needs a renderer: a window that never loaded anything has none
+    await win.loadURL("about:blank");
+    win.webContents.debugger.attach("1.3");
+    await win.webContents.debugger.sendCommand("Page.enable");
+    await win.webContents.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: FAKE_OPS_ONLY });
     await http("POST", "/settings", { settingsLevel: "advanced", previewNotHovered: ["gif", "video", "image"], videoPreviewQuality: "high", glows: true, morphs: true, liveWallpaperBehindAllTabs: false });
     const paths = await fixtures("high");
     await loadLibrary();

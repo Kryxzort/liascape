@@ -30,9 +30,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
        all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
        under that load); the printed `cards` count tells.
-92. [ ] Flaky probe: `probe-libops.js` `libops:toggle` fails whenever it runs after `libops:backfill` in the same
-       probe run (base 1aa78a41 too) and passes alone: a leftover from the backfill cell (a held queue, a pending
-       clip, the progress line) leaks into it. Reset that state between cells or make the cell independent of it.
 95. [ ] Flaky under load (2026-11-18, the full crate suite at --test-threads=4 beside the UI build): `tests/api.rs`
        `dropout_analysis_never_skips_bus_cycles` (its recording file was missing) and `outbox_is_bounded` (timed out
        waiting for `outbox.dropped`); both pass alone with `--exact`. Find what each waits on and make the wait
