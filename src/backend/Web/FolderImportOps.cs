@@ -51,13 +51,13 @@ public static class FolderImportOps
                 if (!seen.Add(f.Path)) continue;
                 var rel = Path.GetRelativePath(baseDir, Path.GetDirectoryName(f.Path) ?? baseDir);
                 items.Add(new { path = f.Path, kind = f.Kind, title = f.Title, folder = f.Folder, workshopId = f.WorkshopId,
-                    inLibrary = f.InLibrary, dir = rel == "." ? "" : rel });
+                    inLibrary = f.InLibrary, subscription = f.Subscription, dir = rel == "." ? "" : rel });
             }
         }
         // a folder already watched: the dialog offers no second watch of it
         var watched = s.WatchedFolders.Select(w => Norm(w.Path)).ToHashSet();
         return new { roots, folders = roots.Where(Directory.Exists).ToList(), items, unreadable, unsupported, duplicates, truncated, scenesOff = !s.AllowScenes,
-            watched = roots.Where(watched.Contains).ToList(), copy = s.CopyFilesInsteadOfSymlinking };
+            autoImport = s.AutoAddWeWallpapersToLibrary, watched = roots.Where(watched.Contains).ToList(), copy = s.CopyFilesInsteadOfSymlinking };
     }
 
     // POST /library/import-found {paths, copy, watch?, skip?}: imports the ticked paths in the background (each identified
@@ -79,9 +79,10 @@ public static class FolderImportOps
             try
             {
                 var known = FolderScanner.Known.Load();
-                // what the library has meanwhile stays out (the dialog shows it disabled; a second dialog may have imported it)
+                // what the library has meanwhile stays out (the dialog shows it disabled; a second dialog may have imported it),
+                // and so does a Steam subscription (FolderScanner: the WE auto-import's alone)
                 var found = paths.Select(p => FolderScanner.Identify(p, known)).ToList();
-                var take = found.Where(f => f is { InLibrary: false }).Cast<FolderScanner.Found>().ToList();
+                var take = found.Where(f => f is { InLibrary: false, Subscription: false }).Cast<FolderScanner.Found>().ToList();
                 if (found.Count > take.Count) Step(found.Count - take.Count);
                 await ImportAsync(take, link: !r.Copy,
                     f => watch != null && f.Path.StartsWith(watch + "/", StringComparison.Ordinal) ? watch : null, "import");
@@ -197,7 +198,7 @@ public static class FolderImportOps
     // One watched folder's pass (Web/FolderWatch.cs): import what's new, import again what changed, and let go of what's gone.
     // Returns true when a file was still being written (its write time younger than `stable`): the caller looks again later.
     //   - new: imported (the folder's link / copy choice), never one in its Skip, never one the library has under another
-    //     source (the same Workshop id), never a scene while "Play scenes" is off (the next pass takes it once it's on).
+    //     source (the same Workshop id), never a Steam subscription (FolderScanner: the WE auto-import's alone), never a scene while "Play scenes" is off (the next pass takes it once it's on).
     //   - changed (its Sig): imported again in the form it has; a video's loudness is measured again.
     //   - gone: only an item this folder brought in (LibMeta.WatchedFrom). A link leaves the library (unlinked: AppOps.Trash
     //     without an undo, so the playlist and a playing wallpaper follow, like a delete); a copy stays as the user's own and
@@ -238,7 +239,7 @@ public static class FolderImportOps
                 again.Add((f, have.Key));
                 continue;
             }
-            if (skip.Contains(f.Path) || f.InLibrary || (f.Kind == "scene" && !s.AllowScenes)) continue;
+            if (skip.Contains(f.Path) || f.InLibrary || f.Subscription || (f.Kind == "scene" && !s.AllowScenes)) continue;
             if (f.Mtime > cutoff) { unsettled = true; continue; }
             fresh.Add(f);
         }

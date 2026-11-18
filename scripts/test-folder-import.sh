@@ -18,6 +18,10 @@
 #  subscribed: a backed-up Workshop folder imported, then its subscription's folder synced (the WE auto-import): one item,
 #          no local/ link beside it; deleting either leaves the other's files, and the subscription comes in once the
 #          imported item is gone.
+#  steam:  Steam's own Workshop folder (a library named in a fake libraryfolders.vdf): scanning it, a parent of it or a link
+#          into it lists its items as subscriptions (the user's own file beside them as usual); /library/import-found of every
+#          path lands only the user's file, and watching the parent never imports a subscription, old or new: nothing in
+#          the library links into Steam's folder and Steam's files are unchanged.
 #  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
 #          every root nor a watched folder's file by its own path, and no longer once the folder is unwatched.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
@@ -210,6 +214,39 @@ post /library/delete "$(item "Backed Scene")" > /dev/null
 check "Steam's one deleted: both folders untouched" \
   "$([ -L "$LIB/local/4444444444" ] && echo link) $(cd "$BK" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum) $(cd "$WE/4444444444" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)" " $BK_SUM $WE_SUM"
 rm -rf "$WE/4444444444"
+
+echo "== steam: Steam's own Workshop folder is its subscriptions, never imported"
+# a second Steam library, known only through Steam's libraryfolders.vdf (WorkshopDownloader.SteamLibraryRoots)
+SL=$T/steamlib2; SWC=$SL/steamapps/workshop/content/431960
+mkdir -p "$H/.local/share/Steam/steamapps"
+printf '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' \
+  "$H/.local/share/Steam" "$SL" > "$H/.local/share/Steam/steamapps/libraryfolders.vdf"
+wevid "$SWC/6666666661" "Steam Video"; scene "$SWC/6666666662" "Steam Scene"; vid "$SL/mine.mp4"
+ln -s "$SWC/6666666661" "$T/to-steam"
+steamsum() { (cd "$SWC" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum); }
+SWC_SUM=$(steamsum)
+subs() { post /library/scan "$(jq -nc --arg p "$1" '{paths: [$p]}')" | jq -c --arg s "$SL/" '[.items[] | [(.path | ltrimstr($s)), .subscription]] | sort'; }
+check "Steam's Workshop folder: every item a subscription" "$(subs "$SWC")" \
+  '[["steamapps/workshop/content/431960/6666666661",true],["steamapps/workshop/content/431960/6666666662",true]]'
+check "a parent of it: the subscriptions, the user's own file beside them not one" "$(subs "$SL")" \
+  '[["mine.mp4",false],["steamapps/workshop/content/431960/6666666661",true],["steamapps/workshop/content/431960/6666666662",true]]'
+check "a link into it: still a subscription" "$(post /library/scan "$(jq -nc --arg p "$T/to-steam" '{paths: [$p]}')" | jq -c '[.items[].subscription]')" '[true]'
+check "the scan says the auto-import is off" "$(post /library/scan "$(jq -nc --arg p "$SL" '{paths: [$p]}')" | jq -c .autoImport)" false
+post /library/import-found "$(jq -nc --argjson p "$(P "$SWC/6666666661" "$SWC/6666666662" "$T/to-steam" "$SL/mine.mp4")" '{paths: $p, copy: false}')" > /dev/null
+wait_for 30 idle; wait_for 10 has mine
+intosteam() { find "$LIB" -type l -print0 | xargs -0 -r realpath -m -- | grep -c "^$SL/steamapps/"; }
+check "every path sent: only the user's own file lands" "$(lib | jq -c '[.[].title | select(. == "mine" or . == "Steam Video" or . == "Steam Scene")] | sort')" '["mine"]'
+check "…nothing in the library links into Steam's folder" "$(intosteam)" 0
+post /library/import-found "$(jq -nc --arg w "$SL" '{paths: [], copy: false, watch: $w}')" > /dev/null
+wevid "$SWC/6666666663" "Steam New"; vid "$SL/mine2.mp4"
+if wait_for 8 has mine2; then ok "a watched folder holding Steam's: the user's new file comes in"; else bad "a watched folder holding Steam's: the user's new file comes in (proved nothing)"; fi
+post /library/watched "$(jq -nc --arg w "$SL" '{path: $w}')" > /dev/null; sleep 1.5
+check "…no subscription, old or new" "$(lib | jq -c '[.[].title | select(startswith("Steam "))]')" '[]'
+check "…nothing links into Steam's folder" "$(intosteam)" 0
+post /library/watched "$(jq -nc --arg w "$SL" '{path: $w, remove: true}')" > /dev/null
+rm -rf "$SWC/6666666663"
+check "Steam's files are unchanged" "$(steamsum)" "$SWC_SUM"
+for t in mine mine2; do post /library/delete "$(item "$t")" > /dev/null; done
 
 echo "== watch"
 W=$T/watched; mkdir -p "$W/sub"

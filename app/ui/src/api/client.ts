@@ -224,9 +224,11 @@ export interface LibraryOp { id: string; phase: string; done: number; total: num
 // folder; dir = its folder under the scanned one ("" at its top); inLibrary = the library has it (the same source, or the
 // same Workshop id). roots = the paths scanned, folders = those that are folders, watched = those already watched.
 export interface FoundItem { path: string; kind: "video" | "gif" | "image" | "scene"; title: string; folder: boolean;
-  workshopId: string | null; inLibrary: boolean; dir: string }
+  workshopId: string | null; inLibrary: boolean; dir: string;
+  // in Steam's own Workshop folder: a subscription, never imported (the WE auto-import's; Helpers/FolderScanner.cs)
+  subscription: boolean }
 export interface ImportScan { roots: string[]; folders: string[]; items: FoundItem[]; unreadable: string[]; unsupported: number; duplicates: number;
-  truncated: boolean; scenesOff: boolean; watched: string[]; copy: boolean }
+  truncated: boolean; scenesOff: boolean; autoImport: boolean; watched: string[]; copy: boolean }
 // AppSettings.WatchedFolders (backend-owned: POST /settings never changes it)
 export interface WatchedFolder { path: string; copy: boolean; skip: string[] }
 export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }

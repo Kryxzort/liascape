@@ -16,6 +16,11 @@ namespace Liascape.Helpers;
 // Never written to: the scan only lists and reads project.json. Folder links are followed, each real folder once (a link loop or
 // a second way into the same folder adds nothing); dot-entries, Windows' system folders and the library itself are skipped; a
 // folder that can't be read is reported, never an error. Guard: scripts/test-folder-import.sh § scan
+// An item whose real path is inside one of Steam's own Workshop folders (any Steam library's workshop/content/431960, the WE
+// folder setting) is a subscription: Steam deletes its files on an unsubscribe, so a link to it would dangle and a library
+// item would lose its files behind the app's back. The scan lists it as Subscription and nothing imports it (the dialog, a
+// watched folder, /library/import-found): the WE auto-import is the one way a subscription enters the library (local/<id>).
+// Guard: scripts/test-folder-import.sh § steam
 public static class FolderScanner
 {
     // the containers ImportService stores under their own name (LibraryService.ImportedMediaExts) plus .m4v (stored as .mp4)
@@ -28,8 +33,10 @@ public static class FolderScanner
 
     // Kind: video | gif | image | scene. Folder = a Wallpaper Engine item folder (Path is the folder). Sig = what a change of
     // its files changes (size + newest write time), Mtime its newest write (a watched folder waits until it settles).
-    // InLibrary: the library has it already (the same source imported before, or the same Workshop id).
-    public sealed record Found(string Path, string Kind, string Title, bool Folder, string? WorkshopId, string Sig, DateTime Mtime, bool InLibrary);
+    // InLibrary: the library has it already (the same source imported before, or the same Workshop id). Subscription: it is in
+    // Steam's own Workshop folder (never imported).
+    public sealed record Found(string Path, string Kind, string Title, bool Folder, string? WorkshopId, string Sig, DateTime Mtime, bool InLibrary,
+        bool Subscription = false);
 
     public sealed class Result
     {
@@ -46,9 +53,14 @@ public static class FolderScanner
     {
         public HashSet<string> WorkshopIds { get; } = new(StringComparer.Ordinal);
         public HashSet<string> Sources { get; } = new(StringComparer.Ordinal);
+        // Steam's Workshop folders as real paths (WorkshopDownloader.SteamWorkshopRoots: the WE folder setting, standard /
+        // Flatpak / snap Steam, every libraryfolders.vdf library), those that exist
+        public List<string> SteamRoots { get; } = [];
         public static Known Load()
         {
             var k = new Known();
+            foreach (var root in WorkshopDownloader.SteamWorkshopRoots(SettingsService.Load().WorkshopFolder))
+                if (Liascape.Web.ApiSecurity.RealPath(root) is { } real && !k.SteamRoots.Contains(real)) k.SteamRoots.Add(real);
             foreach (var src in LibraryStore.Sources)
             {
                 if (src is LibraryStore.Local or LibraryStore.Workshop)
@@ -64,6 +76,10 @@ public static class FolderScanner
         public bool Has(string path, string? workshopId) =>
             Sources.Contains(path) || (Liascape.Web.ApiSecurity.RealPath(path) is { } r && Sources.Contains(r))
             || (workshopId != null && WorkshopIds.Contains(workshopId));
+        // inside one of Steam's Workshop folders, by real path (a link or a mount into it counts as it)
+        public bool InSteam(string path) =>
+            SteamRoots.Count > 0 && (Liascape.Web.ApiSecurity.RealPath(path) ?? path) is var r
+            && SteamRoots.Any(s => r.StartsWith(s + "/", StringComparison.Ordinal));
     }
 
     // an imported item's source path (LibMeta.SourceUrl "import:<path>", ImportService's dedupe key)
@@ -142,7 +158,7 @@ public static class FolderScanner
             var fi = new FileInfo(path);
             if (fi.LinkTarget != null) fi = (FileInfo)(fi.ResolveLinkTarget(true) ?? fi);
             var title = System.IO.Path.GetFileNameWithoutExtension(path);
-            return new Found(path, kind, title, false, null, $"{fi.Length}:{fi.LastWriteTimeUtc.Ticks}", fi.LastWriteTimeUtc, known.Has(path, null));
+            return new Found(path, kind, title, false, null, $"{fi.Length}:{fi.LastWriteTimeUtc.Ticks}", fi.LastWriteTimeUtc, known.Has(path, null), known.InSteam(path));
         }
         catch { return null; }
     }
@@ -181,7 +197,7 @@ public static class FolderScanner
         }
         catch { }
         var t = LibraryService.SanitizeName(title ?? "") is { Length: > 0 } st ? st : name;
-        return new Found(dir, scene ? "scene" : "video", t, true, wid, $"{size}:{newest.Ticks}", newest, known.Has(dir, wid));
+        return new Found(dir, scene ? "scene" : "video", t, true, wid, $"{size}:{newest.Ticks}", newest, known.Has(dir, wid), known.InSteam(dir));
     }
 
     private static string? Str(JsonElement o, string k) => o.TryGetProperty(k, out var v)

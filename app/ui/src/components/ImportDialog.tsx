@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Film, ImagePlay, Image as ImageIcon, Layers, LoaderCircle, Upload } from "lucide-react";
+import { CloudCheck, Film, ImagePlay, Image as ImageIcon, Layers, LoaderCircle, Upload } from "lucide-react";
 import { useStore } from "../store";
 import { api, type FoundItem, type ImportScan } from "../api/client";
 import { useFadeOff, useMotion, FADE } from "./motion";
@@ -14,7 +14,10 @@ import { hasPicker, pickFolder } from "./importPick";
 // background (the top bar's progress line); Cancel, Escape or a click outside lands nothing. One scanned folder can be kept
 // watched (Settings → Watched folders), and every import is linked or copied ("Copy files instead of linking", the Workshop
 // folder's own choice, as its default). With no native picker (a plain browser) the dialog asks for the folder's path.
-// Guard: --probe probe-import.js (import:*)
+// What sits in Steam's own Workshop folder is listed apart, "From your Steam subscriptions", unticked and disabled: Steam
+// deletes those files on an unsubscribe, so the WE auto-import is their one way in (Settings' "Import new Workshop
+// wallpapers"); the backend refuses them too.
+// Guard: --probe probe-import.js (import:*, import:steam)
 const GROUPS: { kind: FoundItem["kind"]; label: string; one: string; many: string; icon: React.ReactNode }[] = [
   { kind: "video", label: "Videos", one: "video", many: "videos", icon: <Film size={14} /> },
   { kind: "gif", label: "GIFs", one: "GIF", many: "GIFs", icon: <ImagePlay size={14} /> },
@@ -23,17 +26,20 @@ const GROUPS: { kind: FoundItem["kind"]; label: string; one: string; many: strin
 ];
 const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
 
-// "12 videos, 3 scenes, 2 already in your library"
+// "12 videos, 3 scenes, 2 already in your library, 4 from your Steam subscriptions"
 function scanSummary(scan: ImportScan): string {
-  const parts = GROUPS.map((g) => [g, scan.items.filter((i) => i.kind === g.kind && !i.inLibrary).length] as const)
+  const own = scan.items.filter((i) => !i.subscription);
+  const parts = GROUPS.map((g) => [g, own.filter((i) => i.kind === g.kind && !i.inLibrary).length] as const)
     .filter(([, c]) => c > 0).map(([g, c]) => n(c, g.one, g.many));
-  const have = scan.items.filter((i) => i.inLibrary).length;
+  const have = own.filter((i) => i.inLibrary).length;
   if (have) parts.push(`${have} already in your library`);
+  const subs = scan.items.length - own.length;
+  if (subs) parts.push(`${subs} from your Steam subscriptions`);
   return parts.length ? parts.join(", ") : "No wallpapers here";
 }
 
-// an item the user can tick: not in the library yet, and a scene only while scenes can play
-const tickable = (i: FoundItem, scan: ImportScan) => !i.inLibrary && !(i.kind === "scene" && scan.scenesOff);
+// an item the user can tick: not in the library yet, not a Steam subscription, and a scene only while scenes can play
+const tickable = (i: FoundItem, scan: ImportScan) => !i.inLibrary && !i.subscription && !(i.kind === "scene" && scan.scenesOff);
 
 export function ImportDialog() {
   const req = useStore((s) => s.importAt);
@@ -168,9 +174,15 @@ export function ImportDialog() {
 }
 
 // The found items by kind: a group's tick ticks all it can (mixed: some), each item's its own; the library's own and (with
-// "Play scenes" off) the scenes are shown unticked and can't be ticked, each saying why.
+// "Play scenes" off) the scenes are shown unticked and can't be ticked, each saying why. Steam's subscriptions come last, in
+// a group of their own whose line says how they reach the library.
+const STEAM = { kind: "steam", label: "From your Steam subscriptions", icon: <CloudCheck size={14} /> } as const;
 function ScanList({ scan, ticked, tick }: { scan: ImportScan; ticked: ReadonlySet<string>; tick: (paths: string[], on: boolean) => void }) {
-  const groups = useMemo(() => GROUPS.map((g) => ({ ...g, items: scan.items.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length), [scan]);
+  const groups = useMemo(() => {
+    const kinds: { kind: string; label: string; icon: React.ReactNode; items: FoundItem[] }[] =
+      GROUPS.map((g) => ({ ...g, items: scan.items.filter((i) => i.kind === g.kind && !i.subscription) }));
+    return [...kinds, { ...STEAM, items: scan.items.filter((i) => i.subscription) }].filter((g) => g.items.length);
+  }, [scan]);
   const notes = [
     scan.unreadable.length ? `${n(scan.unreadable.length, "folder", "folders")} couldn't be read.` : "",
     scan.unsupported ? `${n(scan.unsupported, "Wallpaper Engine item is", "Wallpaper Engine items are")} a kind the app can't play (web, application).` : "",
@@ -190,6 +202,11 @@ function ScanList({ scan, ticked, tick }: { scan: ImportScan; ticked: ReadonlySe
                 <GroupTick label={g.label} icon={g.icon} count={g.items.length} on={on} of={can.length}
                   note={g.kind === "scene" && scan.scenesOff ? "turn on Play scenes in Settings to import them" : null}
                   onChange={(v) => tick(can.map((i) => i.path), v)} />
+                {g.kind === "steam" && (
+                  <p className="shint imp-gwhy" data-import-steam-why>{scan.autoImport
+                    ? "In Steam's Workshop folder: Import new Workshop wallpapers brings these into your library by itself."
+                    : "In Steam's Workshop folder: turn on Import new Workshop wallpapers in Settings to bring these in."}</p>
+                )}
                 {g.items.map((i) => {
                   const off = !tickable(i, scan);
                   return (

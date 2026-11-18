@@ -21,6 +21,12 @@
 //                       importing lists the folder in Watched folders with its wallpaper count (all six); its "Copy files instead of
 //                       linking" saves the folder's copy choice; a file written into the folder shows up in the Library
 //                       without a click; the remove button stops the watching (the row glides out) and keeps the wallpapers
+//   import:steam        a folder holding a Steam library's Workshop folder (a fake libraryfolders.vdf in the stack's HOME):
+//                       its items listed apart, last, as "From your Steam subscriptions" (the summary says how many), the
+//                       group's tick and every item unticked and disabled, its line naming "Import new Workshop wallpapers"
+//                       (off: turn it on in Settings; on: it brings them in) in --subtext, the chip in --accent; the user's
+//                       own file beside them ticked; Import lands only that file, nothing linked into Steam's folder;
+//                       picture import-steam.png (also under no-glow and bg-live: the dialog keeps its fill)
 //   import:look         theme colours (the in-library pill in --success, the group chips in --accent), the drop frame's
 //                       glow (none under no-glow), bg-live: the dialog keeps its own fill; pictures import-*.png
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
@@ -373,6 +379,69 @@ app.whenReady().then(async () => {
       if (!fades) v.push(`the row popped out (${brief(fr)})`);
       if (!(await waitFor(async () => !((await http("GET", "/settings")).json?.watchedFolders ?? []).some((w) => w.path === d), 8000))) v.push("remove didn't stop the watching");
       if (!(await titles()).includes("wa")) v.push("removing the folder took its wallpapers away");
+      return v;
+    });
+
+    await cell("import:steam — Steam's own Workshop folder: its items apart as your Steam subscriptions, disabled, saying how they come in", async () => {
+      const v = [];
+      // a second Steam library, named only in Steam's libraryfolders.vdf (the backend reads it from this HOME at each scan)
+      const lib = path.join(T, "steamlib"), wc = path.join(lib, "steamapps", "workshop", "content", "431960");
+      const vdfDir = path.join(E.HOME, ".local", "share", "Steam", "steamapps");
+      fs.mkdirSync(vdfDir, { recursive: true });
+      fs.writeFileSync(path.join(vdfDir, "libraryfolders.vdf"), `"libraryfolders"\n{\n\t"1"\n\t{\n\t\t"path"\t\t"${lib}"\n\t}\n}\n`);
+      scene(path.join(wc, "7100000001"), "Steam Sub Scene"); scene(path.join(wc, "7100000002"), "Steam Sub Two");
+      vid(path.join(lib, "smine.mp4"));
+      const look = async (autoImport) => {
+        await setSettings({ AutoAddWeWallpapersToLibrary: autoImport }); await load();
+        await stubPicker(lib);
+        await js(`document.querySelector("[data-import-btn]").click(); return true`);
+        if (!(await found())) return [`auto-import ${autoImport}: the dialog didn't list the folder`];
+        const w = [];
+        const s = await dialog();
+        if (s.summary !== "1 video, 2 from your Steam subscriptions") w.push(`summary ${J(s.summary)}`);
+        if (J(s.groups.map((g) => g.kind)) !== J(["video", "steam"])) w.push(`groups ${J(s.groups.map((g) => g.kind))}, want the subscriptions last, apart`);
+        const sg = s.groups.find((g) => g.kind === "steam");
+        if (sg) {
+          const head = await js(`const g = document.querySelector('[data-import-group="steam"]'); const h = g.querySelector(".imp-head");
+            return { label: h.querySelector(".imp-gname")?.textContent, off: h.querySelector("input").disabled, why: g.querySelector("[data-import-steam-why]")?.textContent ?? null }`);
+          if (head.label !== "From your Steam subscriptions") w.push(`group label ${J(head.label)}`);
+          if (!head.off || sg.on || sg.mixed) w.push(`the group's tick: disabled ${head.off}, on ${sg.on}, mixed ${sg.mixed} (want disabled, off)`);
+          if (sg.items.length !== 2 || sg.items.some((i) => i.on || !i.off)) w.push(`its items ${J(sg.items)}: want two, unticked and disabled`);
+          const want = autoImport ? /Import new Workshop wallpapers brings these/ : /turn on Import new Workshop wallpapers in Settings/;
+          if (!want.test(head.why ?? "")) w.push(`auto-import ${autoImport}: its line ${J(head.why)}`);
+        }
+        const own = s.groups.find((g) => g.kind === "video")?.items ?? [];
+        if (own.length !== 1 || !own[0].on || own[0].off) w.push(`the user's own file: ${J(own)}, want ticked`);
+        if (s.go !== "Import 1") w.push(`button ${J(s.go)}, want "Import 1"`);
+        return w.map((x) => `auto-import ${autoImport}: ${x}`);
+      };
+      v.push(...await look(true));
+      await js(`[...document.querySelectorAll(".imp-actions .btn")].find((b) => b.textContent.trim() === "Cancel").click(); return true`);
+      await gone();
+      v.push(...await look(false));
+      const col = await js(`const cs = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e) : null; };
+        const probe = document.createElement("i"); document.body.append(probe);
+        const tv = (n) => { probe.style.color = "var(" + n + ")"; return getComputedStyle(probe).color; };
+        const out = { why: cs("[data-import-steam-why]")?.color, subtext: tv("--subtext"), gico: cs('[data-import-group="steam"] .imp-gico')?.color, accent: tv("--accent") };
+        probe.remove(); return out;`);
+      if (col.why !== col.subtext) v.push(`its line ${col.why}, want --subtext ${col.subtext}`);
+      if (col.gico !== col.accent) v.push(`its chip ${col.gico}, want --accent ${col.accent}`);
+      await shot("steam", ".imp-modal");
+      await js(`document.documentElement.classList.add("no-glow", "bg-live"); return true`); await sleep(200);
+      const fill = await js(`return getComputedStyle(document.querySelector(".imp-modal")).backgroundColor`);
+      if (/rgba\(0, 0, 0, 0\)|transparent/.test(fill)) v.push(`bg-live: the dialog lost its fill (${fill})`);
+      await shot("steam-noglow-bglive", ".imp-modal");
+      await js(`document.documentElement.classList.remove("no-glow", "bg-live"); return true`);
+      const before = await titles();
+      await js(`document.querySelector("[data-import-go]").click(); return true`);
+      if (!(await gone())) v.push("the dialog stayed after Import");
+      if (!(await waitFor(async () => (await titles()).includes("smine"), 20000))) v.push("the user's own file never landed");
+      await sleep(800);
+      const added = (await titles()).filter((t) => !before.includes(t));
+      if (J(added) !== J(["smine"])) v.push(`landed ${J(added)}, want only "smine"`);
+      const linked = (await library()).filter((i) => { try { return fs.realpathSync(i.videoPath).startsWith(wc + "/"); } catch { return false; } });
+      if (linked.length) v.push(`the library links into Steam's folder: ${J(linked.map((i) => i.videoPath))}`);
+      fs.rmSync(path.join(vdfDir, "libraryfolders.vdf"), { force: true });
       return v;
     });
 

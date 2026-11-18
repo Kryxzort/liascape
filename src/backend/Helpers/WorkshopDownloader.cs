@@ -455,7 +455,7 @@ public static class WorkshopDownloader
     }
 
     // Roots (…/431960) of every place workshop content can live: configured WE path,
-    // standard + Flatpak Steam, and each libraryfolders.vdf library. Parse the vdf once and reuse
+    // standard + Flatpak + snap Steam, and each libraryfolders.vdf library. Parse the vdf once and reuse
     // across many ids (the prune pass does this).
     private static System.Collections.Generic.List<string> WorkshopContentRoots(string workshopBasePath)
     {
@@ -464,12 +464,13 @@ public static class WorkshopDownloader
         if (!string.IsNullOrEmpty(workshopBasePath)) roots.Add(workshopBasePath); // already …/431960
         roots.Add(Path.Combine(home, ".local/share/Steam/steamapps/workshop/content/431960"));
         roots.Add(Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"));
+        roots.Add(Path.Combine(home, "snap/steam/common/.local/share/Steam/steamapps/workshop/content/431960"));
         foreach (var libRoot in ReadSteamLibraryRoots())
             roots.Add(Path.Combine(libRoot, "steamapps/workshop/content/431960"));
         return roots;
     }
 
-    /// The Workshop roots, all Steam's (the WE folder setting, standard + Flatpak Steam, every library). Its folder in one of
+    /// The Workshop roots, all Steam's (the WE folder setting, standard + Flatpak + snap Steam, every library). Its folder in one of
     /// them = Steam has it subscribed (until an unsubscribe makes Steam delete it).
     public static System.Collections.Generic.List<string> SteamWorkshopRoots(string workshopBasePath) => WorkshopContentRoots(workshopBasePath);
 
@@ -840,6 +841,7 @@ public static class WorkshopDownloader
             Path.Combine(home, ".local/share/Steam/steamapps/libraryfolders.vdf"),
             Path.Combine(home, ".steam/steam/steamapps/libraryfolders.vdf"),
             Path.Combine(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"),
+            Path.Combine(home, "snap/steam/common/.local/share/Steam/steamapps/libraryfolders.vdf"),
         ];
 
         foreach (var vdf in vdfCandidates)

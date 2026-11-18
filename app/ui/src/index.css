@@ -2184,6 +2184,8 @@ button.side-pill.copy { overflow: hidden; }
   background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .imp-count { color: var(--subtext); font-weight: 600; font-variant-numeric: tabular-nums; }
 .imp-gnote { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--warn); }
+/* the Steam subscriptions group's line: under its head, in line with its items' titles */
+.imp-gwhy { margin: 0 0 2px; padding: 0 6px 2px 36px; }
 .ck.imp-item { margin: 0; padding: 4px 6px 4px 36px; border-radius: 7px; font-size: 13px; min-width: 0; cursor: pointer;
   transition: background .12s; }
 .ck.imp-item:hover:not(.off) { background: color-mix(in srgb, var(--surface0) 70%, transparent); }
