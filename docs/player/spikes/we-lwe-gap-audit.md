@@ -426,7 +426,7 @@ property table GH 0x140273180 places overrides at object+0x760.
 | P34 | Control-point flags | **Observed**: per-CP flags mask 0x10005 (bits 0, 2, 16) gates override application. bit0 = follow mouse (GH 0x140251f70). CPs also have `parentcontrolpoint` and `angles`. | bit0 = mouse and bit1 = "world space" (`CP.cpp:146-165`). `parentcontrolpoint` and `angles` are ignored. A `locktopointer` key is parsed and unused (`OP.cpp:828`). | bit0 24, bit1 3 (3042492564, 3163060610, 3479521040) | **Unknown** for bit1 scenes. | S **Done in B11** (0053): bit1 = the offset is in the scene's space, unrotated and unscaled into the system's (not control point 0, GH 0x1402504f0). Local offsets are now mirrored like emitter origins. |
 | P35 | Mouse CP vs object transform | **Inferred**: WE stores CP matrices (stride 0xd0) and transforms them with the object. | Mouse CP = screen px − origin, ignoring object `scale` and `angles`, but rendered through the scaled and rotated model matrix (`CP.cpp:235-255, 1828-1841`). | 24 mouse-CP scenes. scale≠1 in 59 and angles≠0 in 54 particle scenes overall. | Cursor-follow effects offset or rotated away from the cursor when the system is scaled or rotated. | S: inverse model matrix **Done in B11** (0053): the inverse of the system's rotation and scale. |
 | P36 | Parented particle systems | **Unknown** for particles specifically (parenting is generic in WE). | `updateMatrices` uses only the object's own origin, angles and scale (`CP.cpp:1828-1841`). | 13 (3042492564, 3163060610, 3174556087…) | Effects don't follow the moving or animated parent. | M (shared with the hierarchy section) |
-| P37 | Frame-time handling | **Observed**: no dt clamp seen in GH 0x140255e50 or GH 0x14025c2e0. When the scene FPS setting is 1-20, each frame is simulated as two half steps (GH 0x14025c2e0 tail). | dt capped at 0.1 s (`CP.cpp:197`). No substeps. | all 78 | At <10 fps (or on hitches) LWE sim time runs slower than wall time. | S |
+| P37 | Frame-time handling | **Observed**: no dt clamp seen in GH 0x140255e50 or GH 0x14025c2e0; 2.8.797's main loop clamps the frame's step at 0.1 s before any object steps (§ "Particle half steps at 1 to 20 fps (P37)"). When the scene FPS setting is 1-20, each frame is simulated as two half steps (GH 0x14025c2e0 tail). | dt capped at 0.1 s (`CP.cpp:197`). No substeps. | all 78 | Particles at the default 15 fps move by whole steps where WE's move by half ones. | S **Done** (0134): the operators run twice on half steps at 1-20 fps; the 0.1 s cap is WE's too. |
 | P38 | Random source | **Observed**: one scene-level RNG (`*scene+0x1f08`, GH 0x140223090). | `std::random_device` per system (`CP.cpp:31`). randomframe uses the particle *address* as seed (`CP.cpp:283-287`). | 21 randomframe | randomframe frames repeat per pool slot (patterned). | S |
 | P39 | Particle-level `flags` | **Observed**: only the low 8 bits are kept (`movzx`, asm 0x1401f3379). bit1 or randomframe disables sheet blend. Bit 0x4 sets template+4=0x80. 0x10/0x20/0x40/0x80 opt out of speed/count/lifetime/size override binding. | Uses only bit2 (perspective: 3D spawn shell, separate projection) (`CP.cpp:578, 904, 1883`). | bit0 16, bit1 11, bit2 36 | **Unknown** for bit0 (WE meaning not identified). | S **Done in the leftovers** (0092): bit 0 is the editor's "Worldspace" (wallpaperui.exe's flag strings); its particles stay where they were emitted (the carry inferred). |
 | P40 | Scene gravity/wind | **Unknown**: `general.gravitydirection/strength`, `windenabled/direction/strength` live in the scene property table (GH 0x1401d…; scene+0x3a8…). No particle-side reader found. Likely bone or puppet physics. | Not parsed. | 22 particle scenes set gravitystrength | Probably none for particles. | n/a |
@@ -799,7 +799,8 @@ no change: every system in the library sets maxcount and sizerandom, and LWE's `
   same 3 scenes fail to load: 3276522107, 3477054430 and 3509243656. No scene is newly blank, broken or crashed.
 - **Left of B3:** `SPRITESHEETBLENDNPOT` (P8, 6 sheets). The owner's WE captures of 1797172968 and 1155728109
   (P5, P8/P9) are still the reference for the hues and the sheet timing. The rest of the particle rows stay in
-  B6 (P36), B8 (P20, P21) and B11 (child systems P2, P10, P15, P22, P24–P30, P34, P35, P37: the 0.1 s dt cap stays).
+  B6 (P36), B8 (P20, P21) and B11 (child systems P2, P10, P15, P22, P24–P30, P34, P35, P37: the 0.1 s dt cap stays, and
+  is WE's too).
 
 ### B5 result (fork patch 0029, pin `9f64193`, 2026-11-03)
 
@@ -3416,10 +3417,8 @@ per-frame floor. Ours: the simulation steps at `ToWorker::Rate` = `scene_fps` wi
 **The particle step at fps 1–20 (P37), decoded again:** GH 0x14020a7a8 (2.8.797) computes fdt = dt ·
 min(0.025 / ctx+0x154, 1)^0.7 (`powf` at 0x1404de920; 0.025 at 0x140578430, 0.7 at 0x1405784dc, 1 at 0x140578550),
 then reads the int at ctx+0x150: if 1 ≤ it ≤ 20 (`dec eax; cmp eax, 0x13; ja`) it halves dt and fdt (0.5 at
-0x1405784c8) and runs the step (0x1402132b0) twice, the first with flag 0x4 at system+0x3fe set (inside the step it
-picks 0.5 instead of 1 for a blend factor kept at rbp−0x80 / rbp+0x10 / rbp+0x150, used by the emitter's motion: not
-decoded further); otherwise once with dt, fdt. LWE runs one step. Liascape's default `scene_fps` (15) is WE's default
-(15), so every particle scene at the default rate is affected. Not ported: it is a fork patch (`docs/TODO.md`).
+0x1405784c8) and runs the step (0x1402132b0) twice, the first with flag 0x4 at system+0x3fe set; otherwise once with
+dt, fdt. Ported in fork 0134; what the flag does and the proof against WE: § "Particle half steps at 1 to 20 fps (P37)".
 
 **The sweep:** shaders reading `g_Frametime` or `g_PointerPositionLast` in the 321 Workshop items (packaged and loose)
 and WE's assets: only cursorripple (3184155462; 3414858021's `iris_movement__` declares `g_PointerPositionLast` but
@@ -3428,5 +3427,78 @@ not checked).
 Scene scripts: 1147 `update()` bodies, 353 scale by `engine.frametime` / time (the frame's dt in ours as in WE), 5 in
 4 items (2469881470, 2828233985, 2890767643, 3509243656) step a fixed amount per call — per frame drawn, as in WE when
 ours draws at `scene_fps` (not under the GPU budget's throttle). Particles: per-frame dt with WE's fdt; the half
-steps above are the one difference found. LWE caps a particle frame's dt at 0.1 s, WE doesn't (only < 10 fps or a
-hitch).
+steps above are the one difference found (ported since). LWE caps a particle frame's dt at 0.1 s, and so does WE
+2.8.797 (§ "Particle half steps at 1 to 20 fps (P37)").
+
+### Particle half steps at 1 to 20 fps (P37): fork 0134 against WE 2.8.797 (2026-11-20)
+
+**What WE does** (2.8.797's `wallpaper64.exe`, objdump and its `.pdata`). A particle system's frame, 0x140209a50
+(dt, a flag): ages every particle by the whole dt and kills the dead (their death children), updates the control
+points (0x140200c00: each one's 0xd0-byte record, current transform at +0, last at +0x40), runs the emitters
+(0x14020a970, dt, when the flag says so), then at 0x14020a7a8 the forces' step and the operator interpreter
+(0x1402132b0, args system, dt, fdt): at an fps (ctx +0x150) of 1 to 20 it sets bit 0x4 of system +0x3fe, runs the
+interpreter on dt / 2, fdt / 2, clears the bit and runs it again on dt / 2, fdt / 2; otherwise once on dt, fdt. Last,
+every control point's current transform becomes its last one. So the halves cover only the interpreter; ageing,
+emission, control points and children are once a frame. The interpreter's head copies the spawn colour (system flag
+8), alpha (flag 0x10) and size arrays back before the operators multiply them, so each half starts from them afresh.
+Its byte code dispatches on a type byte (jump table at 0x140220750); the parser's allocators give `movement` type 1
+(0x1401e7d90, from the "movement" string at 0x1401d7880) and `movementpath` type 2 (0x1401e7db0, 0x1401d78f4). Bit
+0x4 of +0x3fe is read once in the whole binary, in type 2's case (0x1402137ba): a blend of 0.5 instead of 1 in its
+position update (the new point on the path less (1 − blend) × the particle's offset from the path at its old
+parameter) and in the velocity it sets (that offset × blend / dt), so the first half sheds half the offset. Not decoded
+further: the core has no `movementpath` and no item of the library (321) nor WE's assets use it, so nothing of the
+bit is ported.
+
+**The 0.1 s cap is WE's too.** 2.8.797's wallpaper loop (0x1401261b0) measures the frame time from the performance
+counter, takes min (it, 0.1) (0x1401272c1, 0.1 at 0x14057845c) and max (it, 0), multiplies in the playback rate and
+speed and takes min (…, 0.1) again (0x14012745e) before the scene's frame (0x14016bd90) passes it down to every object
+(0x140197f50, vtable slot 9) and the particle object scales it by its own `rate` (0x1402032a0). LWE caps the system's
+dt at 0.1 s and then applies `rate`: the same; nothing to port.
+
+**The port** (fork 0134, `CParticle::update`): at the host's frame rate (`wp_project_set_frame_rate`, rounded) 1 to 20
+the operators run twice, each with dt / 2 and the forces' step / 2, size, alpha and colour reset before each; ageing,
+emitters, control points and children stay once a frame. The worker gives the core `scene_fps` (default 15, WE's
+default), so every particle scene at the default rate steps WE's way now; 0 (the refresh) and 21 and up are unchanged.
+Guard: `patches/lwe/tests/host_api_test.cpp` `particle_half_steps_below_21_fps` (a particle from rest under gravity:
+at 15 fps where it is at 30, 20 fps 1.6 px short, 25 fps 1.3 px past; two alphachange 0.5 at 15 fps still 64/255).
+Unpatched it fails (55 against 48.5 at 15 fps), and so does the port without the per-half reset (16/255).
+
+**How much it changes.** Smoke A/B over the 78 particle scenes at 15 fps (`WPENGINE_PARTICLE_SEED=7`, deterministic,
+frames at 1 / 2 / 3 / 5 s, each scene's own run-to-run noise subtracted): the difference is small everywhere — mean
+|Δ| per frame 0.1-1.0 of 255 where it shows (3516106265 and 3319542538's shooting-star trails, 3276522107's rope rain,
+2672425887's falling dust, 3023509773's bubbles, 3489263099's flow), 0 for most. The scheme is why: WE's movement
+moves by the velocity before the drag, so a particle's final travel under drag and its terminal speed under gravity
+and drag are the same whole or halved; what changes is gravity's lag behind the true curve (g·t·h / 2 for a step h:
+halved) and the drag's transient.
+
+**Against WE, the library** (3516106265 and 3319542538, the two largest A/B differences; three fresh WE captures at
+15 and three at 30 fps, frames at 1-6 s; `scene_we_compare.sh` distance, mean over the runs, lower is closer):
+
+| scene | 15 fps, before | 15 fps, after | 30 fps, before | 30 fps, after |
+|---|---|---|---|---|
+| 3516106265 | 0.0640 | 0.0641 | 0.0547 | 0.0547 |
+| 3319542538 | 0.0531 | 0.0533 | 0.0568 | 0.0568 |
+
+At 30 fps the two cores render identically, as they should. At 15 fps the difference is far below what WE's
+unseeded particles leave between two of its own runs (0.062-0.066 for 3516106265): the whole-frame score can't see a
+trail a few px off.
+
+**Against WE, a fountain** (`src/player/tests/onmachine/scene_particle_halfsteps.py variant`, captured as
+`fountain-3516106265` under the we-ref probe scenes; it is 3516106265 with only its shooting-star system, made a fixed
+fountain: one particle per 1/15 s from one point at 900, 1400 px/s
+under gravity 1200 px/s², no drag, over its background at alpha 0.3 on a black clear colour). Every particle follows one parabola, so
+WE's randomness drops out, and the dots' sag below the true curve is −600 · t · h (canvas px, t the dot's age): its
+slope k is −40 for whole 1/15 s steps and −20 for half ones or whole 1/30 s ones. k fitted over every dot of frames at
+3-6 s (the script's `sag`):
+
+| run | 15 fps | 30 fps |
+|---|---|---|
+| WE 2.8.797, 3 runs × 4 frames | −19.99 (−20.15 to −19.90) | −19.96 (−20.10 to −19.88) |
+| ours before (whole steps), `--lwe-smoke` | −40.0 | −20.0 |
+| ours after (fork 0134) | −20.0 | −20.0 |
+
+So WE steps its particles in halves at 15 fps and whole at 30, and ours now does the same; before, ours sagged twice
+as far as WE's at 15 fps (at the apex, t 1.17 s: 23 canvas px below WE's dots, 47 below the true curve against WE's 23). Seen on the way, not
+ported: WE's 15 fps fountain shows 37 distinct dots, ours 25-31 — inferred: ours emits two particles in one frame now and
+then (the rate × dt accumulator at 15 / s × 1/15 s), drawn on one spot, where WE spaces them evenly. And the variant had to leave
+the emitter's `directions` / `speedmin` / `speedmax` / `distancemin` out: with them (zero) WE emitted nothing, ours did.

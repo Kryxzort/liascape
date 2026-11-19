@@ -35,12 +35,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        check if it does: its Library fallback (`afterControl`, `if (!m.cards().length) m.tab("Library")`) counts
        Browse's cards too (`Card.tsx` and its skeletons are `.card.lib`), so a page left on Browse reads as no mark and
        an empty bar (the bar mounts on Library only) without switching; the printed `tab` tells.
-96. [ ] (owner) Copy WE's frame-rate quirks: wallpaper authors tuned their scenes on WE, so WE's behaviour is the look.
-       Done: cursorripple matches WE 2.8.797 at 30, 60 and 144 fps in the smoke and the player
-       (`src/player/tests/onmachine/scene_fps_quirks.py`; docs/player/spikes/we-lwe-gap-audit.md § "Frame-rate quirks
-       against WE 2.8.797"). Left: WE runs each particle frame as two half steps (dt / 2, fdt / 2) when its fps setting
-       is 1–20 — the default 15, ours too — and LWE runs one; port it in the fork (decode first what the first half's
-       flag 0x4 does inside the step: a 0.5 blend factor of the emitter's motion) and check it against a WE capture at 15.
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.

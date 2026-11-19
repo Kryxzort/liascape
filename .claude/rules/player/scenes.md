@@ -151,9 +151,9 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - The worker's `lia-scene-proto` thread answers pings during a load; past `LIASCAPE_SCENE_LOAD_TIMEOUT_MS` it
   keeps covering while the renderer's CPU time advances (≤ `LOAD_TIMEOUT_MAX_FACTOR` × the bound). Guards:
   `tests/scene.rs::slow_scene_load_keeps_the_heartbeat`, `starved_scene_load_outlasts_the_load_timeout`.
-- `scene_fps` is WE's `fps`: tick at it uncapped by the refresh (default 15, 0 = refresh); each output
-  presents at most `eff(scene_fps, refresh)`. Guards: `tests/api.rs::scene_fps_is_wes_rate_above_the_refresh`,
-  on-machine `src/player/tests/onmachine/scene_fps_quirks.py` (cursorripple's water against WE at each fps).
+- `scene_fps` is WE's `fps`: tick at it uncapped by the refresh (default 15, 0 = refresh), each output presenting at most
+  `eff(scene_fps, refresh)`; at 1–20 the core steps particles in halves, as WE. Guards: `tests/api.rs::scene_fps_is_wes_rate_above_the_refresh`,
+  host_api_test `particle_half_steps_below_21_fps`; vs WE: `src/player/tests/onmachine/scene_fps_quirks.py`, `scene_particle_halfsteps.py`.
 - Keep LWE's pointer at the scene centre until the host sends one. A pointer entering an output is a jump
   (`wp_project_pointer_jump`). Guard: `tests/api.rs::pointer_enter_is_a_jump_and_rate_is_the_demand`.
 - Desktop pointer (`signal/cursor.rs`) polls Hyprland only while an unpaused scene wants it; fall back to the

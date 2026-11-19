@@ -904,6 +904,8 @@ struct ScriptRig {
     /** the scene's size (B4's text scenes are bigger) */
     int width = 64;
     int height = 32;
+    /** each step's time (s): the host's frame time */
+    float dt = 1.0f / 30.0f;
 
     bool open (const std::string& sceneDir) {
         dir = sceneDir;
@@ -940,7 +942,7 @@ struct ScriptRig {
     }
 
     void step () {
-        g_now += 1.0f / 30.0f;
+        g_now += dt;
         wp_render_update_time (ctx);
         wp_render_frame (p);
         frames++;
@@ -1586,6 +1588,74 @@ static bool particle_operators_as_we () {
     }
     printf ("    box particle with speed 40 after 0.5 s: %d px lit within 8 px of the centre, %d px further out\n", nearSpawn, out);
     CHECK (nearSpawn == 0 && out > 0, "the box particle didn't move out (%d px near the centre, %d out)", nearSpawn, out);
+    return true;
+}
+
+// WE runs a particle frame as two half steps when its fps setting is 1 to 20 (2.8.797, 0x14020a7a8: dt / 2 and the
+// forces' step / 2, the operator interpreter twice), once above (docs/player/spikes/we-lwe-gap-audit.md § "Particle
+// half steps at 1 to 20 fps (P37)"). One particle from rest at x 4 under gravity 1920 px/s² along x, 0.2 s at each
+// host rate: semi-implicit Euler puts it g·t·h / 2 past the curve (x 42.4) for a step h, so at 15 fps (half steps of
+// 1/30 s) it is where it is at 30 fps, x 48.8 (unpatched: 55.2, whole 1/15 s steps), at 20 fps (1/40 s) 1.6 px short
+// of that (unpatched: 3.2 px past), at 25 fps (whole 1/25 s steps) 1.28 px past. Each half starts from the spawn
+// alpha: two alphachange 0.5 make 0.25 at 15 fps too (a second half without the interpreter's head: 0.0625)
+static bool particle_half_steps_below_21_fps () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string white = "{\"name\":\"colorrandom\",\"min\":\"255 255 255\",\"max\":\"255 255 255\"}";
+    const std::string life = "{\"name\":\"lifetimerandom\",\"min\":100,\"max\":100}";
+    const std::string one = ",\"distancemin\":0,\"distancemax\":0,\"rate\":0,\"instantaneous\":1";
+    std::string fall = particle_system ("opaque", ",\"maxcount\":5", one, white + "," + life);
+    fall.replace (fall.find ("\"min\":12,\"max\":12"), 17, "\"min\":4,\"max\":4");
+    fall.insert (fall.rfind ('}'), ",\"operator\":[{\"name\":\"movement\",\"gravity\":\"1920 0 0\",\"drag\":0}]");
+    std::string halves = particle_system ("opaque", ",\"maxcount\":5", one, white + "," + life);
+    halves.replace (halves.find ("\"min\":12,\"max\":12"), 17, "\"min\":4,\"max\":4");
+    halves.insert (halves.rfind ('}'), ",\"operator\":[{\"name\":\"alphachange\",\"startvalue\":0.5,\"endvalue\":0.5},"
+                                        "{\"name\":\"alphachange\",\"startvalue\":0.5,\"endvalue\":0.5}]");
+    const int rates[] = { 15, 20, 25, 30 };
+    double centre[4] = {};
+    int alpha15 = -1;
+    for (int r = 0; r < 4; r++) {
+        std::vector<std::string> files;
+        const std::string dir = particle_scene (particle_object (1, "fall.json", 4, 16) + "," + particle_object (2, "halves.json", 58, 6),
+            "0 0 0", { { "fall.json", fall }, { "halves.json", halves } }, files);
+        ScriptRig rig;
+        const float hz = static_cast<float> (rates[r]);
+        rig.dt = 1.0f / hz;
+        rig.loaded = [hz] (wp_project* p) { wp_project_set_frame_rate (p, hz); };
+        CHECK (particle_rig_open (rig, dir, files), "load/build of %s failed", dir.c_str ());
+        // open() drew the system's first frame (no step); then 0.2 s of steps
+        for (int i = 0; i < rates[r] / 5; i++) {
+            rig.step ();
+        }
+        unsigned char px[4] = { 0, 0, 0, 0 };
+        int first = -1, last = -1;
+        for (int x = 0; x < 64; x++) {
+            read_pixel (rig.fbo, x, 16, px);
+            if (px[0] > 128) {
+                first = first < 0 ? x : first;
+                last = x;
+            }
+        }
+        CHECK (first >= 0, "at %d fps the falling particle isn't in its row", rates[r]);
+        centre[r] = (first + last) / 2.0;
+        if (rates[r] == 15) {
+            read_pixel (rig.fbo, 58, 25, px); // object y is WE's, up: y 6 is row 25
+            alpha15 = px[0];
+        }
+    }
+    printf ("    after 0.2 s from x 4 under 1920 px/s²: x %.1f at 15 fps, %.1f at 20, %.1f at 25, %.1f at 30 (half steps "
+            "below 21: 48.8, 47.2, 50.08, 48.8; whole steps: 55.2, 52.0, 50.08, 48.8); two alphachange 0.5 at 15 fps: red %d "
+            "(want ~64)\n",
+            centre[0], centre[1], centre[2], centre[3], alpha15);
+    CHECK (std::abs (centre[3] - 48.8) <= 1.0, "at 30 fps the particle is at %.1f, not 48.8", centre[3]);
+    CHECK (std::abs (centre[0] - centre[3]) <= 0.5, "at 15 fps the particle is at %.1f, at 30 fps at %.1f: not half steps",
+           centre[0], centre[3]);
+    CHECK (centre[1] >= centre[3] - 3.0 && centre[1] <= centre[3] - 0.5,
+           "at 20 fps the particle is at %.1f against 30 fps' %.1f: not half steps", centre[1], centre[3]);
+    CHECK (centre[2] >= centre[3] + 0.5 && centre[2] <= centre[3] + 2.0,
+           "at 25 fps the particle is at %.1f against 30 fps' %.1f: not whole steps", centre[2], centre[3]);
+    CHECK (alpha15 >= 54 && alpha15 <= 74, "two alphachange 0.5 at 15 fps compose to %d/255", alpha15);
     return true;
 }
 
@@ -7876,6 +7946,7 @@ int main (int argc, char** argv) {
     run ("particle_colorn_hsv_shift", particle_colorn_hsv_shift);
     run ("particle_hide_resets_and_overrides_live", particle_hide_resets_and_overrides_live);
     run ("particle_operators_as_we", particle_operators_as_we);
+    run ("particle_half_steps_below_21_fps", particle_half_steps_below_21_fps);
     run ("particle_children_run", particle_children_run);
     run ("particle_control_points", particle_control_points);
     run ("puppet_warp_as_we", puppet_warp_as_we);

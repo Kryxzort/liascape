@@ -1,7 +1,7 @@
 From 61dd67b1f426e1e858267753c2bd353fdb7cc109 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sun, 15 Nov 2026 23:26:53 +0530
-Subject: [PATCH 131/133] render: upload a wallpaper's JPEG / PNG textures on a
+Subject: [PATCH 131/134] render: upload a wallpaper's JPEG / PNG textures on a
  context of the host's while it builds
 
 A wallpaper's JPEG / PNG textures decode on the pool's threads while it builds (0128), but their pixels still
