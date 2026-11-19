@@ -37,6 +37,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.
+104. [ ] Video textures in scenes cost ~390 MiB of VRAM each with nvdec: mpv loads every hwdec interop at
+       `mpv_render_context_create` and makes one CUDA context per video (3426575339's worker 356 → 906 MiB once libcuda
+       loads). In the fork's GLPlayer, ask mpv for the CUDA interop only (`gpu-hwdec-interop`), and see whether a scene's
+       video textures can share one CUDA context; a scene with 6+ videos would otherwise hit the backend's 2048 MiB scene
+       VRAM limit. Also moves ~200 ms of interop setup out of the build (`source.ready`).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
