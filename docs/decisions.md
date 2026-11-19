@@ -13,14 +13,11 @@ output always warps the cursor to another monitor's centre and focuses it (`CMon
 reads Hyprland; its watcher aborts on any owner-side event. `.claude/rules/ui/shell-and-probes.md`.
 
 ### Serve media from a second listener — 2026-11-12
-Chromium opens 6 HTTP/1.1 connections per origin; slow media loads held all six and every API call queued
-behind them. Media gets its own listener at the API's port + 1
-(`ApiSecurity.PickPorts`): its own origin and pool, answering only token-carrying GETs of the media routes; the page derives
-it from the API's port (`api/client.ts` `MEDIA`). Rejected: `localhost:<port>` on the same listener (Chromium tries `[::1]`
-first, where another local user could listen and collect the token; `localhost` is already the API's own origin), HTTP/2
-(browsers need TLS), a discovered random port (races the first thumbnails). `.claude/rules/backend/api.md`; matrix
-`browse:mediaPool`.
-
+Chromium opens 6 HTTP/1.1 connections per origin; slow media loads held them all and API calls queued behind. Media
+gets its own listener at the API's port + 1 (`ApiSecurity.PickPorts`), answering only token-carrying GETs of the media
+routes; the page derives it (`api/client.ts` `MEDIA`). Rejected: `localhost:<port>` (Chromium tries `[::1]` first, where
+another local user could listen and collect the token), HTTP/2 (needs TLS), a random port (races the first thumbnails).
+`.claude/rules/backend/api.md`; matrix `browse:mediaPool`.
 ### Authenticate media URLs with `?token=`, not a cookie — 2026-11-11
 Every page in the user's browser and every local user can reach `127.0.0.1`, so the API needs a capability only the
 app's page holds. `<img>`/`<video>` src and the WebSocket can't send headers, so GET/HEAD may carry `?token=`; writes need
@@ -198,13 +195,11 @@ GIF previews as videos" (off by default) holds it: the gif plays as its clip, pa
 Guard: matrix `appear:gifResume`, `appear:gifVideo`; `.claude/rules/ui/design.md` § Performance.
 
 ### Play every on-screen video preview, each as a small clip — 2026-11-18
-Every video preview on screen plays a clip the backend makes (`Web/ClipStore.cs`), never the wallpaper's file (it holds one
-of Chromium's 6 connections). Owner's terms: no storage options; one clip per item, box × dpr × "Video preview quality",
-up to 5 min; re-made wider, shrunk when 2× too wide while idle; the library follows a settled quality. Each card's still,
-gif and clip (as its preview orders reach) is made ahead of it on the same worker and line, never a second queue; it waits
-while the PC is busy, not for a maximized window (the app's own often is). Guard: `scripts/test-clip-sweep.sh`,
-`scripts/test-preview-backfill.sh`, matrix `clip:*`.
-
+Every on-screen video preview plays a backend-made clip (`Web/ClipStore.cs`), never the wallpaper's file (it holds one of
+Chromium's 6 connections). Owner's terms: no storage options; one clip per item, box × dpr × "Video preview quality", up
+to 5 min; re-made wider, shrunk when 2× too wide while idle. Each card's still, gif and clip is made ahead of it on the
+same worker and line, never a second queue; it waits while the PC is busy, not for a maximized window. Guard:
+`scripts/test-clip-sweep.sh`, `scripts/test-preview-backfill.sh`, matrix `clip:*`.
 ### Keep the Library page mounted across tab switches; don't virtualise the grid — 2026-11-12
 The Library page and the playlist bar stay mounted once shown (React `<Activity>`, hidden = display none); Browse and
 Settings rebuild on each visit. Not a virtualised grid: `content-visibility` already skips off-screen cards, the cost
@@ -240,23 +235,17 @@ YouTube's `loop=1&playlist=<id>` restarted early; `seekTo(0)` + `playVideo` on "
 `components/YouTubeEmbed.tsx`.
 
 ### Filter the Library and the local Wallpaper Engine folder in the page — 2026-11-12
-Owner's call. The Workshop's column, toggle, chips and semantics (`WorkshopTags.Build`), matched in the page against each
-item's saved Steam tags, else its project.json's genres, age rating and declared features (read at library load, cached
-by write time, never written to the index: Steam updates the file under a `local/<id>` link). Each list keeps its own
-filter: a shared one would silently empty a local list with tags it can't know. A local column offers only the tags some
-item has (a project.json never states a resolution), not Steam's whole list. Not a backend `/library` filter: the page
-holds every item, and a request per click is slower. `components/workshopFilter.ts` `localMatcher`; guard probe-filters `lib:*`, `local:weFolder`.
-
+Owner's call: the Workshop's column and semantics (`WorkshopTags.Build`), matched in the page against each item's saved
+Steam tags, else its project.json's genres, rating and features (cached by write time, never written to the index).
+Each list keeps its own filter (a shared one would empty a local list with tags it can't know); a local column offers
+only tags some item has. Not a backend `/library` filter: the page holds every item and a request per click is slower.
+`components/workshopFilter.ts` `localMatcher`; guard probe-filters `lib:*`, `local:weFolder`.
 ### Filter the Workshop in a column of three-way switches — 2026-11-11
-The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide;
-clicking the name toggles include only (a cycle through hide surprised users), so hiding is always deliberate (✕ or
-right-click). `components/WorkshopFilterColumn.tsx`.
-Placement (the owner's pick): on the right, one panel at a time with the item sidebar and in its shape
-(width, 900 px dock, slide: a swap moves no card), toggled by the left half of the top bar's split sort button
-(`components/SortFilterButton.tsx`). Rejected: a left column under a "Filters · N" pill above the grid (it scrolled away),
-that pill in the top bar (it wrapped it), an edge handle (it cost grid width), a sticky row. Guard
-probe-filters `split:*`, `panel:*`, `swap:*`.
-
+The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide; clicking
+the name toggles include only, so hiding is deliberate (✕ or right-click). `components/WorkshopFilterColumn.tsx`.
+Placement (owner's pick): on the right, one panel at a time with the item sidebar and in its shape, toggled by the left
+half of the split sort button (`components/SortFilterButton.tsx`). Rejected: a left column under a pill (scrolled away),
+the pill in the top bar (wrapped it), an edge handle (cost grid width), a sticky row. Guard probe-filters `split:*`, `panel:*`, `swap:*`.
 ### Keep the playlist bar's items 112 px tall at every Thumbnail shape; the dock aims at a fixed rise — 2026-11-12
 The width follows the shape (Widescreen ≈ 199 × 112) rather than a fixed 112 px width: widescreen items were "too small"
 and the bar's height changed with the setting. The dock rises a fixed 12 px (not a fixed 1.16×, which on 112 px items
@@ -346,6 +335,13 @@ mpv reports no time remaining around a load; breaking after 500 ms switched scen
 
 ## Player (`liascape-player`)
 
+### Keep the pointer's arrival jump, not WE's first-frame corner stroke — 2026-11-20
+WE starts the last pointer at 0 0, so its first frame strokes cursor effects from the top-left corner; ours jumps.
+Kept by the owner: a WE quirk. `scene_fps_quirks.py` cancels it with a parked pointer.
+
+### Share one CUDA context across a scene's videos by patching mpv — 2026-11-20
+libmpv makes a CUDA context per render context (160 MiB each) and takes no host device. The owner chose an mpv patch
+over a libcuda shim (driver-tied hack) and copy decoding (CPU cost, late videos).
 ### Scene fonts come from fontconfig, not a Windows install — 2026-11-18
 Owner's call: `systemfont_consolas` asks fontconfig for Consolas like any app.
 Microsoft's fonts pass on only inside their installers (Consolas, Segoe UI never): nothing ships or reads them from a

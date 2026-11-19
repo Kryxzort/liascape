@@ -38,17 +38,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-104. [ ] Video textures in scenes cost ~275 MiB of VRAM each with nvdec (3426575339, two 1080p videos: worker 356 → 906
-       MiB): mpv's CUDA interop makes a CUDA context per video (160 MiB on this GPU), the decoder's surfaces and mpv's
-       textures the rest; about seven videos reach the 2048 MiB scene VRAM limit. Loading only the CUDA interop
-       (`wp_context_set_video_hwdec`) changed nothing here: the other interops fail or hold no device memory. Sharing one
-       CUDA context needs a way outside libmpv's public API (`cuCtxCreate` in every render context; no option or render
-       parameter takes a device): a libcuda shim that hands out the retained primary context (160 MiB for any number of
-       contexts, measured), or an mpv change that takes the host's hwdec device. Or copy modes for scene videos: with
-       `LIASCAPE_PLAYER_HWDEC_INTEROP=off` they decode with `nvdec-copy` (ffmpeg's own context, no GL interop): worker
-       730 MiB (~190 per video), `source.ready` warm 187 ms instead of ~400 (no interop init in the build), each video
-       ~0.28 s after the scene's first frame instead of ~0.03 (the full picture at about the same time), 0/10 black, at
-       the copy's CPU cost (the compositor measured nvdec-copy 1080p30 at ~10 % of a core). Decide which, if any.
+104. [ ] (owner, 2026-11-20: patch mpv) Scene video textures share one CUDA context: carry an mpv patch that lets a libmpv
+       render context use a CUDA device/context the host gives it (instead of `cuCtxCreate` per render context), and
+       have the fork's GLPlayer pass the scene's one context (`wp_context_set_video_hwdec` is the entry point). Ship the
+       patched mpv in the flake and install paths (nixpkgs `mpv` override; other distros' installs need it too, or fall
+       back to today's per-video context). Measured now: 3426575339 (two 1080p videos) worker 906 MiB, 160 MiB of it per
+       CUDA context; a retained primary context costs 160 MiB for any number of users (`docs/decisions.md` § Share one
+       CUDA context across a scene's videos by patching mpv). Consider offering the patch upstream to mpv.
 105. [ ] A cut onto a scene shows B ~30 ms late when A makes no sound: the cut waits for A's anticlick ramp, which
        `recipes/transition.rs` skips only for an A that ended, is paused or sits at −96 dB. Treat a soundless A (a scene
        without audio, a muted or silent source) as silent and swap at once (`scene_load_we.py`: B on screen 33–38 ms after
