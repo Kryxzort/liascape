@@ -49,6 +49,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        730 MiB (~190 per video), `source.ready` warm 187 ms instead of ~400 (no interop init in the build), each video
        ~0.28 s after the scene's first frame instead of ~0.03 (the full picture at about the same time), 0/10 black, at
        the copy's CPU cost (the compositor measured nvdec-copy 1080p30 at ~10 % of a core). Decide which, if any.
+105. [ ] A cut onto a scene shows B ~30 ms late when A makes no sound: the cut waits for A's anticlick ramp, which
+       `recipes/transition.rs` skips only for an A that ended, is paused or sits at −96 dB. Treat a soundless A (a scene
+       without audio, a muted or silent source) as silent and swap at once (`scene_load_we.py`: B on screen 33–38 ms after
+       `transition.started`).
+106. [ ] With the spare scene worker, 4 of 10 cold loads of 3163060610 took 2.8, 4.2, 11.8 and 38 s (the adopted
+       worker stayed inside its load, no crash or restart) and 12 + 6 reruns didn't reproduce it
+       (`docs/player/reports/scene-load-we.md`). `scene_load_we.py` now records the worker's load/build split and the
+       log tail of any load over 2 s: read them on the next occurrence; consider a load watchdog for an adopted spare.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
