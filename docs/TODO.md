@@ -29,7 +29,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        writers + page-cache eviction (2 more runs there never reached their states), and the `playlist × ` cells' run
        under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
        all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
-       under that load); the printed `cards` count tells.
+       under that load); the printed `cards` count tells. Also not reproduced: 20 more runs of `--only ' × cli:next$'`
+       (`--jobs 2`, `LIASCAPE_MATRIX_NICE=1`, 16 nice-19 busy loops; 180 cells, 20 of them this one) all passed. Each
+       cell reloads the page on the Library tab, so "another tab" needs something in the cell to switch. One gap in the
+       check if it does: its Library fallback (`afterControl`, `if (!m.cards().length) m.tab("Library")`) counts
+       Browse's cards too (`Card.tsx` and its skeletons are `.card.lib`), so a page left on Browse reads as no mark and
+       an empty bar (the bar mounts on Library only) without switching; the printed `tab` tells.
 96. [ ] (owner) Copy WE's frame-rate quirks: wallpaper authors tuned their scenes on WE, so WE's behaviour is the look.
        First: `cursorripple` (3184155462) is ~10x weaker in WE at 120 fps than at 30 (`timeAmt = min(1/30, g_Frametime) /
        0.02` × the per-frame pointer delta; see docs/player/reports/scene-we-ref.md § Focus) — give the scene WE's
