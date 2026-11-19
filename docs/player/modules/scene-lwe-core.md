@@ -42,6 +42,10 @@ and `patches/lwe/tests/host_api_test.cpp` stays C++.
 - **Video textures** play in libmpv (`GLPlayer`), muted with no audio track (`aid=no`), so they open no audio
   output: one that can't connect holds mpv's core thread 20–30 s in its cleanup. The render thread takes the frame
   size from observed properties and never calls `mpv_get_property` while drawing, since a get waits for that thread.
+  mpv picks `hwdec=auto`; on NVIDIA the worker loads libcuda before the build (a nixpkgs libmpv can't find it
+  alone), so videos decode with nvdec through mpv's CUDA interop, as wherever libmpv finds libcuda: shown ~0.13 s
+  after the scene's first frame, for ~90 ms of the build and ~275 MiB of VRAM per video (its CUDA context alone is
+  160). Without it they fall to `vulkan-copy` (~120 MiB), black ~0.75 s after the first frame, past 1 s under load.
 - **Scripts.** Property scripts and SceneScript run in LWE's QuickJS. Wallpaper Engine's own JS classes are read at
   run time from the assets dir (`scripts/jsclasses/`, `scripts/jsmodules/`) and must never be copied into the repo
   or the fork.

@@ -1691,6 +1691,62 @@ fn real_scene_project_loads_beside_the_egl_setup() {
     );
 }
 
+/// On NVIDIA a real scene's worker loads libcuda before the build, so LWE's video textures decode
+/// with nvdec instead of falling to `vulkan-copy` (black ~0.75 s after the scene's first frame:
+/// `docs/player/modules/scene-lwe-core.md`, video textures); `LIASCAPE_PLAYER_HWDEC_INTEROP=off`
+/// keeps it out, as it keeps the compositor's CUDA interop out. Read from the worker's own
+/// mappings: nothing else in a scene without video loads libcuda.
+#[test]
+fn real_scene_worker_loads_libcuda_for_video_textures() {
+    use liascape_player::sources::render_worker::HWDEC_INTEROP_ENV;
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: liascape-scene-worker built without LWE");
+        return;
+    }
+    let vendor = unsafe { gfx.gl.get_parameter_string(glow::VENDOR) };
+    if !vendor.to_ascii_lowercase().contains("nvidia") {
+        println!("SKIP: GL vendor {vendor:?} has no CUDA interop");
+        return;
+    }
+    if liascape_player::sources::render_worker::preload_libcuda().is_none() {
+        println!("SKIP: no libcuda on this machine");
+        return;
+    }
+    for (knob, want) in [("on", true), ("off", false)] {
+        let assets = empty_dir("libcuda");
+        let mut src = open_real(
+            &gfx,
+            &format!("libcuda-{knob}"),
+            &lwe_fixture("min-scene"),
+            Some(&assets),
+            |o| o.env.push((HWDEC_INTEROP_ENV.into(), knob.into())),
+        );
+        assert!(
+            pump(&gfx, &mut src, Duration::from_secs(10), |s| s.is_ready()
+                || s.error().is_some()),
+            "{knob}: never ready"
+        );
+        assert!(src.error().is_none(), "{knob}: {:?}", src.error());
+        let pid = src.pid().expect("a live worker");
+        let maps = std::fs::read_to_string(format!("/proc/{pid}/maps")).unwrap();
+        let tail = src.log_tail().join("\n");
+        assert_eq!(
+            maps.contains("libcuda.so"),
+            want,
+            "{HWDEC_INTEROP_ENV}={knob}: libcuda mapped in the worker? log:\n{tail}"
+        );
+        assert_eq!(
+            tail.contains("hwdec: libcuda loaded"),
+            want,
+            "{HWDEC_INTEROP_ENV}={knob}: the log tail:\n{tail}"
+        );
+    }
+}
+
 /// A scene's `systemfont_consolas` asks fontconfig for Consolas like any app, through the
 /// system's configuration plus the worker's alias rules (`scene::fonts::ALIASES`), and the worker
 /// reports in its `Ready` which family it was shown with (`render::font_stand_ins`). Hermetic: the

@@ -171,8 +171,9 @@ pub fn hwdec_interop_for(gl_vendor: &str, env: Option<&str>) -> Option<&'static 
 }
 
 /// `dlopen` libcuda for the CUDA interop (never closed): by soname, else from the NixOS driver
-/// dir. `Some(where)` once loaded, `None` = no libcuda (no CUDA interop then).
-fn preload_libcuda() -> Option<(&'static str, LibHandle)> {
+/// dir. `Some(where)` once loaded, `None` = no libcuda (no CUDA interop then). The scene worker
+/// does the same for LWE's video textures (`liascape-scene-worker`'s `preload_libcuda_for_video`).
+pub fn preload_libcuda() -> Option<(&'static str, LibHandle)> {
     const TRY: [(&str, &std::ffi::CStr); 2] = [
         ("libcuda.so.1", c"libcuda.so.1"),
         (
@@ -188,13 +189,16 @@ fn preload_libcuda() -> Option<(&'static str, LibHandle)> {
 
 /// A `dlopen` handle (never closed).
 #[derive(Clone, Copy, PartialEq)]
-struct LibHandle(*mut libc::c_void);
+pub struct LibHandle(*mut libc::c_void);
+
+// SAFETY: a dlopen handle names a process-wide library, usable from any thread.
+unsafe impl Send for LibHandle {}
 
 /// `cuInit(0)` through the preloaded libcuda — the process's first CUDA initialisation, done on
 /// lane 0 right after it started (the loop doesn't wait for it), so the first render context
 /// with the CUDA interop doesn't pay the driver's initialisation on top of its own (measured
 /// here: `cuInit` 20–32 ms; an interop attach itself 85–220 ms). Returns (cuInit's result, ms); `None` without the symbol.
-fn warm_cuda(lib: LibHandle) -> Option<(i32, f64)> {
+pub fn warm_cuda(lib: LibHandle) -> Option<(i32, f64)> {
     let f = unsafe { libc::dlsym(lib.0, c"cuInit".as_ptr()) };
     if f.is_null() {
         return None;

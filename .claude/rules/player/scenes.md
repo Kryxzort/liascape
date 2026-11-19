@@ -75,8 +75,7 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 ## Build (`build.rs`, LWE core)
 - Only `liascape-scene-worker` links LWE (`cargo::rustc-link-arg-bin`); the compositor binary never does.
   Guard: `tests/lwe_build.rs::worker_links_the_core`.
-- Feature `lwe` is default; without `LIASCAPE_LWE_CORE_DIR` the build fails by design. `--no-default-features`
-  = stub + synthetic only.
+- Feature `lwe` is default; without `LIASCAPE_LWE_CORE_DIR` the build fails by design (`--no-default-features`: stub + synthetic).
 - The pin lives in `third_party/lwe/PIN`; `UPSTREAM.md` § linux-wallpaperengine owns the patch series and
   resync recipe. Guards: `tests/lwe_build.rs::core_is_the_pinned_one`, `pin_matches_flake`.
 - Patch work: `LWE_DEV_SRC=<fork> bash scripts/lwe.sh build test`. Inside the devShell override
@@ -85,9 +84,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `patches/lwe/tests/host_api_test.cpp` C++.
 - Never copy WE's JS classes (`<assets>/scripts/jsclasses`, `<assets>/scripts/jsmodules`) into the repo or fork: LWE reads them
   from the assets dir at run time.
-- Bump `SOUND_SEMANTICS` (`scene/loudness_estimate.rs`) whenever the player's sound-object semantics
-  change, so no fingerprint continues a measurement of the old sound. Guard:
-  `fingerprint_carries_the_sound_semantics`.
+- Bump `SOUND_SEMANTICS` (`scene/loudness_estimate.rs`) whenever the player's sound-object semantics change, so no
+  fingerprint continues a measurement of the old sound. Guard: `fingerprint_carries_the_sound_semantics`.
 - Stop pulling audio before `wp_context_destroy`.
 - Load a real scene's project (`render::load_project`: no GL) on `lia-scene-preload` beside the EGL setup, from
   the host's `--preload` argv (`worker::preload_args`); the `Start` stays the authority (a mismatch loads again).
@@ -95,6 +93,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - Hand LWE the texture upload context as a `gfx::ShareRecipe` (`lwe::Scene::set_upload_context`, looked up with
   `dlsym`): its `wp-tex-upload` thread makes the context, never the render thread (`docs/player/modules/scene-lwe-core.md`
   § Texture uploads).
+- Load libcuda before a real scene's build where the compositor loads the CUDA interop (`hwdec_interop_for`), or video
+  textures take `vulkan-copy`. Guard: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`.
 - Give LWE the shader text cache dir `gfx::shader_cache::lwe_dir` (`wp_config_set_shader_cache_dir`,
   `docs/player/modules/scene-lwe-core.md` § Shader cache); keep it out of the user's cache in tests (`tests/common`
   sets `LIASCAPE_SCENE_SHADER_CACHE_DIR`) and on-machine scripts (their private dir). Guards:

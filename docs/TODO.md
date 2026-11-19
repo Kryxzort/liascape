@@ -11,9 +11,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
        spawn → `Hello` for every apply after a run's first: warm 65–135 ms, cold 70–215 ms faster). Left: the units'
        preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover every texture format
-       and include it resolves); a first-ever load's NVIDIA compiles. 3426575339 (all video) was still black 1 s after
-       its first frame in 7 of 181 loads, the baseline build too, five of them in one player run: needs mpv's log of a
-       black load. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop.
+       and include it resolves); a first-ever load's NVIDIA compiles. 2921510865 (3.6 GB of VRAM) wasn't measured
+       beside a busy desktop.
 88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
        below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
        eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
