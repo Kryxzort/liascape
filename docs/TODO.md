@@ -34,9 +34,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        check if it does: its Library fallback (`afterControl`, `if (!m.cards().length) m.tab("Library")`) counts
        Browse's cards too (`Card.tsx` and its skeletons are `.card.lib`), so a page left on Browse reads as no mark and
        an empty bar (the bar mounts on Library only) without switching; the printed `tab` tells.
-97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
-       we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
-       the scene-worker numbers.
+97. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
+       Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
+       to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
+       crash WE under Proton.
 104. [ ] Video textures in scenes cost ~275 MiB of VRAM each with nvdec (3426575339, two 1080p videos: worker 356 → 906
        MiB): mpv's CUDA interop makes a CUDA context per video (160 MiB on this GPU), the decoder's surfaces and mpv's
        textures the rest; about seven videos reach the 2048 MiB scene VRAM limit. Loading only the CUDA interop

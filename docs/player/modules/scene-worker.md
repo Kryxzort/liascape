@@ -90,6 +90,9 @@ instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs eac
 Measured (`scene_load.py --spare`, release, 3 scenes, medians): an apply 65–135 ms sooner warm, 70–215 cold (no exec or link from a cold disk), 71–108 after a reboot; the waiting spare holds ~168 MiB RSS, ~61 MiB PSS, ~35 MiB private dirty, 3 MiB VRAM.
 A fresh player's first scene with that scene in its rotation (`--first`, 5 rounds): 380–445 → 320–360 ms (59–114 sooner)
 with the files cached, 415–465 → 370–415 ms (49–78 sooner) with them dropped (`first_boot`).
+Against real Wallpaper Engine under Proton (request to B's first frame on screen): warm about even without the spare,
+110–180 ms sooner with it; after a boot or cold 135–265 ms sooner, and WE shows black while it loads.
+See [scene-load-we.md](../reports/scene-load-we.md) (`src/player/tests/onmachine/scene_load_we.py`).
 
 ## The heartbeat
 
