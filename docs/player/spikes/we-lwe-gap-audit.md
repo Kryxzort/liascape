@@ -3380,3 +3380,53 @@ had been lost from the uncommitted worktree.
 across at 1080 p where ours is ~25), with and without the `sa3` layers: the HDR bloom chain's spread at its
 iterations 6 / scatter 2 / feather 0.88 (the other HDR scenes use 8 / 1.619 / 0.1 and match), not read yet. The
 galaxy band's height at the first frames is the late pointer (part 2).
+
+### Frame-rate quirks against WE 2.8.797: cursorripple at 30 / 60 / 144 fps, the sweep (2026-11-19)
+
+The cursor ripple result's fix was only measured ours against ours. This measures it against WE 2.8.797 (the
+Windows install's, under Proton, the we-ref setup) at each fps, through both our renderers.
+
+**The case** (`src/player/tests/onmachine/scene_fps_quirks.py`): 3184155462 with the water on, a 1 s drag from
+(200,1600) to (1600,1600) native px against the pointer parked at (200,1600); the measure is mean |drag − parked|
+(0–255) in the band left of the girl (y 700–900, x 0–640 of 1920 × 1080), its peak less its value before the drag.
+Two WE runs of each, every drag/parked pair. Why parked, not water off: the first frame strokes from the 0 0 last
+pointer to the pointer (WE's, GH 0x1401acb91; ours in the smoke), and how much drag water builds depends on the water
+already there — 10× at 60 fps (a run without that stroke, as the player's arrival jump gives, read 0.5 where one with
+it read 6.0). The parked run cancels it. The x range leaves out the girl, whose sway differs between two WE runs.
+
+| fps | WE (4 pairs) | ours, `--lwe-smoke` | ours, private headless player | ours at 30 whatever the fps (smoke / player) |
+|---|---|---|---|---|
+| 30 | 8.17 (8.09–8.23) | 6.64 | 6.59 | 6.60 / 6.99 |
+| 60 | 3.33 (3.10–3.58) | 2.54 | 3.05 | 7.39 / 10.87 |
+| 144 | 0.11 (0.01–0.20) | 0.35 | 0.44 | 5.58 / 6.03 |
+
+So WE's water falls ~2.5× from 30 to 60 fps and is gone at 144, and ours follows it in both renderers (the player:
+real ticks, `headless.pointer` moved at 250 Hz, `ctl capture`). Ours is ~20 % weaker at 30 and 60 (ours renders
+3840 × 2160 and is box-filtered down, WE draws its 1920 × 1080 window). The last column is what
+`scene_we_compare.sh` did before it took the capture's fps: it rendered ours at 30 for every capture. Left in the
+144 fps row: ~0.5 of the ours' value is a pointer-position-dependent shift of the girl's edges that stays after the
+water has died (t = 4 s), which WE's two runs don't show.
+
+**What WE feeds (the 2.8.485 decode above; 2.8.797's particle step below reads the same frame time, unclamped):**
+`g_Frametime` is the frame's measured dt, unclamped (the shader clamps to 1/30); the pointer is polled once per frame and
+`g_PointerPositionLast` is the previous frame's, so the force is per frame delta × that frame's dt, and the decay has a
+per-frame floor. Ours: the simulation steps at `ToWorker::Rate` = `scene_fps` with `g_Frametime` 1 / rate (fork
+0105), the pointer per frame (the worker sets it as messages come, the core reads it once per frame).
+
+**The particle step at fps 1–20 (P37), decoded again:** GH 0x14020a7a8 (2.8.797) computes fdt = dt ·
+min(0.025 / ctx+0x154, 1)^0.7 (`powf` at 0x1404de920; 0.025 at 0x140578430, 0.7 at 0x1405784dc, 1 at 0x140578550),
+then reads the int at ctx+0x150: if 1 ≤ it ≤ 20 (`dec eax; cmp eax, 0x13; ja`) it halves dt and fdt (0.5 at
+0x1405784c8) and runs the step (0x1402132b0) twice, the first with flag 0x4 at system+0x3fe set (inside the step it
+picks 0.5 instead of 1 for a blend factor kept at rbp−0x80 / rbp+0x10 / rbp+0x150, used by the emitter's motion: not
+decoded further); otherwise once with dt, fdt. LWE runs one step. Liascape's default `scene_fps` (15) is WE's default
+(15), so every particle scene at the default rate is affected. Not ported: it is a fork patch (`docs/TODO.md`).
+
+**The sweep:** shaders reading `g_Frametime` or `g_PointerPositionLast` in the 321 Workshop items (packaged and loose)
+and WE's assets: only cursorripple (3184155462; 3414858021's `iris_movement__` declares `g_PointerPositionLast` but
+never reads it) and WE's `fluidsimulation` (no item in the library uses it; whether 0105's rule takes its passes as a simulation is
+not checked).
+Scene scripts: 1147 `update()` bodies, 353 scale by `engine.frametime` / time (the frame's dt in ours as in WE), 5 in
+4 items (2469881470, 2828233985, 2890767643, 3509243656) step a fixed amount per call — per frame drawn, as in WE when
+ours draws at `scene_fps` (not under the GPU budget's throttle). Particles: per-frame dt with WE's fdt; the half
+steps above are the one difference found. LWE caps a particle frame's dt at 0.1 s, WE doesn't (only < 10 fps or a
+hitch).

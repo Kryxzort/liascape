@@ -152,7 +152,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   keeps covering while the renderer's CPU time advances (≤ `LOAD_TIMEOUT_MAX_FACTOR` × the bound). Guards:
   `tests/scene.rs::slow_scene_load_keeps_the_heartbeat`, `starved_scene_load_outlasts_the_load_timeout`.
 - `scene_fps` is WE's `fps`: tick at it uncapped by the refresh (default 15, 0 = refresh); each output
-  presents at most `eff(scene_fps, refresh)`. Guard: `tests/api.rs::scene_fps_is_wes_rate_above_the_refresh`.
+  presents at most `eff(scene_fps, refresh)`. Guards: `tests/api.rs::scene_fps_is_wes_rate_above_the_refresh`,
+  on-machine `src/player/tests/onmachine/scene_fps_quirks.py` (cursorripple's water against WE at each fps).
 - Keep LWE's pointer at the scene centre until the host sends one. A pointer entering an output is a jump
   (`wp_project_pointer_jump`). Guard: `tests/api.rs::pointer_enter_is_a_jump_and_rate_is_the_demand`.
 - Desktop pointer (`signal/cursor.rs`) polls Hyprland only while an unpaused scene wants it; fall back to the

@@ -187,13 +187,24 @@ run_all() {
         # WE's own scene time for each frame when the capture read it (the clock strip), else the request time
         shots=$(jq -r '[.shots[] | if .scene_time != null then (.scene_time * 1000 | round / 1000) else ((.t_actual // .t) * 10 | round / 10) end | tostring] | unique | join(",")' "$m")
         width=$(jq -r '.window[0]' "$m")
-        args=(--shots "$shots" --shot-width "$width")
+        # WE's fps setting of the capture (30 before captures recorded it): ours steps the scene at the same rate,
+        # since frame-rate-dependent effects (cursorripple's water) are part of WE's look
+        args=(--shots "$shots" --shot-width "$width" --fps "$(jq -r '.fps // 30' "$m")")
         while IFS= read -r p; do [[ -n $p ]] && args+=(--prop "$p"); done < <(jq -r '.props[]?' "$m")
         p=$(jq -r '.pointer // ""' "$m")
         if [[ -n $p ]]; then
             [[ $p == *:* ]] || p="$p:$p"
             args+=(--pointer "$p")
             pt=$(jq -r '.pointer_time // ""' "$m")
+            # the capture moved WE's cursor on its request clock (from WE's first picture, over 0..last T unless
+            # pointer_time says otherwise); a clocked capture's scene time runs ahead of that by its frames' median
+            # scene_time − t_actual, so ours moves at those scene times
+            poff=$(jq -r '[.shots[] | select(.scene_time != null) | .scene_time - (.t_actual // .t)] | sort |
+                if length > 0 then .[length / 2 | floor] else 0 end' "$m")
+            if [[ $poff != 0 ]]; then
+                [[ -n $pt ]] || pt="0-$(jq -r '[.shots[].t] | max' "$m")"
+                pt=$(awk -v w="$pt" -v o="$poff" 'BEGIN { split(w, a, "-"); printf "%.3f-%.3f", a[1] + o, a[2] + o }')
+            fi
             [[ -n $pt ]] && args+=(--pointer-time "$pt")
         fi
         # WE's wall time when its scene clock read 0: a frame's PNG was written ~0.1 s after the frame its strip

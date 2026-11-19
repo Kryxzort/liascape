@@ -33,7 +33,8 @@
 #   --desktop        render at the full 1920x1080 "desktop" (WE's cover fit) instead of the canvas's own aspect
 #   --tag NAME       a variant (other props / pointer / --desktop): PNGs into <out>/NAME/<id>, JPEGs into
 #                    <docs>/<id>/NAME — the compare's default refs stay the plain captures
-#   --repeat N       capture the scene N times (fresh starts) — the determinism check; runs land in r1…rN
+#   --repeat N       capture the scene N times (fresh starts) — the determinism check; runs land in
+#                    <out>[/<tag>]/<id>/r1…rN
 #   --batch          all scene items of ~/.local/share/Steam/steamapps/workshop/content/431960 (sorted by id)
 #   --only ID,ID…    with --batch: only these; --limit N: the first N; --skip-done: skip ids with a manifest
 #   --out DIR        full-size PNGs (default ~/.cache/liascape/we-ref/captures; never the repo)
@@ -540,7 +541,7 @@ for id in "${IDS[@]}"; do
         continue
     fi
     if ((REPEAT > 1)); then
-        for r in $(seq 1 "$REPEAT"); do capture_one "$src" "$OUT/$id/r$r" || fails=$((fails + 1)); done
+        for r in $(seq 1 "$REPEAT"); do capture_one "$src" "$OUT${TAG:+/$TAG}/$id/r$r" || fails=$((fails + 1)); done
     else
         if [[ -n $TAG ]]; then rd=$OUT/$TAG/$id; else rd=$OUT/$id; fi
         if capture_one "$src" "$rd"; then publish "$id" "$rd"; else fails=$((fails + 1)); fi

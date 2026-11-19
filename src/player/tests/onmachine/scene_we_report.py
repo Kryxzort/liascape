@@ -296,18 +296,21 @@ def render_md(out, a, first):
              "Items are named by Workshop id only.\n")
     L.append(f"- **Run:** {run.get('started', '?')}, commit `{run.get('commit', '?')}`, LWE pin `{run.get('pin', '?')}`, "
              f"GPU {run.get('gpu', '?')}; references: Wallpaper Engine {run.get('we', '?')} under {run.get('proton', '?')}, "
-             "Ultra preset, MSAA x8, 30 fps, no audio device; {} scenes.".format(len(res)))
+             "Ultra preset, MSAA x8, at the fps each capture's manifest records (30 unless it says otherwise), "
+             "no audio device; {} scenes.".format(len(res)))
     L.append("- **How:** WE renders each scene in a window of the canvas's own aspect (<= 1920 x 1080) inside a "
              "headless gamescope; frames requested T s after its first frame with a picture. Each frame's real scene time is "
              "read from WE's own clock: the capture's private copy of the scene draws `g_Time` into a strip along the "
              "bottom edge (we-proton.md \"The scene clock\"); the row label says it. Ours: `liascape-scene-worker "
-             "--lwe-smoke --shots` at that scene time (paced 30 fps, particle seed 7), same props / pointer path, at "
+             "--lwe-smoke --shots` at that scene time (paced at the capture's fps, particle seed 7), same props / "
+             "pointer path, at "
              "the capture's wall time (libfaketime) and with the fonts WE drew with (the Windows install's, through a "
              "private fontconfig file). The bottom 3 % (the strip) is left out of both. Each pair "
              "at 256 px wide: score = 0.30 ssim + 0.20 hist + 0.20 edges + 0.30 local (the preview compare's measures, "
              "no alignment needed); a scene's score is its mean over the times, `worst` its worst time.")
     L.append("- **Not render bugs by themselves:** WE's particles and random choices are unseeded (ours seed 7), a "
-             "frame-rate-dependent effect runs at 30 fps on both sides, and media-driven layers have no media on "
+             "frame-rate-dependent effect runs at the capture's fps on both sides, and media-driven layers have no "
+             "media on "
              "either side.")
     L.append("- **Reference trust** (the `reference` column): `FXC` means WE compiled its shaders with Microsoft's "
              "compiler, as on Windows. WE loads the d3dcompiler_47 it ships (`bin\\d3dcompiler_47.dll`, Microsoft "
