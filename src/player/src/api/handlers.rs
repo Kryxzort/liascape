@@ -265,6 +265,7 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
                 rt.audio.down_reason.as_deref(),
                 rt.audio.bus.as_ref().map(|b| b.info()).as_ref(),
             ),
+            "realtime": crate::health::realtime_json(rt.audio.rt_info().as_ref()),
         },
     }))
 }

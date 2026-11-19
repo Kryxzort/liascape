@@ -194,6 +194,15 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
   (`common::pw::RT_WAIT`) and a recording test calls `require_rt_graph` before it records. Tests never touch the
   owner's PipeWire.
 
+## Real-time graph threads (`src/player/src/audio/rt.rs`)
+- `module-rt` is `nofail` and rtkit refuses a user's requests past 25 in 20 s, so `RtWatch` (thread `lia-rt`, started by
+  `Audio::start` whenever sources play through PipeWire) re-asks rtkit for every `data-loop.*` thread still SCHED_OTHER
+  after `SETTLE`, on the `BACKOFF` ladder (first past the 20 s window, then every 5 min), one request per thread per
+  step — never faster, or the retries make a burst themselves. Set `RLIMIT_RTTIME` ≤ rtkit's `RTTimeUSecMax` first.
+- Report it in `hello.health.realtime` (`ok: false`, `state: "off"` while any thread is refused) and the `bus` probe's
+  `realtime`; the meter's `callback_policy` is read live. Guard `src/player/tests/api.rs`
+  `a_graph_thread_refused_real_time_asks_rtkit_again` (uses up the rtkit budget with `common::pw::RtkitFlood`).
+
 ## Meter (`src/player/src/audio/meter.rs`)
 - The capture callback runs on PipeWire's RT data thread (`RT_PROCESS`), never blocks or allocates (`try_lock`,
   staging buffer). Guard `meter_capture_runs_on_the_rt_data_thread`.

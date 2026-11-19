@@ -12,6 +12,7 @@ pub mod bus;
 pub mod foreign;
 pub mod loudness;
 pub mod meter;
+pub mod rt;
 pub mod sysmon;
 
 use std::time::Instant;
@@ -20,6 +21,7 @@ use serde_json::json;
 
 pub use bus::{Bus, BusInfo, BusState};
 pub use meter::{Meter, MeterStatus};
+pub use rt::{RtInfo, RtState, RtWatch};
 
 use crate::log::{self, Level};
 
@@ -29,6 +31,9 @@ pub struct Audio {
     pub meter: Option<Meter>,
     /// Set when `bus` is `None`.
     pub down_reason: Option<String>,
+    /// Real-time for this process's PipeWire graph threads (`rt.rs`): whenever sources play
+    /// through PipeWire, bus or not.
+    pub rt: Option<RtWatch>,
 }
 
 impl Audio {
@@ -44,17 +49,26 @@ impl Audio {
                  target the bus"
             ));
         }
-        match Bus::start() {
+        let rt = RtWatch::start();
+        let mut audio = match Bus::start() {
             Ok(bus) => {
                 let meter = Meter::start(&bus);
                 Audio {
                     bus: Some(bus),
                     meter: Some(meter),
                     down_reason: None,
+                    rt: None,
                 }
             }
             Err(reason) => Audio::down(reason),
-        }
+        };
+        audio.rt = rt;
+        audio
+    }
+
+    /// The graph threads' real-time state; `None` without PipeWire playback.
+    pub fn rt_info(&self) -> Option<RtInfo> {
+        self.rt.as_ref().map(RtWatch::info)
     }
 
     /// `serve`'s bounded wait for the bus's first session ([`Bus::wait_up`]): the route
@@ -79,6 +93,7 @@ impl Audio {
             bus: None,
             meter: None,
             down_reason: Some(reason),
+            rt: None,
         }
     }
 
@@ -126,6 +141,7 @@ impl Audio {
         // core (`bus.rs`'s module doc) — stop it first, so no capture callback can still be
         // running against a connection that's about to go away.
         self.meter = None;
+        self.rt = None;
         // Then the bus itself, explicitly (not just `Option::take`'s return value dropping
         // at the end of the `if`): the drop is the actual teardown step (unloads the
         // loopback module, which takes the sink with it), so it's spelled out rather than

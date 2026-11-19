@@ -2,7 +2,8 @@
 //!
 //! - `bus` — `{state, device, latency_ms, latency_samples, quantum_ms, target,
 //!   default_sink, playback_node, sink_node, retargets, connecting, generation, reason,
-//!   now_ms, meter {available, streaming, samples, last_ms, quantum_frames, dropped, error}}`;
+//!   now_ms, meter {available, streaming, samples, last_ms, quantum_frames, dropped, error},
+//!   realtime {state, threads, off, attempts, next_attempt_ms, reason} (`audio::rt`)}`;
 //!   `state: "down"` with `reason` while the bus isn't up — `connecting: true` while its
 //!   thread is still setting up or retrying (PipeWire not there yet / lost), `false` when
 //!   there's no bus at all (`--ao null`, `LIASCAPE_PLAYER_BUS=off`).
@@ -40,6 +41,7 @@ pub(super) fn bus(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
         None => json!({ "available": false, "error": a.meter_unavailable() }),
     };
     v["meter"] = meter;
+    v["realtime"] = serde_json::to_value(a.rt_info()).unwrap_or(Value::Null);
     v["now_ms"] = json!(now_ms());
     Ok(v)
 }

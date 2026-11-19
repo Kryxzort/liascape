@@ -215,6 +215,7 @@ fn main() -> ExitCode {
                 "vram": liascape_player::health::vram_here(),
                 "automute": liascape_player::health::automute_here(),
                 "bus": liascape_player::health::bus_here(),
+                "realtime": liascape_player::health::realtime_json(None),
             });
             println!("{out}");
             ExitCode::SUCCESS

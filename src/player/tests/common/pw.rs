@@ -183,15 +183,7 @@ context.objects = [
             if std::fs::read_to_string(p.join("comm")).ok()?.trim() != "data-loop.0" {
                 continue;
             }
-            let stat = std::fs::read_to_string(p.join("stat")).ok()?;
-            // field 41 (`policy`), counted from the first field after the `(comm)`, which is field 3
-            let policy: i32 = stat.rsplit_once(')')?.1.split_whitespace().nth(38)?.parse().ok()?;
-            return Some(match policy & !libc::SCHED_RESET_ON_FORK {
-                0 => "other",
-                1 => "fifo",
-                2 => "rr",
-                _ => "unknown",
-            });
+            return stat_policy(&p);
         }
         None
     }
@@ -241,7 +233,105 @@ pub fn rt_refused_retry(what: &str, policy: Option<&'static str>, since: Instant
     true
 }
 
-fn rtkit_running() -> bool {
+/// A thread's scheduling policy from its `/proc/<pid>/task/<tid>` dir: `other` | `fifo` | `rr`.
+fn stat_policy(task: &std::path::Path) -> Option<&'static str> {
+    let stat = std::fs::read_to_string(task.join("stat")).ok()?;
+    // field 41 (`policy`), counted from the first field after the `(comm)`, which is field 3
+    let policy: i32 = stat.rsplit_once(')')?.1.split_whitespace().nth(38)?.parse().ok()?;
+    Some(match policy & !libc::SCHED_RESET_ON_FORK {
+        0 => "other",
+        1 => "fifo",
+        2 => "rr",
+        _ => "unknown",
+    })
+}
+
+/// Every PipeWire graph thread of `pid` (`data-loop.*`, one per PipeWire context: the bus's,
+/// each mpv AO's) with its policy, read off `/proc` — not what the process says about itself.
+pub fn data_loop_policies(pid: u32) -> Vec<(u32, &'static str)> {
+    let Ok(dir) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        return Vec::new();
+    };
+    dir.flatten()
+        .filter(|t| {
+            std::fs::read_to_string(t.path().join("comm"))
+                .is_ok_and(|c| c.trim().starts_with("data-loop"))
+        })
+        .filter_map(|t| {
+            let tid = t.file_name().to_str()?.parse().ok()?;
+            Some((tid, stat_policy(&t.path())?))
+        })
+        .collect()
+}
+
+/// This user's rtkit burst budget used up on purpose, the way a session login or the suite's
+/// own streams do: `MakeThreadHighPriorityWithPID` (nice 0 on the flooding thread itself — a
+/// no-op for the system) 30 times a second until [`RtkitFlood::stop`] or `max`. rtkit then
+/// refuses every real-time request of the user (the desktop's too) until its 20 s window ends:
+/// keep floods short and few.
+pub struct RtkitFlood {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    refused: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl RtkitFlood {
+    /// `None` without rtkit or a system bus (nothing to flood).
+    pub fn start(max: Duration) -> Option<RtkitFlood> {
+        use std::sync::atomic::Ordering;
+        if !rtkit_running() {
+            return None;
+        }
+        let conn = zbus::blocking::Connection::system().ok()?;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let refused = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (st, rf) = (stop.clone(), refused.clone());
+        let thread = std::thread::spawn(move || {
+            let pid = u64::from(std::process::id());
+            // SAFETY: plain syscall.
+            let tid = unsafe { libc::gettid() } as u64;
+            let t = Instant::now();
+            while !st.load(Ordering::SeqCst) && t.elapsed() < max {
+                let r = conn.call_method(
+                    Some("org.freedesktop.RealtimeKit1"),
+                    "/org/freedesktop/RealtimeKit1",
+                    Some("org.freedesktop.RealtimeKit1"),
+                    "MakeThreadHighPriorityWithPID",
+                    &(pid, tid, 0i32),
+                );
+                if r.is_err() {
+                    rf.fetch_add(1, Ordering::SeqCst);
+                }
+                std::thread::sleep(Duration::from_millis(33));
+            }
+        });
+        Some(RtkitFlood {
+            stop,
+            refused,
+            thread: Some(thread),
+        })
+    }
+
+    /// Requests rtkit refused so far (the budget is used up from the first one).
+    pub fn refused(&self) -> u64 {
+        self.refused.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn stop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for RtkitFlood {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+pub fn rtkit_running() -> bool {
     std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|e| {
         std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "rtkit-daemon")
     })

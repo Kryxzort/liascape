@@ -19,6 +19,9 @@
 //!   reason (`--ao` other than pipewire, `LIASCAPE_PLAYER_BUS=off`, no PipeWire / session manager). `ok: null`
 //!   while the first session is still being set up, and in `liascape-player health` (no player: the bus is
 //!   known once one runs; `LIASCAPE_PLAYER_BUS=off` is known).
+//! - `realtime` — the player's PipeWire graph threads run real-time (`audio::rt`): off = rtkit refused
+//!   them (a request burst at login), so audio can drop out under CPU load; the player keeps asking. `ok:
+//!   null` before any graph thread exists, without PipeWire playback, and in `liascape-player health`.
 //!
 //! `hello.health` carries them for a running player; `liascape-player health` prints the same (minus the
 //! interop, which needs the render worker's GL context) when none runs.
@@ -29,6 +32,7 @@ use std::sync::OnceLock;
 use serde_json::{Value, json};
 
 use crate::audio::bus::{BusInfo, BusState, CONNECTING_REASON};
+use crate::audio::rt::{RtInfo, RtState};
 
 /// `effects` from a resolved catalogue dir (None = none resolved) and its effect count.
 pub fn effects_json(dir: Option<&Path>, count: usize) -> Value {
@@ -116,6 +120,31 @@ pub fn bus_json(off_reason: Option<&str>, info: Option<&BusInfo>) -> Value {
             "reason": format!("the player's audio bus is down ({}) — {NOTE}; it keeps retrying",
                 i.reason.as_deref().unwrap_or("no PipeWire / session manager reachable")) }),
         (None, None) => json!({ "ok": null, "reason": null, "state": null }),
+    }
+}
+
+/// `realtime` from the running player's graph-thread watcher (`None` = no PipeWire playback).
+pub fn realtime_json(info: Option<&RtInfo>) -> Value {
+    let Some(i) = info else {
+        return json!({ "ok": null, "reason": null, "state": null });
+    };
+    match i.state {
+        RtState::On => json!({ "ok": true, "reason": null, "state": "on" }),
+        RtState::Unknown => json!({ "ok": null, "reason": null, "state": "unknown" }),
+        RtState::Off => {
+            let next = i
+                .next_attempt_ms
+                .map(|ms| format!("asking again in {} s", ms.div_ceil(1000)))
+                .unwrap_or_else(|| "asking again".into());
+            json!({ "ok": false, "state": "off", "off": i.off, "threads": i.threads,
+                "attempts": i.attempts, "next_attempt_ms": i.next_attempt_ms,
+                "reason": format!(
+                    "{} of the player's {} audio graph threads run without real-time scheduling \
+                     (rtkit refused them, e.g. during a burst of requests at login) — audio can drop \
+                     out while the CPU is busy; {next}{}",
+                    i.off, i.threads,
+                    i.reason.as_deref().map(|r| format!(" (last: {r})")).unwrap_or_default()) })
+        }
     }
 }
 

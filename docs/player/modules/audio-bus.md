@@ -84,6 +84,16 @@ channel reads 6 dB low, a fake dip for a dropout detector. A 4 min ring of `(t_m
 from the cycle's `pw_buffer.time`. The callback runs on PipeWire's RT data thread: on the non-RT `lia-bus` loop it
 missed whole cycles whenever a switch loaded the machine (245 of 301 on-machine switches).
 
+## Real-time graph threads
+
+Each PipeWire context in the process (the bus's, each mpv AO's) has its own `data-loop.*` thread, made real-time
+by libpipewire's `module-rt` through rtkit once, as it starts. rtkit grants a user 25 requests per 20 s, and a
+login or a burst of graph clients uses that up; `module-rt` is `nofail`, so a thread refused then would run
+SCHED_OTHER for its whole life and lose cycles under load. `audio/rt.rs` polls the threads' policies once a
+second and asks rtkit (`MakeThreadRealtimeWithPID`, priority capped by `MaxRealtimePriority`, after lowering
+`RLIMIT_RTTIME` to `RTTimeUSecMax`) for each thread still SCHED_OTHER: 21 s after it was seen (past the window
+that refused it), then 21 s, 30 s, 60 s, then every 5 min. While any is off, `hello.health.realtime` says so.
+
 ## Tests
 
 Recording tests run a private, hermetic PipeWire + WirePlumber (`tests/common/pw.rs`: own runtime/config/state

@@ -19,8 +19,8 @@
 //!   cycles under load (a timestamp jump, then silent blocks), exactly when a switch loads the
 //!   machine — and never blocks or allocates: blocks go to a callback-local staging buffer,
 //!   moved into the ring under a `try_lock` (a reader copying a window just delays them to
-//!   the next cycle). The thread it ran on is recorded once per stream (`callback_thread`,
-//!   `callback_policy` in [`MeterStatus`]).
+//!   the next cycle). The thread it ran on is recorded once per stream (`callback_thread`;
+//!   `callback_policy` in [`MeterStatus`] is that thread's policy now — `super::rt` may raise it).
 //!
 //! [`Meter::available`] is false when the bus is down, the stream isn't streaming, or the
 //! newest sample is more than [`STALE`] old — consumers (the dropout detector) must report
@@ -186,8 +186,12 @@ pub(crate) struct MeterShared {
     /// The process callback's thread name (`comm`, ≤ 15 bytes, NUL-padded) as two words —
     /// written from the RT callback without allocating. All zero = no callback yet.
     pub callback_comm: [AtomicU64; 2],
-    /// That thread's scheduling policy (`SCHED_OTHER` 0, `FIFO` 1, `RR` 2); −1 = unknown.
+    /// That thread's scheduling policy when it was recorded (`SCHED_OTHER` 0, `FIFO` 1, `RR`
+    /// 2); −1 = unknown.
     pub callback_policy: AtomicI32,
+    /// That thread's id (0 = no callback yet): [`Meter::status`] reads its policy live, since
+    /// `audio::rt` can make a refused thread real-time later.
+    pub callback_tid: AtomicI32,
 }
 
 impl MeterShared {
@@ -205,6 +209,7 @@ impl MeterShared {
             last_frames: AtomicU64::new(0),
             callback_comm: [AtomicU64::new(0), AtomicU64::new(0)],
             callback_policy: AtomicI32::new(-1),
+            callback_tid: AtomicI32::new(0),
         }
     }
 
@@ -282,6 +287,9 @@ impl MeterRt {
         // rtkit / module-rt set SCHED_RESET_ON_FORK on top of the policy.
         let policy = unsafe { libc::sched_getscheduler(0) } & !libc::SCHED_RESET_ON_FORK;
         self.shared.callback_policy.store(policy, Ordering::Relaxed);
+        // SAFETY: a plain syscall (no allocation).
+        let tid = unsafe { libc::gettid() };
+        self.shared.callback_tid.store(tid, Ordering::Relaxed);
     }
 
     /// One captured buffer (`t_ns` = its first frame). RT-safe: no allocation while the
@@ -358,6 +366,22 @@ impl Meter {
         self.status().available
     }
 
+    /// The capture callback thread's policy now (the recorded one once that thread is gone).
+    fn callback_policy_now(&self) -> i32 {
+        let tid = self.shared.callback_tid.load(Ordering::Relaxed);
+        // SAFETY: a plain query; a gone thread answers −1.
+        let live = if tid > 0 {
+            unsafe { libc::sched_getscheduler(tid) }
+        } else {
+            -1
+        };
+        if live >= 0 {
+            live & !libc::SCHED_RESET_ON_FORK
+        } else {
+            self.shared.callback_policy.load(Ordering::Relaxed)
+        }
+    }
+
     pub fn status(&self) -> MeterStatus {
         let streaming = self.shared.streaming.load(Ordering::Relaxed);
         let (samples, last) = {
@@ -376,7 +400,7 @@ impl Meter {
             dropped: self.shared.dropped.load(Ordering::Relaxed),
             error,
             callback_thread: self.shared.callback_thread(),
-            callback_policy: match self.shared.callback_policy.load(Ordering::Relaxed) {
+            callback_policy: match self.callback_policy_now() {
                 0 => Some("other"),
                 1 => Some("fifo"),
                 2 => Some("rr"),

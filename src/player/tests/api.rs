@@ -7687,6 +7687,88 @@ fn require_rt_graph(pw: &PrivatePw, c: &mut Client) {
     );
 }
 
+/// A player started inside an rtkit burst (a session login, many graph clients at once) gets
+/// its graph thread refused by `module-rt` (`nofail`: silently SCHED_OTHER). It must notice,
+/// say so in `hello.health.realtime` while it's off, and ask rtkit again once the burst window
+/// is over — ending real-time within a bound, read off `/proc`, not off the player's word.
+/// The flood refuses the whole user's requests for one 20 s window (the desktop's too): it
+/// runs only until the player's refusal is seen.
+#[test]
+fn a_graph_thread_refused_real_time_asks_rtkit_again() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    // At most 12 s of flooding: rtkit's window is 20 s, so the next one starts unflooded.
+    let Some(mut flood) = common::pw::RtkitFlood::start(Duration::from_secs(12)) else {
+        println!("SKIP: no rtkit on the system bus");
+        return;
+    };
+    wait_for(Duration::from_secs(5), "rtkit refusing the flood", || {
+        (flood.refused() > 0).then_some(())
+    });
+    let run = pw.run_dir();
+    let env = [("PIPEWIRE_RUNTIME_DIR", run.as_path())];
+    let args = ["--ao", "pipewire", "--clock", "real", "--log-level", "debug"];
+    let srv = Serve::spawn_env(root, &args, &env, Some(serial));
+    let started = Instant::now();
+    let mut c = srv.client();
+    let pid = c.ok("hello", json!({}))["pid"].as_u64().expect("hello.pid") as u32;
+    wait_for(Duration::from_secs(10), "the bus up", || {
+        (c.ok("probe", json!({"name": "bus"}))["state"] == json!("up")).then_some(())
+    });
+    let threads = common::pw::settled_policy(|| {
+        let p = common::pw::data_loop_policies(pid);
+        if p.is_empty() {
+            None
+        } else if p.iter().all(|(_, p)| matches!(*p, "rr" | "fifo")) {
+            Some("rr")
+        } else {
+            Some("other")
+        }
+    });
+    flood.stop();
+    assert_eq!(
+        threads,
+        Some("other"),
+        "the flood didn't keep rtkit from granting the player's graph thread ({:?}): the test \
+         proved nothing",
+        common::pw::data_loop_policies(pid)
+    );
+    let realtime = |c: &mut Client| c.ok("hello", json!({}))["health"]["realtime"].clone();
+    let mut seen_off = None;
+    let rt = loop {
+        let h = realtime(&mut c);
+        if h["state"] == json!("off") && seen_off.is_none() {
+            seen_off = Some(h.clone());
+        }
+        let p = common::pw::data_loop_policies(pid);
+        if !p.is_empty() && p.iter().all(|(_, p)| matches!(*p, "rr" | "fifo")) {
+            break Some(p);
+        }
+        if started.elapsed() > Duration::from_secs(75) {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    println!(
+        "graph threads after {:.1} s: {rt:?}; health while off: {seen_off:?}",
+        started.elapsed().as_secs_f64()
+    );
+    assert!(
+        rt.is_some(),
+        "the player's graph thread still runs SCHED_OTHER {:.0} s after rtkit refused it \
+         ({:?}): it never asked again",
+        started.elapsed().as_secs_f64(),
+        common::pw::data_loop_policies(pid)
+    );
+    let off = seen_off.expect("hello.health.realtime never said `off` while the graph thread ran SCHED_OTHER");
+    assert_eq!(off["ok"], json!(false), "health.realtime while off: {off}");
+    wait_for(Duration::from_secs(5), "health.realtime `on` once real-time", || {
+        let h = realtime(&mut c);
+        (h["state"] == json!("on") && h["ok"] == json!(true)).then_some(())
+    });
+}
+
 /// The bus meter's 1 ms samples `[t_ms, dB]` over `[from, to)` (t_mono_ms).
 fn meter_samples(c: &mut Client, from: f64, to: f64) -> Vec<(f64, f64)> {
     // An unavailable meter (the bus reconnecting) reads as nothing captured.
