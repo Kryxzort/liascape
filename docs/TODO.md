@@ -43,6 +43,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.
+103. [ ] Player asks rtkit again: rtkit allows a user 25 real-time requests per 20 s and `module-rt` is `nofail`, so a
+       player (or its bus) started inside a burst (login, many graph clients at once) runs its graph thread
+       SCHED_OTHER for the whole session, silently. Detect a refused/never-granted RT graph thread and retry through
+       rtkit (zbus is already a dependency) with backoff; surface it in `player.status` while it's off. Found by #102
+       (tests/common/pw.rs `rt_refused_retry` does the test-side version).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
