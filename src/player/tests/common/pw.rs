@@ -15,7 +15,9 @@
 //! 64 frames of exact silence at the sink, mostly as a stream joins or leaves the graph: "lost
 //! cycles" in the recording tests (`tests/api.rs::*_never_skips_bus_cycles`) that aren't the
 //! player's (measured: `mpv_source_teardown_never_skips_bus_cycles` failed 5 of 26 runs quiet
-//! and every run under CPU load without RT; 0 of 20 quiet, 0–1 loaded with it).
+//! and every run under CPU load without RT; 0 of 20 quiet, 0–1 loaded with it). rtkit can refuse
+//! (a burst limit the suite's own streams reach, [`RT_WAIT`]): a refused daemon is started again,
+//! and the recording tests fail rather than record on a graph that isn't real-time.
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -127,19 +129,34 @@ context.objects = [
     }
 
     /// Only the `pipewire` daemon, no session manager: clients connect, but nothing links
-    /// a stream to a sink (a boot where WirePlumber isn't up yet).
+    /// a stream to a sink (a boot where WirePlumber isn't up yet). Its graph thread is
+    /// real-time when this returns, unless rtkit kept refusing for [`RT_WAIT`] (printed;
+    /// tests that need it check [`PrivatePw::graph_policy`]): a refused daemon is started
+    /// again, before any client connects (see [`rt_refused_retry`]).
     pub fn start_daemon(&mut self) {
         let conf = self.dir.join("pw.conf");
-        let pw = self.spawn("pipewire", &["-c", conf.to_str().unwrap()]);
         let t = Instant::now();
-        while !self.run_dir().join("pipewire-0").exists() {
-            assert!(
-                t.elapsed() < Duration::from_secs(5),
-                "timed out waiting for the private pipewire socket"
-            );
-            std::thread::sleep(Duration::from_millis(5));
+        loop {
+            let pw = self.spawn("pipewire", &["-c", conf.to_str().unwrap()]);
+            let sock = self.run_dir().join("pipewire-0");
+            let t_sock = Instant::now();
+            while !sock.exists() {
+                assert!(
+                    t_sock.elapsed() < Duration::from_secs(5),
+                    "timed out waiting for the private pipewire socket"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            self.procs.push(pw);
+            let policy = settled_policy(|| self.graph_policy());
+            if !rt_refused_retry("the private pipewire's graph thread", policy, t) {
+                return;
+            }
+            let mut pw = self.procs.pop().unwrap();
+            let _ = pw.kill();
+            let _ = pw.wait();
+            let _ = std::fs::remove_file(&sock);
         }
-        self.procs.push(pw);
     }
 
     /// WirePlumber on the running daemon ([`PrivatePw::start_daemon`] first).
@@ -157,11 +174,77 @@ context.objects = [
         }
     }
 
+    /// The daemon's graph thread's (`data-loop.0`) scheduling policy: `other` | `fifo` | `rr`
+    /// (the names the bus probe's `meter.callback_policy` uses), `None` while it can't be read.
+    pub fn graph_policy(&self) -> Option<&'static str> {
+        let pid = self.procs.first()?.id();
+        for t in std::fs::read_dir(format!("/proc/{pid}/task")).ok()? {
+            let p = t.ok()?.path();
+            if std::fs::read_to_string(p.join("comm")).ok()?.trim() != "data-loop.0" {
+                continue;
+            }
+            let stat = std::fs::read_to_string(p.join("stat")).ok()?;
+            // field 41 (`policy`), counted from the first field after the `(comm)`, which is field 3
+            let policy: i32 = stat.rsplit_once(')')?.1.split_whitespace().nth(38)?.parse().ok()?;
+            return Some(match policy & !libc::SCHED_RESET_ON_FORK {
+                0 => "other",
+                1 => "fifo",
+                2 => "rr",
+                _ => "unknown",
+            });
+        }
+        None
+    }
+
     /// `pw-dump` of the private instance (`[]` when it can't be read).
     pub fn dump(&self) -> serde_json::Value {
         let out = self.command("pw-dump").output().expect("pw-dump");
         serde_json::from_slice(&out.stdout).unwrap_or(serde_json::json!([]))
     }
+}
+
+/// How long a test keeps asking for a real-time graph thread. rtkit refuses every request of
+/// a user past 25 in 20 s (`actions-per-burst-max` / `actions-burst-sec`), and the suite itself
+/// makes that many: every graph client (each mpv AO, each scene worker's stream, `pw-record`)
+/// asks once, so a test that switches 20 times leaves the next one's daemon and player refused.
+pub const RT_WAIT: Duration = Duration::from_secs(45);
+
+/// A graph thread's policy once it has one: `module-rt` sets it through rtkit (a D-Bus round
+/// trip) just after the thread starts, so `other` is only final after a moment.
+pub fn settled_policy(mut read: impl FnMut() -> Option<&'static str>) -> Option<&'static str> {
+    let t = Instant::now();
+    loop {
+        let p = read();
+        if matches!(p, Some("rr" | "fifo")) || t.elapsed() > Duration::from_secs(2) {
+            return p;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Whether to start `what` again for a real-time thread: it runs `other` (rtkit refused it), rtkit
+/// runs on this machine (without it nothing would ever change), and `since` is under [`RT_WAIT`]
+/// ago. Waits a moment first (the burst window frees up by itself). Prints each refusal.
+pub fn rt_refused_retry(what: &str, policy: Option<&'static str>, since: Instant) -> bool {
+    if policy != Some("other") || !rtkit_running() {
+        return false;
+    }
+    if since.elapsed() >= RT_WAIT {
+        println!("{what} is still not real-time after {RT_WAIT:?} (rtkit refusing): going on without");
+        return false;
+    }
+    println!(
+        "{what} runs SCHED_OTHER (rtkit refused it, {:.1} s in): starting it again",
+        since.elapsed().as_secs_f64()
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    true
+}
+
+fn rtkit_running() -> bool {
+    std::fs::read_dir("/proc").into_iter().flatten().flatten().any(|e| {
+        std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "rtkit-daemon")
+    })
 }
 
 impl Drop for PrivatePw {

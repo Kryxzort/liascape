@@ -189,6 +189,20 @@ impl Serve {
         self.root.join(name)
     }
 
+    /// Kill the server and start it again on the same root (socket, state) with `extra` and `env`.
+    fn respawn(&mut self, extra: &[&str], env: &[(&str, &Path)]) {
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let mut cmd = serve_cmd(&self.root, extra);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        self.child = Some(cmd.spawn().expect("spawn liascape-player serve"));
+        self.wait_up();
+    }
+
     /// Wait for the child to exit on its own (after `quit`).
     fn wait_exit(&mut self, timeout: Duration) -> Option<std::process::ExitStatus> {
         let t = Instant::now();
@@ -7624,21 +7638,53 @@ fn scene_audio_serve_at(
         "debug",
     ];
     args.extend_from_slice(extra);
-    let srv = Serve::spawn_env(
-        root,
-        &args,
-        &[
-            ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
-            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
-        ],
-        Some(serial),
+    let env = [
+        ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
+        ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+    ];
+    let mut srv = Serve::spawn_env(root, &args, &env, Some(serial));
+    // The player's graph thread (the bus and its meter) asks rtkit for real-time like the
+    // daemon's; a refusal (the suite's own burst, `common::pw::RT_WAIT`) is retried the same way.
+    let t = Instant::now();
+    loop {
+        let mut c = srv.client();
+        wait_for(Duration::from_secs(5), "bus up and metering", || {
+            let b = c.ok("probe", json!({"name": "bus"}));
+            (b["state"] == json!("up") && b["meter"]["available"] == json!(true)).then_some(())
+        });
+        let policy = common::pw::settled_policy(|| player_graph_policy(&mut c));
+        if !common::pw::rt_refused_retry("the player's graph thread", policy, t) {
+            return srv;
+        }
+        srv.respawn(&args, &env);
+    }
+}
+
+/// The player's graph thread's scheduling policy (the bus meter's capture callback runs on
+/// it): `other` | `fifo` | `rr`, `None` before its first callback.
+fn player_graph_policy(c: &mut Client) -> Option<&'static str> {
+    match c.ok("probe", json!({"name": "bus"}))["meter"]["callback_policy"].as_str()? {
+        "other" => Some("other"),
+        "fifo" => Some("fifo"),
+        "rr" => Some("rr"),
+        _ => Some("unknown"),
+    }
+}
+
+/// The recording tests count lost graph cycles at the sink: they need the whole graph
+/// real-time (the private daemon's thread and the player's). A SCHED_OTHER graph thread loses
+/// cycles to the scheduler under load, wherever they fall — they would be counted as the
+/// player's. Fails when rtkit refused for all of `common::pw::RT_WAIT`.
+fn require_rt_graph(pw: &PrivatePw, c: &mut Client) {
+    let (daemon, player) = (pw.graph_policy(), player_graph_policy(c));
+    println!("graph threads: the private pipewire's {daemon:?}, the player's {player:?}");
+    let rt = |p: Option<&str>| matches!(p, Some("rr" | "fifo"));
+    assert!(
+        rt(daemon) && rt(player),
+        "the graph isn't real-time (the private pipewire's thread {daemon:?}, the player's \
+         {player:?}): rtkit refused it for {:?}; a recording would count the scheduler's lost cycles",
+        common::pw::RT_WAIT
     );
-    let mut c = srv.client();
-    wait_for(Duration::from_secs(5), "bus up and metering", || {
-        let b = c.ok("probe", json!({"name": "bus"}));
-        (b["state"] == json!("up") && b["meter"]["available"] == json!(true)).then_some(())
-    });
-    srv
 }
 
 /// The bus meter's 1 ms samples `[t_ms, dB]` over `[from, to)` (t_mono_ms).
@@ -8093,6 +8139,7 @@ fn scene_worker_exit_never_skips_bus_cycles() {
     };
     let srv = scene_audio_serve(&pw, root.clone(), serial);
     let mut c = srv.client();
+    require_rt_graph(&pw, &mut c);
     let wav = root.join("sink.wav");
     let rec = record_sink(&pw, &wav);
     std::thread::sleep(Duration::from_millis(500));
@@ -8116,7 +8163,9 @@ fn scene_worker_exit_never_skips_bus_cycles() {
         audible as f64 / 48_000.0
     );
     assert!(audible > 48_000, "the recording holds the tones");
-    assert_no_lost_cycles(&mut c, &left, &runs, (-2.0, 40.0), SWITCHES);
+    // A worker's stream leaves 1.5–6 ms after its `Quit` (the race, profiled).
+    let leaving = Leaving { kind: "worker.stopped", window: (-2.0, 40.0) };
+    assert_no_lost_cycles(&mut c, &left, &runs, leaving, SWITCHES);
 }
 
 /// One full-live fade to `to` (300 ms), waited for `transition.done`, then 600 ms for A's
@@ -8158,6 +8207,7 @@ fn mpv_source_teardown_never_skips_bus_cycles() {
     };
     let srv = scene_audio_serve(&pw, root.clone(), serial);
     let mut c = srv.client();
+    require_rt_graph(&pw, &mut c);
     let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
     let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
     let wav = root.join("sink.wav");
@@ -8183,7 +8233,12 @@ fn mpv_source_teardown_never_skips_bus_cycles() {
         audible as f64 / 48_000.0
     );
     assert!(audible > 48_000, "the recording holds the tones");
-    assert_no_lost_cycles(&mut c, &left, &runs, (-2.0, 300.0), SWITCHES);
+    // Where the race lands: with the streams made synchronous again (`PIPEWIRE_PROPS='{
+    // node.async = false }'`) under 40 busy loops, all 32 lost cycles of 12 runs sat 0–40 ms
+    // before A's `source.teardown` (A's AO deactivating as A is held, then stopped), none
+    // after it. A run outside that is plain lateness: counted, not the race.
+    let leaving = Leaving { kind: "source.teardown", window: (-55.0, 5.0) };
+    assert_no_lost_cycles(&mut c, &left, &runs, leaving, SWITCHES);
 }
 
 /// The invariant behind the two recordings above, read off the graph: every stream that
@@ -8452,28 +8507,45 @@ fn stop_sink_recording(mut rec: std::process::Child, wav: &Path) -> (Vec<f32>, V
     (left, runs)
 }
 
-/// The recording's clock anchored on the player's: its first non-zero sample is the first
-/// `source.audio_flowing` (the first tone's first buffer). `None` without either.
-fn recording_anchor(ev: &[Value], left: &[f32]) -> Option<f64> {
+/// The recording's clock anchored on the player's: the first tone's onset, seen by both the
+/// recording and the bus meter (whose 1 ms blocks are stamped on the player's clock from the
+/// graph's own cycle times) — the first sample, and the first block, past −40 dB. The first
+/// `source.audio_flowing` (polled, tens of ms late) only finds the onset in the meter's ring,
+/// or stands in when the meter has none. `None` without either.
+fn recording_anchor(c: &mut Client, ev: &[Value], left: &[f32]) -> Option<f64> {
+    const LOUD: f32 = 0.01; // −40 dBFS
     let first = left.iter().position(|v| *v != 0.0)?;
     let flow = ev
         .iter()
         .find(|e| e["kind"] == json!("source.audio_flowing"))
         .and_then(|e| e["t_mono_ms"].as_f64())?;
-    Some(flow - first as f64 / 48.0)
+    let loud = left.iter().position(|v| v.abs() > LOUD);
+    let meter = meter_samples(c, flow - 1000.0, flow + 1000.0)
+        .into_iter()
+        .find(|(_, db)| *db > 20.0 * f64::from(LOUD).log10());
+    match (loud, meter) {
+        (Some(i), Some((t, _))) => Some(t - i as f64 / 48.0),
+        _ => Some(flow - first as f64 / 48.0),
+    }
+}
+
+/// Where a test's deactivation race lands: `window` = (from, to) ms of a lost cycle after each
+/// `kind` event, measured on the race itself (the stream made synchronous again).
+struct Leaving {
+    kind: &'static str,
+    window: (f64, f64),
 }
 
 /// Each run of exact silence against the player's events: `(run, events within ±40 ms,
-/// at a leaving stream)` — the last is the deactivation race's signature: the run sits
-/// `window` ms after a `worker.stopped` (a scene worker's stream leaves 1.5–6 ms after its
-/// `Quit`) or a `source.drop` (an mpv source's AO is destroyed on a worker thread 30–240 ms
-/// later). Printed in full; a debug build on a loaded machine can also lose a cycle to plain
-/// lateness, which lands anywhere.
+/// at a leaving stream)` — the last is the deactivation race's signature, `leaving`. Printed
+/// in full, with the nearest `leaving.kind`; a debug build on a loaded machine can also lose a
+/// cycle to plain lateness, which lands anywhere — a window wider than the race's own spread
+/// counts those as the race.
 fn classify_runs(
     c: &mut Client,
     left: &[f32],
     runs: &[(f64, usize)],
-    window: (f64, f64),
+    leaving: &Leaving,
 ) -> Vec<((f64, usize), Vec<String>, bool)> {
     if runs.is_empty() {
         return Vec::new();
@@ -8485,7 +8557,7 @@ fn classify_runs(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let t0 = recording_anchor(&ev, left);
+    let t0 = recording_anchor(c, &ev, left);
     runs.iter()
         .map(|run| {
             let Some(t0) = t0 else {
@@ -8505,20 +8577,26 @@ fn classify_runs(
                     })
                 })
                 .collect();
-            let leaving = ev.iter().any(|e| {
-                let k = e["kind"].as_str().unwrap_or("");
-                (k == "worker.stopped" || k == "source.drop")
-                    && e["t_mono_ms"]
-                        .as_f64()
-                        .is_some_and(|t| tm - t >= window.0 && tm - t <= window.1)
-            });
+            let left_at: Vec<f64> = ev
+                .iter()
+                .filter(|e| e["kind"] == json!(leaving.kind))
+                .filter_map(|e| e["t_mono_ms"].as_f64())
+                .collect();
+            let (from, to) = leaving.window;
+            let at = left_at.iter().any(|t| tm - t >= from && tm - t <= to);
+            let since = left_at
+                .iter()
+                .map(|t| tm - t)
+                .min_by(|a, b| a.abs().total_cmp(&b.abs()))
+                .unwrap_or(f64::NAN);
             println!(
-                "  run at {:.3} s ({} samples, t_mono {tm:.1} ms){}: {near:?}",
+                "  run at {:.3} s ({} samples, t_mono {tm:.1} ms, {since:+.1} ms after the nearest {}){}: {near:?}",
                 run.0,
                 run.1,
-                if leaving { " AT A LEAVING STREAM" } else { "" }
+                leaving.kind,
+                if at { " AT A LEAVING STREAM" } else { "" }
             );
-            (*run, near, leaving)
+            (*run, near, at)
         })
         .collect()
 }
@@ -8530,10 +8608,10 @@ fn assert_no_lost_cycles(
     c: &mut Client,
     left: &[f32],
     runs: &[(f64, usize)],
-    window: (f64, f64),
+    leaving: Leaving,
     switches: usize,
 ) {
-    let classified = classify_runs(c, left, runs, window);
+    let classified = classify_runs(c, left, runs, &leaving);
     let at_leaving: Vec<_> = classified.iter().filter(|(_, _, l)| *l).map(|(r, n, _)| (*r, n.clone())).collect();
     assert!(
         at_leaving.is_empty(),
@@ -8558,6 +8636,7 @@ fn dropout_analysis_never_skips_bus_cycles() {
     };
     let srv = scene_audio_serve(&pw, root.clone(), serial);
     let mut c = srv.client();
+    require_rt_graph(&pw, &mut c);
     let red = s(&ensure_clip("tr_red_10s", RED_10S)).to_string();
     let blue = s(&ensure_clip("tr_blue_10s", BLUE_10S)).to_string();
     let a = create_src(&mut c, json!({"path": red, "loop": true}));

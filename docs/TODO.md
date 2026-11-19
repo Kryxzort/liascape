@@ -38,9 +38,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.
-102. [ ] Full crate suite load flake: `api.rs` `mpv_source_teardown_never_skips_bus_cycles` fails in every full
-       `cargo test --no-fail-fast` run ("graph cycles lost as a stream left the bus: [((26.06, 64), [])]") but passes
-       3/3 alone. Same lost-cycle shape as #95; find what the suite's own parallel load starves and wait on the event.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

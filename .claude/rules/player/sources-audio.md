@@ -190,7 +190,9 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
 - `Bus::latency()` = the measured loopback latency plus `ASYNC_HOPS` quanta; sources get `audio_delay_bias =
   −latency` and a source's own `audio_delay` adds to it (`read("audio_delay")` stays the graph value).
 - Recording tests need the private PipeWire with `module-rt` (`src/player/tests/common/pw.rs`): a non-RT data thread
-  skips cycles on its own. Tests never touch the owner's PipeWire.
+  skips cycles on its own. rtkit refuses bursts the suite itself makes, so a refused daemon or player is started again
+  (`common::pw::RT_WAIT`) and a recording test calls `require_rt_graph` before it records. Tests never touch the
+  owner's PipeWire.
 
 ## Meter (`src/player/src/audio/meter.rs`)
 - The capture callback runs on PipeWire's RT data thread (`RT_PROCESS`), never blocks or allocates (`try_lock`,
