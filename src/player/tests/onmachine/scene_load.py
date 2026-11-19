@@ -33,6 +33,8 @@ private dirs each create the rotation, wait --gap seconds (and, with --spare, fo
 with the files in the page cache (a player restart), `first_boot` with them dropped (a reboot). Without --spare it is
 the first scene as it was before a rotation started the spare.
 
+--capture also records the worker's VRAM then (`vram_mib`, nvidia-smi's process table): what the loaded scene holds.
+
 Isolation: own XDG_RUNTIME_DIR / STATE / CACHE / CONFIG and socket under --out, no WAYLAND_DISPLAY / DISPLAY,
 PipeWire and Pulse pointed at nothing, LIASCAPE_PLAYER_VRAM_PROBE=none. HOME stays real (WE's assets are found
 through Steam). It kills only the serve it started.
@@ -227,6 +229,8 @@ class Player:
         if capture and "ready_ms" in rec:
             time.sleep(1.0)
             rec["capture"] = self.ctl.call("capture", {"target": src, "path": str(capture)}, timeout=20.0).get("path")
+            if rec.get("pid") and (v := vram_mib(rec["pid"])) is not None:
+                rec["vram_mib"] = v
         # a loaded machine can keep the loop busy for seconds right after a heavy build
         workers = self.ctl.call("probe", {"name": "workers", "args": {"log_tail": True}}, timeout=30.0)
         for w in workers.get("workers", []):
@@ -286,15 +290,22 @@ def spare_memory(pid):
                 out[k.lower() + "_mib"] = round(int(v.split()[0]) / 1024, 1)
     except OSError:
         pass
+    if (v := vram_mib(pid)) is not None:
+        out["vram_mib"] = v
+    return out
+
+
+def vram_mib(pid):
+    """`pid`'s VRAM in nvidia-smi's process table (MiB), None when it isn't listed."""
     try:
         smi = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=10).stdout
-        for line in smi.splitlines():
-            f = line.strip("| ").split()
-            if str(pid) in f and f[-1].endswith("MiB"):
-                out["vram_mib"] = float(f[-1][:-3])
     except (OSError, subprocess.TimeoutExpired):
-        pass
-    return out
+        return None
+    for line in smi.splitlines():
+        f = line.strip("| ").split()
+        if str(pid) in f and f[-1].endswith("MiB"):
+            return float(f[-1][:-3])
+    return None
 
 
 def phases(rec):

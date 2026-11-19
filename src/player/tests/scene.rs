@@ -1695,7 +1695,8 @@ fn real_scene_project_loads_beside_the_egl_setup() {
 /// with nvdec instead of falling to `vulkan-copy` (black ~0.75 s after the scene's first frame:
 /// `docs/player/modules/scene-lwe-core.md`, video textures); `LIASCAPE_PLAYER_HWDEC_INTEROP=off`
 /// keeps it out, as it keeps the compositor's CUDA interop out. Read from the worker's own
-/// mappings: nothing else in a scene without video loads libcuda.
+/// mappings: nothing else in a scene without video loads libcuda. The core is told the same
+/// interop (`cuda`, or `no` with copy modes), so each video loads only it.
 #[test]
 fn real_scene_worker_loads_libcuda_for_video_textures() {
     use liascape_player::sources::render_worker::HWDEC_INTEROP_ENV;
@@ -1743,6 +1744,16 @@ fn real_scene_worker_loads_libcuda_for_video_textures() {
             tail.contains("hwdec: libcuda loaded"),
             want,
             "{HWDEC_INTEROP_ENV}={knob}: the log tail:\n{tail}"
+        );
+        // LWE's video players are told to load that interop only, or none (copy modes)
+        let told = if want {
+            "video textures decode with hwdec nvdec,nvdec-copy,vaapi-copy,auto-copy, gpu-hwdec-interop cuda"
+        } else {
+            "video textures decode with hwdec nvdec-copy,vaapi-copy,auto-copy, gpu-hwdec-interop no"
+        };
+        assert!(
+            tail.contains(told),
+            "{HWDEC_INTEROP_ENV}={knob}: want {told:?} in the log tail:\n{tail}"
         );
     }
 }

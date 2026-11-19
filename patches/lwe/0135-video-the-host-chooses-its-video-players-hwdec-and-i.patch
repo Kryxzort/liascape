@@ -1,0 +1,127 @@
+From 5a14aee43cae93eaa8371fd9fb58e6de5925b1d8 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 02:03:27 +0530
+Subject: [PATCH 135/135] video: the host chooses its video players' hwdec and
+ interop
+
+Every video player (a video texture, a video wallpaper) asked libmpv for `hwdec=auto` and left `gpu-hwdec-interop` at
+its default, which for the render API means trying every interop libmpv has when the player's render context is made:
+on an NVIDIA machine with libcuda reachable that loads the CUDA interop (a CUDA context) and the drmprime one, and
+tries VAAPI, Vulkan and drmprime-overlay, which fail without their display or renderer. A host that already decides
+how its own players decode had no way to make the core's players follow it, nor to keep them to copy modes.
+
+wp_context_set_video_hwdec (context, hwdec, interop) stores libmpv's `hwdec` and `gpu-hwdec-interop` values on the
+context; GLPlayer sets both as options before mpv_initialize, so the render context loads only that interop (`no`:
+none). NULL leaves a value at libmpv's default, so a host that never calls it sees no change.
+
+Measured with liascape's scene worker (two 1080p video textures, NVIDIA, `cuda` with `nvdec,nvdec-copy,vaapi-copy,
+auto-copy`): each player loads only the CUDA interop and decodes with nvdec, as before; the worker's VRAM stays 906
+MiB, since the interops it no longer tries held no device memory. What a video costs is its CUDA context (mpv's CUDA
+interop creates one in every render context, 160 MiB here) plus its decoder's surfaces and textures.
+
+Origin: ours
+Why: liascape docs/TODO.md #104 (scene video texture VRAM)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/linux-wallpaperengine/context.h           | 15 +++++++++++++++
+ src/core/WallpaperEngine/Context.h                |  6 ++++++
+ .../VideoPlayback/MPV/GLPlayer.cpp                | 10 ++++++++--
+ src/core/frontends/context.cpp                    |  8 ++++++++
+ 4 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux-wallpaperengine/context.h b/include/linux-wallpaperengine/context.h
+index 2b0417a..1252323 100644
+--- a/include/linux-wallpaperengine/context.h
++++ b/include/linux-wallpaperengine/context.h
+@@ -135,6 +135,21 @@ WPENGINE_API void wp_context_set_gl_proc_address (wp_context* context, wp_gl_pro
+  */
+ WPENGINE_API void wp_context_set_gl_upload_context (wp_context* context, wp_gl_upload_context* upload);
+ 
++/**
++ * How the video players this context starts (video textures, video wallpapers) decode: libmpv's `hwdec` and
++ * `gpu-hwdec-interop` values. libmpv's render API tries every interop it has when a player's render context is made,
++ * each opening its device where it can (VAAPI's display, CUDA's context, ...), unless `gpu-hwdec-interop` names one. A
++ * host that knows its GPU names the one it decodes with (`cuda`, `vaapi`, ...) or `no` (copy modes only) and an `hwdec`
++ * list that suits it. Set it before the first wp_render_frame;
++ * a player already started keeps what it had. NULL leaves that value at libmpv's default (`hwdec` `auto`,
++ * `gpu-hwdec-interop` `auto`)
++ *
++ * @param context The context to set it for
++ * @param hwdec libmpv's `hwdec` value (e.g. "nvdec,nvdec-copy,auto-copy"), or NULL
++ * @param interop libmpv's `gpu-hwdec-interop` value (e.g. "cuda", "no"), or NULL
++ */
++WPENGINE_API void wp_context_set_video_hwdec (wp_context* context, const char* hwdec, const char* interop);
++
+ /**
+  * Updates the time counter handlers
+  *
+diff --git a/src/core/WallpaperEngine/Context.h b/src/core/WallpaperEngine/Context.h
+index 0bfbe90..8867d99 100644
+--- a/src/core/WallpaperEngine/Context.h
++++ b/src/core/WallpaperEngine/Context.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <memory>
++#include <optional>
++#include <string>
+ 
+ #include "linux-wallpaperengine/context.h"
+ 
+@@ -26,6 +28,10 @@ public:
+     wp_gl_proc_address* gl_proc_address;
+     /** the host's context for the upload thread (wp_context_set_gl_upload_context), or null */
+     wp_gl_upload_context* gl_upload_context = nullptr;
++    /** libmpv's `hwdec` for every video player (wp_context_set_video_hwdec); unset: `auto` */
++    std::optional<std::string> video_hwdec;
++    /** libmpv's `gpu-hwdec-interop` for every video player (wp_context_set_video_hwdec); unset: libmpv's (all) */
++    std::optional<std::string> video_hwdec_interop;
+     wp_time_counter* time_counter;
+     wp_audio_input_mix* audio_input_mix;
+     std::vector<Data::Model::ProjectSharedPtr> projects;
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+index 4bb0a00..f1b2dd6 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+@@ -317,13 +317,19 @@ void GLPlayer::init () {
+     // connect (no PipeWire) can hold mpv's core thread for 20-30 s in its cleanup, and a muted one makes no sound
+     // anyway. clearMuted selects one
+     mpv_set_option_string (this->m_handle, "aid", this->m_muted ? "no" : "auto");
++    // the host's decoder choice (wp_context_set_video_hwdec). Without a gpu-hwdec-interop the render context made below
++    // tries every interop libmpv has, each opening its device where it can, whatever the decoder will be
++    const auto& context = this->getContext ().getContext ();
++    if (context.video_hwdec_interop.has_value ()) {
++	mpv_set_option_string (this->m_handle, "gpu-hwdec-interop", context.video_hwdec_interop->c_str ());
++    }
++    mpv_set_option_string (this->m_handle, "hwdec", context.video_hwdec.value_or ("auto").c_str ());
+ 
+     if (mpv_initialize (this->m_handle) < 0) {
+ 	sLog.exception ("Could not initialize mpv context");
+     }
+ 
+-    // ensure video is muted and plays in a loop
+-    mpv_set_property_string (this->m_handle, "hwdec", "auto");
++    // ensure video plays in a loop
+     mpv_set_property_string (this->m_handle, "loop", this->m_loop ? "inf" : "no");
+     // at the end of a video that doesn't loop, stay on its last frame (IVideoTexture's ended callback)
+     mpv_set_property_string (this->m_handle, "keep-open", "yes");
+diff --git a/src/core/frontends/context.cpp b/src/core/frontends/context.cpp
+index ebcd4c4..138e373 100644
+--- a/src/core/frontends/context.cpp
++++ b/src/core/frontends/context.cpp
+@@ -49,6 +49,14 @@ WPENGINE_API void wp_context_set_gl_upload_context (wp_context* context, wp_gl_u
+     WPENGINE_CONTEXT_API_END ();
+ }
+ 
++WPENGINE_API void wp_context_set_video_hwdec (wp_context* context, const char* hwdec, const char* interop) {
++    WPENGINE_CONTEXT_API_BEGIN
++    auto* ctx = static_cast<WallpaperEngine::Context*> (context);
++    ctx->video_hwdec = hwdec ? std::optional<std::string> (hwdec) : std::nullopt;
++    ctx->video_hwdec_interop = interop ? std::optional<std::string> (interop) : std::nullopt;
++    WPENGINE_CONTEXT_API_END ();
++}
++
+ WPENGINE_API void wp_context_set_time_counter (wp_context* context, wp_time_counter* counter) {
+     WPENGINE_CONTEXT_API_BEGIN
+     static_cast<WallpaperEngine::Context*> (context)->time_counter = counter ?: &default_time_counter;

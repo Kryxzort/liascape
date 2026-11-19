@@ -803,12 +803,17 @@ impl Renderer {
         let dir = std::path::PathBuf::from(&s.path);
         let assets = s.assets_dir.as_ref().map(std::path::PathBuf::from);
         let steam = s.steam_dir.as_ref().map(std::path::PathBuf::from);
+        let (video_hwdec, note) = video_hwdec(&self.gfx);
+        if let Some(note) = note {
+            self.log(note);
+        }
         let opts = render::LoadOpts {
             dir: &dir,
             assets: assets.as_deref(),
             steam_dir: steam.as_deref(),
             properties: &s.properties,
             screen: (s.max_size[0], s.max_size[1]),
+            video_hwdec,
         };
         let t = Instant::now();
         let mut results = Vec::new();
@@ -839,9 +844,6 @@ impl Renderer {
             }
             None => None,
         };
-        if let Some(note) = preload_libcuda_for_video(&self.gfx) {
-            self.log(note);
-        }
         let r = render::LweScene::load(&self.gfx, &opts, project, |n, r| {
             results.push((n.to_string(), r))
         });
@@ -1470,53 +1472,71 @@ fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
     r.run()
 }
 
-/// LWE plays a scene's video textures in libmpv with `hwdec=auto`, and a nixpkgs libmpv finds no
-/// libcuda by itself (its RUNPATH lacks the NixOS driver dir; only the flake's wrapper adds it).
-/// Without it NVIDIA's video textures fall through to `vulkan-copy`, whose Vulkan device per video
-/// (the second waits for the first) keeps the video black ~0.75 s after the scene's first frame,
-/// past 1 s on a busy machine. Loaded before the first build starts a player, mpv's soname lookup
-/// finds it and decodes with nvdec, as on any system whose libmpv finds libcuda (the costs:
-/// `docs/player/modules/scene-lwe-core.md`). Only where the compositor's render worker would load
-/// the CUDA interop (`hwdec_interop_for`: the GL vendor and `LIASCAPE_PLAYER_HWDEC_INTEROP`), once
-/// per process; the note goes to the log tail.
-/// Guard: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`.
+/// How LWE's video players decode, decided once per process: the interop the compositor's render
+/// worker would load (`hwdec_interop_for`: the GL vendor and `LIASCAPE_PLAYER_HWDEC_INTEROP`) and
+/// the `hwdec` list it would ask for with it (`mpv_hwdec("auto", …)`: the interop's zero-copy
+/// decoders, then the copy modes), or copy modes only with no interop (`no`). Given to the core
+/// (`wp_context_set_video_hwdec`), each video's render context loads that one interop instead of
+/// trying every one libmpv has, and `off` means copy modes for scenes as for the compositor (the
+/// costs: `docs/player/modules/scene-lwe-core.md`).
+///
+/// For the CUDA interop libcuda is loaded here first: a nixpkgs libmpv finds none by itself (its
+/// RUNPATH lacks the NixOS driver dir; only the flake's wrapper adds it), and without it the video
+/// falls through to `vulkan-copy`, whose Vulkan device per video keeps it black ~0.75 s after the
+/// scene's first frame. No libcuda = no interop (copy modes). The note goes to the log tail.
+/// Guards: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`, host_api_test
+/// `video_players_load_only_the_hosts_interop`.
 #[cfg(feature = "lwe")]
-fn preload_libcuda_for_video(gfx: &Gfx) -> Option<String> {
+fn video_hwdec(gfx: &Gfx) -> (&'static render::VideoHwdec, Option<String>) {
+    use liascape_player::sources::mpv::mpv_hwdec;
     use liascape_player::sources::render_worker::{
         HWDEC_INTEROP_ENV, hwdec_interop_for, preload_libcuda, warm_cuda,
     };
-    static DONE: std::sync::Once = std::sync::Once::new();
+    static HWDEC: std::sync::OnceLock<render::VideoHwdec> = std::sync::OnceLock::new();
     let mut note = None;
-    DONE.call_once(|| {
+    let hw = HWDEC.get_or_init(|| {
         let vendor = unsafe {
             use glow::HasContext;
             gfx.gl.get_parameter_string(glow::VENDOR)
         };
         let env = std::env::var(HWDEC_INTEROP_ENV).ok();
-        if !matches!(hwdec_interop_for(&vendor, env.as_deref()), Some("cuda" | "all")) {
-            return;
-        }
-        let t = Instant::now();
-        note = Some(match preload_libcuda() {
-            Some((name, lib)) => {
-                // The driver's own initialisation beside the build, not before it: a scene
-                // without video never waits for it, and a video's player finds it done.
-                let _ = std::thread::Builder::new()
-                    .name("lia-scene-cuda".into())
-                    .spawn(move || {
-                        if let Some((rc, ms)) = warm_cuda(lib) {
-                            eprintln!("hwdec: cuInit {rc} in {ms:.0} ms");
-                        }
-                    });
-                format!(
-                    "hwdec: libcuda loaded from {name} in {:.1} ms: video textures decode with nvdec",
-                    t.elapsed().as_secs_f64() * 1e3
-                )
+        let mut interop = hwdec_interop_for(&vendor, env.as_deref());
+        let mut lib_note = String::new();
+        if matches!(interop, Some("cuda" | "all")) {
+            let t = Instant::now();
+            match preload_libcuda() {
+                Some((name, lib)) => {
+                    // The driver's own initialisation beside the build, not before it: a scene
+                    // without video never waits for it, and a video's player finds it done.
+                    let _ = std::thread::Builder::new()
+                        .name("lia-scene-cuda".into())
+                        .spawn(move || {
+                            if let Some((rc, ms)) = warm_cuda(lib) {
+                                eprintln!("hwdec: cuInit {rc} in {ms:.0} ms");
+                            }
+                        });
+                    lib_note = format!(
+                        "libcuda loaded from {name} in {:.1} ms; ",
+                        t.elapsed().as_secs_f64() * 1e3
+                    );
+                }
+                None => {
+                    interop = None;
+                    lib_note = "no libcuda; ".into();
+                }
             }
-            None => "hwdec: no libcuda: video textures take mpv's next decoder".into(),
-        });
+        }
+        let v = render::VideoHwdec {
+            hwdec: mpv_hwdec("auto", interop),
+            interop: interop.unwrap_or("no"),
+        };
+        note = Some(format!(
+            "hwdec: {lib_note}video textures decode with hwdec {}, gpu-hwdec-interop {}",
+            v.hwdec, v.interop
+        ));
+        v
     });
-    note
+    (hw, note)
 }
 
 fn idle_until_quit(sock: &OwnedFd) -> ! {

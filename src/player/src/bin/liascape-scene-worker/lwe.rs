@@ -63,6 +63,11 @@ unsafe extern "C" {
     fn wp_context_destroy(context: *mut c_void);
     fn wp_context_set_gl_proc_address(context: *mut c_void, address: *mut WpGlProcAddress);
     fn wp_context_set_time_counter(context: *mut c_void, counter: *mut WpTimeCounter);
+    fn wp_context_set_video_hwdec(
+        context: *mut c_void,
+        hwdec: *const c_char,
+        interop: *const c_char,
+    );
     fn wp_context_audio_input_push(
         context: *mut c_void,
         interleaved: *const f32,
@@ -375,6 +380,16 @@ impl Scene {
         let set: SetUpload = unsafe { std::mem::transmute(sym) };
         unsafe { set(self.context, &mut u.callbacks) };
         self.upload = Some(u);
+    }
+
+    /// mpv's `hwdec` and `gpu-hwdec-interop` for every video player the scene starts (libmpv's
+    /// render API otherwise tries every interop it has, each opening its device where it can).
+    /// Before [`first_render`](Self::first_render).
+    pub fn set_video_hwdec(&self, hwdec: &str, interop: &str) {
+        let (Ok(h), Ok(i)) = (CString::new(hwdec), CString::new(interop)) else {
+            return;
+        };
+        unsafe { wp_context_set_video_hwdec(self.context, h.as_ptr(), i.as_ptr()) };
     }
 
     /// Renders frame 0 into `scratch_fbo` (any size) and returns the native size; ≤ 1 = the

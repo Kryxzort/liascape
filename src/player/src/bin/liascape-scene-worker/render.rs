@@ -24,6 +24,16 @@ pub struct LoadOpts<'a> {
     pub properties: &'a Map<String, Value>,
     /// The screen it shows on (`Start.max_size`; 0 = unknown), given before the first frame.
     pub screen: (u32, u32),
+    /// How the scene's video textures decode.
+    pub video_hwdec: &'a VideoHwdec,
+}
+
+/// mpv's `hwdec` and `gpu-hwdec-interop` for LWE's video players (`wp_context_set_video_hwdec`):
+/// the compositor's choice for its own render contexts (`render_worker::hwdec_interop_for`,
+/// `mpv::mpv_hwdec`), so a video texture loads one interop, not every one libmpv has.
+pub struct VideoHwdec {
+    pub hwdec: String,
+    pub interop: &'static str,
 }
 
 pub struct LweScene {
@@ -242,6 +252,7 @@ impl LweScene {
             Ok(recipe) => scene.set_upload_context(recipe),
             Err(e) => eprintln!("lwe: texture uploads stay on the render thread: {e}"),
         }
+        scene.set_video_hwdec(&o.video_hwdec.hwdec, o.video_hwdec.interop);
         let scratch = gfx.tex(1, 1);
         let scratch_fbo = gfx.fbo(&scratch);
         let (w, h) = scene.first_render(scratch_fbo.id.0.get()).map_err(|e| {

@@ -172,7 +172,7 @@ pub fn hwdec_interop_for(gl_vendor: &str, env: Option<&str>) -> Option<&'static 
 
 /// `dlopen` libcuda for the CUDA interop (never closed): by soname, else from the NixOS driver
 /// dir. `Some(where)` once loaded, `None` = no libcuda (no CUDA interop then). The scene worker
-/// does the same for LWE's video textures (`liascape-scene-worker`'s `preload_libcuda_for_video`).
+/// does the same for LWE's video textures (`liascape-scene-worker`'s `video_hwdec`).
 pub fn preload_libcuda() -> Option<(&'static str, LibHandle)> {
     const TRY: [(&str, &std::ffi::CStr); 2] = [
         ("libcuda.so.1", c"libcuda.so.1"),

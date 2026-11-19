@@ -166,3 +166,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0132-fs-remember-where-a-path-resolved-so-a-build-asks-th.patch` | fs: remember where a path resolved, so a build asks the filesystem once per path | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0133-render-hoist-a-unit-s-declarations-without-regexes-o.patch` | render: hoist a unit's declarations without regexes, once per text | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0134-render-a-particle-frame-at-an-fps-of-1-to-20-is-two-.patch` | render: a particle frame at an fps of 1 to 20 is two half steps, as in WE | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0135-video-the-host-chooses-its-video-players-hwdec-and-i.patch` | video: the host chooses its video players' hwdec and interop | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

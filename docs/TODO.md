@@ -37,11 +37,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE: time click-to-transition-start for the 3 `scene_load.py` scenes in WE under Proton (the
        we-ref setup), warm and cold, against ours; native Windows later (needs the owner to boot it). Report beside
        the scene-worker numbers.
-104. [ ] Video textures in scenes cost ~390 MiB of VRAM each with nvdec: mpv loads every hwdec interop at
-       `mpv_render_context_create` and makes one CUDA context per video (3426575339's worker 356 → 906 MiB once libcuda
-       loads). In the fork's GLPlayer, ask mpv for the CUDA interop only (`gpu-hwdec-interop`), and see whether a scene's
-       video textures can share one CUDA context; a scene with 6+ videos would otherwise hit the backend's 2048 MiB scene
-       VRAM limit. Also moves ~200 ms of interop setup out of the build (`source.ready`).
+104. [ ] Video textures in scenes cost ~275 MiB of VRAM each with nvdec (3426575339, two 1080p videos: worker 356 → 906
+       MiB): mpv's CUDA interop makes a CUDA context per video (160 MiB on this GPU), the decoder's surfaces and mpv's
+       textures the rest; about seven videos reach the 2048 MiB scene VRAM limit. Loading only the CUDA interop
+       (`wp_context_set_video_hwdec`) changed nothing here: the other interops fail or hold no device memory. Sharing one
+       CUDA context needs a way outside libmpv's public API (`cuCtxCreate` in every render context; no option or render
+       parameter takes a device): a libcuda shim that hands out the retained primary context (160 MiB for any number of
+       contexts, measured), or an mpv change that takes the host's hwdec device. Or copy modes for scene videos: with
+       `LIASCAPE_PLAYER_HWDEC_INTEROP=off` they decode with `nvdec-copy` (ffmpeg's own context, no GL interop): worker
+       730 MiB (~190 per video), `source.ready` warm 187 ms instead of ~400 (no interop init in the build), each video
+       ~0.28 s after the scene's first frame instead of ~0.03 (the full picture at about the same time), 0/10 black, at
+       the copy's CPU cost (the compositor measured nvdec-copy 1080p30 at ~10 % of a core). Decide which, if any.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
