@@ -9,10 +9,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
-       spawn → `Hello` for every apply after a run's first: warm 65–135 ms, cold 70–215 ms faster). Left: the units'
-       preprocessing (8–100 ms: ~100 in 3042492564, ~80 in 3163060610; its key would have to cover every texture format
-       and include it resolves); a first-ever load's NVIDIA compiles. 2921510865 (3.6 GB of VRAM) wasn't measured
-       beside a busy desktop.
+       spawn → `Hello` for every apply after a run's first: warm 65–135 ms, cold 70–215 ms faster). Left: a first-ever
+       load's NVIDIA compiles. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop. Not worth it (tried):
+       caching the units' preprocessing. Since fork patch 0133 it costs 28 ms of 3042492564's build, 21 of 3163060610's,
+       9.5 of 2388299037's (`--lwe-smoke` with `WPENGINE_HEALTH=` empty: the smoke's health report skips every shader
+       cache read). A shader-cache kind keyed by the unit's text, combos and filled slots, storing each include it read
+       and each texture format / flags it asked and checking them again on a hit, gave byte-identical units (2,436 in 8
+       scenes, also under other user properties) and cut that to 8 / 6 / 3 ms, every warm unit a hit inside the real
+       worker, but apply → first frame didn't move (`scene_load.py`, interleaved, warm medians of 16: 459 → 468, 394 →
+       403, 452 → 455 ms; fastest build 289 / 288, 220 / 222, 269 / 267). Likely the render thread then just waits
+       longer for the texture uploads at the first frame (inferred, not measured). Worth retrying only once those stop
+       being the build's tail.
 88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
        below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
        eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
