@@ -231,8 +231,11 @@ impl SceneClock {
 pub struct SceneOpts {
     /// The source id (logs, crash records).
     pub id: String,
-    /// The item folder.
+    /// The item folder: the source's identity (events, crash records, the loudness book).
     pub path: PathBuf,
+    /// The folder the worker loads when it isn't `path` (`scene_dir`: a preset's base scene);
+    /// `None` = `path`. See [`SceneOpts::load_path`].
+    pub load_dir: Option<PathBuf>,
     pub worker_bin: PathBuf,
     pub tick_hz: f64,
     /// The largest output's size (the ring is exported at `scene::cover_size`).
@@ -292,6 +295,7 @@ impl SceneOpts {
         SceneOpts {
             id: "scene".into(),
             path: path.into(),
+            load_dir: None,
             worker_bin: worker_bin.into(),
             tick_hz: DEFAULT_SCENE_FPS,
             max_size: [1920, 1080],
@@ -317,6 +321,26 @@ impl SceneOpts {
             loudness_key: String::new(),
             spare: None,
         }
+    }
+
+    /// The folder the worker loads: `load_dir`, else `path`. Only the worker's `Start` (and its
+    /// `--preload`), the synthetic check and the Steam library come from it; everything that
+    /// names the source names `path`.
+    pub fn load_path(&self) -> &Path {
+        self.load_dir.as_deref().unwrap_or(&self.path)
+    }
+
+    /// Where `load_path` puts the worker: whether it is a synthetic test scene (only when the
+    /// environment allows them) and the Steam library it lives in.
+    fn locate(&mut self) {
+        let dir = self.load_path().to_path_buf();
+        self.synthetic = self
+            .env
+            .iter()
+            .any(|(k, v)| k == "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES" && v == "1")
+            && dir.join("liascape-synthetic.json").is_file();
+        self.steam_dir = crate::scene::assets::steam_root_of_item(&dir)
+            .map(|p| p.to_string_lossy().into_owned());
     }
 
     /// A learner for this scene's loudness: the window, the cap and the seed (if any).
@@ -600,6 +624,11 @@ fn worker_bin_of(base: &Map<String, Value>) -> Option<PathBuf> {
         .or_else(crate::paths::scene_worker_bin)
 }
 
+/// A `scene_dir` value as [`SceneOpts::load_dir`]: "" = load `path` itself.
+fn load_dir_of(scene_dir: &str) -> Option<PathBuf> {
+    (!scene_dir.is_empty()).then(|| PathBuf::from(scene_dir))
+}
+
 /// The environment a scene opened under `base` adds for the synthetic test scenes.
 fn synthetic_env_of(base: &Map<String, Value>) -> Vec<(String, String)> {
     if base.get("allow_synthetic").and_then(Value::as_bool) == Some(true) {
@@ -654,11 +683,11 @@ impl SceneSource {
             )
         })?;
         let path = s("path");
-        let allow_synthetic = bb("allow_synthetic");
         let mut o = SceneOpts::new(&path, bin);
         o.id = id.to_string();
-        o.synthetic = allow_synthetic && Path::new(&path).join("liascape-synthetic.json").is_file();
+        o.load_dir = load_dir_of(&s("scene_dir"));
         o.env = synthetic_env_of(base);
+        o.locate();
         o.position = f("position", 0.0);
         o.paused = matches!(get("paused"), Some(PropValue::Bool(true)));
         o.speed = f("speed", 1.0);
@@ -672,8 +701,6 @@ impl SceneSource {
                 bs("scene_assets_error").unwrap_or_else(|| crate::scene::assets::HINT.into())
             )));
         }
-        o.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
-            .map(|p| p.to_string_lossy().into_owned());
         if let Some(PropValue::Map(m)) = get("scene_props") {
             o.properties = m.clone();
         }
@@ -701,7 +728,7 @@ impl SceneSource {
         let mut src = SceneSource::open_opts(gfx, o).map_err(super::io_error)?;
         // A scene the snapshot saved broken (past its restart budget before the
         // player restarted) comes back as its preview with no worker — never a fresh crash
-        // loop on every player restart. A `path` change plays again.
+        // loop on every player restart. A `path` or `scene_dir` change plays again.
         if matches!(get("broken"), Some(PropValue::Bool(true))) {
             src.restored_broken = true;
             src.broken =
@@ -845,7 +872,7 @@ impl SceneSource {
 
     fn spawn(&mut self) -> Result<(), String> {
         let start = ToWorker::Start {
-            path: self.opts.path.to_string_lossy().into_owned(),
+            path: self.opts.load_path().to_string_lossy().into_owned(),
             assets_dir: self.opts.assets_dir.clone(),
             steam_dir: self.opts.steam_dir.clone(),
             position: self.clock.now(Instant::now()),
@@ -873,6 +900,11 @@ impl SceneSource {
         spec.budget = self.opts.budget;
         spec.hang_timeout = self.opts.hang_timeout;
         spec.crash_dir = self.opts.crash_dir.clone();
+        spec.record_path = self
+            .opts
+            .load_dir
+            .is_some()
+            .then(|| self.opts.path.to_string_lossy().into_owned());
         // The spare, when one launched the same way waits (`worker::spare`), else a new process.
         let taken = match &self.opts.spare {
             Some(sp) => spare::lock(sp).take(spec, Instant::now()),
@@ -1754,13 +1786,7 @@ impl SceneSource {
     }
 
     fn change_path(&mut self, path: String) {
-        // A new worker on the new folder; the old frame stays shown (foreign: never
-        // released) until the new worker's first frame latches. Not a crash.
-        if let Some(h) = self.host.take() {
-            epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, h.wake_fd());
-            drop(h); // `quit`, reaped off the loop
-        }
-        self.latch.forget_worker();
+        self.drop_worker();
         self.end_loudness();
         // The seed (and the audio configuration's key) were the old folder's: the new one
         // continues what the book has of the new folder, else starts from nothing (the next
@@ -1770,14 +1796,31 @@ impl SceneSource {
         self.key_changed_at = None;
         self.opts.path = PathBuf::from(&path);
         self.join_loudness();
-        self.opts.synthetic = self
-            .opts
-            .env
-            .iter()
-            .any(|(k, v)| k == "LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES" && v == "1")
-            && Path::new(&path).join("liascape-synthetic.json").is_file();
-        self.opts.steam_dir = crate::scene::assets::steam_root_of_item(Path::new(&path))
-            .map(|p| p.to_string_lossy().into_owned());
+        self.reload();
+    }
+
+    /// A new folder to load under the same identity (`scene_dir`): a new worker, like a `path`
+    /// change, but the source is still the same item, so its loudness measurement goes on.
+    /// Guard: `tests/api.rs::scene_dir_change_is_a_new_worker_not_a_crash`.
+    fn change_load_dir(&mut self, dir: Option<PathBuf>) {
+        self.drop_worker();
+        self.opts.load_dir = dir;
+        self.reload();
+    }
+
+    /// Let the worker go for a new one: the old frame stays shown (foreign: never released)
+    /// until the new worker's first frame latches. Not a crash.
+    fn drop_worker(&mut self) {
+        if let Some(h) = self.host.take() {
+            epoll_ctl(&self.wake, libc::EPOLL_CTL_DEL, h.wake_fd());
+            drop(h); // `quit`, reaped off the loop
+        }
+        self.latch.forget_worker();
+    }
+
+    /// Start over on `opts.load_path()` from time 0 with a new worker (after [`Self::drop_worker`]).
+    fn reload(&mut self) {
+        self.opts.locate();
         self.wants_audio_input = false;
         self.pending_input.clear();
         self.input_cursor = None;
@@ -2571,6 +2614,17 @@ impl Source for SceneSource {
                     && Path::new(p) != self.opts.path
                 {
                     self.change_path(p.clone());
+                }
+            }
+            "scene_dir" => {
+                if let PropValue::Str(d) = v {
+                    let dir = load_dir_of(d);
+                    let from = self.opts.load_path().to_path_buf();
+                    if dir.as_deref().unwrap_or(&self.opts.path) != from {
+                        self.change_load_dir(dir);
+                    } else {
+                        self.opts.load_dir = dir;
+                    }
                 }
             }
             "paused" => self.set_paused(b),

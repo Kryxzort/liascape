@@ -473,6 +473,15 @@ pub fn schema_for_kind(kind: NodeKind) -> Vec<(&'static str, PropDef)> {
                 "scene_props",
                 def(PropType::Map, false, PropValue::Map(serde_json::Map::new())),
             ),
+            // The folder a scene's worker loads when it isn't `path` (a preset's base scene;
+            // "" = `path`). The identity stays `path`: events, crash records, the loudness
+            // book and the snapshot name it, so two presets of one scene are two sources. A
+            // change = a new worker on the new folder, never a crash. Stored on every kind,
+            // used by scenes only. Guard: `tests/api.rs::scene_dir_plays_under_its_own_path`.
+            (
+                "scene_dir",
+                def(PropType::Str, false, PropValue::Str(String::new())),
+            ),
             // A scene's loudness measured over its earlier plays (`audio::loudness` state —
             // the histogram the backend stored from the last `scene.loudness`), continued by
             // this source; `{}` = none. Read at open (and a live set restarts the measurement

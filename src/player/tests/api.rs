@@ -7488,6 +7488,215 @@ fn scene_props_apply_at_open_and_live() {
     );
 }
 
+// ------------------------------------------------- scene_dir (a preset over its base scene)
+
+/// An empty folder under the server's root standing for a preset item (its own identity; the
+/// worker loads the base scene named by `scene_dir`).
+fn preset_dir(srv: &Serve, name: &str) -> PathBuf {
+    let d = srv.path(&format!("presets/{name}"));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// A scene source whose `path` is an (empty) preset folder and whose `scene_dir` is the synthetic
+/// base scene plays the base scene's picture with the source's `scene_props`, while everything
+/// naming the source names the preset: `get path`, the `workers` probe; `get scene_dir` is the
+/// base. Failure it catches: the worker loading `path` (an empty folder → `source.error`).
+#[test]
+fn scene_dir_plays_under_its_own_path() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let preset = preset_dir(&srv, "api-sdir-900000010");
+    let base = common::synthetic_scene("api-sdir-base", &synth(Pattern::Solid));
+    let id = create_src(
+        &mut c,
+        json!({"kind": "scene", "path": s(&preset), "scene_dir": s(&base),
+               "scene_props": {"rgb": [0, 0, 255]}}),
+    );
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let p = srv.path("sdir0.png");
+    c.ok("capture", json!({"target": id, "path": s(&p)}));
+    near(png_pixel(&p, 100, 100), [0, 0, 255], 0, "the base scene with the props");
+    assert_eq!(
+        get(&mut c, &format!("{id}.ready"))["result"]["value"],
+        json!(true)
+    );
+    assert_eq!(get(&mut c, &format!("{id}.path"))["result"]["value"], json!(s(&preset)));
+    assert_eq!(get(&mut c, &format!("{id}.scene_dir"))["result"]["value"], json!(s(&base)));
+    let w = worker_of(&mut c, &id);
+    assert_eq!(w["path"], json!(s(&preset)), "the probe names the preset: {w}");
+    assert!(
+        logs_of(&mut c, "source.ready").iter().any(|e| e["id"] == json!(id)),
+        "source.ready"
+    );
+    let errs: Vec<Value> = logs_of(&mut c, "source.error")
+        .into_iter()
+        .filter(|e| e["id"] == json!(id))
+        .collect();
+    assert!(errs.is_empty(), "{errs:?}");
+}
+
+/// Two presets of one scene (same `scene_dir`, paths A and B) are two sources: two workers, each
+/// output showing its own source's props. Failure it catches: sources keyed by the loaded folder
+/// (one worker, one colour).
+#[test]
+fn two_paths_over_one_scene_dir_are_two_sources() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let base = common::synthetic_scene("api-sdir-two", &synth(Pattern::Solid));
+    let pa = preset_dir(&srv, "api-sdir-900000011");
+    let pb = preset_dir(&srv, "api-sdir-900000012");
+    let a = create_src(
+        &mut c,
+        json!({"kind": "scene", "path": s(&pa), "scene_dir": s(&base),
+               "scene_props": {"rgb": [255, 0, 0]}}),
+    );
+    let b = create_src(
+        &mut c,
+        json!({"kind": "scene", "path": s(&pb), "scene_dir": s(&base),
+               "scene_props": {"rgb": [0, 255, 0]}}),
+    );
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": a}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": b}));
+    for _ in 0..3 {
+        c.step(16);
+    }
+    let pid_a = worker_of(&mut c, &a)["pid"].as_u64().expect("a's worker");
+    let pid_b = worker_of(&mut c, &b)["pid"].as_u64().expect("b's worker");
+    assert_ne!(pid_a, pid_b, "two workers");
+    for (out, want, n) in [("VIRTUAL-1", [255, 0, 0], "sdir-a.png"), ("VIRTUAL-2", [0, 255, 0], "sdir-b.png")] {
+        let p = srv.path(n);
+        c.ok("capture", json!({"target": format!("out:{out}"), "path": s(&p)}));
+        near(png_pixel(&p, 100, 100), want, 0, out);
+    }
+}
+
+/// Presets of one scene measure their loudness apart: the book keys on `path`, never the loaded
+/// folder — both measure at once (each the head of its own measurement), B starts from nothing
+/// though A already measured seconds of the same scene, and each report carries its own path.
+/// Failure it catches: a book keyed by `scene_dir` (B pending behind A, or B continuing A's seconds).
+#[test]
+fn presets_of_one_scene_measure_apart() {
+    let Some(srv) = loudness_serve("2") else {
+        return;
+    };
+    let mut c = srv.client();
+    let tone = tone_scene(1000.0);
+    let base = common::synthetic_scene("api-loud-sdir", &tone);
+    let pa = preset_dir(&srv, "api-loud-900000013");
+    let pb = preset_dir(&srv, "api-loud-900000014");
+    let a = create_src(&mut c, json!({"kind": "scene", "path": s(&pa), "scene_dir": s(&base)}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": a}));
+    let wa = wait_for(Duration::from_secs(15), "a's window report", || {
+        loudness_events(&mut c, Some(&a)).into_iter().next()
+    });
+    assert_eq!(wa["path"], json!(s(&pa)), "{wa}");
+    let sa = audible_s(&mut c, &a);
+    assert!(sa >= 2.0, "a measured its window: {sa}");
+    let t_b = Instant::now();
+    let b = create_src(&mut c, json!({"kind": "scene", "path": s(&pb), "scene_dir": s(&base)}));
+    let pb0 = loudness_progress(&mut c, &b);
+    assert!(
+        pb0["seconds"].as_f64().unwrap_or(-1.0) < 1e-6,
+        "b shares nothing with a: {pb0}"
+    );
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": b}));
+    wait_for(Duration::from_secs(10), "b measuring", || {
+        (loudness_progress(&mut c, &b)["measuring"] == json!(true)).then_some(())
+    });
+    assert_eq!(
+        loudness_progress(&mut c, &a)["measuring"],
+        json!(true),
+        "a still measures its own"
+    );
+    let wb = wait_for(Duration::from_secs(15), "b's window report", || {
+        loudness_events(&mut c, Some(&b)).into_iter().next()
+    });
+    assert_eq!(wb["path"], json!(s(&pb)), "{wb}");
+    let since_b = t_b.elapsed().as_secs_f64();
+    assert!(
+        wb["seconds"].as_f64().unwrap() <= since_b && wb["seed_s"].as_f64().unwrap_or(0.0) < 1e-6,
+        "b counts only its own play ({since_b:.1} s since its create): {wb}"
+    );
+    assert!(audible_s(&mut c, &a) > sa, "a goes on");
+    c.ok("destroy", json!({"id": b}));
+    c.ok("destroy", json!({"id": a}));
+}
+
+/// A live `scene_dir` change is a new worker on the new folder (a new pid, the new picture) under
+/// the same `path`, never a crash: no `worker.restart`, no `worker.broken`, no crash record.
+#[test]
+fn scene_dir_change_is_a_new_worker_not_a_crash() {
+    let Some(srv) = scene_serve(&[]) else { return };
+    let mut c = srv.client();
+    let preset = preset_dir(&srv, "api-sdir-900000015");
+    let red = common::synthetic_scene(
+        "api-sdir-red",
+        &SyntheticSpec { rgb: [255, 0, 0], ..synth(Pattern::Solid) },
+    );
+    let green = common::synthetic_scene(
+        "api-sdir-green",
+        &SyntheticSpec { rgb: [0, 255, 0], ..synth(Pattern::Solid) },
+    );
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&preset), "scene_dir": s(&red)}));
+    show_all(&mut c, &id);
+    c.step(16);
+    c.step(16);
+    let cap = |c: &mut Client, n: &str| {
+        let p = srv.path(n);
+        c.ok("capture", json!({"target": id, "path": s(&p)}));
+        png_pixel(&p, 100, 100)
+    };
+    near(cap(&mut c, "sdir-red.png"), [255, 0, 0], 0, "the first base");
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().expect("a worker");
+    c.ok("set", json!({"path": format!("{id}.scene_dir"), "value": s(&green)}));
+    wait_for(Duration::from_secs(10), "the new base's picture", || {
+        c.step(16);
+        (cap(&mut c, "sdir-green.png")[..3] == [0, 255, 0]).then_some(())
+    });
+    let w = worker_of(&mut c, &id);
+    assert_ne!(w["pid"].as_u64(), Some(pid), "a new worker: {w}");
+    assert_eq!(w["path"], json!(s(&preset)), "the same identity: {w}");
+    assert_eq!(get(&mut c, &format!("{id}.path"))["result"]["value"], json!(s(&preset)));
+    wait_for(Duration::from_secs(5), "the old worker gone", || {
+        (!pid_alive(pid)).then_some(())
+    });
+    assert!(logs_of(&mut c, "worker.restart").is_empty());
+    assert!(logs_of(&mut c, "worker.broken").is_empty());
+    assert_eq!(crash_files(&srv), 0, "no crash record");
+}
+
+/// A preset whose base scene crash-loops breaks under the preset's identity: `source.broken` and
+/// the crash record name the preset's folder and id, never the base scene's (the backend marks
+/// the preset's card crashed, not the base's).
+#[test]
+fn scene_dir_crash_record_names_the_preset() {
+    let Some(srv) = scene_serve_real_env(&[], &[]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let preset = preset_dir(&srv, "api-sdir-900000016");
+    let base = common::synthetic_scene(
+        "api-sdir-crash-900000017",
+        &SyntheticSpec { crash_after_ms: Some(100), ..synth(Pattern::Solid) },
+    );
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&preset), "scene_dir": s(&base)}));
+    show_all(&mut c, &id);
+    let ev = wait_for(Duration::from_secs(20), "source.broken", || {
+        logs_of(&mut c, "source.broken")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    assert_eq!(ev["path"], json!(s(&preset)), "{ev}");
+    assert_eq!(ev["scene_id"], json!("api-sdir-900000016"), "{ev}");
+    let record = ev["record"].as_str().expect("record path");
+    let rec: Value = serde_json::from_slice(&std::fs::read(record).unwrap()).unwrap();
+    assert_eq!(rec["path"], json!(s(&preset)), "{rec}");
+    assert_eq!(rec["scene_id"], json!("api-sdir-900000016"), "{rec}");
+}
+
 /// A 10 s 440 Hz −6 dBFS stereo s16 WAV.
 fn tone_wav(path: &Path) {
     let rate = 48_000u32;

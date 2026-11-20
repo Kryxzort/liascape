@@ -211,6 +211,10 @@ pub struct WorkerSpec {
     pub budget: RestartBudget,
     /// Where crash records go ([`crate::paths::crash_dir`] by default).
     pub crash_dir: PathBuf,
+    /// The item a crash record names when it isn't the `Start`'s folder (a preset loading its
+    /// base scene: the record, like every event, names the preset). Guard:
+    /// `tests/api.rs::scene_dir_crash_record_names_the_preset`.
+    pub record_path: Option<String>,
 }
 
 impl WorkerSpec {
@@ -227,6 +231,7 @@ impl WorkerSpec {
             hello_timeout: HELLO_TIMEOUT,
             budget: RestartBudget::default(),
             crash_dir: crate::paths::crash_dir(),
+            record_path: None,
         }
     }
 }
@@ -1382,8 +1387,9 @@ impl WorkerHost {
         uptime: Duration,
         out: &mut Vec<WorkerEvent>,
     ) {
-        let path = match &self.spec.start {
-            ToWorker::Start { path, .. } => path.clone(),
+        let path = match (&self.spec.record_path, &self.spec.start) {
+            (Some(p), _) => p.clone(),
+            (None, ToWorker::Start { path, .. }) => path.clone(),
             _ => String::new(),
         };
         let scene_id = scene_id_of(&path, &self.spec.id);

@@ -2479,7 +2479,7 @@ impl Source for MpvSource {
             }
             // A scene's still image and user properties; stored (a global `set`
             // never fails here).
-            "preview" | "scene_props" | "loudness_seed" | "loudness_key" => Ok(()),
+            "preview" | "scene_props" | "scene_dir" | "loudness_seed" | "loudness_key" => Ok(()),
             // `auto` re-inits the AO even after a no-audio start (legacy engine finding).
             "no_audio" => self.set(prop, "aid", if b { "no" } else { "auto" }),
             // The graph value is the user's offset; the bus compensation is added to it.

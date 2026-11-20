@@ -933,6 +933,78 @@ fn scene_serve() -> Option<Serve> {
     Serve::start_env(&[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")])
 }
 
+/// Two presets of one scene in one program (paths P1/P2, the same `scene_dir`, red / green
+/// `scene_props`) are two items: `program.current` alternates P1 / P2 and every switch is a
+/// transition between two distinct sources, each showing its own colour — never one source
+/// re-propped. Failure it catches: items keyed by the loaded folder (one item, no switch) or a
+/// switch done as a live property change.
+#[test]
+fn two_presets_of_one_scene_rotate_as_two_items() {
+    let Some(srv) = scene_serve() else { return };
+    let mut c = srv.client();
+    let base = synth_scene("prog-preset-base", [255, 255, 255]);
+    let p1 = srv.path("presets/900000201");
+    let p2 = srv.path("presets/900000202");
+    std::fs::create_dir_all(&p1).unwrap();
+    std::fs::create_dir_all(&p2).unwrap();
+    let item = |p: &Path, rgb: [u8; 3]| {
+        json!({"path": s(p), "props": {"kind": "scene", "scene_dir": base,
+                                       "scene_props": {"rgb": rgb}}})
+    };
+    c.ok(
+        "subscribe",
+        json!({"topics": ["program.", "transition.", "source."]}),
+    );
+    c.ok(
+        "create",
+        json!({"kind": "program", "id": "prog:main", "props": {
+            "items": [item(&p1, [255, 0, 0]), item(&p2, [0, 255, 0])],
+            "seed": 1, "mode": "timer", "interval_ms": 1000, "transition": fade(200)}}),
+    );
+    c.ok("program.play", json!({"id": "prog:main"}));
+    let shot = srv.path("preset-rot.png");
+    let mut seen = Vec::new();
+    for n in 1..=3 {
+        step_until(&mut c, 16, 8000, "the next current", n_currents(n));
+        // past the effect: the output shows the current item alone
+        step_for(&mut c, 16, 400);
+        let cur = currents(&c)[n - 1].clone();
+        let want = if cur["path"] == json!(s(&p1)) { [255, 0, 0] } else { [0, 255, 0] };
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+        let px = png_rgb(&shot, 100, 100);
+        assert!(
+            px.iter().zip(want).all(|(g, w)| g.abs_diff(w) <= 2),
+            "current {n} ({}) shows {px:?}, want {want:?}",
+            cur["path"]
+        );
+        seen.push(cur["path"].as_str().unwrap().to_string());
+    }
+    assert_eq!(seen, [s(&p1), s(&p2), s(&p1)], "alternates P1 / P2");
+    let started: Vec<Value> = c
+        .named("transition.started")
+        .into_iter()
+        .filter(|e| e["b"]["path"] == json!(s(&p1)) || e["b"]["path"] == json!(s(&p2)))
+        .collect();
+    assert!(started.len() >= 3, "a transition per switch: {started:?}");
+    for e in &started[1..] {
+        let a = e["a"].as_array().unwrap();
+        assert!(!a.is_empty(), "an S→S transition with an A: {e}");
+        for side in a {
+            assert_ne!(side["id"], e["b"]["id"], "two distinct sources: {e}");
+            assert_ne!(side["path"], e["b"]["path"], "the other preset: {e}");
+        }
+    }
+}
+
+fn png_rgb(path: &Path, x: u32, y: u32) -> [u8; 3] {
+    let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+    let mut rd = dec.read_info().unwrap();
+    let mut buf = vec![0; rd.output_buffer_size().unwrap()];
+    let info = rd.next_frame(&mut buf).unwrap();
+    let i = ((y * info.width + x) * 4) as usize;
+    [buf[i], buf[i + 1], buf[i + 2]]
+}
+
 #[test]
 fn scene_switches_after_scenes_after() {
     let Some(srv) = scene_serve() else { return };

@@ -1251,6 +1251,85 @@ fn scene_snapshot_restores_at_position() {
     );
 }
 
+/// A preset's scene source (`path` = the preset's folder, `scene_dir` = its base scene) is
+/// saved with both and restored after a supervised restart under the same `path`, still loading
+/// the base scene: its picture on every output. Failure it catches: `scene_dir` left out of the
+/// snapshot (the restored source loads the empty preset folder → an error, no picture).
+#[test]
+fn scene_dir_survives_a_restore() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let mut sup = Sup::spawn_in(
+        new_root(),
+        &[],
+        &[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")],
+        Some(serial),
+        true,
+    );
+    let base = common::synthetic_scene(
+        "sup-sdir-base",
+        &liascape_player::scene::synthetic::SyntheticSpec {
+            pattern: liascape_player::scene::synthetic::Pattern::Solid,
+            rgb: [0, 0, 255],
+            ..Default::default()
+        },
+    );
+    let preset = sup.root.join("presets/900000301");
+    std::fs::create_dir_all(&preset).unwrap();
+    let mut c = sup.client();
+    let id = c.create(json!({"kind": "scene", "path": s(&preset), "scene_dir": s(&base)}));
+    c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
+    wait_state(&mut c, Duration::from_secs(10), |st| {
+        st["graph"][&id]["ready"] == json!(true)
+    });
+    let snap = sup.wait_snapshot(SNAPSHOT_WAIT, |sn| {
+        sn["sources"]
+            .as_object()
+            .is_some_and(|m| m.values().any(|s| s["path"] == s_json(&preset)))
+    });
+    let saved = snap["sources"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|s| s["path"] == s_json(&preset))
+        .unwrap()
+        .clone();
+    assert_eq!(saved["props"]["scene_dir"], s_json(&base), "{saved}");
+    drop(c);
+    let (_h, latency) = sup.crash(libc::SIGSEGV);
+    println!("restart latency {latency:?}");
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(10), |st| {
+        sources(st)
+            .iter()
+            .any(|(_, n)| n["path"] == s_json(&preset) && n["ready"] == json!(true))
+    });
+    let (nid, node) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == s_json(&preset))
+        .unwrap();
+    assert_eq!(node["scene_dir"], s_json(&base), "{node}");
+    for conn in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(content(&st, conn), nid, "{conn} shows the restored preset");
+    }
+    let shot = sup.root.join("sdir-restored.png");
+    let t = Instant::now();
+    loop {
+        c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+        let px = png_rgb(&shot, 320, 180);
+        if px[0] <= 3 && px[1] <= 3 && px[2] >= 252 {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "the restored preset shows {px:?}, not its base scene"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn s_json(p: &Path) -> Value {
     json!(s(p))
 }

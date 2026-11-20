@@ -82,6 +82,13 @@ gaps only ever supersedes; choose gaps by condition.
   frame) and live as `SetProperty` per changed entry, typed by JSON shape (bool, number, `[r,g,b(,a)]` 0–1,
   string). A removed key keeps its value until the scene reopens — LWE has no reset, so the backend sends defaults
   explicitly.
+- **`scene_dir` vs `path`.** A preset has no scene of its own: its source's `path` is the preset's folder and
+  `scene_dir` the base scene's (`SceneOpts::load_path`; `""` = `path`). Only the worker's `Start` and
+  `--preload`, the synthetic check and the Steam library come from `scene_dir`; everything that names the source —
+  `scene.*` / `source.*` events, crash records (`WorkerSpec::record_path`), the loudness `Book` key, the snapshot,
+  the `workers` probe — names `path`. So two presets of one scene are two sources with two workers, and a switch
+  between them is an ordinary S→S transition. A `scene_dir` change is a new worker on the new folder from time 0
+  (like a `path` change) that keeps the source's loudness measurement, since the item is the same.
 - **Pointer.** Surface samples go through each scene-showing output's `fit_rect` inverse (`scene::pointer`;
   nothing in a letterbox bar) into native scene px, y down. A sample that entered the output is a jump
   (`wp_project_pointer_jump`): WE polls the cursor over the whole desktop and never sees one, so a stroke from where

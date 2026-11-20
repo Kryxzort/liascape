@@ -138,12 +138,12 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `max_size` change re-exports into the same generation without a `None` texture. Guard:
   `tests/scene.rs::demand_change_reexports_without_black`.
 - Ready = the load's first latched frame; send exactly one tick at `position` before it, paused or not.
-- Pause stops ticks and latching at once (a frame in flight never latches). Guard:
-  `tests/scene.rs::pause_freezes_picture_exactly`.
-- The scene clock runs at `speed`, excises pauses, and starts at the first shown frame. Guard:
-  `scene_clock_excises_pauses_and_scales_by_speed`.
+- Pause stops ticks and latching at once (a frame in flight never latches). Guard: `tests/scene.rs::pause_freezes_picture_exactly`.
+- The scene clock runs at `speed`, excises pauses, and starts at the first shown frame. Guard: `scene_clock_excises_pauses_and_scales_by_speed`.
 - Judge step completion by seq (latched seq ≥ the step's tick seq), never by comparing `t` (JSON floats).
-- `kind` change and `color` on a scene → `unsupported`; `path` change = a new worker, not a crash.
+- `kind` change and `color` on a scene → `unsupported`; a `path` or `scene_dir` change = a new worker, not a crash.
+- `scene_dir` = the folder the worker loads (a preset's base scene); identity — events, crash records, the loudness
+  Book, snapshot — stays `path`. Guards: `tests/api.rs::scene_dir_plays_under_its_own_path`, `presets_of_one_scene_measure_apart`.
 - A non-synthetic scene without a resolved assets dir fails at open with the hint and spawns no worker.
   Guard: `tests/api.rs::no_assets_dir_hides_scenes_and_errors_with_hint`.
 - Every load failure (missing folder, no `project.json`, build failed) is fatal, never a restart loop.

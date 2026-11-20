@@ -276,7 +276,7 @@ pub(crate) struct LocalTime {
     pub t: f64,
     /// Steps it has been part of (it advances only from its second step on).
     pub steps: u64,
-    /// A `position`/`path` change since the last step: start over from here.
+    /// A `position`/`path`/`scene_dir` change since the last step: start over from here.
     pub reset: Option<f64>,
 }
 
@@ -1771,7 +1771,7 @@ impl Runtime {
                 {
                     match (prop, v) {
                         ("position", PropValue::F64(t)) => lt.reset = Some(*t),
-                        ("path", _) => lt.reset = Some(0.0),
+                        ("path" | "scene_dir", _) => lt.reset = Some(0.0),
                         _ => {}
                     }
                 }
