@@ -25,17 +25,20 @@ namespace Liascape.Helpers;
 //     a taggroup of the allowed ages (the included ones, else all three, minus the excluded), which drops untagged items.
 //     Every other group's excludes only go to excludedtags (an untagged item stays).
 //   - TYPE: always restricted to what plays here — (included types, else Video + Scene) minus excluded, minus Scene when
-//     scene support is off; Web / Application / Preset always excluded. Pages then come back full instead of thinned
-//     after the fact.
+//     scene support is off; Web / Application always excluded. Pages then come back full instead of thinned after the fact.
+//   - PRESET: Steam tags a preset `Preset` AND its base's type (`Scene`, `Web`), so a type group alone can't keep presets
+//     out of a Scene query: `Preset` goes to excludedtags unless it is ticked and allowed (scene support on + the
+//     Liascape player: SteamWorkshopService.AllowPresets); ticked but not allowed → Plan.Empty. A web-based preset stays
+//     out through `Web`. Guard: steam-selftest "presets: …", test-workshop-social § 5.
 //   - A tag both included and excluded is excluded. Nothing left to allow (all ages excluded, only Scene with scenes
-//     off, an unplayable type included) → Plan.Empty: the caller answers [] without asking Steam.
+//     off, an unplayable type or a disallowed Preset included) → Plan.Empty: the caller answers [] without asking Steam.
 public static class WorkshopTags
 {
     public enum Mode { Any, All }
     public sealed record Group(string Name, Mode Mode, string[] Tags);
 
     public static readonly Group Age = new("Age", Mode.Any, ["Everyone", "Questionable", "Mature"]);
-    public static readonly Group Type = new("Type", Mode.Any, ["Video", "Scene"]);
+    public static readonly Group Type = new("Type", Mode.Any, ["Video", "Scene", "Preset"]);
     // the filter column's lists (app/ui/src/components/workshopFilter.ts `WF_GROUPS` — Steam's own tag names)
     public static readonly Group Resolution = new("Resolution", Mode.Any, [
         "Standard Definition", "1280 x 720", "1366 x 768", "1920 x 1080", "2560 x 1440", "3840 x 2160",
@@ -52,8 +55,13 @@ public static class WorkshopTags
         "Approved", "Audio responsive", "HDR", "3D", "Customizable", "Media Integration", "Puppet Warp", "Video Texture"]);
     public static readonly Group[] Groups = [Age, Type, Resolution, Genre, Features];
 
-    // types that never play here (.claude/rules/backend/sources-steam.md § Scrapers)
-    public static readonly string[] Unplayable = ["Web", "Application", "Preset"];
+    // types that never play here (.claude/rules/backend/sources-steam.md § Scrapers); Preset has its own rule (Build)
+    public static readonly string[] Unplayable = ["Web", "Application"];
+    public const string Preset = "Preset";
+    private static readonly string[] DefaultTypes = ["Video", "Scene"];
+
+    public static bool IsUnplayable(IEnumerable<string> tags) => tags.Any((t) => Unplayable.Contains(t, StringComparer.OrdinalIgnoreCase));
+    public static bool IsPreset(IEnumerable<string> tags) => tags.Contains(Preset, StringComparer.OrdinalIgnoreCase);
 
     private static readonly Dictionary<string, (Group G, string Tag)> _byTag =
         Groups.SelectMany((g) => g.Tags.Select((t) => (g, t))).ToDictionary((x) => x.t, (x) => (x.g, x.t), StringComparer.OrdinalIgnoreCase);
@@ -69,8 +77,23 @@ public static class WorkshopTags
         public IEnumerable<string> RequiredTags => TagGroups.Where((g) => g.Length == 1).Select((g) => g[0]);
     }
 
-    public static Plan Build(WorkshopFilter? filter, bool allowScenes)
+    // A scene's presets list (SteamWorkshopService, list kind "presets"): the filter's other groups as Build makes them, its type
+    // replaced by Preset alone.
+    public static Plan ForPresets(WorkshopFilter? filter)
     {
+        filter ??= new WorkshopFilter();
+        bool NotType(string t) => Resolve(t).G != Type;
+        var (inc, exc) = filter.Effective();
+        return Build(new WorkshopFilter
+        {
+            Sort = filter.Sort, TrendDays = filter.TrendDays, FeatureMatch = filter.FeatureMatch, GenreMatch = filter.GenreMatch,
+            Include = [.. inc.Where(NotType), Preset], Exclude = [.. exc.Where(NotType)],
+        }, allowScenes: true, allowPresets: true);
+    }
+
+    public static Plan Build(WorkshopFilter? filter, bool allowScenes, bool allowPresets = false)
+    {
+        allowPresets &= allowScenes; // a preset plays as a scene
         filter ??= new WorkshopFilter();
         var (incRaw, excRaw) = filter.Effective();
         var exc = excRaw.Select(Resolve).ToList();
@@ -78,9 +101,11 @@ public static class WorkshopTags
         var inc = incRaw.Select(Resolve).Where((x) => !excSet.Contains(x.Tag)).ToList();
         var groups = new List<string[]>();
         var empty = false;
+        bool typeHasPreset;
 
         // an unplayable type included: nothing it could match would play
         if (inc.Any((x) => Unplayable.Contains(x.Tag, StringComparer.OrdinalIgnoreCase))) empty = true;
+        if (!allowPresets && inc.Any((x) => x.Tag == Preset)) empty = true;
 
         // Age: only when the filter touches it at all — then untagged items are out
         if (inc.Any((x) => x.G == Age) || exc.Any((x) => x.G == Age))
@@ -92,9 +117,10 @@ public static class WorkshopTags
 
         // Type: always — only what plays here
         {
-            var allowed = (inc.Any((x) => x.G == Type) ? inc.Where((x) => x.G == Type).Select((x) => x.Tag) : Type.Tags)
-                .Where((t) => !excSet.Contains(t) && (allowScenes || t != "Scene")).Distinct().ToArray();
+            var allowed = (inc.Any((x) => x.G == Type) ? inc.Where((x) => x.G == Type).Select((x) => x.Tag) : DefaultTypes)
+                .Where((t) => !excSet.Contains(t) && (allowScenes || t != "Scene") && (allowPresets || t != Preset)).Distinct().ToArray();
             if (allowed.Length == 0) empty = true; else groups.Add(allowed);
+            typeHasPreset = allowed.Contains(Preset);
         }
 
         // every other group: Any → one taggroup of its included tags, All → one per included tag
@@ -110,7 +136,7 @@ public static class WorkshopTags
         }
 
         var excluded = exc.Where((x) => x.G != Age && x.G != Type).Select((x) => x.Tag)
-            .Concat(Unplayable).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            .Concat(Unplayable).Concat(typeHasPreset ? [] : new[] { Preset }).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         return new Plan(groups, excluded, empty);
     }
 

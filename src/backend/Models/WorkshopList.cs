@@ -5,8 +5,9 @@ namespace Liascape.Models;
 
 // Which Workshop items Browse lists (POST /browse `list`, the Workshop source only): absent = the whole Workshop (the
 // filter's sort, search and tags, server-side); "favorites" = the signed-in account's Workshop favourites; "creator" = every
-// Wallpaper Engine item of the Steam account `Id`. A list is a user's files over Steam's client protocol, which sorts them only
-// by `Sort` ("lastupdated", the default, or "toprated") and has no search; the filter's tags still apply (matched here).
+// Wallpaper Engine item of the Steam account `Id`; "presets" = every Workshop preset of the scene `Id` (QueryFiles' child
+// lookup). A list sorts only by `Sort` ("lastupdated", the default, or "toprated") and has no search; the filter's tags still
+// apply (a user's files: matched here; presets: Steam's, the type replaced by Preset).
 public class WorkshopList
 {
     public string Kind { get; set; } = "";
@@ -16,8 +17,10 @@ public class WorkshopList
     public bool IsFavorites => string.Equals(Kind, "favorites", StringComparison.OrdinalIgnoreCase);
     public bool IsCreator => string.Equals(Kind, "creator", StringComparison.OrdinalIgnoreCase)
         && Id is { Length: >= 15 and <= 20 } id && id.All(char.IsAsciiDigit);
-    public bool Active => IsFavorites || IsCreator;
+    public bool IsPresets => string.Equals(Kind, "presets", StringComparison.OrdinalIgnoreCase)
+        && Id is { Length: >= 1 and <= 20 } id && id.All(char.IsAsciiDigit) && ulong.TryParse(id, out var n) && n > 0;
+    public bool Active => IsFavorites || IsCreator || IsPresets;
     // the client protocol's sort names for a user's files (measured: the rest are ignored)
     public string SteamSort => Sort == "toprated" ? "score" : "lastupdated";
-    public string Key() => Active ? $"{(IsFavorites ? "favorites" : $"creator:{Id}")}|{SteamSort}" : "";
+    public string Key() => Active ? $"{(IsFavorites ? "favorites" : IsPresets ? $"presets:{Id}" : $"creator:{Id}")}|{SteamSort}" : "";
 }

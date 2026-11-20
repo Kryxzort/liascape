@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
 using Liascape.Models;
+using Liascape.Scrapers;
 using SteamKit2;
 
 namespace Liascape.Web;
@@ -212,7 +213,13 @@ public static class SteamSelfTest
         File.WriteAllText(file, """
             {"@query": [{"publishedfileid": "1001", "title": "Query One", "tags": ["Video", "Everyone", "Nature"]},
                         {"publishedfileid": "1002", "title": "Query Two", "tags": ["Video", "Mature", "Anime"]},
-                        {"publishedfileid": "1003", "title": "Query Scene", "tags": ["Scene", "Everyone", "Anime"]}]}
+                        {"publishedfileid": "1003", "title": "Query Scene", "tags": ["Scene", "Everyone", "Anime"]},
+                        {"publishedfileid": "2001", "title": "Preset One", "tags": ["Preset", "Scene", "Everyone"], "children": ["1003"]},
+                        {"publishedfileid": "2002", "title": "Preset Two", "tags": ["Preset", "Scene", "Anime"], "children": ["1003"]},
+                        {"publishedfileid": "2003", "title": "Preset Video", "tags": ["Preset", "Video"], "children": ["1001"]},
+                        {"publishedfileid": "2004", "title": "Preset Web", "tags": ["Preset", "Web"], "children": ["1003"]}],
+             "2001": {"tags": ["Preset", "Scene"], "title": "Preset One", "children": ["1003"]},
+             "1003": {"tags": ["Scene"], "title": "Query Scene"}}
             """);
         var t = TimeSpan.FromSeconds(5);
         async Task<string> Q(WorkshopFilter f, bool scenes, string? q, int page) =>
@@ -228,6 +235,45 @@ public static class SteamSelfTest
             var anime = new WorkshopFilter { Include = ["Anime"] };
             Check(await Q(anime, true, null, 1) == "1002,1003", $"fixture query: an included tag ({await Q(anime, true, null, 1)})");
             Check(await Q(all, true, null, 2) == "", $"fixture query: page 2 is empty ({await Q(all, true, null, 2)})");
+
+            // Presets: their own Type option, only with scenes + allowPresets; a preset carries Preset AND its base's type
+            // tag, so an unticked Preset is excluded outright and a web-based preset stays out with Web
+            async Task<string> QP(WorkshopFilter f, bool scenes, bool presets) =>
+                await SteamWorkshopDetails.QueryAsync(f, WorkshopTags.Build(f, scenes, presets), null, 1, 100, t) is { } r ? string.Join(",", r.Select((d) => d.Id)) : "null";
+            var plan0 = WorkshopTags.Build(all, true, true);
+            Check(plan0.TagGroups.Any((g) => g.Order().SequenceEqual(new[] { "Scene", "Video" }))
+                && new[] { "Web", "Application", "Preset" }.All(plan0.Excluded.Contains), $"presets: unticked → type Video + Scene, Preset excluded ({WorkshopTags.Describe(plan0)})");
+            Check(await QP(all, true, true) == "1001,1002,1003", $"presets: the default list has none ({await QP(all, true, true)})");
+            var incPreset = new WorkshopFilter { Include = ["Preset"] };
+            Check(await QP(incPreset, true, true) == "2001,2002,2003", $"presets: Preset ticked → every preset but the web-based one ({await QP(incPreset, true, true)})");
+            var incScenePreset = new WorkshopFilter { Include = ["Scene", "Preset"] };
+            Check(await QP(incScenePreset, true, true) == "1003,2001,2002,2003", $"presets: Scene + Preset ticked ({await QP(incScenePreset, true, true)})");
+            Check(await QP(new WorkshopFilter { Include = ["Scene"] }, true, true) == "1003", "presets: Scene alone ticked keeps presets out");
+            Check(WorkshopTags.Build(incPreset, true, false).Empty, "presets: Preset ticked without presets allowed → nothing can match");
+            Check(WorkshopTags.Build(incPreset, false, true).Empty, "presets: Preset ticked with scenes off → nothing can match");
+            Check(WorkshopTags.Unplayable.SequenceEqual(new[] { "Web", "Application" }), $"presets: Unplayable = Web, Application ({string.Join(",", WorkshopTags.Unplayable)})");
+            async Task<string> Kids(ulong parent, WorkshopFilter? f, string sort = "lastupdated") =>
+                await SteamWorkshopDetails.QueryChildrenAsync(parent, WorkshopTags.ForPresets(f), sort, 1, 100, t) is { } r ? string.Join(",", r.Select((d) => d.Id)) : "null";
+            Check(await Kids(1003, null) == "2001,2002", $"presets of a scene: exactly the presets naming it, the web-based one left out ({await Kids(1003, null)})");
+            Check(await Kids(1002, null) == "", $"presets of a scene with none: empty ({await Kids(1002, null)})");
+            Check(await Kids(1003, new WorkshopFilter { Include = ["Anime", "Video"] }, "toprated") == "2002",
+                $"presets of a scene: the filter's other groups apply, its type doesn't ({await Kids(1003, new WorkshopFilter { Include = ["Anime", "Video"] }, "toprated")})");
+            var kidsDetail = (await SteamWorkshopDetails.QueryChildrenAsync(1003, WorkshopTags.ForPresets(null), "lastupdated", 1, 100, t))?.FirstOrDefault();
+            Check(kidsDetail?.Children.SequenceEqual(new ulong[] { 1003 }) == true, "presets of a scene: each result names its children");
+            var det = await SteamWorkshopDetails.GetDetailsAsync([2001]);
+            Check(det != null && det.TryGetValue(2001, out var d2001) && d2001.Title == "Preset One" && d2001.Children?.SequenceEqual(new ulong[] { 1003 }) == true,
+                $"presets: GetDetails carries the title and the children ({(det != null && det.TryGetValue(2001, out var dd) ? $"{dd.Title} [{string.Join(",", dd.Children ?? [])}]" : "none")})");
+            var pd = new Dictionary<string, SteamWorkshopScraper.PublishedFileDetail>
+            {
+                ["2001"] = new() { Id = "2001", Title = "p", Tags = ["Preset", "Scene"] },
+                ["2004"] = new() { Id = "2004", Title = "w", Tags = ["Preset", "Web"] },
+                ["1003"] = new() { Id = "1003", Title = "s", Tags = ["Scene"] },
+            };
+            string Ids(List<WallpaperResult> rs) => string.Join(",", rs.Select((x) => x.WorkshopId + (x.IsPreset ? "p" : "") + (x.IsScene ? "s" : "")));
+            Check(Ids(SteamWorkshopScraper.MapToResults(["2001", "2004", "1003"], pd, true)) == "1003s", "presets: mapped results drop a preset without allowPresets");
+            Check(Ids(SteamWorkshopScraper.MapToResults(["2001", "2004", "1003"], pd, true, true)) == "2001ps,1003s",
+                $"presets: with allowPresets a preset is IsPreset + IsScene, a web-based one still dropped ({Ids(SteamWorkshopScraper.MapToResults(["2001", "2004", "1003"], pd, true, true))})");
+            Check(Ids(SteamWorkshopScraper.MapToResults(["2001", "1003"], pd, false, true)) == "", "presets: scenes off drops presets too");
             Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", Path.Combine(Path.GetDirectoryName(file)!, "no-such-fixture.json"));
             Check(await Q(all, true, null, 1) == "null", "fixture query: no fixture file = Steam unreachable (the fallback's cue)");
             // no fixture at all: the client protocol's session is refused before it connects

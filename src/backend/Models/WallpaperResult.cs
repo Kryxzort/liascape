@@ -10,6 +10,7 @@ public class WallpaperResult
     public required string PageUrl { get; init; }
     public string? Resolution { get; init; }
     public bool IsScene { get; init; }
+    public bool IsPreset { get; init; }
     public string? WorkshopId { get; init; }
     public DateTime? AddedAt { get; init; }
 

@@ -38,8 +38,8 @@ public class SteamWorkshopService : IBgsProvider
     private readonly object _lock = new();
     private WorkshopFilter _filter = new();
     private string _filterKey = new WorkshopFilter().Key();
-    private bool _allowScenes;
-    private int _gen; // bumped when filter/scenes change → invalidates the prefetch
+    private bool _allowScenes, _allowPresets;
+    private int _gen; // bumped when filter/scenes/presets change → invalidates the prefetch
 
     // Every /browse sets these (ConfigureProvider); only a real change drops the prefetched page — compared by value, or a
     // re-sent identical filter would invalidate it on every request.
@@ -60,6 +60,13 @@ public class SteamWorkshopService : IBgsProvider
     {
         get { lock (_lock) return _allowScenes; }
         set { lock (_lock) { if (value != _allowScenes) { _allowScenes = value; Invalidate(); } } }
+    }
+    // Workshop presets may be listed (the Type filter's Preset, a scene's presets list): scene support on AND the Liascape
+    // player — presets play only there (ServerHost.ConfigureProvider)
+    public bool AllowPresets
+    {
+        get { lock (_lock) return _allowPresets; }
+        set { lock (_lock) { if (value != _allowPresets) { _allowPresets = value; Invalidate(); } } }
     }
     public string WorkshopBasePath { get; set; } = "";
 
@@ -83,14 +90,14 @@ public class SteamWorkshopService : IBgsProvider
     // serves one request at a time, and the fallback never prefetches (each page read costs rate-limit budget).
     private Task<List<WallpaperResult>> GetWithPrefetch(string? query, int page)
     {
-        int gen; WorkshopFilter filter; bool scenes; WorkshopList list; Task<List<WallpaperResult>> task;
+        int gen; WorkshopFilter filter; bool scenes, presets; WorkshopList list; Task<List<WallpaperResult>> task;
         lock (_lock)
         {
-            (gen, filter, scenes, list) = (_gen, _filter, _allowScenes, _list);
+            (gen, filter, scenes, presets, list) = (_gen, _filter, _allowScenes, _allowPresets, _list);
             // a list has no search (Steam's client protocol can't search a user's files): the query is ignored
             if (list.Active) query = null;
             if (_prefetch is { } p && p.gen == gen && p.query == query && p.page == page) task = p.task;
-            else { DropPrefetch(); task = Fetch(filter, scenes, list, gen, query, page, CancellationToken.None); }
+            else { DropPrefetch(); task = Fetch(filter, scenes, presets, list, gen, query, page, CancellationToken.None); }
         }
         _ = task.ContinueWith((t) =>
         {
@@ -100,7 +107,7 @@ public class SteamWorkshopService : IBgsProvider
                 if (gen != _gen || _prefetch is { } q && q.gen == gen && q.query == query && q.page == page + 1) return;
                 DropPrefetch();
                 var cts = new CancellationTokenSource();
-                var next = Fetch(filter, scenes, list, gen, query, page + 1, cts.Token);
+                var next = Fetch(filter, scenes, presets, list, gen, query, page + 1, cts.Token);
                 next.ContinueWith((n) => _ = n.Exception, TaskContinuationOptions.OnlyOnFaulted); // observe faults
                 _prefetch = (gen, query, page + 1, next, cts);
             }
@@ -108,8 +115,29 @@ public class SteamWorkshopService : IBgsProvider
         return task;
     }
 
-    private Task<List<WallpaperResult>> Fetch(WorkshopFilter filter, bool allowScenes, WorkshopList list, int gen, string? query, int appPage, CancellationToken ct) =>
-        list.Active ? ListAsync(filter, allowScenes, list, gen, appPage, ct) : FetchAsync(filter, allowScenes, query, appPage, ct);
+    private Task<List<WallpaperResult>> Fetch(WorkshopFilter filter, bool allowScenes, bool allowPresets, WorkshopList list, int gen, string? query, int appPage, CancellationToken ct) =>
+        list.IsPresets ? PresetsAsync(filter, allowScenes && allowPresets, ulong.Parse(list.Id!), list.Sort, appPage, ct)
+        : list.Active ? ListAsync(filter, allowScenes, allowPresets, list, gen, appPage, ct)
+        : FetchAsync(filter, allowScenes, allowPresets, query, appPage, ct);
+
+    // A scene's presets: one QueryFiles page of the items that require it (SteamWorkshopDetails.QueryChildrenAsync), the
+    // filter's other groups applied by Steam. No page fallback (like the user lists): Steam unreachable is an error the
+    // list shows. Presets not allowed (scene support off, the legacy engine) → nothing.
+    // Guard: test-workshop-social § 5.
+    private static async Task<List<WallpaperResult>> PresetsAsync(WorkshopFilter filter, bool allowPresets, ulong sceneId, string sort, int appPage, CancellationToken ct)
+    {
+        if (!allowPresets) return [];
+        var plan = WorkshopTags.ForPresets(filter);
+        if (plan.Empty) return [];
+        var sw = Stopwatch.StartNew();
+        var got = await SteamWorkshopDetails.QueryChildrenAsync(sceneId, plan, sort, appPage, CmPageSize, CmTimeout, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        if (got == null) throw new InvalidOperationException("Steam's servers didn't answer — try again in a moment.");
+        Served(Path.Steam, $"Steam's client protocol (anonymous) — presets of {sceneId}: {got.Count} item(s) in {sw.ElapsedMilliseconds} ms");
+        var byId = new Dictionary<string, SteamWorkshopScraper.PublishedFileDetail>();
+        foreach (var d in got) byId.TryAdd(d.Id, d);
+        return SteamWorkshopScraper.MapToResults(got.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes: true, allowPresets: true);
+    }
 
     // A list (the favourites, a creator's items): Steam's client protocol pages a user's files 100 at a time and can't
     // filter them by tag, so the filter's tags (and the playable types) are matched here — and a page the filter empties
@@ -120,9 +148,9 @@ public class SteamWorkshopService : IBgsProvider
     private readonly Dictionary<(int gen, int appPage), int> _cursor = [];
     private readonly HashSet<ulong> _favoritesViaPage = [];
 
-    private async Task<List<WallpaperResult>> ListAsync(WorkshopFilter filter, bool allowScenes, WorkshopList list, int gen, int appPage, CancellationToken ct)
+    private async Task<List<WallpaperResult>> ListAsync(WorkshopFilter filter, bool allowScenes, bool allowPresets, WorkshopList list, int gen, int appPage, CancellationToken ct)
     {
-        var plan = WorkshopTags.Build(filter, allowScenes);
+        var plan = WorkshopTags.Build(filter, allowScenes, allowPresets);
         if (plan.Empty) return [];
         ulong steamId;
         if (list.IsCreator) steamId = ulong.Parse(list.Id!);
@@ -137,7 +165,7 @@ public class SteamWorkshopService : IBgsProvider
         {
             var byId = new Dictionary<string, SteamWorkshopScraper.PublishedFileDetail>();
             foreach (var d in page) byId.TryAdd(d.Id, d);
-            return SteamWorkshopScraper.MapToResults(page.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes)
+            return SteamWorkshopScraper.MapToResults(page.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes, allowPresets)
                 .Where((r) => WorkshopTags.Matches(plan, r.Tags ?? [])).ToList();
         }
         bool viaPage; lock (_lock) viaPage = !list.IsCreator && _favoritesViaPage.Contains(steamId);
@@ -182,9 +210,9 @@ public class SteamWorkshopService : IBgsProvider
 
     private static bool ForceFallback => Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK") == "1";
 
-    private static async Task<List<WallpaperResult>> FetchAsync(WorkshopFilter filter, bool allowScenes, string? query, int appPage, CancellationToken ct)
+    private static async Task<List<WallpaperResult>> FetchAsync(WorkshopFilter filter, bool allowScenes, bool allowPresets, string? query, int appPage, CancellationToken ct)
     {
-        var plan = WorkshopTags.Build(filter, allowScenes);
+        var plan = WorkshopTags.Build(filter, allowScenes, allowPresets);
         if (plan.Empty) return []; // e.g. every age excluded: nothing can match, don't ask
         var sw = Stopwatch.StartNew();
         if (!ForceFallback)
@@ -196,7 +224,7 @@ public class SteamWorkshopService : IBgsProvider
                 Served(Path.Steam, $"Steam's client protocol (anonymous) — page {appPage}: {details.Count} item(s) in {sw.ElapsedMilliseconds} ms");
                 var byId = new Dictionary<string, SteamWorkshopScraper.PublishedFileDetail>();
                 foreach (var d in details) byId.TryAdd(d.Id, d);
-                return SteamWorkshopScraper.MapToResults(details.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes);
+                return SteamWorkshopScraper.MapToResults(details.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes, allowPresets);
             }
         }
 
@@ -206,7 +234,7 @@ public class SteamWorkshopService : IBgsProvider
             : "Workshop page reading — Steam's servers unreachable (rate-limited host, SteamGate-paced)");
         int basePage = (appPage - 1) * FallbackPagesPerLoad + 1;
         var tasks = Enumerable.Range(basePage, FallbackPagesPerLoad)
-            .Select(p => Task.Run(() => SteamWorkshopScraper.BrowseAsync(filter, plan, query, p, allowScenes)));
+            .Select(p => Task.Run(() => SteamWorkshopScraper.BrowseAsync(filter, plan, query, p, allowScenes, allowPresets)));
         var pages = await Task.WhenAll(tasks).ConfigureAwait(false);
 
         var merged = new List<WallpaperResult>();

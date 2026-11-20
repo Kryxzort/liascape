@@ -202,6 +202,7 @@ public static class ServerHost
         if (p is SteamWorkshopService ws)
         {
             ws.AllowScenes = s.AllowScenes;
+            ws.AllowPresets = s.AllowScenes && Liascape.Player.PlayerEngine.IsLiascapePlayer;
             ws.WorkshopBasePath = s.WorkshopFolder;
             if (filter != null) ws.Filter = filter;
             if (browse) ws.List = list ?? new();
@@ -804,6 +805,8 @@ public static class ServerHost
         app.MapPost("/workshop/comment", (CommentReq r, HttpContext ctx) => WorkshopSocialOps.PostCommentAsync(r.WorkshopId, r.Owner, r.Text, r.Count ?? 10, ctx.RequestAborted));
         // the Library sidebar's stat pills: Steam's current subscriber / favourite counts (the client protocol, not the community site)
         app.MapGet("/workshop/counts", (string? id, HttpContext ctx) => WorkshopSocialOps.CountsAsync(id, ctx.RequestAborted));
+        // a Workshop preset's base scene: its id, title and kind from Steam, and its folder when it is in the library
+        app.MapGet("/workshop/base", (string? id, HttpContext ctx) => WorkshopSocialOps.BaseAsync(id, ctx.RequestAborted));
         app.MapPost("/workshop/unsubscribe-keep", async (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : NoUnsubscribe() ?? Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,7 +11,7 @@ using Microsoft.AspNetCore.Http;
 namespace Liascape.Web;
 
 // The Workshop community pieces of the Browse and Library sidebars — the creator (name + avatar), the favourite toggle, the
-// comment thread, the item's current counts — behind thin endpoints (ServerHost): the calls are Helpers/SteamCommunity.cs'.
+// comment thread, the item's current counts, a preset's base — behind thin endpoints (ServerHost): the calls are Helpers/SteamCommunity.cs'.
 // Reading works signed out; favouriting and posting need the sign-in (403 {error, signIn: true}, the UI's "Sign in to …").
 // Steam's cooldown → 429 (the error middleware), Steam unreachable or refusing → 502 {error}: the sidebar shows a quiet line,
 // never a crash.
@@ -21,7 +23,7 @@ public static class WorkshopSocialOps
     // land together (the Library sidebar asks for the creator and the counts at once), kept DetailsFreshFor: the counts are
     // "current", and Steam's servers aren't the rate-limited community site, so a reopened sidebar a while later asks again.
     // A failed ask is dropped at once (asked again next time; SteamAnonymous waits out its own retry gap).
-    // Guard: scripts/test-workshop-social.sh § counts
+    // Guard: scripts/test-workshop-social.sh § counts, § 5 (a preset's base)
     static readonly TimeSpan DetailsFreshFor = TimeSpan.FromMinutes(15);
     // Lazy: ConcurrentDictionary may run a value factory on two racing threads (keeping one result); only the stored entry's
     // ask is ever started
@@ -76,6 +78,41 @@ public static class WorkshopSocialOps
                 { Found: false } => Results.Json(new { error = "Steam has no public item with this id" }, statusCode: 404),
                 var d => Results.Json(new { subscriptions = d.Value.Subscriptions, favorites = d.Value.Favorites }),
             };
+        }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
+    }
+
+    public sealed record PresetBaseInfo(string BaseId, string? Title, string? Kind);
+
+    // A Workshop preset's base: the item Steam lists as the preset's required one (its first child; a preset names one),
+    // with the base's title and kind (`KindOf` its tags). null = not a preset, or one naming no base. Both asks go through
+    // the details cache above (kept DetailsFreshFor, a failed ask not kept); Steam unreachable → HttpRequestException (502).
+    // Guard: scripts/test-workshop-social.sh § 5
+    public static async Task<PresetBaseInfo?> BaseOfAsync(string presetId, CancellationToken ct)
+    {
+        if (!ulong.TryParse(presetId, out var id)) return null;
+        var preset = await DetailsAsync(id, ct).ConfigureAwait(false) ?? throw new HttpRequestException("Couldn't reach Steam");
+        if (!preset.Found || !WorkshopTags.IsPreset(preset.Tags) || preset.Children is not [var baseId, ..]) return null;
+        var b = await DetailsAsync(baseId, ct).ConfigureAwait(false) ?? throw new HttpRequestException("Couldn't reach Steam");
+        return new(baseId.ToString(), b.Found ? b.Title : null, b.Found ? KindOf(b.Tags) : null);
+    }
+
+    // an item's kind from its Workshop tags: "preset" first (Steam tags a preset with its base's type too), then its type
+    // tag lowercased (scene, video, web, application); null = no type tag
+    internal static string? KindOf(IReadOnlyCollection<string> tags) =>
+        WorkshopTags.IsPreset(tags) ? "preset"
+        : new[] { "Scene", "Video", "Web", "Application" }.FirstOrDefault((t) => tags.Contains(t, StringComparer.OrdinalIgnoreCase))?.ToLowerInvariant();
+
+    /// GET /workshop/base?id= → {baseId, title, kind, libraryPath}: a preset's base from Steam (title / kind null when Steam
+    /// has no such public item), its library folder (Presets.BaseDirOf; null = not in the library). 404 = not a preset.
+    public static async Task<IResult> BaseAsync(string? id, CancellationToken ct)
+    {
+        if (!WorkshopSubOps.ValidId(id)) return Results.BadRequest(new { error = "id must be digits" });
+        try
+        {
+            if (await BaseOfAsync(id!, ct).ConfigureAwait(false) is not { } b)
+                return Results.Json(new { error = "Steam lists no base for this item: it isn't a preset" }, statusCode: 404);
+            return Results.Json(new { baseId = b.BaseId, title = b.Title, kind = b.Kind, libraryPath = Presets.BaseDirOf(b.BaseId) });
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
     }

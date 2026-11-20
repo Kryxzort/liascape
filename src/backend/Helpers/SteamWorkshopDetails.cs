@@ -24,8 +24,11 @@ namespace Liascape.Helpers;
 //     walk; search_text works with every sort). Preferred over scraping steamcommunity.com's browse page (rate-limited per IP,
 //     30 items a page, AND-only tags) — that stays only as the fallback (SteamWorkshopService).
 // Both return null when Steam's servers can't be reached / refuse (the caller falls back to page reading).
+//   - QueryChildrenAsync: the items that name a given item as theirs ("Required items": a preset names its base scene) —
+//     QueryFiles with `child_publishedfileid`, checked again against each result's own children.
 // LIASCAPE_STEAM_CM_FIXTURE=<file.json> (tests): GetDetailsAsync answers from that file instead of Steam — `{"<id>": {"tags":
-// [...], "youtube": "<id>"|null, "creator", "subscriptions", "favorited"}}` (the last three optional), an id not in it = no
+// [...], "youtube": "<id>"|null, "creator", "subscriptions", "favorited", "title", "children": ["<id>"]}}` (all but tags
+// optional), an id not in it = no
 // such public item, no file = Steam unreachable; each request is logged with its ids. QueryAsync (Browse's Workshop
 // pages) answers from its "@query" list and UserFilesAsync from "@userfiles" the same way, so a test's Browse never
 // opens a session to Steam.
@@ -39,9 +42,10 @@ public static class SteamWorkshopDetails
 
     // per item: Found = Steam answered for it (result 1); Youtube = its first YouTube preview id (null = none); Tags = its
     // Workshop tags, Steam's names; Creator = its creator's Steam ID (0 = unknown); Subscriptions / Favorites = Steam's
-    // CURRENT counts (`subscriptions` / `favorited`, never the lifetime ones, which also count everyone who has left). An
-    // item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false, no tags.
-    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0, long Subscriptions = 0, long Favorites = 0);
+    // CURRENT counts (`subscriptions` / `favorited`, never the lifetime ones, which also count everyone who has left);
+    // Children = the items it requires (a preset: its base). An item Steam couldn't answer for (removed, private: result ≠ 1)
+    // is Found=false, no tags.
+    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0, long Subscriptions = 0, long Favorites = 0, string? Title = null, ulong[]? Children = null);
 
     private static string? Fixture => Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE") is { Length: > 0 } f ? f : null;
 
@@ -59,13 +63,13 @@ public static class SteamWorkshopDetails
             var got = Fixture is { } fx ? FromFixture(fx, batch) : await SteamAnonymous.UseAsync(async (pub) =>
             {
                 var req = new CPublishedFile_GetDetails_Request
-                    { includetags = true, includeadditionalpreviews = true, short_description = true, appid = AppId };
+                    { includetags = true, includeadditionalpreviews = true, includechildren = true, short_description = true, appid = AppId };
                 req.publishedfileids.AddRange(batch);
                 var resp = await pub.GetDetails(req); // an AsyncJob (no ConfigureAwait)
                 if (resp.Result != EResult.OK) return null;
                 return resp.Body.publishedfiledetails.ToDictionary((d) => d.publishedfileid, (d) => d.result == (int)EResult.OK
                     ? new Details(true, YoutubeOf(d), d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).Distinct().ToArray(), d.creator,
-                        d.subscriptions, d.favorited)
+                        d.subscriptions, d.favorited, d.title, ChildrenOf(d))
                     : new Details(false, null, []));
             }, TimeSpan.FromSeconds(RequestTimeoutSeconds), ct).ConfigureAwait(false);
             Console.WriteLine(got == null ? $"steam-cm: GetDetails of {batch.Count} id(s) — no answer"
@@ -90,11 +94,19 @@ public static class SteamWorkshopDetails
                             ? ts.EnumerateArray().Select((t) => t.GetString() ?? "").Where((t) => t.Length > 0).ToArray() : [],
                         e.TryGetProperty("creator", out var cr) && ulong.TryParse(cr.ToString(), out var crId) ? crId : 0,
                         e.TryGetProperty("subscriptions", out var su) && su.TryGetInt64(out var suN) ? suN : 0,
-                        e.TryGetProperty("favorited", out var fa) && fa.TryGetInt64(out var faN) ? faN : 0)
+                        e.TryGetProperty("favorited", out var fa) && fa.TryGetInt64(out var faN) ? faN : 0,
+                        e.TryGetProperty("title", out var ti) && ti.ValueKind == System.Text.Json.JsonValueKind.String ? ti.GetString() : null,
+                        FixtureChildren(e))
                     : new Details(false, null, []));
         }
         catch { return null; } // no fixture file = Steam unreachable
     }
+
+    private static ulong[] ChildrenOf(PublishedFileDetails d) => d.children.Select((c) => c.publishedfileid).Where((id) => id > 0).Distinct().ToArray();
+
+    private static ulong[] FixtureChildren(System.Text.Json.JsonElement e) =>
+        e.TryGetProperty("children", out var cs) && cs.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? cs.EnumerateArray().Select((c) => ulong.TryParse(c.ToString(), out var id) ? id : 0).Where((id) => id > 0).ToArray() : [];
 
     private static string? YoutubeOf(PublishedFileDetails d) =>
         d.previews.FirstOrDefault((p) => !string.IsNullOrEmpty(p.youtubevideoid))?.youtubevideoid;
@@ -113,16 +125,35 @@ public static class SteamWorkshopDetails
     // mapping takes (MapToResults). null = Steam's servers unreachable / refused / timed out (→ the caller's fallback).
     public static Task<List<PublishedFileDetail>?> QueryAsync(WorkshopFilter filter, WorkshopTags.Plan plan, string? search, int page, int perPage, TimeSpan timeout, CancellationToken ct = default)
     {
+        var req = QueryRequest(plan, filter.Sort, page, perPage);
+        if (req.query_type == 3) req.days = (uint)Math.Max(1, filter.TrendDays);
+        if (!string.IsNullOrWhiteSpace(search)) req.search_text = search.Trim();
+        return SendQuery(req, $"QueryFiles page {req.page}", timeout, ct);
+    }
+
+    // One page (1-based) of the items that require `parentId` (a scene's presets), for the plan (WorkshopTags.ForPresets),
+    // sorted by `sort` (the list's own keys: "lastupdated", "toprated"). Each result is kept only when its own children
+    // name the parent, so a Steam that ignored the child filter can't pass the whole Workshop off as the scene's presets.
+    // null = Steam's servers unreachable / refused / timed out. Guard: steam-selftest "presets of a scene", test-workshop-social § 5.
+    public static async Task<List<PublishedFileDetail>?> QueryChildrenAsync(ulong parentId, WorkshopTags.Plan plan, string sort, int page, int perPage, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var req = QueryRequest(plan, sort == "toprated" ? "toprated" : "lastupdated", page, perPage);
+        req.child_publishedfileid = parentId;
+        req.return_children = true;
+        var got = await SendQuery(req, $"QueryFiles children of {parentId} query_type={req.query_type} page {req.page}", timeout, ct).ConfigureAwait(false);
+        return got?.Where((d) => d.Children.Contains(parentId)).ToList();
+    }
+
+    private static CPublishedFile_QueryFiles_Request QueryRequest(WorkshopTags.Plan plan, string sort, int page, int perPage)
+    {
         var req = new CPublishedFile_QueryFiles_Request
         {
-            appid = AppId, query_type = QueryType(filter.Sort), page = (uint)Math.Max(1, page), numperpage = (uint)Math.Clamp(perPage, 1, 100),
+            appid = AppId, query_type = QueryType(sort), page = (uint)Math.Max(1, page), numperpage = (uint)Math.Clamp(perPage, 1, 100),
             return_tags = true, return_previews = true, return_metadata = true,
             // the full description (it's persisted on a download and shown in the sidebar); measured no slower
             // than the short one — a page's descriptions are a few KB
             return_short_description = false,
         };
-        if (req.query_type == 3) req.days = (uint)Math.Max(1, filter.TrendDays);
-        if (!string.IsNullOrWhiteSpace(search)) req.search_text = search.Trim();
         foreach (var g in plan.TagGroups)
         {
             var tg = new CPublishedFile_QueryFiles_Request.TagGroup();
@@ -130,17 +161,24 @@ public static class SteamWorkshopDetails
             req.taggroups.Add(tg);
         }
         req.excludedtags.AddRange(plan.Excluded);
+        return req;
+    }
+
+    private static Task<List<PublishedFileDetail>?> SendQuery(CPublishedFile_QueryFiles_Request req, string what, TimeSpan timeout, CancellationToken ct)
+    {
         if (Fixture is { } fx)
         {
             var r = QueryFromFixture(fx, req);
-            Console.WriteLine($"steam-cm: QueryFiles page {req.page} — " + (r == null ? "no answer" : $"{r.Count} item(s) (fixture)"));
+            Console.WriteLine($"steam-cm: {what} — " + (r == null ? "no answer" : $"{r.Count} item(s) (fixture)"));
             return Task.FromResult(r);
         }
         return SteamAnonymous.UseAsync(async (pub) =>
         {
             var resp = await pub.QueryFiles(req); // an AsyncJob (no ConfigureAwait)
             if (resp.Result != EResult.OK) return null;
-            return resp.Body.publishedfiledetails.Where((d) => d.result == (int)EResult.OK).Select(ToDetail).ToList();
+            var got = resp.Body.publishedfiledetails.Where((d) => d.result == (int)EResult.OK).Select(ToDetail).ToList();
+            if (req.child_publishedfileid != 0) Console.WriteLine($"steam-cm: {what} — {got.Count} item(s) of {resp.Body.total}");
+            return got;
         }, timeout, ct);
     }
 
@@ -194,7 +232,8 @@ public static class SteamWorkshopDetails
 
     // the fixture's `"@query": [ {publishedfileid, title, tags, …} ]` (the user files' item shape): the whole Workshop as
     // Browse lists it, in that order; Steam's own matching done roughly here (the search text in the title, one tag of each
-    // tag group, no excluded tag) so a filter or a search still narrows the list. No "@query" = an empty Workshop.
+    // tag group, no excluded tag, the child filter by each item's "children") so a filter or a search still narrows the list.
+    // No "@query" = an empty Workshop.
     private static List<PublishedFileDetail>? QueryFromFixture(string file, CPublishedFile_QueryFiles_Request req)
     {
         try
@@ -205,6 +244,7 @@ public static class SteamWorkshopDetails
             return arr.EnumerateArray().Select(FixtureDetails)
                 .Where((d) => string.IsNullOrEmpty(req.search_text) || d.title.Contains(req.search_text, StringComparison.OrdinalIgnoreCase))
                 .Where((d) => req.taggroups.All((g) => g.tags.Any((t) => Has(d, t))) && !req.excludedtags.Any((t) => Has(d, t)))
+                .Where((d) => req.child_publishedfileid == 0 || d.children.Any((c) => c.publishedfileid == req.child_publishedfileid))
                 .Skip((int)((req.page - 1) * req.numperpage)).Take((int)req.numperpage).Select(ToDetail).ToList();
         }
         catch { return null; } // no fixture file = Steam unreachable
@@ -224,6 +264,7 @@ public static class SteamWorkshopDetails
         if (e.TryGetProperty("score", out var sc) && sc.TryGetSingle(out var score)) d.vote_data = new PublishedFileDetails.VoteData { score = score };
         if (e.TryGetProperty("tags", out var ts) && ts.ValueKind == System.Text.Json.JsonValueKind.Array)
             foreach (var t in ts.EnumerateArray()) d.tags.Add(new PublishedFileDetails.Tag { tag = t.GetString() ?? "" });
+        foreach (var c in FixtureChildren(e)) d.children.Add(new PublishedFileDetails.Child { publishedfileid = c });
         return d;
     }
 
@@ -240,6 +281,7 @@ public static class SteamWorkshopDetails
         Subscriptions = (long)d.subscriptions,
         Favorites = (long)d.favorited,
         Tags = d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).ToArray(),
+        Children = ChildrenOf(d),
         TrailerKnown = true,
         YoutubeId = YoutubeOf(d),
     };

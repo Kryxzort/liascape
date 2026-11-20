@@ -20,6 +20,11 @@
 #     a private profile's favourites from the community page + the keyless details (current counts again); the cookie's token
 #     in no log line and not in settings.json; every request with the Firefox User-Agent.
 #  4. Steam's 429: the comments answer 429 "try again in N min", the cooldown file is written and the next read sends nothing.
+#  5. a scene's presets (/browse `list` kind "presets", QueryFiles' child lookup; the engine is liascape-player through a
+#     stub binary that never runs): exactly the presets naming it (a web-based one left out), paged 100 at a time, sorted
+#     as asked; the whole Workshop's default list holds none, Preset ticked holds only presets; a preset's base
+#     (/workshop/base: Steam's one child, its title and kind, the library's folder, one GetDetails per item; 404 / 400);
+#     scene support off or the legacy engine → no presets.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -85,7 +90,20 @@ const counts = { subscriptions: 692, lifetime_subscriptions: 876, favorited: 34,
 const fx = { "3000000001": { tags: ["Video"], creator: OWNER, ...counts }, "3000000002": { tags: ["Video"], creator: OWNER },
   "3000000003": { tags: ["Video"], creator: OWNER, ...counts }, "3000000004": { tags: ["Video"], creator: OWNER, ...counts },
   "@userfiles": { [`${OWNER}:myfiles`]: Array.from({ length: 130 }, (_, i) => item(i)),
-                  [`${ME}:myfavorites`]: [item(500, { title: "fav-a" }), item(501, { title: "fav-b" })] } };
+                  [`${ME}:myfavorites`]: [item(500, { title: "fav-a" }), item(501, { title: "fav-b" })] },
+  // the whole Workshop (QueryFiles): a video, a scene, its two presets (Steam tags a preset Preset + the type of its base), a
+  // video-based preset, a web-based preset of the scene (never listed), and a second scene with 150 presets
+  "@query": [
+    { publishedfileid: "1001", title: "q-video", tags: ["Video"] }, { publishedfileid: "1003", title: "Query Scene", tags: ["Scene"] },
+    { publishedfileid: "2001", title: "preset-a", tags: ["Preset", "Scene"], children: ["1003"] },
+    { publishedfileid: "2002", title: "preset-b", tags: ["Preset", "Scene"], children: ["1003"] },
+    { publishedfileid: "2003", title: "preset-of-video", tags: ["Preset", "Video"], children: ["1001"] },
+    { publishedfileid: "2004", title: "preset-web", tags: ["Preset", "Web"], children: ["1003"] },
+    { publishedfileid: "1004", title: "busy scene", tags: ["Scene"] },
+    ...Array.from({ length: 150 }, (_, i) => ({ publishedfileid: String(4000 + i), title: `busy-preset-${i}`, tags: ["Preset", "Scene"], children: ["1004"] }))] };
+fx["2001"] = { tags: ["Preset", "Scene"], title: "preset-a", children: ["1003"] };
+fx["1003"] = { tags: ["Scene"], title: "Query Scene" };
+fx["1001"] = { tags: ["Video"], title: "q-video" };
 require("fs").writeFileSync(process.env.T + "/steam-cm.json", JSON.stringify(fx));'
 export LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
 
@@ -94,7 +112,10 @@ node "$ROOT/scripts/test-fixtures/fake-steam-community.mjs" "$T/fake.port" "$ME"
 for _ in $(seq 1 50); do [ -s "$T/fake.port" ] && break; sleep 0.1; done
 [ -s "$T/fake.port" ] || { echo "FAIL  the fake community server didn't start"; cat "$T/fake.log"; exit 1; }
 export FAKE=http://127.0.0.1:$(cat "$T/fake.port")
-printf '{"PlayerEngine":"legacy","NoAudio":true,"AllowScenes":true,"AutoAddWeWallpapersToLibrary":false}\n' > "$XDG_CONFIG_HOME/liascape/settings.json"
+# the engine is liascape-player (presets are offered only there), its binary a stub: nothing here ever plays
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
+printf '{"PlayerEngine":"liascape-player","NoAudio":true,"AllowScenes":true,"AutoAddWeWallpapersToLibrary":false}\n' > "$XDG_CONFIG_HOME/liascape/settings.json"
 (cd /tmp && LIASCAPE_STEAM_COMMUNITY=$FAKE LIASCAPE_STEAM_API=$FAKE exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "FAIL  backend didn't start"; tail -15 "$T/backend.log"; exit 1; }
@@ -254,6 +275,48 @@ n0 = (await fakeLog()).length;
 r = await get(`/workshop/comments?id=${ITEM}&owner=${OWNER}&start=10&count=10`);
 const r3 = await post("/workshop/favorite", { workshopId: ITEM, favorite: true });
 out(r.status === 429 && r3.status === 429 && (await since(n0)).length === 0, "during the cooldown: 429 and nothing sent", J([r.status, r3.status]));
+
+// ---- 5. a scene's presets (list kind "presets": QueryFiles' child lookup) and a preset's base ----
+const wids = (x) => (Array.isArray(x.json) ? x.json.map((w) => w.workshopId) : []);
+r = await browse({ kind: "presets", id: "1003" });
+out(r.status === 200 && J(wids(r)) === J(["2001", "2002"]) && r.json.every((w) => w.isPreset === true && w.isScene === true),
+  "presets list: exactly the scene's presets, each isPreset + isScene (the web-based one left out)", J({ s: r.status, ids: wids(r), r: r.json?.error }));
+r = await browse({ kind: "presets", id: "1002" });
+out(r.status === 200 && r.json?.length === 0, "presets list of an item with none: []", J(r));
+const pp1 = await browse({ kind: "presets", id: "1004" }), pp2 = await browse({ kind: "presets", id: "1004" }, 2), pp3 = await browse({ kind: "presets", id: "1004" }, 3);
+out(wids(pp1).length === 100 && wids(pp2).length === 50 && pp3.json?.length === 0 && new Set([...wids(pp1), ...wids(pp2)]).size === 150,
+  "presets list paged: 100, then 50, then the end", J([wids(pp1).length, wids(pp2).length, pp3.json?.length ?? pp3]));
+r = await browse({ kind: "presets", id: "1003", sort: "toprated" });
+const bl5 = fs.readFileSync(`${T}/backend.log`, "utf8");
+out(r.status === 200 && /QueryFiles children of 1003 query_type=21\b/.test(bl5) && /QueryFiles children of 1003 query_type=0\b/.test(bl5),
+  "presets list: last updated / top rated asked of Steam as query_type 21 / 0 (backend log)", J(bl5.match(/QueryFiles children[^\n]*/g)));
+r = await browse(undefined);
+out(r.status === 200 && r.json.length > 0 && r.json.every((w) => !w.isPreset && !(w.tags ?? []).includes("Preset")), "the whole Workshop's default list: no preset", J(wids(r)));
+r = await browse(undefined, 1, filter({ include: ["Preset"] }));
+out(r.status === 200 && r.json.length === 100 && r.json.every((w) => w.isPreset && w.isScene) && wids(r).includes("2003") && !wids(r).includes("2004"),
+  "the whole Workshop, Preset ticked: presets only (incl. a video-based one), never a web-based one", J({ n: r.json?.length, first: wids(r).slice(0, 5) }));
+
+r = await get("/workshop/base?id=2001");
+out(r.status === 200 && r.json?.baseId === "1003" && r.json?.kind === "scene" && r.json?.title === "Query Scene" && r.json?.libraryPath === null,
+  "base of a preset: its one child on Steam, the base's title and kind, not in the library", J(r));
+const libBase = `${process.env.XDG_DATA_HOME}/liascape/library/workshop/1003`;
+fs.mkdirSync(libBase, { recursive: true });
+r = await get("/workshop/base?id=2001");
+out(r.status === 200 && r.json?.libraryPath === libBase && cmAsks("2001") === 1 && cmAsks("1003") === 1,
+  "base of a preset again: the library's folder, Steam asked once per item (the details cache)", J({ r, asks: [cmAsks("2001"), cmAsks("1003")] }));
+const rv = await get("/workshop/base?id=1001"), rx = await get("/workshop/base?id=x");
+out(rv.status === 404 && rx.status === 400, "base of a non-preset → 404, a non-digit id → 400", J([rv, rx]));
+
+const SF = `${process.env.XDG_CONFIG_HOME}/liascape/settings.json`;
+const setFile = (p) => fs.writeFileSync(SF, J({ ...JSON.parse(fs.readFileSync(SF, "utf8")), ...p }));
+setFile({ AllowScenes: false });
+r = await browse({ kind: "presets", id: "1003" });
+const rf = await browse(undefined, 1, filter({ include: ["Preset"] }));
+setFile({ AllowScenes: true });
+out(r.status === 200 && r.json?.length === 0 && rf.status === 200 && rf.json?.length === 0, "scene support off: no presets list, Preset ticked finds nothing", J([r, rf.json?.length]));
+r = await post("/settings", { PlayerEngine: "legacy" });
+const rl = await browse({ kind: "presets", id: "1003" });
+out(r.status === 200 && rl.status === 200 && rl.json?.length === 0, "the legacy engine: no presets list", J([r.status, rl]));
 EOF
 (cd "$T" && timeout 200 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
 sed 's/^/      /' "$T/drive.log"

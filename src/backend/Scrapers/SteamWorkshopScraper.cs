@@ -53,7 +53,7 @@ public static class SteamWorkshopScraper
     // steamcommunity.com browse page (30 items; rate-limited per IP, so through SteamGate). The page only ANDs
     // `requiredtags[]`, so it gets the plan's single-tag groups (a group with one allowed tag, every ticked feature) and
     // the rest of the plan — OR groups, excludes, the age rule — is checked here on each result's tags (WorkshopTags.Matches).
-    public static async Task<List<WallpaperResult>> BrowseAsync(WorkshopFilter filter, WorkshopTags.Plan plan, string? query, int page, bool allowScenes)
+    public static async Task<List<WallpaperResult>> BrowseAsync(WorkshopFilter filter, WorkshopTags.Plan plan, string? query, int page, bool allowScenes, bool allowPresets = false)
     {
         var url = BuildUrl(filter, plan, query, page);
         string html;
@@ -73,7 +73,7 @@ public static class SteamWorkshopScraper
         if (ids.Count == 0) return [];
 
         var details = await GetDetailsBatchAsync(ids).ConfigureAwait(false);
-        return await Task.Run(() => MapToResults(ids, details, allowScenes)
+        return await Task.Run(() => MapToResults(ids, details, allowScenes, allowPresets)
             .Where((r) => WorkshopTags.Matches(plan, r.Tags ?? [])).ToList()).ConfigureAwait(false);
     }
 
@@ -205,10 +205,13 @@ public static class SteamWorkshopScraper
     }
 
     // Shared by both Browse paths (the client protocol's QueryFiles results and the fallback's GetPublishedFileDetails).
+    // A preset (Steam tags it Preset + its base's type) is checked first: kept only with allowPresets (scene support + the
+    // Liascape player), never when its base is unplayable (Web), and always a scene (it plays as its base scene).
+    // Guard: steam-selftest "presets: with allowPresets…".
     public static List<WallpaperResult> MapToResults(
         IReadOnlyList<string> orderedIds,
         Dictionary<string, PublishedFileDetail> details,
-        bool allowScenes)
+        bool allowScenes, bool allowPresets = false)
     {
         var results = new List<WallpaperResult>();
 
@@ -216,14 +219,11 @@ public static class SteamWorkshopScraper
         {
             if (!details.TryGetValue(id, out var d)) continue;
 
-            bool isScene = d.Tags.Contains("Scene", StringComparer.OrdinalIgnoreCase);
-            bool isVideo = d.Tags.Contains("Video", StringComparer.OrdinalIgnoreCase);
-
-            bool isUnplayable = d.Tags.Any(t =>
-                string.Equals(t, "Web", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t, "Application", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t, "Preset", StringComparison.OrdinalIgnoreCase));
-            if (isUnplayable) continue;
+            if (WorkshopTags.IsUnplayable(d.Tags)) continue;
+            bool isPreset = WorkshopTags.IsPreset(d.Tags);
+            if (isPreset && !(allowPresets && allowScenes)) continue;
+            bool isScene = isPreset || d.Tags.Contains("Scene", StringComparer.OrdinalIgnoreCase);
+            bool isVideo = !isPreset && d.Tags.Contains("Video", StringComparer.OrdinalIgnoreCase);
 
             if (isScene && !allowScenes) continue;
             if (!isScene && !isVideo) continue;
@@ -246,6 +246,7 @@ public static class SteamWorkshopScraper
                 AnimatedThumbnailUrl = animatedUrl,
                 PageUrl = $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}",
                 IsScene = isScene,
+                IsPreset = isPreset,
                 WorkshopId = id,
                 Resolution = resolution,
                 AddedAt = d.TimeUpdated != DateTime.MinValue ? d.TimeUpdated : null,
@@ -276,6 +277,8 @@ public static class SteamWorkshopScraper
         public long Subscriptions { get; init; }
         public long Favorites { get; init; }
         public string[] Tags { get; init; } = [];
+        // the items it requires (a preset: its base scene), from the client protocol; the fallback's details leave it empty
+        public ulong[] Children { get; init; } = [];
         // set by the client-protocol path (its previews are inline): the YouTube id is known, null = no trailer
         public bool TrailerKnown { get; init; }
         public string? YoutubeId { get; init; }
