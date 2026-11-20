@@ -341,7 +341,7 @@ Kept by the owner: a WE quirk. `scene_fps_quirks.py` cancels it with a parked po
 
 ### Decode scene video textures with FFmpeg, not mpv — 2026-11-20
 Owner's call, over an mpv patch only the flake could ship: FFmpeg's `primary_ctx` (stock everywhere) gives a scene's
-videos one CUDA context on every install; the player keeps mpv. Rejected: a libcuda shim, copy decoding.
+videos one CUDA context on every install; the player keeps mpv. Not: a libcuda shim, copy decoding.
 
 ### Scene fonts come from fontconfig, not a Windows install — 2026-11-18
 Owner's call: `systemfont_consolas` asks fontconfig for Consolas like any app.
