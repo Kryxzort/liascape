@@ -4,7 +4,7 @@
 
 **Goal:** Browse, subscribe to and play Workshop presets as their own Library items over their base scene, plus a scene's "Presets" list.
 
-**Architecture:** A preset is a `type: preset` item folder resolved at play time: the backend finds its base scene in the
+**Architecture:** A preset is an item folder whose project.json has a `preset` object and a `dependency` (no `type` key; Task 1), resolved at play time: the backend finds its base scene in the
 library by Workshop id and hands liascape-player a scene source whose identity (`path`) is the preset's own folder and
 whose `scene_dir` is the base's folder, with the layered property map (scene defaults → preset values → the card's own
 tweaks). Downloads fetch the base through the same mode and action; Steam's `QueryFiles` `child_publishedfileid`
@@ -18,6 +18,13 @@ lists a scene's presets.
 **Order and parallel work (at most 2 agents, never on the same files):** 1 alone → **2 ∥ 3** → **4 ∥ 6** → **5 ∥ 8** →
 **7 ∥ 9** → 10 alone. Each pair was checked for file overlap; anything a task touches outside its **Files** list it
 first raises with the coordinator.
+
+> **Confirmed format (Task 1, a99b1a33 — overrides any guessed name below):** no `type` key; a preset is recognised by a
+> `preset` object plus `dependency` (the base's Workshop id as a digit string). `preset` values use the base scene's
+> own encoding; it also holds WE's own settings (`_d0`, `alignment*`, `rate`, `wec_*`) that are not scene properties —
+> ignore keys the base doesn't define. `scenetexture` values are `"files/<name>"`, relative to the preset folder; the
+> `files/` folder holds only those images and overrides no base file. Steam's `Preset` tag is only in Steam's tags
+> (with `Scene` or `Web`), never in project.json. See `.claude/rules/backend/library.md` § Presets.
 
 ## Global Constraints
 
@@ -67,7 +74,7 @@ client's folders or `~/.cache/liascape/steamcmd_workshop` (refused by the corpus
 - [ ] **Step 5: Add the fixtures** — each `project.json` minimised: every real key and value type kept, the real base id and values kept, `title` → `Preset fixture <n>`, `description` → `""`, no preview file (tests generate one).
 - [ ] **Step 6: Verify**
 
-Run: `for f in scripts/test-fixtures/presets/*/project.json; do jq -e '.type == "preset" and (.dependency | test("^[0-9]+$")) and (.preset | type == "object")' "$f" >/dev/null || echo "BAD $f"; done` (with the confirmed names)
+Run: `for f in scripts/test-fixtures/presets/*/project.json; do jq -e '(has("type") | not) and (.dependency | test("^[0-9]+$")) and (.preset | type == "object")' "$f" >/dev/null || echo "BAD $f"; done` (with the confirmed names)
 Expected: no `BAD` line. `bash scripts/check-rules.sh` clean.
 
 - [ ] **Step 7: Commit** — `git add scripts/test-fixtures/presets .claude/rules/backend/library.md && git commit -m "Record The Workshop Preset Format"`
@@ -183,7 +190,7 @@ Expected: PASS.
 Run: `dotnet build src/backend && LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`; `bash scripts/test-presets.sh`
 Expected: FAIL (no `Presets`; `/library` has no `isPreset`).
 
-- [ ] **Step 3: Implement `Presets.cs`** (comment: why resolution is by id, not path — the path is the base item's identity and changes form) and wire `BuildItem` (a scene-branch folder that `Presets.Read` accepts → the preset fields), `SyncWallpaperEngine` (`type == "preset"` imports like a scene, only with `allowScenes`), `SteamCopyWhole` (a preset folder is whole). `FolderScanner` stays as is (presets arrive through the Workshop and auto-import).
+- [ ] **Step 3: Implement `Presets.cs`** (comment: why resolution is by id, not path — the path is the base item's identity and changes form) and wire `BuildItem` (a scene-branch folder that `Presets.Read` accepts → the preset fields), `SyncWallpaperEngine` (a project.json with a `preset` object + digit-string `dependency` imports like a scene, only with `allowScenes`), `SteamCopyWhole` (a preset folder is whole). `FolderScanner` stays as is (presets arrive through the Workshop and auto-import).
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: same as Step 2. Expected: PASS, `player-selftest` 0 fails.
