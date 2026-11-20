@@ -20,12 +20,6 @@ https://github.com/Almamu/linux-wallpaperengine — GPL-3.0
 
 *(no techniques adopted yet — see `UPSTREAM.md`)*
 
-## mpv (libmpv)
-
-https://github.com/mpv-player/mpv — LGPL-2.1+ (the build liascape links)
-
-*(no techniques adopted yet — see `UPSTREAM.md`)*
-
 ## gl-transitions
 
 https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.gl-transitions`; per-effect license in `transitions/manifest.json`, MIT when none is given)
@@ -174,4 +168,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0134-render-a-particle-frame-at-an-fps-of-1-to-20-is-two-.patch` | render: a particle frame at an fps of 1 to 20 is two half steps, as in WE | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0135-video-the-host-chooses-its-video-players-hwdec-and-i.patch` | video: the host chooses its video players' hwdec and interop | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0136-video-every-video-player-shares-the-GPU-s-primary-CU.patch` | video: every video player shares the GPU's primary CUDA context | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
-| mpv | `0001-hwdec_cuda-add-cuda-primary-context.patch` | hwdec_cuda: add --cuda-primary-context | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0137-video-decode-video-textures-with-FFmpeg-instead-of-l.patch` | video: decode video textures with FFmpeg instead of libmpv | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

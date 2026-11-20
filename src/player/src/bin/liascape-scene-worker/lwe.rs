@@ -382,9 +382,9 @@ impl Scene {
         self.upload = Some(u);
     }
 
-    /// mpv's `hwdec` and `gpu-hwdec-interop` for every video player the scene starts (libmpv's
-    /// render API otherwise tries every interop it has, each opening its device where it can).
-    /// Before [`first_render`](Self::first_render).
+    /// The `hwdec` list and GL interop (mpv's names) every video texture the scene starts decodes
+    /// with: the core opens only the devices the list leads to. Before
+    /// [`first_render`](Self::first_render).
     pub fn set_video_hwdec(&self, hwdec: &str, interop: &str) {
         let (Ok(h), Ok(i)) = (CString::new(hwdec), CString::new(interop)) else {
             return;
@@ -851,9 +851,9 @@ fn run_sweep(request: &Path, assets: &Path, out: &Path) -> Result<usize, String>
 /// puts it on one channel only (the other silent); `--tone noise` is white noise (every band, like music
 /// that fills the spectrum) at −6 dBFS RMS; `--tone-sweep HZ1` glides from `HZ` to `HZ1`
 /// (log, over the run). The JSON's `spectrum` is the 16-band left/right spectrum the scene saw last.
-/// Frames are paced to the wall clock (frame `f` at `f/30` s after the first): video textures are
-/// decoded by libmpv in real time, so an unpaced run (all of `S` s in a few ms) shows them black
-/// (3426575339, 3432876246, 3556794116). `--unpaced` renders as fast as it can, as before.
+/// Frames are paced to the wall clock (frame `f` at `f/30` s after the first), as a host renders:
+/// video textures decode beside the render, so an unpaced run (all of `S` s in a few ms) runs their
+/// clocks ahead of their decoders, which then skip ahead. `--unpaced` renders as fast as it can.
 /// `--shots T,T…` also writes the frames at those scene times (`lwe-smoke-<T>s.png`; the run lasts at least the
 /// last of them), and `--shot-width W` box-filters every smoke PNG down to at most `W` px wide — the preview
 /// compare (`tests/onmachine/scene_preview_compare.sh`) takes small frames at 0.5 / 2 / 5 s.
@@ -1128,7 +1128,7 @@ fn run_smoke(
     for f in 1..=frames {
         let t = f as f32 / fps;
         if paced {
-            // video textures play on the wall clock (libmpv), so scene time may not run ahead of it
+            // video textures decode beside the render: scene time may not run ahead of the wall clock
             let due = std::time::Duration::from_secs_f32((f - 1) as f32 / fps);
             if let Some(wait) = due.checked_sub(start.elapsed()) {
                 std::thread::sleep(wait);

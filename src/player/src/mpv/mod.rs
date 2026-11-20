@@ -476,13 +476,6 @@ impl Handle {
     }
 }
 
-/// Whether this libmpv takes `cuda-primary-context` (our `patches/mpv/`): its players then decode
-/// on the GPU's one primary CUDA context instead of a context each. Asks a throwaway core (a few
-/// ms: keep it off the loop and the render thread).
-pub fn has_cuda_primary_context() -> bool {
-    Handle::create().is_ok_and(|h| h.set_option("cuda-primary-context", "yes").is_ok())
-}
-
 impl Drop for Handle {
     fn drop(&mut self) {
         // After this returns no callback (wakeup) fires any more.

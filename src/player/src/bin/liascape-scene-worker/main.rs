@@ -47,11 +47,11 @@
 //! (feature `lwe`): a diagnostic outside the protocol — renders a real scene through LWE's core
 //! offscreen, writes two PNGs, prints one JSON line (`lwe.rs`); `--audio-dump` also writes its
 //! sound and the time stretch's 0.5×/1.5× output as raw F32. Frames are paced to the wall clock
-//! (video textures decode in real time) unless `--unpaced`.
+//! (video textures decode beside the render) unless `--unpaced`.
 //!
 //! **Ending.** Every way out once a scene may be live is `_exit`, never `exit`: `exit` runs the
-//! NVIDIA EGL driver's exit handler, which tears the driver down under LWE's video threads (mpv's
-//! core and decoder threads, still decoding), and they segfault in it. Nothing here needs an exit
+//! NVIDIA EGL driver's exit handler, which tears the driver down under LWE's video threads (its
+//! FFmpeg decoders, still decoding), and they segfault in it. Nothing here needs an exit
 //! handler. Log lines go through [`elog!`] (a failed `eprintln!` panics, and the compositor closes
 //! our stderr when it stops us), and a panic ends the process at once ([`exit_on_panic`]).
 
@@ -1592,22 +1592,20 @@ fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
     r.run()
 }
 
-/// How LWE's video players decode, decided once per process: the interop the compositor's render
-/// worker would load (`hwdec_interop_for`: the GL vendor and `LIASCAPE_PLAYER_HWDEC_INTEROP`) and
-/// the `hwdec` list it would ask for with it (`mpv_hwdec("auto", …)`: the interop's zero-copy
-/// decoders, then the copy modes), or copy modes only with no interop (`no`). Given to the core
-/// (`wp_context_set_video_hwdec`), each video's render context loads that one interop instead of
-/// trying every one libmpv has, and `off` means copy modes for scenes as for the compositor (the
-/// costs: `docs/player/modules/scene-lwe-core.md`).
+/// How LWE's video textures decode (the core's FFmpeg decoder), decided once per process: the
+/// interop the compositor's render worker would load (`hwdec_interop_for`: the GL vendor and
+/// `LIASCAPE_PLAYER_HWDEC_INTEROP`) and the `hwdec` list it would ask for with it
+/// (`mpv_hwdec("auto", …)`: the interop's zero-copy decoders, then the copy modes), or copy modes
+/// only with no interop (`no`). Given to the core (`wp_context_set_video_hwdec`, in mpv's names),
+/// each video opens only the devices that list leads to, and `off` means copy modes for scenes as
+/// for the compositor (the costs: `docs/player/modules/scene-lwe-core.md`).
 ///
-/// For the CUDA interop libcuda is loaded here first: a nixpkgs libmpv finds none by itself (its
-/// RUNPATH lacks the NixOS driver dir; only the flake's wrapper adds it), and without it the video
-/// falls through to `vulkan-copy`, whose Vulkan device per video keeps it black ~0.75 s after the
-/// scene's first frame. No libcuda = no interop (copy modes). The note goes to the log tail.
-/// The players share the GPU's primary CUDA context when libmpv has our `cuda-primary-context`
-/// (`patches/mpv/`; the core asks for it), else each makes its own (160 MiB on an RTX 3070 Ti).
+/// For the CUDA interop libcuda is loaded here first, so the driver initialises (`cuInit`) beside
+/// the build and a machine without it is told copy modes up front (no libcuda = no interop). The
+/// note goes to the log tail. Every video decodes on the one CUDA device the core opens on the
+/// GPU's primary context.
 /// Guards: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`, host_api_test
-/// `video_players_load_only_the_hosts_interop`.
+/// `video_players_load_only_the_hosts_interop`, `video_players_share_one_cuda_context`.
 #[cfg(feature = "lwe")]
 fn video_hwdec(gfx: &Gfx) -> (&'static render::VideoHwdec, Option<String>) {
     use liascape_player::sources::mpv::mpv_hwdec;
@@ -1629,22 +1627,13 @@ fn video_hwdec(gfx: &Gfx) -> (&'static render::VideoHwdec, Option<String>) {
             match preload_libcuda() {
                 Some((name, lib)) => {
                     // The driver's own initialisation beside the build, not before it: a scene
-                    // without video never waits for it, and a video's player finds it done.
+                    // without video never waits for it, and a video's decoder finds it done.
                     let _ = std::thread::Builder::new()
                         .name("lia-scene-cuda".into())
                         .spawn(move || {
                             if let Some((rc, ms)) = warm_cuda(lib) {
                                 elog!("hwdec: cuInit {rc} in {ms:.0} ms");
                             }
-                            // LWE's players ask for it themselves; this only reports what they get
-                            elog!(
-                                "hwdec: {}",
-                                if liascape_player::mpv::has_cuda_primary_context() {
-                                    "video textures share the GPU's primary CUDA context"
-                                } else {
-                                    "libmpv lacks cuda-primary-context: a CUDA context per video texture"
-                                }
-                            );
                         });
                     lib_note = format!(
                         "libcuda loaded from {name} in {:.1} ms; ",

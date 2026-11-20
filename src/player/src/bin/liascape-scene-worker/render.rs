@@ -28,9 +28,10 @@ pub struct LoadOpts<'a> {
     pub video_hwdec: &'a VideoHwdec,
 }
 
-/// mpv's `hwdec` and `gpu-hwdec-interop` for LWE's video players (`wp_context_set_video_hwdec`):
-/// the compositor's choice for its own render contexts (`render_worker::hwdec_interop_for`,
-/// `mpv::mpv_hwdec`), so a video texture loads one interop, not every one libmpv has.
+/// The `hwdec` list and GL interop (in mpv's names) LWE's video textures decode with
+/// (`wp_context_set_video_hwdec`): the compositor's choice for its own render contexts
+/// (`render_worker::hwdec_interop_for`, `mpv::mpv_hwdec`), so a video texture opens only the
+/// devices that list leads to.
 pub struct VideoHwdec {
     pub hwdec: String,
     pub interop: &'static str,

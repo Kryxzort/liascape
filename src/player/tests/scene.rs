@@ -1691,14 +1691,14 @@ fn real_scene_project_loads_beside_the_egl_setup() {
     );
 }
 
-/// On NVIDIA a real scene's worker loads libcuda before the build, so LWE's video textures decode
-/// with nvdec instead of falling to `vulkan-copy` (black ~0.75 s after the scene's first frame:
-/// `docs/player/modules/scene-lwe-core.md`, video textures); `LIASCAPE_PLAYER_HWDEC_INTEROP=off`
+/// On NVIDIA a real scene's worker loads libcuda before the build, so the driver initialises
+/// beside it and LWE's video textures hand their CUDA frames to GL through the CUDA–GL interop
+/// (`docs/player/modules/scene-lwe-core.md`, video textures); `LIASCAPE_PLAYER_HWDEC_INTEROP=off`
 /// keeps it out, as it keeps the compositor's CUDA interop out. Read from the worker's own
 /// mappings: nothing else in a scene without video loads libcuda. The core is told the same
-/// interop (`cuda`, or `no` with copy modes), so each video loads only it, and with `cuda` the
-/// worker's libmpv has `cuda-primary-context` (`patches/mpv/`), so its videos share one CUDA
-/// context (host_api_test `video_players_share_one_cuda_context` plays two).
+/// interop (`cuda`, or `no` with copy modes), so each video opens only what that list leads to
+/// (host_api_test `video_players_load_only_the_hosts_interop`; `video_players_share_one_cuda_context`
+/// plays two on one device).
 #[test]
 fn real_scene_worker_loads_libcuda_for_video_textures() {
     use liascape_player::sources::render_worker::HWDEC_INTEROP_ENV;
@@ -1757,24 +1757,6 @@ fn real_scene_worker_loads_libcuda_for_video_textures() {
             tail.contains(told),
             "{HWDEC_INTEROP_ENV}={knob}: want {told:?} in the log tail:\n{tail}"
         );
-        // with the CUDA interop the videos share one CUDA context: the build's libmpv has
-        // `cuda-primary-context` (patches/mpv/), reported from the worker's CUDA thread
-        if want {
-            let shared = "hwdec: video textures share the GPU's primary CUDA context";
-            let t = Instant::now();
-            let mut tail = src.log_tail().join("\n");
-            while !tail.contains("hwdec: video textures share")
-                && !tail.contains("hwdec: libmpv lacks")
-                && t.elapsed() < Duration::from_secs(5)
-            {
-                pump(&gfx, &mut src, Duration::from_millis(100), |_| false);
-                tail = src.log_tail().join("\n");
-            }
-            assert!(
-                tail.contains(shared),
-                "want {shared:?} (the worker's libmpv without patches/mpv/?) in the log tail:\n{tail}"
-            );
-        }
     }
 }
 
@@ -2601,12 +2583,16 @@ fn video_scene(n: usize) -> Option<PathBuf> {
     Some(d)
 }
 
-/// The libavcodec threads (`av:<codec>:…`) running in `pid`: the video textures are decoding.
+/// The video decoder threads running in `pid` (LWE's `wp-video`, one per video texture, and libavcodec's own
+/// `av:<codec>:…` when it decodes in software): the video textures are decoding.
 fn decoder_threads(pid: i32) -> usize {
     std::fs::read_dir(format!("/proc/{pid}/task"))
         .map(|r| {
             r.flatten()
-                .filter(|t| std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.starts_with("av:")))
+                .filter(|t| {
+                    std::fs::read_to_string(t.path().join("comm"))
+                        .is_ok_and(|c| c.starts_with("av:") || c.starts_with("wp-video"))
+                })
                 .count()
         })
         .unwrap_or(0)
@@ -2615,8 +2601,8 @@ fn decoder_threads(pid: i32) -> usize {
 /// A real worker whose scene has live video textures ends cleanly however it is stopped: `Quit` during the load,
 /// right after the first frame (the decoders' busiest moment) and later, with the CUDA interop and with the copy
 /// modes. Clean = `_exit(0)`, reaped by `worker::reap` before its SIGKILL deadline: never a signal, never a
-/// panic's 101. Red: `exit` on `Quit` (the NVIDIA EGL driver's exit handler tears the driver down under mpv's core
-/// thread, which segfaults logging nvdec's error, SIGSEGV), and an `eprintln!` from the frame in flight after the
+/// panic's 101. Red: `exit` on `Quit` (the NVIDIA EGL driver's exit handler tears the driver down under the video
+/// decoders' threads, which segfault in it), and an `eprintln!` from the frame in flight after the
 /// compositor closed the worker's stderr (EPIPE → a panic on the render thread: 101, or an unwinding that hangs
 /// until the reaper's SIGKILL).
 #[test]

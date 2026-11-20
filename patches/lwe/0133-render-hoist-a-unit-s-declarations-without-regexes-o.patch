@@ -1,7 +1,7 @@
 From ff7cf61b59364af06b351cad99d3c17e8c7e5a8e Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 00:17:06 +0530
-Subject: [PATCH 133/136] render: hoist a unit's declarations without regexes,
+Subject: [PATCH 133/137] render: hoist a unit's declarations without regexes,
  once per text
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

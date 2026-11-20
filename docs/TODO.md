@@ -42,14 +42,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-104. [ ] (owner, 2026-11-20: FFmpeg) The fork decodes scene video textures with FFmpeg directly instead of libmpv
-       (`docs/decisions.md` § Decode scene video textures with FFmpeg, not mpv): demux + hw decode on the host's
-       hwdec choice (`wp_context_set_video_hwdec`: CUDA with `primary_ctx` so a scene's videos share the GPU's primary
-       context; VAAPI / Vulkan / software elsewhere), frames to GL textures (CUDA–GL interop or upload), gapless loop on
-       the scene clock, mute. Bar to match or beat (3426575339, flake build with today's mpv patch): worker 742 MiB,
-       `source.ready` warm/cold 286/382 ms, complete picture 407/483 ms, 0 black loads; guards
-       `video_players_share_one_cuda_context`, `real_scene_worker_loads_libcuda_for_video_textures`. Then delete
-       `patches/mpv/`, the flake's mpv override and the `cuda-primary-context` code, and the mpv section of UPSTREAM.md.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

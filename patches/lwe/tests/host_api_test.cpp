@@ -24,6 +24,7 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +43,11 @@
 #include "linux-wallpaperengine/context.h"
 #include "linux-wallpaperengine/project.h"
 #include "linux-wallpaperengine/render.h"
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
+}
 
 static int g_failures = 0;
 static int g_passes = 0;
@@ -4825,6 +4831,51 @@ static const char kSmallMp4[] =
     "\x41\x9a\x68\x49\xa8\x41\x68\x99\x4c\x08\x77\xff\x01\xd5\x00\x00\x00\x0a\x41\x9e\x86\x45\x11\x2c\x3b\xff\x40\xc1\x00\x00\x00\x08\x01\x9e\xa5\x74\x43\x7f\x46\x41"
     "\x00\x00\x00\x08\x01\x9e\xa7\x6a\x43\x7f\x46\x40\x00\x00\x00\x0e\x41\x9a\xa9\x49\xa8\x41\x6c\x99\x4c\x08\x6f\xff\x02\xc6";
 
+// red, green, blue, white for 0.25 s each (1 s, 4 fps, 64 x 64, H.264 with a key frame every 4): a frame's colour
+// says which one shows
+static const char kFourColoursMp4[] =
+    "\x00\x00\x00\x20\x66\x74\x79\x70\x69\x73\x6f\x6d\x00\x00\x02\x00\x69\x73\x6f\x6d\x69\x73\x6f\x32\x61\x76\x63\x31\x6d\x70\x34\x31\x00\x00\x03\x1e\x6d\x6f\x6f\x76"
+    "\x00\x00\x00\x6c\x6d\x76\x68\x64\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\xe8\x00\x00\x03\xe8\x00\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x02\x6d\x74\x72\x61\x6b\x00\x00\x00\x5c"
+    "\x74\x6b\x68\x64\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x03\xe8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00"
+    "\x00\x40\x00\x00\x00\x40\x00\x00\x00\x00\x00\x24\x65\x64\x74\x73\x00\x00\x00\x1c\x65\x6c\x73\x74\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x03\xe8\x00\x00\x00\x00"
+    "\x00\x01\x00\x00\x00\x00\x01\xe5\x6d\x64\x69\x61\x00\x00\x00\x20\x6d\x64\x68\x64\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x40\x00"
+    "\x55\xc4\x00\x00\x00\x00\x00\x2d\x68\x64\x6c\x72\x00\x00\x00\x00\x00\x00\x00\x00\x76\x69\x64\x65\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x56\x69\x64\x65"
+    "\x6f\x48\x61\x6e\x64\x6c\x65\x72\x00\x00\x00\x01\x90\x6d\x69\x6e\x66\x00\x00\x00\x14\x76\x6d\x68\x64\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    "\x24\x64\x69\x6e\x66\x00\x00\x00\x1c\x64\x72\x65\x66\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x0c\x75\x72\x6c\x20\x00\x00\x00\x01\x00\x00\x01\x50\x73\x74\x62"
+    "\x6c\x00\x00\x00\xc0\x73\x74\x73\x64\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\xb0\x61\x76\x63\x31\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x40\x00\x48\x00\x00\x00\x48\x00\x00\x00\x00\x00\x00\x00\x01\x0c\x4c\x61\x76\x63\x20\x6c\x69\x62\x78\x32\x36\x34"
+    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x18\xff\xff\x00\x00\x00\x36\x61\x76\x63\x43\x01\x64\x00\x0a\xff\xe1\x00\x19\x67"
+    "\x64\x00\x0a\xac\x4c\x22\x21\x36\x02\x20\x00\x00\x03\x00\x20\x00\x00\x03\x01\x01\xe2\x44\xc2\x30\x01\x00\x06\x68\xe8\x43\x09\x2c\x8b\xfd\xf8\xf8\x00\x00\x00\x00"
+    "\x10\x70\x61\x73\x70\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x14\x62\x74\x72\x74\x00\x00\x00\x00\x00\x00\x18\x30\x00\x00\x00\x00\x00\x00\x00\x18\x73\x74\x74"
+    "\x73\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x10\x00\x00\x00\x00\x1c\x73\x74\x73\x73\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00"
+    "\x03\x00\x00\x00\x04\x00\x00\x00\x1c\x73\x74\x73\x63\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x00\x01\x00\x00\x00\x24\x73\x74\x73"
+    "\x7a\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x02\x8e\x00\x00\x00\x2b\x00\x00\x00\x2a\x00\x00\x00\x23\x00\x00\x00\x14\x73\x74\x63\x6f\x00\x00\x00"
+    "\x00\x00\x00\x00\x01\x00\x00\x03\x4e\x00\x00\x00\x3d\x75\x64\x74\x61\x00\x00\x00\x35\x6d\x65\x74\x61\x00\x00\x00\x00\x00\x00\x00\x21\x68\x64\x6c\x72\x00\x00\x00"
+    "\x00\x00\x00\x00\x00\x6d\x64\x69\x72\x61\x70\x70\x6c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\x69\x6c\x73\x74\x00\x00\x00\x08\x66\x72\x65\x65\x00\x00"
+    "\x03\x0e\x6d\x64\x61\x74\x00\x00\x02\x61\x06\x05\xff\xff\x5d\xdc\x45\xe9\xbd\xe6\xd9\x48\xb7\x96\x2c\xd8\x20\xd9\x23\xee\xef\x78\x32\x36\x34\x20\x2d\x20\x63\x6f"
+    "\x72\x65\x20\x31\x36\x35\x20\x2d\x20\x48\x2e\x32\x36\x34\x2f\x4d\x50\x45\x47\x2d\x34\x20\x41\x56\x43\x20\x63\x6f\x64\x65\x63\x20\x2d\x20\x43\x6f\x70\x79\x6c\x65"
+    "\x66\x74\x20\x32\x30\x30\x33\x2d\x32\x30\x32\x35\x20\x2d\x20\x68\x74\x74\x70\x3a\x2f\x2f\x77\x77\x77\x2e\x76\x69\x64\x65\x6f\x6c\x61\x6e\x2e\x6f\x72\x67\x2f\x78"
+    "\x32\x36\x34\x2e\x68\x74\x6d\x6c\x20\x2d\x20\x6f\x70\x74\x69\x6f\x6e\x73\x3a\x20\x63\x61\x62\x61\x63\x3d\x31\x20\x72\x65\x66\x3d\x31\x36\x20\x64\x65\x62\x6c\x6f"
+    "\x63\x6b\x3d\x31\x3a\x30\x3a\x30\x20\x61\x6e\x61\x6c\x79\x73\x65\x3d\x30\x78\x33\x3a\x30\x78\x31\x33\x33\x20\x6d\x65\x3d\x75\x6d\x68\x20\x73\x75\x62\x6d\x65\x3d"
+    "\x31\x30\x20\x70\x73\x79\x3d\x31\x20\x70\x73\x79\x5f\x72\x64\x3d\x31\x2e\x30\x30\x3a\x30\x2e\x30\x30\x20\x6d\x69\x78\x65\x64\x5f\x72\x65\x66\x3d\x31\x20\x6d\x65"
+    "\x5f\x72\x61\x6e\x67\x65\x3d\x32\x34\x20\x63\x68\x72\x6f\x6d\x61\x5f\x6d\x65\x3d\x31\x20\x74\x72\x65\x6c\x6c\x69\x73\x3d\x32\x20\x38\x78\x38\x64\x63\x74\x3d\x31"
+    "\x20\x63\x71\x6d\x3d\x30\x20\x64\x65\x61\x64\x7a\x6f\x6e\x65\x3d\x32\x31\x2c\x31\x31\x20\x66\x61\x73\x74\x5f\x70\x73\x6b\x69\x70\x3d\x31\x20\x63\x68\x72\x6f\x6d"
+    "\x61\x5f\x71\x70\x5f\x6f\x66\x66\x73\x65\x74\x3d\x2d\x32\x20\x74\x68\x72\x65\x61\x64\x73\x3d\x32\x20\x6c\x6f\x6f\x6b\x61\x68\x65\x61\x64\x5f\x74\x68\x72\x65\x61"
+    "\x64\x73\x3d\x31\x20\x73\x6c\x69\x63\x65\x64\x5f\x74\x68\x72\x65\x61\x64\x73\x3d\x30\x20\x6e\x72\x3d\x30\x20\x64\x65\x63\x69\x6d\x61\x74\x65\x3d\x31\x20\x69\x6e"
+    "\x74\x65\x72\x6c\x61\x63\x65\x64\x3d\x30\x20\x62\x6c\x75\x72\x61\x79\x5f\x63\x6f\x6d\x70\x61\x74\x3d\x30\x20\x63\x6f\x6e\x73\x74\x72\x61\x69\x6e\x65\x64\x5f\x69"
+    "\x6e\x74\x72\x61\x3d\x30\x20\x62\x66\x72\x61\x6d\x65\x73\x3d\x30\x20\x77\x65\x69\x67\x68\x74\x70\x3d\x32\x20\x6b\x65\x79\x69\x6e\x74\x3d\x34\x20\x6b\x65\x79\x69"
+    "\x6e\x74\x5f\x6d\x69\x6e\x3d\x31\x20\x73\x63\x65\x6e\x65\x63\x75\x74\x3d\x34\x30\x20\x69\x6e\x74\x72\x61\x5f\x72\x65\x66\x72\x65\x73\x68\x3d\x30\x20\x72\x63\x5f"
+    "\x6c\x6f\x6f\x6b\x61\x68\x65\x61\x64\x3d\x34\x20\x72\x63\x3d\x63\x72\x66\x20\x6d\x62\x74\x72\x65\x65\x3d\x31\x20\x63\x72\x66\x3d\x32\x38\x2e\x30\x20\x71\x63\x6f"
+    "\x6d\x70\x3d\x30\x2e\x36\x30\x20\x71\x70\x6d\x69\x6e\x3d\x30\x20\x71\x70\x6d\x61\x78\x3d\x36\x39\x20\x71\x70\x73\x74\x65\x70\x3d\x34\x20\x69\x70\x5f\x72\x61\x74"
+    "\x69\x6f\x3d\x31\x2e\x34\x30\x20\x61\x71\x3d\x31\x3a\x31\x2e\x30\x30\x00\x80\x00\x00\x00\x25\x65\x88\x82\x02\x3f\xfe\xdf\x32\xf8\x14\xcd\xc5\x89\xce\xcc\x80\x5c"
+    "\x9e\x94\xc2\x5c\x76\x37\x16\xbf\x83\x02\x86\x21\xf0\x3e\xb7\x90\x96\x3f\x90\x81\x00\x00\x00\x27\x41\x9a\x1c\x62\x41\xf0\x08\x68\x20\x01\xfe\x28\x07\xfa\x19\xff"
+    "\x77\xc4\xd1\x3e\x07\x1b\xbf\x14\x14\x38\x3f\x0f\xef\x14\xa4\xf0\x31\x42\x61\x67\x79\xc2\xe3\x00\x00\x00\x26\x65\x88\x81\x00\x8f\xff\xfe\xdf\x32\xf8\x14\xd6\x85"
+    "\x0e\x74\x42\x33\x64\x74\xbc\xc2\x5c\x76\x37\x16\xbf\x83\x02\x86\x21\xf0\x3e\xb7\x90\x96\x3f\x90\x81\x00\x00\x00\x1f\x65\x88\x82\x02\x1f\xfe\xf6\xae\xfc\xcb\x2b"
+    "\x47\x0b\x95\x2e\x1d\x59\x7b\x4b\x1b\x97\xb8\x77\xad\x28\x3e\x01\xfe\x32\x80\x80";
+
 // an mp4 texture of `mp4`, `size` x `size` (kTinyMp4 unless given)
 static std::string video_texture (const std::string& mp4 = std::string (kTinyMp4, sizeof kTinyMp4 - 1),
                                   uint32_t size = 16) {
@@ -4864,7 +4915,7 @@ static bool video_texture_api () {
         "check('pause', !v.isPlaying());\n"
         "v.addEndedCallback(() => {});\n"
         "check('duration', typeof v.duration === 'number');\n";
-    // the checks run on a plain square (shown when they pass); the video layers draw on mpv's clock
+    // the checks run on a plain square (shown when they pass); the video layers draw on the scene's clock
     const std::string dir = script_scene (
         "{\"id\":1,\"name\":\"vid\",\"image\":\"models/v.json\",\"size\":\"8 8\",\"origin\":\"8 16 0\"},"
         + square (2, scripted ("visible", "false", checked_once (checks)) + ",\"origin\":\"40 16 0\"")
@@ -4887,47 +4938,104 @@ static bool video_texture_api () {
     read_pixel (rig.fbo, 24, 16, hidden);
     printf ("    checks' square %d %d %d; hidden video layer %d %d %d\n", checked[0], checked[1], checked[2], hidden[0],
             hidden[1], hidden[2]);
-    // mpv sets its own clear colour while it draws a frame: the scene's clear (0 0 0.5) still shows where nothing draws
+    // a video player may set its own clear colour while it draws a frame: the scene's clear (0 0 0.5) still shows where
+    // nothing draws
     CHECK (hidden[2] > 100 && hidden[0] < 30, "the scene's clear colour is gone where nothing draws");
     CHECK (checked[2] < 64, "the checks' square is hidden: a failed check, see FAILS above");
     return true;
 }
 
-// every mpv core a video player made a render context for: libmpv's own call, interposed (the core resolves it here
-// first), so a test can ask each core what it loaded. Opaque pointers: the test doesn't build against mpv's headers
-static std::vector<void*> g_mpvCores;
+// the core's video decoders as FFmpeg sees them: its own calls, interposed (the core resolves them here first), so a
+// test can count the hardware devices opened (and with what), each video decoder's frames (CUDA ones apart) and the
+// hardware frames copied to memory. Decoders run on their own threads: everything under g_videoMutex
+struct VideoDecoderSeen {
+    int frames = 0;
+    int cudaFrames = 0;
+};
+static std::mutex g_videoMutex;
+static std::vector<std::pair<const void*, VideoDecoderSeen>> g_videoDecoders;
+static std::vector<std::string> g_devicesOpened;
+static int g_transfers = 0;
 
-extern "C" int mpv_render_context_create (void** res, void* mpv, void* params) {
-    using Create = int (*) (void**, void*, void*);
-    static const auto real = reinterpret_cast<Create> (dlsym (RTLD_NEXT, "mpv_render_context_create"));
-    const int rc = real (res, mpv, params);
-    if (rc >= 0) {
-        g_mpvCores.push_back (mpv);
+extern "C" int av_hwdevice_ctx_create (AVBufferRef** ref, AVHWDeviceType type, const char* device, AVDictionary* opts, int flags) {
+    using Create = int (*) (AVBufferRef**, AVHWDeviceType, const char*, AVDictionary*, int);
+    static const auto real = reinterpret_cast<Create> (dlsym (RTLD_NEXT, "av_hwdevice_ctx_create"));
+    const AVDictionaryEntry* primary = av_dict_get (opts, "primary_ctx", nullptr, 0);
+    const int rc = real (ref, type, device, opts, flags);
+    std::lock_guard lock (g_videoMutex);
+    g_devicesOpened.push_back (std::string (av_hwdevice_get_type_name (type)) + (primary && strcmp (primary->value, "1") == 0 ? "+primary" : "")
+                               + (rc < 0 ? "(failed)" : ""));
+    return rc;
+}
+
+extern "C" int avcodec_receive_frame (AVCodecContext* ctx, AVFrame* frame) {
+    using Receive = int (*) (AVCodecContext*, AVFrame*);
+    static const auto real = reinterpret_cast<Receive> (dlsym (RTLD_NEXT, "avcodec_receive_frame"));
+    const int rc = real (ctx, frame);
+    if (rc == 0 && ctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+        std::lock_guard lock (g_videoMutex);
+        auto it = std::find_if (g_videoDecoders.begin (), g_videoDecoders.end (), [ctx] (const auto& d) { return d.first == ctx; });
+        if (it == g_videoDecoders.end ()) {
+            it = g_videoDecoders.insert (g_videoDecoders.end (), { ctx, {} });
+        }
+        it->second.frames++;
+        it->second.cudaFrames += frame->format == AV_PIX_FMT_CUDA ? 1 : 0;
     }
     return rc;
 }
 
-// an mpv property as a string, "" when unavailable (between frames: never inside one of the core's render calls)
-static std::string mpv_string (void* core, const char* name) {
-    using Get = char* (*) (void*, const char*);
-    using Free = void (*) (void*);
-    static const auto get = reinterpret_cast<Get> (dlsym (RTLD_DEFAULT, "mpv_get_property_string"));
-    static const auto release = reinterpret_cast<Free> (dlsym (RTLD_DEFAULT, "mpv_free"));
-    char* v = get (core, name);
-    if (v == nullptr) {
-        return {};
+// a decoder's context stops being valid here: drop it from g_videoDecoders first
+extern "C" void avcodec_free_context (AVCodecContext** ctx) {
+    using Free = void (*) (AVCodecContext**);
+    static const auto real = reinterpret_cast<Free> (dlsym (RTLD_NEXT, "avcodec_free_context"));
+    if (ctx != nullptr && *ctx != nullptr) {
+        std::lock_guard lock (g_videoMutex);
+        std::erase_if (g_videoDecoders, [c = *ctx] (const auto& d) { return d.first == c; });
     }
-    std::string out = v;
-    release (v);
+    real (ctx);
+}
+
+extern "C" int av_hwframe_transfer_data (AVFrame* dst, const AVFrame* src, int flags) {
+    using Transfer = int (*) (AVFrame*, const AVFrame*, int);
+    static const auto real = reinterpret_cast<Transfer> (dlsym (RTLD_NEXT, "av_hwframe_transfer_data"));
+    {
+        std::lock_guard lock (g_videoMutex);
+        g_transfers++;
+    }
+    return real (dst, src, flags);
+}
+
+static void video_seen_reset () {
+    std::lock_guard lock (g_videoMutex);
+    g_devicesOpened.clear ();
+    g_transfers = 0;
+}
+
+static std::string video_devices_opened () {
+    std::lock_guard lock (g_videoMutex);
+    std::string out;
+    for (const auto& d : g_devicesOpened) {
+        out += (out.empty () ? "" : ",") + d;
+    }
     return out;
 }
 
-// wp_context_set_video_hwdec: a video texture's mpv core takes the host's hwdec and loads only the host's interop
-// (`hwdec-interop` lists the devices the render context's interops made), with the lists liascape's worker gives.
-// libcuda is loaded first, as the worker does, so the CUDA interop can load where the GPU has one. `no` loads none
-// (copy modes); `cuda` loads at most the CUDA one,
-// and exactly it on NVIDIA with libcuda, decoding with nvdec. Unset (libmpv's `auto`) is printed: every interop that
-// loads (on NVIDIA with libcuda "cuda,drmprime"). Without the core's part: every interop loaded whatever the host asked
+// the live video decoders' stats, oldest first
+static std::vector<VideoDecoderSeen> video_decoders () {
+    std::lock_guard lock (g_videoMutex);
+    std::vector<VideoDecoderSeen> out;
+    for (const auto& d : g_videoDecoders) {
+        out.push_back (d.second);
+    }
+    return out;
+}
+
+// wp_context_set_video_hwdec: a video texture decodes on the host's hardware, with the lists liascape's worker gives,
+// and opens no device the list doesn't lead to. libcuda is loaded first, as the worker does. `no` (copy modes): every
+// hardware frame is copied to memory before it reaches GL; `cuda`: on NVIDIA with libcuda the frames stay CUDA frames
+// into GL through the interop (none copied) and only the CUDA device opens, on the primary context. Either way the
+// video's red reaches the layer. Unset (`auto`) is printed. Against the mpv-based core: no FFmpeg decoder of the core's
+// own ever made a frame
 static bool video_players_load_only_the_hosts_interop () {
     if (!script_tests_can_run ()) {
         return true;
@@ -4953,55 +5061,52 @@ static bool video_players_load_only_the_hosts_interop () {
                                                "\"cullmode\":\"nocull\",\"textures\":[\"v\"]}]}\n");
         write_file (dir + "/materials/v.tex", video_texture (std::string (kSmallMp4, sizeof kSmallMp4 - 1), 64));
         write_file (dir + "/models/v.json", "{\"material\":\"materials/v.json\"}\n");
-        ScriptRig rig;
-        rig.extra = { "materials/v.json", "materials/v.tex", "models/v.json" };
-        rig.loaded = [&rig, c] (wp_project*) {
-            if (c.interop) {
-                wp_context_set_video_hwdec (rig.ctx, c.hwdec, c.interop);
+        video_seen_reset ();
+        std::vector<VideoDecoderSeen> decoders;
+        unsigned char px[4] = {};
+        {
+            ScriptRig rig;
+            rig.extra = { "materials/v.json", "materials/v.tex", "models/v.json" };
+            rig.loaded = [&rig, c] (wp_project*) {
+                if (c.interop) {
+                    wp_context_set_video_hwdec (rig.ctx, c.hwdec, c.interop);
+                }
+            };
+            CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+            for (int i = 0; i < 150 && (decoders.empty () || decoders[0].frames < 3); i++) {
+                rig.step ();
+                usleep (20000);
+                decoders = video_decoders ();
             }
-        };
-        g_mpvCores.clear ();
-        CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
-        // the core opens its VO (and `hwdec-current` shows the decoder) once the file plays
-        std::string names, current;
-        for (int i = 0; i < 150 && (g_mpvCores.empty () || current.empty ()); i++) {
             rig.step ();
-            usleep (20000);
-            if (!g_mpvCores.empty ()) {
-                current = mpv_string (g_mpvCores[0], "hwdec-current");
-            }
+            read_pixel (rig.fbo, 32, 16, px);
         }
-        CHECK (g_mpvCores.size () == 1, "%zu mpv render contexts for one video texture", g_mpvCores.size ());
-        names = mpv_string (g_mpvCores[0], "hwdec-interop");
-        const std::string hwdec = mpv_string (g_mpvCores[0], "hwdec");
-        printf ("    %s / %s: hwdec %s, interops [%s], decoding with %s (GL %s, libcuda %s)\n", c.hwdec ?: "(unset)",
-                c.interop ?: "(unset)", hwdec.c_str (), names.c_str (), current.empty () ? "?" : current.c_str (),
-                vendor ?: "?", libcuda ? "loaded" : "absent");
+        CHECK (decoders.size () == 1, "%zu video decoders made frames for one video texture", decoders.size ());
+        const std::string devices = video_devices_opened ();
+        int transfers = 0;
+        {
+            std::lock_guard lock (g_videoMutex);
+            transfers = g_transfers;
+        }
+        printf ("    %s / %s: devices [%s], %d frames (%d CUDA), %d copied to memory, layer %d %d %d (GL %s, libcuda %s)\n",
+                c.hwdec ?: "(unset)", c.interop ?: "(unset)", devices.c_str (), decoders[0].frames,
+                decoders[0].cudaFrames, transfers, px[0], px[1], px[2], vendor ?: "?", libcuda ? "loaded" : "absent");
+        CHECK (px[0] > 200 && px[1] < 60 && px[2] < 60, "the video's red never reached the layer");
         if (!c.interop) {
-            CHECK (hwdec == "auto", "the default hwdec is %s", hwdec.c_str ());
             continue;
         }
-        CHECK (hwdec == c.hwdec, "hwdec %s, asked for %s", hwdec.c_str (), c.hwdec);
         if (strcmp (c.interop, "no") == 0) {
-            CHECK (names.empty (), "interops [%s] loaded with gpu-hwdec-interop=no", names.c_str ());
-            CHECK (current != "nvdec", "zero-copy nvdec with no interop loaded");
-        } else {
-            CHECK (names.empty () || names == c.interop, "interops [%s] loaded, asked for %s", names.c_str (), c.interop);
-            if (nvidia && libcuda) {
-                CHECK (names == c.interop, "interops [%s]: the CUDA interop didn't load on NVIDIA", names.c_str ());
-                CHECK (current == "nvdec", "decoding with %s, not nvdec through the CUDA interop", current.c_str ());
-            }
+            CHECK (transfers >= decoders[0].cudaFrames, "a CUDA frame reached GL uncopied with no interop");
+            CHECK (devices.find ("vulkan") == std::string::npos && devices.find ("vdpau") == std::string::npos,
+                   "devices [%s] opened outside the list", devices.c_str ());
+        } else if (nvidia && libcuda) {
+            CHECK (devices == "cuda+primary", "devices [%s]: want the CUDA one alone, on the primary context", devices.c_str ());
+            CHECK (decoders[0].cudaFrames == decoders[0].frames && transfers == 0,
+                   "%d of %d frames CUDA, %d copied to memory: not through the CUDA interop", decoders[0].cudaFrames,
+                   decoders[0].frames, transfers);
         }
     }
     return true;
-}
-
-// a core's mpv handle stops being valid at mpv_terminate_destroy: drop it from g_mpvCores first
-extern "C" void mpv_terminate_destroy (void* mpv) {
-    using Destroy = void (*) (void*);
-    static const auto real = reinterpret_cast<Destroy> (dlsym (RTLD_NEXT, "mpv_terminate_destroy"));
-    std::erase (g_mpvCores, mpv);
-    real (mpv);
 }
 
 // this process's device memory (MiB) as NVML counts it (the larger of its graphics and compute entries, over every
@@ -5077,12 +5182,13 @@ static std::string video_scene (int n, std::vector<std::string>& files) {
     return dir;
 }
 
-// every video player shares the GPU's primary CUDA context (libmpv's `cuda-primary-context`, liascape's
-// patches/mpv/): with the CUDA interop the primary context is in use while the videos play and released when the scene
-// closes, and a second video costs only its decoder's memory, not a context of its own (~160 MiB). With two scenes
-// open in one process, closing the one with two videos leaves the other's video decoding on the shared context. Only
-// on NVIDIA with libcuda, NVML and a libmpv that has the option (SKIP otherwise). Without the core's part (no option
-// asked for) each player made its own context: the primary one stayed unused and the second video cost ~170 MiB
+// every video decoder shares one CUDA device on the GPU's primary context (FFmpeg's `primary_ctx`): with the CUDA
+// interop the primary context is in use while the videos play and released when the scene closes, the two videos of
+// a scene open one device between them, and a second video costs only its decoder's memory, not a context of its own
+// (~160 MiB). With two scenes open in one process, closing the one with two videos leaves the other's video decoding
+// on the shared context. Only on NVIDIA with libcuda and NVML (SKIP otherwise). A device per video without the
+// primary context (the core's sharing taken out): the primary context stayed unused and the second video cost
+// ~160 MiB more
 static bool video_players_share_one_cuda_context () {
     if (!script_tests_can_run ()) {
         return true;
@@ -5094,17 +5200,6 @@ static bool video_players_share_one_cuda_context () {
     if (cuda == nullptr || vendor == nullptr || strstr (vendor, "NVIDIA") == nullptr || process_vram_mib () < 0) {
         printf ("    SKIP: needs NVIDIA's GL, libcuda and NVML (GL %s, libcuda %s)\n", vendor ?: "?", cuda ? "loaded" : "absent");
         return true;
-    }
-    {
-        using Create = void* (*) ();
-        using SetOption = int (*) (void*, const char*, const char*);
-        void* probe = reinterpret_cast<Create> (dlsym (RTLD_DEFAULT, "mpv_create")) ();
-        const int rc = reinterpret_cast<SetOption> (dlsym (RTLD_DEFAULT, "mpv_set_option_string")) (probe, "cuda-primary-context", "yes");
-        mpv_terminate_destroy (probe);
-        if (rc < 0) {
-            printf ("    SKIP: this libmpv has no cuda-primary-context (liascape's patches/mpv/)\n");
-            return true;
-        }
     }
     using Init = int (*) (unsigned);
     using DeviceGet = int (*) (int*, int);
@@ -5120,10 +5215,10 @@ static bool video_players_share_one_cuda_context () {
         return active != 0;
     };
     const char* hwdec = "nvdec,nvdec-copy,vaapi-copy,auto-copy";
-    // opens a scene of `n` videos and steps it until every player decodes with nvdec; false when one never does
+    // opens a scene of `n` videos and steps it until every one of its decoders made CUDA frames; false when one never does
     auto play = [&] (ScriptRig& rig, int n, ScriptRig* other) {
         rig.loaded = [&rig, hwdec] (wp_project*) { wp_context_set_video_hwdec (rig.ctx, hwdec, "cuda"); };
-        const size_t before = g_mpvCores.size ();
+        const size_t before = video_decoders ().size ();
         if (!rig.open (video_scene (n, rig.extra))) {
             return false;
         }
@@ -5133,21 +5228,20 @@ static bool video_players_share_one_cuda_context () {
                 other->step ();
             }
             usleep (20000);
-            if (g_mpvCores.size () == before + n
-                && std::all_of (g_mpvCores.begin () + before, g_mpvCores.end (),
-                                [] (void* core) { return mpv_string (core, "hwdec-current") == "nvdec"; })) {
+            const auto decoders = video_decoders ();
+            if (decoders.size () == before + n
+                && std::all_of (decoders.begin () + before, decoders.end (), [] (const VideoDecoderSeen& d) { return d.cudaFrames > 0; })) {
                 return true;
             }
         }
         return false;
     };
     CHECK (!primaryActive (), "the primary CUDA context is in use before any video plays");
-    g_mpvCores.clear ();
     double one = 0;
     bool usedPrimary = false;
     {
         ScriptRig rig;
-        CHECK (play (rig, 1, nullptr), "one video never decoded with nvdec through the CUDA interop");
+        CHECK (play (rig, 1, nullptr), "one video never decoded on CUDA");
         one = process_vram_mib ();
         usedPrimary = primaryActive ();
     }
@@ -5156,29 +5250,85 @@ static bool video_players_share_one_cuda_context () {
     double two = 0;
     {
         ScriptRig rig;
-        CHECK (play (rig, 2, nullptr), "two videos never both decoded with nvdec through the CUDA interop");
+        video_seen_reset ();
+        CHECK (play (rig, 2, nullptr), "two videos never both decoded on CUDA");
         two = process_vram_mib ();
-        printf ("    process VRAM with one video %.0f MiB, with two %.0f MiB\n", one, two);
+        const std::string devices = video_devices_opened ();
+        printf ("    process VRAM with one video %.0f MiB, with two %.0f MiB; devices the two opened [%s]\n", one, two,
+                devices.c_str ());
+        CHECK (devices == "cuda+primary", "the two videos opened [%s], not one CUDA device on the primary context", devices.c_str ());
         // a CUDA context of its own costs well over 100 MiB on every NVIDIA GPU; a 64 x 64 video's surfaces a few MiB
         CHECK (two - one < 64, "the second video cost %.0f MiB: a CUDA context of its own", two - one);
         CHECK (usedPrimary, "a playing video didn't use the primary CUDA context");
         CHECK (!keptPrimary, "the primary CUDA context was still retained after its one video's scene closed");
-        CHECK (play (*solo, 1, &rig), "a second scene's video never decoded with nvdec");
+        CHECK (play (*solo, 1, &rig), "a second scene's video never decoded on CUDA");
     }
-    void* survivor = g_mpvCores.size () == 1 ? g_mpvCores[0] : nullptr;
-    CHECK (survivor, "%zu players left after the two-video scene closed", g_mpvCores.size ());
-    const double from = atof (mpv_string (survivor, "time-pos").c_str ());
+    auto survivor = video_decoders ();
+    CHECK (survivor.size () == 1, "%zu video decoders left after the two-video scene closed", survivor.size ());
+    const int from = survivor[0].frames;
     for (int i = 0; i < 30; i++) {
         solo->step ();
         usleep (20000);
     }
-    const double to = atof (mpv_string (survivor, "time-pos").c_str ());
-    const std::string current = mpv_string (survivor, "hwdec-current");
-    printf ("    the other scene's video after the close: %s, time %.2f -> %.2f s\n", current.c_str (), from, to);
-    CHECK (current == "nvdec" && to != from, "the other scene's video stopped decoding when the two-video scene closed");
+    survivor = video_decoders ();
+    const int to = survivor.size () == 1 ? survivor[0].frames : -1;
+    printf ("    the other scene's video after the close: frames %d -> %d\n", from, to);
+    CHECK (to > from, "the other scene's video stopped decoding when the two-video scene closed");
     CHECK (primaryActive (), "the primary CUDA context was released while a video still plays");
     solo.reset ();
     CHECK (!primaryActive (), "the primary CUDA context is still retained after every scene closed");
+    return true;
+}
+
+// a video texture plays on the scene's clock: each of kFourColoursMp4's frames (red, green, blue, white, 0.25 s each)
+// shows while the host's time is inside it, whatever the wall clock does (the host steps faster than real time here),
+// the loop's first frame follows its last one with no gap (red again at 1.0 s), a host that stops stepping stops the
+// video. Against the mpv-based core: mpv played on its own wall
+// clock and these colours came out of step
+static bool video_texture_plays_on_the_scene_clock () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = script_scene ("{\"id\":1,\"name\":\"vid\",\"image\":\"models/v.json\",\"size\":\"64 32\","
+                                          "\"origin\":\"32 16 0\"}");
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    write_file (dir + "/materials/v.json", "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"normal\","
+                                           "\"depthtest\":\"disabled\",\"depthwrite\":\"disabled\","
+                                           "\"cullmode\":\"nocull\",\"textures\":[\"v\"]}]}\n");
+    write_file (dir + "/materials/v.tex", video_texture (std::string (kFourColoursMp4, sizeof kFourColoursMp4 - 1), 64));
+    write_file (dir + "/models/v.json", "{\"material\":\"materials/v.json\"}\n");
+    ScriptRig rig;
+    rig.extra = { "materials/v.json", "materials/v.tex", "models/v.json" };
+    rig.dt = 0.0f;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    // the colour at the scene's time `t`: steps to it, then lets the decoder catch up with the host (re-rendered at
+    // the same time) — a frame due then is never shown late by more than the decoder's own pace
+    auto colourAt = [&rig] (float t) {
+        rig.dt = t - g_now;
+        rig.step ();
+        rig.dt = 0.0f;
+        char name = '?';
+        for (int i = 0; i < 50; i++) {
+            unsigned char px[4] = {};
+            read_pixel (rig.fbo, 32, 16, px);
+            const bool r = px[0] > 160, g = px[1] > 160, b = px[2] > 160;
+            name = r && g && b ? 'W' : r && !g && !b ? 'R' : !r && g && !b ? 'G' : !r && !g && b ? 'B' : '?';
+            usleep (10000);
+            rig.step ();
+        }
+        return name;
+    };
+    std::string seen;
+    for (const float t : { 0.1f, 0.35f, 0.6f, 0.85f, 1.1f, 1.35f, 2.6f }) {
+        seen += colourAt (t);
+    }
+    // a host that doesn't advance: the same frame however long the wall clock runs
+    const char held = colourAt (2.6f);
+    usleep (300000);
+    seen += held == colourAt (2.6f) ? held : '!';
+    printf ("    at 0.1 0.35 0.6 0.85 1.1 1.35 2.6 s, then held: %s\n", seen.c_str ());
+    CHECK (seen == "RGBWRGBB", "colours %s, want RGBWRGBB", seen.c_str ());
     return true;
 }
 
@@ -8372,6 +8522,7 @@ int main (int argc, char** argv) {
     run ("video_texture_api", video_texture_api);
     run ("video_players_load_only_the_hosts_interop", video_players_load_only_the_hosts_interop);
     run ("video_players_share_one_cuda_context", video_players_share_one_cuda_context);
+    run ("video_texture_plays_on_the_scene_clock", video_texture_plays_on_the_scene_clock);
     run ("animation_layer_api", animation_layer_api);
     run ("puppet_animation_events", puppet_animation_events);
     run ("puppet_blend_shapes_and_alpha", puppet_blend_shapes_and_alpha);

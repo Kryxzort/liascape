@@ -1,0 +1,2788 @@
+From 90e63b584ec61839c9a683173aeecd1103c7966a Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 08:40:25 +0530
+Subject: [PATCH 137/137] video: decode video textures with FFmpeg instead of
+ libmpv
+
+Every video texture (and video wallpaper) ran a libmpv core with a render context of its own: mpv's CUDA interop made a
+CUDA context per player unless libmpv carried an option no release has (0136), mpv played on its own wall clock rather
+than the scene's, and its renderer's textures and passes held device memory a texture needs none of.
+
+GLPlayer is now FFmpeg (libavformat, libavcodec, libavutil; libswscale for odd formats) and one draw:
+- VideoDecoder demuxes the texture's bytes (or a file) and decodes on a thread of its own ("wp-video"), a few frames
+  ahead of the player's clock; every frame carries its time on that clock, which runs on across loops, so a loop's
+  frames follow the last one's at the video's length (gapless). A frame already due replaces the due one before it.
+- hardware, per wp_context_set_video_hwdec (still mpv's names): `nvdec`/`cuda`, `*-copy`, `vaapi`, `vulkan`, `vdpau`,
+  `auto`, `auto-copy`, `no`, tried in order and only where a decoder of the codec can use them (FFmpeg's own `av1`
+  when libdav1d is preferred); software when the list runs
+  out or the hardware refuses a stream (FFmpeg's get_format falls back on the same decoder). Each device type opens
+  once per process and every video shares it: CUDA on the GPU's primary context (FFmpeg's `primary_ctx`), released
+  with its last video.
+- with the `cuda` interop (or none named) a CUDA frame's planes are copied into GL textures registered with
+  cuGraphicsGLRegisterImage, on the GPU (libcuda looked up by soname, as FFmpeg loaded it); every other hardware frame
+  is copied to memory and uploaded. One shader converts the planes (NV12, P010, planar 4:2:0/4:2:2/4:4:4 at 8-16 bits,
+  with alpha when there is one) to RGBA by the frame's matrix and range (mpv's guesses when unspecified: BT.709 from
+  720p up, limited range, left-sited chroma); anything else goes through swscale. The GL state the draw touches is
+  put back.
+- the video plays on the scene's clock: the context's render time, so the host's speed and pauses; IVideoTexture's
+  play, pause, stop, seek, rate, loop and ended keep their meaning. A decoder that falls a second behind (a rate it
+  can't keep up with) jumps to the clock.
+- a scene video texture starts decoding when the build creates it, and a player's first render waits up to 500 ms for
+  its first frame: the scene's first picture shows its videos.
+- nothing is muted any more because no audio is decoded: a video wallpaper (CVideo) plays silent too.
+libmpv is no longer linked by the core.
+
+Measured by liascape's scene_load.py (private headless player, RTX 3070 Ti), 3426575339 (two 1080p H.264 video
+textures) against 162fbd2 with liascape's patched libmpv (medians, base / this):
+- worker VRAM 742 / 446 MiB (mpv's renderer and its per-player surfaces gone; one CUDA context as before)
+- source.ready warm 293 / 291 ms, cold 392 / 315, boot 312 / 331 (n 18 / 2 / 2); both videos are in that first
+  frame, where mpv's came 96-150 ms after it: the complete picture warm 406 / 291, cold 489 / 315, boot 462 / 331
+- black loads 0 / 0; 3042492564 (no video) warm 465 / 463 ms, 1159 / 1159 MiB
+- the CUDA device (the primary context) takes ~90 ms of the ~130 ms a video needs to its first frame
+The library's other video textures (H.264 at 2340x1080, 4000x2800 and 3840x2160) and the first of them re-encoded as
+HEVC 8 and 10 bit, VP9 and AV1 (all on NVDEC through the interop) and H.264 4:4:4 (software, NVDEC has no 4:4:4 H.264)
+render like mpv's frames at the same scene times (mean |diff| 2-11 of 255, from the animation's phase), where mpv still
+showed black at 0.5 s in two of them.
+
+Tests (liascape's host_api_test): video_players_load_only_the_hosts_interop (the devices each hwdec list opens, CUDA
+frames through the interop or copied, the video's red on the layer), video_players_share_one_cuda_context (two videos
+open one CUDA device on the primary context, the second adds < 64 MiB; red with the sharing taken out: two devices,
++169 MiB), video_texture_plays_on_the_scene_clock (a four-colour clip's frames follow the host's time, loop without a
+gap, hold while the host does), video_texture_api.
+
+Origin: ours
+Why: liascape docs/TODO.md #104 (scene video textures: one CUDA context per scene, on every install)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4km9rfgptvuCvc5pKs
+---
+ include/linux-wallpaperengine/context.h       |  22 +-
+ src/core/CMakeLists.txt                       |   7 +-
+ src/core/WallpaperEngine/Context.h            |   4 +-
+ src/core/WallpaperEngine/Render/CTexture.cpp  |  11 +-
+ src/core/WallpaperEngine/Render/CTexture.h    |  11 +-
+ .../WallpaperEngine/Render/TextureProvider.h  |   8 +-
+ .../Render/Wallpapers/CScene.cpp              |   2 +-
+ .../Render/Wallpapers/CVideo.cpp              |  25 +-
+ .../Render/Wallpapers/CVideo.h                |   5 +-
+ .../Adapters/ScriptableObjectAdapter.cpp      |   4 +-
+ .../WallpaperEngine/VideoPlayback/CudaGL.cpp  |  33 +
+ .../WallpaperEngine/VideoPlayback/CudaGL.h    |  55 ++
+ .../VideoPlayback/GLPlayer.cpp                | 729 ++++++++++++++++++
+ .../WallpaperEngine/VideoPlayback/GLPlayer.h  | 156 ++++
+ .../VideoPlayback/MPV/GLPlayer.cpp            | 407 ----------
+ .../VideoPlayback/MPV/GLPlayer.h              | 107 ---
+ .../MPV/MemoryStreamProtocol.cpp              |  55 --
+ .../VideoPlayback/MPV/MemoryStreamProtocol.h  |  24 -
+ .../VideoPlayback/VideoDecoder.cpp            | 616 +++++++++++++++
+ .../VideoPlayback/VideoDecoder.h              | 143 ++++
+ 20 files changed, 1769 insertions(+), 655 deletions(-)
+ create mode 100644 src/core/WallpaperEngine/VideoPlayback/CudaGL.cpp
+ create mode 100644 src/core/WallpaperEngine/VideoPlayback/CudaGL.h
+ create mode 100644 src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+ create mode 100644 src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+ delete mode 100644 src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+ delete mode 100644 src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
+ delete mode 100644 src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.cpp
+ delete mode 100644 src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.h
+ create mode 100644 src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp
+ create mode 100644 src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h
+
+diff --git a/include/linux-wallpaperengine/context.h b/include/linux-wallpaperengine/context.h
+index 2dd28d1..cf7a486 100644
+--- a/include/linux-wallpaperengine/context.h
++++ b/include/linux-wallpaperengine/context.h
+@@ -136,19 +136,19 @@ WPENGINE_API void wp_context_set_gl_proc_address (wp_context* context, wp_gl_pro
+ WPENGINE_API void wp_context_set_gl_upload_context (wp_context* context, wp_gl_upload_context* upload);
+ 
+ /**
+- * How the video players this context starts (video textures, video wallpapers) decode: libmpv's `hwdec` and
+- * `gpu-hwdec-interop` values. libmpv's render API tries every interop it has when a player's render context is made,
+- * each opening its device where it can (VAAPI's display, CUDA's context, ...), unless `gpu-hwdec-interop` names one. A
+- * host that knows its GPU names the one it decodes with (`cuda`, `vaapi`, ...) or `no` (copy modes only) and an `hwdec`
+- * list that suits it. Set it before the first wp_render_frame;
+- * a player already started keeps what it had. NULL leaves that value at libmpv's default (`hwdec` `auto`,
+- * `gpu-hwdec-interop` `auto`). Whatever is set, every player also asks libmpv for `cuda-primary-context`, so with the
+- * CUDA interop or a CUDA decoder they all share the GPU's primary CUDA context instead of making one each (a libmpv
+- * without that option keeps one per player)
++ * How the video players this context starts (video textures, video wallpapers) decode, in the names mpv gives them: an
++ * `hwdec` list tried in order (`nvdec`/`cuda`, `nvdec-copy`, `vaapi[-copy]`, `vulkan[-copy]`, `vdpau[-copy]`, `auto`
++ * = CUDA, VAAPI then Vulkan, `auto-copy*` the same copied, `no` = software; software also when the list runs out or
++ * the hardware can't take a video) and the GL interop frames may take (`cuda`, `all` or NULL: a CUDA frame reaches
++ * GL through the CUDA–GL interop without leaving the GPU; anything else, `no` included: every hardware frame is
++ * copied through memory). Each device type is opened once per process and shared by every video (CUDA's on the GPU's
++ * primary context), and only when a video's codec can decode on it. The CUDA interop needs libcuda in the process
++ * (FFmpeg loads it by soname). Set it before the first wp_render_frame; a player already started keeps what it had.
++ * NULL leaves `hwdec` at `auto`
+  *
+  * @param context The context to set it for
+- * @param hwdec libmpv's `hwdec` value (e.g. "nvdec,nvdec-copy,auto-copy"), or NULL
+- * @param interop libmpv's `gpu-hwdec-interop` value (e.g. "cuda", "no"), or NULL
++ * @param hwdec the `hwdec` list (e.g. "nvdec,nvdec-copy,auto-copy"), or NULL
++ * @param interop the interop (e.g. "cuda", "no"), or NULL
+  */
+ WPENGINE_API void wp_context_set_video_hwdec (wp_context* context, const char* hwdec, const char* interop);
+ 
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 7374787..6f16731 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -95,8 +95,9 @@ set(TARGET_SOURCE_FILES
+     WallpaperEngine/Data/Dumpers/StringPrinter.cpp
+     WallpaperEngine/Data/JSON.cpp
+ 
+-    WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+-    WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.cpp
++    WallpaperEngine/VideoPlayback/CudaGL.cpp
++    WallpaperEngine/VideoPlayback/GLPlayer.cpp
++    WallpaperEngine/VideoPlayback/VideoDecoder.cpp
+ 
+     WallpaperEngine/Scripting/Adapters/ObjectAdapter.cpp
+     WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -120,7 +121,6 @@ set(TARGET_LIBRARIES
+     PkgConfig::lz4
+     SDL2::SDL2
+     PkgConfig::ffmpeg
+-    PkgConfig::mpv
+     kissfft::kissfft
+     Freetype::Freetype
+     PkgConfig::fontconfig
+@@ -166,7 +166,6 @@ include(RequireQuickJS)
+ include(RequireNLOHMANNJson)
+ pkg_check_modules(lz4 REQUIRED IMPORTED_TARGET liblz4)
+ pkg_check_modules(zlib REQUIRED IMPORTED_TARGET zlib)
+-pkg_check_modules(mpv REQUIRED IMPORTED_TARGET mpv)
+ pkg_check_modules(ffmpeg REQUIRED IMPORTED_TARGET libavformat libavcodec libswresample libswscale libavutil)
+ find_package(SDL2 REQUIRED CONFIG REQUIRED COMPONENTS SDL2)
+ find_package(Freetype REQUIRED)
+diff --git a/src/core/WallpaperEngine/Context.h b/src/core/WallpaperEngine/Context.h
+index 8867d99..e1830e2 100644
+--- a/src/core/WallpaperEngine/Context.h
++++ b/src/core/WallpaperEngine/Context.h
+@@ -28,9 +28,9 @@ public:
+     wp_gl_proc_address* gl_proc_address;
+     /** the host's context for the upload thread (wp_context_set_gl_upload_context), or null */
+     wp_gl_upload_context* gl_upload_context = nullptr;
+-    /** libmpv's `hwdec` for every video player (wp_context_set_video_hwdec); unset: `auto` */
++    /** the hardware every video decodes on, as mpv's `hwdec` names it (wp_context_set_video_hwdec, VideoPlayback::HwdecChoice); unset: `auto` */
+     std::optional<std::string> video_hwdec;
+-    /** libmpv's `gpu-hwdec-interop` for every video player (wp_context_set_video_hwdec); unset: libmpv's (all) */
++    /** the GL interop video frames may take, as mpv's `gpu-hwdec-interop` names it: `cuda` (or unset) lets CUDA frames reach GL without leaving the GPU */
+     std::optional<std::string> video_hwdec_interop;
+     wp_time_counter* time_counter;
+     wp_audio_input_mix* audio_input_mix;
+diff --git a/src/core/WallpaperEngine/Render/CTexture.cpp b/src/core/WallpaperEngine/Render/CTexture.cpp
+index b039ed2..9f99c42 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.cpp
++++ b/src/core/WallpaperEngine/Render/CTexture.cpp
+@@ -116,15 +116,12 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header, const bool
+ 
+ 	const auto mipmap = *this->m_header->images.begin ()->second.begin ();
+ 
++	// the header keeps the video's bytes for the texture's life; a video texture plays silent, on the scene's clock
+ 	this->m_player = std::make_unique<GLPlayer> (
+-	    this->getContext (), this->m_textureID[0],
+-	    std::make_unique<MemoryStreamProtocol> (mipmap->uncompressedData.get (), mipmap->uncompressedSize),
+-	    this->m_header->textureWidth, this->m_header->textureHeight
++	    this->getContext (), this->m_textureID[0], reinterpret_cast<const uint8_t*> (mipmap->uncompressedData.get ()),
++	    mipmap->uncompressedSize, this->m_header->textureWidth, this->m_header->textureHeight
+ 	);
+-	// setup texture video player
+-	this->m_player->setMuted ();
+-	this->m_player->setVolume (0.0f);
+-	this->m_player->setUntimed ();
++	this->m_player->prefetch ();
+ 	// texture is ready, nothing else to do
+ 	return;
+     }
+diff --git a/src/core/WallpaperEngine/Render/CTexture.h b/src/core/WallpaperEngine/Render/CTexture.h
+index 8f0e87c..88519e2 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.h
++++ b/src/core/WallpaperEngine/Render/CTexture.h
+@@ -3,22 +3,19 @@
+ #include "Helpers/ContextAware.h"
+ #include "TextureProvider.h"
+ #include "WallpaperEngine/Data/Assets/Texture.h"
+-#include "WallpaperEngine/VideoPlayback/MPV/GLPlayer.h"
++#include "WallpaperEngine/VideoPlayback/GLPlayer.h"
+ 
+ #include <glad/glad.h>
+ #include <cstdlib>
+ #include <future>
+ #include <glm/vec4.hpp>
+ #include <memory>
+-#include <mpv/client.h>
+-#include <mpv/render.h>
+-#include <mpv/render_gl.h>
+ #include <vector>
+ 
+ namespace WallpaperEngine::Render {
+ class RenderContext;
+ using namespace WallpaperEngine::Data::Assets;
+-using namespace WallpaperEngine::VideoPlayback::MPV;
++using namespace WallpaperEngine::VideoPlayback;
+ /** A JPEG / PNG / … mipmap decoded to RGBA8 by stb_image (null: it refused the file), freed as stbi_image_free does */
+ struct DecodedTextureImage {
+     std::unique_ptr<unsigned char, void (*) (void*)> pixels { nullptr, std::free };
+@@ -66,14 +63,14 @@ public:
+      * Increments the usage count of the texture
+      *
+      * Directly controls playback for video CTextures, only started when at least one thing is using it
+-     * Initializes mpv if needed and starts playback
++     * Starts the video decoder if needed
+      */
+     void incrementUsageCount () const override;
+     /**
+      * Decrements the usage count of the texture
+      *
+      * Directly controls playback for video CTextures, only stopped when nothing is using it
+-     * De-initializes mpv if needed
++     * Stops the video decoder when nothing uses it
+      */
+     void decrementUsageCount () const override;
+     /**
+diff --git a/src/core/WallpaperEngine/Render/TextureProvider.h b/src/core/WallpaperEngine/Render/TextureProvider.h
+index 395d430..7b7bcd7 100644
+--- a/src/core/WallpaperEngine/Render/TextureProvider.h
++++ b/src/core/WallpaperEngine/Render/TextureProvider.h
+@@ -9,7 +9,7 @@
+ #include "WallpaperEngine/Data/Assets/Texture.h"
+ #include "WallpaperEngine/Data/Model/Types.h"
+ 
+-namespace WallpaperEngine::VideoPlayback::MPV {
++namespace WallpaperEngine::VideoPlayback {
+ class GLPlayer;
+ }
+ 
+@@ -91,14 +91,14 @@ public:
+      * Increments the usage count of the texture
+      *
+      * Directly controls playback for video CTextures, only started when at least one thing is using it
+-     * Initializes mpv if needed and starts playback
++     * Starts the video decoder if needed
+      */
+     virtual void incrementUsageCount () const = 0;
+     /**
+      * Decrements the usage count of the texture
+      *
+      * Directly controls playback for video CTextures, only stopped when nothing is using it
+-     * De-initializes mpv if needed
++     * Stops the video decoder when nothing uses it
+      */
+     virtual void decrementUsageCount () const = 0;
+     /**
+@@ -106,6 +106,6 @@ public:
+      */
+     virtual void update () const = 0;
+     /** A video texture's player (SceneScript's IVideoTexture), nullptr for every other texture */
+-    [[nodiscard]] virtual VideoPlayback::MPV::GLPlayer* getVideoPlayer () const { return nullptr; }
++    [[nodiscard]] virtual VideoPlayback::GLPlayer* getVideoPlayer () const { return nullptr; }
+ };
+ } // namespace WallpaperEngine::Render
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+index 9f2749c..ecbcb65 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CScene.cpp
+@@ -793,7 +793,7 @@ void CScene::renderFrame () {
+     glColorMask (true, true, true, true);
+     // (a pass leaves depth writes off: the clear needs them)
+     glDepthMask (GL_TRUE);
+-    // the clear colour every frame: a video texture's player (mpv) leaves its own behind, and a script may change it
++    // the clear colour every frame: a video texture's player may leave its own behind, and a script may change it
+     // (IScene.clearcolor)
+     const glm::vec3 clearColor = this->getScene ().colors.clear->value->getVec3 ();
+     glClearColor (clearColor.r, clearColor.g, clearColor.b, 1.0f);
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CVideo.cpp b/src/core/WallpaperEngine/Render/Wallpapers/CVideo.cpp
+index 898ff87..fb03045 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CVideo.cpp
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CVideo.cpp
+@@ -1,15 +1,14 @@
+ #include "CVideo.h"
+ 
+-#include "WallpaperEngine/Audio/AudioPlayingDetector.h"
+ #include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/Data/Model/Project.h"
+ #include "WallpaperEngine/Data/Model/Wallpaper.h"
+-#include "WallpaperEngine/VideoPlayback/MPV/GLPlayer.h"
++#include "WallpaperEngine/VideoPlayback/GLPlayer.h"
+ 
+ using namespace WallpaperEngine;
+ using namespace WallpaperEngine::Render;
+ using namespace WallpaperEngine::Render::Wallpapers;
+-using namespace WallpaperEngine::VideoPlayback::MPV;
++using namespace WallpaperEngine::VideoPlayback;
+ 
+ CVideo::CVideo (const Wallpaper& wallpaper, RenderContext& context, AudioContext& audioContext) :
+     CWallpaper (wallpaper, context, audioContext, nullptr) {
+@@ -19,16 +18,12 @@ CVideo::CVideo (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+     const std::filesystem::path videopath
+ 	= this->getVideo ().project.assetLocator->physicalPath (this->getVideo ().filename);
+ 
+-    // create a player with a small framebuffer
+-    // this will be changed after mpv starts playback and sees the video resolution
++    // create a player with a small framebuffer, resized to the video's at its first frame. The core's video player
++    // decodes no sound: a video wallpaper plays silent
+     this->m_player = std::make_unique<GLPlayer> (
+ 	this->getContext (), this->CWallpaper::getWallpaperTexture (), videopath, 64, 64,
+ 	this->CWallpaper::getWallpaperFramebuffer ()
+     );
+-    const auto audioEnabled = this->getContext ().getContext ().config.enableAudio;
+-    const auto volume = this->getContext ().getContext ().config.volume;
+-
+-    this->m_player->setVolume (audioEnabled ? volume * 100.0 / 128.0 : 0.0);
+     // make sure the video has at least one usage marked, this ensures the video plays
+     this->m_player->incrementUsageCount ();
+ }
+@@ -36,18 +31,6 @@ CVideo::CVideo (const Wallpaper& wallpaper, RenderContext& context, AudioContext
+ CVideo::~CVideo () { this->m_player->decrementUsageCount (); }
+ 
+ void CVideo::renderFrame () {
+-    // ensure the video's audio follows audio detection rules
+-    if (this->getContext ().getContext ().config.enableAudio
+-	&& this->m_muted != this->getContext ().getContext ().audio->getDetector ().anythingPlaying ()) {
+-	this->m_muted = !this->m_muted;
+-
+-	if (this->m_muted) {
+-	    this->m_player->setMuted ();
+-	} else {
+-	    this->m_player->clearMuted ();
+-	}
+-    }
+-
+     this->m_player->render ();
+ }
+ 
+diff --git a/src/core/WallpaperEngine/Render/Wallpapers/CVideo.h b/src/core/WallpaperEngine/Render/Wallpapers/CVideo.h
+index eadc7ca..8dd52a6 100644
+--- a/src/core/WallpaperEngine/Render/Wallpapers/CVideo.h
++++ b/src/core/WallpaperEngine/Render/Wallpapers/CVideo.h
+@@ -2,10 +2,10 @@
+ 
+ #include "WallpaperEngine/Audio/AudioStream.h"
+ #include "WallpaperEngine/Render/CWallpaper.h"
+-#include "WallpaperEngine/VideoPlayback/MPV/GLPlayer.h"
++#include "WallpaperEngine/VideoPlayback/GLPlayer.h"
+ 
+ namespace WallpaperEngine::Render::Wallpapers {
+-using namespace WallpaperEngine::VideoPlayback::MPV;
++using namespace WallpaperEngine::VideoPlayback;
+ 
+ class CVideo final : public CWallpaper {
+ public:
+@@ -28,6 +28,5 @@ protected:
+ private:
+     GLPlayerUniquePtr m_player;
+ 
+-    bool m_muted = false;
+ };
+ } // namespace WallpaperEngine::Render::Wallpapers
+diff --git a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+index fe5c85a..cfd6599 100644
+--- a/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
++++ b/src/core/WallpaperEngine/Scripting/Adapters/ScriptableObjectAdapter.cpp
+@@ -12,7 +12,7 @@
+ #include "WallpaperEngine/Render/Objects/CSound.h"
+ #include "WallpaperEngine/Render/Objects/CText.h"
+ #include "WallpaperEngine/Logging/Log.h"
+-#include "WallpaperEngine/VideoPlayback/MPV/GLPlayer.h"
++#include "WallpaperEngine/VideoPlayback/GLPlayer.h"
+ #include "WallpaperEngine/Scripting/ScriptEngine.h"
+ #include "WallpaperEngine/Scripting/ScriptableObject.h"
+ #include "WallpaperEngine/Utils/ScopeGuard.h"
+@@ -1065,7 +1065,7 @@ void texture_animation_finalizer (JSRuntime* rt, JSValueConst val) {
+ }
+ 
+ namespace {
+-using WallpaperEngine::VideoPlayback::MPV::GLPlayer;
++using WallpaperEngine::VideoPlayback::GLPlayer;
+ 
+ GLPlayer* playerOf (JSValueConst value) {
+     JSClassID classId = 0;
+diff --git a/src/core/WallpaperEngine/VideoPlayback/CudaGL.cpp b/src/core/WallpaperEngine/VideoPlayback/CudaGL.cpp
+new file mode 100644
+index 0000000..02c72f0
+--- /dev/null
++++ b/src/core/WallpaperEngine/VideoPlayback/CudaGL.cpp
+@@ -0,0 +1,33 @@
++#include "CudaGL.h"
++
++#include <dlfcn.h>
++#include <type_traits>
++
++using namespace WallpaperEngine::VideoPlayback;
++
++const CudaGL* CudaGL::get () {
++    static const CudaGL* calls = [] () -> const CudaGL* {
++	// by soname only: a libcuda already in the process (FFmpeg's, or the host's) is found whatever its path
++	void* lib = dlopen ("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
++	if (lib == nullptr) {
++	    return nullptr;
++	}
++	static CudaGL c {};
++	bool all = true;
++	auto bind = [&] (auto& slot, const char* name) {
++	    void* f = dlsym (lib, name);
++	    all = all && f != nullptr;
++	    slot = reinterpret_cast<std::remove_reference_t<decltype (slot)>> (f);
++	};
++	bind (c.ctxPushCurrent, "cuCtxPushCurrent_v2");
++	bind (c.ctxPopCurrent, "cuCtxPopCurrent_v2");
++	bind (c.graphicsGLRegisterImage, "cuGraphicsGLRegisterImage");
++	bind (c.graphicsUnregisterResource, "cuGraphicsUnregisterResource");
++	bind (c.graphicsMapResources, "cuGraphicsMapResources");
++	bind (c.graphicsUnmapResources, "cuGraphicsUnmapResources");
++	bind (c.graphicsSubResourceGetMappedArray, "cuGraphicsSubResourceGetMappedArray");
++	bind (c.memcpy2DAsync, "cuMemcpy2DAsync_v2");
++	return all ? &c : nullptr;
++    }();
++    return calls;
++}
+diff --git a/src/core/WallpaperEngine/VideoPlayback/CudaGL.h b/src/core/WallpaperEngine/VideoPlayback/CudaGL.h
+new file mode 100644
+index 0000000..860869b
+--- /dev/null
++++ b/src/core/WallpaperEngine/VideoPlayback/CudaGL.h
+@@ -0,0 +1,55 @@
++#pragma once
++
++#include <cstddef>
++
++namespace WallpaperEngine::VideoPlayback {
++/**
++ * The few libcuda calls that copy a decoded CUDA frame into GL textures (CUDA–GL interop), looked up in the process's
++ * libcuda: FFmpeg's CUDA device already loaded it by soname (and a host that wants the interop loads it before, from
++ * wherever its driver lives). Declared here rather than from cuda.h, which no build dependency ships.
++ */
++struct CudaGL {
++    using CUresult = int;
++    using CUcontext = void*;
++    using CUstream = void*;
++    using CUgraphicsResource = void*;
++    using CUarray = void*;
++    using CUdeviceptr = unsigned long long;
++
++    static constexpr unsigned kRegisterWriteDiscard = 2; // CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD
++    static constexpr int kMemoryDevice = 2;		 // CU_MEMORYTYPE_DEVICE
++    static constexpr int kMemoryArray = 3;		 // CU_MEMORYTYPE_ARRAY
++
++    /** CUDA_MEMCPY2D (cuda.h, the _v2 layout) */
++    struct Memcpy2D {
++	size_t srcXInBytes;
++	size_t srcY;
++	int srcMemoryType;
++	const void* srcHost;
++	CUdeviceptr srcDevice;
++	CUarray srcArray;
++	size_t srcPitch;
++	size_t dstXInBytes;
++	size_t dstY;
++	int dstMemoryType;
++	void* dstHost;
++	CUdeviceptr dstDevice;
++	CUarray dstArray;
++	size_t dstPitch;
++	size_t WidthInBytes;
++	size_t Height;
++    };
++
++    CUresult (*ctxPushCurrent) (CUcontext);
++    CUresult (*ctxPopCurrent) (CUcontext*);
++    CUresult (*graphicsGLRegisterImage) (CUgraphicsResource*, unsigned image, unsigned target, unsigned flags);
++    CUresult (*graphicsUnregisterResource) (CUgraphicsResource);
++    CUresult (*graphicsMapResources) (unsigned count, CUgraphicsResource*, CUstream);
++    CUresult (*graphicsUnmapResources) (unsigned count, CUgraphicsResource*, CUstream);
++    CUresult (*graphicsSubResourceGetMappedArray) (CUarray*, CUgraphicsResource, unsigned index, unsigned level);
++    CUresult (*memcpy2DAsync) (const Memcpy2D*, CUstream);
++
++    /** the calls, or null when the process has no libcuda or it lacks one of them */
++    static const CudaGL* get ();
++};
++} // namespace WallpaperEngine::VideoPlayback
+diff --git a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+new file mode 100644
+index 0000000..bcc7552
+--- /dev/null
++++ b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+@@ -0,0 +1,729 @@
++#include "GLPlayer.h"
++
++#include "CudaGL.h"
++
++#include "WallpaperEngine/Context.h"
++#include "WallpaperEngine/Logging/Log.h"
++
++#include <algorithm>
++#include <cmath>
++
++// hwcontext_cuda.h wants cuda.h for two handle types; no build dependency ships cuda.h
++#ifndef CUDA_VERSION
++#define CUDA_VERSION 10000
++typedef struct CUctx_st* CUcontext;
++typedef struct CUstream_st* CUstream;
++#endif
++
++extern "C" {
++#include <libavutil/hwcontext_cuda.h>
++#include <libavutil/pixdesc.h>
++#include <libswscale/swscale.h>
++}
++
++using namespace WallpaperEngine::VideoPlayback;
++
++namespace {
++/**
++ * How long a player's first render waits for its first frame (decoding starts with the scene's build, so it is
++ * usually there): a scene's first picture then shows its videos instead of their empty textures
++ */
++constexpr std::chrono::milliseconds kFirstFrameWait { 500 };
++/** a decoder this far behind the clock (a rate it can't keep up with, a stalled render) jumps to the clock instead */
++constexpr double kMaxLag = 1.0;
++
++constexpr const char* kVertex = R"(#version 330 core
++out vec2 v_uv;
++void main () {
++    vec2 p = vec2 ((gl_VertexID << 1) & 2, gl_VertexID & 2);
++    v_uv = p;
++    gl_Position = vec4 (p * 2.0 - 1.0, 0.0, 1.0);
++}
++)";
++
++// texture row 0 is the image's top row, as LWE's other textures (no flip)
++constexpr const char* kFragment = R"(#version 330 core
++in vec2 v_uv;
++out vec4 o_color;
++uniform sampler2D u_y;
++uniform sampler2D u_u;
++uniform sampler2D u_v;
++uniform sampler2D u_a;
++uniform vec4 u_my;
++uniform vec4 u_mu;
++uniform vec4 u_mv;
++uniform vec4 u_ma;
++uniform float u_scale;
++uniform vec2 u_chromaShift;
++uniform mat4 u_matrix;
++uniform int u_rgba;
++uniform int u_alpha;
++void main () {
++    if (u_rgba != 0) {
++        o_color = texture (u_y, v_uv);
++        return;
++    }
++    vec2 c = v_uv + u_chromaShift;
++    vec4 yuv = vec4 (dot (texture (u_y, v_uv), u_my), dot (texture (u_u, c), u_mu), dot (texture (u_v, c), u_mv), 1.0);
++    yuv.xyz *= u_scale;
++    vec3 rgb = (u_matrix * yuv).rgb;
++    float a = u_alpha != 0 ? dot (texture (u_a, v_uv), u_ma) * u_scale : 1.0;
++    o_color = vec4 (clamp (rgb, 0.0, 1.0), a);
++}
++)";
++
++/** the GL state a frame's upload and conversion touch, put back as LWE left it */
++struct SavedState {
++    GLint program, vao, activeTexture, drawFbo, readFbo, unpackBuffer, unpackAlignment, unpackRowLength;
++    GLint viewport[4];
++    GLint textures[4];
++    GLint samplers[4];
++    GLboolean colorMask[4];
++    GLboolean blend, depth, scissor, cull, stencil, srgb;
++
++    SavedState () {
++	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
++	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &vao);
++	glGetIntegerv (GL_ACTIVE_TEXTURE, &activeTexture);
++	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
++	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &readFbo);
++	glGetIntegerv (GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
++	glGetIntegerv (GL_UNPACK_ALIGNMENT, &unpackAlignment);
++	glGetIntegerv (GL_UNPACK_ROW_LENGTH, &unpackRowLength);
++	glGetIntegerv (GL_VIEWPORT, viewport);
++	glGetBooleanv (GL_COLOR_WRITEMASK, colorMask);
++	for (int i = 0; i < 4; i++) {
++	    glActiveTexture (GL_TEXTURE0 + i);
++	    glGetIntegerv (GL_TEXTURE_BINDING_2D, &textures[i]);
++	    glGetIntegerv (GL_SAMPLER_BINDING, &samplers[i]);
++	}
++	blend = glIsEnabled (GL_BLEND);
++	depth = glIsEnabled (GL_DEPTH_TEST);
++	scissor = glIsEnabled (GL_SCISSOR_TEST);
++	cull = glIsEnabled (GL_CULL_FACE);
++	stencil = glIsEnabled (GL_STENCIL_TEST);
++	srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
++	glBindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
++    }
++
++    ~SavedState () {
++	auto set = [] (GLenum cap, GLboolean on) { on ? glEnable (cap) : glDisable (cap); };
++	set (GL_BLEND, blend);
++	set (GL_DEPTH_TEST, depth);
++	set (GL_SCISSOR_TEST, scissor);
++	set (GL_CULL_FACE, cull);
++	set (GL_STENCIL_TEST, stencil);
++	set (GL_FRAMEBUFFER_SRGB, srgb);
++	for (int i = 3; i >= 0; i--) {
++	    glActiveTexture (GL_TEXTURE0 + i);
++	    glBindTexture (GL_TEXTURE_2D, textures[i]);
++	    glBindSampler (i, samplers[i]);
++	}
++	glActiveTexture (activeTexture);
++	glColorMask (colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
++	glViewport (viewport[0], viewport[1], viewport[2], viewport[3]);
++	glPixelStorei (GL_UNPACK_ALIGNMENT, unpackAlignment);
++	glPixelStorei (GL_UNPACK_ROW_LENGTH, unpackRowLength);
++	glBindBuffer (GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
++	glBindFramebuffer (GL_DRAW_FRAMEBUFFER, drawFbo);
++	glBindFramebuffer (GL_READ_FRAMEBUFFER, readFbo);
++	glBindVertexArray (vao);
++	glUseProgram (program);
++    }
++};
++
++GLuint compile (GLenum type, const char* source) {
++    const GLuint shader = glCreateShader (type);
++    glShaderSource (shader, 1, &source, nullptr);
++    glCompileShader (shader);
++    GLint ok = GL_FALSE;
++    glGetShaderiv (shader, GL_COMPILE_STATUS, &ok);
++    if (ok != GL_TRUE) {
++	char log[1024] = {};
++	glGetShaderInfoLog (shader, sizeof log, nullptr, log);
++	sLog.error ("video: the frame conversion shader won't compile: ", log);
++	glDeleteShader (shader);
++	return 0;
++    }
++    return shader;
++}
++
++/** rows of the matrix taking (Y, Cb, Cr, 1) as stored (normalised to their bit depth) to RGB */
++std::array<float, 16> yuvToRgb (const AVFrame* frame, int depth, bool fullRange) {
++    double kr = 0.2126, kb = 0.0722;
++    switch (frame->colorspace) {
++	case AVCOL_SPC_BT470BG:
++	case AVCOL_SPC_SMPTE170M:
++	case AVCOL_SPC_FCC: kr = 0.299, kb = 0.114; break;
++	case AVCOL_SPC_BT2020_NCL:
++	case AVCOL_SPC_BT2020_CL: kr = 0.2627, kb = 0.0593; break;
++	case AVCOL_SPC_SMPTE240M: kr = 0.212, kb = 0.087; break;
++	case AVCOL_SPC_BT709: break;
++	default:
++	    // unspecified: what mpv assumes, BT.601 below HD
++	    if (frame->width < 1280 && frame->height <= 576) {
++		kr = 0.299, kb = 0.114;
++	    }
++	    break;
++    }
++    const double kg = 1.0 - kr - kb;
++    const double max = (1 << depth) - 1;
++    const double unit = 1 << (depth - 8);
++    // Y' = ay·v + by, C = ac·v + bc, from the stored value v in [0, 1]
++    double ay, by, ac, bc;
++    if (fullRange) {
++	ay = 1.0, by = 0.0;
++	ac = 1.0, bc = -(1 << (depth - 1)) / max;
++    } else {
++	ay = max / (219.0 * unit), by = -16.0 / 219.0;
++	ac = max / (224.0 * unit), bc = -128.0 / 224.0;
++    }
++    const double rv = 2.0 * (1.0 - kr), gu = 2.0 * kb * (1.0 - kb) / kg, gv = 2.0 * kr * (1.0 - kr) / kg,
++		 bu = 2.0 * (1.0 - kb);
++    return {
++	static_cast<float> (ay), 0.0f, static_cast<float> (rv * ac), static_cast<float> (by + rv * bc),
++	static_cast<float> (ay), static_cast<float> (-gu * ac), static_cast<float> (-gv * ac),
++	static_cast<float> (by - (gu + gv) * bc),
++	static_cast<float> (ay), static_cast<float> (bu * ac), 0.0f, static_cast<float> (by + bu * bc),
++	0.0f, 0.0f, 0.0f, 1.0f,
++    };
++}
++} // namespace
++
++GLPlayer::GLPlayer (
++    RenderContext& context, GLuint outputTexture, const std::filesystem::path& file, const int64_t baseWidth,
++    const int64_t baseHeight, const GLuint fbo
++) : ContextAware (context), m_doWeOwnFramebuffer (fbo == GL_NONE), m_outputTexture (outputTexture), m_fbo (fbo),
++    m_width (baseWidth), m_height (baseHeight), m_file (file) {
++    this->prepareGL ();
++}
++
++GLPlayer::GLPlayer (
++    RenderContext& context, const GLuint outputTexture, const uint8_t* data, const size_t size, const int64_t baseWidth,
++    const int64_t baseHeight, const GLuint fbo
++) : ContextAware (context), m_doWeOwnFramebuffer (fbo == GL_NONE), m_outputTexture (outputTexture), m_fbo (fbo),
++    m_width (baseWidth), m_height (baseHeight), m_data (data), m_size (size) {
++    this->prepareGL ();
++}
++
++GLPlayer::~GLPlayer () {
++    this->stop ();
++    for (GLuint& plane : this->m_planes) {
++	if (plane != 0) {
++	    glDeleteTextures (1, &plane);
++	}
++    }
++    if (this->m_program != 0) {
++	glDeleteProgram (this->m_program);
++    }
++    if (this->m_vao != 0) {
++	glDeleteVertexArrays (1, &this->m_vao);
++    }
++    sws_freeContext (this->m_sws);
++    if (this->m_doWeOwnFramebuffer) {
++	glDeleteFramebuffers (1, &this->m_fbo);
++    }
++}
++
++void GLPlayer::incrementUsageCount () {
++    this->m_usageCount++;
++
++    if (this->m_usageCount == 1) {
++	this->play ();
++    }
++}
++
++void GLPlayer::decrementUsageCount () {
++    if (this->m_usageCount == 0) {
++	sLog.exception ("GLPlayer usage count would underflow");
++    }
++
++    this->m_usageCount--;
++
++    if (this->m_usageCount == 0) {
++	this->stop ();
++    }
++}
++
++void GLPlayer::setPaused () { this->m_paused = true; }
++
++void GLPlayer::clearPaused () { this->m_paused = false; }
++
++double GLPlayer::getDuration () const { return this->m_decoder ? this->m_decoder->duration () : 0.0; }
++
++double GLPlayer::getTime () const {
++    if (this->m_pendingSeek.has_value ()) {
++	return *this->m_pendingSeek;
++    }
++    const double length = this->getDuration ();
++    if (length <= 0.0) {
++	return this->m_clock;
++    }
++    return this->m_loop ? std::fmod (this->m_clock, length) : std::min (this->m_clock, length);
++}
++
++void GLPlayer::seek (double seconds) {
++    seconds = std::max (seconds, 0.0);
++    if (!this->m_decoder) {
++	this->m_pendingSeek = seconds;
++	return;
++    }
++    const double length = this->m_decoder->duration ();
++    if (length > 0.0) {
++	seconds = this->m_loop ? std::fmod (seconds, length) : std::min (seconds, length);
++    }
++    this->m_clock = seconds;
++    this->m_decoder->seek (seconds);
++}
++
++void GLPlayer::setRate (double rate) {
++    // the range IVideoTexture had with mpv
++    this->m_rate = std::clamp (rate, 0.01, 100.0);
++}
++
++void GLPlayer::setLoop (bool loop) {
++    this->m_loop = loop;
++    if (this->m_decoder) {
++	this->m_decoder->setLoop (loop);
++    }
++}
++
++bool GLPlayer::reachedEnd () const { return this->m_decoder && !this->m_loop && this->m_decoder->ended (); }
++
++int GLPlayer::getWidth () const { return static_cast<int> (this->m_width); }
++int GLPlayer::getHeight () const { return static_cast<int> (this->m_height); }
++
++void GLPlayer::prepareGL () {
++    if (!this->m_doWeOwnFramebuffer || this->m_fbo != GL_NONE) {
++	return;
++    }
++
++    glGenFramebuffers (1, &this->m_fbo);
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_fbo);
++    glBindTexture (GL_TEXTURE_2D, this->m_outputTexture);
++    // reset texture's contents
++    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, this->m_width, this->m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++    constexpr GLenum drawBuffers[1] = { GL_COLOR_ATTACHMENT0 };
++    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, this->m_outputTexture, 0);
++    glDrawBuffers (1, drawBuffers);
++
++    // ensure first framebuffer is okay
++    if (glCheckFramebufferStatus (GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++	sLog.exception ("Framebuffers are not properly set");
++    }
++
++    // clear the framebuffer
++    glClear (GL_COLOR_BUFFER_BIT);
++}
++
++void GLPlayer::prefetch () {
++    if (!this->m_decoder) {
++	this->startDecoder ();
++    }
++}
++
++void GLPlayer::startDecoder () {
++    if (!this->m_file.has_value () && this->m_data == nullptr) {
++	sLog.exception ("Cannot play a GLPlayer without a source");
++    }
++    const auto& context = this->getContext ().getContext ();
++    HwdecChoice choice = HwdecChoice::parse (context.video_hwdec, context.video_hwdec_interop);
++    this->m_decoder = this->m_file.has_value ()
++			? std::make_unique<VideoDecoder> (*this->m_file, std::move (choice))
++			: std::make_unique<VideoDecoder> (this->m_data, this->m_size, std::move (choice));
++    this->m_decoder->setLoop (this->m_loop);
++    this->m_playedAt = std::chrono::steady_clock::now ();
++}
++
++void GLPlayer::play () {
++    // a prefetched decoder is already at the video's start
++    if (!this->m_decoder) {
++	this->startDecoder ();
++    }
++    this->m_lastRenderTime.reset ();
++    this->m_shownAny = false;
++    this->m_waitedFirst = false;
++    this->m_rendersWithout = 0;
++    this->m_firstRender.reset ();
++    this->m_clock = 0.0;
++    if (this->m_pendingSeek.has_value ()) {
++	this->m_clock = *this->m_pendingSeek;
++	this->m_decoder->seek (*this->m_pendingSeek);
++	this->m_pendingSeek.reset ();
++    }
++}
++
++void GLPlayer::stop () {
++    if (!this->m_decoder) {
++	return;
++    }
++    // the interop's registrations go before the decoder, whose device holds their CUDA context
++    this->releaseCuda ();
++    this->m_decoder.reset ();
++}
++
++void GLPlayer::releaseCuda () {
++    const CudaGL* cuda = CudaGL::get ();
++    AVBufferRef* device = this->m_decoder ? this->m_decoder->device () : nullptr;
++    const bool any = std::any_of (this->m_cudaResources.begin (), this->m_cudaResources.end (), [] (void* r) { return r != nullptr; });
++    if (!any) {
++	return;
++    }
++    if (cuda == nullptr || device == nullptr) {
++	this->m_cudaResources.fill (nullptr);
++	return;
++    }
++    const auto* hw = static_cast<const AVCUDADeviceContext*> (reinterpret_cast<AVHWDeviceContext*> (device->data)->hwctx);
++    cuda->ctxPushCurrent (hw->cuda_ctx);
++    for (void*& resource : this->m_cudaResources) {
++	if (resource != nullptr) {
++	    cuda->graphicsUnregisterResource (resource);
++	    resource = nullptr;
++	}
++    }
++    CudaGL::CUcontext popped = nullptr;
++    cuda->ctxPopCurrent (&popped);
++    this->m_planesForCuda = false;
++    this->m_layout = {};
++}
++
++void GLPlayer::render () {
++    if (!this->m_decoder) {
++	return;
++    }
++    if (!this->m_firstRender.has_value ()) {
++	this->m_firstRender = std::chrono::steady_clock::now ();
++    }
++    const double now = this->getContext ().getContext ().renderTime;
++    const double elapsed = this->m_lastRenderTime.has_value () ? std::max (0.0, now - *this->m_lastRenderTime) : 0.0;
++    this->m_lastRenderTime = now;
++    if (!this->m_paused) {
++	this->m_clock += elapsed * this->m_rate;
++    }
++    const double length = this->m_decoder->duration ();
++    if (!this->m_loop && length > 0.0) {
++	this->m_clock = std::min (this->m_clock, length);
++    }
++    if (!this->m_shownAny && !this->m_waitedFirst) {
++	this->m_waitedFirst = true;
++	this->m_decoder->waitFirst (kFirstFrameWait);
++    }
++    for (const std::string& message : this->m_decoder->messages ()) {
++	sLog.error (message);
++    }
++
++    double frameTime = 0.0;
++    AVFrame* frame = this->m_decoder->take (this->m_clock, !this->m_shownAny, &frameTime);
++    if (frame != nullptr) {
++	const bool shown = this->show (frame);
++	if (shown && !this->m_shownAny) {
++	    this->m_shownAny = true;
++	    const auto at = std::chrono::steady_clock::now ();
++	    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds> (at - this->m_playedAt);
++	    const auto late = std::chrono::duration_cast<std::chrono::milliseconds> (at - *this->m_firstRender);
++	    sLog.error (
++		"video: first frame ", this->m_width, "x", this->m_height, " ",
++		av_get_pix_fmt_name (static_cast<AVPixelFormat> (frame->format)),
++		frame->format == AV_PIX_FMT_CUDA && !this->m_cudaFailed ? " through the CUDA-GL interop" : " uploaded",
++		" ", ms.count (), " ms after its decoder started, ", this->m_rendersWithout, " renders (", late.count (), " ms) without it"
++	    );
++	}
++	av_frame_free (&frame);
++    } else if (!this->m_shownAny) {
++	this->m_rendersWithout++;
++    }
++
++    if (this->m_shownAny && !this->m_paused && !this->m_decoder->failed ()) {
++	const double newest = this->m_decoder->newest ();
++	const bool atEnd = !this->m_loop && length > 0.0 && this->m_clock >= length - 1e-3;
++	if (!atEnd && newest >= 0.0 && newest < this->m_clock - kMaxLag) {
++	    this->seek (this->m_clock);
++	}
++    }
++}
++
++bool GLPlayer::show (AVFrame* frame) {
++    const SavedState saved;
++    AVFrame* copied = nullptr;
++    const AVFrame* source = frame;
++    if (frame->hw_frames_ctx != nullptr) {
++	if (frame->format == AV_PIX_FMT_CUDA && !this->m_cudaFailed) {
++	    if (this->copyCuda (frame)) {
++		this->convert (frame);
++		return true;
++	    }
++	    this->m_cudaFailed = true;
++	    this->m_decoder->setTransfer ();
++	    this->releaseCuda ();
++	    sLog.error ("video: the CUDA-GL interop failed; frames are copied through memory");
++	}
++	copied = av_frame_alloc ();
++	if (av_hwframe_transfer_data (copied, frame, 0) < 0) {
++	    av_frame_free (&copied);
++	    return false;
++	}
++	av_frame_copy_props (copied, frame);
++	source = copied;
++    }
++    const bool uploaded = this->upload (const_cast<AVFrame*> (source));
++    if (uploaded) {
++	this->convert (source);
++    }
++    av_frame_free (&copied);
++    return uploaded;
++}
++
++bool GLPlayer::layoutFor (AVPixelFormat format, int width, int height, Layout& layout) const {
++    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get (format);
++    if (desc == nullptr) {
++	return false;
++    }
++    layout = {};
++    layout.format = format;
++    layout.width = width;
++    layout.height = height;
++    constexpr uint64_t kOther
++	= AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_PAL | AV_PIX_FMT_FLAG_BITSTREAM | AV_PIX_FMT_FLAG_HWACCEL
++	| AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_FLOAT;
++    bool planar = !(desc->flags & kOther) && (desc->flags & AV_PIX_FMT_FLAG_PLANAR) && desc->nb_components >= 3;
++    const int depth = desc->comp[0].depth;
++    const int bytes = depth > 8 ? 2 : 1;
++    std::array<int, 4> channels {};
++    for (int c = 0; planar && c < desc->nb_components; c++) {
++	const AVComponentDescriptor& comp = desc->comp[c];
++	planar = comp.depth == depth && depth <= 16 && comp.shift == desc->comp[0].shift && comp.step % bytes == 0
++	      && comp.offset % bytes == 0 && comp.step / bytes <= 2 && comp.offset / bytes < 2 && comp.plane < 4;
++	if (planar) {
++	    channels[comp.plane] = std::max (channels[comp.plane], comp.step / bytes);
++	    layout.compPlane[c] = comp.plane;
++	    layout.compChannel[c] = comp.offset / bytes;
++	}
++    }
++    if (!planar) {
++	// anything else is converted to RGBA by swscale first
++	layout.rgba = true;
++	layout.planes = 1;
++	layout.plane[0] = { GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, width, height, 4 };
++	layout.compPlane = { 0, -1, -1, -1 };
++	return true;
++    }
++    layout.planes = av_pix_fmt_count_planes (format);
++    layout.depth = depth;
++    layout.log2ChromaW = desc->log2_chroma_w;
++    layout.log2ChromaH = desc->log2_chroma_h;
++    layout.scale = static_cast<float> (
++	((1 << (8 * bytes)) - 1) / (static_cast<double> (1 << desc->comp[0].shift) * ((1 << depth) - 1))
++    );
++    for (int p = 0; p < layout.planes; p++) {
++	const bool chroma = p == layout.compPlane[1] || p == layout.compPlane[2];
++	const int w = chroma ? AV_CEIL_RSHIFT (width, desc->log2_chroma_w) : width;
++	const int h = chroma ? AV_CEIL_RSHIFT (height, desc->log2_chroma_h) : height;
++	const bool two = channels[p] == 2;
++	layout.plane[p] = { two ? (bytes == 1 ? GL_RG8 : GL_RG16) : (bytes == 1 ? GL_R8 : GL_R16),
++			    two ? GLenum (GL_RG) : GLenum (GL_RED), bytes == 1 ? GLenum (GL_UNSIGNED_BYTE) : GLenum (GL_UNSIGNED_SHORT),
++			    w, h, channels[p] * bytes };
++    }
++    return true;
++}
++
++bool GLPlayer::preparePlanes (const Layout& layout, bool cuda) {
++    if (this->m_layout == layout && this->m_planesForCuda == cuda && this->m_planes[0] != 0) {
++	return true;
++    }
++    this->releaseCuda ();
++    for (int p = 0; p < layout.planes; p++) {
++	if (this->m_planes[p] == 0) {
++	    glGenTextures (1, &this->m_planes[p]);
++	}
++	glActiveTexture (GL_TEXTURE0);
++	glBindTexture (GL_TEXTURE_2D, this->m_planes[p]);
++	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++	const auto& plane = layout.plane[p];
++	glTexImage2D (GL_TEXTURE_2D, 0, plane.internal, plane.width, plane.height, 0, plane.format, plane.type, nullptr);
++    }
++    if (cuda) {
++	const CudaGL* calls = CudaGL::get ();
++	for (int p = 0; p < layout.planes; p++) {
++	    if (calls->graphicsGLRegisterImage (
++		    &this->m_cudaResources[p], this->m_planes[p], GL_TEXTURE_2D, CudaGL::kRegisterWriteDiscard
++		)
++		!= 0) {
++		this->m_cudaResources[p] = nullptr;
++		return false;
++	    }
++	}
++    }
++    this->m_layout = layout;
++    this->m_planesForCuda = cuda;
++    return true;
++}
++
++bool GLPlayer::copyCuda (AVFrame* frame) {
++    const CudaGL* cuda = CudaGL::get ();
++    if (cuda == nullptr || frame->hw_frames_ctx == nullptr) {
++	return false;
++    }
++    const auto* frames = reinterpret_cast<const AVHWFramesContext*> (frame->hw_frames_ctx->data);
++    Layout layout;
++    if (!this->layoutFor (frames->sw_format, frame->width, frame->height, layout) || layout.rgba) {
++	return false;
++    }
++    const auto* hw = static_cast<const AVCUDADeviceContext*> (frames->device_ctx->hwctx);
++    if (cuda->ctxPushCurrent (hw->cuda_ctx) != 0) {
++	return false;
++    }
++    bool ok = this->preparePlanes (layout, true);
++    if (ok) {
++	auto* resources = reinterpret_cast<CudaGL::CUgraphicsResource*> (this->m_cudaResources.data ());
++	ok = cuda->graphicsMapResources (layout.planes, resources, hw->stream) == 0;
++	if (ok) {
++	    for (int p = 0; ok && p < layout.planes; p++) {
++		CudaGL::CUarray array = nullptr;
++		ok = cuda->graphicsSubResourceGetMappedArray (&array, resources[p], 0, 0) == 0;
++		CudaGL::Memcpy2D copy {};
++		copy.srcMemoryType = CudaGL::kMemoryDevice;
++		copy.srcDevice = reinterpret_cast<CudaGL::CUdeviceptr> (frame->data[p]);
++		copy.srcPitch = frame->linesize[p];
++		copy.dstMemoryType = CudaGL::kMemoryArray;
++		copy.dstArray = array;
++		copy.WidthInBytes = static_cast<size_t> (layout.plane[p].width) * layout.plane[p].bytesPerPixel;
++		copy.Height = layout.plane[p].height;
++		ok = ok && cuda->memcpy2DAsync (&copy, hw->stream) == 0;
++	    }
++	    // the unmap orders the copies before any GL work that follows
++	    ok = cuda->graphicsUnmapResources (layout.planes, resources, hw->stream) == 0 && ok;
++	}
++    }
++    CudaGL::CUcontext popped = nullptr;
++    cuda->ctxPopCurrent (&popped);
++    return ok;
++}
++
++bool GLPlayer::upload (AVFrame* frame) {
++    Layout layout;
++    if (!this->layoutFor (static_cast<AVPixelFormat> (frame->format), frame->width, frame->height, layout)) {
++	return false;
++    }
++    const uint8_t* rgba = nullptr;
++    if (layout.rgba) {
++	this->m_sws = sws_getCachedContext (
++	    this->m_sws, frame->width, frame->height, static_cast<AVPixelFormat> (frame->format), frame->width,
++	    frame->height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr
++	);
++	if (this->m_sws == nullptr) {
++	    return false;
++	}
++	this->m_rgba.resize (static_cast<size_t> (frame->width) * frame->height * 4);
++	uint8_t* planes[4] = { this->m_rgba.data () };
++	int strides[4] = { frame->width * 4 };
++	sws_scale (this->m_sws, frame->data, frame->linesize, 0, frame->height, planes, strides);
++	rgba = this->m_rgba.data ();
++    }
++    if (!this->preparePlanes (layout, false)) {
++	return false;
++    }
++    glActiveTexture (GL_TEXTURE0);
++    glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
++    for (int p = 0; p < layout.planes; p++) {
++	const auto& plane = layout.plane[p];
++	const uint8_t* data = rgba ? rgba : frame->data[p];
++	const int stride = rgba ? frame->width * 4 : frame->linesize[p];
++	glBindTexture (GL_TEXTURE_2D, this->m_planes[p]);
++	if (stride > 0 && stride % plane.bytesPerPixel == 0) {
++	    glPixelStorei (GL_UNPACK_ROW_LENGTH, stride / plane.bytesPerPixel);
++	    glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, plane.width, plane.height, plane.format, plane.type, data);
++	} else {
++	    glPixelStorei (GL_UNPACK_ROW_LENGTH, 0);
++	    for (int row = 0; row < plane.height; row++) {
++		glTexSubImage2D (
++		    GL_TEXTURE_2D, 0, 0, row, plane.width, 1, plane.format, plane.type, data + static_cast<ptrdiff_t> (row) * stride
++		);
++	    }
++	}
++    }
++    return true;
++}
++
++void GLPlayer::sizeOutput (int width, int height) {
++    if (width <= 0 || height <= 0 || (width == this->m_width && height == this->m_height)) {
++	return;
++    }
++    this->m_width = width;
++    this->m_height = height;
++    glBindTexture (GL_TEXTURE_2D, this->m_outputTexture);
++    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
++}
++
++void GLPlayer::convert (const AVFrame* frame) {
++    const Layout& layout = this->m_layout;
++    // the display size: the frame's, stretched by a non-square sample aspect as mpv's dwidth
++    int width = frame->width;
++    if (frame->sample_aspect_ratio.num > 0 && frame->sample_aspect_ratio.den > 0
++	&& frame->sample_aspect_ratio.num != frame->sample_aspect_ratio.den) {
++	width = static_cast<int> (std::lround (width * av_q2d (frame->sample_aspect_ratio)));
++    }
++    glActiveTexture (GL_TEXTURE0);
++    this->sizeOutput (width, frame->height);
++
++    if (this->m_program == 0) {
++	const GLuint vertex = compile (GL_VERTEX_SHADER, kVertex);
++	const GLuint fragment = compile (GL_FRAGMENT_SHADER, kFragment);
++	if (vertex == 0 || fragment == 0) {
++	    return;
++	}
++	this->m_program = glCreateProgram ();
++	glAttachShader (this->m_program, vertex);
++	glAttachShader (this->m_program, fragment);
++	glLinkProgram (this->m_program);
++	glDeleteShader (vertex);
++	glDeleteShader (fragment);
++	glGenVertexArrays (1, &this->m_vao);
++    }
++
++    glBindFramebuffer (GL_FRAMEBUFFER, this->m_fbo);
++    glViewport (0, 0, static_cast<GLsizei> (this->m_width), static_cast<GLsizei> (this->m_height));
++    glDisable (GL_BLEND);
++    glDisable (GL_DEPTH_TEST);
++    glDisable (GL_SCISSOR_TEST);
++    glDisable (GL_CULL_FACE);
++    glDisable (GL_STENCIL_TEST);
++    glDisable (GL_FRAMEBUFFER_SRGB);
++    glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glUseProgram (this->m_program);
++    glBindVertexArray (this->m_vao);
++
++    const GLuint program = this->m_program;
++    const char* samplers[4] = { "u_y", "u_u", "u_v", "u_a" };
++    const char* masks[4] = { "u_my", "u_mu", "u_mv", "u_ma" };
++    for (int c = 0; c < 4; c++) {
++	const int plane = layout.compPlane[c] >= 0 ? layout.compPlane[c] : 0;
++	glActiveTexture (GL_TEXTURE0 + c);
++	glBindTexture (GL_TEXTURE_2D, this->m_planes[plane]);
++	glBindSampler (c, 0);
++	glUniform1i (glGetUniformLocation (program, samplers[c]), c);
++	float mask[4] = {};
++	mask[layout.compChannel[c]] = 1.0f;
++	glUniform4fv (glGetUniformLocation (program, masks[c]), 1, mask);
++    }
++    glUniform1i (glGetUniformLocation (program, "u_rgba"), layout.rgba ? 1 : 0);
++    glUniform1i (glGetUniformLocation (program, "u_alpha"), layout.compPlane[3] >= 0 ? 1 : 0);
++    glUniform1f (glGetUniformLocation (program, "u_scale"), layout.scale);
++    if (!layout.rgba) {
++	const bool fullRange = frame->color_range == AVCOL_RANGE_JPEG || layout.format == AV_PIX_FMT_YUVJ420P
++			    || layout.format == AV_PIX_FMT_YUVJ422P || layout.format == AV_PIX_FMT_YUVJ444P;
++	const auto matrix = yuvToRgb (frame, layout.depth, fullRange);
++	glUniformMatrix4fv (glGetUniformLocation (program, "u_matrix"), 1, GL_TRUE, matrix.data ());
++	// chroma sited on the left luma sample (MPEG-2 / H.264's default, and mpv's for an unspecified one) sits half a
++	// luma pixel left of where a half-size texture's texel centres put it
++	const bool left = frame->chroma_location == AVCHROMA_LOC_UNSPECIFIED || frame->chroma_location == AVCHROMA_LOC_LEFT
++		       || frame->chroma_location == AVCHROMA_LOC_TOPLEFT;
++	const bool top = frame->chroma_location == AVCHROMA_LOC_TOPLEFT || frame->chroma_location == AVCHROMA_LOC_TOP;
++	const float shiftX = left && layout.log2ChromaW == 1 ? 0.5f / static_cast<float> (layout.width) : 0.0f;
++	const float shiftY = top && layout.log2ChromaH == 1 ? 0.5f / static_cast<float> (layout.height) : 0.0f;
++	glUniform2f (glGetUniformLocation (program, "u_chromaShift"), shiftX, shiftY);
++    }
++    glDrawArrays (GL_TRIANGLES, 0, 3);
++}
+diff --git a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+new file mode 100644
+index 0000000..2570b34
+--- /dev/null
++++ b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+@@ -0,0 +1,156 @@
++#pragma once
++
++#include "VideoDecoder.h"
++#include "WallpaperEngine/Render/RenderContext.h"
++
++#include <array>
++#include <chrono>
++#include <filesystem>
++#include <glad/glad.h>
++#include <memory>
++#include <optional>
++#include <string>
++
++struct SwsContext;
++
++namespace WallpaperEngine::VideoPlayback {
++/**
++ * A video drawn into a GL texture, decoded by FFmpeg (VideoDecoder) on the host's hardware and played on the scene's
++ * clock: the context's render time, so it follows the host's speed and pauses and starts where the scene first draws
++ * it. Silent: a video texture's sound is never decoded. Each new frame is converted from its YUV planes into the
++ * texture by one draw; a CUDA frame reaches those planes through the CUDA–GL interop without leaving the GPU.
++ */
++class GLPlayer : public Helpers::ContextAware {
++public:
++    /** plays `file` */
++    GLPlayer (
++	RenderContext& context, GLuint outputTexture, const std::filesystem::path& file, int64_t baseWidth,
++	int64_t baseHeight, GLuint fbo = GL_NONE
++    );
++    /** plays the `size` bytes at `data`, which the caller keeps alive for the player's life */
++    GLPlayer (
++	RenderContext& context, GLuint outputTexture, const uint8_t* data, size_t size, int64_t baseWidth,
++	int64_t baseHeight, GLuint fbo = GL_NONE
++    );
++    ~GLPlayer () override;
++
++    /** playback runs while at least one thing uses the player (decoding starts at the first) */
++    void incrementUsageCount ();
++    /** stops and frees the decoder when nothing uses the player any more */
++    void decrementUsageCount ();
++    /**
++     * Starts decoding before anything uses the player, so its first frame is ready when it first draws: a scene's
++     * video textures start as its build creates them, well before the layers that draw them are set up
++     */
++    void prefetch ();
++
++    void setPaused ();
++    void clearPaused ();
++
++    /** advances the clock to the context's render time and draws the frame due then, if it's a new one */
++    void render ();
++
++    // SceneScript's IVideoTexture (a layer's video): the player's state and controls. Before decoding starts they keep
++    // the state it starts with
++    [[nodiscard]] bool isPaused () const { return this->m_paused; }
++    /** the video's length in seconds (0 until the decoder knows it) */
++    [[nodiscard]] double getDuration () const;
++    /** where the video is, in seconds */
++    [[nodiscard]] double getTime () const;
++    void seek (double seconds);
++    [[nodiscard]] double getRate () const { return this->m_rate; }
++    void setRate (double rate);
++    [[nodiscard]] bool getLoop () const { return this->m_loop; }
++    void setLoop (bool loop);
++    /** a video that doesn't loop showed its last frame (cleared by a seek) */
++    [[nodiscard]] bool reachedEnd () const;
++
++    int getWidth () const;
++    int getHeight () const;
++
++private:
++    /** how a frame's pixel format maps onto plane textures and the conversion's inputs */
++    struct Layout {
++	AVPixelFormat format = AV_PIX_FMT_NONE;
++	int width = 0;
++	int height = 0;
++	int planes = 0;
++	struct Plane {
++	    GLint internal;
++	    GLenum format;
++	    GLenum type;
++	    int width;
++	    int height;
++	    int bytesPerPixel;
++	};
++	std::array<Plane, 4> plane {};
++	/** the plane and channel of Y, Cb, Cr and alpha (plane -1: none) */
++	std::array<int, 4> compPlane { -1, -1, -1, -1 };
++	std::array<int, 4> compChannel {};
++	/** RGBA from swscale in plane 0 (a format the planes can't take) */
++	bool rgba = false;
++	/** a sample's stored value / its full scale, from the texture's normalised value */
++	float scale = 1.0f;
++	int depth = 8;
++	int log2ChromaW = 0;
++	int log2ChromaH = 0;
++
++	bool operator== (const Layout& o) const {
++	    return format == o.format && width == o.width && height == o.height;
++	}
++    };
++
++    void prepareGL ();
++    void play ();
++    void startDecoder ();
++    void stop ();
++    /** shows `frame` (any format), true when it reached the texture */
++    bool show (AVFrame* frame);
++    bool layoutFor (AVPixelFormat format, int width, int height, Layout& layout) const;
++    /** (re)allocates the plane textures for `layout` (and their CUDA registrations when `cuda`) */
++    bool preparePlanes (const Layout& layout, bool cuda);
++    bool copyCuda (AVFrame* frame);
++    bool upload (AVFrame* frame);
++    void convert (const AVFrame* frame);
++    void releaseCuda ();
++    void sizeOutput (int width, int height);
++
++    bool m_doWeOwnFramebuffer;
++    GLuint m_outputTexture;
++    GLuint m_fbo = GL_NONE;
++    int64_t m_width;
++    int64_t m_height;
++
++    const uint8_t* m_data = nullptr;
++    size_t m_size = 0;
++    std::optional<std::filesystem::path> m_file;
++    std::unique_ptr<VideoDecoder> m_decoder;
++    uint32_t m_usageCount = 0;
++
++    bool m_paused = false;
++    double m_rate = 1.0;
++    bool m_loop = true;
++    /** the video's clock (seconds, running on across loops), its last render time, a seek before decoding started */
++    double m_clock = 0.0;
++    std::optional<double> m_lastRenderTime;
++    std::optional<double> m_pendingSeek;
++    bool m_shownAny = false;
++    bool m_waitedFirst = false;
++    int m_rendersWithout = 0;
++    std::chrono::steady_clock::time_point m_playedAt;
++    std::optional<std::chrono::steady_clock::time_point> m_firstRender;
++
++    Layout m_layout;
++    std::array<GLuint, 4> m_planes {};
++    bool m_planesForCuda = false;
++    std::array<void*, 4> m_cudaResources {};
++    bool m_cudaFailed = false;
++    GLuint m_program = 0;
++    GLuint m_vao = 0;
++    SwsContext* m_sws = nullptr;
++    std::vector<uint8_t> m_rgba;
++};
++
++using GLPlayerUniquePtr = std::unique_ptr<GLPlayer>;
++using GLPlayerSharedPtr = std::shared_ptr<GLPlayer>;
++} // namespace WallpaperEngine::VideoPlayback
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+deleted file mode 100644
+index f845a87..0000000
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
++++ /dev/null
+@@ -1,407 +0,0 @@
+-#include <algorithm>
+-#include <string>
+-#include "GLPlayer.h"
+-
+-#include "WallpaperEngine/Context.h"
+-#include "WallpaperEngine/Logging/Log.h"
+-
+-#include <mpv/render_gl.h>
+-#include <mpv/stream_cb.h>
+-
+-using namespace WallpaperEngine::VideoPlayback::MPV;
+-
+-namespace {
+-// mpv_observe_property's reply_userdata for the display size
+-constexpr uint64_t kObserveWidth = 1;
+-constexpr uint64_t kObserveHeight = 2;
+-} // namespace
+-
+-void* get_proc_address (void* ctx, const char* name) {
+-    const auto gl_proc_address = static_cast<GLPlayer*> (ctx)->getContext ().getContext ().gl_proc_address;
+-
+-    return gl_proc_address->get_proc_address (gl_proc_address->user_parameter, name);
+-}
+-
+-GLPlayer::GLPlayer (
+-    RenderContext& context, GLuint outputTexture, const std::filesystem::path& file, const int64_t baseWidth,
+-    const int64_t baseHeight, const GLuint fbo
+-) : ContextAware (context), m_outputTexture (outputTexture), m_width (baseWidth), m_height (baseHeight) {
+-    this->m_fbo = fbo;
+-    this->m_doWeOwnFramebuffer = this->m_fbo == GL_NONE;
+-
+-    this->prepareGL ();
+-    this->setSource (file);
+-}
+-
+-GLPlayer::GLPlayer (
+-    RenderContext& context, const GLuint outputTexture, MemoryStreamProtocolUniquePtr stream, const int64_t baseWidth,
+-    const int64_t baseHeight, const GLuint fbo
+-) : ContextAware (context), m_outputTexture (outputTexture), m_width (baseWidth), m_height (baseHeight) {
+-    this->m_fbo = fbo;
+-    this->m_doWeOwnFramebuffer = this->m_fbo == GL_NONE;
+-
+-    this->prepareGL ();
+-    this->setSource (std::move (stream));
+-}
+-
+-GLPlayer::~GLPlayer () {
+-    // clean up any kept resources
+-    this->stop ();
+-
+-    // only clean up framebuffer if we own it
+-    if (this->m_doWeOwnFramebuffer) {
+-	// free gl resources too
+-	glDeleteFramebuffers (1, &this->m_fbo);
+-    }
+-}
+-
+-void GLPlayer::incrementUsageCount () {
+-    this->m_usageCount++;
+-
+-    if (this->m_usageCount == 1) {
+-	this->play ();
+-    }
+-}
+-
+-void GLPlayer::decrementUsageCount () {
+-    if (this->m_usageCount == 0) {
+-	sLog.exception ("GLPlayer usage count would underflow");
+-    }
+-
+-    this->m_usageCount--;
+-
+-    if (this->m_usageCount == 0) {
+-	this->stop ();
+-    }
+-}
+-
+-void GLPlayer::setUntimed () {
+-    if (this->m_handle) {
+-	sLog.exception ("Cannot set untimed mode after playback has started");
+-    }
+-
+-    this->m_untimed = true;
+-}
+-
+-void GLPlayer::clearUntimed () {
+-    if (this->m_handle) {
+-	sLog.exception ("Cannot set untimed mode after playback has started");
+-    }
+-
+-    this->m_untimed = false;
+-}
+-
+-void GLPlayer::setMuted () {
+-    this->m_muted = true;
+-
+-    if (this->m_handle) {
+-	mpv_set_property_string (this->m_handle, "mute", "yes");
+-    }
+-}
+-
+-void GLPlayer::clearMuted () {
+-    this->m_muted = false;
+-
+-    if (this->m_handle) {
+-	mpv_set_property_string (this->m_handle, "mute", "no");
+-	// a player started muted has no audio track (init); sound needs one
+-	mpv_set_property_string (this->m_handle, "aid", "auto");
+-    }
+-}
+-
+-void GLPlayer::setVolume (double volume) {
+-    this->m_volume = volume;
+-
+-    if (this->m_handle) {
+-	mpv_set_property (this->m_handle, "volume", MPV_FORMAT_DOUBLE, &this->m_volume);
+-    }
+-}
+-
+-void GLPlayer::setPaused () {
+-    this->m_paused = true;
+-
+-    if (this->m_handle) {
+-	mpv_set_property_string (this->m_handle, "pause", "yes");
+-    }
+-}
+-
+-void GLPlayer::clearPaused () {
+-    this->m_paused = false;
+-
+-    if (this->m_handle) {
+-	mpv_set_property_string (this->m_handle, "pause", "no");
+-    }
+-}
+-
+-double GLPlayer::getDuration () const {
+-    double value = 0.0;
+-    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "duration", MPV_FORMAT_DOUBLE, &value) < 0) {
+-	return 0.0;
+-    }
+-    return value;
+-}
+-
+-double GLPlayer::getTime () const {
+-    // a seek not done yet (mpv hasn't loaded the video, or is still seeking this frame): where it will be
+-    if (this->m_pendingSeek.has_value ()) {
+-	return *this->m_pendingSeek;
+-    }
+-    if (this->m_seekTarget.has_value ()) {
+-	return *this->m_seekTarget;
+-    }
+-    double value = 0.0;
+-    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "time-pos", MPV_FORMAT_DOUBLE, &value) < 0) {
+-	return 0.0;
+-    }
+-    return value;
+-}
+-
+-void GLPlayer::seek (double seconds) {
+-    seconds = std::max (seconds, 0.0);
+-    double position = 0.0;
+-    // mpv seeks only a loaded video: until then the seek waits (render () does it)
+-    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "time-pos", MPV_FORMAT_DOUBLE, &position) < 0) {
+-	this->m_pendingSeek = seconds;
+-	return;
+-    }
+-    this->m_pendingSeek = std::nullopt;
+-    this->m_seekTarget = seconds;
+-    const std::string at = std::to_string (seconds);
+-    const char* command[] = { "seek", at.c_str (), "absolute+exact", nullptr };
+-    mpv_command (this->m_handle, command);
+-}
+-
+-void GLPlayer::setRate (double rate) {
+-    // mpv's speed range
+-    this->m_rate = std::clamp (rate, 0.01, 100.0);
+-    if (this->m_handle) {
+-	mpv_set_property (this->m_handle, "speed", MPV_FORMAT_DOUBLE, &this->m_rate);
+-    }
+-}
+-
+-void GLPlayer::setLoop (bool loop) {
+-    this->m_loop = loop;
+-    if (this->m_handle) {
+-	mpv_set_property_string (this->m_handle, "loop", loop ? "inf" : "no");
+-    }
+-}
+-
+-bool GLPlayer::reachedEnd () const {
+-    int flag = 0;
+-    if (this->m_handle == nullptr || mpv_get_property (this->m_handle, "eof-reached", MPV_FORMAT_FLAG, &flag) < 0) {
+-	return false;
+-    }
+-    return flag != 0;
+-}
+-
+-void GLPlayer::render () const {
+-    // rendering should only happen if the texture is in use
+-    if (this->m_handle == nullptr) {
+-	return;
+-    }
+-    // a seek issued last frame is mpv's to report now
+-    const_cast<GLPlayer*> (this)->m_seekTarget = std::nullopt;
+-    // a script's seek from before mpv had the video loaded
+-    if (this->m_pendingSeek.has_value ()) {
+-	const_cast<GLPlayer*> (this)->seek (*this->m_pendingSeek);
+-    }
+-
+-    // read all the events available. The frame size comes from observed properties, never mpv_get_property: a get
+-    // waits for mpv's core thread, which can be busy for seconds (an audio output that won't open), and this is the
+-    // render thread
+-    while (true) {
+-	const mpv_event* event = mpv_wait_event (this->m_handle, 0);
+-
+-	if (event == nullptr || event->event_id == MPV_EVENT_NONE) {
+-	    break;
+-	}
+-
+-	if (event->event_id != MPV_EVENT_PROPERTY_CHANGE) {
+-	    continue;
+-	}
+-
+-	const auto* property = static_cast<const mpv_event_property*> (event->data);
+-
+-	if (property->format != MPV_FORMAT_INT64) {
+-	    continue;
+-	}
+-
+-	const int64_t value = *static_cast<const int64_t*> (property->data);
+-
+-	if (event->reply_userdata == kObserveWidth) {
+-	    this->m_videoWidth = value;
+-	} else if (event->reply_userdata == kObserveHeight) {
+-	    this->m_videoHeight = value;
+-	}
+-    }
+-
+-    if (this->m_videoWidth > 0 && this->m_videoHeight > 0
+-	&& (this->m_videoWidth != this->m_width || this->m_videoHeight != this->m_height)) {
+-	this->m_width = this->m_videoWidth;
+-	this->m_height = this->m_videoHeight;
+-	// reconfigure the texture
+-	glBindTexture (GL_TEXTURE_2D, this->m_outputTexture);
+-	glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, this->m_width, this->m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+-    }
+-
+-    // render the next
+-    glViewport (0, 0, this->m_width, this->m_height);
+-
+-    mpv_opengl_fbo fbo { static_cast<int> (this->m_fbo), static_cast<int> (this->m_width),
+-			 static_cast<int> (this->m_height), GL_RGBA8 };
+-
+-    // no need to flip as it'll be handled by the wallpaper rendering code
+-    int flip_y = 0;
+-    // The host loop is paced by the compositor's frame callbacks (vsync). Do not
+-    // let libmpv block until the frame's target time: with several outputs each
+-    // owning a player on one thread, that serialises every screen onto the
+-    // video's frame grid and judders 24fps content on 60Hz outputs.
+-    int block_for_target_time = 0;
+-
+-    mpv_render_param params[] = { { MPV_RENDER_PARAM_OPENGL_FBO, &fbo },
+-				  { MPV_RENDER_PARAM_FLIP_Y, &flip_y },
+-				  { MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time },
+-				  { MPV_RENDER_PARAM_INVALID, nullptr } };
+-
+-    mpv_render_context_render (this->m_renderContext, params);
+-}
+-
+-int GLPlayer::getWidth () const { return this->m_width; }
+-int GLPlayer::getHeight () const { return this->m_height; }
+-
+-void GLPlayer::prepareGL () {
+-    if (!this->m_doWeOwnFramebuffer || this->m_fbo != GL_NONE) {
+-	return;
+-    }
+-
+-    glGenFramebuffers (1, &this->m_fbo);
+-    glBindFramebuffer (GL_FRAMEBUFFER, this->m_fbo);
+-    glBindTexture (GL_TEXTURE_2D, this->m_outputTexture);
+-    // reset texture's contents
+-    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, this->m_width, this->m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+-    constexpr GLenum drawBuffers[1] = { GL_COLOR_ATTACHMENT0 };
+-    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, this->m_outputTexture, 0);
+-    glDrawBuffers (1, drawBuffers);
+-
+-    // ensure first framebuffer is okay
+-    if (glCheckFramebufferStatus (GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+-	sLog.exception ("Framebuffers are not properly set");
+-    }
+-
+-    // clear the framebuffer
+-    glClear (GL_COLOR_BUFFER_BIT);
+-}
+-
+-void GLPlayer::init () {
+-    this->m_handle = mpv_create ();
+-
+-    if (this->m_handle == nullptr) {
+-	sLog.exception ("Cannot create mpv context for video texture");
+-    }
+-
+-    // setup mpv options for playback
+-    mpv_set_option_string (this->m_handle, "terminal", "yes");
+-#if NDEBUG
+-    mpv_set_option_string (this->m_handle, "msg-level", "all=status,statusline=no");
+-#else
+-    mpv_set_option_string (this->m_handle, "msg-level", "all=v");
+-#endif
+-    mpv_set_option_string (this->m_handle, "input-cursor", "no");
+-    mpv_set_option_string (this->m_handle, "cursor-autohide", "no");
+-    mpv_set_option_string (this->m_handle, "config", "no");
+-    mpv_set_option_string (this->m_handle, "fbo-format", "rgba8");
+-    mpv_set_option_string (this->m_handle, "vo", "libmpv");
+-    mpv_set_option_string (this->m_handle, "profile", "fast");
+-    mpv_set_option_string (this->m_handle, "untimed", this->m_untimed ? "yes" : "no");
+-    // a muted player (every video texture) selects no audio track, so it never opens an audio output: one that can't
+-    // connect (no PipeWire) can hold mpv's core thread for 20-30 s in its cleanup, and a muted one makes no sound
+-    // anyway. clearMuted selects one
+-    mpv_set_option_string (this->m_handle, "aid", this->m_muted ? "no" : "auto");
+-    // the host's decoder choice (wp_context_set_video_hwdec). Without a gpu-hwdec-interop the render context made below
+-    // tries every interop libmpv has, each opening its device where it can, whatever the decoder will be
+-    const auto& context = this->getContext ().getContext ();
+-    if (context.video_hwdec_interop.has_value ()) {
+-	mpv_set_option_string (this->m_handle, "gpu-hwdec-interop", context.video_hwdec_interop->c_str ());
+-    }
+-    mpv_set_option_string (this->m_handle, "hwdec", context.video_hwdec.value_or ("auto").c_str ());
+-    // every player in the process decodes on the GPU's one primary CUDA context rather than making its own (each costs
+-    // device memory: 160 MiB on an RTX 3070 Ti, so a scene with two videos paid twice). A libmpv without the option
+-    // (the option comes from a patch to mpv) refuses it and keeps a context per player
+-    mpv_set_option_string (this->m_handle, "cuda-primary-context", "yes");
+-
+-    if (mpv_initialize (this->m_handle) < 0) {
+-	sLog.exception ("Could not initialize mpv context");
+-    }
+-
+-    // ensure video plays in a loop
+-    mpv_set_property_string (this->m_handle, "loop", this->m_loop ? "inf" : "no");
+-    // at the end of a video that doesn't loop, stay on its last frame (IVideoTexture's ended callback)
+-    mpv_set_property_string (this->m_handle, "keep-open", "yes");
+-    mpv_set_property (this->m_handle, "speed", MPV_FORMAT_DOUBLE, &this->m_rate);
+-    mpv_set_property (this->m_handle, "volume", MPV_FORMAT_DOUBLE, &this->m_volume);
+-
+-    mpv_observe_property (this->m_handle, kObserveWidth, "dwidth", MPV_FORMAT_INT64);
+-    mpv_observe_property (this->m_handle, kObserveHeight, "dheight", MPV_FORMAT_INT64);
+-
+-    // initialize gl context for mpv
+-    mpv_opengl_init_params gl_init_params { get_proc_address, this };
+-    mpv_render_param params[] { { MPV_RENDER_PARAM_API_TYPE, const_cast<char*> (MPV_RENDER_API_TYPE_OPENGL) },
+-				{ MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &gl_init_params },
+-				{ MPV_RENDER_PARAM_INVALID, nullptr } };
+-
+-    if (mpv_render_context_create (&this->m_renderContext, this->m_handle, params) < 0) {
+-	sLog.exception ("Failed to initialize MPV's GL context");
+-    }
+-
+-    // mute the video if required
+-    mpv_set_property_string (this->m_handle, "mute", this->m_muted ? "yes" : "no");
+-    // ensure play/pause status is respected too
+-    mpv_set_property_string (this->m_handle, "pause", this->m_paused ? "yes" : "no");
+-}
+-
+-void GLPlayer::setSource (const std::filesystem::path& file) { this->m_file = file; }
+-
+-void GLPlayer::setSource (MemoryStreamProtocolUniquePtr source) { this->m_stream = std::move (source); }
+-
+-void GLPlayer::play () {
+-    if (this->m_handle != nullptr) {
+-	sLog.exception ("Cannot play the same GLPlayer twice");
+-    }
+-
+-    if (!this->m_file.has_value () && !this->m_stream.has_value ()) {
+-	sLog.exception ("Cannot play a GLPlayer without a source");
+-    }
+-
+-    this->init ();
+-
+-    if (this->m_file.has_value ()) {
+-	// build the path to the video file
+-	const char* command[] = { "loadfile", this->m_file.value ().c_str (), nullptr };
+-
+-	if (mpv_command (this->m_handle, command) < 0) {
+-	    sLog.exception ("Cannot load video to play");
+-	}
+-    } else if (this->m_stream) {
+-	this->m_stream.value ()->registerReadCallback (this->m_handle);
+-
+-	// start playing the video
+-	const char* command[] = { "loadfile", "buffer://", nullptr };
+-
+-	if (mpv_command (this->m_handle, command) < 0) {
+-	    sLog.exception ("Cannot load video texture to play");
+-	}
+-    }
+-}
+-
+-void GLPlayer::stop () {
+-    // clean up mpv and get it ready to start again at some point
+-    if (this->m_renderContext) {
+-	mpv_render_context_free (this->m_renderContext);
+-	this->m_renderContext = nullptr;
+-    }
+-
+-    if (this->m_handle) {
+-	mpv_terminate_destroy (this->m_handle);
+-	this->m_handle = nullptr;
+-    }
+-}
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
+deleted file mode 100644
+index 02e81c0..0000000
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.h
++++ /dev/null
+@@ -1,107 +0,0 @@
+-#pragma once
+-
+-#include "MemoryStreamProtocol.h"
+-#include "WallpaperEngine/Render/RenderContext.h"
+-
+-#include <filesystem>
+-#include <glad/glad.h>
+-#include <mpv/client.h>
+-#include <mpv/render.h>
+-#include <optional>
+-#include <string>
+-
+-namespace WallpaperEngine::VideoPlayback::MPV {
+-class GLPlayer : public Helpers::ContextAware {
+-    friend struct MemoryStreamProtocol;
+-
+-public:
+-    GLPlayer (
+-	RenderContext& context, GLuint outputTexture, const std::filesystem::path& file, int64_t baseWidth,
+-	int64_t baseHeight, GLuint fbo = GL_NONE
+-    );
+-    GLPlayer (
+-	RenderContext& context, GLuint outputTexture, MemoryStreamProtocolUniquePtr stream, int64_t baseWidth,
+-	int64_t baseHeight, GLuint fbo = GL_NONE
+-    );
+-    ~GLPlayer () override;
+-
+-    /**
+-     * Increments the usage count of the player
+-     *
+-     * Directly controls playback, only started when at least one thing is using it
+-     * Initializes mpv if needed and starts playback
+-     */
+-    void incrementUsageCount ();
+-    /**
+-     * Decrements the usage count of the player
+-     *
+-     * Directly controls playback, only stopped when nothing is using it
+-     * De-initializes mpv if needed
+-     */
+-    void decrementUsageCount ();
+-
+-    void setUntimed ();
+-    void clearUntimed ();
+-    void setMuted ();
+-    void clearMuted ();
+-    void setVolume (double volume);
+-    void setPaused ();
+-    void clearPaused ();
+-
+-    void render () const;
+-
+-    // SceneScript's IVideoTexture (a layer's video): the player's state and controls. Before mpv runs (nothing
+-    // draws the video yet) they keep the state it starts with
+-    [[nodiscard]] bool isPaused () const { return this->m_paused; }
+-    /** the video's length in seconds (0 until mpv knows it) */
+-    [[nodiscard]] double getDuration () const;
+-    /** where the video is, in seconds */
+-    [[nodiscard]] double getTime () const;
+-    void seek (double seconds);
+-    [[nodiscard]] double getRate () const { return this->m_rate; }
+-    void setRate (double rate);
+-    [[nodiscard]] bool getLoop () const { return this->m_loop; }
+-    void setLoop (bool loop);
+-    /** mpv reached the end of a video that doesn't loop (cleared by a seek) */
+-    [[nodiscard]] bool reachedEnd () const;
+-
+-    int getWidth () const;
+-    int getHeight () const;
+-
+-private:
+-    void prepareGL ();
+-    void init ();
+-    void play ();
+-    void setSource (MemoryStreamProtocolUniquePtr source);
+-    void setSource (const std::filesystem::path& file);
+-    void stop ();
+-
+-protected:
+-    bool m_doWeOwnFramebuffer;
+-    GLuint m_outputTexture;
+-    GLuint m_fbo = GL_NONE;
+-    mutable int64_t m_width;
+-    mutable int64_t m_height;
+-    /** mpv's display size as its property-change events report it (render () reads no property: see there) */
+-    mutable int64_t m_videoWidth = 0;
+-    mutable int64_t m_videoHeight = 0;
+-    mpv_handle* m_handle = nullptr;
+-    mpv_render_context* m_renderContext = nullptr;
+-    double m_volume = 0.0f;
+-    bool m_muted = false;
+-    bool m_untimed = false;
+-    bool m_paused = false;
+-    double m_rate = 1.0;
+-    bool m_loop = true;
+-    /** a seek asked for before mpv ran */
+-    std::optional<double> m_pendingSeek = std::nullopt;
+-    /** a seek issued this frame: getTime reports it until mpv does (the next render) */
+-    std::optional<double> m_seekTarget = std::nullopt;
+-    std::optional<std::filesystem::path> m_file;
+-    std::optional<MemoryStreamProtocolUniquePtr> m_stream;
+-    uint32_t m_usageCount = 0;
+-};
+-
+-using GLPlayerUniquePtr = std::unique_ptr<GLPlayer>;
+-using GLPlayerSharedPtr = std::shared_ptr<GLPlayer>;
+-};
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.cpp
+deleted file mode 100644
+index 6092e82..0000000
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.cpp
++++ /dev/null
+@@ -1,55 +0,0 @@
+-#include "MemoryStreamProtocol.h"
+-
+-#include "GLPlayer.h"
+-#include "WallpaperEngine/Logging/Log.h"
+-
+-#include <mpv/stream_cb.h>
+-
+-using namespace WallpaperEngine::VideoPlayback::MPV;
+-
+-int64_t mem_seek (void* cookie, const int64_t offset) {
+-    const auto stream = static_cast<MemoryStreamProtocol*> (cookie);
+-
+-    // sometimes the stream can get to fail state depending on what mpv did
+-    // seeking usually means we can ignore that and try seek
+-    // if the seek fails the failbit will be set again
+-    if (stream->fail ()) {
+-	stream->clear ();
+-    }
+-
+-    stream->seekg (offset, std::ios_base::beg);
+-
+-    return stream->tellg ();
+-}
+-
+-int64_t mem_read (void* cookie, char* buf, uint64_t bytes) {
+-    return static_cast<MemoryStreamProtocol*> (cookie)->read (buf, bytes).gcount ();
+-}
+-
+-int64_t mem_size (void* cookie) { return static_cast<MemoryStreamProtocol*> (cookie)->m_size; }
+-
+-void mem_close (void* cookie) {
+-    // seek to the beginning again for the next play
+-    mem_seek (cookie, 0);
+-    // closing does nothing else because the life is managed
+-    // by whatever owns it
+-
+-    // this also allows starting playback in another instance no problem,
+-    // but two instances won't be able to use the same stream
+-}
+-
+-int mem_open (void* userdata, char* uri, struct mpv_stream_cb_info* info) {
+-    info->cookie = userdata;
+-    info->read_fn = mem_read;
+-    info->seek_fn = mem_seek;
+-    info->close_fn = mem_close;
+-    info->size_fn = mem_size;
+-
+-    return 0;
+-}
+-
+-void MemoryStreamProtocol::registerReadCallback (mpv_handle* handle) {
+-    if (mpv_stream_cb_add_ro (handle, "buffer", this, mem_open) < 0) {
+-	sLog.exception ("Cannot register memory stream protocol for mpv");
+-    }
+-}
+\ No newline at end of file
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.h b/src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.h
+deleted file mode 100644
+index 9447356..0000000
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/MemoryStreamProtocol.h
++++ /dev/null
+@@ -1,24 +0,0 @@
+-#pragma once
+-#include "../../Data/Utils/MemoryStream.h"
+-
+-#include <mpv/client.h>
+-
+-#include <cstring>
+-#include <memory>
+-
+-namespace WallpaperEngine::VideoPlayback::MPV {
+-class GLPlayer;
+-struct MemoryStreamProtocol : Data::Utils::MemoryStream {
+-    explicit MemoryStreamProtocol (const char* pointer, const size_t size) :
+-	MemoryStream (std::unique_ptr<char[]> (new char[size]), size), m_size (size) {
+-	memcpy (this->m_buffer.get (), pointer, size);
+-    }
+-
+-    void registerReadCallback (mpv_handle* handle);
+-
+-    size_t m_size;
+-};
+-
+-using MemoryStreamProtocolUniquePtr = std::unique_ptr<MemoryStreamProtocol>;
+-using MemoryStreamProtocolSharedPtr = std::shared_ptr<MemoryStreamProtocol>;
+-};
+diff --git a/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp
+new file mode 100644
+index 0000000..09b69bf
+--- /dev/null
++++ b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp
+@@ -0,0 +1,616 @@
++#include "VideoDecoder.h"
++
++#include <algorithm>
++#include <cstring>
++#include <map>
++#include <pthread.h>
++#include <utility>
++
++extern "C" {
++#include <libavutil/pixdesc.h>
++}
++
++using namespace WallpaperEngine::VideoPlayback;
++
++namespace {
++/** decoded frames kept ahead of the player's clock: enough to cover a render that comes late, few enough that the
++ * surfaces they hold stay a few MiB */
++constexpr size_t kAhead = 3;
++constexpr int kIoBuffer = 64 * 1024;
++
++/**
++ * The process's hardware devices, one per type, shared by every decoder: a scene's videos decode on one CUDA context
++ * (the GPU's primary one: `primary_ctx`), not one each (each costs ~160 MiB of device memory on an RTX 3070 Ti).
++ * Released with their last user, so a process without a video holds none. A type that failed to open isn't tried
++ * again by the next video
++ */
++struct SharedDevice {
++    AVBufferRef* ref = nullptr;
++    int users = 0;
++    bool failed = false;
++};
++std::mutex g_devicesMutex;
++std::map<AVHWDeviceType, SharedDevice> g_devices;
++
++AVBufferRef* acquireDevice (AVHWDeviceType type) {
++    std::lock_guard lock (g_devicesMutex);
++    SharedDevice& device = g_devices[type];
++    if (device.ref == nullptr && !device.failed) {
++	AVDictionary* options = nullptr;
++	if (type == AV_HWDEVICE_TYPE_CUDA) {
++	    av_dict_set (&options, "primary_ctx", "1", 0);
++	}
++	if (av_hwdevice_ctx_create (&device.ref, type, nullptr, options, 0) < 0) {
++	    device.ref = nullptr;
++	    device.failed = true;
++	}
++	av_dict_free (&options);
++    }
++    if (device.ref == nullptr) {
++	return nullptr;
++    }
++    device.users++;
++    return av_buffer_ref (device.ref);
++}
++
++void releaseDevice (AVHWDeviceType type) {
++    std::lock_guard lock (g_devicesMutex);
++    const auto it = g_devices.find (type);
++    if (it == g_devices.end () || it->second.ref == nullptr) {
++	return;
++    }
++    if (--it->second.users == 0) {
++	av_buffer_unref (&it->second.ref);
++	g_devices.erase (it);
++    }
++}
++
++std::string error (int code) {
++    char buffer[AV_ERROR_MAX_STRING_SIZE] = {};
++    av_strerror (code, buffer, sizeof buffer);
++    return buffer;
++}
++} // namespace
++
++HwdecChoice HwdecChoice::parse (const std::optional<std::string>& hwdec, const std::optional<std::string>& interop) {
++    // the CUDA–GL interop is the one zero-copy path: allowed unless the host named another interop (or none)
++    const bool cudaInterop = !interop.has_value () || *interop == "cuda" || *interop == "all" || *interop == "auto";
++    HwdecChoice choice;
++    auto add = [&choice] (AVHWDeviceType type, bool zeroCopy) {
++	for (const auto& c : choice.candidates) {
++	    if (c.type == type && c.zeroCopy == zeroCopy) {
++		return;
++	    }
++	}
++	choice.candidates.push_back ({ type, zeroCopy });
++    };
++    const std::string list = hwdec.value_or ("auto");
++    size_t at = 0;
++    while (at <= list.size ()) {
++	const size_t comma = list.find (',', at);
++	std::string name = list.substr (at, comma == std::string::npos ? std::string::npos : comma - at);
++	at = comma == std::string::npos ? list.size () + 1 : comma + 1;
++	name.erase (0, name.find_first_not_of (" \t"));
++	name.erase (name.find_last_not_of (" \t") + 1);
++	const bool copy = name.size () > 5 && name.ends_with ("-copy");
++	const std::string base = copy ? name.substr (0, name.size () - 5) : name;
++	if (name == "no") {
++	    break;
++	}
++	if (base == "auto" || base == "auto-safe" || base == "auto-unsafe" || base == "yes" || name.starts_with ("auto-copy")) {
++	    const bool anyCopy = copy || name.starts_with ("auto-copy");
++	    add (AV_HWDEVICE_TYPE_CUDA, !anyCopy && cudaInterop);
++	    add (AV_HWDEVICE_TYPE_VAAPI, false);
++	    add (AV_HWDEVICE_TYPE_VULKAN, false);
++	} else if (base == "nvdec" || base == "cuda") {
++	    add (AV_HWDEVICE_TYPE_CUDA, !copy && cudaInterop);
++	} else if (base == "vaapi") {
++	    add (AV_HWDEVICE_TYPE_VAAPI, false);
++	} else if (base == "vulkan") {
++	    add (AV_HWDEVICE_TYPE_VULKAN, false);
++	} else if (base == "vdpau") {
++	    add (AV_HWDEVICE_TYPE_VDPAU, false);
++	}
++    }
++    return choice;
++}
++
++VideoDecoder::VideoDecoder (const uint8_t* data, size_t size, HwdecChoice choice) :
++    m_data (data), m_size (size), m_choice (std::move (choice)) {
++    this->start ();
++}
++
++VideoDecoder::VideoDecoder (std::filesystem::path file, HwdecChoice choice) :
++    m_file (std::move (file)), m_choice (std::move (choice)) {
++    this->start ();
++}
++
++void VideoDecoder::start () {
++    this->m_thread = std::thread ([this] { this->run (); });
++}
++
++VideoDecoder::~VideoDecoder () {
++    {
++	std::lock_guard lock (this->m_mutex);
++	this->m_stop = true;
++    }
++    this->m_wake.notify_all ();
++    if (this->m_thread.joinable ()) {
++	this->m_thread.join ();
++    }
++    for (auto& [frame, time] : this->m_frames) {
++	av_frame_free (&frame);
++    }
++    av_frame_free (&this->m_lastDiscarded);
++    av_packet_free (&this->m_packet);
++    avcodec_free_context (&this->m_codec);
++    avformat_close_input (&this->m_format);
++    if (this->m_io != nullptr) {
++	av_freep (&this->m_io->buffer);
++	avio_context_free (&this->m_io);
++    }
++    if (this->m_device != nullptr) {
++	av_buffer_unref (&this->m_device);
++	releaseDevice (this->m_deviceType);
++    }
++}
++
++void VideoDecoder::say (std::string message) {
++    std::lock_guard lock (this->m_mutex);
++    this->m_messages.push_back (std::move (message));
++}
++
++std::vector<std::string> VideoDecoder::messages () {
++    std::lock_guard lock (this->m_mutex);
++    return std::exchange (this->m_messages, {});
++}
++
++AVPixelFormat VideoDecoder::pickFormat (AVCodecContext* ctx, const AVPixelFormat* formats) {
++    const auto* self = static_cast<const VideoDecoder*> (ctx->opaque);
++    for (const AVPixelFormat* f = formats; *f != AV_PIX_FMT_NONE; f++) {
++	if (*f == self->m_hwFormat) {
++	    return *f;
++	}
++    }
++    // the hardware can't take this stream (its profile, its size): software, on the same decoder
++    for (const AVPixelFormat* f = formats; *f != AV_PIX_FMT_NONE; f++) {
++	const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get (*f);
++	if (desc != nullptr && !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
++	    return *f;
++	}
++    }
++    return AV_PIX_FMT_NONE;
++}
++
++bool VideoDecoder::open () {
++    const auto started = std::chrono::steady_clock::now ();
++    this->m_format = avformat_alloc_context ();
++    if (this->m_format == nullptr) {
++	return false;
++    }
++    if (this->m_data != nullptr) {
++	auto* buffer = static_cast<unsigned char*> (av_malloc (kIoBuffer));
++	this->m_io = avio_alloc_context (
++	    buffer, kIoBuffer, 0, this,
++	    [] (void* opaque, uint8_t* out, int wanted) -> int {
++		auto* self = static_cast<VideoDecoder*> (opaque);
++		const size_t left = self->m_size - self->m_position;
++		if (left == 0) {
++		    return AVERROR_EOF;
++		}
++		const size_t n = std::min (left, static_cast<size_t> (wanted));
++		memcpy (out, self->m_data + self->m_position, n);
++		self->m_position += n;
++		return static_cast<int> (n);
++	    },
++	    nullptr,
++	    [] (void* opaque, int64_t offset, int whence) -> int64_t {
++		auto* self = static_cast<VideoDecoder*> (opaque);
++		if (whence == AVSEEK_SIZE) {
++		    return static_cast<int64_t> (self->m_size);
++		}
++		int64_t to = offset;
++		switch (whence & ~AVSEEK_FORCE) {
++		    case SEEK_SET: break;
++		    case SEEK_CUR: to += static_cast<int64_t> (self->m_position); break;
++		    case SEEK_END: to += static_cast<int64_t> (self->m_size); break;
++		    default: return -1;
++		}
++		if (to < 0 || to > static_cast<int64_t> (self->m_size)) {
++		    return -1;
++		}
++		self->m_position = static_cast<size_t> (to);
++		return to;
++	    }
++	);
++	if (buffer == nullptr || this->m_io == nullptr) {
++	    return false;
++	}
++	this->m_format->pb = this->m_io;
++	this->m_format->flags |= AVFMT_FLAG_CUSTOM_IO;
++    }
++    const int opened = avformat_open_input (&this->m_format, this->m_data ? nullptr : this->m_file.c_str (), nullptr, nullptr);
++    if (opened < 0) {
++	this->say ("video: cannot open the video: " + error (opened));
++	return false;
++    }
++    this->m_stream = av_find_best_stream (this->m_format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
++    // an MP4's header names the codec and size; probing (which decodes frames) only when it doesn't
++    if (this->m_stream < 0 || this->m_format->streams[this->m_stream]->codecpar->width <= 0) {
++	avformat_find_stream_info (this->m_format, nullptr);
++	this->m_stream = av_find_best_stream (this->m_format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
++    }
++    if (this->m_stream < 0) {
++	this->say ("video: no video stream");
++	return false;
++    }
++    for (unsigned i = 0; i < this->m_format->nb_streams; i++) {
++	if (static_cast<int> (i) != this->m_stream) {
++	    this->m_format->streams[i]->discard = AVDISCARD_ALL;
++	}
++    }
++    const AVStream* stream = this->m_format->streams[this->m_stream];
++    this->m_timeBase = stream->time_base;
++    this->m_startPts = stream->start_time != AV_NOPTS_VALUE ? stream->start_time : 0;
++    const AVRational rate = av_guess_frame_rate (this->m_format, const_cast<AVStream*> (stream), nullptr);
++    if (rate.num > 0 && rate.den > 0) {
++	this->m_frameDuration = av_q2d (av_inv_q (rate));
++    }
++    {
++	std::lock_guard lock (this->m_mutex);
++	if (stream->duration != AV_NOPTS_VALUE && stream->duration > 0) {
++	    this->m_containerDuration = static_cast<double> (stream->duration) * av_q2d (this->m_timeBase);
++	} else if (this->m_format->duration != AV_NOPTS_VALUE && this->m_format->duration > 0) {
++	    this->m_containerDuration = static_cast<double> (this->m_format->duration) / AV_TIME_BASE;
++	}
++    }
++
++    for (const auto& candidate : this->m_choice.candidates) {
++	if (this->openCodec (&candidate)) {
++	    break;
++	}
++    }
++    if (this->m_codec == nullptr && !this->openCodec (nullptr)) {
++	return false;
++    }
++    const char* name = avcodec_get_name (stream->codecpar->codec_id);
++    const auto ms = [] (std::chrono::steady_clock::duration d) {
++	return std::to_string (std::chrono::duration_cast<std::chrono::milliseconds> (d).count ());
++    };
++    this->say (
++	std::string ("video: ") + name + " " + std::to_string (stream->codecpar->width) + "x"
++	+ std::to_string (stream->codecpar->height) + " decodes on "
++	+ (this->m_device ? av_hwdevice_get_type_name (this->m_deviceType) : "the CPU")
++	+ (this->m_device ? (this->m_transfer ? " (frames copied to memory)" : " (frames to GL through the interop)") : "")
++	+ ", open in " + ms (std::chrono::steady_clock::now () - started) + " ms (its device " + ms (this->m_deviceTime)
++	+ " ms)"
++    );
++    this->m_packet = av_packet_alloc ();
++    return this->m_packet != nullptr;
++}
++
++bool VideoDecoder::openCodec (const HwdecChoice::Candidate* candidate) {
++    const AVCodecParameters* parameters = this->m_format->streams[this->m_stream]->codecpar;
++    const AVCodec* codec = nullptr;
++    AVPixelFormat hwFormat = AV_PIX_FMT_NONE;
++    if (candidate == nullptr) {
++	codec = avcodec_find_decoder (parameters->codec_id);
++	if (codec == nullptr) {
++	    this->say (std::string ("video: no decoder for ") + avcodec_get_name (parameters->codec_id));
++	    return false;
++	}
++    } else {
++	// the first decoder of the codec that can decode on this hardware: the preferred one may have none (libdav1d is
++	// AV1's, FFmpeg's own `av1` has the hwaccels)
++	void* at = nullptr;
++	while (hwFormat == AV_PIX_FMT_NONE && (codec = av_codec_iterate (&at)) != nullptr) {
++	    if (codec->id != parameters->codec_id || !av_codec_is_decoder (codec)) {
++		continue;
++	    }
++	    for (int i = 0;; i++) {
++		const AVCodecHWConfig* config = avcodec_get_hw_config (codec, i);
++		if (config == nullptr) {
++		    break;
++		}
++		if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && config->device_type == candidate->type) {
++		    hwFormat = config->pix_fmt;
++		    break;
++		}
++	    }
++	}
++	// no decoder of it has such hardware: the device isn't even opened
++	if (hwFormat == AV_PIX_FMT_NONE) {
++	    return false;
++	}
++    }
++    AVCodecContext* ctx = avcodec_alloc_context3 (codec);
++    if (ctx == nullptr || avcodec_parameters_to_context (ctx, parameters) < 0) {
++	avcodec_free_context (&ctx);
++	return false;
++    }
++    ctx->pkt_timebase = this->m_timeBase;
++    AVBufferRef* device = nullptr;
++    if (candidate != nullptr) {
++	const auto asked = std::chrono::steady_clock::now ();
++	device = acquireDevice (candidate->type);
++	this->m_deviceTime += std::chrono::steady_clock::now () - asked;
++	if (device == nullptr) {
++	    avcodec_free_context (&ctx);
++	    return false;
++	}
++	ctx->hw_device_ctx = av_buffer_ref (device);
++	ctx->opaque = this;
++	ctx->get_format = &VideoDecoder::pickFormat;
++	this->m_hwFormat = hwFormat;
++	// the hardware does the work: frame threads would only add frames of delay and surfaces
++	ctx->thread_count = 1;
++    } else {
++	ctx->thread_count = 0;
++    }
++    if (const int rc = avcodec_open2 (ctx, codec, nullptr); rc < 0) {
++	this->say (std::string ("video: ") + codec->name + " won't open"
++		   + (candidate ? std::string (" on ") + av_hwdevice_get_type_name (candidate->type) : "") + ": " + error (rc));
++	avcodec_free_context (&ctx);
++	if (device != nullptr) {
++	    av_buffer_unref (&device);
++	    releaseDevice (candidate->type);
++	}
++	this->m_hwFormat = AV_PIX_FMT_NONE;
++	return false;
++    }
++    this->m_codec = ctx;
++    if (candidate != nullptr) {
++	this->m_device = device;
++	this->m_deviceType = candidate->type;
++	this->m_transfer = !(candidate->zeroCopy && candidate->type == AV_HWDEVICE_TYPE_CUDA);
++    }
++    return true;
++}
++
++void VideoDecoder::run () {
++    pthread_setname_np (pthread_self (), "wp-video");
++    if (!this->open ()) {
++	std::lock_guard lock (this->m_mutex);
++	this->m_failed = true;
++	this->m_firstReady.notify_all ();
++	return;
++    }
++    int framesThisLoop = 0;
++    while (true) {
++	{
++	    std::unique_lock lock (this->m_mutex);
++	    this->m_wake.wait (lock, [this] {
++		if (this->m_stop || this->m_seekTo.has_value ()) {
++		    return true;
++		}
++		if (this->m_eof) {
++		    return false;
++		}
++		// frames still to come on the player's clock (a due one counts once: a newer one replaces it)
++		size_t ahead = 0;
++		for (const auto& [frame, time] : this->m_frames) {
++		    ahead += time > this->m_wanted ? 1 : 0;
++		}
++		return ahead < kAhead;
++	    });
++	    if (this->m_stop) {
++		return;
++	    }
++	    if (this->m_seekTo.has_value ()) {
++		const double to = *this->m_seekTo;
++		this->m_seekTo.reset ();
++		for (auto& [frame, time] : this->m_frames) {
++		    av_frame_free (&frame);
++		}
++		this->m_frames.clear ();
++		this->m_eof = false;
++		this->m_newest = to;
++		lock.unlock ();
++		this->doSeek (to);
++		framesThisLoop = 0;
++		continue;
++	    }
++	}
++	const int before = this->m_framesMade;
++	if (this->step ()) {
++	    framesThisLoop += this->m_framesMade - before;
++	    continue;
++	}
++	framesThisLoop += this->m_framesMade - before;
++	// the end of the input: every frame of this pass is out
++	if (framesThisLoop == 0) {
++	    this->say ("video: no frame decodes");
++	    std::lock_guard lock (this->m_mutex);
++	    this->m_failed = true;
++	    this->m_eof = true;
++	    this->m_firstReady.notify_all ();
++	    continue;
++	}
++	bool loop;
++	{
++	    std::lock_guard lock (this->m_mutex);
++	    loop = this->m_loop;
++	    if (this->m_frameLength <= 0.0 && this->m_lastTime >= 0.0) {
++		this->m_frameLength = this->m_lastTime - this->m_loopOffset + this->m_frameDuration;
++	    }
++	    if (!loop) {
++		this->m_eof = true;
++	    }
++	}
++	if (loop) {
++	    // the next pass's frames follow this one's last at the video's length: no gap, no repeat
++	    this->m_loopOffset += this->m_frameLength;
++	    av_seek_frame (this->m_format, this->m_stream, this->m_startPts, AVSEEK_FLAG_BACKWARD);
++	    avcodec_flush_buffers (this->m_codec);
++	    framesThisLoop = 0;
++	}
++    }
++}
++
++bool VideoDecoder::step () {
++    AVFrame* frame = av_frame_alloc ();
++    bool queued = false;
++    bool ended = false;
++    while (!queued && !ended) {
++	const int received = avcodec_receive_frame (this->m_codec, frame);
++	if (received == 0) {
++	    queued = this->deliver (frame);
++	    av_frame_unref (frame);
++	    continue;
++	}
++	if (received == AVERROR_EOF) {
++	    ended = true;
++	    break;
++	}
++	if (received != AVERROR (EAGAIN)) {
++	    // a frame that failed to decode: the next packet may still
++	    continue;
++	}
++	if (!this->m_packetPending) {
++	    const int read = av_read_frame (this->m_format, this->m_packet);
++	    if (read < 0) {
++		// the end of the input: drain what the decoder holds
++		avcodec_send_packet (this->m_codec, nullptr);
++		continue;
++	    }
++	    if (this->m_packet->stream_index != this->m_stream) {
++		av_packet_unref (this->m_packet);
++		continue;
++	    }
++	}
++	const int sent = avcodec_send_packet (this->m_codec, this->m_packet);
++	this->m_packetPending = sent == AVERROR (EAGAIN);
++	if (!this->m_packetPending) {
++	    av_packet_unref (this->m_packet);
++	}
++	{
++	    std::lock_guard lock (this->m_mutex);
++	    if (this->m_stop || this->m_seekTo.has_value ()) {
++		break;
++	    }
++	}
++    }
++    av_frame_free (&frame);
++    if (ended && this->m_discardBefore.has_value () && this->m_lastDiscarded != nullptr) {
++	// a seek past the last frame shows the last frame
++	this->m_discardBefore.reset ();
++	AVFrame* last = std::exchange (this->m_lastDiscarded, nullptr);
++	this->deliver (last);
++	av_frame_free (&last);
++    }
++    return !ended;
++}
++
++bool VideoDecoder::deliver (AVFrame* frame) {
++    int64_t pts = frame->best_effort_timestamp;
++    if (pts == AV_NOPTS_VALUE) {
++	pts = frame->pts;
++    }
++    double time = pts == AV_NOPTS_VALUE
++		    ? this->m_lastTime + this->m_frameDuration
++		    : static_cast<double> (pts - this->m_startPts) * av_q2d (this->m_timeBase) + this->m_loopOffset;
++    if (this->m_discardBefore.has_value () && time + this->m_frameDuration / 2 < *this->m_discardBefore) {
++	// before a seek's target: decoded for the frames that follow, kept only in case nothing does
++	if (this->m_lastDiscarded == nullptr) {
++	    this->m_lastDiscarded = av_frame_alloc ();
++	}
++	av_frame_unref (this->m_lastDiscarded);
++	av_frame_ref (this->m_lastDiscarded, frame);
++	this->m_lastTime = time;
++	return false;
++    }
++    this->m_discardBefore.reset ();
++    av_frame_free (&this->m_lastDiscarded);
++
++    AVFrame* out = av_frame_alloc ();
++    if (frame->format == this->m_hwFormat && this->m_transfer.load ()) {
++	if (const int rc = av_hwframe_transfer_data (out, frame, 0); rc < 0) {
++	    this->say ("video: a frame won't copy from the GPU: " + error (rc));
++	    av_frame_free (&out);
++	    return false;
++	}
++	av_frame_copy_props (out, frame);
++    } else {
++	av_frame_ref (out, frame);
++    }
++    this->m_lastTime = time;
++    this->m_framesMade++;
++    std::lock_guard lock (this->m_mutex);
++    // a frame already due replaces the due one before it: only the newest due frame is ever shown
++    if (!this->m_frames.empty () && this->m_frames.back ().second <= this->m_wanted && time <= this->m_wanted) {
++	av_frame_free (&this->m_frames.back ().first);
++	this->m_frames.pop_back ();
++    }
++    this->m_frames.emplace_back (out, time);
++    this->m_newest = time;
++    if (!this->m_gotFirst) {
++	this->m_gotFirst = true;
++	this->m_firstReady.notify_all ();
++    }
++    return true;
++}
++
++void VideoDecoder::doSeek (double seconds) {
++    const auto ts = this->m_startPts + static_cast<int64_t> (seconds / av_q2d (this->m_timeBase));
++    av_seek_frame (this->m_format, this->m_stream, ts, AVSEEK_FLAG_BACKWARD);
++    avcodec_flush_buffers (this->m_codec);
++    if (this->m_packetPending) {
++	av_packet_unref (this->m_packet);
++	this->m_packetPending = false;
++    }
++    this->m_loopOffset = 0.0;
++    this->m_lastTime = seconds - this->m_frameDuration;
++    this->m_discardBefore = seconds;
++}
++
++AVFrame* VideoDecoder::take (double time, bool first, double* frameTime) {
++    std::lock_guard lock (this->m_mutex);
++    this->m_wanted = time;
++    AVFrame* best = nullptr;
++    while (!this->m_frames.empty () && (this->m_frames.front ().second <= time + 1e-6 || (first && best == nullptr))) {
++	av_frame_free (&best);
++	best = this->m_frames.front ().first;
++	*frameTime = this->m_frames.front ().second;
++	this->m_frames.pop_front ();
++    }
++    this->m_wake.notify_one ();
++    return best;
++}
++
++bool VideoDecoder::waitFirst (std::chrono::milliseconds bound) {
++    std::unique_lock lock (this->m_mutex);
++    this->m_firstReady.wait_for (lock, bound, [this] { return this->m_gotFirst || this->m_failed.load (); });
++    return this->m_gotFirst;
++}
++
++void VideoDecoder::seek (double seconds) {
++    {
++	std::lock_guard lock (this->m_mutex);
++	this->m_seekTo = seconds;
++	this->m_wanted = seconds;
++	this->m_newest = seconds;
++    }
++    this->m_wake.notify_all ();
++}
++
++void VideoDecoder::setLoop (bool loop) {
++    std::lock_guard lock (this->m_mutex);
++    this->m_loop = loop;
++}
++
++void VideoDecoder::setTransfer () { this->m_transfer = true; }
++
++double VideoDecoder::duration () const {
++    std::lock_guard lock (this->m_mutex);
++    return this->m_frameLength > 0.0 ? this->m_frameLength : this->m_containerDuration;
++}
++
++bool VideoDecoder::ended () const {
++    std::lock_guard lock (this->m_mutex);
++    return this->m_eof && this->m_frames.empty ();
++}
++
++double VideoDecoder::newest () const {
++    std::lock_guard lock (this->m_mutex);
++    return this->m_newest;
++}
+diff --git a/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h
+new file mode 100644
+index 0000000..a9c35ac
+--- /dev/null
++++ b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h
+@@ -0,0 +1,143 @@
++#pragma once
++
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <cstdint>
++#include <deque>
++#include <filesystem>
++#include <mutex>
++#include <optional>
++#include <string>
++#include <thread>
++#include <vector>
++
++extern "C" {
++#include <libavcodec/avcodec.h>
++#include <libavformat/avformat.h>
++#include <libavutil/hwcontext.h>
++}
++
++namespace WallpaperEngine::VideoPlayback {
++/**
++ * The hardware a video may decode on, in the host's order (wp_context_set_video_hwdec takes mpv's `hwdec` names and
++ * `gpu-hwdec-interop`): `nvdec`/`cuda` decode on CUDA and hand frames to GL through the CUDA–GL interop when the
++ * interop is `cuda` (or unset, or `all`); `nvdec-copy`, `vaapi[-copy]`, `vulkan[-copy]`, `vdpau[-copy]` decode there and
++ * copy each frame to memory; `auto` is CUDA, VAAPI then Vulkan; `no` (or a list that runs out) is software.
++ */
++struct HwdecChoice {
++    struct Candidate {
++	AVHWDeviceType type;
++	bool zeroCopy;
++    };
++    std::vector<Candidate> candidates;
++
++    static HwdecChoice parse (const std::optional<std::string>& hwdec, const std::optional<std::string>& interop);
++};
++
++/**
++ * One video's demuxer and decoder on a thread of its own ("wp-video"), a few frames ahead of the player: every frame
++ * carries its time on the video's own clock, which runs on across loops (a loop's frames follow the last one's at
++ * the video's length, so looping is gapless). The player takes the newest frame due on its clock; a seek restarts the
++ * clock at the target. Every hardware device is shared by the process's decoders (HwDevices): one CUDA device on the
++ * GPU's primary context, whatever the number of videos.
++ */
++class VideoDecoder {
++public:
++    /** decodes `size` bytes at `data` (kept alive by the caller for the decoder's life) or `file` */
++    VideoDecoder (const uint8_t* data, size_t size, HwdecChoice choice);
++    VideoDecoder (std::filesystem::path file, HwdecChoice choice);
++    ~VideoDecoder ();
++
++    VideoDecoder (const VideoDecoder&) = delete;
++    VideoDecoder& operator= (const VideoDecoder&) = delete;
++
++    /**
++     * The newest decoded frame due at `time` (the caller owns it; the older ones are freed), or, while `first`, the
++     * first frame whatever its time. Null when none is due. `frameTime` gets its time
++     */
++    AVFrame* take (double time, bool first, double* frameTime);
++    /** waits up to `bound` for the first frame (or a failure); true when one is there */
++    bool waitFirst (std::chrono::milliseconds bound);
++    /** restarts decoding at `seconds` (the clock's new time) */
++    void seek (double seconds);
++    void setLoop (bool loop);
++    /** hardware frames reach the player copied to memory from now on (the interop failed) */
++    void setTransfer ();
++
++    /** the video's length in seconds: the container's, then the frames' own once a loop ended; 0 until known */
++    [[nodiscard]] double duration () const;
++    /** a video that doesn't loop decoded its last frame and the player took it */
++    [[nodiscard]] bool ended () const;
++    /** the thread gave up (nothing can open or decode the video) */
++    [[nodiscard]] bool failed () const { return this->m_failed.load (); }
++    /** the newest frame the thread has made, in time on the video's clock (seek targets count); -1 before any */
++    [[nodiscard]] double newest () const;
++    /** the decoder's hardware device (to copy CUDA frames with), null when software */
++    [[nodiscard]] AVBufferRef* device () const { return this->m_device; }
++    /** what the thread had to report (opened with what, errors), for the caller's log: the log isn't thread-safe */
++    std::vector<std::string> messages ();
++
++private:
++    void start ();
++    void run ();
++    bool open ();
++    bool openCodec (const HwdecChoice::Candidate* candidate);
++    /** decodes until a frame is queued, the end, a stop or a seek; false at the end of the input */
++    bool step ();
++    /** queues a decoded frame (false: discarded, before a seek's target) */
++    bool deliver (AVFrame* frame);
++    void doSeek (double seconds);
++    void say (std::string message);
++    static AVPixelFormat pickFormat (AVCodecContext* ctx, const AVPixelFormat* formats);
++
++    const uint8_t* m_data = nullptr;
++    size_t m_size = 0;
++    size_t m_position = 0;
++    std::filesystem::path m_file;
++    HwdecChoice m_choice;
++
++    AVFormatContext* m_format = nullptr;
++    AVIOContext* m_io = nullptr;
++    AVCodecContext* m_codec = nullptr;
++    AVPacket* m_packet = nullptr;
++    int m_stream = -1;
++    /** the device in use (shared: HwDevices) and its type, AV_HWDEVICE_TYPE_NONE for software */
++    AVBufferRef* m_device = nullptr;
++    AVHWDeviceType m_deviceType = AV_HWDEVICE_TYPE_NONE;
++    AVPixelFormat m_hwFormat = AV_PIX_FMT_NONE;
++    std::atomic<bool> m_transfer = false;
++    /** the stream's first timestamp and time base: frame times count from it */
++    int64_t m_startPts = 0;
++    AVRational m_timeBase { 1, 1 };
++    double m_frameDuration = 1.0 / 30.0;
++
++    /** the decode thread's own state: the clock offset of this loop, a seek's target, the last frame's time */
++    double m_loopOffset = 0.0;
++    std::optional<double> m_discardBefore;
++    double m_lastTime = -1.0;
++    AVFrame* m_lastDiscarded = nullptr;
++    bool m_packetPending = false;
++    /** time spent opening (or waiting for another decoder to open) hardware devices, for the open's log line */
++    std::chrono::steady_clock::duration m_deviceTime {};
++    int m_framesMade = 0;
++
++    mutable std::mutex m_mutex;
++    std::condition_variable m_wake;
++    std::condition_variable m_firstReady;
++    std::deque<std::pair<AVFrame*, double>> m_frames;
++    std::optional<double> m_seekTo;
++    /** the player's clock at its last take: frames up to it are due */
++    double m_wanted = 0.0;
++    bool m_stop = false;
++    bool m_loop = true;
++    bool m_eof = false;
++    bool m_gotFirst = false;
++    double m_newest = -1.0;
++    double m_containerDuration = 0.0;
++    double m_frameLength = 0.0;
++    std::vector<std::string> m_messages;
++    std::atomic<bool> m_failed = false;
++    std::thread m_thread;
++};
++} // namespace WallpaperEngine::VideoPlayback

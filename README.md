@@ -124,7 +124,7 @@ are known to crash on NVIDIA. Only the window needs Electron: the commands work 
 |---|---|---|---|
 | Rust (edition 2024) | `rust` | `cargo rustc` | `cargo rust` |
 | Native toolchain and headers | `base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang` | `build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev` | `gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel` |
-| Wallpaper Engine scenes (skip with `--no-scenes`) | `cmake git sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg mpv libglvnd` | `cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libmpv-dev libgl-dev` | `cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel mpv-libs-devel libglvnd-devel` |
+| Wallpaper Engine scenes (skip with `--no-scenes`) | `cmake git sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg libglvnd` | `cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libgl-dev` | `cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel libglvnd-devel` |
 | .NET 10 SDK | `dotnet-sdk` (10.x) | `dotnet-sdk-10.0` | `dotnet-sdk-10.0` |
 | Node.js and npm | `nodejs npm` | `nodejs npm` | `nodejs npm` |
 

@@ -93,8 +93,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - Hand LWE the texture upload context as a `gfx::ShareRecipe` (`lwe::Scene::set_upload_context`, looked up with
   `dlsym`): its `wp-tex-upload` thread makes the context, never the render thread (`docs/player/modules/scene-lwe-core.md`
   § Texture uploads).
-- Give the core the compositor's interop and `hwdec` (`wp_context_set_video_hwdec`; unset, mpv loads every interop) and
-  load libcuda first for `cuda`, or video textures take `vulkan-copy`. Its players share the GPU's primary CUDA context (libmpv's `cuda-primary-context`, `patches/mpv/`). Guards: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`, host_api_test `video_players_load_only_the_hosts_interop`, `video_players_share_one_cuda_context`.
+- Give the core the compositor's interop and `hwdec` (`wp_context_set_video_hwdec`, mpv's names: its FFmpeg decoder opens only the devices the list leads to) and
+  load libcuda first for `cuda`. A scene's videos share one CUDA device on the primary context and play on the scene clock (`docs/decisions.md` § Decode scene video textures with FFmpeg, not mpv). Guards: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`, host_api_test `video_players_load_only_the_hosts_interop`, `video_players_share_one_cuda_context`, `video_texture_plays_on_the_scene_clock`.
 - Give LWE the shader text cache dir `gfx::shader_cache::lwe_dir` (`wp_config_set_shader_cache_dir`,
   `docs/player/modules/scene-lwe-core.md` § Shader cache); keep it out of the user's cache in tests (`tests/common`
   sets `LIASCAPE_SCENE_SHADER_CACHE_DIR`) and on-machine scripts (their private dir). Guards:

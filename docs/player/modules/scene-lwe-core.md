@@ -39,17 +39,17 @@ and `patches/lwe/tests/host_api_test.cpp` stays C++.
   random file per start, `loop`/`random`/`single` modes, `volume²` live from user properties, the schedule on the
   host's render time (so it follows the worker's clock, speed and pause). `WPENGINE_SOUND_SEED` makes picks
   deterministic. The offline estimate models the same rules ([scene-loudness.md](scene-loudness.md)).
-- **Video textures** play in libmpv (`GLPlayer`), muted with no audio track (`aid=no`), so they open no audio
-  output: one that can't connect holds mpv's core thread 20–30 s in its cleanup. The render thread takes the frame
-  size from observed properties and never calls `mpv_get_property` while drawing, since a get waits for that thread.
-  The worker gives the core the compositor's interop (`hwdec_interop_for`) and `hwdec` list (`mpv_hwdec`), or `no`
-  with copy modes (`wp_context_set_video_hwdec`; unset, mpv tries every interop). On NVIDIA it loads libcuda first (a
-  nixpkgs libmpv can't find it), so videos decode with nvdec via the CUDA interop. Every player asks libmpv for
-  `cuda-primary-context` (`patches/mpv/`): all share the primary CUDA context (160 MiB a worker), a 1080p video
-  adds ~115 MiB; a stock libmpv refuses it (one each). 3426575339 (two 1080p videos) shared / not: 742 / 906
-  MiB, `source.ready` warm ~285 / ~410 ms, complete picture ~405 / ~470 ms. The worker quits with `_exit` (libcuda's
-  exit handler frees the context under the decoders). Without libcuda: `vulkan-copy` (~120 MiB), black ~0.75 s
-  after the first frame.
+- **Video textures** decode with FFmpeg (a `wp-video` thread each, no audio) into their texture through one
+  YUV → RGB draw (`GLPlayer`). They play on the scene clock (the context's render time: the host's speed and pauses),
+  loop without a gap and keep IVideoTexture's controls. Decoding starts as the build creates the texture and a
+  player's first render waits ≤ 500 ms for its first frame, so the first picture shows the videos. The worker gives
+  the core the compositor's interop (`hwdec_interop_for`) and `hwdec` list (`mpv_hwdec`), or `no` with copy modes
+  (`wp_context_set_video_hwdec`); the core opens only the devices the list leads to, once per process: CUDA on the
+  GPU's primary context, shared by every video. With the `cuda` interop a CUDA frame reaches the plane textures on the
+  GPU (`cuGraphicsGLRegisterImage`, libcuda by soname: the worker loads it first, `cuInit` beside the build); other
+  hardware frames go through memory, a stream the hardware refuses decodes in software. 3426575339 (two 1080p
+  videos): 446 MiB, `source.ready` ~290 ms with both videos in it. The worker quits with `_exit` (libcuda's exit
+  handler frees the context under the decoder threads).
 - **Scripts.** Property scripts and SceneScript run in LWE's QuickJS. Wallpaper Engine's own JS classes are read at
   run time from the assets dir (`scripts/jsclasses/`, `scripts/jsmodules/`) and must never be copied into the repo
   or the fork.
@@ -146,8 +146,7 @@ what it added (`fonts: aliases added; …`) and each stand-in (`fonts: Consolas 
 
 - `liascape-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--prop
   name=value]… [--prop-at T name=value]… [--pointer X0,Y0:X1,Y1] [--tone HZ]` renders LWE's core alone offscreen at
-  30 fps of scene time, paced to the wall clock (libmpv decodes video textures in real time; unpaced runs showed
-  them black), writes upright PNGs and one JSON line (load/build ms, frame ms, lit and changed pixels, GL error,
+  30 fps of scene time, paced to the wall clock (video textures decode beside the render), writes upright PNGs and one JSON line (load/build ms, frame ms, lit and changed pixels, GL error,
   audio streams and peak), exit 0 = rendered and animating. It also writes `<out>/health.json`.
 - **Health report** (`WPENGINE_HEALTH=<path>`, fork patches): off unless set (one relaxed atomic load per call site).
   On, the core appends JSON lines naming what a scene silently loses — dropped objects and effects, shader errors

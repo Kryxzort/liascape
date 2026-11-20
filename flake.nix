@@ -24,8 +24,7 @@
         ffmpeg # /still thumbnail decode + frozen-frame grabs
         mpvpaper # video wallpapers (spawned via setsid)
         linux-wallpaperengine # Wallpaper Engine scene playback
-        # still frames; the patched libmpv below, whose lib/ a devShell build would otherwise find before ours
-        (mpv.override { inherit mpv-unwrapped; })
+        mpv # mpvpaper dep + still frames
         libsecret # secret-tool: the Steam sign-in in the system keyring (Helpers/SecretStore.cs; no keyring → a 0600 file)
       ];
 
@@ -81,14 +80,6 @@
         }).corefonts;
       fontDirs = fonts: lib.concatMapStringsSep ":" (p: "${p}/share/fonts") fonts;
 
-      # libmpv for the player and the scene core: nixpkgs' mpv with patches/mpv/ on top. `--cuda-primary-context` lets
-      # every video player in a process share the GPU's one primary CUDA context instead of making its own (160 MiB
-      # each on an RTX 3070 Ti): a scene's video textures (docs/decisions.md § Share one CUDA context across a scene's
-      # videos by patching mpv). Every libmpv user here takes this one, so a process never loads two libmpv builds.
-      mpv-unwrapped = pkgs.mpv-unwrapped.overrideAttrs (old: {
-        patches = (old.patches or [ ]) ++ [ ./patches/mpv/0001-hwdec_cuda-add-cuda-primary-context.patch ];
-      });
-
       # 1) React UI → static dist/.
       ui = pkgs.buildNpmPackage {
         pname = "liascape-ui";
@@ -132,7 +123,7 @@
         buildInputs = [
           pkgs.wayland # wayland-client + wayland-egl
           pkgs.libGL # egl + glesv2 (libglvnd)
-          mpv-unwrapped # libmpv render API
+          pkgs.mpv # libmpv render API
         ];
         installPhase = ''
           runHook preInstall
@@ -189,8 +180,8 @@
           pkgs.lz4
           pkgs.zlib
           pkgs.libGL
+          # video textures: demux and decode (with NVDEC / VAAPI / Vulkan), the CUDA frames' device
           pkgs.ffmpeg
-          mpv-unwrapped
         ];
         cmakeFlags = [
           "-DWPBUILD_CORE=ON"
@@ -231,7 +222,7 @@
           pkgs.makeWrapper
         ];
         buildInputs = [
-          mpv-unwrapped
+          pkgs.mpv-unwrapped
           pkgs.wayland
           pkgs.libGL
           pkgs.libxkbcommon
@@ -327,7 +318,6 @@
           lwe-core
           liascape-player
           liascape
-          mpv-unwrapped
           ;
         default = liascape;
       };

@@ -72,7 +72,7 @@ cmd_deps() {
     command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || missing="$missing c++"
     command -v git >/dev/null 2>&1 || missing="$missing git"
     if command -v pkg-config >/dev/null 2>&1; then
-        for p in sdl2 freetype2 fontconfig harfbuzz liblz4 zlib libavformat libavcodec libswresample libswscale libavutil mpv gl; do
+        for p in sdl2 freetype2 fontconfig harfbuzz liblz4 zlib libavformat libavcodec libswresample libswscale libavutil gl; do
             pkg-config --exists "$p" 2>/dev/null || missing="$missing ${p}(dev)"
         done
         # glm is header-only; it ships a CMake config (and on some distros a .pc)
@@ -91,9 +91,9 @@ cmd_deps() {
         cat >&2 <<MSG
 ERROR: missing build dependencies for Wallpaper Engine scenes (LWE core):$missing
   Install them and re-run, or pass --no-scenes to build without scene support:
-    Arch:   sudo pacman -S cmake git sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg mpv libglvnd
-    Debian: sudo apt install cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libmpv-dev libgl-dev
-    Fedora: sudo dnf install cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel mpv-libs-devel libglvnd-devel
+    Arch:   sudo pacman -S cmake git sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg libglvnd
+    Debian: sudo apt install cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libgl-dev
+    Fedora: sudo dnf install cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel libglvnd-devel
     NixOS:  use the flake instead — 'nix run github:Kryxzort/liascape' (all deps handled)
 MSG
         return 1
@@ -192,7 +192,7 @@ cmd_test() {
     mkdir -p "$ROOT/build"
     c++ -std=c++20 -O1 -g -Wall "$PATCH_DIR/tests/host_api_test.cpp" \
         -I"$CORE/include" -L"$CORE/lib" -llinux-wallpaperengine-core -Wl,-rpath,"$CORE/lib" \
-        $(pkg-config --cflags --libs sdl2 egl liblz4) -o "$out"
+        $(pkg-config --cflags --libs sdl2 egl liblz4 libavcodec libavutil) -o "$out"
     local empty nv rc=0
     empty="$(mktemp -d)"
     # NVIDIA's shader cache of the test's own: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one, and
