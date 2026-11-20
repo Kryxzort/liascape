@@ -339,9 +339,10 @@ mpv reports no time remaining around a load; breaking after 500 ms switched scen
 WE starts the last pointer at 0 0, so its first frame strokes cursor effects from the top-left corner; ours jumps.
 Kept by the owner: a WE quirk. `scene_fps_quirks.py` cancels it with a parked pointer.
 
-### Share one CUDA context across a scene's videos by patching mpv — 2026-11-20
-libmpv made a CUDA context per player (160 MiB each). Owner's call: patch mpv (`--cuda-primary-context`, as FFmpeg's
-`primary_ctx`), not a libcuda shim (driver-tied) or copy decoding (CPU, late videos).
+### Decode scene video textures with FFmpeg, not mpv — 2026-11-20
+Owner's call, over an mpv patch only the flake could ship: FFmpeg's `primary_ctx` (stock everywhere) gives a scene's
+videos one CUDA context on every install; the player keeps mpv. Rejected: a libcuda shim, copy decoding.
+
 ### Scene fonts come from fontconfig, not a Windows install — 2026-11-18
 Owner's call: `systemfont_consolas` asks fontconfig for Consolas like any app.
 Microsoft's fonts pass on only inside their installers (Consolas, Segoe UI never): nothing ships or reads them from a

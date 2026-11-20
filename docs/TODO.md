@@ -45,11 +45,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-104. [ ] (owner) Offer `patches/mpv/0001` (`--cuda-primary-context`: a process's players share the GPU's primary CUDA
-       context) to mpv upstream. Until a release nixpkgs ships has it, only the flake shares a scene's CUDA context:
-       install.sh, the PKGBUILD and the AppImage link the system's stock libmpv, which refuses the option, so each scene
-       video texture keeps its own (160 MiB on an RTX 3070 Ti). If that wait is too long, install.sh could build and
-       bundle the patched libmpv for the scene worker (mpv's meson build and its deps on every distro).
+104. [ ] (owner, 2026-11-20: FFmpeg) The fork decodes scene video textures with FFmpeg directly instead of libmpv
+       (`docs/decisions.md` § Decode scene video textures with FFmpeg, not mpv): demux + hw decode on the host's
+       hwdec choice (`wp_context_set_video_hwdec`: CUDA with `primary_ctx` so a scene's videos share the GPU's primary
+       context; VAAPI / Vulkan / software elsewhere), frames to GL textures (CUDA–GL interop or upload), gapless loop on
+       the scene clock, mute. Bar to match or beat (3426575339, flake build with today's mpv patch): worker 742 MiB,
+       `source.ready` warm/cold 286/382 ms, complete picture 407/483 ms, 0 black loads; guards
+       `video_players_share_one_cuda_context`, `real_scene_worker_loads_libcuda_for_video_textures`. Then delete
+       `patches/mpv/`, the flake's mpv override and the `cuda-primary-context` code, and the mpv section of UPSTREAM.md.
 106. [ ] With the spare scene worker, 4 of 10 cold loads of 3163060610 took 2.8, 4.2, 11.8 and 38 s (the adopted
        worker stayed inside its load, no crash or restart) and 12 + 6 reruns didn't reproduce it
        (`docs/player/reports/scene-load-we.md`). `scene_load_we.py` now records the worker's load/build split and the
