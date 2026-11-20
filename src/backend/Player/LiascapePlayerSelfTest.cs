@@ -747,6 +747,8 @@ public static class LiascapePlayerSelfTest
         Vis("clock.value && style.value == 2", false, off);
         Vis("sds.value && (clock.value || date.value)", false, off);
 
+        PresetLayerAssertions(fails, props);
+
         // legacy launch args, only for overrides that name an editable property
         var dir = Path.Combine("/tmp", "lpst-props-" + Guid.NewGuid().ToString("N")[..8]);
         try
@@ -791,6 +793,64 @@ public static class LiascapePlayerSelfTest
             }
         }
         Console.WriteLine($"scene properties corpus: {scenes} project.json, {n} properties, {conds} conditions — all parsed");
+    }
+
+    // ---- a preset's values layered over its base scene's properties (pure: WithPreset, PlayerMap over a list) -----------
+    private static void PresetLayerAssertions(List<string> fails, List<SceneProp> scene)
+    {
+        static JsonElement J(string json) => JsonDocument.Parse(json).RootElement;
+        static Dictionary<string, JsonElement> Vals(params (string Name, string Json)[] v) =>
+            v.ToDictionary(x => x.Name, x => J(x.Json));
+        string D(List<SceneProp> ps, string n) => ps.FirstOrDefault(p => p.Name == n)?.Default?.ToJsonString() ?? "missing";
+        string SD(List<SceneProp> ps, string n) => ps.FirstOrDefault(p => p.Name == n)?.SceneDefault?.ToJsonString() ?? "missing";
+        string Map(List<SceneProp> ps, Dictionary<string, JsonElement>? ov = null, Dictionary<string, JsonElement>? tr = null) =>
+            JsonSerializer.Serialize(SceneProperties.PlayerMap(ps, ov, tr));
+        string sceneBefore = string.Join(",", scene.Select(p => $"{p.Name}={p.Default?.ToJsonString()}"));
+
+        // the preset's values become the defaults; the scene's own stay beside them
+        var a = SceneProperties.WithPreset(scene, Vals(("schemecolor", "\"0 0 1\""), ("clock", "false")));
+        if (D(a, "schemecolor") != "\"0 0 1\"" || SD(a, "schemecolor") != "\"0.5 0.25 1\"")
+            fails.Add($"WithPreset schemecolor: default {D(a, "schemecolor")} scene default {SD(a, "schemecolor")}, want \"0 0 1\" / \"0.5 0.25 1\"");
+        if (D(a, "clock") != "false" || SD(a, "clock") != "true")
+            fails.Add($"WithPreset clock: default {D(a, "clock")} scene default {SD(a, "clock")}, want false / true");
+        if (D(a, "name") != "\"YOURNAME\"" || SD(a, "name") != "\"YOURNAME\"")
+            fails.Add($"WithPreset name (no preset value): default {D(a, "name")} scene default {SD(a, "name")}, want the scene's \"YOURNAME\" for both");
+        if (string.Join(",", a.Select(p => p.Name)) != string.Join(",", scene.Select(p => p.Name)))
+            fails.Add("WithPreset must keep the base's properties, in its order");
+        if (string.Join(",", scene.Select(p => $"{p.Name}={p.Default?.ToJsonString()}")) != sceneBefore)
+            fails.Add("WithPreset changed the base scene's own list (it is ForItem's cached copy, shared with the base's card)");
+        if (scene.FirstOrDefault(p => p.Name == "schemecolor") is { } sc && sc.SceneDefault?.ToJsonString() != sc.Default?.ToJsonString())
+            fails.Add("a plain scene's SceneDefault must be its Default");
+        // its conditions see the preset's values: `style` shows only while `clock` is on
+        if (SceneProperties.Visible(a.First(p => p.Name == "style").Condition, SceneProperties.Effective(a, null)))
+            fails.Add("under the preset (clock false) `style` must be hidden");
+
+        // values saved against an older base: a name it no longer has, a value its type refuses, a combo option gone, a
+        // value of another JSON type (a number for a bool), WE's own settings — each dropped alone, the rest applied
+        var b = SceneProperties.WithPreset(scene, Vals(("gone", "1"), ("clock", "\"notabool\""), ("style", "\"9\""),
+            ("opacity", "0.5"), ("_d0", "null"), ("wec_brs", "50"), ("alignmentx", "50"), ("rate", "100")));
+        if (D(b, "clock") != "true" || D(b, "style") != "\"2\"" || D(b, "opacity") != "0.5")
+            fails.Add($"WithPreset stale values: clock {D(b, "clock")} style {D(b, "style")} opacity {D(b, "opacity")}, want true / \"2\" / 0.5");
+        if (b.Any(p => p.Name is "gone" or "_d0" or "wec_brs" or "alignmentx" or "rate") || b.Count != scene.Count)
+            fails.Add("WithPreset must never add a property the base doesn't define");
+        if (D(SceneProperties.WithPreset(scene, Vals(("clock", "0"))), "clock") != "true")
+            fails.Add("WithPreset: a number for a bool property (its type changed) must be dropped, not read as false");
+
+        // a slider beyond its range is clamped like a user's value (64 is also the scene's default: 3 → 16 proves it applied)
+        if (D(SceneProperties.WithPreset(scene, Vals(("bars", "999"))), "bars") != "64"
+            || D(SceneProperties.WithPreset(scene, Vals(("bars", "3"))), "bars") != "16")
+            fails.Add($"WithPreset bars 999 → {D(SceneProperties.WithPreset(scene, Vals(("bars", "999"))), "bars")}, 3 → "
+                + $"{D(SceneProperties.WithPreset(scene, Vals(("bars", "3"))), "bars")}; want 64 and 16 (clamped)");
+
+        // the player's map: scene defaults never sent → the preset's values → the card's tweaks → a drag's transient value
+        var c = SceneProperties.WithPreset(scene, Vals(("schemecolor", "\"0 0 1\""), ("clock", "false"), ("opacity", "0.85")));
+        void M(string what, string got, string want) { if (got != want) fails.Add($"PlayerMap {what} = {got}, want {want}"); }
+        M("of a plain scene, no overrides", Map(scene), "{}");
+        M("of a preset", Map(c), "{\"clock\":false,\"schemecolor\":[0,0,1]}"); // opacity = the scene's own: not sent
+        M("of a preset + the card's tweak", Map(c, Vals(("clock", "true"))), "{\"clock\":true,\"schemecolor\":[0,0,1]}");
+        M("of a preset + a tweak + a drag", Map(c, Vals(("clock", "true")), Vals(("schemecolor", "\"0 1 0\""))),
+            "{\"clock\":true,\"schemecolor\":[0,1,0]}");
+        M("of a preset + a refused tweak", Map(c, Vals(("clock", "\"maybe\""))), "{\"clock\":false,\"schemecolor\":[0,0,1]}");
     }
 
     // ---- next/prev/random's scene-skip decision point -----------------------------------------

@@ -36,8 +36,8 @@ public static class SceneLoudnessPlanner
         return null;
     }
 
-    // The item's user properties as the player gets them (`scene_props`) and a key that changes with them (a queued
-    // estimate whose props changed meanwhile is stored but never made current — SceneLoudnessOps).
+    // The item's user properties as the player gets them (`scene_props`; a preset's merged map) and a key that changes
+    // with them (a queued estimate whose props changed meanwhile is stored but never made current — SceneLoudnessOps).
     public static (string Json, string Key) PropsOf(string scenePath, LibMeta? m)
     {
         var map = SceneProperties.PlayerMap(scenePath, m?.SceneProps);
@@ -46,14 +46,22 @@ public static class SceneLoudnessPlanner
     }
 
     // Estimate `scenePath` under its current props (read from the index now). null + `error` on failure (not a scene,
-    // a half-downloaded folder, no binary, a killed child). `ct` kills the child.
+    // a half-downloaded folder, a preset that can't play, no binary, a killed child). `ct` kills the child.
+    // A preset is its own item: the estimator reads its base scene's folder with the preset's own merged map, and the plan
+    // is the preset's (stored under its path, its configuration), never the base's. Guard: scripts/test-presets.sh § 2 loudness
     public static Plan? Estimate(string scenePath, bool background, CancellationToken ct, out string? error)
     {
         error = null;
+        var load = Presets.LoadDirOf(scenePath);
+        if (load == null && Presets.StatusOf(scenePath, liascapePlayer: true).Reason is { Length: > 0 } why)
+        {
+            error = char.ToLowerInvariant(why[0]) + why[1..];
+            return null;
+        }
         var bin = PlayerEngine.ResolveBinary();
         if (bin == null) { error = "liascape-player not found"; return null; }
         var (props, key) = PropsOf(scenePath, LibraryStore.GetMeta(scenePath));
-        var dir = Path.GetFullPath(scenePath).TrimEnd('/');
+        var dir = Path.GetFullPath(load ?? scenePath).TrimEnd('/');
         ProcessStartInfo psi;
         lock (typeof(SceneLoudnessPlanner))
         {

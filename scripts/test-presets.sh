@@ -7,6 +7,11 @@
 #     its reason when it can't play (no base, a malformed preset file, a base that is a preset / a video / a web
 #     wallpaper, the legacy engine); the WE auto-import brings presets in only with scene support on; trashing a preset
 #     leaves its base alone.
+#  2. layered properties (SceneProperties): a preset's sidebar lists its base's properties with the preset's values as
+#     their defaults (conditions read them too); the card's own tweaks go to the preset's index entry only (a tweak equal
+#     to the preset's value drops, Reset returns to it); the base's tweaks never reach the preset or the other way round;
+#     no base → no properties and a tweak is refused. Loudness per item: a preset's offline estimate runs on its base's
+#     folder with its merged map and lands under its own path (the stub player answers `scene-loudness`).
 # Runs in its own network namespace (`unshare -rn`) with a temp HOME + XDG dirs and a private backend whose Steam servers
 # are an empty fixture (LIASCAPE_STEAM_CM_FIXTURE) and which refuses every real server (LIASCAPE_TEST_NO_NETWORK=1). The
 # engine is liascape-player through a stub binary that never runs (nothing is played here); the base scene is synthetic.
@@ -54,8 +59,18 @@ export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 export LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
 echo '{}' > "$LIASCAPE_STEAM_CM_FIXTURE"
-# the engine is liascape-player (presets play only there), its binary a stub: nothing here ever plays
-mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+# the engine is liascape-player (presets play only there), its binary a stub: nothing here ever plays. Once
+# $T/stub-loudness exists it answers `scene-loudness <dir> --props <json>` (the offline estimate) with a fingerprint of
+# exactly what it was given and logs the call in $T/loudness-calls
+mkdir -p "$T/bin"
+cat > "$T/bin/liascape-player" <<EOF
+#!/bin/sh
+[ "\$1" = scene-loudness ] && [ -e "$T/stub-loudness" ] || exit 1
+printf '%s %s\n' "\$2" "\$4" >> "$T/loudness-calls"
+printf '{"fingerprint":"fp-%s","lufs":-20,"peak_dbfs":-3,"model":"stub"}\n' "\$(printf '%s %s' "\$2" "\$4" | sha1sum | cut -c1-12)"
+EOF
+chmod +x "$T/bin/liascape-player"
+stubfp() { echo "fp-$(printf '%s %s' "$1" "$2" | sha1sum | cut -c1-12)"; }   # $1 = dir, $2 = props: the stub's fingerprint
 export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
@@ -253,6 +268,71 @@ check "the engine is legacy" "$(api "$U/player-engine" | jq -r .active)" legacy
 check "a preset whose base is here → the legacy reason" "$(pf "$P1" '[.isPreset, .presetReason, .basePath]')" "[true,\"Presets play only in the Liascape player\",\"$LIB/workshop/900000001\"]"
 check "…a missing base still says so first" "$(pf "$LIB/workshop/3009121253" '.presetReason')" '"Needs its base scene"'
 check "…a malformed one too" "$(pf "$LIB/workshop/910000201" '.presetReason')" '"Its preset file names no base scene"'
+stopbe
+
+# ---- 2. layered properties --------------------------------------------------------------------------------------------
+jqset "$SETTINGS" '.PlayerEngine = "liascape-player"'
+startbe
+check "§ 2 runs under liascape-player" "$(api "$U/player-engine" | jq -r .active)" liascape-player
+BASE=$LIB/workshop/900000001
+props() { api "$U/library/scene-props?path=$(jq -rn --arg p "$1" '$p|@uri')"; }
+prop() { props "$1" | jq -c --arg n "$2" '.props[] | select(.name == $n) | '"$3"; }
+setp() { api -o "$T/body" -w '%{http_code}' -X POST "$U/library/scene-props" -d "$(jq -nc --arg p "$1" --arg n "$2" --argjson v "$3" '{path: $p, name: $n, value: $v}')"; }
+resetp() { api -o "$T/body" -w '%{http_code}' -X POST "$U/library/scene-props" -d "$(jq -nc --arg p "$1" --arg n "$2" '{path: $p, name: $n, reset: true}')"; }
+sp() { jq -c --arg k "$2" '.[$k].sceneProps // null' "$LIB/$1/index.json"; }   # $1 = source, $2 = key
+
+echo "== 2. layered properties: the base's properties, the preset's values as their defaults, the card's own tweaks"
+check "the preset lists its base's properties, in its base's order" "$(props "$P1" | jq -c '[.props[].name]')" '["color","clock","style"]'
+check "…color: the preset's value is the default and the value, not overridden" \
+  "$(prop "$P1" color '[.default, .value, .overridden]')" '["0 0 1","0 0 1",false]'
+check "…clock: the preset's false" "$(prop "$P1" clock '[.default, .value]')" '[false,false]'
+check "…style hidden (its condition reads the preset's clock)" "$(prop "$P1" style '.visible')" false
+check "the base keeps its own defaults" "$(prop "$BASE" color '[.default, .value]') $(prop "$BASE" style '.visible')" '["1 0 0","1 0 0"] true'
+check "a tweak on the preset → 200, saved on the preset only" \
+  "$(setp "$P1" color '"0 1 0"') $(sp workshop 910000101) $(sp workshop 900000001)" '200 {"color":"0 1 0"} null'
+check "…the preset's value stays the default, the tweak is the value" "$(prop "$P1" color '[.default, .value, .overridden]')" '["0 0 1","0 1 0",true]'
+check "a tweak equal to the preset's value drops the key" "$(setp "$P1" color '"0 0 1"') $(sp workshop 910000101)" '200 null'
+setp "$P1" color '"0 1 0"' >/dev/null
+check "reset → back to the preset's value, the key gone" \
+  "$(resetp "$P1" color) $(sp workshop 910000101) $(prop "$P1" color '[.value, .overridden]')" '200 null ["0 0 1",false]'
+check "a tweak of the base's own color → the preset's view unchanged" \
+  "$(setp "$BASE" color '"1 1 0"') $(prop "$P1" color '[.default, .value]') $(sp workshop 910000101)" '200 ["0 0 1","0 0 1"] null'
+check "…the base's tweak against the scene's own default" "$(prop "$BASE" color '[.default, .value]') $(sp workshop 900000001)" '["1 0 0","1 1 0"] {"color":"1 1 0"}'
+check "a tweak of the preset's clock → the base's view unchanged" \
+  "$(setp "$P1" clock true) $(prop "$BASE" clock '[.default, .value]') $(prop "$P1" style '.visible') $(sp workshop 900000001)" \
+  '200 [true,true] true {"color":"1 1 0"}'
+resetp "$P1" clock >/dev/null; resetp "$BASE" color >/dev/null
+check "WE's own settings in a preset (_d0, alignment*, rate, wec_*) never list; the base's list is what shows" \
+  "$(props "$LIB/workshop/900000009" | jq -c '[.props[] | [.name, .default]]')" '[["color","1 1 0"],["clock",true],["style","1"]]'
+check "a preset whose base is missing → no properties" "$(props "$LIB/workshop/3009121253" | jq -c '.props')" '[]'
+check "…a tweak on it → 400, nothing saved" "$(setp "$LIB/workshop/3009121253" color '"0 1 0"') $(sp workshop 3009121253)" '400 null'
+
+echo "== 2. loudness per item: a preset is estimated on its base's folder with its own map, stored under its own path"
+NOBASE=$LIB/workshop/3009121253
+fp() { jq -r --arg k "$2" '.[$k].sceneLoudnessFp // "none"' "$LIB/$1/index.json"; }
+estimate() {   # queue these items (force) and wait for the queue to finish
+  api -X POST "$U/library/scene-loudness/estimate" -d "$(jq -nc '{paths: $ARGS.positional, force: true}' --args "$@")" >/dev/null
+  for _ in $(seq 1 100); do [ "$(api "$U/library/scene-loudness/status" | jq -r .running)" = false ] && break; sleep 0.1; done
+}
+: > "$T/stub-loudness"; : > "$T/loudness-calls"
+estimate "$P1" "$P2" "$BASE" "$NOBASE"
+check "the estimator ran on the base's folder for each: the base {}, preset one its values, preset two its value" \
+  "$(sort "$T/loudness-calls" | tr '\n' '|')" \
+  "$(printf '%s\n' "$BASE {\"clock\":false,\"color\":[0,0,1]}" "$BASE {\"color\":[0,1,0]}" "$BASE {}" | sort | tr '\n' '|')"
+check "each stored under its own path, its own configuration" \
+  "$(fp workshop 910000101) $(fp workshop 910000102) $(fp workshop 900000001)" \
+  "$(stubfp "$BASE" '{"clock":false,"color":[0,0,1]}') $(stubfp "$BASE" '{"color":[0,1,0]}') $(stubfp "$BASE" '{}')"
+check "a preset whose base is missing: not estimated, with the reason" \
+  "$(fp workshop 3009121253) $(api "$U/library/scene-loudness/status" | jq -c --arg p "$NOBASE" '[.failed[] | select(.path == $p) | .error]')" \
+  'none ["needs its base scene"]'
+: > "$T/loudness-calls"
+setp "$P1" color '"0 1 0"' >/dev/null
+want=$(stubfp "$BASE" '{"clock":false,"color":[0,1,0]}')
+for _ in $(seq 1 100); do [ "$(fp workshop 910000101)" = "$want" ] && break; sleep 0.1; done
+check "a tweak on the preset re-plans it with the merged map (the base's own configuration unchanged)" \
+  "$(cat "$T/loudness-calls") $(fp workshop 910000101) $(fp workshop 900000001)" \
+  "$BASE {\"clock\":false,\"color\":[0,1,0]} $want $(stubfp "$BASE" '{}')"
+resetp "$P1" color >/dev/null
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

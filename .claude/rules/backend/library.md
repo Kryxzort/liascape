@@ -51,6 +51,12 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - Parse defensively: skip anything malformed, never throw. Render labels as plain text (strip HTML), never as HTML.
 - `Visible(condition, values)`: an unevaluable condition → shown.
 - Under legacy they are launch-only (`--set-property`); under liascape-player live (`SceneProperties.PlayerMap`).
+- A preset: scene defaults → preset values → the card's tweaks. `ForItem(<preset>)` = its base's properties with the
+  preset's values as their `Default` (`WithPreset`: only a value of the type's saved JSON kind that `Coerce` accepts;
+  the rest drop alone) and the scene's own as `SceneDefault`; its tweaks live in the preset's own `SceneProps` (equal to
+  the preset's value → dropped). `PlayerMap` sends the preset's values, never the scene's defaults. Its loudness is its
+  own: estimated on the base's folder with that merged map, stored under the preset's path (`SceneLoudnessPlanner.Estimate`).
+  Guard: `scripts/test-presets.sh` § 2.
 
 ## Presets (Wallpaper Engine's format, from real Workshop items)
 - Recognise a preset by its `project.json`: no `type` key, a `preset` object and a `dependency`; never by `type` (WE

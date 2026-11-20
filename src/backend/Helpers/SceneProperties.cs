@@ -23,7 +23,10 @@ namespace Liascape.Helpers;
 // text (and a missing / "Text" type — HTML labels) and group are labels; scenetexture / file / directory
 // need a file picker and usershortcut is a Windows app launcher — listed as not editable. `condition`
 // (a JS expression over `<name>.value`) decides visibility, evaluated like WE's JS (loose ==, truthiness).
-public sealed class SceneProp
+//
+// A preset (.claude/rules/backend/library.md § Presets) has its base scene's properties with the preset's values as their
+// defaults (`WithPreset`); the card's own overrides layer on top. Everything below then works on its path unchanged.
+public sealed record SceneProp
 {
     public string Name { get; init; } = "";
     public string Type { get; init; } = "";      // lowercased; "text" for an untyped/"Text" label
@@ -32,7 +35,10 @@ public sealed class SceneProp
     public string? Condition { get; init; }
     public bool Editable { get; init; }
     public string? Unsupported { get; init; }    // why an input-ish type can't be edited here
-    public JsonNode? Default { get; init; }      // WE encoding; null for labels
+    public JsonNode? Default { get; init; }      // WE encoding; null for labels; a preset's value when it set one
+    // the base scene's own default (what LWE loads by itself): = Default, except on a preset's property
+    public JsonNode? SceneDefault { get => _sceneDefault ?? Default; init => _sceneDefault = value; }
+    private readonly JsonNode? _sceneDefault;
     public double? Min { get; init; }
     public double? Max { get; init; }
     public double? Step { get; init; }
@@ -54,8 +60,10 @@ public static class SceneProperties
     private static readonly Dictionary<string, (DateTime Mtime, long Size, List<SceneProp> Props)> _cache = new();
     private static readonly object _cacheLock = new();
 
+    // An item folder's properties: a scene's own; a preset's = its base scene's with the preset's values (`ForPreset`).
     public static List<SceneProp> ForItem(string sceneDir)
     {
+        if (Presets.Read(sceneDir) is { } preset) return ForPreset(sceneDir, preset);
         var file = Path.Combine(sceneDir, "project.json");
         FileInfo fi;
         try { fi = new FileInfo(file); if (!fi.Exists) return []; } catch { return []; }
@@ -66,6 +74,56 @@ public static class SceneProperties
         lock (_cacheLock) _cache[file] = (fi.LastWriteTimeUtc, fi.Length, props);
         return props;
     }
+
+    // preset project.json → its state, its base's project.json (path + state) when merged, and the merge
+    private static readonly Dictionary<string, (DateTime Mtime, long Size, string BaseFile, DateTime BaseMtime, long BaseSize,
+        List<SceneProp> Props)> _presetCache = new();
+
+    // The base is resolved at every ask (`Presets.LoadDirOf`: by Workshop id, never a kept path — the base comes and goes
+    // and changes form at its path); only the merge is cached, on both files' mtime + size. A preset that can't play
+    // (no base, a base that isn't a scene) has none: nothing to edit, a tweak is refused.
+    // Guard: scripts/test-presets.sh § 2 layered properties
+    private static List<SceneProp> ForPreset(string presetDir, PresetFile preset)
+    {
+        if (Presets.LoadDirOf(presetDir) is not { } baseDir) return [];
+        string file = Path.Combine(presetDir, "project.json"), baseFile = Path.Combine(baseDir, "project.json");
+        FileInfo fi, bfi;
+        try { fi = new FileInfo(file); bfi = new FileInfo(baseFile); if (!fi.Exists || !bfi.Exists) return []; } catch { return []; }
+        lock (_cacheLock)
+            if (_presetCache.TryGetValue(file, out var c) && c.Mtime == fi.LastWriteTimeUtc && c.Size == fi.Length
+                && c.BaseFile == baseFile && c.BaseMtime == bfi.LastWriteTimeUtc && c.BaseSize == bfi.Length)
+                return c.Props;
+        var props = WithPreset(ForItem(baseDir), preset.Values);
+        lock (_cacheLock) _presetCache[file] = (fi.LastWriteTimeUtc, fi.Length, baseFile, bfi.LastWriteTimeUtc, bfi.Length, props);
+        return props;
+    }
+
+    // A preset's values over its base scene's properties (pure). An editable property the preset names takes the preset's
+    // value as its Default (SceneDefault keeps the scene's), when the value has the JSON type WE saves that property type
+    // in and `Coerce` accepts it (a slider clamped to its range). Each other value drops alone and the base's default
+    // stays: a name the base no longer has, WE's own settings (`_d0`, `alignment*`, `rate`, `wec_*`), a property whose
+    // type changed, a combo option gone. The list is the base's, in its order; `sceneProps` (ForItem's cached copy, the
+    // base card's too) is never changed. Guard: player-selftest PresetLayerAssertions
+    public static List<SceneProp> WithPreset(IReadOnlyList<SceneProp> sceneProps, IReadOnlyDictionary<string, JsonElement> presetValues)
+    {
+        var list = new List<SceneProp>(sceneProps.Count);
+        foreach (var p in sceneProps)
+            list.Add(p.Editable && presetValues.TryGetValue(p.Name, out var v) && SavedAs(p, v) && Coerce(p, v) is ({ } c, null)
+                ? p with { Default = c, SceneDefault = p.SceneDefault }
+                : p);
+        return list;
+    }
+
+    // The JSON type WE saves a property type's value in (library.md § Presets). `Coerce` alone also reads a number as a
+    // bool or a numeric string as a slider (what the UI may send); in a saved preset that means the type changed.
+    private static bool SavedAs(SceneProp p, JsonElement v) => p.Type switch
+    {
+        "bool" => v.ValueKind is JsonValueKind.True or JsonValueKind.False,
+        "slider" => v.ValueKind == JsonValueKind.Number,
+        "color" or "textinput" => v.ValueKind == JsonValueKind.String,
+        "combo" => v.ValueKind is JsonValueKind.String or JsonValueKind.Number,
+        _ => false,
+    };
 
     public static SceneProp? Find(string sceneDir, string name) => ForItem(sceneDir).FirstOrDefault(p => p.Name == name);
 
@@ -243,18 +301,28 @@ public static class SceneProperties
         return d;
     }
 
-    // The player's `scene_props` map for an item: every override (+ transient) that names an editable property of
-    // its project.json, encoded for the player. Defaults aren't sent — LWE loads them itself.
+    // The player's `scene_props` map for an item (`ForItem`: a preset's properties carry its values as their defaults).
     public static SortedDictionary<string, object?> PlayerMap(string sceneDir, IReadOnlyDictionary<string, JsonElement>? overrides,
         IReadOnlyDictionary<string, JsonElement>? transient = null)
     {
+        // a plain scene with nothing set sends nothing: its project.json isn't even read
+        if ((overrides == null || overrides.Count == 0) && (transient == null || transient.Count == 0) && Presets.Read(sceneDir) == null)
+            return new SortedDictionary<string, object?>(StringComparer.Ordinal);
+        return PlayerMap(ForItem(sceneDir), overrides, transient);
+    }
+
+    // Per editable property: a drag's transient value, else the card's override, else a preset's value — each layer only
+    // where `Coerce` accepts it — encoded for the player. The scene's own default is never sent (LWE loads it itself), so
+    // a plain scene sends only its overrides; `WithResets` sends `PlayerDefault` (on a preset, the preset's value) for a
+    // name the source still runs and the map lacks. Guard: player-selftest PresetLayerAssertions
+    public static SortedDictionary<string, object?> PlayerMap(IReadOnlyList<SceneProp> props, IReadOnlyDictionary<string, JsonElement>? overrides,
+        IReadOnlyDictionary<string, JsonElement>? transient = null)
+    {
         var m = new SortedDictionary<string, object?>(StringComparer.Ordinal);
-        if ((overrides == null || overrides.Count == 0) && (transient == null || transient.Count == 0)) return m;
-        var props = ForItem(sceneDir);
         foreach (var p in props)
         {
             if (!p.Editable) continue;
-            JsonNode? v = null;
+            JsonNode? v = SameValue(p, p.Default, p.SceneDefault) ? null : p.Default;
             if (overrides != null && overrides.TryGetValue(p.Name, out var ov) && Coerce(p, ov) is ({ } c, null)) v = c;
             if (transient != null && transient.TryGetValue(p.Name, out var tv) && Coerce(p, tv) is ({ } t, null)) v = t;
             if (v != null) m[p.Name] = ToPlayer(p, v);
