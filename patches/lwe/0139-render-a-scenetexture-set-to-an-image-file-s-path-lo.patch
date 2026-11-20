@@ -1,0 +1,148 @@
+From 11b1d1bbdc0a7af69bfb40c645cecc9fcae917ec Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 05:16:16 +0530
+Subject: [PATCH 139/139] render: a scenetexture set to an image file's path
+ loads that image
+
+A Wallpaper Engine preset ships the images its scenetexture slots use in its own folder (`files/<name>.png`,
+`.gif`, ...), as plain image files: Wallpaper Engine keeps a picked image as a path, never as a .tex inside the scene.
+The core resolved every texture name as `materials/<name>.tex` through the scene's containers, which refuse a path
+outside them and read only WE's TEX format, so the host had no way to put such an image in its slot.
+
+RenderContext::resolveTexture now takes a name that is an absolute path ending in .png, .jpg, .jpeg, .bmp, .tga or
+.gif as an image file: it is read and checked with stbi_info_from_memory, then wrapped as the texture a .tex holding
+a PNG / JPEG is (TEXB0003 with a FreeImage format: one image, one level of the file's bytes), so it decodes to RGBA8
+on the decode pool like those (a GIF's first frame), keeps its own size (no power-of-two padding: an image object's
+UVs stay whole) and is clamped at the edges as WE's image textures are. The shader-format pass sees a free image (RGBA8,
+format 0). A file that can't be read or isn't an image throws AssetLoadException, which every caller already logs as a
+missing asset and survives by keeping the slot's texture. Any other name resolves as before.
+
+liascape's host sets the property to the preset's image (resolved and confined to the preset's folder by its
+backend) before the renderer build; textures bind at the build, so a live change doesn't rebind the slot.
+
+Tested by liascape's host_api_test usertexture_loads_an_image_file (a generated PNG in the slot; a missing file and
+a file that isn't an image keep the slot's texture).
+
+Origin: ours
+Why: liascape docs/TODO.md #108 (preset wallpapers: a preset's own images)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kUDe36Q9Hthaz2WEU
+---
+ .../WallpaperEngine/Render/RenderContext.cpp  | 96 +++++++++++++++++++
+ 1 file changed, 96 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Render/RenderContext.cpp b/src/core/WallpaperEngine/Render/RenderContext.cpp
+index 10de6f6..20e7a93 100644
+--- a/src/core/WallpaperEngine/Render/RenderContext.cpp
++++ b/src/core/WallpaperEngine/Render/RenderContext.cpp
+@@ -8,6 +8,92 @@
+ #include "WallpaperEngine/Assets/AssetLoadException.h"
+ #include "WallpaperEngine/Context.h"
+ #include "WallpaperEngine/Data/Parsers/TextureParser.h"
++#include "WallpaperEngine/Logging/Log.h"
++
++#include <stb_image.h>
++
++#include <algorithm>
++#include <cctype>
++#include <fstream>
++#include <iterator>
++
++namespace {
++using namespace WallpaperEngine::Data::Assets;
++
++/**
++ * The image format of a texture name the host set to an image file's absolute path (a scenetexture property set to a
++ * preset's `files/<name>`, or to a picked file), FIF_UNKNOWN for any other name. WE's own names are relative
++ * (`materials/<name>.tex` inside the scene's folders, which refuse an absolute path), so nothing else takes this route.
++ */
++FIF imageFileFormat (const std::string& name) {
++    if (name.empty () || name.front () != '/') {
++	return FIF_UNKNOWN;
++    }
++    std::string extension = std::filesystem::path (name).extension ().string ();
++    std::ranges::transform (extension, extension.begin (), [] (unsigned char c) { return std::tolower (c); });
++    if (extension == ".png") {
++	return FIF_PNG;
++    }
++    if (extension == ".jpg" || extension == ".jpeg") {
++	return FIF_JPEG;
++    }
++    if (extension == ".gif") {
++	return FIF_GIF;
++    }
++    if (extension == ".bmp") {
++	return FIF_BMP;
++    }
++    if (extension == ".tga") {
++	return FIF_TARGA;
++    }
++    return FIF_UNKNOWN;
++}
++
++/**
++ * The image file as the texture a .tex wrapping a PNG / JPEG is (TEXB0003 with a FreeImage format): one image, one level
++ * holding the file's bytes, decoded to RGBA8 by stb_image when it uploads (a GIF's first frame), its size its own (no
++ * power-of-two padding, so an image object's UVs stay whole) and clamped at the edges as WE's image textures are. Throws
++ * AssetLoadException for a file that can't be read or isn't an image stb_image knows, which every caller reports and
++ * survives by keeping the slot's own texture.
++ */
++TextureUniquePtr imageFileTexture (const std::string& path, FIF format) {
++    std::ifstream file (path, std::ios::binary);
++    if (!std::filesystem::is_regular_file (path) || !file) {
++	throw WallpaperEngine::Assets::AssetLoadException (
++	    "Cannot read image file", path, std::make_error_code (std::errc::no_such_file_or_directory)
++	);
++    }
++    std::vector<char> bytes ((std::istreambuf_iterator<char> (file)), std::istreambuf_iterator<char> ());
++    int width = 0, height = 0, channels = 0;
++    if (bytes.empty () || bytes.size () > static_cast<size_t> (INT32_MAX)
++	|| !stbi_info_from_memory (
++	    reinterpret_cast<const stbi_uc*> (bytes.data ()), static_cast<int> (bytes.size ()), &width, &height, &channels
++	)
++	|| width <= 0 || height <= 0) {
++	throw WallpaperEngine::Assets::AssetLoadException (
++	    "Not an image file", path, std::make_error_code (std::errc::invalid_argument)
++	);
++    }
++
++    auto mipmap = std::make_shared<Mipmap> ();
++    mipmap->width = static_cast<uint32_t> (width);
++    mipmap->height = static_cast<uint32_t> (height);
++    mipmap->uncompressedSize = static_cast<int> (bytes.size ());
++    mipmap->uncompressedData = std::make_unique<char[]> (bytes.size ());
++    std::ranges::copy (bytes, mipmap->uncompressedData.get ());
++
++    auto texture = std::make_unique<Texture> ();
++    texture->containerVersion = ContainerVersion_TEXB0003;
++    texture->format = TextureFormat_ARGB8888;
++    texture->flags = TextureFlags_ClampUVs;
++    texture->freeImageFormat = format;
++    texture->width = texture->textureWidth = mipmap->width;
++    texture->height = texture->textureHeight = mipmap->height;
++    texture->imageCount = 1;
++    texture->images.emplace (0, MipmapList { mipmap });
++    return texture;
++}
++} // namespace
+ 
+ namespace WallpaperEngine::Render {
+ RenderContext::RenderContext (Context& context, Assets::AssetLocator& locator) :
+@@ -39,6 +125,16 @@ std::shared_ptr<const TextureProvider> RenderContext::resolveTexture (const std:
+     try {
+ 	return this->m_textureCache.resolve (name);
+     } catch (const Assets::AssetLoadException& e) {
++	if (const FIF format = imageFileFormat (name); format != FIF_UNKNOWN) {
++	    auto texture = std::make_shared<CTexture> (*this, imageFileTexture (name, format), this->m_deferTextureUploads);
++	    sLog.debug ("Loaded image file ", name, " as a texture");
++	    this->m_textureCache.store (name, texture);
++	    if (this->m_deferTextureUploads) {
++		this->m_deferredTextures.push_back (texture);
++	    }
++	    return texture;
++	}
++
+ 	const auto& locator = this->getAssetLocator ();
+ 	const auto contents = locator.texture (name);
+ 	const auto stream = BinaryReader (contents);

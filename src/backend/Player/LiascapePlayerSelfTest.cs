@@ -833,8 +833,16 @@ public static class LiascapePlayerSelfTest
             fails.Add($"WithPreset stale values: clock {D(b, "clock")} style {D(b, "style")} opacity {D(b, "opacity")}, want true / \"2\" / 0.5");
         if (b.Any(p => p.Name is "gone" or "_d0" or "wec_brs" or "alignmentx" or "rate") || b.Count != scene.Count)
             fails.Add("WithPreset must never add a property the base doesn't define");
-        if (D(SceneProperties.WithPreset(scene, Vals(("clock", "0"))), "clock") != "true")
-            fails.Add("WithPreset: a number for a bool property (its type changed) must be dropped, not read as false");
+        // WE saves a bool as true/false or as 0/1; any other number for a bool means its type changed
+        if (D(SceneProperties.WithPreset(scene, Vals(("clock", "0"))), "clock") != "false"
+            || D(SceneProperties.WithPreset(scene, Vals(("clock", "1"))), "clock") != "true"
+            || D(SceneProperties.WithPreset(scene, Vals(("opacity", "0.5"), ("clock", "0"))), "clock") != "false")
+            fails.Add($"WithPreset: a bool saved as 0 / 1 must read as false / true (0 → {D(SceneProperties.WithPreset(scene, Vals(("clock", "0"))), "clock")})");
+        if (D(SceneProperties.WithPreset(scene, Vals(("clock", "2"))), "clock") != "true"
+            || D(SceneProperties.WithPreset(scene, Vals(("clock", "0.5"))), "clock") != "true")
+            fails.Add("WithPreset: a number other than 0 / 1 for a bool property (its type changed) must be dropped");
+
+        PresetImageAssertions(fails, scene);
 
         // a slider beyond its range is clamped like a user's value (64 is also the scene's default: 3 → 16 proves it applied)
         if (D(SceneProperties.WithPreset(scene, Vals(("bars", "999"))), "bars") != "64"
@@ -851,6 +859,56 @@ public static class LiascapePlayerSelfTest
         M("of a preset + a tweak + a drag", Map(c, Vals(("clock", "true")), Vals(("schemecolor", "\"0 1 0\""))),
             "{\"clock\":true,\"schemecolor\":[0,1,0]}");
         M("of a preset + a refused tweak", Map(c, Vals(("clock", "\"maybe\""))), "{\"clock\":false,\"schemecolor\":[0,0,1]}");
+    }
+
+    // ---- a preset's own image for a scenetexture slot (`tex` in the test scene) -----------------------------------------
+    private static void PresetImageAssertions(List<string> fails, List<SceneProp> scene)
+    {
+        static Dictionary<string, JsonElement> Tex(string json) => new() { ["tex"] = JsonDocument.Parse(json).RootElement };
+        var root = Path.Combine("/tmp", "lpst-preset-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            string dir = Path.Combine(root, "preset"), files = Path.Combine(dir, "files");
+            Directory.CreateDirectory(files);
+            File.WriteAllBytes(Path.Combine(files, "tint.png"), [0x89, (byte)'P', (byte)'N', (byte)'G']);
+            File.WriteAllBytes(Path.Combine(files, "Anim.GIF"), [(byte)'G', (byte)'I', (byte)'F']);
+            File.WriteAllText(Path.Combine(files, "notes.txt"), "not an image");
+            File.WriteAllBytes(Path.Combine(root, "outside.png"), [0x89]);
+            File.CreateSymbolicLink(Path.Combine(files, "out.png"), Path.Combine(root, "outside.png"));
+            Directory.CreateDirectory(Path.Combine(files, "dir.png"));
+            // the preset folder reached through a link (a `local/<id>` link to Steam's folder): its files are still inside it
+            var link = Path.Combine(root, "link");
+            File.CreateSymbolicLink(link, dir);
+            var real = Liascape.Web.ApiSecurity.RealPath(Path.Combine(files, "tint.png"))!;
+
+            string? Default(string json, string? presetDir) =>
+                SceneProperties.WithPreset(scene, Tex(json), presetDir).First(p => p.Name == "tex").Default?.GetValue<string>();
+            string Map(string json, string? presetDir, Dictionary<string, JsonElement>? ov = null) =>
+                JsonSerializer.Serialize(SceneProperties.PlayerMap(SceneProperties.WithPreset(scene, Tex(json), presetDir), ov));
+            void Want(string what, string? got, string? want) { if (got != want) fails.Add($"preset image {what}: {got ?? "none"}, want {want ?? "none"}"); }
+
+            Want("files/tint.png → its real path", Default("\"files/tint.png\"", dir), real);
+            Want("through a linked preset folder", Default("\"files/tint.png\"", link), real);
+            Want("a GIF (any case)", Default("\"files/Anim.GIF\"", dir), Liascape.Web.ApiSecurity.RealPath(Path.Combine(files, "Anim.GIF")));
+            Want("PlayerMap sends it", Map("\"files/tint.png\"", dir), JsonSerializer.Serialize(new Dictionary<string, string> { ["tex"] = real }));
+            Want("a refused tweak of the slot keeps the preset's image", Map("\"files/tint.png\"", dir, Tex("\"/etc/passwd\"")),
+                JsonSerializer.Serialize(new Dictionary<string, string> { ["tex"] = real }));
+            foreach (var (json, why) in new[]
+            {
+                ("\"files/missing.png\"", "a missing file"), ("\"files/notes.txt\"", "not an image"), ("\"files/dir.png\"", "a folder"),
+                ("\"../outside.png\"", "a path out of the folder"), ("\"files/../../outside.png\"", "a path through .."),
+                ("\"files/out.png\"", "a link out of the folder"), ($"\"{Path.Combine(root, "outside.png")}\"", "an absolute path"),
+                ("\"\"", "an empty value"), ("5", "a number"), ("\"files\\\\tint.png\"", "a backslash path"),
+            })
+            {
+                Want(why + " is not sent", Default(json, dir), null);
+                Want(why + ": PlayerMap", Map(json, dir), "{}");
+            }
+            Want("without the preset's folder nothing resolves", Default("\"files/tint.png\"", null), null);
+            Want("the base's own (empty) value is never sent", JsonSerializer.Serialize(SceneProperties.PlayerMap(scene, null)), "{}");
+        }
+        catch (Exception e) { fails.Add($"preset image assertions threw {e.GetType().Name}: {e.Message}"); }
+        finally { try { Directory.Delete(root, true); } catch { } }
     }
 
     // ---- next/prev/random's scene-skip decision point -----------------------------------------

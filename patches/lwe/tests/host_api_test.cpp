@@ -3602,6 +3602,138 @@ static bool usertexture_reads_its_property () {
     return true;
 }
 
+// a string the host sets by name is that string: a text, a scene texture (a combo's key takes the same call; the listing
+// has no current key to read back). Unpatched: the `const char*` took Project::propertySet's bool overload, so each
+// became true, its string ""
+static bool string_values_set_by_name () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const std::string dir = camera_scene ("\"zoom\":1", square (1, "\"origin\":\"16 16 0\""),
+        "\"b_name\":{\"type\":\"textinput\",\"value\":\"YOURNAME\",\"text\":\"n\"},"
+        "\"c_mode\":{\"type\":\"combo\",\"value\":1,\"text\":\"m\",\"options\":[{\"label\":\"one\",\"value\":1},{\"label\":\"two\",\"value\":2}]},"
+        "\"d_tex\":{\"type\":\"scenetexture\",\"value\":\"\",\"text\":\"t\"}");
+    ScriptRig rig;
+    CHECK (rig.open (dir), "load/build of %s failed", dir.c_str ());
+    const bool set = wp_project_property_set_value_by_name (rig.p, "b_name", "Ada")
+        && wp_project_property_set_value_by_name (rig.p, "c_mode", "2")
+        && wp_project_property_set_value_by_name (rig.p, "d_tex", "/somewhere/image.png");
+    CHECK (set, "a set was refused");
+    std::string name, tex;
+    wp_project_property_list_reset (rig.p);
+    for (wp_project_property* property; (property = wp_project_property_list_next (rig.p)) != nullptr;) {
+        if (const auto text = WP_PROPERTY_AS_TEXT_INPUT (property)) {
+            name = text->value;
+        } else if (property->type == WP_PROPERTY_TYPE_SCENE_TEXTURE) {
+            tex = reinterpret_cast<wp_project_property_scene_texture*> (property)->value;
+        }
+    }
+    printf ("    textinput \"%s\", scenetexture \"%s\"\n", name.c_str (), tex.c_str ());
+    CHECK (name == "Ada", "the textinput isn't Ada (\"%s\")", name.c_str ());
+    CHECK (tex == "/somewhere/image.png", "the scenetexture isn't the path (\"%s\")", tex.c_str ());
+    return true;
+}
+
+// a w×h PNG of one colour (8-bit RGB, stored deflate): the image a WE preset ships in its own `files/`
+static std::string solid_png (int w, int h, unsigned char r, unsigned char g, unsigned char b) {
+    const auto be32 = [] (std::string& out, uint32_t v) {
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            out += static_cast<char> ((v >> shift) & 0xff);
+        }
+    };
+    const auto crc = [] (const std::string& data) {
+        uint32_t c = 0xffffffffu;
+        for (const unsigned char byte : data) {
+            c ^= byte;
+            for (int k = 0; k < 8; k++) {
+                c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1u)));
+            }
+        }
+        return ~c;
+    };
+    const auto chunk = [&] (std::string& out, const char* type, const std::string& data) {
+        be32 (out, static_cast<uint32_t> (data.size ()));
+        const std::string body = std::string (type, 4) + data;
+        out += body;
+        be32 (out, crc (body));
+    };
+    std::string raw;
+    for (int y = 0; y < h; y++) {
+        raw += '\0'; // filter: none
+        for (int x = 0; x < w; x++) {
+            raw += static_cast<char> (r);
+            raw += static_cast<char> (g);
+            raw += static_cast<char> (b);
+        }
+    }
+    uint32_t a = 1, s = 0;
+    for (const unsigned char byte : raw) {
+        a = (a + byte) % 65521;
+        s = (s + a) % 65521;
+    }
+    std::string zlib ("\x78\x01\x01", 3); // one final stored block
+    const auto len = static_cast<uint16_t> (raw.size ());
+    zlib += static_cast<char> (len & 0xff);
+    zlib += static_cast<char> (len >> 8);
+    zlib += static_cast<char> (~len & 0xff);
+    zlib += static_cast<char> ((~len >> 8) & 0xff);
+    zlib += raw;
+    be32 (zlib, (s << 16) | a);
+    std::string ihdr;
+    be32 (ihdr, static_cast<uint32_t> (w));
+    be32 (ihdr, static_cast<uint32_t> (h));
+    ihdr += std::string ("\x08\x02\x00\x00\x00", 5);
+    std::string png ("\x89PNG\r\n\x1a\n", 8);
+    chunk (png, "IHDR", ihdr);
+    chunk (png, "IDAT", zlib);
+    chunk (png, "IEND", "");
+    return png;
+}
+
+// a scenetexture value the host sets to an image file's absolute path (a WE preset's own `files/<name>`) is that
+// image in the slot, decoded as a .tex holding a PNG is; a path that doesn't load (missing, not an image) keeps the
+// slot's texture and the scene still draws (unpatched: only `materials/<value>.tex` inside the scene was looked up,
+// so the slot kept its texture for every path)
+static bool usertexture_loads_an_image_file () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const auto draw = [] (const std::string& value, std::array<unsigned char, 4>& px, std::string& dir) {
+        dir = camera_scene ("\"zoom\":1", b9_object (1, 16),
+            "\"picked\":{\"type\":\"scenetexture\",\"value\":\"\",\"text\":\"t\"}");
+        b9_layer (dir, "uniform sampler2D g_Texture0;\n", "gl_FragColor = vec4(texSample2D(g_Texture0, vec2(0.5, 0.5)).rgb, 1.0);");
+        write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                "\"depthwrite\":\"disabled\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                "\"usertextures\":[\"picked\"]}]}\n");
+        mkdir ((dir + "/files").c_str (), 0755);
+        write_file (dir + "/files/tint.png", solid_png (6, 4, 200, 40, 10));
+        write_file (dir + "/files/broken.png", "not an image");
+        const std::string path = value.empty () ? "" : dir + "/files/" + value;
+        ScriptRig rig;
+        rig.loaded = [path] (wp_project* p) { wp_project_property_set_value_by_name (p, "picked", path.c_str ()); };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        px = b9_pixel (rig);
+        return true;
+    };
+    std::array<unsigned char, 4> image {}, missing {}, broken {};
+    std::string dir;
+    CHECK (draw ("tint.png", image, dir), "load/build of %s with the image failed", dir.c_str ());
+    CHECK (draw ("none.png", missing, dir), "load/build of %s with a missing file failed", dir.c_str ());
+    CHECK (draw ("broken.png", broken, dir), "load/build of %s with a file that isn't an image failed", dir.c_str ());
+    printf ("    g_Texture0: the image %d %d %d; a missing file %d %d %d; not an image %d %d %d\n", image[0], image[1],
+            image[2], missing[0], missing[1], missing[2], broken[0], broken[1], broken[2]);
+    CHECK (near (image[0], 200) && near (image[1], 40) && near (image[2], 10), "the slot isn't the file's 200 40 10 (%d %d %d)",
+           image[0], image[1], image[2]);
+    CHECK (missing[0] > 250 && missing[1] > 250 && missing[2] > 250, "a missing file lost the slot's texture (%d %d %d)",
+           missing[0], missing[1], missing[2]);
+    CHECK (broken[0] > 250 && broken[1] > 250 && broken[2] > 250, "a file that isn't an image lost the slot's texture (%d %d %d)",
+           broken[0], broken[1], broken[2]);
+    return true;
+}
+
 // a slot WE leaves to the pass is no missing asset (Leftovers; the health report's 25 in 3516106265 and 3042865984):
 // a sampler annotated "default":"" names no file, and a usertexture naming a `usershortcut` property (an app
 // shortcut's icon, GH 0x140184980) with none picked keeps the slot's texture. Unpatched: "materials/.tex" and
@@ -8467,6 +8599,8 @@ int main (int argc, char** argv) {
     run ("fragment_gets_vertex_varyings", fragment_gets_vertex_varyings);
     run ("properties_list_as_written", properties_list_as_written);
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
+    run ("string_values_set_by_name", string_values_set_by_name);
+    run ("usertexture_loads_an_image_file", usertexture_loads_an_image_file);
     run ("unset_slots_are_not_missing", unset_slots_are_not_missing);
     run ("effect_visible_is_live", effect_visible_is_live);
     run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);

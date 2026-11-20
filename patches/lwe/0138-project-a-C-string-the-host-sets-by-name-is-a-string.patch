@@ -1,0 +1,43 @@
+From cd02e446ac592e28a06dc6cf76431f316af9fd96 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 05:16:16 +0530
+Subject: [PATCH 138/139] project: a C string the host sets by name is a
+ string, not true
+
+wp_project_property_set_value_by_name, _text_by_name, _combo_by_name, _file_by_name and _scene_texture_by_name (and
+their wp_project_property_* twins) pass their `const char*` to Project::propertySet, whose overloads take a
+std::string, a float, a glm::vec4 or a bool. A pointer converts to bool by a standard conversion, which beats the
+user-defined one to std::string, so every one of them called the bool overload: a text, a combo key or a texture the
+host set became `true`, its string "". liascape's scene worker sets every string-valued property this way.
+
+Project gains `const char*` overloads of both propertySet families that forward to the std::string ones.
+
+Tested by liascape's host_api_test string_values_set_by_name (a textinput and a scenetexture read back what was
+set; before: "" for both).
+
+Origin: ours
+Why: liascape docs/TODO.md #108 (preset wallpapers: a preset's own images; found setting one)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Vg3T4kUDe36Q9Hthaz2WEU
+---
+ src/core/WallpaperEngine/Project.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/core/WallpaperEngine/Project.h b/src/core/WallpaperEngine/Project.h
+index 1493ed5..d59377b 100644
+--- a/src/core/WallpaperEngine/Project.h
++++ b/src/core/WallpaperEngine/Project.h
+@@ -53,6 +53,12 @@ public:
+     void propertySet (const std::string& key, float value);
+     void propertySet (const std::string& key, glm::vec4 value);
+     void propertySet (const std::string& key, bool value);
++    // a C string is a string: without these, a `const char*` converts to bool before std::string and takes the bool
++    // overloads (every text, combo key and texture the host set became `true`)
++    void propertySet (const wp_project_property* property, const char* value) {
++	this->propertySet (property, std::string (value));
++    }
++    void propertySet (const std::string& key, const char* value) { this->propertySet (key, std::string (value)); }
+ 
+     void describe (wp_describe_callback* callback);
+ 

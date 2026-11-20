@@ -93,32 +93,58 @@ public static class SceneProperties
             if (_presetCache.TryGetValue(file, out var c) && c.Mtime == fi.LastWriteTimeUtc && c.Size == fi.Length
                 && c.BaseFile == baseFile && c.BaseMtime == bfi.LastWriteTimeUtc && c.BaseSize == bfi.Length)
                 return c.Props;
-        var props = WithPreset(ForItem(baseDir), preset.Values);
+        var props = WithPreset(ForItem(baseDir), preset.Values, presetDir);
         lock (_cacheLock) _presetCache[file] = (fi.LastWriteTimeUtc, fi.Length, baseFile, bfi.LastWriteTimeUtc, bfi.Length, props);
         return props;
     }
 
-    // A preset's values over its base scene's properties (pure). An editable property the preset names takes the preset's
-    // value as its Default (SceneDefault keeps the scene's), when the value has the JSON type WE saves that property type
-    // in and `Coerce` accepts it (a slider clamped to its range). Each other value drops alone and the base's default
-    // stays: a name the base no longer has, WE's own settings (`_d0`, `alignment*`, `rate`, `wec_*`), a property whose
-    // type changed, a combo option gone. The list is the base's, in its order; `sceneProps` (ForItem's cached copy, the
-    // base card's too) is never changed. Guard: player-selftest PresetLayerAssertions
-    public static List<SceneProp> WithPreset(IReadOnlyList<SceneProp> sceneProps, IReadOnlyDictionary<string, JsonElement> presetValues)
+    // A preset's values over its base scene's properties (pure but for `PresetImage`'s file checks). An editable property
+    // the preset names takes the preset's value as its Default (SceneDefault keeps the scene's), when the value has the
+    // JSON type WE saves that property type in and `Coerce` accepts it (a slider clamped to its range). A scenetexture
+    // takes the preset's own image (`PresetImage` in `presetDir`) as an absolute path. Each other value drops alone and
+    // the base's default stays: a name the base no longer has, WE's own settings (`_d0`, `alignment*`, `rate`, `wec_*`),
+    // a property whose type changed, a combo option gone. The list is the base's, in its order; `sceneProps` (ForItem's
+    // cached copy, the base card's too) is never changed. Guard: player-selftest PresetLayerAssertions, PresetImageAssertions
+    public static List<SceneProp> WithPreset(IReadOnlyList<SceneProp> sceneProps, IReadOnlyDictionary<string, JsonElement> presetValues,
+        string? presetDir = null)
     {
         var list = new List<SceneProp>(sceneProps.Count);
         foreach (var p in sceneProps)
-            list.Add(p.Editable && presetValues.TryGetValue(p.Name, out var v) && SavedAs(p, v) && Coerce(p, v) is ({ } c, null)
-                ? p with { Default = c, SceneDefault = p.SceneDefault }
-                : p);
+        {
+            if (!presetValues.TryGetValue(p.Name, out var v)) list.Add(p);
+            else if (p.Editable && SavedAs(p, v) && Coerce(p, v) is ({ } c, null)) list.Add(p with { Default = c, SceneDefault = p.SceneDefault });
+            else if (p.Type == "scenetexture" && presetDir != null && PresetImage(presetDir, v) is { } image)
+                list.Add(p with { Default = JsonValue.Create(image), SceneDefault = p.SceneDefault });
+            else list.Add(p);
+        }
         return list;
     }
 
-    // The JSON type WE saves a property type's value in (library.md § Presets). `Coerce` alone also reads a number as a
-    // bool or a numeric string as a slider (what the UI may send); in a saved preset that means the type changed.
+    // What the LWE core decodes as an image when a scenetexture is set to a file (stb_image; a GIF's first frame).
+    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp", ".tga", ".gif"];
+
+    // A preset's scenetexture value (`files/<name>`, WE's path relative to the PRESET folder, never the base's) → the
+    // image's real absolute path, or null. The value comes from someone else's Workshop item and the path goes to the
+    // core as a file to read, so only a relative '/' path with no `..` naming an existing image file whose real path
+    // (links resolved) stays inside the preset's real folder is taken; anything else keeps the base's own texture.
+    // Guard: player-selftest PresetImageAssertions, scripts/test-presets.sh § 2 preset images
+    internal static string? PresetImage(string presetDir, JsonElement v)
+    {
+        if (v.ValueKind != JsonValueKind.String || v.GetString() is not { Length: > 0 } rel) return null;
+        if (rel[0] == '/' || rel.Contains('\\') || rel.Contains('\0') || rel.Split('/').Contains("..")) return null;
+        if (!ImageExtensions.Contains(Path.GetExtension(rel).ToLowerInvariant())) return null;
+        if (Liascape.Web.ApiSecurity.RealPath(presetDir) is not { } root
+            || Liascape.Web.ApiSecurity.RealPath(Path.Combine(presetDir, rel)) is not { } file) return null;
+        return file.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal) && File.Exists(file) ? file : null;
+    }
+
+    // The JSON type WE saves a property type's value in (library.md § Presets): a bool as true/false or 0/1. `Coerce` alone
+    // also reads any number as a bool or a numeric string as a slider (what the UI may send); in a saved preset that means
+    // the type changed.
     private static bool SavedAs(SceneProp p, JsonElement v) => p.Type switch
     {
-        "bool" => v.ValueKind is JsonValueKind.True or JsonValueKind.False,
+        "bool" => v.ValueKind is JsonValueKind.True or JsonValueKind.False
+            || (v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var b) && b is 0 or 1),
         "slider" => v.ValueKind == JsonValueKind.Number,
         "color" or "textinput" => v.ValueKind == JsonValueKind.String,
         "combo" => v.ValueKind is JsonValueKind.String or JsonValueKind.Number,
@@ -321,6 +347,13 @@ public static class SceneProperties
         var m = new SortedDictionary<string, object?>(StringComparer.Ordinal);
         foreach (var p in props)
         {
+            // a preset's own image for a scenetexture slot (its absolute path, `WithPreset`); the base's own is never sent.
+            // Re-checked here: the cached merge doesn't see the file go
+            if (p.Type == "scenetexture" && Str(p.Default) is { } image)
+            {
+                if (File.Exists(image)) m[p.Name] = image;
+                continue;
+            }
             if (!p.Editable) continue;
             JsonNode? v = SameValue(p, p.Default, p.SceneDefault) ? null : p.Default;
             if (overrides != null && overrides.TryGetValue(p.Name, out var ov) && Coerce(p, ov) is ({ } c, null)) v = c;

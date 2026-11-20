@@ -68,10 +68,14 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - `dependency` = the base item's Workshop id, digits as a JSON string.
 - `preview` names its own preview (`preview.jpg` or `preview.gif`) in the preset folder.
 - `preset` maps a property name to its value in the base scene's own `general.properties` encoding (§ Scene
-  properties): `bool` true/false, `slider` a number (float noise kept, `0.89999998`), `color` `"r g b"` 0–1, `combo`
-  the option's value string, `textinput` a string.
+  properties): `bool` true/false or 0/1 (any other number = its type changed: dropped), `slider` a number (float
+  noise kept, `0.89999998`), `color` `"r g b"` 0–1, `combo` the option's value string, `textinput` a string.
 - A `scenetexture` value is `"files/<name>"`, relative to the preset folder (its `files/`), or `""`; resolve it
   against the preset folder, never the base's. `files/` holds only what those values name; it overlays no base file.
+  PNG, JPEG or GIF. `WithPreset` takes it only as a relative path with no `..` to an image file whose real path is
+  inside the preset's real folder, and `PlayerMap` sends that absolute path (the core loads it into the slot); anything
+  else sends nothing (the base's texture). Guards: player-selftest `PresetImageAssertions`, `scripts/test-presets.sh`
+  § 2 preset images.
 - `preset` also carries WE's own per-wallpaper settings that are not scene properties: `_d0` (`null`), `alignment*`,
   `rate`, `wec_*` (colour correction), and when the base supports them `audioprocessing`, `cameraparallax`, `volume`,
   `wcc_*`. A base property the preset lacks (saved against an older base) keeps the base's value.

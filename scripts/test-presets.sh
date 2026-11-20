@@ -11,7 +11,9 @@
 #     their defaults (conditions read them too); the card's own tweaks go to the preset's index entry only (a tweak equal
 #     to the preset's value drops, Reset returns to it); the base's tweaks never reach the preset or the other way round;
 #     no base → no properties and a tweak is refused. Loudness per item: a preset's offline estimate runs on its base's
-#     folder with its merged map and lands under its own path (the stub player answers `scene-loudness`).
+#     folder with its merged map and lands under its own path (the stub player answers `scene-loudness`). A bool saved
+#     as 0 / 1 reads as false / true. Preset images: a scenetexture value `files/<name>` goes to the player as the image's
+#     real path inside the preset's own folder; a path out of it, a link out, not an image or a missing file sends nothing.
 # Runs in its own network namespace (`unshare -rn`) with a temp HOME + XDG dirs and a private backend whose Steam servers
 # are an empty fixture (LIASCAPE_STEAM_CM_FIXTURE) and which refuses every real server (LIASCAPE_TEST_NO_NETWORK=1). The
 # engine is liascape-player through a stub binary that never runs (nothing is played here); the base scene is synthetic.
@@ -333,6 +335,53 @@ check "a tweak on the preset re-plans it with the merged map (the base's own con
   "$(cat "$T/loudness-calls") $(fp workshop 910000101) $(fp workshop 900000001)" \
   "$BASE {\"clock\":false,\"color\":[0,1,0]} $want $(stubfp "$BASE" '{}')"
 resetp "$P1" color >/dev/null
+
+echo "== 2. bools saved as 0 / 1: WE writes both"
+mk_preset "$LIB/workshop/910000401" '"900000001"' "Clock as 0" '{"clock":0}' ""
+mk_preset "$LIB/workshop/910000402" '"900000001"' "Clock as 2" '{"clock":2,"color":"0 0 1"}' ""
+check "a bool saved as 0 → false (the preset's default; style hidden by it)" \
+  "$(prop "$LIB/workshop/910000401" clock '.default') $(prop "$LIB/workshop/910000401" style '.visible')" 'false false'
+check "…any other number for a bool → dropped alone (the base's true), the rest applied" \
+  "$(prop "$LIB/workshop/910000402" clock '.default') $(prop "$LIB/workshop/910000402" color '.default')" 'true "0 0 1"'
+
+echo "== 2. preset images: a scenetexture value is the preset's own files/<name>, sent as its real path"
+# the base the fixtures 3583880694 and 3520333138 name, synthetic: its two image slots (empty by default, as the real
+# one's) and the toggles that show them
+IB=$LIB/workshop/3354740764
+mk_base "$IB" "Image base"
+jq '.general.properties += {custom11pnggif: {order: 10, text: "Custom image", type: "bool", value: false},
+  custom: {order: 11, text: "Image", type: "scenetexture", value: "", condition: "custom11pnggif.value == true"},
+  customtab: {order: 15, text: "Window", type: "bool", value: false},
+  customtabimage: {order: 16, text: "Window image", type: "scenetexture", value: "", condition: "customtab.value == true"}}' \
+  "$IB/project.json" > "$IB/p.tmp" && mv "$IB/p.tmp" "$IB/project.json"
+idx workshop '.["3354740764"] = {title: "Image base", workshopId: "3354740764", isScene: true}'
+F1=$LIB/workshop/3583880694 F2=$LIB/workshop/3520333138
+real() { realpath -e "$1"; }
+check "fixture 3583880694 plays over it" "$(pf "$F1" '[.presetReason, .basePath]')" "[null,\"$IB\"]"
+check "…its image slot's default is its own files/eeeeee.png (real path); the empty one stays empty" \
+  "$(prop "$F1" custom '.default') $(prop "$F1" customtabimage '.default')" "\"$(real "$F1/files/eeeeee.png")\" null"
+check "the base's own slots stay empty" "$(prop "$IB" custom '.default')" null
+# a preset over the image base for each value that must never reach the core as a file to read
+mkdir -p "$T/elsewhere"; cp "$F1/files/eeeeee.png" "$T/elsewhere/out.png"
+ESC=$LIB/workshop/910000501
+mk_preset "$ESC" '"3354740764"' "Escapes" "$(jq -nc --arg abs "$T/elsewhere/out.png" '{custom: "../3583880694/files/eeeeee.png", customtabimage: $abs}')" ""
+ESC2=$LIB/workshop/910000502
+mk_preset "$ESC2" '"3354740764"' "Escapes 2" '{"custom":"files/link.png","customtabimage":"files/notes.txt","custom11pnggif":1}' ""
+mkdir -p "$ESC2/files"; ln -s "$T/elsewhere/out.png" "$ESC2/files/link.png"; echo text > "$ESC2/files/notes.txt"
+GONE=$LIB/workshop/910000503
+mk_preset "$GONE" '"3354740764"' "Missing image" '{"custom":"files/none.png","custom11pnggif":true}' ""
+: > "$T/loudness-calls"
+estimate "$F1" "$F2" "$ESC" "$ESC2" "$GONE"
+check "the player's map: each preset's own images as real paths, the toggles its values; nothing out of its folder, no text file, no missing file" \
+  "$(sort "$T/loudness-calls" | tr '\n' '|')" \
+  "$(printf '%s\n' \
+    "$IB $(jq -nc --arg a "$(real "$F1/files/eeeeee.png")" '{custom: $a, custom11pnggif: true}')" \
+    "$IB $(jq -nc --arg a "$(real "$F2/files/com-resize-unscreen.gif")" --arg b "$(real "$F2/files/4367d2382289f5f8ce92347c4e2417db.gif")" \
+         '{custom: $a, custom11pnggif: true, customtab: true, customtabimage: $b}')" \
+    "$IB {}" "$IB {\"custom11pnggif\":true}" "$IB {\"custom11pnggif\":true}" | sort | tr '\n' '|')"
+check "a value for an image slot can't be set on the card (no file picker): 400, the preset's image stays" \
+  "$(setp "$F1" custom "\"$T/elsewhere/out.png\"") $(sp workshop 3583880694) $(prop "$F1" custom '.default')" \
+  "400 null \"$(real "$F1/files/eeeeee.png")\""
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

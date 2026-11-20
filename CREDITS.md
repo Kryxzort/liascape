@@ -169,3 +169,5 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0135-video-the-host-chooses-its-video-players-hwdec-and-i.patch` | video: the host chooses its video players' hwdec and interop | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0136-video-every-video-player-shares-the-GPU-s-primary-CU.patch` | video: every video player shares the GPU's primary CUDA context | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0137-video-decode-video-textures-with-FFmpeg-instead-of-l.patch` | video: decode video textures with FFmpeg instead of libmpv | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0138-project-a-C-string-the-host-sets-by-name-is-a-string.patch` | project: a C string the host sets by name is a string, not true | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0139-render-a-scenetexture-set-to-an-image-file-s-path-lo.patch` | render: a scenetexture set to an image file's path loads that image | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
