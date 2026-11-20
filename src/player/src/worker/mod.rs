@@ -1563,7 +1563,10 @@ fn epoll_del(ep: RawFd, fd: RawFd) {
 
 /// Stopped workers' last moments: one `lia-worker-reap` thread (started on demand, gone once
 /// nothing is dying) reaps them and SIGKILLs any still alive at its deadline — so `stop` and
-/// `Drop` never wait for a process.
+/// `Drop` never wait for a process. How each one ended is kept ([`ended`]): a worker told to
+/// quit that dies of a signal nobody sent crashed in its own teardown (`worker.exit_crash`), which
+/// nothing else would see — the scene was already gone from the screen. Guard:
+/// `tests/scene.rs::real_worker_with_video_textures_ends_cleanly`.
 pub mod reap {
     use super::*;
 
@@ -1573,14 +1576,38 @@ pub mod reap {
         killed: bool,
     }
 
+    /// How a stopped worker ended.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Ended {
+        pub pid: libc::pid_t,
+        /// `exit(code)` / `_exit(code)`
+        pub code: Option<i32>,
+        /// died of this signal
+        pub signal: Option<i32>,
+        /// the reaper SIGKILLed it at its deadline (so `signal` 9 is ours, not a crash)
+        pub killed: bool,
+    }
+
+    impl Ended {
+        /// Died of a signal the reaper didn't send: a crash after `Quit` (at exit).
+        pub fn crashed(&self) -> bool {
+            self.signal.is_some() && !self.killed
+        }
+    }
+
+    /// The newest endings kept for [`ended`].
+    const ENDED_KEEP: usize = 64;
+
     struct State {
         dying: Vec<Dying>,
         running: bool,
+        ended: VecDeque<Ended>,
     }
 
     static STATE: Mutex<State> = Mutex::new(State {
         dying: Vec::new(),
         running: false,
+        ended: VecDeque::new(),
     });
 
     fn lock() -> std::sync::MutexGuard<'static, State> {
@@ -1615,14 +1642,29 @@ pub mod reap {
         lock().dying.len()
     }
 
+    /// How the stopped worker `pid` ended, once reaped (among the last [`ENDED_KEEP`]).
+    pub fn ended(pid: libc::pid_t) -> Option<Ended> {
+        lock().ended.iter().rev().find(|e| e.pid == pid).copied()
+    }
+
     fn run() {
         loop {
             {
                 let mut s = lock();
                 let now = Instant::now();
+                let mut gone = Vec::new();
                 s.dying.retain_mut(|d| {
                     let mut st = 0;
                     let r = unsafe { libc::waitpid(d.pid, &mut st, libc::WNOHANG) };
+                    if r == d.pid {
+                        let signaled = libc::WIFSIGNALED(st);
+                        gone.push(Ended {
+                            pid: d.pid,
+                            code: (!signaled).then(|| libc::WEXITSTATUS(st)),
+                            signal: signaled.then(|| libc::WTERMSIG(st)),
+                            killed: d.killed,
+                        });
+                    }
                     if r != 0 {
                         return false; // reaped (or not ours any more)
                     }
@@ -1632,6 +1674,21 @@ pub mod reap {
                     }
                     true
                 });
+                for e in gone {
+                    if e.crashed() {
+                        log::event(
+                            "worker",
+                            Level::Warn,
+                            "worker.exit_crash",
+                            None,
+                            json!({"pid": e.pid, "signal": e.signal}),
+                        );
+                    }
+                    if s.ended.len() == ENDED_KEEP {
+                        s.ended.pop_front();
+                    }
+                    s.ended.push_back(e);
+                }
                 if s.dying.is_empty() {
                     s.running = false;
                     return;

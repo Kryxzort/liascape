@@ -2537,3 +2537,146 @@ fn scene_meter_comes_back_on_when_the_path_is_no_longer_capped() {
         loud(s[0], "seconds").as_f64().unwrap_or(0.0) >= s0 + 0.5
     }), "a measures");
 }
+
+/// A scene of `n` video layers, each its own 64 × 64 H.264 video texture (`TEXV0005` / `TEXB0004`, as WE stores
+/// one), drawn with a shader the scene carries itself, so no WE assets are needed. `None` without an ffmpeg that
+/// encodes H.264 (libx264).
+fn video_scene(n: usize) -> Option<PathBuf> {
+    let d = empty_dir("video-scene");
+    let mp4 = d.join("v.mp4");
+    let encoded = std::process::Command::new("ffmpeg")
+        .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=64x64:d=2:r=30"])
+        .args(["-pix_fmt", "yuv420p", "-c:v", "libx264", "-movflags", "+faststart"])
+        .arg(&mp4)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !encoded {
+        return None;
+    }
+    let video = std::fs::read(&mp4).ok()?;
+    std::fs::remove_file(&mp4).ok()?;
+    let u32s = |v: &[u32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+    let mut tex = b"TEXV0005\0TEXI0001\0".to_vec();
+    tex.extend(u32s(&[0, 32 | 2, 64, 64, 64, 64, 0]));
+    tex.extend(b"TEXB0004\0");
+    tex.extend(u32s(&[1, 0xffff_ffff, 1]));
+    // one image, one mipmap: TEXB0004's editor fields (an empty name), its size, the bytes uncompressed
+    tex.extend(u32s(&[1, 0, 0]));
+    tex.push(0);
+    tex.extend(u32s(&[0, 64, 64, 0, video.len() as u32, video.len() as u32]));
+    tex.extend(&video);
+    let write = |rel: &str, bytes: &[u8]| {
+        let p = d.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+    };
+    write(
+        "shaders/lia_video.vert",
+        b"uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n\
+          varying vec2 v_TexCoord;\nvoid main() {\n\tgl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n\
+          \tv_TexCoord = a_TexCoord;\n}\n",
+    );
+    write(
+        "shaders/lia_video.frag",
+        b"uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n\
+          void main() {\n\tgl_FragColor = texture(g_Texture0, v_TexCoord);\n}\n",
+    );
+    let mut objects = Vec::new();
+    for i in 1..=n {
+        let material = json!({"passes": [{"shader": "lia_video", "blending": "normal", "depthtest": "disabled",
+            "depthwrite": "disabled", "cullmode": "nocull", "textures": [format!("v{i}")]}]});
+        write(&format!("materials/v{i}.json"), material.to_string().as_bytes());
+        write(&format!("materials/v{i}.tex"), &tex);
+        write(&format!("models/v{i}.json"), json!({"material": format!("materials/v{i}.json")}).to_string().as_bytes());
+        objects.push(json!({"id": i, "name": format!("video{i}"), "image": format!("models/v{i}.json"),
+            "size": "16 16", "origin": format!("{} 16 0", 8 + 16 * (i - 1))}));
+    }
+    write("project.json", json!({"title": "video textures", "type": "scene", "file": "scene.json"}).to_string().as_bytes());
+    let scene = json!({"camera": {"center": "0 0 -1", "eye": "0 0 0", "up": "0 1 0"},
+        "general": {"clearcolor": "0 0 0.5", "orthogonalprojection": {"width": 64, "height": 32}},
+        "objects": objects});
+    write("scene.json", scene.to_string().as_bytes());
+    Some(d)
+}
+
+/// The libavcodec threads (`av:<codec>:…`) running in `pid`: the video textures are decoding.
+fn decoder_threads(pid: i32) -> usize {
+    std::fs::read_dir(format!("/proc/{pid}/task"))
+        .map(|r| {
+            r.flatten()
+                .filter(|t| std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.starts_with("av:")))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// A real worker whose scene has live video textures ends cleanly however it is stopped: `Quit` during the load,
+/// right after the first frame (the decoders' busiest moment) and later, with the CUDA interop and with the copy
+/// modes. Clean = `_exit(0)`, reaped by `worker::reap` before its SIGKILL deadline: never a signal, never a
+/// panic's 101. Red: `exit` on `Quit` (the NVIDIA EGL driver's exit handler tears the driver down under mpv's core
+/// thread, which segfaults logging nvdec's error, SIGSEGV), and an `eprintln!` from the frame in flight after the
+/// compositor closed the worker's stderr (EPIPE → a panic on the render thread: 101, or an unwinding that hangs
+/// until the reaper's SIGKILL).
+#[test]
+fn real_worker_with_video_textures_ends_cleanly() {
+    use liascape_player::sources::render_worker::HWDEC_INTEROP_ENV;
+    use liascape_player::worker::reap;
+    let _g = gpu_lock();
+    let Some(gfx) = common::headless_gl() else {
+        return;
+    };
+    if !worker_has_lwe() {
+        println!("SKIP: liascape-scene-worker built without LWE");
+        return;
+    }
+    let Some(scene) = video_scene(2) else {
+        println!("SKIP: no ffmpeg that encodes H.264");
+        return;
+    };
+    let assets = empty_dir("video-assets");
+    let (mut ends, mut decoding) = (Vec::new(), 0);
+    for interop in ["on", "off"] {
+        // seconds after the first frame (`None`: inside the load); the decoders are busiest right after it
+        let stops = [None, Some(0.0), Some(0.2), Some(0.2), Some(0.2), Some(0.2), Some(0.2), Some(1.0)];
+        for (i, after) in stops.into_iter().enumerate() {
+            let mut src = open_real(&gfx, &format!("video-end-{interop}-{i}"), &scene, Some(&assets), |o| {
+                o.env.push((HWDEC_INTEROP_ENV.into(), interop.into()))
+            });
+            match after {
+                None => assert!(
+                    pump(&gfx, &mut src, Duration::from_secs(10), |s| s.loading()),
+                    "{interop}: never loading"
+                ),
+                Some(after) => {
+                    assert!(
+                        pump(&gfx, &mut src, Duration::from_secs(10), |s| s.is_ready()
+                            || s.error().is_some()),
+                        "{interop}: never ready"
+                    );
+                    assert!(src.error().is_none(), "{interop}: {:?}", src.error());
+                    pump(&gfx, &mut src, Duration::from_secs_f64(after), |_| false);
+                }
+            }
+            let pid = src.pid().expect("a live worker") as i32;
+            if after.is_some() && decoder_threads(pid) > 0 {
+                decoding += 1;
+            }
+            drop(src);
+            let t = Instant::now();
+            let end = loop {
+                match reap::ended(pid) {
+                    Some(e) => break Some(e),
+                    None if t.elapsed() > Duration::from_secs(5) => break None,
+                    None => std::thread::sleep(Duration::from_millis(10)),
+                }
+            };
+            ends.push((interop, after, end));
+        }
+    }
+    let clean = |e: &reap::Ended| e.code == Some(0) && e.signal.is_none() && !e.killed;
+    let bad: Vec<_> = ends.iter().filter(|(_, _, e)| !e.as_ref().is_some_and(clean)).collect();
+    assert!(bad.is_empty(), "workers that didn't end with a clean exit 0 (interop, s after ready, how):\n{bad:#?}");
+    assert!(decoding > 0, "no stopped worker had a decoder thread running: the check proved nothing");
+}

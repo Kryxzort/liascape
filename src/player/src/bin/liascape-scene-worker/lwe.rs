@@ -181,7 +181,7 @@ extern "C" fn upload_make_current(user: *mut c_void) -> bool {
             true
         }
         Err(e) => {
-            eprintln!("lwe: texture uploads stay on the render thread: {e}");
+            elog!("lwe: texture uploads stay on the render thread: {e}");
             false
         }
     }
@@ -755,7 +755,7 @@ pub fn shader_sweep(args: &[String]) -> ! {
         }
     }
     let (Some(request), Some(assets), Some(out)) = (request, assets, out) else {
-        eprintln!("usage: liascape-scene-worker --shader-sweep <request.json> --assets <dir> --out <results.jsonl>");
+        elog!("usage: liascape-scene-worker --shader-sweep <request.json> --assets <dir> --out <results.jsonl>");
         std::process::exit(2)
     };
     match run_sweep(Path::new(&request), Path::new(&assets), Path::new(&out)) {
@@ -945,7 +945,7 @@ pub fn smoke(args: &[String]) -> ! {
         }
     }
     let (Some(scene_dir), Some(assets), Some(out)) = (scene_dir, assets, out) else {
-        eprintln!(
+        elog!(
             "usage: liascape-scene-worker --lwe-smoke <scene dir> --assets <dir> --out <dir> [--seconds S] [--audio-dump S] [--tone HZ [--tone-channel left|right] [--tone-sweep HZ1]] [--prop name=value]... [--prop-at T name=value]... [--pointer X0,Y0:X1,Y1[:X2,Y2…] [--pointer-time A-B]] [--fps N] [--we-fps R] [--unpaced] [--shots T,T…] [--shot-width W]"
         );
         std::process::exit(2)

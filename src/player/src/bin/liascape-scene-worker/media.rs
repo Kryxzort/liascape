@@ -154,7 +154,7 @@ fn run(shared: &Shared, stop: &std::sync::atomic::AtomicBool) {
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("scene media: no session bus ({e}): media events off");
+            elog!("scene media: no session bus ({e}): media events off");
             *shared.bus.lock().unwrap_or_else(|e| e.into_inner()) = Some(false);
             return;
         }

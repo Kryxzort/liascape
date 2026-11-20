@@ -137,7 +137,7 @@ pub fn scene_fonts() -> &'static str {
             dirs.len(),
             t.elapsed().as_secs_f64() * 1e3
         );
-        eprintln!("{note}");
+        elog!("{note}");
         note
     })
 }
@@ -153,7 +153,7 @@ impl SceneText {
             Ok(sd) => SceneText(Some(fonts::requested(&sd.scene))),
             Err(e) => {
                 // can't tell: set fontconfig up as for a text, report nothing
-                eprintln!("fonts: can't read the scene's text: {e}");
+                elog!("fonts: can't read the scene's text: {e}");
                 SceneText(Some(Vec::new()))
             }
         }
@@ -168,7 +168,7 @@ impl SceneText {
         };
         let out = fonts::stand_ins(requested, lwe::fc::matched_families);
         for s in &out {
-            eprintln!("fonts: {} shown with {}", s.font, s.shown);
+            elog!("fonts: {} shown with {}", s.font, s.shown);
         }
         out
     }
@@ -250,7 +250,7 @@ impl LweScene {
         // Without it every texture uploads here, on the render thread: slower, never wrong.
         match gfx.share_recipe() {
             Ok(recipe) => scene.set_upload_context(recipe),
-            Err(e) => eprintln!("lwe: texture uploads stay on the render thread: {e}"),
+            Err(e) => elog!("lwe: texture uploads stay on the render thread: {e}"),
         }
         scene.set_video_hwdec(&o.video_hwdec.hwdec, o.video_hwdec.interop);
         let scratch = gfx.tex(1, 1);
@@ -319,7 +319,7 @@ impl LweScene {
             let e = gl.get_error();
             if e != glow::NO_ERROR && self.gl_errors < 10 {
                 self.gl_errors += 1;
-                eprintln!("lwe: GL error {e:#06x} after frame t={t:.3}");
+                elog!("lwe: GL error {e:#06x} after frame t={t:.3}");
             }
             // LWE leaves its own state behind: a scissor would clip the blit.
             gl.disable(glow::SCISSOR_TEST);

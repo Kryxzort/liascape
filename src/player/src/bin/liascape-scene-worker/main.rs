@@ -48,6 +48,22 @@
 //! offscreen, writes two PNGs, prints one JSON line (`lwe.rs`); `--audio-dump` also writes its
 //! sound and the time stretch's 0.5×/1.5× output as raw F32. Frames are paced to the wall clock
 //! (video textures decode in real time) unless `--unpaced`.
+//!
+//! **Ending.** Every way out once a scene may be live is `_exit`, never `exit`: `exit` runs the
+//! NVIDIA EGL driver's exit handler, which tears the driver down under LWE's video threads (mpv's
+//! core and decoder threads, still decoding), and they segfault in it. Nothing here needs an exit
+//! handler. Log lines go through [`elog!`] (a failed `eprintln!` panics, and the compositor closes
+//! our stderr when it stops us), and a panic ends the process at once ([`exit_on_panic`]).
+
+/// `eprintln!` that never panics. The compositor closes the worker's stderr pipe the moment it
+/// stops it, so a line written after that (an LWE GL error at the end of the frame in flight) fails
+/// with EPIPE, and `eprintln!` turns that into a panic on the render thread.
+macro_rules! elog {
+    ($($t:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), $($t)*);
+    }};
+}
 
 mod audio;
 mod gputimer;
@@ -142,6 +158,7 @@ fn usage() -> ! {
 }
 
 fn main() {
+    exit_on_panic();
     // a diagnostic, not part of the protocol: render a real scene through LWE's core offscreen
     #[cfg(feature = "lwe")]
     if std::env::args().nth(1).as_deref() == Some("--lwe-smoke") {
@@ -249,6 +266,21 @@ fn hello(sock: &OwnedFd, features: &[&str], sync: &str) {
             sync: sync.into(),
         },
     );
+}
+
+/// A panic ends the worker at once, from the panicking thread, with Rust's exit code 101 (the
+/// default hook prints it first). Unwinding the render thread would drop the live scene under
+/// LWE's video threads and then `exit` (module doc § Ending): the drop can hang until the
+/// compositor's SIGKILL, and the exit handlers crash those threads. A panic on another thread ends
+/// the process too: the compositor reads the EOF as a crash and restarts the scene, where a dead
+/// audio or protocol thread would have left it limping. Guard:
+/// `tests/scene.rs::real_worker_with_video_textures_ends_cleanly`.
+fn exit_on_panic() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default(info);
+        unsafe { libc::_exit(101) }
+    }));
 }
 
 /// A scene that crashes LWE is an expected, handled event (the host restarts it, then marks it
@@ -1211,9 +1243,10 @@ impl Renderer {
         }
     }
 
-    /// Fade an audible stream out (≤ 30 ms, bounded), then exit. `_exit`, not `exit`: libcuda's
-    /// exit handler tears down the GPU's primary CUDA context, which the scene's video players
-    /// share, while their decoder threads still run (`cuCtxPushCurrent failed` from each).
+    /// Fade an audible stream out (≤ 30 ms, bounded), then exit. `_exit`, not `exit`: the drivers'
+    /// exit handlers (NVIDIA's EGL, libcuda's) tear the GPU state down while the scene's video
+    /// threads still decode on it (module doc § Ending). Guard:
+    /// `tests/scene.rs::real_worker_with_video_textures_ends_cleanly`.
     fn quit(&self) -> ! {
         self.audio.quit(QUIT_FADE_MAX);
         unsafe { libc::_exit(0) }
@@ -1379,7 +1412,8 @@ impl Renderer {
             let lost_exit = self.lost.map(|t| t + LOST_EXIT_AFTER);
             if lost_exit.is_some_and(|t| now >= t) {
                 warn("context lost and not restarted: exiting");
-                std::process::exit(LOST_EXIT_CODE);
+                // `_exit`: the scene's video threads still run (module doc § Ending)
+                unsafe { libc::_exit(LOST_EXIT_CODE) }
             }
             let can_render = self.lost.is_none()
                 && self.pending.is_some()
@@ -1600,10 +1634,10 @@ fn video_hwdec(gfx: &Gfx) -> (&'static render::VideoHwdec, Option<String>) {
                         .name("lia-scene-cuda".into())
                         .spawn(move || {
                             if let Some((rc, ms)) = warm_cuda(lib) {
-                                eprintln!("hwdec: cuInit {rc} in {ms:.0} ms");
+                                elog!("hwdec: cuInit {rc} in {ms:.0} ms");
                             }
                             // LWE's players ask for it themselves; this only reports what they get
-                            eprintln!(
+                            elog!(
                                 "hwdec: {}",
                                 if liascape_player::mpv::has_cuda_primary_context() {
                                     "video textures share the GPU's primary CUDA context"

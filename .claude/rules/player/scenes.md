@@ -63,11 +63,11 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - Fold `Start`/`Paused`/`Resize`/`Route`/`SetProperty`/`Gain`/`NoAudio`/`Speed`/`LoudnessMeter` into the
   restart's `Start` so a restart never resumes stale. Guard: `restart_start_folds_live_changes`.
 - A fatal `error` (can't play) is not a crash: no restart, no crash record; the caller stops the worker.
-- `stop()`/`Drop` never block: send `quit`, hand the pid to the `worker::reap` thread. Drain the pipe
-  first so a fatal error's stderr line stays in the log tail. Guards: `tests/worker.rs::stop_never_blocks`,
-  `tests/api.rs::missing_scene_folder_fails_without_crash_record`.
-- Test gotcha: a sibling test's `posix_spawn` briefly holds copies of every fd (CLOEXEC too) — `poll` for
-  the hang-up before reading EOF.
+- `stop()`/`Drop` never block: send `quit`, hand the pid to `worker::reap`; drain the pipe first (a fatal error's
+  stderr line stays in the tail). Guards: `tests/worker.rs::stop_never_blocks`, `tests/api.rs::missing_scene_folder_fails_without_crash_record`.
+- End the worker with `_exit` once a scene may be live (`exit` runs driver exit handlers under LWE's video threads), log
+  with `elog!`, never `eprintln!`, keep `exit_on_panic`. Guard: `tests/scene.rs::real_worker_with_video_textures_ends_cleanly`.
+- Test gotcha: a sibling's `posix_spawn` briefly holds every fd (CLOEXEC too): `poll` for the hang-up before EOF.
 - Keep ≤ 1 spare worker (`worker::spare`, scene-worker.md § The spare worker); its death is never a crash; adopt it only when launched
   like the scene (`sources::scene::launch_for`), reap it at once when a setting changes that; drop an adopted one whose load stalls for a fresh
   worker, never as a crash (`WorkerHost::watch_adopted_load`). Read "a scene is coming" from `Programs::rotation_scenes`, never a backend prop. Guards: `tests/worker.rs`, `tests/api.rs`, `tests/supervise.rs` `spare_*`.

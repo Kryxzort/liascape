@@ -50,12 +50,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `source.ready` warm/cold 286/382 ms, complete picture 407/483 ms, 0 black loads; guards
        `video_players_share_one_cuda_context`, `real_scene_worker_loads_libcuda_for_video_textures`. Then delete
        `patches/mpv/`, the flake's mpv override and the `cuda-primary-context` code, and the mpv section of UPSTREAM.md.
-107. [ ] The kernel log shows ~480 segfaults of scene-worker threads in 18 h of test and measurement runs (thread `core`:
-       ~245 in `libnvidia-eglcore` at a near-null address, ~190 in libc; `av:h264:df*` decoder threads ~12; the
-       `liascape-scene-` main thread 5), with no worker restart recorded, so most look like exit or teardown. Sort the
-       deliberate ones (tests that inject crashes) from the rest, then find and fix the real ones (exit order of the
-       render thread, EGL context and upload context; `_exit` vs exit; the video decoders' teardown). A crash at exit
-       still writes a core dump and can hide a real crash in the logs.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

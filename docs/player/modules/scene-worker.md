@@ -8,8 +8,8 @@ Covers `src/player/src/worker/` (`proto.rs`, `mod.rs`, `reap`) and the process s
 [scene-gpu-budget.md](scene-gpu-budget.md). Measurements: `docs/player/spikes/dmabuf.md`.
 
 A Wallpaper Engine scene renders in its own `liascape-scene-worker` process — one per scene source, shared by every
-output showing it. The compositor drives it over a socket and samples its dmabuf frames, so an LWE crash, hang or
-GPU reset never takes the compositor with it.
+output showing it. The compositor drives it over a socket and samples its dmabuf frames, so LWE's crashes, hangs and
+GPU resets stay out of the compositor.
 
 ## Protocol (`worker/proto.rs`)
 
@@ -29,9 +29,8 @@ restarts; `waitpid` runs every poll only once the worker is ending, else every `
 
 - **Spawn** is `posix_spawn` (glibc's `CLONE_VM|CLONE_VFORK`: no page-table copy of the compositor, 0.2–0.7 ms of
   loop time). It runs on the loop because `PR_SET_PDEATHSIG` fires when the spawning thread exits and pool threads
-  exit when idle. A long-lived spawn thread would take the vfork off the loop but make the pid arrive late for every
-  kill/reap path; not done. The child gets the socket at fd 3, stdout+stderr on one pipe (the log tail), stdin
-  `/dev/null`; the parent's copies are renumbered ≥ 10 first so no `dup2` clobbers another and fd 3 never equals its
+  exit when idle (a spawn thread would make the pid late for every kill/reap path). The child gets the socket at
+  fd 3, stdout+stderr on one pipe (the log tail), stdin `/dev/null`; the parent's copies are renumbered ≥ 10 first so no `dup2` clobbers another and fd 3 never equals its
   source (an `adddup2(3, 3)` would keep `CLOEXEC`). Signal mask empty and dispositions default (the compositor blocks
   SIGINT/SIGTERM for its signalfd).
 - **`wake_fd()`** is an epoll fd over the current socket and pipe, stable across restarts: a dup of the old socket
@@ -44,15 +43,16 @@ restarts; `waitpid` runs every poll only once the worker is ending, else every `
   are recorded even while connected and folded into the restart's `Start`, so a restart never resumes with a stale
   pause, size, route, property, level or meter. Other messages while not connected are `NotConnected`; the caller
   re-sends gains and the pointer after the new worker's `Ready`. `WouldBlock` = the worker isn't reading.
-- **Fatal errors are not crashes.** `error {fatal: true}` (no GPU, load or build failed, protocol mismatch — a
-  `Hello` with another `protocol` is turned into one by the host) leaves the worker idle until `quit`: no restart, no
-  crash record.
+- **Fatal errors are not crashes.** `error {fatal: true}` (no GPU, load or build failed; the host makes one of a
+  `Hello` with another `protocol`) leaves the worker idle until `quit`: no restart, no crash record.
 - **`stop()`/`Drop`** send `quit` and hand the pid to the `lia-worker-reap` thread (started on demand), which
   SIGKILLs at `STOP_GRACE` (500 ms). `stop` drains the pipe first so a fatal error's own stderr line stays in the
-  tail. `kill_for_restart(why)` SIGKILLs a live worker as a crash with `why` leading the record's reason.
+  tail, then closes it. The reaper keeps each ending (`reap::ended`); a death by a signal it didn't send is a crash
+  in the worker's teardown (`worker.exit_crash`; else only the kernel log has it). `kill_for_restart(why)`
+  SIGKILLs a live worker as a crash with `why` leading the record's reason.
 - **Log tail:** the last `LOG_TAIL` (50) lines of output and `log` messages across restarts, with a marker line
-  between processes; `ctl probe '{"name":"workers","args":{"log_tail":true}}'` shows it — LWE's own warnings for a
-  scene that loads but renders wrong, not only for one that crashed.
+  between processes; `ctl probe '{"name":"workers","args":{"log_tail":true}}'` shows it (LWE's warnings, also for a
+  scene that renders wrong).
 - **Crash record** `<state>/crashes/<scene-id>-<unix_ms>.json` (temp + rename): source id, path, reason,
   signal/code, restarts, uptime, log tail; the oldest beyond `MAX_CRASH_RECORDS` (20) are removed.
 
@@ -108,9 +108,8 @@ the last third of the bound it is late for: before `Hello` its CPU time or major
 wait (`D`); after it only paging in counts (major faults, `D`), since CPU work then is a load the worker's protocol
 thread covers itself (`LoadGate`, its own cap) and a renderer spinning without answering is hung. All of it up to
 `HELLO_TIMEOUT_MAX_FACTOR` (10) × `HELLO_TIMEOUT` from its spawn (50 s, as long as the transition recipe waits for a
-loading B). A cold start pages its binary and the GL driver in; with those evicted from the page cache and the disk
-saturated, the debug build's sat in D state for over 20 s at 2–3 major faults a second. A slow start killed would only
-start over, and three restarts mark the scene broken.
+loading B). A cold start on a saturated disk (binary and GL driver evicted) sat in D state for over 20 s at 2–3 major
+faults a second; killed, it would only start over, and three restarts mark the scene broken.
 
 "Hung" means the worker is the reason no frame comes, so two waits don't count:
 
@@ -147,6 +146,9 @@ inherited limit). It keeps its socket `CLOEXEC`: nothing it starts may hold it, 
   drops it and loads again; a preload's error is the load's error. While the renderer waits for it the `LoadGate`
   watches the preload thread's CPU time. Nothing thread-bound exists before the build: LWE's thread-locals live
   inside one parser call, and the QuickJS runtime and every GL object come with `first_render` on the renderer.
+- **Ending.** With a scene possibly live every exit is `_exit` (`Quit`, EOF, lost context, any panic via
+  `exit_on_panic`): `exit` runs NVIDIA's EGL and libcuda exit handlers under LWE's still-decoding video threads,
+  which segfault. Log with `elog!`: `eprintln!` panics once `stop` closed the pipe.
 - **`--stub`** (tests, no GPU) answers pings and ticks with fd-less frames and is scripted by
   `LIASCAPE_SCENE_WORKER_TEST` (`crash_after_ms`, `hang_after_ms`, `ring:N` for slot starvation, `freeze_after_ms`
   + `freeze_ms`, `exit_code`, `ignore_quit`, `spam_stderr`). Without `--stub`, a folder holding
@@ -156,7 +158,3 @@ inherited limit). It keeps its socket `CLOEXEC`: nothing it starts may hold it, 
 - **Build.** Only this binary links LWE's core (`cargo::rustc-link-arg-bin`); the compositor never does. Without
   feature `lwe` (`--no-default-features`, `install.sh --no-scenes`) it runs the stub and the synthetic renderer only.
   `paths::scene_worker_bin()` = `$LIASCAPE_SCENE_WORKER_BIN` (if it names a file) → next to `/proc/self/exe` → `PATH`.
-
-**Test gotcha:** a sibling test's `posix_spawn` holds a copy of every fd, `CLOEXEC` ones included, for the
-microseconds between its clone and exec — a test that closes one end and expects EOF must `poll` for the hang-up
-first.
