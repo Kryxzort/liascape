@@ -52,10 +52,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        back to today's per-video context). Measured now: 3426575339 (two 1080p videos) worker 906 MiB, 160 MiB of it per
        CUDA context; a retained primary context costs 160 MiB for any number of users (`docs/decisions.md` § Share one
        CUDA context across a scene's videos by patching mpv). Consider offering the patch upstream to mpv.
-105. [ ] A cut onto a scene shows B ~30 ms late when A makes no sound: the cut waits for A's anticlick ramp, which
-       `recipes/transition.rs` skips only for an A that ended, is paused or sits at −96 dB. Treat a soundless A (a scene
-       without audio, a muted or silent source) as silent and swap at once (`scene_load_we.py`: B on screen 33–38 ms after
-       `transition.started`).
 106. [ ] With the spare scene worker, 4 of 10 cold loads of 3163060610 took 2.8, 4.2, 11.8 and 38 s (the adopted
        worker stayed inside its load, no crash or restart) and 12 + 6 reruns didn't reproduce it
        (`docs/player/reports/scene-load-we.md`). `scene_load_we.py` now records the worker's load/build split and the

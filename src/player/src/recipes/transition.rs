@@ -573,6 +573,20 @@ fn b_has_audio(g: &Graph, id: &str) -> bool {
     crate::onset::has_audio(g, id)
 }
 
+/// Can A be heard right now ([`crate::onset::audible`])? Only then does a cut ramp it out
+/// before the swap: the anticlick ramp exists so a sounding stream doesn't click. A source
+/// with no sound at all (no audio track, `no_audio`, a scene without sound objects, an
+/// image or colour), a paused one, or one already at the −96 dB floor (muted, volume 0,
+/// auto-muted, held by the player pause's gate) goes at once, so a cut shows B at t0
+/// rather than 30 ms later for nothing. An A whose track isn't known yet reads as audio
+/// (`has_audio` defaults `true`), so it keeps its ramp. `effectively_paused` is `false`
+/// here because the player-level pause reaches A as its `pause` gain slot, which the floor
+/// check already sees. Guards: the unit `cut_from_a_soundless_a_swaps_at_once` and
+/// `tests/transition.rs::cut_from_a_soundless_a_swaps_at_once`.
+fn a_audible(g: &Graph, a: &str) -> bool {
+    crate::onset::audible(g, a, false)
+}
+
 /// The user paused the player (`player.paused`; a rule's hold is the runtime's, not the graph's).
 fn user_paused(g: &Graph) -> bool {
     get_bool(g, "player", "paused")
@@ -1731,19 +1745,16 @@ impl Transitions {
         );
         let Some(eid) = tr.effect_id.clone() else {
             // Cut: 30 ms ramp down A, swap, 30 ms ramp up B — decided per A: one that has
-            // ended (End), is paused or is already silent (the player pause's gate holds a
-            // playing source at −96 — a cut made while paused swaps at once instead of
-            // waiting for the resume on the frozen clock) just gets the slot set.
+            // ended (End) or can't be heard (`a_audible`: no sound, paused, at −96 — a cut
+            // made while paused swaps at once instead of waiting for the resume on the
+            // frozen clock) just gets the slot set, and with no A ramped B shows at t0.
             let mut ramped = false;
             for side in &mut tr.sides {
                 if let (false, Some(a)) = (side.shared, side.a.clone())
                     && is_source(g, &a)
                 {
                     note_gain(&mut side.orig, g, anim, &a, "anticlick");
-                    let silent = g
-                        .effective_gain_db(&a)
-                        .is_some_and(|db| db <= SILENT_DB + 1e-9);
-                    if self.ended.contains_key(&a) || get_bool(g, &a, "paused") || silent {
+                    if self.ended.contains_key(&a) || !a_audible(g, &a) {
                         gset(g, &corr, &a, "gain.anticlick", PropValue::F64(SILENT_DB));
                     } else {
                         ramp_slot(g, anim, &corr, &a, "anticlick", SILENT_DB, t0, ANTICLICK);
@@ -3423,6 +3434,102 @@ mod tests {
 
         h.tick(20, &[]); // now = 83: past ANTICLICK + AUDIO_SETTLE_TAIL (77)
         assert!(h.bool(&a, "paused"), "settle tail elapsed: paused now");
+    }
+
+    /// A cut onto B swaps at t0 when A can't be heard — no anticlick ramp to wait for — and
+    /// keeps the 30 ms ramp (swap at t0 + 30 ms) for an A that is audible or whose audio
+    /// isn't known yet. Every shape of "no sound" the graph knows: no audio track, our own
+    /// `no_audio`, a scene without sound objects, an image, a colour, muted, volume 0,
+    /// auto-muted.
+    #[test]
+    fn cut_from_a_soundless_a_swaps_at_once() {
+        type Shape = fn(&mut H, &str);
+        fn set(h: &mut H, a: &str, prop: &str, v: PropValue) {
+            h.g.set(&path(a, prop), v).unwrap();
+        }
+        let silent: [(&str, Shape); 8] = [
+            ("no audio track", |h, a| {
+                h.observe(a, "has_audio", PropValue::Bool(false))
+            }),
+            ("no_audio", |h, a| {
+                set(h, a, "no_audio", PropValue::Bool(true))
+            }),
+            ("scene without sound", |h, a| {
+                set(h, a, "kind", PropValue::Str("scene".into()));
+                h.observe(a, "has_audio", PropValue::Bool(false));
+            }),
+            ("image", |h, a| {
+                set(h, a, "kind", PropValue::Str("image".into()))
+            }),
+            ("colour", |h, a| {
+                set(h, a, "kind", PropValue::Str("color".into()))
+            }),
+            ("muted", |h, a| {
+                set(h, a, "gain.mute", PropValue::F64(SILENT_DB))
+            }),
+            ("volume 0", |h, a| {
+                set(h, a, "gain.user", PropValue::F64(SILENT_DB))
+            }),
+            ("auto-muted", |h, a| {
+                set(h, a, "gain.automute", PropValue::F64(SILENT_DB))
+            }),
+        ];
+        let audible: [(&str, Shape); 4] = [
+            ("audio not known yet", |_, _| {}),
+            ("an audio track", |h, a| {
+                h.observe(a, "has_audio", PropValue::Bool(true))
+            }),
+            ("scene with sound", |h, a| {
+                set(h, a, "kind", PropValue::Str("scene".into()));
+                h.observe(a, "has_audio", PropValue::Bool(true));
+            }),
+            ("quiet but not silent", |h, a| {
+                set(h, a, "gain.user", PropValue::F64(-60.0))
+            }),
+        ];
+        let cut = |shape: Shape| {
+            let mut h = H::new(&["V1"]);
+            let a = h.video(&["V1"], 10.0, 1.0);
+            shape(&mut h, &a);
+            let t = h.start(req("/b.mkv", "full-live", "now", None));
+            let b = h.b_of(&t);
+            h.observe(&b, "ready", PropValue::Bool(true));
+            h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+            assert!(h.has(&t, "transition.started"));
+            (h, a, b)
+        };
+        for (what, shape) in silent {
+            let (h, a, b) = cut(shape);
+            assert_eq!(
+                get_str(&h.g, "lay:V1:main", "content"),
+                b,
+                "{what}: B on screen at t0"
+            );
+            assert_eq!(
+                h.anim.target_of(&path(&a, "gain.anticlick")),
+                None,
+                "{what}: no ramp on A"
+            );
+        }
+        for (what, shape) in audible {
+            let (mut h, a, b) = cut(shape);
+            assert_eq!(
+                get_str(&h.g, "lay:V1:main", "content"),
+                a,
+                "{what}: A still on screen while it ramps out"
+            );
+            assert_eq!(
+                h.anim.target_of(&path(&a, "gain.anticlick")),
+                Some(SILENT_DB),
+                "{what}: A ramps to −96"
+            );
+            h.tick(ANTICLICK.as_millis() as u64, &[]);
+            assert_eq!(
+                get_str(&h.g, "lay:V1:main", "content"),
+                b,
+                "{what}: B on screen at t0 + 30 ms"
+            );
+        }
     }
 
     /// With nothing on any requested output there is no A to go from: the requested

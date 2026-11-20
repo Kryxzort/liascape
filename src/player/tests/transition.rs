@@ -678,6 +678,89 @@ fn cut_without_effect() {
     assert_eq!(h.sources(), vec![b]);
 }
 
+/// A cut swaps the picture at `transition.started` when A makes no sound — a video without an
+/// audio track, a muted or volume-0 one, a scene without sound objects — on real sources, every
+/// V/S pairing; an audible A still ramps out first and B shows 30 ms later.
+#[test]
+fn cut_from_a_soundless_a_swaps_at_once() {
+    let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
+        return;
+    };
+    let mute = |h: &mut Harness, a: &str, slot: &str| {
+        h.graph
+            .set(
+                &PropPath(format!("{a}.gain.{slot}")),
+                PropValue::F64(SILENT_DB),
+            )
+            .unwrap();
+    };
+    // (what, A, B kind, swap expected at t0 + this many ms)
+    let cases: [(&str, &str, Kind, f64); 7] = [
+        ("V no audio track → V", "idx", Kind::Video, 0.0),
+        ("V no audio track → S", "idx", Kind::Scene, 0.0),
+        ("V muted → V", "muted", Kind::Video, 0.0),
+        ("V volume 0 → S", "vol0", Kind::Scene, 0.0),
+        ("S without sound → V", "scene", Kind::Video, 0.0),
+        ("S without sound → S", "scene", Kind::Scene, 0.0),
+        ("V audible → S", "audible", Kind::Scene, 30.0),
+    ];
+    for (i, (what, a_shape, b_kind, want)) in cases.into_iter().enumerate() {
+        let a = match a_shape {
+            "idx" => h.play(&idx(300), json!({"loop": true}), &["VIRTUAL-1"]),
+            "scene" => play_kind(&mut h, Kind::Scene, &format!("sa{i}"), &["VIRTUAL-1"]),
+            _ => h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]),
+        };
+        match a_shape {
+            "muted" => mute(&mut h, &a, "mute"),
+            "vol0" => mute(&mut h, &a, "user"),
+            _ => {}
+        }
+        h.tick();
+        let silent = a_shape != "audible";
+        assert_eq!(
+            !h.bool(&format!("{a}.has_audio")) || h.gain(&a) <= SILENT_DB + 1e-9,
+            silent,
+            "{what}: A's sound isn't what the case needs — proved nothing"
+        );
+        let corr = h.start(json!({
+            "outputs": "out:*", "to": to_props(b_kind, &format!("sb{i}")), "effect_id": null
+        }));
+        let b = h.to_of(&corr);
+        let m = h.mark();
+        let started = loop {
+            h.tick();
+            if let Some(e) = h.event(&corr, "transition.started") {
+                break e;
+            }
+            assert!(h.within(m, MS(10_000)), "{what}: never started");
+        };
+        let on_screen = loop {
+            if h.content("VIRTUAL-1") == b {
+                break ms(h.now()) - started.at_ms;
+            }
+            h.tick();
+            assert!(h.within(m, MS(10_000)), "{what}: B never on screen");
+        };
+        println!("{what}: B on screen {on_screen:.1} ms after transition.started");
+        if want == 0.0 {
+            assert!(on_screen <= 1e-6, "{what}: B {on_screen} ms late");
+        } else {
+            assert!(
+                on_screen >= want - 1e-6,
+                "{what}: B after {on_screen} ms, before A's ramp ended"
+            );
+        }
+        h.wait_event(&corr, "transition.done", MS(5000));
+        h.tick();
+        assert_eq!(h.sources(), vec![b.clone()], "{what}: only B left");
+        let last = h.sources();
+        for s in last {
+            h.graph.destroy(&s).unwrap();
+        }
+        h.tick();
+    }
+}
+
 #[test]
 fn handoff_no_seam() {
     let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
@@ -929,9 +1012,11 @@ fn cancel_waiting_restores_a() {
 
 /// A restore puts a gain back to the TARGET of the animation that
 /// was moving it when it was recorded, never to the mid-ramp value. T1 (frozen) hands off
-/// — B1's anticlick ramps −96 → 0 dB over 30 ms — and 5 ms later T2 (a colour, ready in
-/// one tick; a cut, which records B1's anticlick before ramping it down) begins; T2 is
-/// cancelled → B1 must end at 0 dB, not the −15.6 dB it was at.
+/// — B1's anticlick ramps −96 → 0 dB over 30 ms once its audio flows — and while it is
+/// mid-way T2 (a colour, ready in one tick; a cut, which records B1's anticlick before
+/// ramping it down) begins; T2 is cancelled → B1 must end at 0 dB, not the value it was
+/// at. B1 has an audio track: a soundless one is silenced at once and the cut swaps at
+/// t0, leaving nothing to cancel (`cut_from_a_soundless_a_swaps_at_once`).
 #[test]
 fn restore_targets_not_mid_ramp() {
     let Some(mut h) = Harness::new(&["VIRTUAL-1"]) else {
@@ -939,22 +1024,30 @@ fn restore_targets_not_mid_ramp() {
     };
     h.play(&red10(), json!({"loop": true}), &["VIRTUAL-1"]);
     let t1 = h.start(json!({
-        "outputs": "out:*", "to": {"path": s(&idx(300)), "loop": true},
+        "outputs": "out:*", "to": {"path": s(&idx_with_audio(300)), "loop": true},
         "effect_id": "fade", "duration_ms": 300, "method": "frozen"
     }));
     let b1 = h.to_of(&t1);
-    let th = from_ms(h.wait_event(&t1, "transition.handoff", MS(5000)).at_ms);
+    let ac = format!("{b1}.gain.anticlick");
+    h.wait_event(&t1, "transition.handoff", MS(5000));
+    // 2 ms steps, so the 30 ms ramp is caught early whatever the wall-clock pace.
+    let m = h.mark();
+    while h.f64(&ac) <= SILENT_DB {
+        assert!(h.within(m, MS(1000)), "B1's ramp-in never started");
+        let t = h.now() + MS(2);
+        h.tick_toward(t);
+    }
     let t2 = h.start(json!({
         "outputs": "out:*", "to": {"kind": "color", "color": [0, 255, 0]},
         "effect_id": null
     }));
-    h.tick_to(th + MS(5));
-    assert!(
-        h.event(&t2, "transition.started").is_some(),
-        "T2 began 5 ms after T1's handoff: {:?}",
-        h.tr_events
-    );
-    let mid = h.f64(&format!("{b1}.gain.anticlick"));
+    let m = h.mark();
+    while h.event(&t2, "transition.started").is_none() {
+        assert!(h.within(m, MS(1000)), "T2 never started: {:?}", h.tr_events);
+        let t = h.now() + MS(2);
+        h.tick_toward(t);
+    }
+    let mid = h.f64(&ac);
     assert!(
         mid > SILENT_DB && mid < -3.0,
         "B1's ramp-in was mid-way: {mid} dB"

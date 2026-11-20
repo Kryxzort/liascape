@@ -55,7 +55,8 @@ pub fn has_audio(g: &Graph, id: &str) -> bool {
 
 /// Can `id` be heard right now? It has audio ([`has_audio`]), is playing (not node-paused,
 /// not `effectively_paused` by the player-level pause), has played (`ready`), and isn't at
-/// the −96 dB floor. Anything else may go without a ramp (`Runtime::retire`/`park`).
+/// the −96 dB floor. Anything else may go without a ramp (`Runtime::retire`/`park`, a cut's A
+/// in `recipes::transition`).
 pub fn audible(g: &Graph, id: &str, effectively_paused: bool) -> bool {
     has_audio(g, id)
         && !flag(g, id, "paused")

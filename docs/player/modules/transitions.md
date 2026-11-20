@@ -34,7 +34,7 @@ t0 = effect start, D = duration, gains animated in linear amplitude (`AnimUnit::
 | full-live | fx `from = A` | `gain.xfade` k·cos over max(D, 30 ms), k = its current level | unpaused at t0; `gain.xfade` sin over max(D, 30 ms), held for audio |
 | reveal | fx `from` = snapshot of A | `gain.anticlick` → −96 in 30 ms, paused after `AUDIO_SETTLE_TAIL` more | unpaused at t0; xfade sin, held for audio |
 | frozen | fx `from` = snapshot of A | as reveal | stays paused on its first frame at −96; at handoff unpaused, anticlick 30 ms ramp in, held for audio |
-| cut | swap at t0 + 30 ms (t0 if no A was ramped) | playing → anticlick −96 over 30 ms; ended/paused → set at once | unpaused at the swap, xfade 0→1 over 30 ms; never held |
+| cut | swap at t0 + 30 ms (t0 if no A was ramped) | audible (`onset::audible`) → anticlick −96 over 30 ms; ended, paused, soundless (no audio track, `no_audio`, a scene without sound, image, colour) or at −96 (muted, volume 0, gated) → set at once | unpaused at the swap, xfade 0→1 over 30 ms; never held |
 
 **Held onsets.** A held cell un-pauses B at −96 and records a `PendingOnset`; the ramp is added only when B's
 `AudioFlowing` arrives, starting at that instant (never backdated), or after `ONSET_TIMEOUT` (150 ms,

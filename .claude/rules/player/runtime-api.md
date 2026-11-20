@@ -102,6 +102,9 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   Only then capture A.
 - With no A on any requested output, run the request as a cut (`effect_id: null`); an A on any one output
   keeps the effect. Guards: `effect_from_nothing_is_a_cut`, `effect_stays_with_any_a_and_superseding_from_nothing_stays_a_cut`.
+- A cut ramps out (and swaps at t0 + 30 ms) only an A that `onset::audible` says can be heard; an ended, paused,
+  soundless or −96 dB A gets its anticlick set and B shows at t0 (`a_audible`). An A whose audio isn't
+  known yet counts as audible. Guards: `cut_from_a_soundless_a_swaps_at_once` (unit and `tests/transition.rs`).
 - Never run a gain animation shorter than 30 ms, whatever `duration_ms`. Guard: `tests/transition.rs::zero_duration_gains_still_ramp_30ms`.
 - Hold B's onset ramp until its `AudioFlowing` (≤ `ONSET_TIMEOUT`), started at the confirmation instant,
   never backdated; route every call site through `schedule_onset`. `b_has_audio` skips the wait for
