@@ -389,7 +389,7 @@ public static class AppOps
         if (!LiascapePlayerProgram.IsActive)
             return path == null ? "nothing is playing" : $"no playlist is rotating — {title} already stays on screen";
         if (LiascapePlayerProgram.ToggleKeep() is not bool keep) return "the player didn't answer — nothing changed";
-        info = keep ? $"Looping {title} — the playlist stays on it until you run toggle-loop-current again" : $"Rotation resumed (from {title})";
+        info = keep ? $"Looping {title}. The playlist stays on it until you toggle the loop again." : $"The playlist moves on again from {title}";
         EventBus.Broadcast("toggle-loop-current", new { keep, path, message = info });
         return null;
     }

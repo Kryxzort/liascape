@@ -23,9 +23,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
        below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
        eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
-84. [ ] (owner) Status bar: rewrite its messages in the app's own wording style, never backend terms ("unsubscribing in 5
-       seconds, undo to stop"); no progress bar for a single quick action (one unsubscribe); check whether the separate
-       progress-bar area is needed or the status bar can carry it.
 67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist
        bar while the backend played k2) and hasn't come back in five full runs since. Ruled out: the keybind touches no
        playlist state, playlist_state.json is written atomically, and a stalled player's /current no longer reads
@@ -169,6 +166,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] `--probe probe-libops.js` `libops:backfill` fails in a whole-probe run (twice on 2026-11-20, this tree's UI and the
+      previous bundle alike) and passes with `--only 'libops:(combined|backfill)'`: mid-run the line's name turns from
+      "Making previews" to "Making Low previews" (ClipStore's phase leaves `make` for a quality) and an operation is still
+      listed at the end. Likely a quality sweep left by an earlier cell (libops:motion / hold / toggle change the quality);
+      the cause is unread.
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in

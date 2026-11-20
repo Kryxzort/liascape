@@ -82,7 +82,7 @@ public static class WorkshopDownloader
     /// Unsubscribes what a one-off subscribed only to fetch it: the unsubscribe queue and its drain, at once (no Undo window: the
     /// user never asked for the subscription), through the mode's own way (the sign-in, the Steam client). The drain marks it
     /// blocked; a sign-in gone by then drops it like any unsubscribe, saying so. It is part of the download, so the drain reports
-    /// no progress for it (the UI's "Removing from Steam" is for the user's own unsubscribes). Guard: test-steam-signin.sh § 2
+    /// no progress for it (the top bar's "Unsubscribing" count is for the user's own unsubscribes). Guard: test-steam-signin.sh § 2
     /// (one-off), § 3 j.
     public static void LetGoOfOneOff(string workshopId)
     {
@@ -669,8 +669,9 @@ public static class WorkshopDownloader
             // a failure, never the sign-in / the to-do instead: what's left stays queued for the next drain
             Console.WriteLine($"workshop: unsubscribe {string.Join(", ", pending)}: the Steam app couldn't — {fallback ?? "Steam didn't confirm it"}");
             return new DrainResult(0, fallback != null
-                ? SteamClientUgc.FailureMessage(fallback) + " The unsubscribe stays queued."
-                : $"Steam didn't confirm unsubscribing {pending.Count} item{(pending.Count == 1 ? "" : "s")} — they stay queued; try again.");
+                ? SteamClientUgc.FailureMessage(fallback) + " Liascape tries again with your next unsubscribe."
+                : pending.Count == 1 ? "Steam didn't confirm the unsubscribe. Liascape tries again with your next unsubscribe."
+                : $"Steam didn't confirm unsubscribing from {pending.Count} wallpapers. Liascape tries again with your next unsubscribe.");
         }
         // "Open in the Steam app" unsubscribes through each item's Steam page, signed in or not: never the sign-in
         if (settings.WorkshopDownloadMode == "steampage") return UnsubscribeInSteamApp(settings, pending, "Set to open items in the Steam app");
@@ -701,7 +702,7 @@ public static class WorkshopDownloader
                 // Steam is limiting us — the rest of the queue would just fail too. Stop now; the
                 // remaining ids stay pending (and blocked) and resume on the next drain.
                 WorkshopUnsubQueue.Release([id]);
-                return new DrainResult(0, "Steam is limiting requests from this connection — the rest is unsubscribed on a later try.");
+                return new DrainResult(0, "Steam is limiting requests from this connection. Liascape tries the rest again with your next unsubscribe.");
             }
             catch
             {
@@ -733,8 +734,8 @@ public static class WorkshopDownloader
                 SteamTodo.EnqueueSubscribe(id, titles != null && titles.TryGetValue(id, out var t) ? t : null, hasDownload: false, out _);
             // the page route can't know whether the user clicked Unsubscribe there — the words cover both
             return ids.Count == 1
-                ? "Undone — to keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then Next."
-                : $"Undone — to keep them subscribed, click Subscribe on each of the {ids.Count} pages the Steam to-do opens (any that say Subscribed are set).";
+                ? "Undone. To keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then Next."
+                : $"Undone. To keep them subscribed, click Subscribe on each of the {ids.Count} pages the Steam to-do opens (any that say Subscribed are set).";
         }
         // the one rule: a mode that can't subscribe now sends nothing (no page, no other mode's way); the words say why
         if (Blocked(settings, WorkshopAction.Subscribe) is { } blocked)
@@ -794,10 +795,11 @@ public static class WorkshopDownloader
         foreach (var id in ids) if (!inSteam.Contains(id)) WorkshopUnsubQueue.MarkBlocked(id); // not a subscription: nothing to click
         if (inSteam.Count == 0) return new DrainResult();
         var (queued, openFailed) = SteamTodo.EnqueueUnsubscribes(inSteam);
+        // the status bar's words: what to click (the user picked this mode, so the page needs no excuse; `why` goes to the log)
         string message = openFailed
-            ? $"{why}, and the Steam app couldn't be opened — unsubscribe on Steam yourself, or sign in under Settings → Getting Workshop wallpapers."
-            : queued == 1 ? $"{why} — Steam opened the item: click Unsubscribe there, then Next."
-            : $"{why} — Steam opens the {queued} items one at a time: click Unsubscribe on each, then Next.";
+            ? "The Steam app couldn't be opened. Unsubscribe on Steam yourself, or sign in under Settings → Getting Workshop wallpapers."
+            : queued == 1 ? "Click Unsubscribe on the page Steam opened, then Next."
+            : $"Steam opens the {queued} wallpapers one at a time. Click Unsubscribe on each, then Next.";
         Console.WriteLine($"workshop: unsubscribe {string.Join(", ", inSteam)}: {why} — in the Steam to-do{(openFailed ? " (the Steam app couldn't be opened)" : "")}");
         return new DrainResult(queued, message);
     }

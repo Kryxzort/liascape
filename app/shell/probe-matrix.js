@@ -3482,14 +3482,14 @@ C["vram:exceeded"] = { states: ["sceneS"], switch: true,
     vramFake({ [c.pid]: 2000 });
     c.adv = await waitSettled(12000, SC[1]);
     c.status = "";
-    await waitFor(async () => (c.status = String(await ui(`return document.querySelector(".status")?.textContent ?? "";`))).includes("stopped: used"), 5000, 100);
+    await waitFor(async () => (c.status = String(await ui(`return document.querySelector(".status")?.textContent ?? "";`))).includes("of video memory, over the"), 5000, 100);
     c.ev = (await scLogs("scene.vram_exceeded")).filter((e) => e.path === SC[0]);
     vramFake();
   }, check(c) {
     const v = [...expectShown(c, SC[1], { effect: true })];
     if (!c.ev.length) v.push(`no scene.vram_exceeded for s1 (worker ${c.pid})`);
     if (readScIndex()[SC_KEY(SC[0])]?.crashed) v.push("s1 was marked crashed by a VRAM stop");
-    if (!c.status.includes("used 2000 MiB > limit 1536 MiB")) v.push(`the status bar says "${c.status}", expected "s1: stopped: used 2000 MiB > limit 1536 MiB of VRAM"`);
+    if (!c.status.includes("Stopped s1: it used 2000 MiB of video memory, over the 1536 MiB cap")) v.push(`the status bar says "${c.status}", expected "Stopped s1: it used 2000 MiB of video memory, over the 1536 MiB cap"`);
     return v;
   } };
 
@@ -4577,15 +4577,15 @@ C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
     await post("/playlist/state", { videoPaths: ps.videoPaths, settings: ps.settings, name: ps.name });
   }, check(c) {
     const v = [];
-    if (c.on?.code !== 0 || !/Looping .* the playlist stays on it/.test(c.on?.out ?? "")) v.push(`toggle-loop-current (on): exit ${c.on?.code}, said ${JSON.stringify(c.on?.out)}`);
+    if (c.on?.code !== 0 || !/Looping .*\. The playlist stays on it until you toggle the loop again\./.test(c.on?.out ?? "")) v.push(`toggle-loop-current (on): exit ${c.on?.code}, said ${JSON.stringify(c.on?.out)}`);
     if (c.keep1 !== true) v.push(`prog:main.keep after toggle-loop-current: ${c.keep1}, expected true`);
     if (c.curKeep !== true) v.push(`/current.keep ${c.curKeep}, expected true`);
     if (!/^Looping /.test(c.status1 ?? "")) v.push(`topbar after toggle-loop-current: ${JSON.stringify(c.status1)}`);
     if (c.switchesKept) v.push(`${c.switchesKept} switch(es) within 7 s under the keep (3 s interval) — it must stay on ${TITLE(c.cur1)}`);
     if (c.loop !== true) v.push(`the kept video's loop ${c.loop}, expected true`);
-    if (c.off?.code !== 0 || !/Rotation resumed/.test(c.off?.out ?? "")) v.push(`toggle-loop-current (off): exit ${c.off?.code}, said ${JSON.stringify(c.off?.out)}`);
+    if (c.off?.code !== 0 || !/: The playlist moves on again from /.test(c.off?.out ?? "")) v.push(`toggle-loop-current (off): exit ${c.off?.code}, said ${JSON.stringify(c.off?.out)}`);
     if (c.keep2 !== false) v.push(`prog:main.keep after the 2nd toggle-loop-current: ${c.keep2}, expected false`);
-    if (!/^Rotation resumed/.test(c.status2 ?? "")) v.push(`topbar after the 2nd toggle-loop-current: ${JSON.stringify(c.status2)}`);
+    if (!/^The playlist moves on again from /.test(c.status2 ?? "")) v.push(`topbar after the 2nd toggle-loop-current: ${JSON.stringify(c.status2)}`);
     if (!c.resumed) v.push("no switch within 5.5 s of lifting the keep (3 s interval)");
     if (!c.down) v.push("the backend didn't stop (the fixture failed)");
     if (c.closed?.code !== 0 || c.keep3 !== true) v.push(`toggle-loop-current with the app closed: exit ${c.closed?.code} (${JSON.stringify(c.closed?.out)}), prog:main.keep ${c.keep3}`);

@@ -121,7 +121,7 @@ fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
 const ok1 = await dropAndDrain("710000001");
 const failMsg = unsub.find((e) => e.message)?.message ?? "";
-out(ok1 && urls().length === n0 && (await queue()).includes("710000001") && /Couldn't use the Steam app/.test(failMsg) && /stays queued/.test(failMsg),
+out(ok1 && urls().length === n0 && (await queue()).includes("710000001") && /Couldn't use the Steam app/.test(failMsg) && /tries again with your next unsubscribe/.test(failMsg),
   "…Steam unreachable: the unsubscribe fails with the reason, stays queued, nothing opens", `opened ${urls().length - n0} | ${failMsg}`);
 fs.rmSync(`${T}/steamlib/fail-init`);
 // Steam reachable again → the next drain finishes it through the Steam client
@@ -598,7 +598,7 @@ await unsubDone();
 st = await state(["770000003"]);
 out(ro3?.status === 200 && ownCopy(ro3.body, "770000003") === true && !fakeLines("downloads").includes("770000003"),
   "one-off, the client refuses DownloadItem: the library's own copy all the same", JSON.stringify(ro3)?.slice(0, 160));
-// its unsubscribe is part of the download: no progress for the UI's "Removing from Steam", only the finishing event
+// its unsubscribe is part of the download: no progress for the top bar's "Unsubscribing" count, only the finishing event
 out(unsub.some((e) => e.finished) && !unsub.some((e) => !e.finished),
   "…its unsubscribe sends no unsub-progress, only the finishing event", JSON.stringify(unsub));
 out(!fs.existsSync(`${T}/steamlib/sub-770000003`) && fakeLines("unsubscribed").length === unsub0 + 1 && tUnsub3 < 4500 && !(await queue()).includes("770000003")

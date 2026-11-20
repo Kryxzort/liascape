@@ -53,12 +53,14 @@ export const filterOf = (s: State, scope: FilterScope) => scope === "library" ? 
 // PERF: a library re-read (closing the item sidebar re-reads it, a sync, a WS reopen) keeps every item object whose content
 // didn't change — and the whole array when nothing did — so the grid's memo'd cards and the playlist bar's items don't all
 // re-render for a reload that changed nothing. Guard: probe-layout perf:sidebar (close).
-// "Unsubscribing X in 5 s — removed from your library; Undo keeps it": the wait is the backend's Undo window
-// (POST /workshop/unsubscribe, /workshop/delete-from-source → unsubscribeInMs). Guard: probe-steam side:unsub:names
-function unsubStatus(what: string, inMs: number | undefined, removed: boolean): string {
-  const when = inMs ? ` in ${Math.round(inMs / 1000)} s` : "";
-  return `Unsubscribing ${what}${when}${removed ? ` — removed from your library${inMs ? "; Undo keeps it" : ""}` : ""}`;
+// "Unsubscribing from X. Undo brings it back.": what happens to the user's wallpapers and what they can do about it, never
+// the backend's Undo window (unsubscribeInMs) it rides on. The message lasts that window's 5 s; an Undo after it still brings
+// the item back and subscribes it again. Removed = it left the library too (the topbar's Undo is the library's trash).
+// Guard: probe-steam side:unsub:names
+function unsubStatus(what: string, n: number, removed: boolean): string {
+  return `Unsubscribing from ${what}${removed ? `. Undo brings ${n === 1 ? "it" : "them"} back.` : ""}`;
 }
+const wallpapers = (n: number) => (n === 1 ? "1 wallpaper" : `${n} wallpapers`);
 
 function keepSame(prev: LibraryItem[], next: LibraryItem[]): LibraryItem[] {
   const old = new Map(prev.map((i) => [i.videoPath, i]));
@@ -114,7 +116,6 @@ interface State {
   // the password sign-in modal (SteamPasswordModal): which step Steam is at (WS steam-login-code), busy while a request /
   // Steam's answer is pending, the inline error. The password itself is never in the store — the modal's own field only.
   pwLogin: { step: "credentials" | "email" | "device" | "confirm"; hint: string | null; retry: boolean; busy: boolean; error: string | null } | null;
-  unsub: { done: number; total: number; currentId: string; active: boolean } | null;
   // the Steam to-do (WS steam-todo; null / finished = idle) — components/SteamTodoPanel.tsx
   steamTodo: SteamTodo | null; setSteamTodo(t: SteamTodo | null): void;
   // the library's background operations running now (WS library-ops, GET /library/ops): the top bar's progress line
@@ -207,7 +208,6 @@ interface State {
   openPwLogin(): void; startPwLogin(username: string, password: string): Promise<void>; submitPwCode(code: string): Promise<void>;
   cancelPwLogin(): Promise<void>; onPwCode(p: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean }): void;
   onPwError(message: string): void;
-  setUnsub(u: State["unsub"]): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
   focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void;
   setPreviewPref(side: "library" | "browse", k: PreviewKind): void;
@@ -296,7 +296,7 @@ export const useStore = create<State>((set, get) => ({
   filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false), filterDrawer: null,
   libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
-  steam: null, qrOpen: false, qrPng: null, pwLogin: null, unsub: null, steamTodo: null, libraryOps: [],
+  steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
   themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
@@ -475,7 +475,7 @@ export const useStore = create<State>((set, get) => ({
     const s = { ...(get().settings ?? {}), ...SETTINGS_DEFAULTS };
     set({ settings: s }); api.saveSettings(s).catch(() => {});
     get().applyTheme(SETTINGS_DEFAULTS.theme as string);
-    get().setStatus("Settings cleared — reset to defaults");
+    get().setStatus("Settings are back to their defaults");
   },
   addManyToPlaylist(paths) {
     const set0 = new Set(get().playlist);
@@ -600,8 +600,8 @@ export const useStore = create<State>((set, get) => ({
   },
   async clearLibrary() { await api.libraryClear(); await get().loadLibrary(); get().setStatus("Library cleared"); },
   async clearCache(ids) {
-    try { const r = await api.clearCache(ids); get().setStatus(`Cache cleared — freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB (${r.count} files)`); return r; }
-    catch { get().setStatus("Failed to clear cache"); return null; }
+    try { const r = await api.clearCache(ids); get().setStatus(`Freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB of cache`); return r; }
+    catch { get().setStatus("Couldn't clear the cache"); return null; }
   },
   openImport(paths, watch = false) { set({ importAt: { paths, watch } }); },
   closeImport() { set({ importAt: null }); },
@@ -614,8 +614,8 @@ export const useStore = create<State>((set, get) => ({
   // the unsubscribe waits out the backend's Undo window (no drain from here: the backend starts it, the window closed or not)
   async deleteFromSource(items) {
     if (items.length === 0) return;
-    const r = await api.deleteFromSource(items); await get().loadLibrary();
-    get().setStatus(unsubStatus(items.length === 1 ? items[0].title : `${items.length} items`, r.unsubscribeInMs, true));
+    await api.deleteFromSource(items); await get().loadLibrary();
+    get().setStatus(unsubStatus(items.length === 1 ? items[0].title : wallpapers(items.length), items.length, true));
   },
   setQrPng(png) { set({ qrPng: png }); },
   onSignedIn(s) { set({ steam: s, qrOpen: false, qrPng: null, pwLogin: null }); get().setStatus("Signed in to Steam"); },
@@ -640,7 +640,6 @@ export const useStore = create<State>((set, get) => ({
   onPwCode(c) { if (get().pwLogin) set({ pwLogin: { step: c.kind, hint: c.hint, retry: c.retry, busy: false, error: null } }); },
   // back to the first step with the error (its password field starts empty: the password is never kept)
   onPwError(message) { if (get().pwLogin) set({ pwLogin: { step: "credentials", hint: null, retry: false, busy: false, error: message } }); },
-  setUnsub(u) { set({ unsub: u }); },
   setSteamTodo(t) { set({ steamTodo: t && "finished" in t && t.finished ? null : t }); },
   setLibraryOps(ops) { set({ libraryOps: ops }); },
 
@@ -667,7 +666,7 @@ export const useStore = create<State>((set, get) => ({
       if (r.subscribed) get().setSubProgress(id, null);
     } catch (e) {
       get().setSubProgress(id, null);
-      get().setStatus(`Subscribing failed: ${(e as Error).message}`);
+      get().setStatus(`Couldn't subscribe to ${title}: ${(e as Error).message}`);
     }
     get().bumpWsState();
   },
@@ -676,8 +675,8 @@ export const useStore = create<State>((set, get) => ({
       const r = await api.workshopUnsubscribe(id, title);
       // an item in the library went to the trash like Delete from source — the library + the status bar's Undo follow
       if (r.inLibrary) await get().loadLibrary();
-      get().setStatus(unsubStatus(title, r.unsubscribeInMs, r.inLibrary));
-    } catch (e) { get().setStatus(`Unsubscribing failed: ${(e as Error).message}`); }
+      get().setStatus(unsubStatus(title, 1, r.inLibrary));
+    } catch (e) { get().setStatus(`Couldn't unsubscribe from ${title}: ${(e as Error).message}`); }
     get().bumpWsState();
   },
   // "Unsubscribe without deleting": the library keeps its copy (the backend copies it out of Steam's folder first)
@@ -685,8 +684,8 @@ export const useStore = create<State>((set, get) => ({
     try {
       const r = await api.workshopUnsubscribeKeep(id, title);
       if (r.inLibrary) await get().loadLibrary();
-      get().setStatus(r.inLibrary ? `Unsubscribing ${title} — kept in your library` : `Unsubscribing ${title}`);
-    } catch (e) { get().setStatus(`Unsubscribing failed: ${(e as Error).message}`); }
+      get().setStatus(r.inLibrary ? `Unsubscribing from ${title}. It stays in your library.` : `Unsubscribing from ${title}`);
+    } catch (e) { get().setStatus(`Couldn't unsubscribe from ${title}: ${(e as Error).message}`); }
     get().bumpWsState();
   },
 

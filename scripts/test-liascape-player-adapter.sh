@@ -1278,7 +1278,7 @@ adv2_ms() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq
 waitfor $WAIT eval 'am=$(adv2_ms); [ -n "$am" ]'
 [ -n "${am:-}" ] && python3 -c "import sys; sys.exit(0 if float('$am') <= 2000 else 1)" && ok "the rotation advanced to scene 2 $(printf %.0f "$am") ms after the stop" || bad "advance after the VRAM stop: ${am:-none} ms (cur $(basename "$(cur path)"))"
 waitfor $WAIT scene_ready "$S2" || bad "after the VRAM stop: cur $(basename "$(cur path)")"
-waitfor $WAIT eval 'grep "scene-vram-stopped" "$T/ws-vram.log" | jq -r "select(.payload.path | endswith(\"900000001\")) | .payload.message" | grep -q "used 2000 MiB > limit 1536"' && ok "WS scene-vram-stopped: $(grep -m1 scene-vram-stopped "$T/ws-vram.log" | jq -r .payload.message)" || bad "no WS scene-vram-stopped: $(grep -c . "$T/ws-vram.log") lines"
+waitfor $WAIT eval 'grep "scene-vram-stopped" "$T/ws-vram.log" | jq -r "select(.payload.path | endswith(\"900000001\")) | .payload.message" | grep -q "used 2000 MiB of video memory, over the 1536 MiB cap"' && ok "WS scene-vram-stopped: $(grep -m1 scene-vram-stopped "$T/ws-vram.log" | jq -r .payload.message)" || bad "no WS scene-vram-stopped: $(grep -c . "$T/ws-vram.log") lines"
 jq -e '."900000001".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S1" '.events[] | select(.path==$p) | .id')" ] \
   && ok "…never marked crashed (no source.broken, index crashed false)" || bad "a VRAM stop marked the scene crashed: $(jq -c '."900000001"' "$IDX")"
 vram_fake ""

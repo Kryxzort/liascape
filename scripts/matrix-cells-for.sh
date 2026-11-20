@@ -51,7 +51,7 @@ for f in $FILES; do
       echo "  $f → nothing in the matrix (bash scripts/test-clip-sweep.sh + --probe probe-libops.js)" >&2 ;;
     # the top bar's status slot: its words (a status message, the background work, the hint)
     app/ui/src/components/TopbarStatus.tsx)
-      echo "  $f → nothing in the matrix (--probe probe-libops.js libops:status / libops:combined; LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js resize:)" >&2 ;;
+      echo "  $f → nothing in the matrix (--probe probe-libops.js libops:status / libops:combined / libops:single; LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-layout.js resize:)" >&2 ;;
     # the top bar's search field and the widths its controls fold at: the matrix's Browse cells type into the search
     app/ui/src/components/TopbarSearch.tsx|app/ui/src/hooks/useTopbarCompact.ts)
       add "browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-filters.js search: split:; --probe probe-layout.js resize:)" ;;

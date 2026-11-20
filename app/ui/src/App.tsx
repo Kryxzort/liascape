@@ -35,7 +35,6 @@ const Settings = memo(lazy(() => import("./views/Settings").then((m) => ({ defau
 const PlaylistBar = memo(PlaylistBarView);
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
 const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").then((m) => ({ default: m.SteamPasswordModal })));
-const DrainToast = lazy(() => import("./components/DrainToast").then((m) => ({ default: m.DrainToast })));
 const SteamTodoPanel = lazy(() => import("./components/SteamTodoPanel").then((m) => ({ default: m.SteamTodoPanel })));
 const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ default: m.ErrorModal })));
 const ImportDialog = lazy(() => import("./components/ImportDialog").then((m) => ({ default: m.ImportDialog })));
@@ -52,7 +51,7 @@ const BROWSE_SORTS =["Default", "Name A–Z", "Name Z–A", "Videos first", "Sce
 export default function App() {
   // PERF: only what App reads (useShallow: the store's actions are stable, so the state fields decide), never the whole
   // store: a Library filter change or a selection re-rendered App and its top bar's ~30 icons. Guard: probe-filters lib:interplay
-  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setUnsub: st.setUnsub, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort })));
+  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort })));
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
   const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
@@ -102,7 +101,7 @@ export default function App() {
     else if (e.type === "subscribe-progress") {
       const p = e.payload;
       s.setSubProgress(p.id, p.done ? null : { value: p.value, status: p.status });
-      if (p.done) { s.bumpWsState(); if (p.error) s.setStatus(`Subscribing failed: ${p.error}`); }
+      if (p.done) { s.bumpWsState(); if (p.error) s.setStatus(`Couldn't subscribe: ${p.error}`); }
     }
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
@@ -112,16 +111,16 @@ export default function App() {
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     // API: the sign-in ended (here or by Steam): the Unsubscribe controls follow (SteamOps.SignInLost)
     else if (e.type === "steam-status") useStore.setState({ steam: e.payload });
-    else if (e.type === "steam-qr-error") s.setStatus("Steam: " + e.payload.message);
+    else if (e.type === "steam-qr-error") s.setStatus("Couldn't sign in to Steam: " + e.payload.message);
     // the password sign-in's steps (SteamPasswordModal)
     else if (e.type === "steam-login-code") s.onPwCode(e.payload);
     else if (e.type === "steam-login-error") s.onPwError(e.payload.message);
+    // the unsubscribes reaching Steam: their count is the library's "unsubscribe" operation (library-ops, the top bar's words
+    // and line); here only the end. What the drain wants the user to know (held, not a flash): what to click in the Steam app
+    // ("Open in the Steam app"), or that an unsubscribe was dropped for want of a sign-in
     else if (e.type === "unsub-progress") {
-      s.setUnsub(e.payload.finished ? null : { done: e.payload.done, total: e.payload.total, currentId: e.payload.currentId, active: true });
-      // what the drain wants the user to know (held, not a flash): what to click in the Steam app ("Open in the Steam app"), or
-      // that an unsubscribe was dropped for want of a sign-in
       if (e.payload.finished && e.payload.message) s.setStatus(e.payload.message, false);
-      else if (e.payload.finished && e.payload.error) s.setStatus("Removing from Steam failed: " + e.payload.error);
+      else if (e.payload.finished && e.payload.error) s.setStatus("Couldn't unsubscribe on Steam: " + e.payload.error);
       if (e.payload.finished) s.bumpWsState();
     }
     else if (e.type === "steam-todo") { s.setSteamTodo(e.payload); s.bumpWsState(); }
@@ -133,12 +132,12 @@ export default function App() {
     // message here would sit over it); a timed line at its end
     else if (e.type === "scene-loudness-progress") {
       const p = e.payload;
-      if (p.finished) s.setStatus(p.cancelled ? "Scene loudness: cancelled" : `Scene loudness: estimated ${p.done} scene${p.done === 1 ? "" : "s"}`);
+      if (p.finished) s.setStatus(p.cancelled ? "Stopped estimating scene loudness" : `Estimated the loudness of ${p.done === 1 ? "1 scene" : `${p.done} scenes`}`);
     }
     // liascape-player's VRAM guard stopped a scene (not a crash — it stays playable): say why
     else if (e.type === "scene-vram-stopped") {
       const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop();
-      s.setStatus(`${t}: ${e.payload.message}`, true, true); // held: the rotation's switch off it lands right after
+      s.setStatus(`Stopped ${t}: ${e.payload.message}`, true, true); // held: the rotation's switch off it lands right after
     }
     // a scene broke for good (liascape-player: past its restart budget) — the backend marked it crashed in its index:
     // its card shows it at once, not at the next library reload
@@ -281,7 +280,6 @@ export default function App() {
       <Suspense fallback={null}>
         <SteamModal />
         <SteamPasswordModal />
-        <DrainToast />
         <SteamTodoPanel />
         <ErrorModal />
         <ImportDialog />

@@ -255,9 +255,10 @@ public static class SteamOps
         StartDrain();
     }
 
-    // The drain modal is a view onto this; dismissing it doesn't stop the drain. One drain at a time. What it did beyond the
-    // queue (pages opened under "Open in the Steam app", unsubscribes dropped for want of a sign-in) → `openedInSteam` +
-    // `message` on the finishing event (WorkshopDownloader.DrainUnsubQueueAsync).
+    // One drain at a time. Its count is also the library's "unsubscribe" operation (Web/LibraryOps.cs: the top bar's words and
+    // progress line, which leave a single quick one out). What it did beyond the queue (pages opened under "Open in the Steam
+    // app", unsubscribes dropped for want of a sign-in) → `openedInSteam` + `message` on the finishing event
+    // (WorkshopDownloader.DrainUnsubQueueAsync).
     public static void StartDrain()
     {
         // asked while one runs (the Browse sidebar's Unsubscribe right after a Delete from source): that run may have read the
@@ -272,12 +273,22 @@ public static class SteamOps
                 {
                     try
                     {
-                        var progress = new Progress<(int Done, int Total, string CurrentId)>(t =>
-                            EventBus.Broadcast("unsub-progress", new { done = t.Done, total = t.Total, currentId = t.CurrentId }));
+                        // reported inline, not through Progress<T>: its callbacks run later on the pool, and one landing after
+                        // the End below would leave the operation showing for good
+                        var progress = new InlineProgress<(int Done, int Total, string CurrentId)>(t =>
+                        {
+                            EventBus.Broadcast("unsub-progress", new { done = t.Done, total = t.Total, currentId = t.CurrentId });
+                            LibraryOps.Set("unsubscribe", "steam", t.Done, t.Total);
+                        });
                         var r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), progress, CancellationToken.None);
+                        LibraryOps.End("unsubscribe");
                         EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = r.OpenedInSteam, message = r.Message });
                     }
-                    catch (Exception e) { EventBus.Broadcast("unsub-progress", new { error = e.Message, finished = true }); }
+                    catch (Exception e)
+                    {
+                        LibraryOps.End("unsubscribe");
+                        EventBus.Broadcast("unsub-progress", new { error = e.Message, finished = true });
+                    }
                 }
             }
             finally
@@ -287,4 +298,6 @@ public static class SteamOps
             }
         });
     }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T> { public void Report(T value) => report(value); }
 }

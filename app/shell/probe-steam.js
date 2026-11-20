@@ -57,13 +57,14 @@
 //                         aria-label's ("— copy" / "— copied"), never the hidden face's; "Copied" rolls in (motion on) or only
 //                         fades in place (motion off). Shots steam-idpill-*.png
 //   side:deleteSource:names  "Delete from source" reads "Delete and unsubscribe" with a tooltip naming the unsubscribe; its click
-//                         (stubbed POST /workshop/delete-from-source) → the status bar says "Unsubscribing …"; with auto-import on
-//                         a Workshop item's Delete reads the same, a non-Workshop item's stays "Delete". Shots steam-delsource*.png
+//                         (stubbed POST /workshop/delete-from-source) → the status bar says "Unsubscribing from s1. Undo brings
+//                         it back." (no Undo window's seconds); with auto-import on a Workshop item's Delete reads the same, a
+//                         non-Workshop item's stays "Delete". Shots steam-delsource*.png
 //   steam:subToggle:keepMenu  a library item's Unsubscribe: a real right-click opens a menu at the pointer ("Unsubscribe without
 //                         deleting", focused; it grows in per frame; no request); Escape (focus back) and a click outside close it;
 //                         picking it → ONE POST /workshop/unsubscribe-keep (never /workshop/unsubscribe), the menu fades out, the
-//                         status says "kept in your library"; the left-click still posts /workshop/unsubscribe; no menu for an
-//                         item not in the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
+//                         status says "Unsubscribing from ws-1. It stays in your library."; the left-click still posts
+//                         /workshop/unsubscribe; no menu for an item not in the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
 //   steam:subToggle:keepMenuOff  motion off: the menu fades in and out in place (motion-off.js)
 //   steam:subToggle:signedOut  signed out: the Browse sidebar's Unsubscribe aria-disabled, its sub-line "Sign in to Steam to
 //                         unsubscribe" (no tooltip), a click posts nothing, its right-click entry disabled with that note; "Use the
@@ -1199,7 +1200,7 @@ app.whenReady().then(async () => {
       const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
       console.log(`        clicked: ${J(got.map((c) => c.p))} | status "${status}"`);
       if (!got.some((c) => c.p === "/workshop/delete-from-source" && c.body?.items?.[0]?.workshopId === "900000001")) v.push(`the click posted ${J(got)}`);
-      if (!/^Unsubscribing s1 in 5 s — removed from your library; Undo keeps it/.test(status)) v.push(`the status bar says "${status}"`);
+      if (!/^Unsubscribing from s1\. Undo brings it back\.$/.test(status)) v.push(`the status bar says "${status}"`);
       // auto-import on: a Workshop item Steam doesn't have subscribed (the library's own copy) deletes plainly — no unsubscribe
       // (a subscribed one's Delete is Unsubscribe: side:unsub:names); a plain item's stays "Delete"
       await setSettings({ autoAddWeWallpapersToLibrary: true });
@@ -1301,7 +1302,7 @@ app.whenReady().then(async () => {
       if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe-keep" || got[0].body?.workshopId !== "930000" || got[0].body?.title !== "ws-1") v.push(`picking it posted ${J(got)}`);
       if (between(ops, 0.05) < 1 || ops.at(-1) != null) v.push(`the menu didn't fade / shrink out (opacity per frame ${J(ops.slice(0, 12))})`);
       const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
-      if (!/kept in your library/.test(status)) v.push(`the status bar says "${status}"`);
+      if (!/^Unsubscribing from \S+\. It stays in your library\.$/.test(status)) v.push(`the status bar says "${status}"`);
       // the plain left-click is still the deleting Unsubscribe
       await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true }); await bump(); await sleep(500);
       b = await btnBox(); n0 = (await calls()).length;
@@ -1797,7 +1798,7 @@ app.whenReady().then(async () => {
       const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
       console.log(`        Unsubscribe: ${J(got.map((c) => [c.p, c.body?.items?.map((i) => i.title)]))} | "${status}"`);
       if (got.length !== 1 || got[0].p !== "/workshop/delete-from-source" || J(got[0].body?.items?.map((i) => i.title)) !== J(["s1"])) v.push(`Unsubscribe posted ${J(got)}`);
-      if (!/^Unsubscribing s1 in 5 s — removed from your library; Undo keeps it/.test(status)) v.push(`the status bar says "${status}"`);
+      if (!/^Unsubscribing from s1\. Undo brings it back\.$/.test(status)) v.push(`the status bar says "${status}"`);
       // the card's button the same
       n0 = (await calls()).length;
       await page(`[...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(600);
@@ -1900,7 +1901,7 @@ app.whenReady().then(async () => {
       console.log(`        keep: ${J(got.map((c) => [c.p, c.body]))}`);
       if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe-keep" || got[0].body?.workshopId !== "900000001" || got[0].body?.title !== "s1") v.push(`picking it posted ${J(got)}`);
       const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
-      if (!/kept in your library/.test(status)) v.push(`the status bar says "${status}"`);
+      if (!/^Unsubscribing from \S+\. It stays in your library\.$/.test(status)) v.push(`the status bar says "${status}"`);
       const del = sw.filter((f) => f && f[0] === "Delete");
       console.log(`        the tile: ${sw.filter(Boolean).length} frames, Delete frames ${del.length}; op ${J(del.slice(0, 8).map((f) => f[1]))} x ${J(del.slice(0, 8).map((f) => f[2]))}`);
       if (!del.length) v.push(`the tile never became Delete: ${J(sw.filter(Boolean).at(-1))}`);

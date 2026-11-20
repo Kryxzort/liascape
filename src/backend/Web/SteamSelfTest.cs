@@ -530,7 +530,7 @@ public static class SteamSelfTest
         var r = await WorkshopDownloader.DrainUnsubQueueAsync(SettingsService.Load(), null, CancellationToken.None);
         var urls = await Urls(1);
         Check(urls.LastOrDefault() == "steam://url/CommunityFilePage/800000001", $"unsub, Open in the Steam app, signed out, 1 item: its page opens in Steam ({string.Join(" ", urls)})");
-        Check(r.OpenedInSteam == 1 && (r.Message ?? "").Contains("Set to open items in the Steam app") && (r.Message ?? "").Contains("Unsubscribe"), $"…the message says why + what to click ({r.Message})");
+        Check(r.OpenedInSteam == 1 && (r.Message ?? "") == "Click Unsubscribe on the page Steam opened, then Next.", $"…the message says what to click ({r.Message})");
         var tp = Todo();
         Check(Str(tp ?? default, "action") == "unsubscribe" && I(tp, "index") == 1 && I(tp, "total") == 1 && CurId(tp) == "800000001",
             $"…WS steam-todo: unsubscribe 1 of 1, the item ({Show(tp)})");
@@ -550,7 +550,7 @@ public static class SteamSelfTest
         urls = await Urls(0);
         Check(urls.Count == 2 && urls[^1] == "steam://url/CommunityFilePage/800000002",
             $"unsub, Open in the Steam app, signed in, 3 items Steam has: only the first page opens — never the subscriptions list ({string.Join(" ", urls)})");
-        Check(r.OpenedInSteam == 3 && (r.Message ?? "").Contains("Set to open items in the Steam app") && (r.Message ?? "").Contains("one at a time"), $"…3 in the to-do, the message says why ({r.Message})");
+        Check(r.OpenedInSteam == 3 && (r.Message ?? "").StartsWith("Steam opens the 3 wallpapers one at a time"), $"…3 in the to-do, the message says what to click ({r.Message})");
         Check(!Pending("800000099") && Blocked("800000099"), "…the one Steam doesn't have (no Steam folder): no entry, no page, blocked at once");
         tp = Todo();
         Check(I(tp, "index") == 1 && I(tp, "total") == 3 && I(tp, "remaining") == 3, $"…WS steam-todo: 1 of 3 ({Show(tp)})");

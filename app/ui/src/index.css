@@ -892,16 +892,6 @@ input[type=range]:focus-visible { outline: none; }
 .hms span.s-warn-text { color: var(--warn, #f9e2af); }
 .steam-row-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
-/* ---- unsub drain toast (dismissable; drain keeps running) ---- */
-.drain-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60;
-  display: flex; align-items: center; gap: 12px; background: var(--surface0); border: 1px solid var(--surface1);
-  border-radius: 12px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5), var(--glow-sm); font-size: 13px; }
-.drain-toast em { color: var(--muted); font-style: normal; }
-.drain-bar { width: 90px; height: 5px; border-radius: 999px; background: var(--surface2); overflow: hidden; }
-.drain-fill { width: 40%; height: 100%; background: var(--accent); border-radius: 999px;
-  box-shadow: var(--glow-sm); animation: drain-ind 1.1s ease-in-out infinite; }
-@keyframes drain-ind { 0% { margin-left: -45%; } 100% { margin-left: 100%; } }
-
 /* ---- the Steam to-do (components/SteamTodoPanel.tsx): floating bottom-right, above the item sidebar (40) + the bar's hover
    glow (45), under the modals (50); `bottom` inline (lifted over the playlist bar). Glow = var(--glow*) → none under no-glow ---- */
 /* the dock: fixed bottom-right, lifted over the playlist bar by a translateY that GLIDES (the app's springy curve) — a tab switch /
@@ -1455,9 +1445,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .dl-btn:active { scale: none; }
 :root.no-motion .card { transition: box-shadow .2s ease; }
 :root.no-motion .ns-btn::before { transform: none; }
-/* loops stand still: the undo / confirm buttons glow without pulsing, the drain toast's bar holds full width, dimmed */
+/* loops stand still: the undo / confirm buttons glow without pulsing */
 :root.no-motion .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent), var(--glow-sm); }
-:root.no-motion .drain-fill { animation: none; width: 100%; margin-left: 0; opacity: .45; }
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
 :root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico, .wf-gico) { transition: none !important; }
 :root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }

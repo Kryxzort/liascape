@@ -3944,7 +3944,7 @@ public static class PlayerHelper
     // crashed (it isn't broken; with a higher limit or less on the GPU it plays): the UI is told why instead
     // (WS `scene-vram-stopped {path, usedMib, limitMib, message}`).
     public static string VramStoppedMessage(double usedMib, double limitMib) =>
-        $"stopped: used {usedMib:0} MiB > limit {limitMib:0} MiB of VRAM";
+        $"it used {usedMib:0} MiB of video memory, over the {limitMib:0} MiB cap";
 
     public static void OnSceneVramStopped(string path, double usedMib, double limitMib)
     {

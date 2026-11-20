@@ -32,12 +32,15 @@
 //                    three; counts moving never switch the named one; when it ends the words cross-fade to the next
 //   libops:previews  the cards' own first clips (ClipStore's queue, "clips" phase make): the slot reads "Making previews
 //                    n / total", the line names it and fills to its count
+//   libops:single    one item's work (one unsubscribe reaching Steam, operation "unsubscribe"): over within 1.2 s it shows
+//                    nothing at all; still running, nothing before 3 s, then "Unsubscribing…" alone (no "0 / 1", no line, the
+//                    words spoken), at 900 px too; three items "Unsubscribing 1 / 3" with the line
 //   libops:backfill  the previews made ahead of their cards (Web/PreviewBackfill.cs): six videos imported at once below the fold
 //                    of a small window with "Not hovered" on the video: the real line shows "Making previews n / total" and
 //                    goes; every card never scrolled into view has its still and its clip; a card scrolled into view mid-run
 //                    plays its preview within a few seconds (logged: how long)
 // Pictures (looked at, not only counted): libops-appear.png, libops-steady.png, libops-noglow-bglive.png, libops-nomotion.png,
-// libops-browse-mid.png, libops-status-*.png, libops-combined*.png, libops-previews.png in $LIASCAPE_OUT. Exit 1 on any FAIL.
+// libops-browse-mid.png, libops-status-*.png, libops-combined*.png, libops-previews.png, libops-single.png in $LIASCAPE_OUT. Exit 1 on any FAIL.
 // LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const fs = require("fs");
@@ -418,7 +421,7 @@ app.whenReady().then(async () => {
       if (!l) return [...v, "no line with three operations running"];
       if (r.text !== "Making Low previews3 / 12· +2 more") v.push(`the slot reads "${r.text}" (want "Making Low previews" "3 / 12" "· +2 more")`);
       if (l.label !== "Making Low previews, Measuring scene loudness, Measuring video loudness") v.push(`the line's name is "${l.label}" (want all three)`);
-      if (l.text !== "Making Low previews: 3 of 12; Measuring scene loudness: 1 of 4; Measuring video loudness: 0 of 8") v.push(`the line's value text is "${l.text}"`);
+      if (l.text !== "Making Low previews: 3 of 12, Measuring scene loudness: 1 of 4, Measuring video loudness: 0 of 8") v.push(`the line's value text is "${l.text}"`);
       if (l.now !== 4 || l.max !== 24 || Math.abs(l.scale - 4 / 24) > 0.01) v.push(`the fill is ${l.scale} (${l.now} / ${l.max}), want the sum: 4 / 24`);
       await shot("combined");
       // counts moving: the named one stays (never a cycle)
@@ -463,6 +466,52 @@ app.whenReady().then(async () => {
       if (l.label !== "Making previews" || l.text !== "Making previews: 3 of 16") v.push(`the line's name "${l.label}", value text "${l.text}"`);
       if (Math.abs(l.scale - 3 / 16) > 0.01) v.push(`the fill is ${l.scale}, want ${(3 / 16).toFixed(3)}`);
       await shot("previews");
+      await dbg(`ops([])`); await sleep(900);
+      return v;
+    });
+
+    // one item's work (an unsubscribe of one wallpaper reaching Steam): a quick one shows nothing at all, a long one only its
+    // words ("Unsubscribing…", no "0 / 1", no line) from 3 s on; two or more items show the count and the line as usual
+    await cell("libops:single — one item's quick work shows nothing, a long one its words alone (no count, no line); two items the count and the line", async () => {
+      const v = [];
+      await opsIdle();
+      await loadLibrary(true);
+      if (!(await js(`return typeof window.liascapeDbg?.ops === "function"`))) return ["no debug bridge (liascapeDbg.ops) — proved nothing"];
+      await dbg(`status("")`);
+      const seen = () => js(`return { op: !!document.querySelector(".topbar > .status [data-st=op]"), line: !!document.querySelector(".libops") }`);
+      // API: SteamOps.StartDrain's operation: id unsubscribe, phase steam
+      const U1 = (d) => ({ id: "unsubscribe", phase: "steam", done: d, total: 1 });
+      // quick: over in 1.2 s, sampled every 100 ms to past its end
+      await dbg(`ops(${J([U1(0)])})`);
+      let shown = 0;
+      for (let t = 0; t < 20; t++) { const s = await seen(); if (s.op || s.line) shown++; if (t === 12) await dbg(`ops([])`); await sleep(100); }
+      if (shown) v.push(`a quick single unsubscribe showed in the top bar (${shown} of 20 samples had the words or the line)`);
+      // long: nothing before 3 s, then the words alone
+      await dbg(`ops(${J([U1(0)])})`);
+      let early = 0;
+      for (let t = 0; t < 24; t++) { const s = await seen(); if (s.op || s.line) early++; await sleep(100); }
+      if (early) v.push(`a single unsubscribe showed before 3 s (${early} of 24 samples)`);
+      if (!(await waitFor(async () => (await seen()).op, 2500))) v.push("a single unsubscribe still running past 3 s never showed its words");
+      await sleep(400);
+      const one = await js(`const op = document.querySelector(".topbar > .status [data-st=op]:not(.out)");
+        return op && { text: op.textContent, n: !!op.querySelector(".st-op-n"), hidden: op.getAttribute("aria-hidden"), id: op.dataset.opId, line: !!document.querySelector(".libops") }`);
+      console.log(`        single: ${J(one)}`);
+      if (!one || one.text !== "Unsubscribing…" || one.n || one.id !== "unsubscribe") v.push(`the long single unsubscribe reads ${J(one)} (want "Unsubscribing…", no count)`);
+      if (one?.line) v.push("the long single unsubscribe has a progress line");
+      if (one && one.hidden === "true") v.push("with no line to speak for it, the slot's words are aria-hidden");
+      await shot("single");
+      // the same at 900 px (narrow: a count would show alone; one item shows its words)
+      const size = win.getSize();
+      win.setSize(900, size[1]); await sleep(600);
+      const narrow = await js(`return document.querySelector(".topbar > .status [data-st=op]:not(.out)")?.textContent ?? null`);
+      win.setSize(size[0], size[1]); await sleep(400);
+      if (narrow !== "Unsubscribing…") v.push(`900 px: the single unsubscribe reads ${J(narrow)} (want "Unsubscribing…")`);
+      // two items: the count and the line
+      await dbg(`ops(${J([{ id: "unsubscribe", phase: "steam", done: 1, total: 3 }])})`); await sleep(900);
+      const many = await js(`const op = document.querySelector(".topbar > .status [data-st=op]:not(.out)"); const l = document.querySelector(".libops");
+        return { text: op?.textContent ?? null, line: l?.getAttribute("aria-label") ?? null, value: l?.getAttribute("aria-valuetext") ?? null }`);
+      console.log(`        three: ${J(many)}`);
+      if (many.text !== "Unsubscribing1 / 3" || many.line !== "Unsubscribing" || many.value !== "Unsubscribing: 1 of 3") v.push(`three unsubscribes read ${J(many)} (want "Unsubscribing" "1 / 3" and the line)`);
       await dbg(`ops([])`); await sleep(900);
       return v;
     });

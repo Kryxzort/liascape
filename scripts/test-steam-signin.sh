@@ -152,7 +152,7 @@ const urls = () => (fs.existsSync(`${T}/xdg-open.urls`) ? fs.readFileSync(`${T}/
 const status = {}; // workshop id → the statuses seen
 const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN));
 const todo = []; // WS steam-todo payloads
-const unsubEv = []; // WS unsub-progress payloads (the UI's "Removing from Steam" toast and held message)
+const unsubEv = []; // WS unsub-progress payloads (the held message at its end)
 ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress" && e.payload.status) (status[e.payload.id] ??= []).push(e.payload.status);
   if (e.type === "steam-todo") todo.push(e.payload);
   if (e.type === "unsub-progress") unsubEv.push(e.payload); };
@@ -356,7 +356,7 @@ for (const [mode, why] of [["subscribe", "Sign in to Steam to unsubscribe"]]) {
   // its unsubscribe is part of the download: the UI is sent no progress for it (only the finish, which shows nothing)
   for (let i = 0; i < 50 && !unsubEv.some((e) => e.finished); i++) await sleep(100);
   out(unsubEv.some((e) => e.finished) && !unsubEv.some((e) => !e.finished),
-    "…its unsubscribe sends no unsub-progress (nothing for the UI's \"Removing from Steam\"), only the finishing event", JSON.stringify(unsubEv));
+    "…its unsubscribe sends no unsub-progress (nothing for the top bar's \"Unsubscribing\" count), only the finishing event", JSON.stringify(unsubEv));
   const st9 = await wsState("700000009"), q9 = unsubState();
   out((q9.Blocked ?? []).includes("700000009") && !(q9.Pending ?? []).includes("700000009") && st9?.subscribed === false && st9.onDisk === true,
     "…Steam's lingering folder blocked from auto-import, not called subscribed, nothing left queued", JSON.stringify({ q9, st9 }));

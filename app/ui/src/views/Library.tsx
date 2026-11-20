@@ -110,13 +110,14 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   useEffect(() => setPreviewOrder(filtered.map((i) => i.videoPath)), [filtered]);
   useEffect(() => setPreviewSide(libFocus), [libFocus]);
 
-  // selection status — "{n} selected — {x video, y scene}", reverts to now-playing on clear.
+  // selection status — "3 selected: 2 videos, 1 scene", reverts to now-playing on clear.
   useEffect(() => {
     if (sel.size) {
       const selItems = [...sel].map((p) => byPath[p]).filter(Boolean);
       const scenes = selItems.filter((i) => i.isScene).length, vids = sel.size - scenes;
-      const detail = scenes === 0 ? `${vids} video` : vids === 0 ? `${scenes} scene` : `${vids} video, ${scenes} scene`;
-      setStatus(`${sel.size} selected — ${detail}`, false);
+      const count = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+      const detail = scenes === 0 ? count(vids, "video") : vids === 0 ? count(scenes, "scene") : `${count(vids, "video")}, ${count(scenes, "scene")}`;
+      setStatus(`${sel.size} selected: ${detail}`, false);
     } else {
       refreshPlayingStatus();
     }
@@ -148,9 +149,9 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     const ws = [...new Map(list.filter(unsubs).map((i) => [i.workshopId!, i])).values()];
     if (!ws.length || unsubOff) return;
     setSel(new Set());
-    setStatus(`Keeping ${ws.length === 1 ? ws[0].title : `${ws.length} wallpapers`} in your library…`, false);
+    setStatus(`Copying ${ws.length === 1 ? ws[0].title : `${ws.length} wallpapers`} into your library…`, false);
     for (const i of ws) await unsubscribeKeep(i.workshopId!, i.title);
-    if (ws.length > 1) setStatus(`Unsubscribing ${ws.length} wallpapers — kept in your library`);
+    if (ws.length > 1) setStatus(`Unsubscribing from ${ws.length} wallpapers. They stay in your library.`);
   };
 
   // card actions on a *selected* card repeat to the whole selection.
