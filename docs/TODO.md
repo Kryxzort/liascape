@@ -42,6 +42,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
+108. [ ] (owner) Preset wallpapers: browse, download and play other people's Wallpaper Engine presets as their own
+       Library items over their base scene, plus a scene's "Presets" list. Design approved 2026-11-20:
+       `docs/superpowers/specs/2026-11-20-preset-wallpapers-design.md`. Application wallpapers stay unplayable
+       (Wallpaper Engine removed the type from the Workshop after malware; running them means executing downloaded
+       Windows programs).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
@@ -65,11 +70,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
       monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. Design (top-bar screen
       carousel, follow All, per-screen popover, sound priority list): `docs/superpowers/specs/2026-11-17-multi-monitor-design.md`.
-- [ ] **Preset wallpapers**: WE presets (a scene + saved property values, pointing at the scene they customise).
-      Same Unplayable / type-filter step as web. Application wallpapers are NOT planned: Wallpaper Engine 2.8.42
-      removed the type from the Steam Workshop after malware was uploaded as application wallpapers (new ones can't be
-      published, existing ones can't be fetched), and running them would mean executing downloaded Windows programs.
-      Keep Application in Unplayable.
 - [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (the player's last phase), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
       Browse and the scrapers; once it plays, take it out of Unplayable and the Browse type filter (its tag then shows
       in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).
