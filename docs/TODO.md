@@ -47,6 +47,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `docs/superpowers/specs/2026-11-20-preset-wallpapers-design.md`. Application wallpapers stay unplayable
        (Wallpaper Engine removed the type from the Workshop after malware; running them means executing downloaded
        Windows programs).
+109. [ ] A dev build's scene worker links the LWE core by its Nix store path (`LIASCAPE_LWE_CORE_DIR` from `nix develop`),
+       which nothing roots: a Nix garbage collection removed it and every scene worker of the owner's release build
+       exited 127 ("cannot open liblinux-wallpaperengine-core.so.0"), so every scene got a crash mark. Root the core
+       whenever the dev shell builds against it (e.g. `nix build .#lwe-core -o src/player/target/lwe-core-gcroot` in
+       the devShell hook or `scripts/dev.sh`), and make a worker that can't load its core report that reason (not
+       "crashed") so the card says what's wrong.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
