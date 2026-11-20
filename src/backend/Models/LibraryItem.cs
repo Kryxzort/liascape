@@ -55,4 +55,12 @@ public class LibraryItem
     public bool OffWorkshop { get; init; }
     // the watched folder that brought it in (LibMeta.WatchedFrom): Settings counts each folder's wallpapers by it
     public string? WatchedFrom { get; init; }
+    // A Wallpaper Engine preset (Helpers/Presets.cs; also IsScene): its base scene's Workshop id (null = its file names
+    // none), the base's library folder when found, the base's title (its own, else the one its download saved), and why it
+    // can't play now (null = it plays; the legacy engine's reason included). Read at every GET /library.
+    public bool IsPreset { get; init; }
+    public string? BaseWorkshopId { get; init; }
+    public string? BasePath { get; init; }
+    public string? BaseTitle { get; init; }
+    public string? PresetReason { get; init; }
 }

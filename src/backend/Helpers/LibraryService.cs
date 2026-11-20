@@ -14,7 +14,7 @@ namespace Liascape.Helpers;
 //   local/<id> -> symlink into the user's WE dir           subscribed/WE-local video
 //   workshop/<id> | local/<id>                             SCENE — the item FOLDER itself is the play path.
 //       PlayerHelper.IsScenePath = "no media extension"; LWE launches by id (local) or dir (owned).
-//       Scene-ness comes from index .IsScene / project.json type / scene.pkg.
+//       Scene-ness comes from index .IsScene / project.json type / scene.pkg / a preset (Presets.Read: plays its base).
 //   <source>/index.json                                    metadata (volume/speed/crashed/whitelist/source/…)
 // Metadata + dedup live in the per-source index.json (see LibraryStore).
 public static class LibraryService
@@ -499,17 +499,18 @@ public static class LibraryService
         var items = new List<LibraryItem>();
         if (!Directory.Exists(DownloadHelper.LibraryPath)) return items;
 
+        var ctx = new BuildContext();
         foreach (var source in LibraryStore.Sources)
         {
             var dir = LibraryStore.SourceDir(source);
             if (!Directory.Exists(dir)) continue;
-            var idx = LibraryStore.LoadIndex(source);
+            var idx = ctx.Index(source);
 
             // Every item is a folder. SCENE = folder whose VideoPath IS the folder (no media file —
             // see PlayerHelper.IsScenePath); VIDEO/IMAGE = folder holding a media file. local/<id> is a
-            // symlink, still a directory entry. Scene-ness: the index flag, else project.json type / scene.pkg.
+            // symlink, still a directory entry. Scene-ness: the index flag, else project.json type / scene.pkg / a preset.
             foreach (var itemDir in SafeDirs(dir))
-                if (BuildItem(source, itemDir, idx.GetValueOrDefault(Path.GetFileName(itemDir))) is { } item) items.Add(item);
+                if (BuildItem(source, itemDir, idx.GetValueOrDefault(Path.GetFileName(itemDir)), ctx) is { } item) items.Add(item);
         }
         return items;
     }
@@ -519,10 +520,22 @@ public static class LibraryService
     {
         var itemDir = Path.Combine(LibraryStore.SourceDir(source), key);
         if (!Directory.Exists(itemDir)) return null;
-        return BuildItem(source, itemDir, LibraryStore.LoadIndex(source).GetValueOrDefault(key));
+        var ctx = new BuildContext();
+        return BuildItem(source, itemDir, ctx.Index(source).GetValueOrDefault(key), ctx);
     }
 
-    private static LibraryItem? BuildItem(string source, string itemDir, LibMeta? m)
+    // What building items reads beyond each one's own entry, once per listing: each source's index (a preset's base is
+    // another item, its title in that item's entry) and the engine that runs (a preset's legacy reason).
+    private sealed class BuildContext
+    {
+        private readonly Dictionary<string, Dictionary<string, LibMeta>> _idx = new();
+        private bool? _player;
+        public Dictionary<string, LibMeta> Index(string source) =>
+            _idx.TryGetValue(source, out var i) ? i : _idx[source] = LibraryStore.LoadIndex(source);
+        public bool LiascapePlayer => _player ??= Liascape.Player.PlayerEngine.IsLiascapePlayer;
+    }
+
+    private static LibraryItem? BuildItem(string source, string itemDir, LibMeta? m, BuildContext ctx)
     {
         var key = Path.GetFileName(itemDir);
         if ((m?.IsScene ?? false) || IsSceneFolder(itemDir))
@@ -532,8 +545,10 @@ public static class LibraryService
             // to the user's folder: revealed as the item's folder, which the file manager follows)
             bool owned = source is LibraryStore.Workshop or LibraryStore.Imported || (source == LibraryStore.Local && !IsSymlink(itemDir));
             // the folder name is a Workshop id only under workshop/ and local/; an imported folder's id is its index entry's
+            var workshopId = source is LibraryStore.Workshop or LibraryStore.Local ? key : null;
+            var preset = Presets.Read(itemDir) is { } pf ? PresetFactsOf(pf, m, m?.WorkshopId ?? workshopId, ctx) : null;
             return Build(itemDir, key, m, isScene: true, assetDir: itemDir,
-                workshopId: source is LibraryStore.Workshop or LibraryStore.Local ? key : null, copiedSceneDir: owned ? itemDir : null);
+                workshopId: workshopId, copiedSceneDir: owned ? itemDir : null, preset: preset);
         }
         var media = ResolveItemMedia(itemDir, key, imported: source == LibraryStore.Imported);
         if (media == null) return null;
@@ -541,8 +556,9 @@ public static class LibraryService
         return Build(media, key, m, isScene: false, itemDir);
     }
 
-    // A workshop/local folder is a scene when project.json says type=scene (authoritative when present),
-    // else when a compiled scene.pkg sits in it. Web/imported folders have neither → video/image.
+    // A workshop/local folder is a scene when project.json says type=scene (authoritative when present), else when it is
+    // a Wallpaper Engine preset (no type: Presets.Read; it plays as its base scene), else when a compiled scene.pkg sits in
+    // it. Web/imported folders have none → video/image.
     private static bool IsSceneFolder(string itemDir)
     {
         var pj = Path.Combine(itemDir, "project.json");
@@ -555,8 +571,21 @@ public static class LibraryService
                     return string.Equals(t.GetString(), "scene", StringComparison.OrdinalIgnoreCase);
             }
             catch { }
+            if (Presets.Read(itemDir) != null) return true;
         }
         return File.Exists(Path.Combine(itemDir, "scene.pkg"));
+    }
+
+    // A preset item's link to its base (Presets.StatusFor) and the base's title: the found base's own (its index entry's,
+    // else its folder name, as its card shows it), else the one the preset's download saved (LibMeta.BaseTitle).
+    private sealed record PresetFacts(string? BaseId, PresetStatus Status, string? BaseTitle);
+    private static PresetFacts PresetFactsOf(PresetFile f, LibMeta? m, string? selfId, BuildContext ctx)
+    {
+        var st = Presets.StatusFor(f, selfId, m?.BaseKind, id => Presets.BaseDirOf(id, ctx.Index), Presets.KindOf, ctx.LiascapePlayer);
+        string? own = null;
+        if (st.BaseDir is { } bd && LibraryStore.Locate(bd) is { } bl)
+            own = ctx.Index(bl.Source).GetValueOrDefault(bl.Key)?.Title;
+        return new PresetFacts(f.BaseId, st, own ?? m?.BaseTitle ?? (st.BaseDir is { } d ? Path.GetFileName(d) : null));
     }
 
     // the playable media inside an item folder: web/imported = <key>.<videoext>|png; workshop/local = project.json "file".
@@ -588,7 +617,7 @@ public static class LibraryService
     }
 
     private static LibraryItem Build(string media, string key, LibMeta? m, bool isScene,
-        string? assetDir = null, string? workshopId = null, string? copiedSceneDir = null)
+        string? assetDir = null, string? workshopId = null, string? copiedSceneDir = null, PresetFacts? preset = null)
     {
         m ??= new LibMeta();
         string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
@@ -624,6 +653,8 @@ public static class LibraryService
             Subscriptions = m.Subscriptions, Favorites = m.Favorites, Tags = tags,
             OffWorkshop = steamTags == null && m.TagsCheckedAt != null,
             WatchedFrom = m.WatchedFrom,
+            IsPreset = preset != null, BaseWorkshopId = preset?.BaseId, BasePath = preset?.Status.BaseDir,
+            BaseTitle = preset?.BaseTitle, PresetReason = preset?.Status.Reason,
         };
     }
 
@@ -726,7 +757,10 @@ public static class LibraryService
             else if (!hasScenePkg) continue;
 
             bool isVideo = string.Equals(type, "video", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(file);
-            bool isScene = string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase) || (type == null && hasScenePkg);
+            // a preset (no type, a `preset` object, its base's Workshop id) comes in like a scene, with scene support only;
+            // one naming no Workshop id isn't a subscription's preset. Guard: scripts/test-presets.sh § 1 auto-import
+            bool isScene = string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase) || (type == null && hasScenePkg)
+                || (type == null && Presets.Read(dir) is { BaseId: not null });
 
             if (isVideo)
             {
@@ -791,8 +825,9 @@ public static class LibraryService
         return Directory.Exists(p) && !IsSymlink(p);
     }
 
-    // Steam's folder holds the item whole: its project.json and its media (or a scene). Steam moves a download in from its
-    // staging folder only at the end, so a folder here isn't half-written.
+    // Steam's folder holds the item whole: its project.json and its media (or a scene, or a preset: its project.json is all
+    // of it, its base is another item). Steam moves a download in from its staging folder only at the end, so a folder here
+    // isn't half-written.
     private static bool SteamCopyWhole(string dir, string id)
     {
         if (!Directory.Exists(dir) || !File.Exists(Path.Combine(dir, "project.json"))) return false;

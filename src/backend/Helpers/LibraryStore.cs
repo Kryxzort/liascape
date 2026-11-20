@@ -85,6 +85,11 @@ public sealed class LibMeta
     // mark ever leaves the library with its source; absent = imported once, never touched by a watch.
     public string? WatchedFrom { get; set; }
     public string? SourceSig { get; set; }
+    // A preset's base as its download found it (Steam's details of the base): its kind ("scene", "web", …: one that isn't
+    // a scene greys the preset before any base folder exists) and its title (the preset's "Uses:" while the base has no
+    // title of its own or isn't here). Absent = not known; the base folder speaks (Helpers/Presets.cs).
+    public string? BaseKind { get; set; }
+    public string? BaseTitle { get; set; }
 }
 
 // A font a scene asks for (Font, a family) and the family fontconfig showed it with (Shown).

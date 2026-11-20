@@ -19,6 +19,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Steam paths (no account needed): `bash scripts/test-steam-signin.sh`
 - The item sidebars' Workshop favourite / comments / creator / counts and Browse's Workshop lists (a fake community server, no network): `bash scripts/test-workshop-social.sh`
 - Library tags, trailers, frame sizes and sizes on disk (no network, fake Steam servers): `bash scripts/test-library-facts.sh`
+- Presets: their base scene, layered properties, the base's delete (fake Steam servers, no network): `bash scripts/test-presets.sh`
 - Preview clips following "Video preview quality" (debounce, up / down, cancel, restart): `bash scripts/test-clip-sweep.sh`
 - Previews made ahead of their cards (on-screen first, failures remembered, the hold, restart, live preview settings): `bash scripts/test-preview-backfill.sh`
 - Legacy engine: a cold launch's late announce and one auto-mute monitor (stub mpvpaper, own PID namespace): `bash scripts/test-legacy-launch.sh`

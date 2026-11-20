@@ -2,6 +2,8 @@
 paths:
   - "src/backend/Helpers/LibraryService.cs"
   - "src/backend/Helpers/LibraryStore.cs"
+  - "src/backend/Helpers/Presets.cs"
+  - "scripts/test-presets.sh"
   - "src/backend/Helpers/SceneProperties.cs"
   - "src/backend/Helpers/SceneLoudnessPlanner.cs"
   - "src/backend/Helpers/DownloadHelper.cs"
@@ -25,7 +27,7 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - Identity = the folder name: `<id>` for `workshop/` and `local/`, `<name>` for web sources and `imported/`.
 - `local/<id>` is a symlink into the user's Wallpaper Engine folder (Steam owns the bytes); `workshop/<id>` is an owned copy ("Download without subscribing").
 - "Unsubscribe without deleting" (`LibraryService.KeepOwnCopy`) turns a `local/<id>` link into an owned copy at the same path, copied through a staging folder under `.trash` and swapped in for the link before the unsubscribe is queued; never moved to `workshop/<id>`: the path is the item's identity (playlist, playing item, sidebar), and the reconcile of direct downloads would swap a `workshop/<id>` copy back to a link and delete it while Steam's folder still exists. So test "is it a link", never "is it under `local/`", for "Steam owns it" (legacy LWE then launches by path). Subscribed again (auto-import on), the copy gives way to a link at the same path once Steam's folder is whole (`LibraryService.RelinkOwnCopies`). Guard: `scripts/test-steam-signin.sh` § 3 i.
-- A scene's play path IS its folder (no `.scene` marker): `PlayerHelper.IsScenePath` = no media extension. Scene-ness on load: index `IsScene`, else `project.json` `type:"scene"`, else a `scene.pkg`.
+- A scene's play path IS its folder (no `.scene` marker): `PlayerHelper.IsScenePath` = no media extension. Scene-ness on load: index `IsScene`, else `project.json` `type:"scene"`, else a preset (§ Presets), else a `scene.pkg`.
 - Deleting a `local/<id>` item unlinks the symlink only; never delete inside the WE folder ourselves.
 
 ## The index (`Helpers/LibraryStore.cs`)
@@ -69,6 +71,17 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
   `wcc_*`. A base property the preset lacks (saved against an older base) keeps the base's value.
 - Steam's tags (not `project.json`'s) carry `Preset` plus the base's type tag (`Scene` or `Web`), and never
   `Wallpaper` / `Customizable`; Steam lists the base as the item page's one "Required items" link.
+- In the library (`Helpers/Presets.cs`): a preset is its own scene item (`IsScene`, `isPreset`); its identity is its
+  own folder, never the base's. A `preset` object with a missing or non-digit `dependency` is still a preset (greyed);
+  the WE auto-import brings in only one with a digit `dependency`, and only with `AllowScenes` on.
+- Find the base by Workshop id at every ask (`Presets.BaseDirOf`: `local/<id>`, else `workshop/<id>`, else the
+  `imported/` entry whose `WorkshopId` is the id); never keep its path or a link target: the base's form changes at the
+  same path (`KeepOwnCopy`, `RelinkOwnCopies`).
+- Reasons (`presetReason`, exact text), first match wins (`Presets.StatusFor`): no base id or its own id → "Its preset
+  file names no base scene"; `LibMeta.BaseKind` (the download's) not `scene` → "Its base is a {kind} wallpaper, not a
+  scene"; no base folder (or one with no kind yet) → "Needs its base scene"; the base folder a preset or a video → the
+  same "Its base is a …" (never resolved through another preset); the legacy engine → "Presets play only in the
+  Liascape player". `baseTitle` = the base's own title, else `LibMeta.BaseTitle`. Guard: `scripts/test-presets.sh` § 1.
 
 ## Steam tags, trailers and frame sizes (`Web/LibraryFactsOps.cs`)
 - One background pass, single-flight, kicked after the startup sync, `/library/sync`, an import and a download. It writes each fact field-level (`UpdateIndex`) and asks only for what an item doesn't have yet: never on every launch.

@@ -31,6 +31,7 @@ public static class LiascapePlayerSelfTest
             TransitionDurationAssertions(fails);
             FeatureHealthAssertions(fails);
             ScenePropertyAssertions(fails);
+            PresetAssertions(fails);
             PlayLimitAssertions(fails);
             ProgramSpecAssertions(fails);
             OutboxAckAssertions(fails);
@@ -846,6 +847,69 @@ public static class LiascapePlayerSelfTest
                   "verified the skip formula has no engine-specific case instead");
         }
         finally { PlayerEngine.Refresh(SettingsService.Load()); } // restore the real cached engine for RoundTrip
+    }
+
+    // ---- presets: a preset's status (pure: StatusFor's table) and reading its project.json (Presets.Read) ---------------
+    private static void PresetAssertions(List<string> fails)
+    {
+        static PresetFile F(string? baseId) =>
+            new(baseId, new Dictionary<string, JsonElement> { ["color"] = JsonDocument.Parse("\"0 0 1\"").RootElement });
+        const string baseDir = "/lib/workshop/123";
+        void Row(string what, PresetFile f, string? selfId, string? baseKind, string? dir, string? kind, bool player,
+            PresetProblem want, string? wantDir, string? wantReason)
+        {
+            var got = Presets.StatusFor(f, selfId, baseKind, id => id == f.BaseId ? dir : null, d => d == dir ? kind : null, player);
+            if (got.Problem != want || got.BaseDir != wantDir || got.Reason != wantReason)
+                fails.Add($"preset status ({what}) = {got.Problem} {got.BaseDir ?? "null"} \"{got.Reason}\", want {want} {wantDir ?? "null"} \"{wantReason}\"");
+        }
+        Row("base found, a scene", F("123"), "910", null, baseDir, "scene", true, PresetProblem.None, baseDir, null);
+        Row("no base id", F(null), "910", null, baseDir, "scene", true, PresetProblem.NoBase, null, "Its preset file names no base scene");
+        Row("its own id", F("910"), "910", null, "/lib/workshop/910", "preset", true, PresetProblem.NoBase, null, "Its preset file names no base scene");
+        Row("the download said web", F("123"), "910", "web", baseDir, "scene", true, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
+        Row("the download said scene", F("123"), "910", "scene", baseDir, "scene", true, PresetProblem.None, baseDir, null);
+        Row("no base folder", F("123"), "910", null, null, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
+        Row("a base folder of no kind (not whole yet)", F("123"), "910", null, baseDir, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
+        Row("the base is a preset", F("123"), "910", null, baseDir, "preset", true, PresetProblem.BaseNotScene, baseDir, "Its base is a preset wallpaper, not a scene");
+        Row("the base is a video", F("123"), "910", null, baseDir, "video", true, PresetProblem.BaseNotScene, baseDir, "Its base is a video wallpaper, not a scene");
+        Row("all fine, legacy engine", F("123"), "910", null, baseDir, "scene", false, PresetProblem.Legacy, baseDir, "Presets play only in the Liascape player");
+        Row("no base folder, legacy engine", F("123"), "910", null, null, null, false, PresetProblem.NeedsBase, null, "Needs its base scene");
+
+        // Read over Wallpaper Engine's own files (scripts/test-fixtures/presets/<id>/project.json, from real Workshop items)
+        string? fx = null;
+        foreach (var start in new[] { Environment.CurrentDirectory, AppContext.BaseDirectory })
+            for (var d = new DirectoryInfo(start); d != null && fx == null; d = d.Parent)
+                if (Directory.Exists(Path.Combine(d.FullName, "scripts/test-fixtures/presets"))) fx = Path.Combine(d.FullName, "scripts/test-fixtures/presets");
+        var dirs = fx == null ? [] : Directory.GetDirectories(fx);
+        if (dirs.Length == 0) fails.Add("preset fixtures not found (scripts/test-fixtures/presets: run the self-test from the checkout)");
+        foreach (var d in dirs)
+        {
+            var f = Presets.Read(d);
+            if (f == null) { fails.Add($"Presets.Read({Path.GetFileName(d)}) = null, want a preset"); continue; }
+            if (f.BaseId is not { Length: > 0 } b || !b.All(char.IsAsciiDigit) || f.Values.Count == 0)
+                fails.Add($"Presets.Read({Path.GetFileName(d)}): base {f.BaseId ?? "null"}, {f.Values.Count} values; want a digit id and its values");
+        }
+        var tmp = Directory.CreateTempSubdirectory("liascape-selftest-presets-").FullName;
+        try
+        {
+            string Dir(string name, string pj) { var d = Path.Combine(tmp, name); Directory.CreateDirectory(d); File.WriteAllText(Path.Combine(d, "project.json"), pj); return d; }
+            if (Presets.Read(Dir("scene", "{\"type\":\"scene\",\"file\":\"scene.json\",\"general\":{\"properties\":{}}}")) != null)
+                fails.Add("Presets.Read(a scene's project.json) should be null");
+            if (Presets.Read(Dir("typed", "{\"type\":\"scene\",\"preset\":{\"a\":1},\"dependency\":\"123\"}")) != null)
+                fails.Add("Presets.Read(a project.json with a type) should be null: a preset has none");
+            if (Presets.Read(Dir("bad", "{\"preset\":{\"a\":1},\"dependency\":\"12")) != null)
+                fails.Add("Presets.Read(malformed JSON) should be null");
+            if (Presets.Read(Path.Combine(tmp, "none")) != null) fails.Add("Presets.Read(no folder) should be null");
+            if (Presets.Read(Dir("nodep", "{\"preset\":{\"a\":1},\"title\":\"x\"}")) is not { BaseId: null })
+                fails.Add("Presets.Read(a preset without a dependency) should be a preset with no base id (greyed with its reason)");
+            if (Presets.Read(Dir("pathdep", "{\"preset\":{\"a\":1},\"dependency\":\"../123\"}")) is not { BaseId: null })
+                fails.Add("Presets.Read(a non-digit dependency) should be a preset with no base id");
+            // the cache follows the file: rewritten (another size) → read again
+            var c = Dir("cached", "{\"preset\":{\"a\":1},\"dependency\":\"5\"}");
+            Presets.Read(c);
+            File.WriteAllText(Path.Combine(c, "project.json"), "{\"preset\":{\"a\":1,\"b\":2},\"dependency\":\"777\"}");
+            if (Presets.Read(c) is not { BaseId: "777", Values.Count: 2 }) fails.Add("Presets.Read must read a changed project.json again (cached by mtime + size)");
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
     }
 
     // ---- item 6: queue depth cap, never blocks a caller --------------------------------------

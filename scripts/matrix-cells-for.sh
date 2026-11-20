@@ -44,7 +44,7 @@ for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
-    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-preview-backfill.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|\
+    scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-preview-backfill.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|scripts/test-presets.sh|\
     scripts/test-steam-signin.sh|scripts/test-fixtures/drive-steam-client.mjs|scripts/test-fixtures/fake_steamclient.c|src/backend/Web/SteamSelfTest.cs) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe
     src/backend/Web/LibraryOps.cs|app/ui/src/components/LibraryOpsLine.tsx|app/ui/src/components/libraryOps.ts)
@@ -65,7 +65,7 @@ for f in $FILES; do
       echo "  $f → nothing in the matrix (bash scripts/test-folder-import.sh + --probe probe-import.js)" >&2 ;;
     app/ui/src/components/ImportDialog.tsx|app/ui/src/components/ImportButton.tsx|app/ui/src/components/importPick.ts)
       echo "  $f → nothing in the matrix (--probe probe-import.js; the top bar's widths: --probe probe-layout.js resize:)" >&2 ;;
-    src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs) add "$LIB" "$f" ;;
+    src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs|src/backend/Helpers/Presets.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
     src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET|cover|plStart|parked|expert" "$f" ;;
     src/backend/Helpers/AudioMonitor.cs) add "$AUTOMUTE" "$f" ;;
