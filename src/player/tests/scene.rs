@@ -1696,7 +1696,9 @@ fn real_scene_project_loads_beside_the_egl_setup() {
 /// `docs/player/modules/scene-lwe-core.md`, video textures); `LIASCAPE_PLAYER_HWDEC_INTEROP=off`
 /// keeps it out, as it keeps the compositor's CUDA interop out. Read from the worker's own
 /// mappings: nothing else in a scene without video loads libcuda. The core is told the same
-/// interop (`cuda`, or `no` with copy modes), so each video loads only it.
+/// interop (`cuda`, or `no` with copy modes), so each video loads only it, and with `cuda` the
+/// worker's libmpv has `cuda-primary-context` (`patches/mpv/`), so its videos share one CUDA
+/// context (host_api_test `video_players_share_one_cuda_context` plays two).
 #[test]
 fn real_scene_worker_loads_libcuda_for_video_textures() {
     use liascape_player::sources::render_worker::HWDEC_INTEROP_ENV;
@@ -1755,6 +1757,24 @@ fn real_scene_worker_loads_libcuda_for_video_textures() {
             tail.contains(told),
             "{HWDEC_INTEROP_ENV}={knob}: want {told:?} in the log tail:\n{tail}"
         );
+        // with the CUDA interop the videos share one CUDA context: the build's libmpv has
+        // `cuda-primary-context` (patches/mpv/), reported from the worker's CUDA thread
+        if want {
+            let shared = "hwdec: video textures share the GPU's primary CUDA context";
+            let t = Instant::now();
+            let mut tail = src.log_tail().join("\n");
+            while !tail.contains("hwdec: video textures share")
+                && !tail.contains("hwdec: libmpv lacks")
+                && t.elapsed() < Duration::from_secs(5)
+            {
+                pump(&gfx, &mut src, Duration::from_millis(100), |_| false);
+                tail = src.log_tail().join("\n");
+            }
+            assert!(
+                tail.contains(shared),
+                "want {shared:?} (the worker's libmpv without patches/mpv/?) in the log tail:\n{tail}"
+            );
+        }
     }
 }
 

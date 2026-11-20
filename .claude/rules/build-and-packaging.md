@@ -13,6 +13,7 @@ paths:
   - ".envrc"
   - "deps.json"
   - "third_party/lwe/**"
+  - "patches/mpv/**"
   - "app/shell/package.json"
   - "src/backend/liascape-backend.csproj"
   - "src/player/Cargo.toml"
@@ -36,6 +37,7 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 
 ## Nix
 - `liascape-player` is wrapped with `--prefix LD_LIBRARY_PATH : /run/opengl-driver/lib` (libmpv's nvdec needs NVIDIA's `libcuda.so.1`, outside the store).
+- libmpv is nixpkgs' `mpv-unwrapped` with `patches/mpv/` on top (the flake's `mpv-unwrapped`): the player, the LWE core and `liascape-transition` all link that one, so a process never loads two builds. install.sh, the PKGBUILD and the AppImage use the system's libmpv, which lacks the patch: scene video textures then keep a CUDA context each (`docs/player/modules/scene-lwe-core.md`).
 - Run cargo through the devShell without the shell's stray `LD_LIBRARY_PATH`: `env -u LD_LIBRARY_PATH nix develop -c …` (`scripts/lwe.sh --nix` does this).
 - Don't run a blind `nix flake update`: diff the lock and build first.
 

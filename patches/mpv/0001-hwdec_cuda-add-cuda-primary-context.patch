@@ -1,0 +1,290 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 05:30:21 +0530
+Subject: [PATCH] hwdec_cuda: add --cuda-primary-context
+
+The CUDA hwdec interop creates a CUDA context for every render context
+(cuCtxCreate), and the copy hwdecs let FFmpeg create one per decoder.
+Each costs device memory: about 160 MiB on an RTX 3070 Ti. A libmpv
+client that plays several videos in one process (for example a
+compositor or a scene renderer with several video textures) pays that
+once per player, although nothing stops the players from sharing one.
+
+With --cuda-primary-context, the GL and Vulkan interops retain the
+device's primary context instead (cuDevicePrimaryCtxRetain) and release
+it on uninit, so every player in the process shares that one context
+and mpv never destroys a context it did not create. The copy hwdecs
+pass FFmpeg's equivalent primary_ctx option to av_hwdevice_ctx_create.
+The default stays a private context per player.
+
+Origin: ours
+Why: liascape docs/decisions.md "Share one CUDA context across a scene's videos by patching mpv"
+Status: candidate-for-upstream
+---
+ .../cuda-primary-context.txt                  |  1 +
+ DOCS/man/options.rst                          | 12 ++++
+ options/options.c                             |  1 +
+ options/options.h                             |  1 +
+ video/cuda.c                                  |  8 ++-
+ video/out/hwdec/hwdec_cuda.c                  | 60 ++++++++++++++++++-
+ video/out/hwdec/hwdec_cuda.h                  |  9 +++
+ video/out/hwdec/hwdec_cuda_gl.c               | 11 ++--
+ video/out/hwdec/hwdec_cuda_vk.c               |  6 +-
+ 9 files changed, 97 insertions(+), 12 deletions(-)
+ create mode 100644 DOCS/interface-changes/cuda-primary-context.txt
+
+diff --git a/DOCS/interface-changes/cuda-primary-context.txt b/DOCS/interface-changes/cuda-primary-context.txt
+new file mode 100644
+index 0000000..94bea1c
+--- /dev/null
++++ b/DOCS/interface-changes/cuda-primary-context.txt
+@@ -0,0 +1 @@
++add `--cuda-primary-context`
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index fa71dc0..237e5e7 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -1571,6 +1571,18 @@ Video
+     For the Vulkan GPU backend, decoding must always happen on the display
+     device, and this option has no effect.
+ 
++``--cuda-primary-context=<yes|no>``
++    Use the CUDA device's primary context for the ``cuda`` and ``nvdec``
++    hwdecs (with both the OpenGL and Vulkan GPU backends) and for the
++    ``cuda-copy`` and ``nvdec-copy`` hwdecs, instead of creating a context of
++    their own (default: no).
++
++    Every CUDA context costs device memory (on the order of 100-200 MiB),
++    while a device has only one primary context per process. This helps
++    libmpv clients that run several players or render contexts in one process:
++    with this option they all share that one context. mpv only retains and
++    releases the primary context, so a client that uses it too keeps it.
++
+ ``--vaapi-device=<device file|adapter name>``
+     Choose the DRM device for ``vaapi-copy``. This should be the path to a
+     DRM device file. (Default: ``/dev/dri/renderD128``)
+diff --git a/options/options.c b/options/options.c
+index 716c3e6..f656c94 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -445,6 +445,7 @@ const struct m_sub_options cuda_conf = {
+     .opts = (const struct m_option[]){
+         {"decode-device", OPT_CHOICE(cuda_device, {"auto", -1}),
+             M_RANGE(0, INT_MAX)},
++        {"primary-context", OPT_BOOL(primary_ctx)},
+         {0}
+     },
+     .size = sizeof(struct cuda_opts),
+diff --git a/options/options.h b/options/options.h
+index 12dafea..7928bee 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -419,6 +419,7 @@ typedef struct MPOpts {
+ 
+ struct cuda_opts {
+     int cuda_device;
++    bool primary_ctx;
+ };
+ 
+ struct filter_opts {
+diff --git a/video/cuda.c b/video/cuda.c
+index 3b7a2d8..5c0a361 100644
+--- a/video/cuda.c
++++ b/video/cuda.c
+@@ -19,6 +19,7 @@
+ #include "options/m_config.h"
+ #include "options/options.h"
+ 
++#include <libavutil/dict.h>
+ #include <libavutil/hwcontext.h>
+ 
+ static struct AVBufferRef *cuda_create_standalone(struct mpv_global *global,
+@@ -30,9 +31,14 @@ static struct AVBufferRef *cuda_create_standalone(struct mpv_global *global,
+     if (opts->cuda_device != -1)
+         decode_dev = talloc_asprintf(NULL, "%d", opts->cuda_device);
+ 
++    AVDictionary *dict = NULL;
++    if (opts->primary_ctx)
++        av_dict_set(&dict, "primary_ctx", "1", 0);
++
+     AVBufferRef* ref = NULL;
+-    av_hwdevice_ctx_create(&ref, AV_HWDEVICE_TYPE_CUDA, decode_dev, NULL, 0);
++    av_hwdevice_ctx_create(&ref, AV_HWDEVICE_TYPE_CUDA, decode_dev, dict, 0);
+ 
++    av_dict_free(&dict);
+     talloc_free(decode_dev);
+     talloc_free(opts);
+     return ref;
+diff --git a/video/out/hwdec/hwdec_cuda.c b/video/out/hwdec/hwdec_cuda.c
+index 1428946..a412759 100644
+--- a/video/out/hwdec/hwdec_cuda.c
++++ b/video/out/hwdec/hwdec_cuda.c
+@@ -27,6 +27,8 @@
+ 
+ #include "config.h"
+ #include "hwdec_cuda.h"
++#include "options/m_config.h"
++#include "options/options.h"
+ 
+ #include <libavutil/hwcontext.h>
+ #include <libavutil/hwcontext_cuda.h>
+@@ -57,6 +59,56 @@ int check_cu(const struct ra_hwdec *hw, CUresult err, const char *func)
+ 
+ #define CHECK_CU(x) check_cu(hw, (x), #x)
+ 
++// Get a context on dev and make it current on the calling thread: a new one,
++// or with --cuda-primary-context the device's primary context, which every
++// user of the device in this process shares instead of each paying for its
++// own. Undo with cuda_ctx_release().
++int cuda_ctx_acquire(const struct ra_hwdec *hw, CUcontext *ctx, CUdevice dev)
++{
++    struct cuda_hw_priv *p = hw->priv;
++    CudaFunctions *cu = p->cu;
++    const unsigned int flags = CU_CTX_SCHED_BLOCKING_SYNC;
++
++    if (!p->primary_ctx)
++        return CHECK_CU(cu->cuCtxCreate(ctx, flags, dev));
++
++    unsigned int cur_flags = 0;
++    int active = 0;
++    int ret = CHECK_CU(cu->cuDevicePrimaryCtxGetState(dev, &cur_flags, &active));
++    if (ret < 0)
++        return ret;
++
++    // The flags only affect how the CPU waits for the GPU, so a primary
++    // context someone else already set up differently is still usable.
++    if (cur_flags != flags && cu->cuDevicePrimaryCtxSetFlags(dev, flags) != CUDA_SUCCESS) {
++        MP_VERBOSE(hw, "Using the primary context with flags 0x%x (it is %s)\n",
++                   cur_flags, active ? "active" : "inactive");
++    }
++
++    ret = CHECK_CU(cu->cuDevicePrimaryCtxRetain(ctx, dev));
++    if (ret < 0)
++        return ret;
++
++    ret = CHECK_CU(cu->cuCtxPushCurrent(*ctx));
++    if (ret < 0) {
++        CHECK_CU(cu->cuDevicePrimaryCtxRelease(dev));
++        *ctx = NULL;
++    }
++    return ret;
++}
++
++void cuda_ctx_release(const struct ra_hwdec *hw, CUcontext ctx, CUdevice dev)
++{
++    struct cuda_hw_priv *p = hw->priv;
++    CudaFunctions *cu = p->cu;
++
++    // A primary context belongs to the device: drop our reference only.
++    if (p->primary_ctx)
++        CHECK_CU(cu->cuDevicePrimaryCtxRelease(dev));
++    else
++        CHECK_CU(cu->cuCtxDestroy(ctx));
++}
++
+ static const struct cuda_interop_fn *interop_fns[] = {
+ #if HAVE_GL
+     &cuda_gl_fn,
+@@ -77,6 +129,10 @@ static int cuda_init(struct ra_hwdec *hw)
+     int level = hw->probing ? MSGL_V : MSGL_ERR;
+     bool initialized = false;
+ 
++    struct cuda_opts *opts = mp_get_config_group(NULL, hw->global, &cuda_conf);
++    p->primary_ctx = opts->primary_ctx;
++    talloc_free(opts);
++
+     // Initialise CUDA context from backend.
+     // Note that the interop check doesn't require the CUDA backend to be initialized.
+     // This is important because cuInit wakes up the dgpu (even if the cuda hwdec won't be used!)
+@@ -154,10 +210,10 @@ static void cuda_uninit(struct ra_hwdec *hw)
+     av_buffer_unref(&p->hwctx.av_device_ref);
+ 
+     if (p->decode_ctx && p->decode_ctx != p->display_ctx)
+-        CHECK_CU(cu->cuCtxDestroy(p->decode_ctx));
++        cuda_ctx_release(hw, p->decode_ctx, p->decode_dev);
+ 
+     if (p->display_ctx)
+-        CHECK_CU(cu->cuCtxDestroy(p->display_ctx));
++        cuda_ctx_release(hw, p->display_ctx, p->display_dev);
+ 
+     cuda_free_functions(&p->cu);
+ }
+diff --git a/video/out/hwdec/hwdec_cuda.h b/video/out/hwdec/hwdec_cuda.h
+index 6e671b3..98ff2ee 100644
+--- a/video/out/hwdec/hwdec_cuda.h
++++ b/video/out/hwdec/hwdec_cuda.h
+@@ -28,6 +28,12 @@ struct cuda_hw_priv {
+     CudaFunctions *cu;
+     CUcontext display_ctx;
+     CUcontext decode_ctx;
++    CUdevice display_dev;
++    CUdevice decode_dev;
++
++    // Are display_ctx and decode_ctx their devices' primary contexts
++    // (--cuda-primary-context), retained rather than created
++    bool primary_ctx;
+ 
+     // Do we need to do a full CPU sync after copying
+     bool do_full_sync;
+@@ -60,3 +66,6 @@ extern struct cuda_interop_fn cuda_gl_fn;
+ extern struct cuda_interop_fn cuda_vk_fn;
+ 
+ int check_cu(const struct ra_hwdec *hw, CUresult err, const char *func);
++
++int cuda_ctx_acquire(const struct ra_hwdec *hw, CUcontext *ctx, CUdevice dev);
++void cuda_ctx_release(const struct ra_hwdec *hw, CUcontext ctx, CUdevice dev);
+diff --git a/video/out/hwdec/hwdec_cuda_gl.c b/video/out/hwdec/hwdec_cuda_gl.c
+index 4c25352..103fdd0 100644
+--- a/video/out/hwdec/hwdec_cuda_gl.c
++++ b/video/out/hwdec/hwdec_cuda_gl.c
+@@ -130,12 +130,12 @@ static bool cuda_gl_init(const struct ra_hwdec *hw) {
+     if (ret < 0)
+         return false;
+ 
+-    ret = CHECK_CU(cu->cuCtxCreate(&p->display_ctx, CU_CTX_SCHED_BLOCKING_SYNC,
+-                                   display_dev));
+-    if (ret < 0)
++    p->display_dev = display_dev;
++    if (cuda_ctx_acquire(hw, &p->display_ctx, display_dev) < 0)
+         return false;
+ 
+     p->decode_ctx = p->display_ctx;
++    p->decode_dev = display_dev;
+ 
+     struct cuda_opts *opts = mp_get_config_group(NULL, hw->global, &cuda_conf);
+     int decode_dev_idx = opts->cuda_device;
+@@ -158,9 +158,8 @@ static bool cuda_gl_init(const struct ra_hwdec *hw) {
+             if (ret < 0)
+                 return false;
+ 
+-            ret = CHECK_CU(cu->cuCtxCreate(&p->decode_ctx, CU_CTX_SCHED_BLOCKING_SYNC,
+-                                           decode_dev));
+-            if (ret < 0)
++            p->decode_dev = decode_dev;
++            if (cuda_ctx_acquire(hw, &p->decode_ctx, decode_dev) < 0)
+                 return false;
+         }
+     }
+diff --git a/video/out/hwdec/hwdec_cuda_vk.c b/video/out/hwdec/hwdec_cuda_vk.c
+index e744ff6..02a09de 100644
+--- a/video/out/hwdec/hwdec_cuda_vk.c
++++ b/video/out/hwdec/hwdec_cuda_vk.c
+@@ -331,12 +331,12 @@ static bool cuda_vk_init(const struct ra_hwdec *hw) {
+         return false;
+     }
+ 
+-    ret = CHECK_CU(cu->cuCtxCreate(&p->display_ctx, CU_CTX_SCHED_BLOCKING_SYNC,
+-                                   display_dev));
+-    if (ret < 0)
++    p->display_dev = display_dev;
++    if (cuda_ctx_acquire(hw, &p->display_ctx, display_dev) < 0)
+         return false;
+ 
+     p->decode_ctx = p->display_ctx;
++    p->decode_dev = display_dev;
+ 
+     p->ext_init = cuda_ext_vk_init;
+     p->ext_uninit = cuda_ext_vk_uninit;
+-- 
+2.56.0
+

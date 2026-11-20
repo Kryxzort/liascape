@@ -21,6 +21,10 @@
 #                                           liascape-scene-worker, liascape-transition, liascape-audio
 #   $PREFIX/lib/liascape/                   backend/ ui/ shell/ transitions/ + LWE's core library
 #   $PREFIX/share/applications/liascape.desktop
+#
+# libmpv is the system's (as for PKGBUILD and the AppImage). The flake patches it (patches/mpv/: `cuda-primary-context`,
+# so a scene's video textures share one CUDA context); a stock libmpv works the same but costs a CUDA context per scene
+# video texture on NVIDIA (~160 MiB each).
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 
@@ -30,7 +34,7 @@ for arg in "$@"; do
   case "$arg" in
     --no-scenes) NO_SCENES=1 ;;
     --dry-run) DRY=1 ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     *) echo "install.sh: unknown option '$arg' (see --help)" >&2; exit 2 ;;
   esac
 done

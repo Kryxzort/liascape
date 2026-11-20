@@ -340,8 +340,8 @@ WE starts the last pointer at 0 0, so its first frame strokes cursor effects fro
 Kept by the owner: a WE quirk. `scene_fps_quirks.py` cancels it with a parked pointer.
 
 ### Share one CUDA context across a scene's videos by patching mpv — 2026-11-20
-libmpv makes a CUDA context per render context (160 MiB each) and takes no host device. The owner chose an mpv patch
-over a libcuda shim (driver-tied hack) and copy decoding (CPU cost, late videos).
+libmpv made a CUDA context per player (160 MiB each). Owner's call: patch mpv (`--cuda-primary-context`, as FFmpeg's
+`primary_ctx`), not a libcuda shim (driver-tied) or copy decoding (CPU, late videos).
 ### Scene fonts come from fontconfig, not a Windows install — 2026-11-18
 Owner's call: `systemfont_consolas` asks fontconfig for Consolas like any app.
 Microsoft's fonts pass on only inside their installers (Consolas, Segoe UI never): nothing ships or reads them from a

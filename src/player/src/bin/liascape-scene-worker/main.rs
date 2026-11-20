@@ -1127,10 +1127,12 @@ impl Renderer {
         }
     }
 
-    /// Fade an audible stream out (≤ 30 ms, bounded), then exit.
+    /// Fade an audible stream out (≤ 30 ms, bounded), then exit. `_exit`, not `exit`: libcuda's
+    /// exit handler tears down the GPU's primary CUDA context, which the scene's video players
+    /// share, while their decoder threads still run (`cuCtxPushCurrent failed` from each).
     fn quit(&self) -> ! {
         self.audio.quit(QUIT_FADE_MAX);
-        std::process::exit(0)
+        unsafe { libc::_exit(0) }
     }
 
     /// The GL context is gone (a GPU reset, an NVIDIA video-memory purge — or the
@@ -1484,6 +1486,8 @@ fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
 /// RUNPATH lacks the NixOS driver dir; only the flake's wrapper adds it), and without it the video
 /// falls through to `vulkan-copy`, whose Vulkan device per video keeps it black ~0.75 s after the
 /// scene's first frame. No libcuda = no interop (copy modes). The note goes to the log tail.
+/// The players share the GPU's primary CUDA context when libmpv has our `cuda-primary-context`
+/// (`patches/mpv/`; the core asks for it), else each makes its own (160 MiB on an RTX 3070 Ti).
 /// Guards: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`, host_api_test
 /// `video_players_load_only_the_hosts_interop`.
 #[cfg(feature = "lwe")]
@@ -1514,6 +1518,15 @@ fn video_hwdec(gfx: &Gfx) -> (&'static render::VideoHwdec, Option<String>) {
                             if let Some((rc, ms)) = warm_cuda(lib) {
                                 eprintln!("hwdec: cuInit {rc} in {ms:.0} ms");
                             }
+                            // LWE's players ask for it themselves; this only reports what they get
+                            eprintln!(
+                                "hwdec: {}",
+                                if liascape_player::mpv::has_cuda_primary_context() {
+                                    "video textures share the GPU's primary CUDA context"
+                                } else {
+                                    "libmpv lacks cuda-primary-context: a CUDA context per video texture"
+                                }
+                            );
                         });
                     lib_note = format!(
                         "libcuda loaded from {name} in {:.1} ms; ",

@@ -45,13 +45,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-104. [ ] (owner, 2026-11-20: patch mpv) Scene video textures share one CUDA context: carry an mpv patch that lets a libmpv
-       render context use a CUDA device/context the host gives it (instead of `cuCtxCreate` per render context), and
-       have the fork's GLPlayer pass the scene's one context (`wp_context_set_video_hwdec` is the entry point). Ship the
-       patched mpv in the flake and install paths (nixpkgs `mpv` override; other distros' installs need it too, or fall
-       back to today's per-video context). Measured now: 3426575339 (two 1080p videos) worker 906 MiB, 160 MiB of it per
-       CUDA context; a retained primary context costs 160 MiB for any number of users (`docs/decisions.md` § Share one
-       CUDA context across a scene's videos by patching mpv). Consider offering the patch upstream to mpv.
+104. [ ] (owner) Offer `patches/mpv/0001` (`--cuda-primary-context`: a process's players share the GPU's primary CUDA
+       context) to mpv upstream. Until a release nixpkgs ships has it, only the flake shares a scene's CUDA context:
+       install.sh, the PKGBUILD and the AppImage link the system's stock libmpv, which refuses the option, so each scene
+       video texture keeps its own (160 MiB on an RTX 3070 Ti). If that wait is too long, install.sh could build and
+       bundle the patched libmpv for the scene worker (mpv's meson build and its deps on every distro).
 106. [ ] With the spare scene worker, 4 of 10 cold loads of 3163060610 took 2.8, 4.2, 11.8 and 38 s (the adopted
        worker stayed inside its load, no crash or restart) and 12 + 6 reruns didn't reproduce it
        (`docs/player/reports/scene-load-we.md`). `scene_load_we.py` now records the worker's load/build split and the

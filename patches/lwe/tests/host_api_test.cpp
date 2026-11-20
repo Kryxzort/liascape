@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <cstdio>
 #include <cstdlib>
@@ -4995,6 +4996,192 @@ static bool video_players_load_only_the_hosts_interop () {
     return true;
 }
 
+// a core's mpv handle stops being valid at mpv_terminate_destroy: drop it from g_mpvCores first
+extern "C" void mpv_terminate_destroy (void* mpv) {
+    using Destroy = void (*) (void*);
+    static const auto real = reinterpret_cast<Destroy> (dlsym (RTLD_NEXT, "mpv_terminate_destroy"));
+    std::erase (g_mpvCores, mpv);
+    real (mpv);
+}
+
+// this process's device memory (MiB) as NVML counts it (the larger of its graphics and compute entries, over every
+// GPU), -1 without NVML
+static double process_vram_mib () {
+    struct ProcInfo {
+        unsigned pid;
+        unsigned long long used;
+        unsigned gpuInstance;
+        unsigned computeInstance;
+    };
+    using Init = int (*) ();
+    using Count = int (*) (unsigned*);
+    using Handle = int (*) (unsigned, void**);
+    using Procs = int (*) (void*, unsigned*, ProcInfo*);
+    static void* lib = dlopen ("libnvidia-ml.so.1", RTLD_NOW) ?: dlopen ("/run/opengl-driver/lib/libnvidia-ml.so.1", RTLD_NOW);
+    if (lib == nullptr) {
+        return -1;
+    }
+    static const bool up = reinterpret_cast<Init> (dlsym (lib, "nvmlInit_v2")) () == 0;
+    const auto count = reinterpret_cast<Count> (dlsym (lib, "nvmlDeviceGetCount_v2"));
+    const auto handle = reinterpret_cast<Handle> (dlsym (lib, "nvmlDeviceGetHandleByIndex_v2"));
+    const Procs lists[] = { reinterpret_cast<Procs> (dlsym (lib, "nvmlDeviceGetGraphicsRunningProcesses_v3")),
+                            reinterpret_cast<Procs> (dlsym (lib, "nvmlDeviceGetComputeRunningProcesses_v3")) };
+    unsigned devices = 0;
+    if (!up || !count || !handle || !lists[0] || !lists[1] || count (&devices) != 0) {
+        return -1;
+    }
+    double total = 0;
+    for (unsigned d = 0; d < devices; d++) {
+        void* dev = nullptr;
+        if (handle (d, &dev) != 0) {
+            continue;
+        }
+        double here = 0;
+        for (const Procs list : lists) {
+            std::vector<ProcInfo> procs (512);
+            unsigned n = procs.size ();
+            if (list (dev, &n, procs.data ()) != 0) {
+                continue;
+            }
+            for (unsigned i = 0; i < n && i < procs.size (); i++) {
+                if (procs[i].pid == static_cast<unsigned> (getpid ()) && procs[i].used != ~0ULL) {
+                    here = std::max (here, procs[i].used / (1024.0 * 1024.0));
+                }
+            }
+        }
+        total += here;
+    }
+    return total;
+}
+
+// a scene of `n` video layers, each its own 64 x 64 video texture (v1.tex, v2.tex, ...: one GLPlayer each)
+static std::string video_scene (int n, std::vector<std::string>& files) {
+    std::string objects;
+    for (int i = 1; i <= n; i++) {
+        objects += (i > 1 ? "," : "") + std::string ("{\"id\":") + std::to_string (i) + ",\"name\":\"vid" + std::to_string (i)
+                 + "\",\"image\":\"models/v" + std::to_string (i) + ".json\",\"size\":\"16 16\",\"origin\":\""
+                 + std::to_string (8 + 16 * (i - 1)) + " 16 0\"}";
+    }
+    const std::string dir = script_scene (objects);
+    mkdir ((dir + "/materials").c_str (), 0755);
+    mkdir ((dir + "/models").c_str (), 0755);
+    for (int i = 1; i <= n; i++) {
+        const std::string v = "v" + std::to_string (i);
+        write_file (dir + "/materials/" + v + ".json",
+                    "{\"passes\":[{\"shader\":\"genericimage2\",\"blending\":\"normal\",\"depthtest\":\"disabled\","
+                    "\"depthwrite\":\"disabled\",\"cullmode\":\"nocull\",\"textures\":[\"" + v + "\"]}]}\n");
+        write_file (dir + "/materials/" + v + ".tex", video_texture (std::string (kSmallMp4, sizeof kSmallMp4 - 1), 64));
+        write_file (dir + "/models/" + v + ".json", "{\"material\":\"materials/" + v + ".json\"}\n");
+        files.insert (files.end (), { "materials/" + v + ".json", "materials/" + v + ".tex", "models/" + v + ".json" });
+    }
+    return dir;
+}
+
+// every video player shares the GPU's primary CUDA context (libmpv's `cuda-primary-context`, liascape's
+// patches/mpv/): with the CUDA interop the primary context is in use while the videos play and released when the scene
+// closes, and a second video costs only its decoder's memory, not a context of its own (~160 MiB). With two scenes
+// open in one process, closing the one with two videos leaves the other's video decoding on the shared context. Only
+// on NVIDIA with libcuda, NVML and a libmpv that has the option (SKIP otherwise). Without the core's part (no option
+// asked for) each player made its own context: the primary one stayed unused and the second video cost ~170 MiB
+static bool video_players_share_one_cuda_context () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    void* cuda = dlopen ("libcuda.so.1", RTLD_NOW | RTLD_GLOBAL) ?: dlopen ("/run/opengl-driver/lib/libcuda.so.1", RTLD_NOW | RTLD_GLOBAL);
+    using GetString = const unsigned char* (*) (unsigned);
+    const char* vendor = reinterpret_cast<const char*> (
+        reinterpret_cast<GetString> (eglGetProcAddress ("glGetString")) (0x1F00 /*GL_VENDOR*/));
+    if (cuda == nullptr || vendor == nullptr || strstr (vendor, "NVIDIA") == nullptr || process_vram_mib () < 0) {
+        printf ("    SKIP: needs NVIDIA's GL, libcuda and NVML (GL %s, libcuda %s)\n", vendor ?: "?", cuda ? "loaded" : "absent");
+        return true;
+    }
+    {
+        using Create = void* (*) ();
+        using SetOption = int (*) (void*, const char*, const char*);
+        void* probe = reinterpret_cast<Create> (dlsym (RTLD_DEFAULT, "mpv_create")) ();
+        const int rc = reinterpret_cast<SetOption> (dlsym (RTLD_DEFAULT, "mpv_set_option_string")) (probe, "cuda-primary-context", "yes");
+        mpv_terminate_destroy (probe);
+        if (rc < 0) {
+            printf ("    SKIP: this libmpv has no cuda-primary-context (liascape's patches/mpv/)\n");
+            return true;
+        }
+    }
+    using Init = int (*) (unsigned);
+    using DeviceGet = int (*) (int*, int);
+    using State = int (*) (int, unsigned*, int*);
+    reinterpret_cast<Init> (dlsym (cuda, "cuInit")) (0);
+    int device = 0;
+    reinterpret_cast<DeviceGet> (dlsym (cuda, "cuDeviceGet")) (&device, 0);
+    const auto state = reinterpret_cast<State> (dlsym (cuda, "cuDevicePrimaryCtxGetState"));
+    auto primaryActive = [&] {
+        unsigned flags = 0;
+        int active = 0;
+        state (device, &flags, &active);
+        return active != 0;
+    };
+    const char* hwdec = "nvdec,nvdec-copy,vaapi-copy,auto-copy";
+    // opens a scene of `n` videos and steps it until every player decodes with nvdec; false when one never does
+    auto play = [&] (ScriptRig& rig, int n, ScriptRig* other) {
+        rig.loaded = [&rig, hwdec] (wp_project*) { wp_context_set_video_hwdec (rig.ctx, hwdec, "cuda"); };
+        const size_t before = g_mpvCores.size ();
+        if (!rig.open (video_scene (n, rig.extra))) {
+            return false;
+        }
+        for (int i = 0; i < 150; i++) {
+            rig.step ();
+            if (other) {
+                other->step ();
+            }
+            usleep (20000);
+            if (g_mpvCores.size () == before + n
+                && std::all_of (g_mpvCores.begin () + before, g_mpvCores.end (),
+                                [] (void* core) { return mpv_string (core, "hwdec-current") == "nvdec"; })) {
+                return true;
+            }
+        }
+        return false;
+    };
+    CHECK (!primaryActive (), "the primary CUDA context is in use before any video plays");
+    g_mpvCores.clear ();
+    double one = 0;
+    bool usedPrimary = false;
+    {
+        ScriptRig rig;
+        CHECK (play (rig, 1, nullptr), "one video never decoded with nvdec through the CUDA interop");
+        one = process_vram_mib ();
+        usedPrimary = primaryActive ();
+    }
+    const bool keptPrimary = primaryActive ();
+    auto solo = std::make_unique<ScriptRig> ();
+    double two = 0;
+    {
+        ScriptRig rig;
+        CHECK (play (rig, 2, nullptr), "two videos never both decoded with nvdec through the CUDA interop");
+        two = process_vram_mib ();
+        printf ("    process VRAM with one video %.0f MiB, with two %.0f MiB\n", one, two);
+        // a CUDA context of its own costs well over 100 MiB on every NVIDIA GPU; a 64 x 64 video's surfaces a few MiB
+        CHECK (two - one < 64, "the second video cost %.0f MiB: a CUDA context of its own", two - one);
+        CHECK (usedPrimary, "a playing video didn't use the primary CUDA context");
+        CHECK (!keptPrimary, "the primary CUDA context was still retained after its one video's scene closed");
+        CHECK (play (*solo, 1, &rig), "a second scene's video never decoded with nvdec");
+    }
+    void* survivor = g_mpvCores.size () == 1 ? g_mpvCores[0] : nullptr;
+    CHECK (survivor, "%zu players left after the two-video scene closed", g_mpvCores.size ());
+    const double from = atof (mpv_string (survivor, "time-pos").c_str ());
+    for (int i = 0; i < 30; i++) {
+        solo->step ();
+        usleep (20000);
+    }
+    const double to = atof (mpv_string (survivor, "time-pos").c_str ());
+    const std::string current = mpv_string (survivor, "hwdec-current");
+    printf ("    the other scene's video after the close: %s, time %.2f -> %.2f s\n", current.c_str (), from, to);
+    CHECK (current == "nvdec" && to != from, "the other scene's video stopped decoding when the two-video scene closed");
+    CHECK (primaryActive (), "the primary CUDA context was released while a video still plays");
+    solo.reset ();
+    CHECK (!primaryActive (), "the primary CUDA context is still retained after every scene closed");
+    return true;
+}
+
 // IAnimationLayer on a puppet: count, by name and index (the same object), fps / frameCount / name, pause / play /
 // isPlaying, rate, a script on the animation layer's visible sees it as thisObject, createAnimationLayer /
 // destroyAnimationLayer, addEndedCallback fires as a fast loop wraps; the bones: count, index, parent, a local
@@ -8184,6 +8371,7 @@ int main (int argc, char** argv) {
     run ("script_strings_and_regexp", script_strings_and_regexp);
     run ("video_texture_api", video_texture_api);
     run ("video_players_load_only_the_hosts_interop", video_players_load_only_the_hosts_interop);
+    run ("video_players_share_one_cuda_context", video_players_share_one_cuda_context);
     run ("animation_layer_api", animation_layer_api);
     run ("puppet_animation_events", puppet_animation_events);
     run ("puppet_blend_shapes_and_alpha", puppet_blend_shapes_and_alpha);

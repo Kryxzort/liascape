@@ -187,6 +187,25 @@ it inside this repo's devShell). The source cache is `~/.cache/liascape/src/lwe-
 
 ---
 
+## mpv (libmpv)
+
+- **Project**: <https://github.com/mpv-player/mpv>
+- **License**: LGPL-2.1+ (the build liascape links)
+- **Relationship**: **patched in the flake only.** `patches/mpv/*.patch` (`git format-patch` against the release
+  nixpkgs ships, today 0.41.0) go on top of nixpkgs' `mpv-unwrapped` (`flake.nix`); install.sh, the PKGBUILD and the
+  AppImage link the system's stock libmpv and do without them. `0001` adds `--cuda-primary-context` (scene video
+  textures share one CUDA context, `docs/decisions.md` § Share one CUDA context across a scene's videos by patching
+  mpv); a stock libmpv refuses the option and plays as before. Not offered upstream yet.
+
+### How to resync
+
+1. When nixpkgs moves mpv, `git apply --check` each patch on the new release's tag; refresh a failing one there and
+   `git format-patch --zero-commit` it back into `patches/mpv/`.
+2. `nix build .#mpv-unwrapped`, then host_api_test `video_players_share_one_cuda_context` (`scripts/lwe.sh test`).
+3. Once upstream mpv has the option in a release nixpkgs ships, drop the patch and the flake override.
+
+---
+
 ## gl-transitions
 
 - **Project**: <https://github.com/gl-transitions/gl-transitions>

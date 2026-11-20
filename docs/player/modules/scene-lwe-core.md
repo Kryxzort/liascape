@@ -44,10 +44,12 @@ and `patches/lwe/tests/host_api_test.cpp` stays C++.
   size from observed properties and never calls `mpv_get_property` while drawing, since a get waits for that thread.
   The worker gives the core the compositor's interop (`hwdec_interop_for`) and `hwdec` list (`mpv_hwdec`), or `no`
   with copy modes (`wp_context_set_video_hwdec`; unset, mpv tries every interop). On NVIDIA it loads libcuda first (a
-  nixpkgs libmpv can't find it), so videos decode with nvdec through the CUDA interop: ready ~35 ms after the scene's
-  first frame, ~90 ms of the build and ~275 MiB of VRAM each: a CUDA context (160 MiB; mpv makes one per render
-  context and takes no shared one) plus the decoder's surfaces and textures (1080p). Without libcuda: `vulkan-copy`
-  (~120 MiB), black ~0.75 s after the first frame.
+  nixpkgs libmpv can't find it), so videos decode with nvdec via the CUDA interop. Every player asks libmpv for
+  `cuda-primary-context` (`patches/mpv/`): all share the primary CUDA context (160 MiB a worker), a 1080p video
+  adds ~115 MiB; a stock libmpv refuses it (one each). 3426575339 (two 1080p videos) shared / not: 742 / 906
+  MiB, `source.ready` warm ~285 / ~410 ms, complete picture ~405 / ~470 ms. The worker quits with `_exit` (libcuda's
+  exit handler frees the context under the decoders). Without libcuda: `vulkan-copy` (~120 MiB), black ~0.75 s
+  after the first frame.
 - **Scripts.** Property scripts and SceneScript run in LWE's QuickJS. Wallpaper Engine's own JS classes are read at
   run time from the assets dir (`scripts/jsclasses/`, `scripts/jsmodules/`) and must never be copied into the repo
   or the fork.

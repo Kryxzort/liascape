@@ -1,0 +1,58 @@
+From 162fbd267e79c28012f1827b7757c996fe1f7050 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 06:06:38 +0530
+Subject: [PATCH 136/136] video: every video player shares the GPU's primary
+ CUDA context
+
+libmpv's CUDA hwdec interop creates a CUDA context in every render context, and FFmpeg one per copy decoder, so each
+video texture of a scene paid for a context of its own: 160 MiB of device memory on an RTX 3070 Ti, a scene with two
+1080p videos 320 MiB of it. Nothing needs them apart: the players run in one process on one GPU.
+
+GLPlayer now asks libmpv for `cuda-primary-context` (an mpv option from a patch liascape carries, offered upstream):
+the interop then retains the device's primary context instead of creating one and releases it when the player's render
+context goes, so every player in the process shares that one context, decoding with nvdec on it as before. A libmpv
+without the option refuses it and keeps a context per player, exactly as before; no host call is needed.
+
+Measured with liascape's host_api_test (two 64 x 64 video textures, NVIDIA): the second video adds 0-1 MiB instead of
+169 MiB; the primary context is released when the last player goes; a second scene's video keeps decoding when the
+first scene and its two videos close.
+
+Origin: ours
+Why: liascape docs/TODO.md #104 (scene video texture VRAM)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/linux-wallpaperengine/context.h                 | 4 +++-
+ src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp | 4 ++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux-wallpaperengine/context.h b/include/linux-wallpaperengine/context.h
+index 1252323..2dd28d1 100644
+--- a/include/linux-wallpaperengine/context.h
++++ b/include/linux-wallpaperengine/context.h
+@@ -142,7 +142,9 @@ WPENGINE_API void wp_context_set_gl_upload_context (wp_context* context, wp_gl_u
+  * host that knows its GPU names the one it decodes with (`cuda`, `vaapi`, ...) or `no` (copy modes only) and an `hwdec`
+  * list that suits it. Set it before the first wp_render_frame;
+  * a player already started keeps what it had. NULL leaves that value at libmpv's default (`hwdec` `auto`,
+- * `gpu-hwdec-interop` `auto`)
++ * `gpu-hwdec-interop` `auto`). Whatever is set, every player also asks libmpv for `cuda-primary-context`, so with the
++ * CUDA interop or a CUDA decoder they all share the GPU's primary CUDA context instead of making one each (a libmpv
++ * without that option keeps one per player)
+  *
+  * @param context The context to set it for
+  * @param hwdec libmpv's `hwdec` value (e.g. "nvdec,nvdec-copy,auto-copy"), or NULL
+diff --git a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+index f1b2dd6..f845a87 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/MPV/GLPlayer.cpp
+@@ -324,6 +324,10 @@ void GLPlayer::init () {
+ 	mpv_set_option_string (this->m_handle, "gpu-hwdec-interop", context.video_hwdec_interop->c_str ());
+     }
+     mpv_set_option_string (this->m_handle, "hwdec", context.video_hwdec.value_or ("auto").c_str ());
++    // every player in the process decodes on the GPU's one primary CUDA context rather than making its own (each costs
++    // device memory: 160 MiB on an RTX 3070 Ti, so a scene with two videos paid twice). A libmpv without the option
++    // (the option comes from a patch to mpv) refuses it and keeps a context per player
++    mpv_set_option_string (this->m_handle, "cuda-primary-context", "yes");
+ 
+     if (mpv_initialize (this->m_handle) < 0) {
+ 	sLog.exception ("Could not initialize mpv context");
