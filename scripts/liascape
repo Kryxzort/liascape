@@ -9,6 +9,7 @@
 #   <prefix>/libexec/liascape/liascape-transition  legacy engine: the transition renderer
 #   <prefix>/libexec/liascape/liascape-audio       legacy engine: the scene-audio crossfade helper
 #   <prefix>/lib/liascape/{ui,shell,transitions}   the React UI, the Electron shell, the effect catalogue
+#   (Arch's package puts the internal executables in lib/liascape/ itself: its guidelines rule out /usr/libexec)
 #
 #   liascape                 open the app (Electron: $LIASCAPE_ELECTRON, else `electron45`, else `electron` on PATH)
 #   liascape ctl <verb> …    the running player's control socket (state, logs, probe, …)
@@ -19,8 +20,9 @@ set -euo pipefail
 
 self="$(readlink -f "${BASH_SOURCE[0]}")"
 prefix="$(cd "$(dirname "$self")/.." && pwd -P)"
-libexec="$prefix/libexec/liascape"
 lib="$prefix/lib/liascape"
+libexec="$prefix/libexec/liascape"
+[ -e "$libexec/liascape-backend" ] || [ ! -e "$lib/liascape-backend" ] || libexec="$lib"
 
 export LIASCAPE_UI_DIR="${LIASCAPE_UI_DIR:-$lib/ui}"
 export LIASCAPE_TRANSITIONS_DIR="${LIASCAPE_TRANSITIONS_DIR:-$lib/transitions}"

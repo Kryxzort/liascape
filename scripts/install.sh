@@ -8,6 +8,8 @@
 # Knobs (env):
 #   PREFIX             runtime install prefix   (default: $HOME/.local; packages use /usr)
 #   DESTDIR            staging root             (default: empty; PKGBUILD/AppImage set $pkgdir/$AppDir)
+#   LIBEXECDIR         the internal executables go in $LIBEXECDIR/liascape (default: $PREFIX/libexec; the PKGBUILD sets
+#                      /usr/lib, Arch's place for them, so they sit in lib/liascape/ beside backend/ and ui/)
 #   LIASCAPE_ELECTRON  read at RUNTIME by `liascape` (default: 'electron' on PATH; the AppImage bundles one)
 #
 # Options:
@@ -17,7 +19,7 @@
 #
 # Layout (scripts/liascape finds everything relative to itself, so a staged tree works wherever it lands):
 #   $PREFIX/bin/liascape                    the one command (bare = the app, `liascape help` = the CLI)
-#   $PREFIX/libexec/liascape/               liascape-backend (→ ../../lib/liascape/backend/), liascape-player,
+#   $LIBEXECDIR/liascape/                   liascape-backend (→ lib/liascape/backend/), liascape-player,
 #                                           liascape-scene-worker, liascape-transition, liascape-audio
 #   $PREFIX/lib/liascape/                   backend/ ui/ shell/ transitions/ + LWE's core library
 #   $PREFIX/share/applications/liascape.desktop
@@ -38,7 +40,7 @@ done
 PREFIX="${PREFIX:-$HOME/.local}"
 DESTDIR="${DESTDIR:-}"
 BINDIR="$PREFIX/bin"
-LIBEXEC="$PREFIX/libexec/liascape"   # the internal executables — never on PATH
+LIBEXEC="${LIBEXECDIR:-$PREFIX/libexec}/liascape"   # the internal executables — never on PATH
 LIBDIR="$PREFIX/lib/liascape"        # backend + ui + shell + transitions + LWE's core
 APPSDIR="$PREFIX/share/applications"
 # staging (where we write now) = $DESTDIR + runtime path
@@ -51,7 +53,7 @@ if [ "$DRY" = 1 ]; then
   cat <<EOF
 install.sh --dry-run (PREFIX=$PREFIX${DESTDIR:+, staged under $DESTDIR}$([ "$NO_SCENES" = 1 ] && echo ", no scenes")):
   $S_BIN/liascape
-  $S_LIBEXEC/liascape-backend -> ../../lib/liascape/backend/liascape-backend
+  $S_LIBEXEC/liascape-backend -> $(realpath -ms --relative-to="$LIBEXEC" "$LIBDIR/backend/liascape-backend")
   $S_LIBEXEC/liascape-player
   $S_LIBEXEC/liascape-scene-worker$([ "$NO_SCENES" = 1 ] && echo "   (test scenes only)")
 $(for d in "$ROOT"/src/native/*/; do [ -f "${d}Makefile" ] && echo "  $S_LIBEXEC/$(basename "$d")"; done)
@@ -130,7 +132,7 @@ echo "==> publishing backend (self-contained) → $LIBDIR/backend"
 rm -rf "$S_LIB/backend"; mkdir -p "$S_LIB" "$S_LIBEXEC"
 dotnet publish "$ROOT/src/backend" -r linux-x64 --self-contained -c Release -o "$S_LIB/backend"
 # the apphost finds its runtime from its real path (/proc/self/exe), so a symlink in libexec is enough
-ln -sfn ../../lib/liascape/backend/liascape-backend "$S_LIBEXEC/liascape-backend"
+ln -sfn "$(realpath -ms --relative-to="$LIBEXEC" "$LIBDIR/backend/liascape-backend")" "$S_LIBEXEC/liascape-backend"
 
 echo "==> staging UI"
 rm -rf "$S_LIB/ui"; mkdir -p "$S_LIB/ui"; cp -r "$ROOT/app/ui/dist/." "$S_LIB/ui/"
@@ -164,8 +166,10 @@ if [ "$NO_SCENES" = 0 ]; then
   find "$S_LIB" -maxdepth 1 -name 'liblinux-wallpaperengine-core.so*' -delete
   cp -P "$LWE_CORE"/lib/liblinux-wallpaperengine-core.so* "$S_LIB/"
   echo "==> building liascape-player + liascape-scene-worker (Rust compositor) → $LIBEXEC"
-  # the worker finds the core at runtime from libexec/liascape/ → lib/liascape/, not in the build tree
-  (cd "$ROOT" && LIASCAPE_LWE_CORE_DIR="$LWE_CORE" LIASCAPE_LWE_RPATH='$ORIGIN/../../lib/liascape' \
+  # the worker finds the core at runtime from libexec/liascape/ → lib/liascape/ (or beside it), not in the build tree
+  core_rel="$(realpath -ms --relative-to="$LIBEXEC" "$LIBDIR")"
+  if [ "$core_rel" = . ]; then core_rpath='$ORIGIN'; else core_rpath="\$ORIGIN/$core_rel"; fi
+  (cd "$ROOT" && LIASCAPE_LWE_CORE_DIR="$LWE_CORE" LIASCAPE_LWE_RPATH="$core_rpath" \
     cargo build --release --locked --manifest-path src/player/Cargo.toml)
 else
   echo "==> building liascape-player + liascape-scene-worker without scene support (--no-scenes) → $LIBEXEC"
@@ -209,7 +213,7 @@ EOF
 if [ -z "$DESTDIR" ]; then update-desktop-database "$S_APPS" 2>/dev/null || true; fi
 
 echo ""
-echo "Done. Installed to $PREFIX (bin/liascape, libexec/liascape/, lib/liascape/)."
+echo "Done. Installed to $PREFIX (bin/liascape, $LIBEXEC, lib/liascape/)."
 echo "  App:  liascape"
 echo "  CLI:  liascape restore | next | previous | random | volume up | kill | ctl state | help"
 if [ -z "$DESTDIR" ]; then echo "  Ensure $BINDIR is on PATH."; fi  # (a bare `[ ] &&` made a DESTDIR install exit 1)

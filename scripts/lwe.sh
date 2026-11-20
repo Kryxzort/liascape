@@ -153,7 +153,10 @@ cmd_build() {
     cmd_deps
     local t0=$SECONDS
     if [ ! -f "$BUILD/CMakeCache.txt" ]; then
-        cmake -S "$PREP" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release \
+        # no RPATH: the core is copied out of the build tree rather than `cmake --install`ed, so its build RPATH (the
+        # build dir plus an empty entry, i.e. the current directory) would ship in every package. Its NEEDED are all
+        # system libraries. CMAKE_SKIP_RPATH, not CMAKE_SKIP_BUILD_RPATH: the core's target sets SKIP_BUILD_RPATH FALSE.
+        cmake -S "$PREP" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SKIP_RPATH=ON \
             -DWPBUILD_CORE=ON -DWPBUILD_WEBHELPER=OFF -DWPBUILD_FRONTEND=OFF \
             -DWPBUILD_DEVVIEWER=OFF -DWPBUILD_TESTS=OFF \
             -DWPBUILD_VERSION_OVERRIDE="$VERSION" >/dev/null

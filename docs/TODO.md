@@ -45,15 +45,20 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
-      download in `prepare()` and an offline `build()`; so far it has only been built off Arch, by running its functions as
-      makepkg does (`build()` with no network). Left:
-      - [ ] A clean-chroot build on Arch (`makechrootpkg -c` with `electron45-bin` built first and passed with `-I`), then
-            `namcap` on the PKGBUILD and the package (the scene worker's RUNPATH must be `$ORIGIN/../../lib/liascape`), and
-            an install test as a throwaway user: `liascape help`, the app under a headless compositor with one video and
-            one scene, nothing read from the repo or `~/.cache/liascape`. Check that Arch's source-built `dotnet-sdk`
-            restores the `linux-x64` runtime packs for the self-contained publish.
+      download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
+      the three AUR fonts passed with `-I`), `namcap` is clean but for accepted warnings (.NET's optional
+      `liblttng-ust`, "unused" libc stubs in .NET's own libraries, run-time-only depends it can't see), and the package
+      passed an install test as a throwaway user: `liascape help`, the app under a headless sway, a video (NVDEC) and a
+      scene, nothing read from a build tree or a source cache. Left:
+      - [ ] The installed app takes any server answering on `localhost:5173` for its Vite dev server (`app/shell/main.js`
+            `viteUp` probes `/`): with some other Vite project running, the app starts no backend of its own, waits for a
+            dev backend's `serve.port` and quits after 60 s with no window ("backend never wrote serve.port"). Probe
+            something only Liascape's dev server answers (a marker header on `app/ui/vite.config.ts`'s
+            `/__liascape/token`, which already answers 403 to a non-page request), keeping an installed app on Liascape's
+            own dev server in dev mode; `LIASCAPE_VITE` stays a trusted override.
       - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
-            calls `pactl`/`parec` any more), then publish `liascape-git` to the AUR.
+            calls `pactl`/`parec` any more), and `libxkbcommon` / `zlib` if still nothing links them (`namcap` flags both;
+            install.sh still preflights xkbcommon), then publish `liascape-git` to the AUR.
       - [ ] An app icon: none exists (`app/ui/public/favicon.svg` and `app/ui/src/assets/hero.png` are Vite's template
             art), so the desktop entry has no `Icon=`. Add one to `scripts/install.sh` and the flake under
             `share/icons/hicolor/scalable/apps/` once there is an icon.

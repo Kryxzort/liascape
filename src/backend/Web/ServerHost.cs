@@ -50,7 +50,10 @@ public static class ServerHost
 
     public static void Run(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        // The content root is the backend's own folder, never the working directory: the host watches its content root
+        // for appsettings changes with a recursive inotify watcher, so an app started from "/" or $HOME (a desktop launch)
+        // walked and watched that whole tree at every start. Nothing here reads appsettings or the content root.
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
         builder.Logging.ClearProviders();
         // How long a SIGTERM waits for open requests before Kestrel cuts them (the default 30 s). A service manager kills
         // after its own stop timeout (systemd's often 10 s), and an open response can stay open for good: a paused
