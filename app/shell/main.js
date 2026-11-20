@@ -1,15 +1,15 @@
 // Electron shell. Two modes, auto-detected:
-//  • DEV (HMR): if a Vite dev server is up on :5173 (systemd liascape-vite; LIASCAPE_VITE = another), load the UI from Vite
+//  • DEV (HMR): if Liascape's Vite dev server is up on :5173 (systemd liascape-vite; LIASCAPE_VITE = another), load the UI from Vite
 //    (hot-reload) and talk to the systemd `dotnet watch -- serve` backend (port via serve.port).
 //  • PROD: no Vite → spawn our own backend (LIASCAPE_BACKEND or `dotnet run`) and load the built dist
 //    same-origin. Packaging spawns the published binary.
 const { app, BrowserWindow, ipcMain, dialog, shell, session } = require("electron");
 const { spawn } = require("child_process");
-const http = require("http");
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
 const { configDir, tokenFile, withToken } = require("./api-auth");
+const { liascapeViteUp } = require("./vite-detect");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const uiDir = path.join(repoRoot, "app", "ui", "dist");
@@ -93,13 +93,12 @@ function waitForPort(cb, tries = 120) {
   setTimeout(() => waitForPort(cb, tries - 1), 500);
 }
 
-// Is a Vite dev server already running? → dev/HMR mode. A LIASCAPE_VITE the caller started counts as up without asking:
-// its first answer can take longer than the probe waits (a cold transform), and PROD mode would start a backend of its own.
+// Is Liascape's Vite dev server already running? → dev/HMR mode (another project's server on :5173 doesn't count:
+// vite-detect.js). A LIASCAPE_VITE the caller started counts as up without asking: its first answer can take longer than
+// the probe waits (a cold transform), and PROD mode would start a backend of its own.
 function viteUp(cb) {
   if (process.env.LIASCAPE_VITE) return cb(true);
-  const req = http.get(VITE, (res) => { res.destroy(); cb(true); });
-  req.on("error", () => cb(false));
-  req.setTimeout(400, () => { req.destroy(); cb(false); });
+  liascapeViteUp(VITE, cb);
 }
 
 // ── Hardening (.claude/rules/backend/api.md § Security) ────────────

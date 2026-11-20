@@ -26,6 +26,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - The sidebar's crash-mark Clear and "open in your default app" (a stub xdg-open; what /open/media refuses): `bash scripts/test-item-actions.sh`
 - Folder import and watched folders (the scan, link / copy, live pickup, removals; sources never touched): `bash scripts/test-folder-import.sh`
 - Settings' cache clear (per-category sizes, 400s, nothing outside the ticked folders deleted): `bash scripts/test-cache-clear.sh`
+- The shell's dev mode only on Liascape's own Vite, never another server on its port: `bash scripts/test-vite-detect.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`
 - Agent window (NOT hermetic — its own headless compositor, sandboxed backend, Vite and CDP port; it never writes to the session's Hyprland; CDP scripts and benches drive it, never the owner's window): `bash scripts/agent-window.sh up|status|down`

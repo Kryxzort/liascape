@@ -57,6 +57,8 @@ for f in $FILES; do
       add "browse:" "$f (+ LIASCAPE_MATRIX_SCREEN=2560x1440 … --probe probe-filters.js search: split:; --probe probe-layout.js resize:)" ;;
     # the library's Steam tags / trailers / frame sizes: the filter column's data
     src/backend/Web/LibraryFactsOps.cs) echo "  $f → nothing in the matrix (bash scripts/test-library-facts.sh + --probe probe-filters.js --only '^lib:'; the size on disk: --probe probe-steam.js --only lib:ws:size; its progress: --probe probe-libops.js)" >&2 ;;
+    # the shell's dev-server detection: the matrix loads a built UI through LIASCAPE_VITE, which skips it
+    app/shell/vite-detect.js|scripts/test-vite-detect.sh) echo "  $f → nothing in the matrix (bash scripts/test-vite-detect.sh)" >&2 ;;
     scripts/agent-window.sh|scripts/bench-live-ui.mjs|app/shell/cdp.js|app/shell/drive.js) echo "  $f → nothing (the agent window and its drivers — run: bash scripts/agent-window.sh up)" >&2 ;;
     # folder import and watched folders: their own script + probe (the matrix imports single files through /library/import)
     src/backend/Helpers/FolderScanner.cs|src/backend/Web/FolderImportOps.cs|src/backend/Web/FolderWatch.cs|src/backend/Models/WatchedFolder.cs|scripts/test-folder-import.sh)

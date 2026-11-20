@@ -17,6 +17,9 @@ function devApiToken(): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use("/__liascape/token", (req, res) => {
+        // the marker the installed app's shell looks for (app/shell/vite-detect.js): this is Liascape's dev server, not
+        // another project's on the same port. Sent on every answer, the 403 to the shell's own request included.
+        res.setHeader("X-Liascape-Vite", "1");
         let t = "";
         try { t = readFileSync(file(), "utf8").trim(); } catch { /* no backend yet */ }
         if (req.headers["sec-fetch-site"] !== "same-origin" || !/^[A-Za-z0-9_-]{16,128}$/.test(t)) { res.statusCode = 403; res.end(); return; }

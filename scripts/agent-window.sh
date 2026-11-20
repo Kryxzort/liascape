@@ -352,7 +352,9 @@ up() {
   (cd "$ROOT/app/ui" && exec env -u LD_LIBRARY_PATH "$MARK" XDG_CONFIG_HOME="$H/.config" \
      setsid node --input-type=module -e "$VITE_JS" "$VPORT" "$S/vite-cache" </dev/null >"$LOG/vite.log" 2>&1) &
   record vite $!
-  wait_for 300 curl -sf -m 1 "http://localhost:$VPORT/" -o /dev/null || { tail -5 "$LOG/vite.log" >&2; false; }
+  # ready = Liascape's Vite answers with its marker (app/shell/vite-detect.js), not just anything on the port
+  wait_for 300 sh -c 'curl -s -m 1 -o /dev/null -D - "$1" | grep -qi "^x-liascape-vite: 1"' _ "http://localhost:$VPORT/__liascape/token" \
+    || { tail -5 "$LOG/vite.log" >&2; false; }
 
   step "compositor start"
   compositor_up

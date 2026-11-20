@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dev mode with hot reload. Starts two invisible background services (Vite HMR + dotnet watch)
-# as systemd user units, then you just launch the app normally — main.js auto-detects Vite on
-# :5173 and loads the UI with HMR (edits apply live, no rebuild, no Stop-hook). The C# backend is
+# as systemd user units, then you just launch the app normally — main.js auto-detects Liascape's Vite on
+# :5173 (its marker header, app/shell/vite-detect.js) and loads the UI with HMR (edits apply live, no rebuild, no Stop-hook). The C# backend is
 # `dotnet watch -- serve` on a pinned port (5174), so .cs edits recompile in ~seconds without losing
 # the open window.
 set -e

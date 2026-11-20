@@ -50,12 +50,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `liblttng-ust`, "unused" libc stubs in .NET's own libraries, run-time-only depends it can't see), and the package
       passed an install test as a throwaway user: `liascape help`, the app under a headless sway, a video (NVDEC) and a
       scene, nothing read from a build tree or a source cache. Left:
-      - [ ] The installed app takes any server answering on `localhost:5173` for its Vite dev server (`app/shell/main.js`
-            `viteUp` probes `/`): with some other Vite project running, the app starts no backend of its own, waits for a
-            dev backend's `serve.port` and quits after 60 s with no window ("backend never wrote serve.port"). Probe
-            something only Liascape's dev server answers (a marker header on `app/ui/vite.config.ts`'s
-            `/__liascape/token`, which already answers 403 to a non-page request), keeping an installed app on Liascape's
-            own dev server in dev mode; `LIASCAPE_VITE` stays a trusted override.
       - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
             calls `pactl`/`parec` any more), and `libxkbcommon` / `zlib` if still nothing links them (`namcap` flags both;
             install.sh still preflights xkbcommon), then publish `liascape-git` to the AUR.
