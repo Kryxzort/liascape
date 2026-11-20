@@ -12126,6 +12126,91 @@ fn spare_death_never_marks_a_scene_broken() {
     assert_eq!(worker_of(&mut c, &a)["total_restarts"], json!(0));
 }
 
+/// An adopted spare whose load stalls (`load_stall_once`: asleep, its pings answered as the
+/// worker's `LoadGate` does) is dropped for a fresh worker after one stall window: the scene
+/// readies in the new process and shows, `worker.spare_dropped` says why, `spares_dropped`
+/// counts it, and nothing of a crash happens — no restart, no `source.broken` / `source.error`,
+/// no crash record.
+#[test]
+fn spare_load_stall_is_replaced_by_a_fresh_worker() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    // The real clock: the watchdog judges wall time between polls, and a stepped loop polls only
+    // when stepped (a step waiting on a loading source doesn't).
+    let srv = Serve::spawn_env(
+        new_root(),
+        &["--clock", "real"],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_PLAYER_SPARE_TIMING", Path::new(SPARE_TIMING)),
+            ("LIASCAPE_SCENE_WORKER_HANG_MS", Path::new("600")),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["source."]}));
+    c.ok("set", json!({"path": "player.scene_spare", "value": true}));
+    let a = create_scene(&mut c, "stall-a", &synth(Pattern::FrameIndex), json!({}));
+    show_all(&mut c, &a);
+    wait_for(Duration::from_secs(20), "A ready", || {
+        (get(&mut c, &format!("{a}.ready"))["result"]["value"] == json!(true)).then_some(())
+    });
+    let p = wait_for(Duration::from_secs(20), "a spare", || {
+        let sp = spare_of(&mut c);
+        (sp["hello"] == json!(true)).then(|| sp["pid"].as_u64()).flatten()
+    });
+
+    let flag = srv.path("stall-b.flag");
+    let spec_b = SyntheticSpec {
+        pattern: Pattern::Solid,
+        rgb: [30, 160, 220],
+        load_stall_once: Some(s(&flag).to_string()),
+        ..SyntheticSpec::default()
+    };
+    let b = create_scene(&mut c, "stall-b", &spec_b, json!({}));
+    show_all(&mut c, &b);
+    wait_for(Duration::from_secs(20), "B ready", || {
+        (get(&mut c, &format!("{b}.ready"))["result"]["value"] == json!(true)).then_some(())
+    });
+    assert!(flag.exists(), "the spare's load never stalled: proved nothing");
+    let wb = worker_of(&mut c, &b);
+    assert_ne!(wb["pid"].as_u64(), Some(p), "B plays in a fresh worker: {wb}");
+    assert_eq!(
+        (wb["spares_taken"].clone(), wb["spares_dropped"].clone()),
+        (json!(1), json!(1)),
+        "{wb}"
+    );
+    assert_eq!(
+        (wb["restarts_60s"].clone(), wb["total_restarts"].clone()),
+        (json!(0), json!(0)),
+        "{wb}"
+    );
+    assert_eq!(wb["broken"], json!(false), "{wb}");
+    let dropped = logs_of(&mut c, "worker.spare_dropped");
+    assert!(
+        dropped.iter().any(|e| e["id"] == json!(b)
+            && e["pid"] == json!(p)
+            && e["why"].as_str().is_some_and(|w| w.contains("load stalled"))),
+        "{dropped:?}"
+    );
+    wait_for(Duration::from_secs(3), "the stalled spare to go", || {
+        (!pid_alive(p)).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let shot = srv.path("stall-b.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+    near(png_pixel(&shot, 320, 180), [30, 160, 220], 2, "B on screen");
+    assert!(logs_of(&mut c, "worker.restart").is_empty());
+    let evs = c.drain_events();
+    assert!(
+        !evs.iter().any(|e| e["event"] == "source.broken" || e["event"] == "source.error"),
+        "{evs:?}"
+    );
+    assert_eq!(crash_files(&srv), 0, "no crash record");
+}
+
 /// The low-VRAM rule's `stop` frees the spare with every source (its context is GPU memory
 /// too) and none starts during the hold; after the resume a spare comes back.
 #[test]

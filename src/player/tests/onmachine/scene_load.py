@@ -33,6 +33,9 @@ private dirs each create the rotation, wait --gap seconds (and, with --spare, fo
 with the files in the page cache (a player restart), `first_boot` with them dropped (a reboot). Without --spare it is
 the first scene as it was before a rotation started the spare.
 
+--keep-pages leaves the page cache alone (cold then empties only the shader caches, boot is a warm load): no disk
+reads, for a run while someone uses the machine.
+
 --capture also records the worker's VRAM then (`vram_mib`, nvidia-smi's process table): what the loaded scene holds.
 
 Isolation: own XDG_RUNTIME_DIR / STATE / CACHE / CONFIG and socket under --out, no WAYLAND_DISPLAY / DISPLAY,
@@ -368,7 +371,7 @@ def first_round(a, bindir, out, r, records, core):
                     spare = p.wait_spare()
                     if not spare:
                         print(f"round {r} {scene.name} {mode}: no spare within 20 s", file=sys.stderr)
-                if cold:
+                if cold and not a.keep_pages:
                     files = [bindir / "liascape-scene-worker", Path(p.check["assets_dir"])] + ([core] if core else [])
                     evict(files + [scene])
                 rec = p.apply(scene, a.timeout)
@@ -395,6 +398,9 @@ def main():
     ap.add_argument("--capture", action="store_true", help="a PNG of each load 1 s after its first frame, in <out>/captures")
     ap.add_argument("--spare", action="store_true", help="player.scene_spare on: each apply takes the spare worker")
     ap.add_argument("--gap", type=float, default=3.0, help="seconds from one apply's end to the next's start (both modes)")
+    ap.add_argument("--keep-pages", action="store_true",
+                    help="cold / boot drop nothing from the page cache (cold still empties both shader caches): no "
+                         "disk reads, for a run while the machine is in use")
     ap.add_argument("--first", action="store_true",
                     help="the first scene of a fresh player whose rotation holds it (first, first_boot) instead")
     a = ap.parse_args()
@@ -449,7 +455,7 @@ def main():
                             mem = spare_memory(pid)
                             records.write(json.dumps({"round": r, "mode": "spare_idle", "scene": scene.name} | mem) + "\n")
                             print(f"round {r} spare idle: {mem}", file=sys.stderr)
-                    if cold:
+                    if cold and not a.keep_pages:
                         evict(files + [scene])
                     cap = None
                     if a.capture:

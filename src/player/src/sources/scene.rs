@@ -350,6 +350,9 @@ pub struct SceneStats {
     pub spawns: u64,
     /// Of those, workers that were the spare (`worker::spare`), started ahead of time.
     pub spares_taken: u64,
+    /// Of those, spares whose load stalled and were replaced by a fresh worker
+    /// (`WorkerEvent::Replaced`).
+    pub spares_dropped: u64,
     /// Slots imported in the latched frame's ring (3 once a re-export's old ones went).
     pub slots: usize,
     /// `Pointer` messages sent as a jump (the pointer entered the output).
@@ -1196,7 +1199,13 @@ impl SceneSource {
             WorkerEvent::Msg(m, fds) => self.on_message(gfx, now, m, fds),
             WorkerEvent::Restarted { attempt } => {
                 self.stats.restarts += 1;
-                self.on_new_worker(now, attempt);
+                self.on_new_worker(now, attempt, true);
+            }
+            // A stalled adopted spare made way for a fresh worker: the load starts over, no
+            // crash, so no preview either (what shows meanwhile stays).
+            WorkerEvent::Replaced { .. } => {
+                self.stats.spares_dropped += 1;
+                self.on_new_worker(now, 0, false);
             }
             WorkerEvent::Broken { record } => {
                 self.want_preview_if_blank();
@@ -1220,9 +1229,10 @@ impl SceneSource {
         }
     }
 
-    /// A new worker process took over after a crash: the shown frame stays (never released: the
-    /// new worker never had its slot) and the scene resumes at its `t`.
-    fn on_new_worker(&mut self, now: Instant, attempt: u32) {
+    /// A new worker process took over after a crash (`crashed`) or from a dropped spare: the shown
+    /// frame stays (never released: the new worker never had its slot) and the scene resumes at
+    /// its `t`.
+    fn on_new_worker(&mut self, now: Instant, attempt: u32, crashed: bool) {
         self.latch.forget_worker();
         self.worker_ready = false;
         self.inflight = 0;
@@ -1247,7 +1257,9 @@ impl SceneSource {
                 json!({"id": self.opts.id, "t": t, "attempt": attempt}),
             );
         }
-        self.want_preview_if_blank();
+        if crashed {
+            self.want_preview_if_blank();
+        }
     }
 
     /// The worker is gone with a frame on screen — stop the scene clock at that
@@ -2371,6 +2383,8 @@ impl SceneSource {
         v["font_stand_ins"] = json!(self.fonts);
         // of `spawns`, the workers that were the spare (`worker::spare`)
         v["spares_taken"] = json!(st.spares_taken);
+        // of those, spares whose load stalled, replaced by a fresh worker
+        v["spares_dropped"] = json!(st.spares_dropped);
         v["gpu_ms_p50"] = json!(gpu_p50);
         v["gpu_ms_p95"] = json!(gpu_p95);
         v["throttle"] = json!(self.budget.cap().map(|cap| json!({

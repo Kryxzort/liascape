@@ -1155,6 +1155,121 @@ fn spare_death_is_not_a_crash() {
     assert_eq!(records, 0, "no crash record for a spare");
 }
 
+fn is_log(e: &WorkerEvent, needle: &str) -> bool {
+    matches!(e, WorkerEvent::Msg(FromWorker::Log { line, .. }, _) if line.contains(needle))
+}
+
+fn crash_records(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .count()
+}
+
+/// An adopted spare whose load stalls (pings answered by its protocol thread, as the worker's
+/// `LoadGate` does for 30 s, but no CPU time, page fault or IO) is dropped one stall window
+/// (`worker::spare_load_stall`: the hang timeout) after its last progress, and a fresh worker
+/// takes the same scene: `Replaced` and nothing a crash brings (no `Exited`, `Hung`,
+/// `Restarted`, budget or crash record); the fresh process gets the scene's `Start`.
+#[test]
+fn spare_load_stall_drops_it_for_a_fresh_worker() {
+    let flag = tmp_dir("spare-stall").join("stalled");
+    let mut spare_spec = stub_spec("spare", &format!("load_stall:{}", flag.display()));
+    spare_spec.hang_timeout = Duration::from_millis(400);
+    let crash_dir = spare_spec.crash_dir.clone();
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn_spare(spare_spec.clone()).unwrap();
+    pump(&mut host, t0, Duration::from_secs(3), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    let spare_pid = host.pid().unwrap();
+    let mut mine = spare_spec;
+    mine.id = "src7".into();
+    mine.start = start_at("src7", 4.0);
+    host.adopt(mine).expect("the spare is adopted");
+    let adopted = Instant::now();
+    let evs = pump(&mut host, t0, Duration::from_secs(4), |e| {
+        matches!(e, WorkerEvent::Replaced { .. })
+    });
+    let dropped_after = adopted.elapsed();
+    assert!(flag.exists(), "the spare never stalled: proved nothing: {evs:?}");
+    match evs.last().map(|e| &e.1) {
+        Some(WorkerEvent::Replaced { why }) => {
+            assert!(why.contains("adopted spare's load stalled"), "{why}")
+        }
+        _ => panic!("a stalled adopted spare is replaced: {evs:?}"),
+    }
+    assert!(
+        dropped_after >= Duration::from_millis(400),
+        "dropped before a whole stall window passed: {dropped_after:?}"
+    );
+    let fresh = host.pid().expect("a fresh worker");
+    assert_ne!(fresh, spare_pid, "a new process, not the spare");
+    assert_eq!(*host.state(), WorkerState::Starting);
+    // The fresh worker plays the scene; no crash path at any point.
+    let more = pump(&mut host, t0, Duration::from_secs(3), |e| is_log(e, "start position 4"));
+    let all: Vec<_> = evs.iter().chain(&more).collect();
+    assert!(
+        more.last().is_some_and(|(_, e)| is_log(e, "start position 4")),
+        "the fresh worker takes the scene's Start: {more:?}"
+    );
+    assert!(
+        !all.iter().any(|(_, e)| matches!(
+            e,
+            WorkerEvent::Exited { .. }
+                | WorkerEvent::Hung { .. }
+                | WorkerEvent::Restarted { .. }
+                | WorkerEvent::Broken { .. }
+        )),
+        "a dropped spare is no crash: {all:?}"
+    );
+    assert_eq!(*host.state(), WorkerState::Running);
+    assert_eq!(host.restarts(Instant::now()), (0, 0), "no restart budget spent");
+    assert_eq!(crash_records(&crash_dir), 0, "no crash record");
+    let t = Instant::now();
+    while !pid_dead(spare_pid) && t.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(pid_dead(spare_pid), "the stalled spare is killed");
+    let tail = host.log_tail().join("\n");
+    assert!(tail.contains("stub: load stalled"), "the spare's own last lines stay: {tail}");
+    assert!(tail.contains("a fresh worker loads the scene"), "{tail}");
+    host.stop();
+}
+
+/// An adopted spare whose load is slow but works (CPU time on another thread, pings answered)
+/// stays: the watchdog judges progress, not time.
+#[test]
+fn spare_load_that_moves_is_kept() {
+    let mut spare_spec = stub_spec("spare", "load_busy_ms:1500");
+    spare_spec.hang_timeout = Duration::from_millis(400);
+    let t0 = Instant::now();
+    let mut host = WorkerHost::spawn_spare(spare_spec.clone()).unwrap();
+    pump(&mut host, t0, Duration::from_secs(3), |e| {
+        matches!(e, WorkerEvent::Msg(FromWorker::Hello { .. }, _))
+    });
+    let pid = host.pid().unwrap();
+    let mut mine = spare_spec;
+    mine.id = "src8".into();
+    mine.start = start_at("src8", 1.0);
+    host.adopt(mine).expect("the spare is adopted");
+    let evs = pump(&mut host, t0, Duration::from_secs(5), |e| is_log(e, "stub: loaded"));
+    assert!(
+        evs.last().is_some_and(|(_, e)| is_log(e, "stub: loaded")),
+        "the slow load finishes in the adopted spare: {evs:?}"
+    );
+    assert!(
+        !evs.iter().any(|(_, e)| matches!(
+            e,
+            WorkerEvent::Replaced { .. } | WorkerEvent::Exited { .. } | WorkerEvent::Hung { .. }
+        )),
+        "{evs:?}"
+    );
+    assert_eq!(host.pid(), Some(pid), "the same process");
+    host.stop();
+}
+
 mod spare_pool {
     use super::*;
     use liascape_player::worker::spare::{Launch, Spare, Timing, Want};

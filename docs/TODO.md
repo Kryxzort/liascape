@@ -50,10 +50,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `source.ready` warm/cold 286/382 ms, complete picture 407/483 ms, 0 black loads; guards
        `video_players_share_one_cuda_context`, `real_scene_worker_loads_libcuda_for_video_textures`. Then delete
        `patches/mpv/`, the flake's mpv override and the `cuda-primary-context` code, and the mpv section of UPSTREAM.md.
-106. [ ] With the spare scene worker, 4 of 10 cold loads of 3163060610 took 2.8, 4.2, 11.8 and 38 s (the adopted
-       worker stayed inside its load, no crash or restart) and 12 + 6 reruns didn't reproduce it
-       (`docs/player/reports/scene-load-we.md`). `scene_load_we.py` now records the worker's load/build split and the
-       log tail of any load over 2 s: read them on the next occurrence; consider a load watchdog for an adopted spare.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

@@ -74,6 +74,15 @@ pub const STARVE_LIMIT_FACTOR: u32 = 5;
 pub fn host_stall_gap(hang_timeout: Duration) -> Duration {
     hang_timeout / 2
 }
+/// An adopted spare's load whose process shows no progress (no CPU time, no major fault, no IO
+/// wait) this long is dropped for a fresh worker (`WorkerHost::watch_adopted_load`): one hang
+/// timeout, 2 s in production. A load works on the CPU or pages in the whole time (a heavy build
+/// starved at 5 runnable threads per CPU still got a slice every 1.3 s at worst), so a process
+/// quiet that long is blocked.
+pub fn spare_load_stall(hang_timeout: Duration) -> Duration {
+    hang_timeout
+}
+
 /// A starting worker's activity, from `/proc/<pid>/stat`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StartActivity {
@@ -248,6 +257,11 @@ pub enum WorkerEvent {
     Restarted {
         attempt: u32,
     },
+    /// An adopted spare's load stalled: it was killed and a fresh worker started for the same
+    /// scene — no crash (no budget, no record, no `Exited` before it); the load starts over.
+    Replaced {
+        why: String,
+    },
     Broken {
         record: PathBuf,
     },
@@ -285,6 +299,17 @@ struct Proc {
     hung: bool,
     /// Why the host killed it (`kill_for_restart`) — the restart's / record's reason.
     why: Option<String>,
+    /// An adopted spare still inside its first load (see [`spare_load_stall`]).
+    adopted: Option<AdoptedLoad>,
+}
+
+/// An adopted spare's load, watched for progress until its `Ready` / first `Frame`.
+struct AdoptedLoad {
+    at: Instant,
+    /// When the process last moved, what it showed then, and the last sample.
+    moved_at: Instant,
+    activity: Option<StartActivity>,
+    sampled: Instant,
 }
 
 /// Supervises one scene worker. See the module docs.
@@ -371,6 +396,8 @@ impl WorkerHost {
     /// next poll; else the `Start` answers its `Hello` as for any worker. `Err(spec)` = not
     /// adoptable (not a spare, gone or dying, or launched differently: another binary, args or
     /// environment) — the caller spawns its own.
+    /// Its load is watched until `Ready`: one that stalls is dropped for a fresh worker
+    /// ([`WorkerEvent::Replaced`]).
     pub fn adopt(&mut self, spec: WorkerSpec) -> Result<(), WorkerSpec> {
         let alive = self
             .proc_
@@ -397,6 +424,12 @@ impl WorkerHost {
         p.start_moved_at = now;
         p.start_activity = None;
         p.last_beat = now;
+        p.adopted = Some(AdoptedLoad {
+            at: now,
+            moved_at: now,
+            activity: start_activity(p.pid),
+            sampled: now,
+        });
         let prev_id = std::mem::replace(&mut self.spec, spec).id;
         self.spare = false;
         self.state = if hello {
@@ -520,6 +553,7 @@ impl WorkerHost {
             self.drain_socket(now, &mut out);
         }
         self.heartbeat(now, &mut out);
+        self.watch_adopted_load(now, &mut out);
         let ending = self
             .proc_
             .as_ref()
@@ -829,6 +863,7 @@ impl WorkerHost {
             killed: false,
             hung: false,
             why: None,
+            adopted: None,
         })
     }
 
@@ -941,6 +976,7 @@ impl WorkerHost {
             }
             FromWorker::Frame { seq, slot, .. } => {
                 p.framed = true;
+                p.adopted = None;
                 while p.ticks.front().is_some_and(|(s, _)| s <= seq) {
                     p.ticks.pop_front();
                 }
@@ -1012,6 +1048,8 @@ impl WorkerHost {
                 let l = format!("[{level}] {line}");
                 self.push_line(l);
             }
+            // The load is over: built, or it can't play.
+            FromWorker::Ready { .. } | FromWorker::Error { fatal: true, .. } => p.adopted = None,
             _ => {}
         }
         out.push(WorkerEvent::Msg(m, fds));
@@ -1045,6 +1083,9 @@ impl WorkerHost {
             p.started = now;
         }
         p.start_moved_at = now;
+        if let Some(a) = p.adopted.as_mut() {
+            a.moved_at = now;
+        }
         if outstanding > 0 || p.hello_at.is_none() {
             log::event(
                 "worker",
@@ -1164,6 +1205,88 @@ impl WorkerHost {
                 p.ping = Some((self.ping_seq, now));
                 p.last_beat = now;
             }
+        }
+    }
+
+    /// An adopted spare whose load stopped moving (no CPU time, major fault or IO wait for
+    /// [`spare_load_stall`]) is dropped: SIGKILLed and replaced by a fresh
+    /// worker that loads the scene from scratch, as if no spare had been there. Not a crash — the
+    /// spare process is suspect, not the scene: no restart budget, no crash record, no `Exited`
+    /// (the source keeps waiting for its first frame, no preview); `worker.spare_dropped` says
+    /// why. Only the adopted process is watched: the fresh one is an ordinary worker, judged by
+    /// the heartbeat and the worker's `LoadGate` alone, so a stall the machine causes costs one
+    /// extra load at most. Guards: `tests/worker.rs::spare_load_stall_drops_it_for_a_fresh_worker`,
+    /// `spare_load_that_moves_is_kept`, `tests/api.rs::spare_load_stall_is_replaced_by_a_fresh_worker`.
+    fn watch_adopted_load(&mut self, now: Instant, out: &mut Vec<WorkerEvent>) {
+        let window = spare_load_stall(self.spec.hang_timeout);
+        let Some(p) = self.proc_.as_mut().filter(|p| !p.killed) else {
+            return;
+        };
+        let pid = p.pid;
+        let Some(a) = p.adopted.as_mut() else { return };
+        if now.saturating_duration_since(a.sampled) < REAP_CHECK.min(window / 4) {
+            return;
+        }
+        a.sampled = now;
+        // Unreadable = gone: the reap decides.
+        let Some(cur) = start_activity(pid) else {
+            return;
+        };
+        let moved = cur.in_io
+            || a.activity
+                .is_none_or(|b| b.cpu != cur.cpu || b.majflt != cur.majflt);
+        a.activity = Some(cur);
+        if moved {
+            a.moved_at = now;
+            return;
+        }
+        let quiet = now.saturating_duration_since(a.moved_at);
+        if quiet < window {
+            return;
+        }
+        let load_ms = now.saturating_duration_since(a.at).as_secs_f64() * 1e3;
+        let wchan = std::fs::read_to_string(format!("/proc/{pid}/wchan")).unwrap_or_default();
+        let why = format!(
+            "the adopted spare's load stalled: no CPU time, page fault or IO for {:.0} ms, {load_ms:.0} ms \
+             into the load{}",
+            quiet.as_secs_f64() * 1e3,
+            if wchan.is_empty() || wchan == "0" {
+                String::new()
+            } else {
+                format!(" (waiting in {wchan})")
+            }
+        );
+        // Its last lines (what it was doing) stay in the tail.
+        self.drain_output(false);
+        let p = self.proc_.take().unwrap();
+        unsafe { libc::kill(p.pid, libc::SIGKILL) };
+        self.forget_fds(&p);
+        reap::hand_off(p.pid, now);
+        self.sync = None;
+        log::event(
+            "worker",
+            Level::Warn,
+            "worker.spare_dropped",
+            Some(self.corr.clone()),
+            json!({"id": self.spec.id, "pid": p.pid, "why": why, "load_ms": load_ms,
+                   "quiet_ms": quiet.as_secs_f64() * 1e3, "wchan": wchan}),
+        );
+        self.push_line(format!(
+            "--- liascape-player: {why}; a fresh worker loads the scene ---"
+        ));
+        match self.spawn_proc(0) {
+            Ok(np) => {
+                self.proc_ = Some(np);
+                self.state = WorkerState::Starting;
+                out.push(WorkerEvent::Replaced { why });
+            }
+            Err(e) => self.broken(
+                format!("{why}; its replacement failed to start: {e}"),
+                None,
+                None,
+                Duration::from_secs_f64(load_ms / 1e3),
+                out,
+            ),
         }
     }
 

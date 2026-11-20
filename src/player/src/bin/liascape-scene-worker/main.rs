@@ -19,7 +19,9 @@
 //! `start_busy_ms:N` / `start_sleep_ms:N` (before `Hello`, spend N ms on the CPU / asleep: a slow
 //! start that makes progress, and one that is stuck), `first_fault_ms:N` / `first_busy_ms:N` (right
 //! after `Hello`, N ms paging a file in from disk / on the CPU before reading anything: a first
-//! render held up by a busy disk, and one that spins).
+//! render held up by a busy disk, and one that spins), `load_stall:<path>` (the first stub to create
+//! `<path>` stalls at its `Start`: pings answered, nothing else, no CPU), `load_busy_ms:N` (each
+//! `Start` is a load N ms on the CPU, pings answered, then `stub: loaded`).
 //!
 //! Without `--stub`: the renderer — the NVIDIA shader cache directory created if
 //! `__GL_SHADER_DISK_CACHE_PATH` names a missing one (`gfx::shader_cache`; `--lwe-smoke` and
@@ -93,6 +95,14 @@ struct Knobs {
     /// faults / on the CPU before reading anything.
     first_fault_ms: u64,
     first_busy_ms: u64,
+    /// `load_stall:<path>` (stub): the first stub to create `<path>` stalls at its `Start` as a
+    /// load blocked on a lock would — pings answered (the `LoadGate`'s cover), nothing else, no
+    /// CPU — until it is killed; every later one plays (a stalled adopted spare, and the fresh
+    /// worker that replaces it).
+    load_stall: Option<String>,
+    /// `load_busy_ms:N` (stub): each `Start` is a load N ms on the CPU (another thread), pings
+    /// answered meanwhile, then `stub: loaded` is logged — a slow load that makes progress.
+    load_busy_ms: u64,
 }
 
 impl Knobs {
@@ -113,6 +123,8 @@ impl Knobs {
                 "start_sleep_ms" => k.start_sleep_ms = val.parse().unwrap_or(0),
                 "first_fault_ms" => k.first_fault_ms = val.parse().unwrap_or(0),
                 "first_busy_ms" => k.first_busy_ms = val.parse().unwrap_or(0),
+                "load_stall" => k.load_stall = Some(val.to_string()),
+                "load_busy_ms" => k.load_busy_ms = val.parse().unwrap_or(0),
                 other => warn(&format!("unknown LIASCAPE_SCENE_WORKER_TEST knob {other:?}")),
             }
         }
@@ -431,6 +443,18 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
                                 line: format!("stub: start position {position}"),
                             },
                         );
+                        if let Some(flag) = &k.load_stall
+                            && std::fs::OpenOptions::new()
+                                .write(true)
+                                .create_new(true)
+                                .open(flag)
+                                .is_ok()
+                        {
+                            stall_load(s)
+                        }
+                        if k.load_busy_ms > 0 {
+                            busy_load(s, k.load_busy_ms);
+                        }
                         if ring.is_empty() {
                             for slot in 0..k.ring {
                                 ring.push((slot, false));
@@ -476,6 +500,53 @@ fn run_stub(sock: OwnedFd, k: Knobs) -> ! {
                     gpu_ms: None,
                 },
             );
+        }
+    }
+}
+
+/// The stub's `load_busy_ms`: `ms` on the CPU on another thread while pings are answered here.
+fn busy_load(sock: &OwnedFd, ms: u64) {
+    let worker = std::thread::spawn(move || {
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(ms) {
+            std::hint::spin_loop();
+        }
+    });
+    while !worker.is_finished() {
+        wait_readable(sock.as_raw_fd(), Some(Duration::from_millis(5)));
+        loop {
+            match proto::recv::<ToWorker>(sock.as_fd()) {
+                Ok(Some((ToWorker::Ping { seq }, _))) => send(sock, &FromWorker::Pong { seq }),
+                Ok(Some((ToWorker::Quit, _))) => std::process::exit(0),
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => std::process::exit(0),
+                Err(_) => {}
+            }
+        }
+    }
+    send(
+        sock,
+        &FromWorker::Log {
+            level: "info".into(),
+            line: "stub: loaded".into(),
+        },
+    );
+}
+
+/// The stub's `load_stall`: answer pings, ignore the rest, never return (killed by the host).
+fn stall_load(sock: &OwnedFd) -> ! {
+    let _ = writeln!(std::io::stderr(), "stub: load stalled");
+    loop {
+        wait_readable(sock.as_raw_fd(), None);
+        loop {
+            match proto::recv::<ToWorker>(sock.as_fd()) {
+                Ok(Some((ToWorker::Ping { seq }, _))) => send(sock, &FromWorker::Pong { seq }),
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => std::process::exit(0),
+                Err(_) => {}
+            }
         }
     }
 }
@@ -908,6 +979,19 @@ impl Renderer {
             Ok(s) => s,
             Err(e) => return self.fatal(format!("synthetic scene {}: {e}", file.display())),
         };
+        if let Some(flag) = &spec.load_stall_once
+            && std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(flag)
+                .is_ok()
+        {
+            self.gate.set(true);
+            warn("synthetic: load stalled (load_stall_once)");
+            loop {
+                std::thread::sleep(Duration::from_secs(3600));
+            }
+        }
         if spec.load_ms > 0 {
             // A slow "load + build": the reader thread answers pings meanwhile.
             self.gate.set(true);

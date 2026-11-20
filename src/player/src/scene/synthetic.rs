@@ -69,6 +69,10 @@ pub struct SyntheticSpec {
     /// keeps getting CPU time (the worker's `LoadGate` keeps covering such a load past its
     /// base timeout; a load asleep that long is a hang).
     pub load_busy: bool,
+    /// Test-only: the first worker to create this file stalls in its load — asleep, its
+    /// protocol answered (the `LoadGate`'s cover) — until it is killed; later ones load as usual.
+    /// A stalled adopted spare and the fresh worker that replaces it.
+    pub load_stall_once: Option<String>,
     /// Test-only: every `Frame` reports this GPU time instead of the measured one —
     /// drives the GPU budget deterministically without loading the GPU.
     pub report_gpu_ms: Option<f32>,
@@ -104,6 +108,7 @@ impl Default for SyntheticSpec {
             fail: None,
             load_ms: 0,
             load_busy: false,
+            load_stall_once: None,
             report_gpu_ms: None,
             context_lost_after_ms: None,
             gpu_stall: None,

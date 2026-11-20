@@ -81,7 +81,10 @@ instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs eac
 - **Failure.** A spare that dies, hangs (its heartbeat runs as for any worker) or reports a fatal error is no crash:
   `Exited` only, no restart, no budget, no record, no scene touched; the next starts after 5 s, doubling to 5 min
   while failures continue. Once adopted it is the scene's own worker: its crash restarts through that scene's budget.
-  Crash restarts spawn their own process. It dies with its player (`PR_SET_PDEATHSIG`, spawned on the loop); a
+  Crash restarts spawn their own process. Until its `Ready` an adopted spare's load is watched: a process with no CPU
+  time, page fault or IO wait for one hang timeout (a load works the whole time) is SIGKILLed for a fresh worker that
+  loads from scratch, no crash (no budget, record, `Exited` or preview), once per adoption (`worker.spare_dropped`
+  with why and the main thread's wchan; the source's `spares_dropped`). It dies with its player (`PR_SET_PDEATHSIG`, spawned on the loop); a
   supervisor restart keeps `player.scene_spare` (snapshot) and starts a new spare once the restored scene's worker
   started, or once the restore shows when the restored rotation holds a scene.
 - **Seen in** the `workers` probe's `spare` (state `spare` | `none` with `why`), the source's `spares_taken`, and the

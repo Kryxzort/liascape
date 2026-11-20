@@ -149,7 +149,14 @@ cost above):
 - Nothing to copy from WE's switch. It shows black for 0.5–1.2 s on every switch; ours holds A until B's first
   frame.
 - Find the † loads: rerun `ours --spare` cold until one is slow. The script now records the worker's
-  `load_ms` / `build_ms`, and the log tail of any load over 2 s.
+  `load_ms` / `build_ms`, and the log tail of any load over 2 s. A later rerun (2026-11-20 morning, `5cc90053`,
+  release) didn't find one either: 57 cold spare loads with both shader caches emptied and the page cache kept
+  (the machine was in use). 3163060610 30 times: plain 680–736 ms, the spare adopted before its `Hello` 768–950,
+  right after the previous scene's worker was destroyed 658–746, beside 24 nice-19 CPU burners 1027–1169, the spare
+  idle 20 s first 703–779. 3042492564, 2388299037 and 3426575339 9 times each (plain, before `Hello`, burners):
+  867–1442, 595–918 and 228–369 ms. No restart, no crash. Since then an adopted spare whose load stalls is dropped
+  for a fresh worker (`docs/player/modules/scene-worker.md` § The spare worker); a load that is slow while working
+  is left alone.
 
 ## Caveats
 

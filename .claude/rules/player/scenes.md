@@ -69,8 +69,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - Test gotcha: a sibling test's `posix_spawn` briefly holds copies of every fd (CLOEXEC too) — `poll` for
   the hang-up before reading EOF.
 - Keep ≤ 1 spare worker (`worker::spare`, scene-worker.md § The spare worker); its death is never a crash; adopt it only when launched
-  like the scene (`sources::scene::launch_for`), reap it at once when a setting changes that. Read "a scene is coming" from
-  the programs (`Programs::rotation_scenes`), never a backend prop. Guards: `tests/worker.rs`, `tests/api.rs`, `tests/supervise.rs` `spare_*`.
+  like the scene (`sources::scene::launch_for`), reap it at once when a setting changes that; drop an adopted one whose load stalls for a fresh
+  worker, never as a crash (`WorkerHost::watch_adopted_load`). Read "a scene is coming" from `Programs::rotation_scenes`, never a backend prop. Guards: `tests/worker.rs`, `tests/api.rs`, `tests/supervise.rs` `spare_*`.
 
 ## Build (`build.rs`, LWE core)
 - Only `liascape-scene-worker` links LWE (`cargo::rustc-link-arg-bin`); the compositor binary never does.
