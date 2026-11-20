@@ -50,6 +50,26 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - `Visible(condition, values)`: an unevaluable condition → shown.
 - Under legacy they are launch-only (`--set-property`); under liascape-player live (`SceneProperties.PlayerMap`).
 
+## Presets (Wallpaper Engine's format, from real Workshop items)
+- Recognise a preset by its `project.json`: no `type` key, a `preset` object and a `dependency`; never by `type` (WE
+  writes none) or a `Preset` tag (`project.json`'s `tags` hold only a genre: `Unspecified`, `Music`, `Anime`).
+  Fixtures: `scripts/test-fixtures/presets/<presetId>/`.
+- Its keys: `dependency`, `preset`, `preview`, `tags`, `title`, `visibility`, and sometimes `description`,
+  `contentrating`, `ratingsex`, `ratingviolence`, `snapshotformat`, `snapshotoverlay`. No `file`, `general`,
+  `workshopid`, `version` or `scene.pkg`: a preset folder can't play on its own.
+- `dependency` = the base item's Workshop id, digits as a JSON string.
+- `preview` names its own preview (`preview.jpg` or `preview.gif`) in the preset folder.
+- `preset` maps a property name to its value in the base scene's own `general.properties` encoding (§ Scene
+  properties): `bool` true/false, `slider` a number (float noise kept, `0.89999998`), `color` `"r g b"` 0–1, `combo`
+  the option's value string, `textinput` a string.
+- A `scenetexture` value is `"files/<name>"`, relative to the preset folder (its `files/`), or `""`; resolve it
+  against the preset folder, never the base's. `files/` holds only what those values name; it overlays no base file.
+- `preset` also carries WE's own per-wallpaper settings that are not scene properties: `_d0` (`null`), `alignment*`,
+  `rate`, `wec_*` (colour correction), and when the base supports them `audioprocessing`, `cameraparallax`, `volume`,
+  `wcc_*`. A base property the preset lacks (saved against an older base) keeps the base's value.
+- Steam's tags (not `project.json`'s) carry `Preset` plus the base's type tag (`Scene` or `Web`), and never
+  `Wallpaper` / `Customizable`; Steam lists the base as the item page's one "Required items" link.
+
 ## Steam tags, trailers and frame sizes (`Web/LibraryFactsOps.cs`)
 - One background pass, single-flight, kicked after the startup sync, `/library/sync`, an import and a download. It writes each fact field-level (`UpdateIndex`) and asks only for what an item doesn't have yet: never on every launch.
 - Tags and trailers: ONE `GetDetails` over Steam's client protocol for every Workshop item missing either (`Helpers/SteamWorkshopDetails.cs`, up to 1000 ids a request: measured, docs/decisions.md § "Ask Steam for a whole library's details in one request"). A Workshop item's id is its index `workshopId`, else its `local/` or `workshop/` folder name.
