@@ -17,6 +17,8 @@
 #     once list "clips" (phase make) on GET /library/ops, total 3, done counting up, gone once the queue drains.
 #  8. a quality change while the cards' batch runs: the same operation goes on (never ended in between) with the new
 #     quality as its phase until the sweep and the cards' clips are done; every clip ends up at the new quality.
+#  9. a choice changed back within the grace (Low → Mid → Low, a longer grace): the Low clip re-made under the name the
+#     Mid sweep doomed outlives that sweep's grace, the item's only clip, still Low.
 # Never touches ~/.config/liascape, ~/.cache or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-clip-sweep.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -255,6 +257,28 @@ waitlog 'library-ops: clips ended' 2 10 || true
 sleep 0.5; kill $OPSP 2>/dev/null; wait $OPSP 2>/dev/null
 check "one operation throughout (started and ended once more)" "$(grep -c 'library-ops: clips started' "$LOG") $(grep -c 'library-ops: clips ended' "$LOG")" "2 2"
 check "its phase: the batch's, then the change's" "$(uniq "$T/phases-seen" | tr '\n' ' ')" "make low "
+stopbe
+
+echo "== 9. a choice changed back within the grace: the clip re-made under the old name stays"
+# Low → Mid → Low, both sweeps done inside one grace: the Low sweep re-makes n's clip under the very name the Mid sweep
+# doomed (the card's box sizes both), and the Mid sweep's timer must not delete it once the grace is over
+export LIASCAPE_CLIP_GRACE_MS=15000
+mkdir -p "$LIB/imported/n"; cp "$(P a)" "$(P n)"
+start run4
+for _ in $(seq 1 240); do [ "$(fulls n)" = "n:0" ] && break; ask n low >/dev/null; sleep 0.5; done
+check "n's first clip Low" "$(fulls n)" "n:0"
+low0=$(basename "$(ls -t "$CD/$(id n)"_*_full.mp4 | head -1)")
+quality mid
+for _ in $(seq 1 240); do [ "$(fulls n)" = "n:1" ] && break; ask n mid >/dev/null; sleep 0.5; done
+check "n re-made Mid (first: a card asks)" "$(fulls n)" "n:1"
+quality low
+for _ in $(seq 1 240); do [ "$(fulls n)" = "n:0" ] && break; ask n low >/dev/null; sleep 0.5; done
+low1=$(basename "$(ls -t "$CD/$(id n)"_*_full.mp4 2>/dev/null | head -1)")
+check "n re-made Low under its first Low clip's name" "$low1" "$low0"
+waitq "a:0 b:0 c:0 d:0" 180 || true   # the rest of the library back to Low too
+sleep 18   # every grace over: the Mid sweep's and the Low sweep's
+check "after the grace: n's clip still Low" "$(fulls n)" "n:0"
+check "after the grace: one clip file for n, the re-made one" "$(ls "$CD/$(id n)"_*.mp4 2>/dev/null | xargs -rn1 basename | tr '\n' ' ')" "$low0 "
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

@@ -35,7 +35,8 @@ namespace Liascape.Web;
 //     the sweep re-makes the whole library (§ the library follows "Video preview quality").
 //   - a card's local .gif preview, under "Play GIF previews as videos", is a source like a video: its clips are made, sized,
 //     kept and removed the same way (Lead cuts its fade-from-black).
-//   - a replaced file goes after GRACE, so a card still playing it can hand over to the new one first.
+//   - a replaced file goes after GRACE, so a card still playing it can hand over to the new one first; a name that is the
+//     item's clip again before then (re-made under it, or kept) stays (Superseded).
 //   - deleted with its library item (trash, delete, clear) and at start-up when its source is gone; clips of items outside
 //     the library (Browse's Wallpaper Engine folder) share a size-capped LRU (OUTSIDE_CAP).
 // Every clip file is immutable under its name (`v`), which the UI puts in the <video> URL: a URL never changes content
@@ -306,8 +307,13 @@ public static class ClipStore
     // card may be playing that one, and a file replaced under a playing <video> breaks it mid-play. False: it was there.
     private static bool Publish(string tmp, string dst)
     {
-        try { File.Move(tmp, dst, false); return true; }
-        catch (IOException) when (File.Exists(dst)) { try { File.Delete(tmp); } catch { } return false; }
+        lock (_doomLock)
+        {
+            // either way `dst` is the item's clip now: an earlier Superseded's timer must not take it
+            _doomed.Remove(Path.GetFileName(dst));
+            try { File.Move(tmp, dst, false); return true; }
+            catch (IOException) when (File.Exists(dst)) { try { File.Delete(tmp); } catch { } return false; }
+        }
     }
 
     // stand-ins (and the full clip of a video no longer than one) are made on the request: a card waits for them. A cap of
@@ -504,7 +510,7 @@ public static class ClipStore
         // a 5 min clip from a 4K source takes about a minute niced on an idle machine; past this something is wrong
         if (Encode(Args(j.Path, tmp, CAP_SECONDS, w, j.Q, Lead(j.Path, stamp, true)), tmp, true, TimeSpan.FromMinutes(20), ct))
         {
-            File.Move(tmp, dst, true);
+            lock (_doomLock) { _doomed.Remove(name); File.Move(tmp, dst, true); }
             WriteSrc(j.Item, j.Path);
             Console.WriteLine($"clips: {(j.Shrink ? "shrank" : j.Sweep ? "re-made" : "made")} {w} px {QUALITY[j.Q].Name} ({new FileInfo(dst).Length / 1024} KB, {t0.Elapsed.TotalSeconds:0.0} s) for {Path.GetFileName(j.Path)}");
             Superseded(j.Item, name);
@@ -568,12 +574,33 @@ public static class ClipStore
     }
 
     // `keep` is the item's clip now: every other file of the item goes after GRACE (a card still playing one hands over to
-    // the new clip first — clipSource.ts asks again every few seconds)
+    // the new clip first — clipSource.ts asks again every few seconds). A timer deletes names, and a name can come back: the
+    // quality changed back within GRACE (Low → Mid → Low) re-makes a clip under the very name the earlier change doomed
+    // (same item, width and quality), and that change's timer would delete the new clip, leaving the item at the other
+    // quality (swept again: "Making Low previews" over the cards' own work) or with no clip at all. So a name made or kept
+    // again leaves `_doomed` (under `_doomLock` with the rename that makes it), and a timer deletes only the names its own
+    // call still dooms. Guard: scripts/test-clip-sweep.sh case 9; --probe probe-libops.js libops:backfill.
+    private static readonly object _doomLock = new();
+    private static readonly Dictionary<string, long> _doomed = new();
+    private static long _doomSeq;
     private static void Superseded(string item, string keep)
     {
-        var old = ClipsOf(item).Select(c => c.Name).Where(n => n != keep).ToList();
-        if (old.Count == 0) return;
-        _ = Task.Delay(GRACE).ContinueWith(_ => { foreach (var n in old) Delete(n); });
+        long seq;
+        List<string> old;
+        lock (_doomLock)
+        {
+            _doomed.Remove(keep);
+            old = ClipsOf(item).Select(c => c.Name).Where(n => n != keep).ToList();
+            if (old.Count == 0) return;
+            seq = ++_doomSeq;
+            foreach (var n in old) _doomed[n] = seq;
+        }
+        _ = Task.Delay(GRACE).ContinueWith(_ =>
+        {
+            lock (_doomLock)
+                foreach (var n in old)
+                    if (_doomed.TryGetValue(n, out var s) && s == seq) { _doomed.Remove(n); Delete(n); }
+        });
     }
 
     // ---- the library follows "Video preview quality" ---------------------------------------------------------------------

@@ -172,11 +172,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       framer layout node, which fights `.ssection`'s hover `transform`; animate the height another way (a measured
       height transition) or move the hover lift onto an inner element. Guard: probe-import `import:settings` sampling
       the next section's y per frame on the remove.
-- [ ] `--probe probe-libops.js` `libops:backfill` fails in a whole-probe run (twice on 2026-11-20, this tree's UI and the
-      previous bundle alike) and passes with `--only 'libops:(combined|backfill)'`: mid-run the line's name turns from
-      "Making previews" to "Making Low previews" (ClipStore's phase leaves `make` for a quality) and an operation is still
-      listed at the end. Likely a quality sweep left by an earlier cell (libops:motion / hold / toggle change the quality);
-      the cause is unread.
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in
