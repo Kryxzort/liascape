@@ -109,6 +109,8 @@ for f in $FILES; do
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
     app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:|appear|clip:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs)" ;;
+    # a scene that presets play: the question before it goes (the Library's and the Browse sidebar's deletes / unsubscribes)
+    app/ui/src/components/baseConfirm.ts|app/ui/src/components/BaseSceneConfirm.tsx) add "$CARD|$KEYS" "$f (+ --probe probe-sidebar.js — lib:baseDelete*, lib:preset:*)" ;;
     # what a card shows hovered and not ("On hover" / "Not hovered"), the list control that orders them, the on-screen gating
     app/ui/src/components/mediaAssets.ts|app/ui/src/components/autoplay.ts|app/ui/src/components/OrderList.tsx)
       add "appear|clip:|$CARD" "$f (+ --probe probe-cardpreview.js — cardpv:preset, cardpv:order, cardpv:orderCtl)" ;;

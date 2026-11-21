@@ -40,7 +40,8 @@ const ROWS_GONE_S = 0.6;
 let morphT: { layout: { type: "tween"; duration: number; ease: (t: number) => number } } | undefined;
 
 // `onReady` fires once the first answer is in (or the read failed): the sidebar holds its body until then
-export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: () => void }) {
+// `preset`: a preset card, whose defaults are the preset's own values (SceneProperties.ForItem): Default returns to those
+export function ScenePropsEditor({ path, preset = false, onReady }: { path: string; preset?: boolean; onReady?: () => void }) {
   const [data, setDataRaw] = useState<ScenePropsResp | null>(() => cache.get(path) ?? null);
   const setData = (r: ScenePropsResp) => { cache.set(path, r); setDataRaw(r); };
   const [local, setLocal] = useState<Record<string, unknown>>({});
@@ -116,7 +117,7 @@ export function ScenePropsEditor({ path, onReady }: { path: string; onReady?: ()
   const val = (p: SceneProp) => (p.name in local ? local[p.name] : p.value);
   const anyOverridden = data.props.some((p) => p.overridden);
   const resetBtn = (p: SceneProp) => p.overridden && (
-    <button className="mini ico" title="Back to the scene's default" onClick={() => reset(p.name)}><RotateCcw size={13} /> Default</button>);
+    <button className="mini ico" title={preset ? "Back to the preset's value" : "Back to the scene's default"} onClick={() => reset(p.name)}><RotateCcw size={13} /> Default</button>);
 
   const row = (p: SceneProp) => {
     if (!p.visible) return null;

@@ -464,6 +464,18 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   .res { font-size: 8px; padding: 2px 5px; top: 5px; right: 5px; }
 }
 .card.crashed { outline: 2px solid var(--danger); }
+/* a preset that can't play (LibraryCard `reason`): its picture greys out and dims, and its status icon (the crash mark's place,
+   in --warn) fades in with the reason as its tooltip; both transitions, both ways (a mount animation would replay whenever
+   <Activity> shows the page again). The title bar and the card's controls stay as they are. Guard: probe-sidebar
+   lib:preset:needsBase, lib:preset:legacy */
+.card.lib .thumb-wrap > .thumb { transition: filter .3s ease; }
+.card.lib .thumb-wrap > .thumb.anim { transition: opacity .2s ease, filter .3s ease; }
+.card.lib.unplayable .thumb-wrap > .thumb { filter: grayscale(1) brightness(.6); }
+.card.lib.unplayable .thumb-wrap { cursor: default; }
+.warn.preset { color: var(--warn, #f9e2af); filter: drop-shadow(0 0 4px var(--warn, #f9e2af)); opacity: 0; scale: .7; pointer-events: none;
+  transition: opacity .22s ease, scale .3s var(--spring-soft, ease); }
+.warn.preset.on { opacity: 1; scale: 1; pointer-events: auto; }
+:root.no-motion .warn.preset { scale: 1; transition: opacity var(--fade-dur) linear; }
 /* crashed warn — bottom-left, above the title bar (avoids the toggle/SCENE corners) */
 .warn { position: absolute; left: 6px; bottom: 50px; color: var(--danger); display: grid; place-items: center;
   filter: drop-shadow(0 0 4px var(--danger)); }
@@ -1127,6 +1139,11 @@ input[type=range]:focus-visible { outline: none; }
 /* save / load playlist modals */
 .pl-modal { width: min(380px, 92vw);
   background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); } /* playlist popups = stronger */
+/* the question before a scene that presets play goes (BaseSceneConfirm.tsx): the playlist popups' panel, a little wider for
+   its two sentences. Guard: probe-sidebar lib:baseDelete */
+.base-confirm { width: min(420px, 92vw); }
+.base-confirm-text { margin: 0; color: var(--subtext); font-size: 13.5px; line-height: 1.45; }
+.base-confirm .modal-actions { justify-content: flex-end; }
 .field-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: var(--muted); margin: 14px 0 6px; }
 .pl-names { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow: auto; margin-bottom: 4px; }
 .pl-name { text-align: left; padding: 8px 10px; border-radius: 7px; background: var(--surface0); color: var(--text); font-size: 13px;
@@ -1652,6 +1669,19 @@ input[type=range]:focus-visible { outline: none; }
   pointer-events: none; animation: side-crash-out .22s ease-in forwards; animation-delay: 0s; }
 .side-wl.leaving { transform-origin: left center; }
 @keyframes side-crash-out { to { opacity: 0; transform: scale(.96); } }
+/* a preset that can't play (LibrarySide.tsx PresetNotice): the crash notice's block, its glyph and stripe in --warn; why
+   "Download it again" can't run now under its words. One that turns up with the sidebar open rises in (motion off: fades).
+   Guard: probe-sidebar lib:preset:needsBase, lib:preset:needsBaseOff */
+.side-crash.side-preset::before { background: linear-gradient(var(--warn, #f9e2af), color-mix(in srgb, var(--warn, #f9e2af) 30%, transparent)); box-shadow: 0 0 12px -1px var(--warn, #f9e2af); }
+.side-preset .side-crash-ico { color: var(--warn, #f9e2af); }
+/* its words take the row and the button sits under them, lined up with the words: "Download it again" beside a reason
+   would squeeze both into a narrow column */
+.side-crash.side-preset { flex-wrap: wrap; row-gap: 8px; }
+.side-preset .side-crash-text { flex: 1 0 calc(100% - 26px); }
+.side-preset .side-crash-clear { margin-left: 26px; }
+.side-preset-why { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--subtext); }
+.side-preset .side-crash-clear[aria-disabled="true"] { opacity: .5; cursor: default; box-shadow: none; color: var(--subtext); }
+.side-panel .side-content > .side-body:not(.wait) > .side-preset.arrive:not(.leaving) { animation: side-pill-in .28s ease-out; }
 .side-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--subtext);
   padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--surface0) 70%, transparent);
   border: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }

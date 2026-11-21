@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { Trash2, AlertTriangle } from "lucide-react";
+import { Trash2, AlertTriangle, Unplug } from "lucide-react";
 import { type LibraryItem } from "../api/client";
 import { PlaylistToggle } from "./PlaylistToggle";
 import { MotionThumb } from "./MotionThumb";
@@ -13,12 +13,15 @@ import { useSeenCard } from "./previewQueue";
 // A click applies it; its settings and actions live in the item sidebar (a right-click focuses the card) — components/LibrarySide.tsx.
 // COOL: animated preview (MotionThumb): what it shows hovered and not follows Settings → "On hover" / "Not hovered".
 export const LibraryCard = memo(function LibraryCard({
-  item, playing, selected, focused, inPlaylist, unsub, unsubOff, onClick, onTrash, onToggle, onContextFocus,
+  item, playing, selected, focused, inPlaylist, unsub, unsubOff, reason, onClick, onTrash, onToggle, onContextFocus,
 }: {
   // unsub: its Delete is Unsubscribe (a subscribed Workshop item with auto-import on: Library.tsx doTrash); unsubOff: it can't
   // unsubscribe now (signed out): the button shows disabled, its name says why, and a click only puts that in the status bar
   // (no tooltips on cards). Guard: probe-steam side:unsub:signedOut
   item: LibraryItem; playing: boolean; selected: boolean; focused: boolean; inPlaylist: boolean; unsub?: boolean; unsubOff?: string | null;
+  // why it can't play now (a preset: its base scene gone, the legacy engine… store presetReasonOf), else null: the card greys
+  // out with a status icon whose tooltip is the reason, and a click plays nothing (store applyItem says why in the status bar)
+  reason?: string | null;
   // PERF: each takes the item, so the list passes the same function to every card (Library.tsx useStableFn) and a
   // focus / selection change re-renders only the cards whose own props changed
   onClick: (item: LibraryItem, e: React.MouseEvent) => void; onTrash: (item: LibraryItem) => void; onToggle: (item: LibraryItem) => void;
@@ -31,7 +34,9 @@ export const LibraryCard = memo(function LibraryCard({
   const autoVideo = useAutoplayVideo(wrapRef, idleKind === "video");
   // on screen: its previews are made first if the backend still lacks them (components/previewQueue.ts)
   useSeenCard(wrapRef, item.videoPath);
-  const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed ? " crashed" : ""}`;
+  // COOL: a preset greys out and its status icon fades in when it stops being playable, and back (CSS transitions on a state
+  // class, never a mount animation: the page is hidden and shown again by <Activity>, which would replay one)
+  const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed && !reason ? " crashed" : ""}${reason ? " unplayable" : ""}`;
   return (
     <div className={cls}>
       {/* right-click = the item sidebar on this card WITHOUT applying it, a click = apply only (docs/decisions.md § "Left click
@@ -43,7 +48,10 @@ export const LibraryCard = memo(function LibraryCard({
        >
         <MotionThumb item={item} hover={hover} hoverKind={hoverKind} idleKind={idleKind} autoVideo={autoVideo} />
         {item.isScene && <span className="badge">SCENE</span>}
-        {item.hasCrashed && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}
+        {/* Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy */}
+        {item.isPreset && <span className={`warn preset${reason ? " on" : ""}`} data-card-reason={reason ?? ""} title={reason ?? undefined}
+          aria-hidden={reason ? undefined : true}><Unplug size={15} /></span>}
+        {item.hasCrashed && !reason && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
           onClick={(e) => { e.stopPropagation(); onToggle(item); }}><PlaylistToggle on={inPlaylist} /></button>
         <button className="del" aria-label={unsub ? (unsubOff ?? "Unsubscribe") : "Delete"} aria-disabled={unsubOff ? true : undefined}

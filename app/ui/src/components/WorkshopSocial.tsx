@@ -124,24 +124,28 @@ export function PresetsRow({ workshopId, title, onListed, scene }: { workshopId:
 const bases = new Map<string, Base>(); // per preset, for the session
 type Base = Awaited<ReturnType<typeof api.workshopBase>>;
 // the library's copy of a base: its Workshop id, else the folder the backend found it in
-const libraryBase = (items: LibraryItem[], b: Base) => items.find((x) => x.workshopId === b.baseId && !(x as { isPreset?: boolean }).isPreset)
+const libraryBase = (items: LibraryItem[], b: Base) => items.find((x) => x.workshopId === b.baseId && !x.isPreset)
   ?? (b.libraryPath ? items.find((x) => x.videoPath === b.libraryPath || x.videoPath.startsWith(b.libraryPath + "/")) : undefined);
 
 // A preset's base: "Uses" + the scene it plays (GET /workshop/base, asked once the sidebar settles and kept for the session). A
 // click shows the base's card, never a Steam page: its Library card when the library has it (`onShowInLibrary`), else its
 // Browse card — the shown list's own, the scene its presets list was opened from, or one made from what Steam said
 // (store showBrowseItem; `onShowInBrowse` takes the user there from another tab). Nothing to say (not a preset, Steam
-// unreachable): no row. Guard: probe-steam ws:presetBase
-export function BaseRow({ presetId, onShowInLibrary, onShowInBrowse }: { presetId: string; onShowInLibrary?: (path: string) => void; onShowInBrowse?: () => void }) {
+// unreachable): no row. A Library preset passes what its own file says (`local`: the base's id, title and library folder,
+// GET /library): Steam isn't asked. Guard: probe-steam ws:presetBase, probe-sidebar lib:preset:uses
+export function BaseRow({ presetId, local, onShowInLibrary, onShowInBrowse }: {
+  presetId: string; local?: { baseId: string; title: string | null; path: string | null }; onShowInLibrary?: (path: string) => void; onShowInBrowse?: () => void;
+}) {
   const settled = useSettled(presetId);
-  const [b, setB] = useState<Base | null>(() => bases.get(presetId) ?? null);
+  const [fetched, setB] = useState<Base | null>(() => bases.get(presetId) ?? null);
+  const b: Base | null = local ? { baseId: local.baseId, title: local.title, kind: "scene", libraryPath: local.path } : fetched;
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    if (!settled || bases.has(presetId)) return;
+    if (local || !settled || bases.has(presetId)) return;
     let alive = true;
     api.workshopBase(presetId).then((r) => { bases.set(presetId, r); if (alive) setB(r); }).catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; };
-  }, [settled, presetId]);
+  }, [local, settled, presetId]);
   const lib = useStore((s) => (b ? libraryBase(s.libraryItems, b) ?? null : null));
   if (failed) return null;
   const name = b ? b.title ?? "Its base scene" : null;

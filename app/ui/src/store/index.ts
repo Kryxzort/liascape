@@ -25,6 +25,16 @@ const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boo
 // row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
 export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine === "liascape-player";
 export const PRESET_TAG = "Preset";
+// API: Helpers/Presets.cs LegacyReason, word for word
+export const PRESET_LEGACY = "Presets play only in the Liascape player";
+// Why a library item can't play now, or null: a preset's own reason (GET /library), and under the legacy engine every preset
+// (the page's settings say so at once; the library's re-read after the switch says it too: libraryFollowsEngine).
+// Guard: probe-sidebar lib:preset:legacy
+export const presetReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason">, settings: Record<string, unknown> | null) =>
+  i.presetReason ?? (i.isPreset && settings && settings.playerEngine !== "liascape-player" ? PRESET_LEGACY : null);
+// the status bar's "Can't play X: it needs its base scene" (a reason starts with a capital: it is also the card's tooltip)
+export const cantPlay = (title: string, why: string) =>
+  `Can't play ${title}: ${/^Needs /.test(why) ? "it n" + why.slice(1) : why[0].toLowerCase() + why.slice(1)}`;
 const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
@@ -483,7 +493,7 @@ export const useStore = create<State>((set, get) => ({
     // spread defaults over current → preserves daemon-owned fields (lastSession, steam tokens) the
     // backend also guards; re-applies the default theme's CSS vars (settings.theme alone won't).
     const s = { ...(get().settings ?? {}), ...SETTINGS_DEFAULTS };
-    set({ settings: s }); api.saveSettings(s).catch(() => {});
+    set({ settings: s }); api.saveSettings(s).then(() => libraryFollowsEngine(get)).catch(() => {});
     get().applyTheme(SETTINGS_DEFAULTS.theme as string);
     get().setStatus("Settings are back to their defaults");
   },
@@ -514,6 +524,11 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({ libraryItems: s.libraryItems.map(p) }));
   },
   async applyItem(path) {
+    // a preset that can't play (its base scene gone, the legacy engine…) plays nothing: the status bar says why (the card,
+    // Enter and the sidebar's picture alike). Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy
+    const it = get().libraryItems.find((i) => i.videoPath === path);
+    const why = it ? presetReasonOf(it, get().settings) : null;
+    if (it && why) { get().setStatus(cantPlay(it.title, why), true, true); return; }
     await api.apply(path); set({ playingPath: path });
     const t = get().libraryItems.find((i) => i.videoPath === path)?.title ?? (path.split("/").pop() ?? "").replace(/\.[^.]+$/, "");
     get().setStatus(`Applied: ${t}`);
@@ -592,6 +607,7 @@ export const useStore = create<State>((set, get) => ({
   // save posts the whole object, so the store must hold the new values or the next save reverts them.
   mergeSettings(p) {
     set({ settings: { ...(get().settings ?? {}), ...p } });
+    libraryFollowsEngine(get);
     if (get().playingPath) get().refreshPlayingStatus();
   },
   setSetting(key, value) {
@@ -602,7 +618,7 @@ export const useStore = create<State>((set, get) => ({
     set({ settings: s });
     clearTimeout(settingsTimer); settingsSavePending = true;
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
-    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).then(() => set({ settingsSaves: get().settingsSaves + 1 })).catch(() => {}); }, 250);
+    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).then(() => { set({ settingsSaves: get().settingsSaves + 1 }); libraryFollowsEngine(get); }).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
     if (get().playingPath && ["volume", "noAudio", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
@@ -758,6 +774,20 @@ useStore.subscribe((s) => {
   if (useStore.getState().wsList?.kind === "presets") st.setSource(useStore.getState().activeSource);
 });
 
+// A library listing depends on the engine and scene support (a preset's legacy reason, the presets the WE auto-import brings):
+// when either changes, read the library again once the backend has the change (after the page's own save lands, or at once for
+// a change the backend made: settings-changed), so a preset greys out or plays again without a reload. libKey = the settings
+// the shown listing answers. Guard: probe-sidebar lib:preset:legacy
+const libKeyOf = (s: Record<string, unknown> | null | undefined) => (s ? `${String(s.playerEngine)}|${!!s.allowScenes}` : null);
+let libKey: string | null = null;
+function libraryFollowsEngine(get: () => State) {
+  const k = libKeyOf(get().settings);
+  if (k === null || k === libKey) return;
+  const first = libKey === null;
+  libKey = k;
+  if (!first) get().loadLibrary().catch(() => {});
+}
+
 // Format an interval (e.g. "1h 30m", "45s").
 function fmtInterval(total: number): string {
   const p: string[] = []; const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
@@ -845,6 +875,8 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   }
   if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
+  // this listing answers these settings: no second read for them (libraryFollowsEngine)
+  if (lib && settings) libKey = libKeyOf(settings.v);
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
   }

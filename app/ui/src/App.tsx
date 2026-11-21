@@ -37,6 +37,7 @@ const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ d
 const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").then((m) => ({ default: m.SteamPasswordModal })));
 const SteamTodoPanel = lazy(() => import("./components/SteamTodoPanel").then((m) => ({ default: m.SteamTodoPanel })));
 const ErrorModal = lazy(() => import("./components/ErrorModal").then((m) => ({ default: m.ErrorModal })));
+const BaseSceneConfirm = lazy(() => import("./components/BaseSceneConfirm").then((m) => ({ default: m.BaseSceneConfirm })));
 const ImportDialog = lazy(() => import("./components/ImportDialog").then((m) => ({ default: m.ImportDialog })));
 const DebugHud = lazy(() => import("./debug/DebugHud").then((m) => ({ default: m.DebugHud })));
 
@@ -282,6 +283,7 @@ export default function App() {
         <SteamPasswordModal />
         <SteamTodoPanel />
         <ErrorModal />
+        <BaseSceneConfirm />
         <ImportDialog />
         <DebugHud setTab={(t) => setTab(t as Tab)} getScroll={() => document.querySelector<HTMLElement>(".scroll")} />
       </Suspense>

@@ -10,6 +10,7 @@ import { magnetRef } from "./magnet";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { keepMenuItem, menuAt } from "./menuItems";
 import { actionBlocked, unsubBlocked } from "./subscribeMode";
+import { confirmBaseRemoval } from "./baseConfirm";
 
 // how long a leaving card stays mounted (its fade out: enterLeave)
 const SUB_OUT_MS = 200;
@@ -154,6 +155,12 @@ export function SubToggle({ id, title, weLocal, only, likely = false }: {
   const off = st.subscribed ? !!unsubOff : !!subOff;
   const click = async () => {
     if (off) return;
+    // the Unsubscribe of a library item takes it out of the library: a scene that presets there play asks first
+    // (components/baseConfirm.ts). Guard: probe-sidebar lib:baseDelete
+    if (st.subscribed && st.inLibrary) {
+      const lib = useStore.getState().libraryItems;
+      if (!await confirmBaseRemoval(lib.filter((x) => x.workshopId === id && !x.isPreset), lib, "unsubscribe")) return;
+    }
     setBusy(true);
     try { if (st.subscribed) await unsubscribe(id, title); else await subscribe(id, title); }
     finally { setBusy(false); setReadTick((n) => n + 1); }

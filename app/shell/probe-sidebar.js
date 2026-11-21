@@ -74,6 +74,22 @@
 //   side:titleFoldKeys   Enter unfolds the focused title, Space folds it; nothing applies; a switch away and back starts it folded
 //   side:titleSelect     the title is selectable text (no Copy button, at rest or hovered): a drag selects words without
 //                        unfolding, Ctrl+C copies them, a plain click still unfolds. Shot side-titleselect.png
+//   lib:preset:props     a preset's sidebar: its base's properties with the preset's values as defaults; a tweak marks it, saved
+//                        to the preset alone; Default returns to the preset's value
+//   lib:preset:uses      "Uses <base>" (WsListRow) from the preset's own file, no Steam ask; a click focuses the base's card
+//   lib:presets:scene    a Library scene with a Workshop id: "Presets" lists its presets on the Browse tab (the CM fixture's
+//                        two, marked In library); none on a preset; the Library's Preset filter keeps exactly the presets
+//   lib:preset:needsBase[Off]  the base goes with the preset's sidebar open: the cards grey out (status icon fading in, the
+//                        reason as its tooltip), the notice (the crash notice's block, --warn) rises in (Off: fades); a click
+//                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
+//                        for the library's own copy with a one-off route, disabled with the reason when the mode can't; the
+//                        base back → the notice leaves, the cards come back; no-glow, bg-live. Shots side-needsbase-*.png
+//   lib:preset:legacy    the legacy engine (page-only settings-changed): every preset greyed with "Presets play only in the
+//                        Liascape player", the library read again, a click plays nothing; back → playable, no reload
+//   lib:baseDelete[Off]  Delete of a base two presets play (card button, Delete key, sidebar; Delete and unsubscribe too) asks,
+//                        naming 2; Keep it / Escape delete nothing; Delete trashes it and both presets grey out; a scene no
+//                        preset plays and a preset itself delete unasked; the dialog zooms in (Off: fades), no-glow, bg-live.
+//                        Shots side-basedel-*.png
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
 //   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
 //   browse:dblclick      a double-click downloads & applies
@@ -153,9 +169,19 @@ const page = (code) => js(`(async () => { const m = window.__sb; ${code} })()`);
 async function loadUi() {
   await win.loadURL(withToken(U + "/"));
   // /open would start a real file manager (/open/media a real player), the unsubscribe a Steam call: recorded, never sent
-  await js(`(() => { window.__opened = []; const f = window.fetch; window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
-    if ((o?.method || "GET") === "POST" && (p === "/open" || p === "/open/media" || p.startsWith("/workshop/unsubscribe") || p === "/library/delete-from-source")) { window.__opened.push({ p, body: o?.body ?? null });
-      return Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })); }
+  // The preset cells' hooks, inert unless a cell sets them: every request recorded (__reqs: [method, path]); /download held
+  // and recorded while __dlHold (__dl: its bodies; __dlGo() answers it); /workshop/one-off answered by __oneOff; a
+  // /library/trash stubbed while __stubTrash (__trashed: its bodies); GET /library's items patched by __libPatch {path: fields}
+  await js(`(() => { window.__opened = []; window.__reqs = []; window.__dl = []; window.__trashed = []; const f = window.fetch;
+    const json = (b) => Promise.resolve(new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } }));
+    window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0], m = (o?.method || "GET").toUpperCase();
+    window.__reqs.push([m, p]);
+    if (m === "POST" && (p === "/open" || p === "/open/media" || p.startsWith("/workshop/unsubscribe") || p === "/library/delete-from-source")) { window.__opened.push({ p, body: o?.body ?? null });
+      return json({}); }
+    if (m === "POST" && p === "/download" && window.__dlHold) { window.__dl.push(JSON.parse(o.body)); return new Promise((r) => { window.__dlGo = () => r(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })); }); }
+    if (p === "/workshop/one-off" && window.__oneOff) return json(window.__oneOff);
+    if (m === "POST" && p === "/library/trash" && window.__stubTrash) { window.__trashed.push(JSON.parse(o.body)); return json({ batch: "" }); }
+    if (m === "GET" && p === "/library" && window.__libPatch) return f(u, o).then((r) => r.json()).then((l) => json(l.map((i) => ({ ...i, ...(window.__libPatch[i.videoPath] || {}) }))));
     return f(u, o); }; })(); true`);
   for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4) break; await sleep(100); }
   await js(PAGE); await sleep(400);
@@ -197,6 +223,15 @@ async function wallOf(title) {
 
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: true, useContentSize: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
+  // window.__fakeWs(type, payload): an event into the page's own socket, before its scripts run (the preset cells: a
+  // settings-changed that only the page sees, a library-synced that makes it read the library). The debugger needs a
+  // renderer first (one that never loaded anything has none).
+  await win.loadURL("about:blank");
+  if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach("1.3");
+  await win.webContents.debugger.sendCommand("Page.enable");
+  await win.webContents.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const O = window.WebSocket, socks = [];
+    window.WebSocket = class extends O { constructor(...a) { super(...a); socks.push(this); } };
+    window.__fakeWs = (type, payload) => { let n = 0; for (const s of socks) if (s.readyState === 1 && s.onmessage) { s.onmessage({ data: JSON.stringify({ type, payload }) }); n++; } return n; }; })();` });
   const results = [];
   const cell = async (name, fn) => {
     if (ONLY && !ONLY.test(name)) return;
@@ -2231,6 +2266,425 @@ app.whenReady().then(async () => {
       await mv(5, 5, 100);
       return v;
     }));
+
+    // ---- presets in the Library (LibraryCard reason, LibrarySide PresetNotice / BaseRow / PresetsRow, baseConfirm.ts,
+    // BaseSceneConfirm.tsx, store presetReasonOf / libraryFollowsEngine). The cells add their own items to the stack's library
+    // and take them away again (the shared library the other cells count stays as it was): pb, a copy of s1 (its properties
+    // color / clock / bars, bars shown while clock is on) under the Workshop id 910000003 (the CM fixture's scene whose two
+    // presets Browse lists, "children"), and two presets of it in Wallpaper Engine's format, pp1 (color "0 0 1", clock false)
+    // and pp2 (color "0 1 0"). Scene support on while they run.
+    const PRE = { base: "910000003", p1: "910000011", p2: "910000012" };
+    const WSDIR = path.dirname(SC[0]);
+    const preDir = (id) => path.join(WSDIR, id);
+    const withPresets = async (fn, settings = {}) => {
+      const idx = path.join(WSDIR, "index.json"), idx0 = fs.readFileSync(idx, "utf8");
+      const writeIdx = (s) => { fs.writeFileSync(idx + ".pb", s); fs.renameSync(idx + ".pb", idx); };
+      const s0 = await getSettings(), keep = Object.fromEntries(Object.keys(settings).map((k) => [k, s0[k]]));
+      try {
+        fs.cpSync(SC[0], preDir(PRE.base), { recursive: true });
+        const pj = JSON.parse(fs.readFileSync(path.join(SC[0], "project.json"), "utf8"));
+        fs.writeFileSync(path.join(preDir(PRE.base), "project.json"), JSON.stringify({ ...pj, title: "pb" }));
+        for (const [id, title, vals] of [[PRE.p1, "pp1", { color: "0 0 1", clock: false }], [PRE.p2, "pp2", { color: "0 1 0" }]]) {
+          fs.mkdirSync(preDir(id), { recursive: true });
+          fs.writeFileSync(path.join(preDir(id), "project.json"), JSON.stringify({ contentrating: "Everyone", dependency: PRE.base,
+            preset: { _d0: null, alignment: 0, rate: 100, wec_e: false, ...vals }, preview: "preview.png", tags: ["Unspecified"], title, visibility: "public" }));
+          fs.copyFileSync(path.join(SC[1], "preview.png"), path.join(preDir(id), "preview.png"));
+        }
+        const j = JSON.parse(idx0);
+        j[PRE.base] = { title: "pb", isScene: true, workshopId: PRE.base };
+        j[PRE.p1] = { title: "pp1", workshopId: PRE.p1, baseTitle: "pb" };
+        j[PRE.p2] = { title: "pp2", workshopId: PRE.p2, baseTitle: "pb" };
+        writeIdx(JSON.stringify(j));
+        await setSettings({ allowScenes: true, ...settings });
+        await loadUi();
+        for (let i = 0; i < 50 && !(await page(`return !!m.card("pp2") && !!m.card("pb");`)); i++) await sleep(100);
+        return await fn();
+      } finally {
+        // a base a cell trashed comes back through its Undo first: nothing of these stays in the library's trash
+        for (let i = 0; i < 3 && !fs.existsSync(preDir(PRE.base)); i++) await post("/library/undo");
+        for (const id of Object.values(PRE)) fs.rmSync(preDir(id), { recursive: true, force: true });
+        writeIdx(idx0);
+        await setSettings({ allowScenes: false, ...keep });
+        await page(`localStorage.removeItem("liascape.libFilter");`).catch(() => {});
+        await mv(5, 5); await loadUi();
+      }
+    };
+    const reqsSince = (n) => js(`window.__reqs.slice(${n})`);
+    const reqMark = () => js(`window.__reqs.length`);
+    const statusText = () => page(`return document.querySelector(".status")?.textContent.trim() ?? "";`);
+    // a card's preset state: greyed, its status icon (shown, its reason, its tooltip), the picture's filter
+    const cardState = (t) => page(`const c = m.card(${JSON.stringify(t)}); if (!c) return null; const w = c.querySelector("[data-card-reason]"), th = c.querySelector(".thumb-wrap > .thumb");
+      return { off: c.classList.contains("unplayable"), reason: w?.dataset.cardReason ?? null, title: w?.getAttribute("title") ?? null, op: w ? +getComputedStyle(w).opacity : null,
+        filter: th ? getComputedStyle(th).filter : null };`);
+    const alpha = (c) => +(/\/\s*([\d.]+)\s*\)/.exec(c)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)/.exec(c)?.[1] ?? "1");
+    const visibleGlow2 = (bs) => !!bs && bs !== "none" && !/^(rgba\(0, 0, 0, 0\)[^,]*)(, rgba\(0, 0, 0, 0\)[^,]*)*$/.test(bs);
+    // an element's opacity per frame passes through in-between values (a fade, not a jump)
+    const fades = (fr) => fr.filter((f) => f[1] != null && f[1] > 0.05 && f[1] < 0.95).length;
+
+    // lib:preset:props — a preset's sidebar lists its base's properties with the preset's values as their defaults (pp1:
+    // color blue, clock off, so bars hides; pb, the base, shows its own: red, clock on, bars), nothing marked changed; a
+    // tweak (clock on) marks it and shows bars, saved to pp1 alone (pb's properties untouched); its Default returns to the
+    // preset's value.
+    await cell("lib:preset:props", async () => withPresets(async () => {
+      const v = [], J = JSON.stringify;
+      const rows = (t) => page(`await m.closeAll(); await m.openSide(${J(t)});
+        for (let i = 0; i < 60 && !m.side()?.querySelector('[data-scene-prop="clock"]'); i++) await m.sleep(50); await m.sleep(300);
+        const s = m.side(), q = (n) => s.querySelector('[data-scene-prop="' + n + '"]');
+        return { color: q("color")?.querySelector("input[type=color]")?.value ?? null, clock: q("clock")?.querySelector("input[type=checkbox]")?.checked ?? null,
+          bars: !!q("bars"), defaults: [...s.querySelectorAll("[data-scene-prop] .mini")].map((b) => b.closest("[data-scene-prop]").dataset.sceneProp) };`);
+      const base = await rows("pb"), pre = await rows("pp1");
+      console.log(`        pb ${J(base)} / pp1 ${J(pre)}`);
+      if (base.clock == null || pre.clock == null) return [`no clock row (pb ${J(base)}, pp1 ${J(pre)}) — proved nothing`];
+      if (base.color !== "#ff0000" || base.clock !== true || !base.bars) v.push(`pb shows ${J(base)}, want its own red / clock on / bars`);
+      if (pre.color !== "#0000ff" || pre.clock !== false || pre.bars) v.push(`pp1 shows ${J(pre)}, want the preset's blue / clock off / no bars`);
+      if (pre.defaults.length) v.push(`pp1 marks ${J(pre.defaults)} changed before any tweak (the preset's values are its defaults)`);
+      const ck = await page(`const c = m.side().querySelector('[data-scene-prop="clock"] input[type=checkbox]'); c.scrollIntoView({ block: "nearest" }); await m.sleep(200); return m.rect(c);`);
+      await clickAt(ck.x + ck.w / 2, ck.y + ck.h / 2); await sleep(700);
+      const t1 = await page(`const s = m.side(), r = s.querySelector('[data-scene-prop="clock"]');
+        return { clock: r.querySelector("input[type=checkbox]").checked, def: !!r.querySelector(".mini"), tip: r.querySelector(".mini")?.title ?? null, bars: !!s.querySelector('[data-scene-prop="bars"]') };`);
+      const pp = (await http("GET", `/library/scene-props?path=${encodeURIComponent(preDir(PRE.p1))}`)).json?.props?.find((x) => x.name === "clock");
+      const bp = (await http("GET", `/library/scene-props?path=${encodeURIComponent(preDir(PRE.base))}`)).json?.props?.find((x) => x.name === "clock");
+      console.log(`        tweaked: ${J(t1)}; pp1 clock ${J(pp && { value: pp.value, overridden: pp.overridden })}, pb clock ${J(bp && { value: bp.value, overridden: bp.overridden })}`);
+      if (!t1.clock || !t1.def || !t1.bars) v.push(`after the tweak pp1 shows ${J(t1)}, want clock on, marked (Default), bars shown`);
+      if (t1.tip !== "Back to the preset's value") v.push(`the Default button's tooltip says ${J(t1.tip)}`);
+      if (!pp || pp.value !== true || !pp.overridden) v.push(`pp1's clock reads ${J(pp)}, want true + overridden`);
+      if (!bp || bp.value !== true || bp.overridden) v.push(`the tweak reached pb: ${J(bp)}`);
+      await page(`m.side().querySelector('[data-scene-prop="clock"] .mini').click();`); await sleep(700);
+      const t2 = await page(`const r = m.side().querySelector('[data-scene-prop="clock"]'); return { clock: r.querySelector("input[type=checkbox]").checked, def: !!r.querySelector(".mini") };`);
+      if (t2.clock !== false || t2.def) v.push(`Default left pp1's clock at ${J(t2)}, want the preset's off, unmarked`);
+      await shot("preset-props");
+      return v;
+    }));
+
+    // lib:preset:uses — a preset's sidebar says which scene it plays ("Uses" + the base's title, the creator row's control:
+    // WsListRow) from its own file, never asking Steam (/workshop/base); a click puts the sidebar on the base's own card,
+    // focused. A scene's sidebar has no such row.
+    await cell("lib:preset:uses", async () => withPresets(async () => {
+      const v = [], J = JSON.stringify;
+      const n0 = await reqMark();
+      await page(`await m.closeAll(); await m.openSide("pp1"); await m.sleep(600);`);
+      const row = await page(`const b = m.side().querySelector("[data-ws-base]"); if (!b) return null;
+        return { name: b.querySelector("[data-ws-row-name]")?.textContent.trim(), label: b.getAttribute("aria-label"), ctl: b.classList.contains("ws-creator"), state: b.dataset.wsBase, r: m.rect(b) };`);
+      console.log(`        ${J(row)}`);
+      if (!row) return ["pp1's sidebar has no Uses row"];
+      if (row.name !== "pb") v.push(`the Uses row names ${J(row.name)}, want pb`);
+      if (!row.ctl) v.push("the Uses row isn't the shared row control (.ws-creator)");
+      if (!/^Uses pb\. Show it in your library$/.test(row.label ?? "")) v.push(`its label says ${J(row.label)}`);
+      await shot("preset-uses");
+      await clickAt(row.r.x + row.r.w / 2, row.r.y + row.r.h / 2); await sleep(700);
+      const after = await page(`return { title: m.sideTitle(), focused: !!m.card("pb")?.classList.contains("focused") };`);
+      if (after.title !== "pb" || !after.focused) v.push(`after the click: sidebar ${J(after.title)}, pb focused ${after.focused}`);
+      const asked = (await reqsSince(n0)).filter(([, p]) => p === "/workshop/base");
+      if (asked.length) v.push(`asked Steam for the base (${asked.length} × /workshop/base): the preset's own file names it`);
+      if (await page(`return !!m.side()?.querySelector("[data-ws-base]");`)) v.push("the base scene's own sidebar shows a Uses row");
+      return v;
+    }));
+
+    // lib:presets:scene — a Library scene with a Workshop id shows Browse's "Presets" row (PresetsRow); a click lists its
+    // presets on the Browse tab (the CM fixture's two that name 910000003), the ones the library has marked so; a preset's
+    // sidebar has no Presets row. The Library's filter: Preset ticked keeps exactly the two presets (facetsOf `preset`).
+    await cell("lib:presets:scene", async () => withPresets(async () => {
+      const v = [], J = JSON.stringify;
+      // the presets list moves Browse to the Workshop: the source the other cells start on comes back after
+      const src0 = await page(`return localStorage.getItem("liascape.activeSource");`);
+      try {
+      await page(`await m.closeAll(); await m.openSide("pp1"); await m.sleep(500);`);
+      if (await page(`return !!m.side().querySelector("[data-ws-presets]");`)) v.push("a preset's sidebar shows a Presets row");
+      await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(500);`);
+      const row = await page(`const b = m.side().querySelector("[data-ws-presets]"); return b ? { id: b.dataset.wsPresets, ctl: b.classList.contains("ws-creator"), r: m.rect(b) } : null;`);
+      if (!row) return [...v, "pb's sidebar has no Presets row"];
+      if (row.id !== PRE.base || !row.ctl) v.push(`the Presets row ${J(row)}`);
+      await clickAt(row.r.x + row.r.w / 2, row.r.y + row.r.h / 2);
+      let got = null;
+      for (let i = 0; i < 60; i++) {
+        got = await page(`const tab = document.querySelector(".tab.active")?.textContent.trim();
+          const cards = [...document.querySelectorAll(".card")].filter((c) => !c.closest(".lib-scroll")).map((c) => ({ t: c.querySelector("[data-title]")?.dataset.title, lib: !!c.querySelector("[data-in-library]") }));
+          return { tab, cards };`);
+        if (got.tab === "Browse" && got.cards.length >= 2) break;
+        await sleep(150);
+      }
+      console.log(`        ${J(got)}`);
+      const titles = got.cards.map((c) => c.t).sort();
+      if (got.tab !== "Browse") v.push(`the click left the ${J(got.tab)} tab showing, want Browse`);
+      if (J(titles) !== J(["Fixture Preset One", "Fixture Preset Two"])) v.push(`Browse lists ${J(titles)}, want the scene's two presets`);
+      else if (!got.cards.every((c) => c.lib)) v.push(`the presets the library has aren't marked In library (${J(got.cards)})`);
+      await shot("presets-scene-browse");
+      await tab("Library");
+      // the Library's Preset filter (its saved include, read at load)
+      await page(`localStorage.setItem("liascape.libFilter", JSON.stringify({ sort: "trend", trendDays: 7, include: ["Preset"], exclude: [], featureMatch: "all", genreMatch: "any" }));`);
+      await loadUi(); await sleep(400);
+      const shown = (await page(`return [...document.querySelectorAll(".lib-scroll .card.lib")].map((c) => c.querySelector(".lib-title")?.dataset.title);`)).sort();
+      if (J(shown) !== J(["pp1", "pp2"])) v.push(`the Library filtered to Preset shows ${J(shown)}, want pp1 and pp2`);
+      } finally {
+        await page(src0 == null ? `localStorage.removeItem("liascape.activeSource");` : `localStorage.setItem("liascape.activeSource", ${JSON.stringify(src0)});`).catch(() => {});
+      }
+      return v;
+    }));
+
+    // lib:preset:needsBase:<on|off> — the base goes while pp1's sidebar is open (trashed by the backend, the page told
+    // through library-synced): pp1 and pp2 grey out (the picture greyscale, a status icon in --warn fading in, its tooltip the
+    // reason) and pp1's sidebar gets the crash notice's block, in --warn, rising in (off: fading in place): "Needs its base
+    // scene, pb" + "Download it again". A click on the greyed card plays nothing and the status bar says why. The button
+    // follows the preset and the mode: pp2 (subscribed) a plain download, pp1 (the library's own copy) a one-off while
+    // /workshop/one-off has a route, else plain; a mode that can't download now (signed out under "subscribe", a WS
+    // settings-changed the page alone sees) shows it disabled with the reason, a click sends nothing. A click (one-off) →
+    // POST /download of the base's Workshop id (held), the button says it's downloading; the base back (Undo) and the
+    // download answered → the notice leaves (fade; off: opacity only) and the cards come back. Hovered, the button glows (none
+    // under no-glow); under bg-live the notice keeps its fill. Shots side-needsbase-*.png
+    for (const mode of ["on", "off"]) await cell(`lib:preset:needsBase${mode === "off" ? "Off" : ""}`, async () => withPresets(async () => {
+      const v = [], J = JSON.stringify, S = (sel) => `.side-panel:not(.closing) ${sel}`;
+      const cur0 = await current();
+      try {
+        if (mode === "off") { await setMotion(false); }
+        const ws = ((await http("GET", "/sources")).json || []).find((x) => x.supportsTagFilter && x.available)?.index;
+        await page(`window.__oneOff = { route: "steamapp", missing: null }; window.__libPatch = { ${J(preDir(PRE.p2))}: { subscribed: true }, ${J(preDir(PRE.p1))}: { subscribed: false } };
+          await m.closeAll(); await m.openSide("pp1"); await m.sleep(600);`);
+        const before = await cardState("pp1");
+        if (await page(`return !!m.side().querySelector("[data-preset-note]");`) || before?.off) return [`pp1 can't play before its base went (${J(before)}) — proved nothing`];
+        // the base goes: trashed in the backend, the page re-reads the library (library-synced)
+        const baseItem = await libItem(preDir(PRE.base));
+        const samp = js(MO.SAMPLE({ note: S("[data-preset-note]"), icon: `[data-card-reason]` }, 1400));
+        await sleep(40);
+        const tr = await post("/library/trash", { items: [baseItem] });
+        if (tr.status !== 200) return [`trashing pb answered ${tr.status}`];
+        await js(`window.__fakeWs("library-synced", {})`);
+        const fr = await samp;
+        console.log(`        motion ${mode}: note ${MO.brief(fr.note)} / icon ${MO.brief(fr.icon)}`);
+        v.push(...MO.judge("the needs-base notice", fr.note, { appear: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        if (fades(fr.icon) < 1) v.push(`the card's status icon didn't fade in (${MO.brief(fr.icon)})`);
+        await sleep(300);
+        for (const t of ["pp1", "pp2"]) {
+          const c = await cardState(t);
+          console.log(`        ${t}: ${J(c)}`);
+          if (!c?.off || c.reason !== "Needs its base scene" || c.title !== "Needs its base scene" || c.op < 0.99) v.push(`${t}'s card isn't greyed with its reason: ${J(c)}`);
+          if (!/grayscale\(1\)/.test(c?.filter ?? "")) v.push(`${t}'s picture isn't grey (${c?.filter})`);
+        }
+        if (await page(`return !!m.card("pb");`)) v.push("pb's card still shows after it was trashed");
+        const note = await page(`const s = m.side(), n = s.querySelector("[data-preset-note]"); if (!n) return null; const b = n.querySelector("[data-preset-get]");
+          const d = document.createElement("div"); d.style.color = "var(--warn, #f9e2af)"; document.body.appendChild(d); const warn = getComputedStyle(d).color; d.remove();
+          const tx = getComputedStyle(n.querySelector(".side-crash-text")).color;
+          return { text: n.querySelector(".side-crash-text")?.textContent.trim(), crashBlock: n.classList.contains("side-crash"), btn: b?.textContent.trim() ?? null, kind: b?.dataset.presetGet ?? null,
+            off: b?.getAttribute("aria-disabled") ?? null, ico: getComputedStyle(n.querySelector(".side-crash-ico")).color, warn, tx, r: b ? m.rect(b) : null };`);
+        console.log(`        notice ${J(note)}`);
+        if (!note) return [...v, "pp1's sidebar has no needs-base notice"];
+        if (note.text !== "Needs its base scene, pb") v.push(`the notice says ${J(note.text)}`);
+        if (!note.crashBlock) v.push("the notice isn't the crash notice's block");
+        if (note.ico !== note.warn || note.ico === note.tx) v.push(`its glyph is ${note.ico}, want --warn ${note.warn} (not the text's ${note.tx})`);
+        if (note.btn !== "Download it again" || note.kind !== "one-off" || note.off) v.push(`pp1's button: ${J(note)}, want "Download it again", a one-off, enabled`);
+        if (mode === "on") await shot("needsbase-side");
+        // a click on the greyed card: nothing plays, the status bar says why
+        await page(`await m.closeAll();`);
+        const th = await page(`const t = m.thumb("pp1"); t.scrollIntoView({ block: "center" }); await m.sleep(300); return m.rect(t);`);
+        const n1 = await reqMark();
+        await clickAt(th.x + th.w / 2, th.y + th.h / 2); await sleep(500);
+        const applied = (await reqsSince(n1)).filter(([mt, p]) => mt === "POST" && p === "/apply");
+        const st = await statusText();
+        console.log(`        click on pp1: ${applied.length} /apply, status ${J(st)}`);
+        if (applied.length) v.push(`a click on greyed pp1 posted /apply ${applied.length}×`);
+        if (st !== "Can't play pp1: it needs its base scene") v.push(`the status bar says ${J(st)}`);
+        if ((await current()) !== cur0) v.push(`the playing wallpaper changed (${T(await current())})`);
+        if (mode === "on") await shot("needsbase-cards");
+        // pp2, a subscribed preset: a plain download; pp1 with no one-off route: a plain download too
+        await page(`await m.openSide("pp2"); await m.sleep(500);`);
+        const k2 = await page(`return m.side().querySelector("[data-preset-get]")?.dataset.presetGet ?? null;`);
+        if (k2 !== "download") v.push(`pp2 (subscribed): the button is ${J(k2)}, want a plain download`);
+        // the mode can't download now (signed out under "subscribe"): disabled, the reason under the words, a click sends nothing
+        await js(`window.__fakeWs("settings-changed", { workshopDownloadMode: "subscribe" })`); await sleep(400);
+        const blk = await page(`const n = m.side().querySelector("[data-preset-note]"), b = n?.querySelector("[data-preset-get]");
+          return { off: b?.getAttribute("aria-disabled") ?? null, why: n?.querySelector("[data-preset-why]")?.textContent.trim() ?? null };`);
+        const n2 = await js(`window.__dl.length + window.__reqs.filter(([m, p]) => p === "/download").length`);
+        await page(`window.__dlHold = true; m.side().querySelector("[data-preset-get]").click(); await m.sleep(300);`);
+        const n3 = await js(`window.__dl.length + window.__reqs.filter(([m, p]) => p === "/download").length`);
+        console.log(`        blocked: ${J(blk)}`);
+        if (blk.off !== "true" || !/^Sign in to Steam/.test(blk.why ?? "")) v.push(`signed out under "subscribe": ${J(blk)}, want disabled with the reason`);
+        if (n3 !== n2) v.push("the disabled button sent a download");
+        if (mode === "on") await shot("needsbase-blocked");
+        await js(`window.__fakeWs("settings-changed", { workshopDownloadMode: "steamapp" })`); await sleep(300);
+        await page(`window.__oneOff = { route: null, missing: "Steam isn't running" }; await m.closeAll(); await m.openSide("pp1"); await m.sleep(600);`);
+        const k1 = await page(`return m.side().querySelector("[data-preset-get]")?.dataset.presetGet ?? null;`);
+        if (k1 !== "download") v.push(`pp1 with no one-off route: the button is ${J(k1)}, want a plain download`);
+        await page(`window.__oneOff = { route: "steamapp", missing: null }; await m.closeAll(); await m.openSide("pp1"); await m.sleep(600);`);
+        // hovered: it glows, none under no-glow; bg-live: the notice keeps its fill
+        const br = await page(`const b = m.side().querySelector("[data-preset-get]"); return m.rect(b);`);
+        await mv(br.x + br.w / 2, br.y + br.h / 2, 400);
+        const look = await page(`const b = m.side().querySelector("[data-preset-get]"), root = document.documentElement, out = { glow: getComputedStyle(b).boxShadow };
+          root.classList.add("no-glow"); await m.sleep(250); out.noGlow = getComputedStyle(b).boxShadow; out.icoNoGlow = getComputedStyle(m.side().querySelector("[data-preset-note] .side-crash-ico > svg")).filter;
+          root.classList.remove("no-glow"); const had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(60);
+          out.liveBg = getComputedStyle(m.side().querySelector("[data-preset-note]")).backgroundColor; if (!had) root.classList.remove("bg-live"); return out;`);
+        if (!visibleGlow2(look.glow)) v.push(`the hovered button doesn't glow (${look.glow})`);
+        if (visibleGlow2(look.noGlow) || look.icoNoGlow !== "none") v.push(`no-glow: still glowing (${look.noGlow}, glyph ${look.icoNoGlow})`);
+        if (alpha(look.liveBg) < 0.3) v.push(`bg-live: the notice has no fill of its own (${look.liveBg})`);
+        if (mode === "on") {
+          await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("needsbase-noglow");
+          await page(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live");`); await sleep(250);
+          await shot("needsbase-bglive"); await page(`document.documentElement.classList.remove("bg-live");`);
+        }
+        // the download: the base's Workshop id through the mode, a one-off (pp1 is the library's own copy), held
+        await clickAt(br.x + br.w / 2, br.y + br.h / 2); await sleep(400);
+        const dl = await js(`window.__dl.slice()`);
+        const busy = await page(`const b = m.side().querySelector("[data-preset-get]"); return { text: b?.textContent.trim(), off: b?.getAttribute("aria-disabled") };`);
+        console.log(`        download ${J(dl.map((d) => ({ source: d.source, id: d.result?.workshopId, oneOff: d.oneOff, apply: d.apply })))}; button ${J(busy)}`);
+        if (dl.length !== 1) v.push(`${dl.length} downloads sent, want 1`);
+        else if (dl[0].result?.workshopId !== PRE.base || dl[0].oneOff !== true || dl[0].apply !== false || dl[0].source !== ws)
+          v.push(`the download sent ${J({ source: dl[0].source, id: dl[0].result?.workshopId, oneOff: dl[0].oneOff, apply: dl[0].apply })}, want the Workshop (${ws}) ${PRE.base} one-off, not applied`);
+        if (busy.text !== "Downloading…" || busy.off !== "true") v.push(`while it downloads the button reads ${J(busy)}`);
+        // the base lands: the notice leaves, the cards come back
+        await mv(5, 5);
+        const out = js(MO.SAMPLE({ note: S("[data-preset-note]"), icon: `[data-card-reason]` }, 1400));
+        await sleep(40);
+        await post("/library/undo");
+        await js(`window.__dlGo?.()`);
+        const fo = await out;
+        console.log(`        landed, motion ${mode}: note ${MO.brief(fo.note)} / icon ${MO.brief(fo.icon)}`);
+        v.push(...MO.judge("the needs-base notice", fo.note, { leave: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        if (fades(fo.icon) < 1) v.push(`the card's status icon didn't fade out (${MO.brief(fo.icon)})`);
+        if (mode === "on") await shot("needsbase-landed");
+        for (const t of ["pp1", "pp2"]) { const c = await cardState(t); if (c?.off || c?.op > 0.01) v.push(`${t} still greyed after the base came back: ${J(c)}`); }
+      } finally {
+        await page(`window.__dlHold = false; window.__dlGo?.(); window.__oneOff = null; window.__libPatch = null;`).catch(() => {});
+        if (mode === "off") await setMotion(true);
+      }
+      return v;
+    }, { workshopDownloadMode: "steamapp" }));
+
+    // lib:preset:legacy — the legacy engine (a WS settings-changed only the page sees: the stack's backend stays on
+    // liascape-player): every preset greys out at once with "Presets play only in the Liascape player", the scene itself
+    // doesn't; the page reads the library again; a click plays nothing and the status bar says why; the preset's notice has
+    // the reason and no download; the scene's Presets row goes. Back on liascape-player: read again, playable, no reload.
+    await cell("lib:preset:legacy", async () => withPresets(async () => {
+      const v = [], J = JSON.stringify, LEG = "Presets play only in the Liascape player";
+      const c0 = await cardState("pp1");
+      if (c0?.off) return [`pp1 is greyed before the switch (${J(c0)}) — proved nothing`];
+      const libReads = (from) => reqsSince(from).then((l) => l.filter(([mt, p]) => mt === "GET" && p === "/library").length);
+      let n0 = await reqMark();
+      await js(`window.__fakeWs("settings-changed", { playerEngine: "legacy" })`); await sleep(800);
+      const st = { pp1: await cardState("pp1"), pp2: await cardState("pp2"), pb: await cardState("pb") };
+      console.log(`        legacy: ${J(st)}`);
+      for (const t of ["pp1", "pp2"]) if (!st[t]?.off || st[t].reason !== LEG || st[t].title !== LEG) v.push(`${t} under legacy: ${J(st[t])}`);
+      if (st.pb?.off) v.push("the base scene greyed under legacy");
+      if (await libReads(n0) < 1) v.push("the engine switch didn't re-read the library");
+      await shot("preset-legacy");
+      const th = await page(`const t = m.thumb("pp1"); t.scrollIntoView({ block: "center" }); await m.sleep(300); return m.rect(t);`);
+      n0 = await reqMark();
+      await clickAt(th.x + th.w / 2, th.y + th.h / 2); await sleep(500);
+      if ((await reqsSince(n0)).some(([mt, p]) => mt === "POST" && p === "/apply")) v.push("a click on pp1 under legacy posted /apply");
+      const sb = await statusText();
+      if (sb !== "Can't play pp1: presets play only in the Liascape player") v.push(`the status bar says ${J(sb)}`);
+      await page(`await m.openSide("pp1"); await m.sleep(500);`);
+      const note = await page(`const n = m.side().querySelector("[data-preset-note]"); return n ? { text: n.querySelector(".side-crash-text").textContent.trim(), get: !!n.querySelector("[data-preset-get]") } : null;`);
+      if (!note || note.text !== LEG || note.get) v.push(`pp1's notice under legacy: ${J(note)}`);
+      await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(400);`);
+      if (await page(`return !!m.side().querySelector("[data-ws-presets]");`)) v.push("pb shows a Presets row under legacy");
+      await page(`await m.closeAll();`);
+      n0 = await reqMark();
+      await js(`window.__fakeWs("settings-changed", { playerEngine: "liascape-player" })`); await sleep(800);
+      const back = { pp1: await cardState("pp1"), pp2: await cardState("pp2") };
+      console.log(`        back: ${J(back)}`);
+      for (const t of ["pp1", "pp2"]) if (back[t]?.off || back[t]?.op > 0.01) v.push(`${t} still greyed back on liascape-player: ${J(back[t])}`);
+      if (await libReads(n0) < 1) v.push("the switch back didn't re-read the library");
+      return v;
+    }));
+
+    // lib:baseDelete:<on|off> — deleting pb, which pp1 and pp2 play, asks first: the card's Delete button, the Delete key on
+    // a selection and the sidebar's Delete all open the dialog (the modal shell: zooms in, motion off fades in place) naming
+    // 2 presets; Keep it / Escape delete nothing; Delete trashes pb (the sidebar closes after the answer) and both presets
+    // grey out. The sidebar's "Delete and unsubscribe" asks the same (Unsubscribe). A scene no preset plays (s2) and a preset
+    // itself (pp2) delete without asking (trash stubbed). The Delete button glows hovered (none under no-glow), the panel keeps
+    // its fill under bg-live. Shots side-basedel-*.png
+    for (const mode of ["on", "off"]) await cell(`lib:baseDelete${mode === "off" ? "Off" : ""}`, async () => withPresets(async () => {
+      const v = [], J = JSON.stringify;
+      try {
+        if (mode === "off") await setMotion(false);
+        const dlg = () => page(`const d = document.querySelector("[data-base-confirm]"); if (!d) return null;
+          return { h: d.querySelector("h2")?.textContent.trim(), text: d.querySelector("[data-base-confirm-text]")?.textContent.trim(),
+            keep: d.querySelector("[data-base-confirm-keep]")?.textContent.trim(), go: d.querySelector("[data-base-confirm-go]")?.textContent.trim(),
+            focus: document.activeElement?.hasAttribute("data-base-confirm-keep") ?? false };`);
+        const waitDlg = async (on) => { for (let i = 0; i < 40; i++) { if (!!(await dlg()) === on) return true; await sleep(50); } return false; };
+        const trashes = (from) => reqsSince(from).then((l) => l.filter(([mt, p]) => mt === "POST" && p === "/library/trash").length);
+        const WANT = "2 presets in your library use this scene. They stay, greyed out, until you download it again.";
+        // 1. the card's Delete button
+        let n0 = await reqMark();
+        const samp = js(MO.SAMPLE({ panel: ".modal.base-confirm", back: "[data-base-confirm]" }, 900));
+        await sleep(40);
+        await page(`const c = m.card("pb"); c.scrollIntoView({ block: "center" }); c.querySelector(".del").click();`);
+        const fr = await samp;
+        console.log(`        motion ${mode}: panel ${MO.brief(fr.panel)}`);
+        v.push(...MO.judge("the dialog", fr.panel, { appear: true, still: mode === "off", maxMs: mode === "on" ? 600 : 300 }));
+        if (mode === "on" && !fr.panel.some((f) => f[1] != null && f[4] > 0 && fr.panel.at(-1)[4] - f[4] > 2)) v.push("motion on: the dialog didn't grow in");
+        const d1 = await dlg();
+        console.log(`        ${J(d1)}`);
+        if (!d1) return [...v, "Delete on pb asked nothing"];
+        if (d1.h !== "Delete “pb”?" || d1.text !== WANT || d1.keep !== "Keep it" || d1.go !== "Delete") v.push(`the dialog reads ${J(d1)}`);
+        if (!d1.focus) v.push("Keep it isn't focused");
+        if (mode === "on") await shot("basedel-dialog");
+        // its look: the Delete button glows hovered, none under no-glow; the panel's own fill under bg-live
+        const gr = await page(`return m.rect(document.querySelector("[data-base-confirm-go]"));`);
+        await mv(gr.x + gr.w / 2, gr.y + gr.h / 2, 350);
+        const look = await page(`const b = document.querySelector("[data-base-confirm-go]"), root = document.documentElement, out = { glow: getComputedStyle(b).boxShadow };
+          root.classList.add("no-glow"); await m.sleep(250); out.noGlow = getComputedStyle(b).boxShadow; root.classList.remove("no-glow");
+          const had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(60);
+          out.liveBg = getComputedStyle(document.querySelector(".modal.base-confirm")).backgroundColor; if (!had) root.classList.remove("bg-live"); return out;`);
+        if (!visibleGlow2(look.glow)) v.push(`the hovered Delete doesn't glow (${look.glow})`);
+        if (visibleGlow2(look.noGlow)) v.push(`no-glow: the hovered Delete still glows (${look.noGlow})`);
+        if (alpha(look.liveBg) < 0.3) v.push(`bg-live: the dialog has no fill (${look.liveBg})`);
+        if (mode === "on") {
+          await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("basedel-noglow");
+          await page(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live");`); await sleep(250);
+          await shot("basedel-bglive"); await page(`document.documentElement.classList.remove("bg-live");`);
+        }
+        await mv(5, 5);
+        const out = js(MO.SAMPLE({ panel: ".modal.base-confirm" }, 900));
+        await sleep(40);
+        await page(`document.querySelector("[data-base-confirm-keep]").click();`);
+        const fo = await out;
+        v.push(...MO.judge("the dialog", fo.panel, { leave: true, still: mode === "off", maxMs: mode === "on" ? 600 : 300 }));
+        await sleep(200);
+        if (await trashes(n0)) v.push("Keep it deleted something");
+        if (!(await libItem(preDir(PRE.base)))) v.push("pb is gone after Keep it");
+        // 2. the Delete key on a selection (pb Ctrl-clicked), Escape answers
+        n0 = await reqMark();
+        await page(`m.thumb("pb").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true })); await m.sleep(200); m.key("Delete");`);
+        if (!await waitDlg(true)) v.push("the Delete key on pb asked nothing");
+        await page(`document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));`);
+        if (!await waitDlg(false)) v.push("Escape didn't close the dialog");
+        await sleep(200);
+        if (await trashes(n0)) v.push("Escape deleted something");
+        // 3. the sidebar's Delete and unsubscribe: the same question, as an unsubscribe; Keep it
+        await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(400); m.side().querySelector("[data-delete-source]")?.click();`);
+        const d3 = await waitDlg(true) ? await dlg() : null;
+        if (!d3 || d3.h !== "Unsubscribe from “pb”?" || d3.go !== "Unsubscribe" || d3.text !== WANT) v.push(`Delete and unsubscribe asked ${J(d3)}`);
+        await page(`document.querySelector("[data-base-confirm-keep]")?.click();`); await waitDlg(false);
+        if (await page(`return !!window.__reqs.find(([m, p]) => p === "/workshop/delete-from-source");`)) v.push("Keep it still unsubscribed pb");
+        if (!await page(`return m.sideTitle() === "pb";`)) v.push("the sidebar closed though nothing was deleted");
+        // 4. the sidebar's Delete: Delete → pb trashed, both presets grey out, the sidebar closes
+        n0 = await reqMark();
+        await page(`m.sideBtn("Delete").click();`);
+        if (!await waitDlg(true)) v.push("the sidebar's Delete asked nothing");
+        await page(`document.querySelector("[data-base-confirm-go]").click();`);
+        for (let i = 0; i < 40 && (await libItem(preDir(PRE.base))); i++) await sleep(100);
+        await sleep(600);
+        if (await trashes(n0) !== 1) v.push(`Delete sent ${await trashes(n0)} trash requests, want 1`);
+        if (await libItem(preDir(PRE.base))) v.push("pb is still in the library after Delete");
+        if (await page(`return !!m.side();`)) v.push("the sidebar stayed open on the deleted pb");
+        for (const t of ["pp1", "pp2"]) { const c = await cardState(t); if (!c?.off || c.reason !== "Needs its base scene") v.push(`${t} after its base went: ${J(c)}`); }
+        if (mode === "on") await shot("basedel-after");
+        await post("/library/undo");
+        // 5. no question: a scene no preset plays, a preset itself (trash stubbed: nothing really goes)
+        await loadUi();
+        await page(`window.__stubTrash = true;`);
+        for (const t of ["s2", "pp2"]) {
+          await page(`const c = m.card(${J(t)}); c.scrollIntoView({ block: "center" }); c.querySelector(".del").click(); await m.sleep(500);`);
+          const asked = await dlg(), sent = await js(`window.__trashed.length`);
+          if (asked) { v.push(`deleting ${t} asked ${J(asked)}`); await page(`document.querySelector("[data-base-confirm-keep]").click();`); await waitDlg(false); }
+          else if (!sent) v.push(`deleting ${t} sent no trash`);
+          await page(`window.__trashed = [];`);
+        }
+      } finally {
+        await page(`window.__stubTrash = false; document.querySelector("[data-base-confirm-keep]")?.click();`).catch(() => {});
+        if (mode === "off") await setMotion(true);
+      }
+      return v;
+    }, { workshopDownloadMode: "steamapp" }));
 
     // ---- Browse: a local Wallpaper Engine folder: we1 (not in the library) + 900000001 (= s1's Workshop id: in the library)
     const we = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-side");

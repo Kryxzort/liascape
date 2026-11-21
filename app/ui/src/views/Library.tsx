@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useStore } from "../store";
+import { presetReasonOf, useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
 import { facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
@@ -19,6 +19,7 @@ import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
 import { unsubBlocked } from "../components/subscribeMode";
 import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
+import { confirmBaseRemoval } from "../components/baseConfirm";
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -62,6 +63,12 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
   // why Unsubscribe can't happen now (signed out), else null: every Unsubscribe here shows it disabled
   const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
+  // under the legacy engine every preset is greyed at once (store presetReasonOf): one flag here, a reason per card
+  const engine = useStore((s) => (s.settings ? String(s.settings.playerEngine) : null));
+  const reasonOf = useMemo(() => {
+    const st = engine == null ? null : { playerEngine: engine };
+    return (i: LibraryItem) => presetReasonOf(i, st);
+  }, [engine]);
 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
@@ -131,7 +138,12 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // When the mode can't unsubscribe (unsubOff: signed out) those Workshop items stay, nothing queued, and the status bar
   // says why; the rest of a selection still deletes. Guard: probe-steam side:unsub:signedOut
   const unsubs = (i: LibraryItem) => autoImport && !!i.workshopId && !!i.subscribed;
-  const doTrash = (list: LibraryItem[]) => {
+  // A scene that presets in the library play asks first, naming how many (components/baseConfirm.ts); `then` runs only once
+  // it goes ahead (the sidebar closes after the answer, not before). Guard: probe-sidebar lib:baseDelete
+  const doTrash = async (list: LibraryItem[], then?: () => void) => {
+    const go = list.filter((i) => !unsubs(i) || !unsubOff);
+    if (go.length && !await confirmBaseRemoval(go, items, go.some(unsubs) ? "unsubscribe" : "delete")) return;
+    then?.();
     const ws = list.filter(unsubs);
     if (ws.length && !unsubOff) deleteFromSource(ws);
     const plain = list.filter((i) => !unsubs(i));
@@ -174,7 +186,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "a" && !typing()) { e.preventDefault(); setSel(new Set(filtered.map((i) => i.videoPath))); return; }
-      if (e.key === "Delete" && sel.size && !typing()) { doTrash([...sel].map((p) => byPath[p]).filter(Boolean)); return; }
+      if (e.key === "Delete" && sel.size && !typing() && !document.querySelector(".modal-backdrop")) { doTrash([...sel].map((p) => byPath[p]).filter(Boolean)); return; }
       if (!gridOwnsKey(e)) return;
       if (e.key === "Escape") { if (libFocus || sel.size) { focusLib(null); setSel(new Set()); } return; }
       if (e.key === "Enter") { if (libFocus && byPath[libFocus]) { e.preventDefault(); applyItem(libFocus); } return; }
@@ -247,7 +259,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
             selected={sel.has(it.videoPath)}
             focused={it.videoPath === libFocus}
             inPlaylist={playlist.includes(it.videoPath)}
-            unsub={unsubs(it)} unsubOff={unsubs(it) ? unsubOff : null}
+            unsub={unsubs(it)} unsubOff={unsubs(it) ? unsubOff : null} reason={reasonOf(it)}
             onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
       </div>
@@ -266,8 +278,13 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
             globalVolume={gVol} globalSpeed={gSpd}
             onPlay={() => applyItem(sideItem.videoPath)}
             onReveal={() => openExternal({ path: sideItem.videoPath, reveal: true, isScene: sideItem.isScene, workshopId: sideItem.workshopId, copiedSceneDir: sideItem.copiedSceneDir })}
-            onTrash={() => { focusLib(null); doTrash(targets); }}
-            onDeleteSource={() => { if (unsubOff) return; focusLib(null); deleteFromSource(targets.filter((i) => i.workshopId)); }}
+            onTrash={() => doTrash(targets, () => focusLib(null))}
+            onDeleteSource={async () => {
+              if (unsubOff) return;
+              const ws = targets.filter((i) => i.workshopId);
+              if (!await confirmBaseRemoval(ws, items, "unsubscribe")) return;
+              focusLib(null); deleteFromSource(ws);
+            }}
             onShowInBrowse={onShowInBrowse}
             onKeep={() => doKeep(targets)} />
         </SidePanel>

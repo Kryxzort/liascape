@@ -31,6 +31,14 @@ and § Settings & state.
 - The UI never guesses which item plays: the mark comes from `wallpaper-changed` (and `/current` for a Play that switches nothing; drop it if an event landed meanwhile). Guard: matrix `playlistMark:shufflePlay`.
 - Ask `/current` only through `askCurrent()`: an answer applies while it is the newest asked and no `wallpaper-changed` landed since. The page asks once more when its first socket opens (`rereadPlaying`): the store's first reads race it. Guards: matrix `load:afterApply:*`.
 - A Browse list reply belongs to its generation (`browseGen`): drop replies from an older `reload()`.
+- A library listing depends on the engine and scene support (a preset's legacy reason, the presets the WE auto-import
+  brings): a change of either reads the library again once the backend has it (`libraryFollowsEngine`: after the page's own
+  save, at once for a `settings-changed`), never a reload. A preset that can't play (`presetReasonOf`: its `presetReason`,
+  and every preset at once while the page's engine is legacy) is greyed with the reason, and `applyItem` plays nothing and
+  says why. Guard: probe-sidebar `lib:preset:legacy`, `lib:preset:needsBase`.
+- Removing a scene that library presets play (Delete, the Delete key, Delete and unsubscribe, the Browse sidebar's
+  Unsubscribe) asks first through `app/ui/src/components/baseConfirm.ts` `confirmBaseRemoval`, naming how many; a preset's own delete
+  never asks. Guard: probe-sidebar `lib:baseDelete`.
 - The production origin is `http://127.0.0.1:<port>`; the shell reuses the last port (`LIASCAPE_PORT`, when it and the media port after it are free) so localStorage prefs survive a relaunch.
 
 ## Settings page

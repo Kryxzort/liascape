@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat } from "lucide-react";
-import { api, media, still, anim as animUrl, CARD_STILL_W, type LibraryItem } from "../api/client";
-import { useStore } from "../store";
+import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat, Unplug, Download } from "lucide-react";
+import { api, media, still, anim as animUrl, steamPageUrl, CARD_STILL_W, type LibraryItem, type OneOffRoute, type Wallpaper } from "../api/client";
+import { presetReasonOf, useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
 import { SideMedia, SideSection } from "./SidePanel";
 import { FolderFlap } from "./icons";
@@ -16,7 +16,9 @@ import { SubToggle } from "./SubToggle";
 import { useLinger } from "../hooks/useLinger";
 import { WorkshopIdPill } from "./WorkshopIdPill";
 import { snapFlip, glideFlip, glideY } from "./flipGlide";
-import { CommentsSection, CreatorRow, FavoriteTile, WorkshopStats } from "./WorkshopSocial";
+import { BaseRow, CommentsSection, CreatorRow, FavoriteTile, PresetsRow, WorkshopStats } from "./WorkshopSocial";
+import { actionBlocked } from "./subscribeMode";
+import { revealCard } from "../hooks/gridKeys";
 import { SizePill } from "./sidePills";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
@@ -181,6 +183,28 @@ export function LibrarySide({
     if (crash.value != null || !flipFrom.current) return;
     glideFlip(flipFrom.current, bodyRef.current, CRASH_FLIP); flipFrom.current = null;
   }, [crash.value]);
+  // a preset that can't play: its notice (the crash notice's block), fading out once it can (its base back, the engine
+  // switched), what follows gliding into its room as for the crash notice. Guard: probe-sidebar lib:preset:needsBase*
+  const reason = useStore((s) => presetReasonOf(item, s.settings));
+  const presetNote = useLinger(reason, CRASH_OUT_MS, motion);
+  // one that turns up while the sidebar is open fades in (the body's own entrance plays for one there at the open)
+  const [noteAtOpen] = useState(() => reason != null);
+  const presetFlip = useRef<ReturnType<typeof snapFlip>>(null);
+  useLayoutEffect(() => { if (presetNote.closing && motion) presetFlip.current = snapFlip(bodyRef.current, CRASH_FLIP); }, [presetNote.closing, motion]);
+  const noteShown = useRef(presetNote.value != null);
+  useLayoutEffect(() => {
+    const shown = presetNote.value != null, was = noteShown.current;
+    noteShown.current = shown;
+    if (!shown && presetFlip.current) { glideFlip(presetFlip.current, bodyRef.current, CRASH_FLIP); presetFlip.current = null; return; }
+    // one arriving pushes what follows down: it glides there (motion off: it takes its place at once)
+    if (!shown || was || !motion) return;
+    const n = bodyRef.current?.querySelector<HTMLElement>("[data-preset-note]");
+    if (!n) return;
+    const h = n.offsetHeight + parseFloat(getComputedStyle(n).marginTop || "0");
+    for (let el = n.nextElementSibling; el; el = el.nextElementSibling) glideY(el, -h);
+  }, [presetNote.value, motion]);
+  // "Uses <base>": the base's own card in the Library, the sidebar on it
+  const showBase = (path: string) => { useStore.getState().focusLib(path); revealCard(`lib-${path}`); };
   const clearCrash = () => {
     patchItem(p, { hasCrashed: false });
     api.libraryClearCrash(p).catch((e) => { patchItem(p, { hasCrashed: true }); useStore.getState().setError(`Couldn't clear the crash mark: ${(e as Error).message}`); });
@@ -270,6 +294,13 @@ export function LibrarySide({
         </div>
         {/* who made it, near the top as in Browse (a click lists all their wallpapers there). Guard: probe-steam lib:ws:creator */}
         {workshop && <CreatorRow workshopId={workshop} authorId={null} onListed={onShowInBrowse} />}
+        {/* a scene: the presets made for it, listed in Browse (only while presets can play); a preset: the scene it plays, from
+            its own file (Steam isn't asked). Guard: probe-sidebar lib:presets:scene, lib:preset:uses */}
+        {workshop && item.isScene && !item.isPreset && <PresetsRow workshopId={workshop} title={item.title} onListed={onShowInBrowse} />}
+        {item.isPreset && item.baseWorkshopId && !multi && (
+          <BaseRow presetId={item.workshopId ?? p} local={{ baseId: item.baseWorkshopId, title: item.baseTitle ?? null, path: item.basePath ?? null }}
+            onShowInLibrary={showBase} onShowInBrowse={onShowInBrowse} />
+        )}
         {tags.length > 0 && <div className="tags side-tags">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
         {/* the crash mark, as a notice block of the body (the tiles' material, a danger stripe) with its own Clear */}
         {crash.value && (
@@ -279,6 +310,9 @@ export function LibrarySide({
             <button className="mini side-crash-clear" data-side-crash-clear aria-label="Clear the crash mark" disabled={crash.closing}
               onClick={clearCrash}>Clear</button>
           </div>
+        )}
+        {presetNote.value && !multi && (
+          <PresetNotice item={item} reason={presetNote.value} closing={presetNote.closing} arrive={!noteAtOpen} />
         )}
         {/* the right-click menu's actions (all four of them), as tiles */}
         <div className="side-tiles">
@@ -349,7 +383,7 @@ export function LibrarySide({
           {fontNote.value && <div className={`shint side-note side-fonts${fontNote.closing ? " leaving" : ""}`} data-scene-fonts>{fontNote.value}</div>}
         </SideSection>
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
-        {sceneProps && <ScenePropsEditor key={p} path={p} onReady={() => setReady(true)} />}
+        {sceneProps && <ScenePropsEditor key={p} path={p} preset={!!item.isPreset} onReady={() => setReady(true)} />}
         {/* a Workshop item's community, after everything about playing it: the Browse sidebar's own pieces
             (components/WorkshopSocial.tsx), the favourite and the comments (read once in view); its counts and its creator sit
             at the top. Not for an item the Workshop no longer has, nor a multi-selection (each item has its own).
@@ -362,5 +396,55 @@ export function LibrarySide({
         )}
       </div>
     </>
+  );
+}
+
+// API: Helpers/Presets.cs NeedsBaseReason, word for word: the one reason a download of the base answers
+const NEEDS_BASE = "Needs its base scene";
+
+// A preset that can't play, as a notice of the body (the crash notice's block and words' style). "Needs its base scene" gets
+// "Download it again": the base through the current download mode (store download, its Workshop id), as a one-off only when
+// the preset is the library's own copy (a one-off itself) and the mode has a one-off route (GET /workshop/one-off), else as
+// a plain download; a mode that can't do it now shows the button disabled with the reason under the words, never another
+// mode's route. While it downloads the button says so; once the base lands the library's re-read takes the notice away.
+// Guard: probe-sidebar lib:preset:needsBase, lib:preset:needsBaseOff
+function PresetNotice({ item, reason, closing, arrive }: { item: LibraryItem; reason: string; closing: boolean; arrive: boolean }) {
+  const baseId = reason === NEEDS_BASE ? item.baseWorkshopId ?? null : null;
+  const ownCopy = item.subscribed === false;
+  const [route, setRoute] = useState<OneOffRoute | null>(null);
+  useEffect(() => {
+    if (!baseId || !ownCopy) return;
+    let alive = true;
+    api.workshopOneOff().then((r) => { if (alive) setRoute(r); }).catch(() => { if (alive) setRoute({ route: null, missing: null }); });
+    return () => { alive = false; };
+  }, [baseId, ownCopy]);
+  const oneOff = ownCopy && !!route?.route;
+  const ws = useStore((s) => s.sources.find((x) => x.supportsTagFilter && x.available)?.index ?? null);
+  const blocked = useStore((s) => (baseId ? actionBlocked(s.settings, s.steam, oneOff ? "oneOff" : "download") : null));
+  const pageUrl = baseId ? steamPageUrl(baseId) : "";
+  const progress = useStore((s) => (pageUrl ? s.downloads[pageUrl] : undefined));
+  const download = useStore((s) => s.download);
+  // a one-off asked but not answered yet: wait for it (the route decides which download it is)
+  const asking = !!baseId && ownCopy && !route;
+  const why = !baseId ? null : ws == null ? "The Workshop isn't available right now" : blocked;
+  const busy = progress !== undefined;
+  const get = () => {
+    if (!baseId || ws == null || why || asking || busy) return;
+    const w: Wallpaper = { title: item.baseTitle ?? "Its base scene", thumbnailUrl: "", animatedThumbnailUrl: null, pageUrl, resolution: null,
+      isScene: true, workshopId: baseId, addedAt: null, description: null, authorName: null, fileSizeBytes: null, subscriptions: null,
+      favorites: null, tags: null };
+    void download(ws, w, false, oneOff);
+  };
+  const text = baseId && item.baseTitle ? `Needs its base scene, ${item.baseTitle}` : reason;
+  return (
+    <div className={`side-crash side-preset${closing ? " leaving" : ""}${arrive ? " arrive" : ""}`} data-preset-note={reason} role="status">
+      <span className="side-crash-ico"><Unplug size={16} /></span>
+      <span className="side-crash-text">{text}{why && <span className="side-preset-why" data-preset-why>{why}</span>}</span>
+      {baseId && (
+        <button className="mini ico side-crash-clear" data-preset-get={oneOff ? "one-off" : "download"} disabled={closing}
+          aria-disabled={why || asking || busy ? true : undefined} onClick={get}>
+          <Download size={13} />{busy ? (progress > 0 ? `Downloading ${Math.round(progress * 100)}%` : "Downloading…") : "Download it again"}</button>
+      )}
+    </div>
   );
 }

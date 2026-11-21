@@ -220,6 +220,11 @@ export interface LibraryItem {
   // a scene's fonts this machine showed with another family at its last load under liascape-player (the player's
   // `scene.fonts`: Consolas shown with Cascadia Mono); null = every one installed, or never loaded there
   fontStandIns?: { font: string; shown: string }[] | null;
+  // API: a Wallpaper Engine preset (Helpers/Presets.cs; also isScene: it plays its base scene): its base's Workshop id, the
+  // base's library folder (null = the library has none), the base's title, and why it can't play now (null = it plays:
+  // "Needs its base scene", "Its preset file names no base scene", "Its base is a … wallpaper, not a scene", "Presets play
+  // only in the Liascape player")
+  isPreset?: boolean; baseWorkshopId?: string | null; basePath?: string | null; baseTitle?: string | null; presetReason?: string | null;
 }
 // a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips' queue: following "Video
 // preview quality" (phase low | mid | high) or the cards' own first clips (make), `facts` = Steam's tags (steam), trailer
