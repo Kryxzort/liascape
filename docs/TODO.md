@@ -54,6 +54,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        check finds no "Text shadow" row (an Advanced-level row: likely the cell never raises the level;
        `look:textShadow`); Browse's grid has nothing to scroll in the wheel-glide check (`scroll:glide:browse`). Find
        each cause; fix the tab switch's forced layouts, and make the other two cells set up what they need.
+111. [ ] "Import a folder" and watched folders recognise Wallpaper Engine presets: a preset folder imports as its own
+       preset item (as from the Workshop or "Wallpaper Engine (Local)"), linked or copied like any imported item, and
+       brings its base scene from the same folder tree when it's there; otherwise it shows "needs its base scene".
+       Sources are never touched; covered in `scripts/test-folder-import.sh`.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
