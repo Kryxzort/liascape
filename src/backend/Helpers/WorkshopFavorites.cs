@@ -157,7 +157,7 @@ public static class WorkshopFavorites
                 Show(a, ids, new Progress(ids.Count, total));
                 if (ids.Count >= total) break;
             }
-            if (viaPage && !await PrivateAsync(steamId, a, ids, seen).ConfigureAwait(false)) return;
+            if (viaPage) await PrivateAsync(steamId, a, ids, seen).ConfigureAwait(false);
         }
         catch (Exception e)
         {
@@ -166,7 +166,8 @@ public static class WorkshopFavorites
         }
         var saved = new Saved(ids, viaPage, viaPage ? null : total);
         try { AtomicFile.WriteAllText(FilePath(steamId), JsonSerializer.Serialize(saved, Json)); }
-        catch (Exception e) { Console.WriteLine($"workshop-favorites: couldn't save the list ({e.GetType().Name}: {e.Message})"); }
+        // the type only: an IO error's message names the file, and its name holds the Steam ID
+        catch (Exception e) { Console.WriteLine($"workshop-favorites: couldn't save the list ({e.GetType().Name})"); }
         lock (_lock)
         {
             a.Ids = ids; a.ViaPage = viaPage; a.Total = saved.Total; a.Complete = true;
@@ -177,17 +178,17 @@ public static class WorkshopFavorites
     }
 
     // A private profile: the community pages (Interactive: the user is waiting for this list) until a page adds no new id
-    // or is short (the last one), then the items' details through the details cache, a chunk at a time. false = it
-    // stopped (failed, or the sign-in is another account's now).
+    // or is short (the last one), then the items' details through the details cache, a chunk at a time. Each page is
+    // asked for this account only (`account:`), checked against the very sign-in its request carries: a sign-in switched
+    // between two pages throws there, with nothing sent as the other account and nothing written.
     // Guard: scripts/test-workshop-social.sh § 7 "private profile: 3 community pages with the cookie, …", "private
-    // profile: progress 'so far' while paging, then of 65 for the details"
-    static async Task<bool> PrivateAsync(ulong steamId, Account a, List<string> ids, HashSet<string> seen)
+    // profile: progress 'so far' while paging, then of 65 for the details", "a sign-in switched mid-load: no page asked
+    // as the other account, none of its favourites in this account's list, nothing written"
+    static async Task PrivateAsync(ulong steamId, Account a, List<string> ids, HashSet<string> seen)
     {
         for (int page = 1; ; page++)
         {
-            // the page is the signed-in account's own: one signed in as someone else now must not fill this list
-            if (SteamCommunity.SignedInAccount() != steamId) { Fail(a, ids, "the sign-in changed"); return false; }
-            var got = await SteamCommunity.MyFavoritesPageAsync(page, SteamGate.Kind.Interactive).ConfigureAwait(false);
+            var got = await SteamCommunity.MyFavoritesPageAsync(page, SteamGate.Kind.Interactive, account: steamId).ConfigureAwait(false);
             int added = 0;
             foreach (var id in got.Ids) if (seen.Add(id)) { ids.Add(id); added++; }
             if (added == 0) break;
@@ -202,7 +203,6 @@ public static class WorkshopFavorites
             done += chunk.Count;
             Show(a, ids, new Progress(done, ids.Count));
         }
-        return true;
     }
 
     // What came so far stays shown with the error; nothing is written (a partial list would read as unfavourited items)

@@ -358,12 +358,16 @@ public static class SteamCommunity
     }
 
     /// One page (30) of the signed-in account's Workshop favourites for Wallpaper Engine, paced as `kind` (the user's own
-    /// Browse page = Interactive; a cache's check = Background).
+    /// Browse page = Interactive; a cache's check = Background). `account` ≠ 0: that account's page only — the sign-in
+    /// this request is sent with is checked against it, and another account's throws with nothing sent (a list kept per
+    /// account must never take a page fetched after a switch).
     // Guard: scripts/test-workshop-social.sh "favourites of a private profile: the community page (with the cookie) + the
-    // keyless details"; its parsing: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: …".
-    public static async Task<FavoritesPage> MyFavoritesPageAsync(int page, SteamGate.Kind kind, CancellationToken ct = default)
+    // keyless details"; its parsing: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: …"; `account`:
+    // test-workshop-social.sh § 7 "a sign-in switched mid-load: no page asked as the other account, …".
+    public static async Task<FavoritesPage> MyFavoritesPageAsync(int page, SteamGate.Kind kind, CancellationToken ct = default, ulong account = 0)
     {
         var who = await SignInAsync(ct).ConfigureAwait(false) ?? throw new SignInRequiredException("Sign in to Steam to see your Workshop favourites (Settings → Getting Workshop wallpapers).");
+        if (account != 0 && who.SteamId != account) throw new InvalidOperationException("The Steam sign-in is another account's now.");
         var (status, html) = await SendAsync(Request(HttpMethod.Get,
             $"/profiles/{who.SteamId}/myworkshopfiles/?appid={AppId}&browsefilter=myfavorites&numperpage=30&p={Math.Max(1, page)}", who.Cookie, null, null), ct, kind).ConfigureAwait(false);
         if (status is < 200 or >= 300) throw new InvalidOperationException($"Steam didn't return your favourites ({status})");

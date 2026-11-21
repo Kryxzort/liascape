@@ -36,7 +36,8 @@
 #     events (no ids in them) up to 250, then 248 items (web left out) in Steam's order with their created times, the
 #     creator's name only when this run already read it; no Steam ID or item id in the log; sync=none and a restart ask
 #     nothing; another account sees none of these, signed out again → {signedIn:false}; a private profile → the community
-#     pages with the cookie (3 of them for 65 ids), then the items' details in one GetDetails.
+#     pages with the cookie (3 of them for 65 ids), then the items' details in one GetDetails; a sign-in switched to
+#     another account between two of those pages → no page asked as it, none of its favourites kept, nothing written.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -196,6 +197,8 @@ if (process.argv[2]?.startsWith("fav")) {
   const shown = FAVS.map((_, i) => i).filter((i) => !WEB.has(i)).map((i) => `fav-${i}`);
   // a private profile's 65 favourites (the community page's list) and their details
   const PRIV = Array.from({ length: 65 }, (_, i) => String(3300000000 + i));
+  // another account's (ME2's) 40 favourites on its own community page
+  const OTHER = Array.from({ length: 40 }, (_, i) => String(3400000000 + i));
   const FF = (id) => `${process.env.XDG_CACHE_HOME}/liascape/workshop/favorites-${id}.json`;
   const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
   const AUTH = `${process.env.XDG_CONFIG_HOME}/liascape/steam-auth.json`;
@@ -301,15 +304,34 @@ if (process.argv[2]?.startsWith("fav")) {
     const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
     delete fx["@userfiles"][`${ME}:myfavorites`];
     PRIV.forEach((id, i) => { fx[id] = { tags: ["Video"], title: `pfav-${i}`, time_created: 1700000000 + i, creator: OWNER }; });
+    OTHER.forEach((id, i) => { fx[id] = { tags: ["Video"], title: `other-${i}`, time_created: 1700000000 + i, creator: OWNER }; });
     fs.writeFileSync(FX, J(fx));
-    await fetch(`${FAKE}/__myfavs`, { method: "POST", body: J({ ids: PRIV }) });
+    await fetch(`${FAKE}/__myfavs`, { method: "POST", body: J({ steamid: ME2, ids: OTHER }) });
+    // the account's page 1 waits for the test's /__release (the switch below)
+    await fetch(`${FAKE}/__myfavs`, { method: "POST", body: J({ ids: PRIV, hold: 1 }) });
     fs.rmSync(FF(ME), { force: true });
     process.exit(0);
   }
 
   if (MODE === "fav-private") {
+    // the sign-in switches to another account while the first load reads the community pages: page 1 is held until the
+    // test has signed in as ME2, so the next page would go out with ME2's cookie
+    let n0 = (await fakeLog()).length;
+    await favs("open");
+    const held = await waitAsync(async () => (await since(n0)).some((x) => x.path === `/profiles/${ME}/myworkshopfiles/` && x.query.p === "1"));
+    signIn(ME2);
+    await fetch(`${FAKE}/__release`);
+    await waitFor(() => evs.at(-1)?.loading === null, 8000);
+    const asked = (await since(n0)).map((x) => x.path);
+    signIn(ME);
+    const rs = await favs();
+    out(held && evs.at(-1)?.loading === null && !fs.existsSync(FF(ME)) && !asked.includes(`/profiles/${ME2}/myworkshopfiles/`) && rs.json?.signedIn === true
+      && !(rs.json.items ?? []).some((w) => OTHER.includes(w.workshopId)) && rs.json.error,
+      "a sign-in switched mid-load: no page asked as the other account, none of its favourites in this account's list, nothing written",
+      J({ held, asked, file: fs.existsSync(FF(ME)), err: rs.json?.error, other: (rs.json?.items ?? []).filter((w) => OTHER.includes(w.workshopId)).length }));
     // i. a private profile: the community pages with the cookie, then the details in one GetDetails
-    const n0 = (await fakeLog()).length;
+    evs.length = 0;
+    n0 = (await fakeLog()).length;
     let r = await favs("open");
     await waitFor(() => evs.at(-1)?.loading === null, 8000);
     r = await favs();
