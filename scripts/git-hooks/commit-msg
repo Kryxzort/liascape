@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# The commit-message rules CLAUDE.md sets that a script can check: a title that starts with a capital and ends without
+# a period, and a `Claude-Agent: <model id>, effort <…>, <role>` trailer on every commit a Claude co-wrote (the trailer
+# names which model and effort wrote it; the Co-Authored-By line alone doesn't). Enable once per clone:
+#   git config core.hooksPath scripts/git-hooks
+msg=$1
+title=$(grep -v '^#' "$msg" | sed -n '/./{p;q}')
+fail() { echo "commit-msg: $*" >&2; echo "commit-msg: (message kept in $msg)" >&2; exit 1; }
+[ -n "$title" ] || exit 0
+case "$title" in fixup!*|squash!*|amend!*|Merge\ *|Revert\ *) exit 0 ;; esac
+[[ "$title" =~ ^[A-Z0-9#] ]] || fail "the title starts with a capital: \"$title\""
+[[ "$title" == *. ]] && fail "the title ends without a period: \"$title\""
+if grep -qi '^Co-Authored-By: Claude' "$msg"; then
+  grep -Eq '^Claude-Agent: [^,]+, effort (low|medium|high|xhigh|max|unknown), .+' "$msg" ||
+    fail "a commit Claude co-wrote needs 'Claude-Agent: <model id>, effort <low|medium|high|xhigh|max|unknown>, <role>'"
+fi
+exit 0
