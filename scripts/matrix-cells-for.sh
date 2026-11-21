@@ -75,6 +75,8 @@ for f in $FILES; do
     src/backend/Helpers/ImportService.cs) add "cardApply" "$f (the matrix imports its clips with it)" ;;
     # a preset's base fetched with it, by the preset's own mode and action: its own scripts
     src/backend/Web/PresetDownloads.cs) echo "  $f → nothing in the matrix (bash scripts/test-steam-signin.sh: § 2 presets, § 3 k.; bash scripts/test-presets.sh)" >&2 ;;
+    # the shared Workshop details cache: its own script
+    src/backend/Helpers/WorkshopDetailsCache.cs) echo "  $f → nothing in the matrix (bash scripts/test-workshop-social.sh)" >&2 ;;
     src/backend/Scrapers/*|src/backend/Services/*|src/backend/Helpers/Steam*|src/backend/Web/SteamOps.cs|\
     src/backend/Helpers/Workshop*|src/backend/Helpers/DownloadHelper.cs|src/backend/Web/WorkshopSocialOps.cs|src/backend/Web/WorkshopSubOps.cs|src/backend/Models/WorkshopList.cs)
       echo "  $f → nothing (Browse/download/Steam: not in the matrix — test it by hand / its own script)" >&2 ;;

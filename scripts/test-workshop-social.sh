@@ -25,6 +25,11 @@
 #     as asked; the whole Workshop's default list holds none, Preset ticked holds only presets; a preset's base
 #     (/workshop/base: Steam's one child, its title and kind, the library's folder, one GetDetails per item; 404 / 400);
 #     scene support off or the legacy engine → no presets.
+#  6. the shared Workshop details cache (POST /workshop/details, Helpers/WorkshopDetailsCache.cs): the found items in the
+#     asked order with their created time and score, the missing ones in one GetDetails, a second ask sends nothing (an id
+#     Steam has none of remembered for the run, not on disk), kept in $XDG_CACHE_HOME/liascape/workshop/details.json (saves
+#     at most once a second), Steam unreachable → only what's cached, 2001 ids / a non-digit id → 400 with nothing asked, a
+#     Library sidebar's counts refresh a cached copy (an uncached one isn't added); after a restart the same ask sends nothing.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -104,6 +109,10 @@ const fx = { "3000000001": { tags: ["Video"], creator: OWNER, ...counts }, "3000
 fx["2001"] = { tags: ["Preset", "Scene"], title: "preset-a", children: ["1003"] };
 fx["1003"] = { tags: ["Scene"], title: "Query Scene" };
 fx["1001"] = { tags: ["Video"], title: "q-video" };
+// the details cache (§ 6): Steam field names, created times and vote scores
+fx["5001"] = { tags: ["Video"], title: "d-5001", time_created: 1700000001, score: 0.75, preview_url: "https://images.example.invalid/5001.jpg", subscriptions: 10 };
+fx["5002"] = { tags: ["Scene"], title: "d-5002", time_created: 1700000002, score: 0.5, preview_url: "https://images.example.invalid/5002.jpg" };
+fx["5003"] = { tags: ["Video"], title: "d-5003", time_created: 1700000003, score: 0.25, preview_url: "https://images.example.invalid/5003.jpg" };
 require("fs").writeFileSync(process.env.T + "/steam-cm.json", JSON.stringify(fx));'
 export LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
 
@@ -116,11 +125,20 @@ export FAKE=http://127.0.0.1:$(cat "$T/fake.port")
 mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
 export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 printf '{"PlayerEngine":"liascape-player","NoAudio":true,"AllowScenes":true,"AutoAddWeWallpapersToLibrary":false}\n' > "$XDG_CONFIG_HOME/liascape/settings.json"
-(cd /tmp && LIASCAPE_STEAM_COMMUNITY=$FAKE LIASCAPE_STEAM_API=$FAKE exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
-for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
-[ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "FAIL  backend didn't start"; tail -15 "$T/backend.log"; exit 1; }
-export U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
-for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
+# the backend's log is appended to across a restart (§ 6 counts its GetDetails lines over both runs)
+start_backend() {
+  rm -f "$XDG_CONFIG_HOME/liascape/serve.port"
+  (cd /tmp && LIASCAPE_STEAM_COMMUNITY=$FAKE LIASCAPE_STEAM_API=$FAKE exec "$DOTNET" "$DLL" serve >> "$T/backend.log" 2>&1) & BP=$!
+  for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
+  [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "FAIL  backend didn't start"; tail -15 "$T/backend.log"; exit 1; }
+  export U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
+  for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
+}
+stop_backend() {
+  kill "$BP" 2>/dev/null
+  for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null
+}
+start_backend
 
 cat > "$T/drive.mjs" <<'EOF'
 import fs from "node:fs";
@@ -138,6 +156,26 @@ const sources = (await get("/sources")).json;
 const WS = sources.find((s) => s.supportsTagFilter).index;
 const filter = (p = {}) => ({ sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any", ...p });
 const browse = (list, page = 1, f = filter()) => post("/browse", { source: WS, page, filter: f, list });
+const wids = (x) => (Array.isArray(x.json) ? x.json.map((w) => w.workshopId) : []);
+const blog = () => fs.readFileSync(`${T}/backend.log`, "utf8");
+const count = (re) => (blog().match(new RegExp(re.source, "g")) ?? []).length;
+const DF = `${process.env.XDG_CACHE_HOME}/liascape/workshop/details.json`;
+const onDisk = () => { try { return JSON.parse(fs.readFileSync(DF, "utf8")); } catch { return null; } };
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+const waitFor = async (f, ms = 4000) => { for (let t = 0; t < ms && !f(); t += 50) await sleep(50); return !!f(); };
+
+if (process.argv[2] === "after-restart") {
+  // ---- 6 (after a restart). the details cache read back from disk ----
+  let before = count(/GetDetails of/);
+  let r = await post("/workshop/details", { ids: ["5001", "5002"] });
+  out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5001", "5002"]) && r.json.items[0].subscriptions === 99 && count(/GetDetails of/) === before,
+    "details after a restart: the same ask sends nothing (read from disk, the sidebar's refreshed counts kept)", J({ r, asks: count(/GetDetails of/) - before }));
+  before = count(/GetDetails of/);
+  r = await post("/workshop/details", { ids: ["5001", "9999"] });
+  out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5001"]) && count(/GetDetails of/) === before + 1 && count(/GetDetails of 1 id\(s\).*fixture: 9999\)/) === 1,
+    "details after a restart: an id Steam had no public item for is asked again (remembered for a run, not on disk)", J({ r, asks: count(/GetDetails of/) - before }));
+  process.exit(0);
+}
 
 // ---- 1. signed out ----
 let n0 = (await fakeLog()).length;
@@ -277,7 +315,6 @@ const r3 = await post("/workshop/favorite", { workshopId: ITEM, favorite: true }
 out(r.status === 429 && r3.status === 429 && (await since(n0)).length === 0, "during the cooldown: 429 and nothing sent", J([r.status, r3.status]));
 
 // ---- 5. a scene's presets (list kind "presets": QueryFiles' child lookup) and a preset's base ----
-const wids = (x) => (Array.isArray(x.json) ? x.json.map((w) => w.workshopId) : []);
 r = await browse({ kind: "presets", id: "1003" });
 out(r.status === 200 && J(wids(r)) === J(["2001", "2002"]) && r.json.every((w) => w.isPreset === true && w.isScene === true),
   "presets list: exactly the scene's presets, each isPreset + isScene (the web-based one left out)", J({ s: r.status, ids: wids(r), r: r.json?.error }));
@@ -317,8 +354,54 @@ out(r.status === 200 && r.json?.length === 0 && rf.status === 200 && rf.json?.le
 r = await post("/settings", { PlayerEngine: "legacy" });
 const rl = await browse({ kind: "presets", id: "1003" });
 out(r.status === 200 && rl.status === 200 && rl.json?.length === 0, "the legacy engine: no presets list", J([r.status, rl]));
+
+// ---- 6. the shared Workshop details cache (POST /workshop/details) ----
+let before = count(/GetDetails of/);
+r = await post("/workshop/details", { ids: ["5001", "5002", "9999"] });
+out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5001", "5002"]) && r.json.items[0].createdAt && r.json.items[0].score === 0.75,
+  "details: the found items in order, with created / score", J(r));
+out(count(/GetDetails of 3 id/) === 1 && count(/GetDetails of/) === before + 1, "details: one GetDetails for the missing ids", J(count(/GetDetails of/) - before));
+before = count(/GetDetails of/);
+r = await post("/workshop/details", { ids: ["5002", "5001", "9999"] });
+out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5002", "5001"]) && count(/GetDetails of/) === before,
+  "details: a second ask (in another order) sends nothing, the id Steam has none of included", J({ r, asks: count(/GetDetails of/) - before }));
+out(await waitFor(() => onDisk()?.["5001"] && onDisk()?.["5002"]), "details: kept on disk");
+const disk = onDisk();
+out(!!disk && !("9999" in disk), "details: an id Steam has no public item for isn't kept on disk", J(Object.keys(disk ?? {})));
+out(!!disk && !(ITEM in disk), "details: a sidebar's counts of an uncached item don't add it to the cache", J(Object.keys(disk ?? {})));
+// writes coalesced: three items cached one after another → one save (at most one a second; never three)
+const saves0 = count(/workshop-details: saved/);
+for (const id of ["5003", "3000000002", "3000000003"]) await post("/workshop/details", { ids: [id] });
+await waitFor(() => ["5003", "3000000002", "3000000003"].every((id) => onDisk()?.[id]));
+await sleep(1300);
+const saves = count(/workshop-details: saved/) - saves0;
+out(saves >= 1 && saves <= 2 && ["5003", "3000000002", "3000000003"].every((id) => onDisk()?.[id]), "details: three asks in a row saved at most once a second", J({ saves }));
+// Steam unreachable: what's cached, the rest left out and asked again once it answers
+fs.renameSync(`${T}/steam-cm.json`, `${T}/steam-cm.off`);
+r = await post("/workshop/details", { ids: ["5001", "3000000004"] });
+fs.renameSync(`${T}/steam-cm.off`, `${T}/steam-cm.json`);
+before = count(/GetDetails of/);
+const r6 = await post("/workshop/details", { ids: ["5001", "3000000004"] });
+out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5001"]) && J(wids({ json: r6.json?.items })) === J(["5001", "3000000004"]) && count(/GetDetails of/) === before + 1,
+  "details with Steam unreachable: only what's cached; the rest asked again once it answers", J([r, r6]));
+before = count(/GetDetails of/);
+const big = await post("/workshop/details", { ids: Array.from({ length: 2001 }, (_, i) => String(i + 1)) });
+const bad = await post("/workshop/details", { ids: ["5001", "12a"] });
+out(big.status === 400 && bad.status === 400 && count(/GetDetails of/) === before, "details: 2001 ids → 400, a non-digit id → 400, nothing asked", J([big.status, bad.status]));
+// a Library sidebar's counts (fixture 5001 subscriptions 10 → 99) refresh the cached copy
+const fx6 = JSON.parse(fs.readFileSync(`${T}/steam-cm.json`, "utf8")); fx6["5001"].subscriptions = 99;
+fs.writeFileSync(`${T}/steam-cm.json`, J(fx6));
+const rcnt = await get("/workshop/counts?id=5001");
+before = count(/GetDetails of/);
+r = await post("/workshop/details", { ids: ["5001"] });
+out(rcnt.json?.subscriptions === 99 && r.json?.items?.[0]?.subscriptions === 99 && count(/GetDetails of/) === before
+  && await waitFor(() => onDisk()?.["5001"]?.Subscriptions === 99),
+  "details: a Library sidebar's counts refresh the cached copy (in memory and on disk)", J({ rcnt, r }));
 EOF
 (cd "$T" && timeout 200 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
+# § 6 after a restart: what the details cache kept on disk
+stop_backend; start_backend
+(cd "$T" && timeout 60 node drive.mjs after-restart) >> "$T/drive.log" 2>&1 || rc=$?
 sed 's/^/      /' "$T/drive.log"
 p=$(grep -c '^PASS' "$T/drive.log"); f=$(grep -c '^FAIL' "$T/drive.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))
