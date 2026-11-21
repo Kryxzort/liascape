@@ -128,14 +128,41 @@ public static class SceneProperties
     // core as a file to read, so only a relative '/' path with no `..` naming an existing image file whose real path
     // (links resolved) stays inside the preset's real folder is taken; anything else keeps the base's own texture.
     // Guard: player-selftest PresetImageAssertions, scripts/test-presets.sh § 2 preset images
-    internal static string? PresetImage(string presetDir, JsonElement v)
+    internal static string? PresetImage(string presetDir, JsonElement v) => PresetImage(presetDir, v, out _);
+
+    // …and why one isn't taken (null for "" — the preset keeps the base's texture on purpose)
+    private static string? PresetImage(string presetDir, JsonElement v, out string? why)
     {
-        if (v.ValueKind != JsonValueKind.String || v.GetString() is not { Length: > 0 } rel) return null;
+        why = null;
+        if (v.ValueKind != JsonValueKind.String) { why = "not a file name"; return null; }
+        if (v.GetString() is not { Length: > 0 } rel) return null;
+        why = "outside the preset's folder";
         if (rel[0] == '/' || rel.Contains('\\') || rel.Contains('\0') || rel.Split('/').Contains("..")) return null;
+        why = "not an image";
         if (!ImageExtensions.Contains(Path.GetExtension(rel).ToLowerInvariant())) return null;
+        why = "missing";
         if (Liascape.Web.ApiSecurity.RealPath(presetDir) is not { } root
             || Liascape.Web.ApiSecurity.RealPath(Path.Combine(presetDir, rel)) is not { } file) return null;
-        return file.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal) && File.Exists(file) ? file : null;
+        why = "outside the preset's folder";
+        if (!file.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal)) return null;
+        why = "not an image file";
+        if (!File.Exists(file)) return null;
+        why = null;
+        return file;
+    }
+
+    // A playable preset's image values its base's slots won't show (each slot keeps the base's own texture), with why:
+    // the adapter logs them when the preset plays — the rest of the preset still plays, so it isn't greyed out.
+    // Guard: adapter IT § presets "a preset image that doesn't load is in the adapter log"
+    public static List<(string Name, string Value, string Why)> DroppedPresetImages(string presetDir)
+    {
+        var dropped = new List<(string, string, string)>();
+        if (Presets.Read(presetDir) is not { } preset || Presets.LoadDirOf(presetDir) is not { } baseDir) return dropped;
+        foreach (var p in ForItem(baseDir))
+            if (p.Type == "scenetexture" && preset.Values.TryGetValue(p.Name, out var v) && PresetImage(presetDir, v, out var why) == null
+                && why != null)
+                dropped.Add((p.Name, v.ValueKind == JsonValueKind.String ? v.GetString()! : v.GetRawText(), why));
+        return dropped;
     }
 
     // The JSON type WE saves a property type's value in (library.md § Presets): a bool as true/false or 0/1. `Coerce` alone

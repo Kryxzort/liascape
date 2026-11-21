@@ -828,6 +828,8 @@ public static class PlayerHelper
 
     public static void Apply(string videoPath, string mpvOptions)
     {
+        // a preset that can't play (both engines): its reason, never its plain base scene
+        if (PresetUnplayableReason(videoPath) is string presetWhy) throw new InvalidOperationException(presetWhy);
         lock (_lock)
         {
             if (IsScenePath(videoPath))
@@ -3912,9 +3914,16 @@ public static class PlayerHelper
     public static bool SkipScene(bool isScene, bool playable, bool crashed, bool whitelisted) =>
         isScene && (!playable || (crashed && !whitelisted));
 
+    // A preset that can't play now, and why (Presets.StatusOf, read fresh: its base missing, not a scene, the legacy
+    // engine); null = not a preset, or one that plays. Never played as its plain base: Apply refuses it with the reason
+    // and every picker and the program's `skip` pass it by. Guard: player-selftest SceneSkipAssertions, adapter IT § presets
+    public static string? PresetUnplayableReason(string path) =>
+        IsScenePath(path) && Presets.Read(path) != null ? Presets.StatusOf(path, PlayerEngine.IsLiascapePlayer).Reason : null;
+
     private static bool IsSkippedPath(string path)
     {
         if (!IsScenePath(path)) return false;
+        if (PresetUnplayableReason(path) != null) return true;
         return IsSkippedPath(path, PlayerEngine.ScenesPlayable(SettingsService.Load()));
     }
 
@@ -4062,7 +4071,7 @@ public static class PlayerHelper
     private static bool IsSkippedPath(string path, bool scenesPlayable)
     {
         if (!IsScenePath(path)) return false;
-        if (!scenesPlayable) return true;
+        if (!scenesPlayable || PresetUnplayableReason(path) != null) return true;
         var m = LibraryStore.GetMeta(path);
         return SkipScene(true, true, m?.Crashed ?? false, m?.Whitelist ?? false);
     }

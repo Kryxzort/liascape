@@ -30,6 +30,8 @@
 #   scripts/test-liascape-player-adapter.sh             # builds liascape-player (cargo, via the flake devShell when
 #                                                 # `nix` exists) + the backend (dotnet build), then tests
 #   scripts/test-liascape-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
+#   LIASCAPE_IT_ONLY=presets …                          # only the presets section (then the engine switch at the end)
+#   LIASCAPE_IT_ONLY=automute …                         # only the auto-mute section
 #   LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor …          # the auto-mute section with the backend's AudioMonitor as the
 #                                                 # engine (the player's Signal off: LIASCAPE_PLAYER_AUTOMUTE=0) —
 #                                                 # without it, the shipped engine: the player's Signal
@@ -310,6 +312,12 @@ mk_scene() {   # $1 = item folder, $2 = liascape-synthetic.json
   echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC | base64 -d > "$1/preview.png"
 }
 nsch() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
+wpid() { ctl state | jq -r --arg id "$1" '.workers[]? | select(.id==$id) | .pid // empty'; }
+scene_ready() { [ "$(cur path)" = "$1" ] && [ "$(cur kind)" = scene ] && [ "$(cur ready)" = true ]; }
+live_sp() { ctl get "{\"path\":\"$1.scene_props\"}" | jq -c '.value'; }
+# one pixel of a source's own picture (rgb), from a capture
+px() { ctl capture "{\"target\":\"$1\",\"path\":\"$T/px.png\"}" >/dev/null 2>&1 && ffmpeg -nostdin -loglevel error -i "$T/px.png" -vf "crop=1:1:100:100" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s ' ' | sed 's/^ //;s/ $//'; }
+px_is() { [ "$(px "$1")" = "$2" ]; }
 # the newest switch to $1 (after scheduled event $2, of align $3) and its outcome
 corr_to() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" --argjson n "$2" --arg a "$3" '[.events[$n:][] | select(.path==$p and .align==$a)][-1].corr // empty'; }
 switched_to() { sc=$(corr_to "$1" "$2" "${3:-now}"); [ -n "$sc" ] && [ "$(corr_has "$sc" handoff)" -ge 1 ]; }
@@ -334,7 +342,7 @@ rebuild_commit() { mv -f "$T/bin/liascape-player.new" "$T/bin/liascape-player"; 
 rebuild() { rebuild_prep && rebuild_commit; }
 
 IT_ONLY=${LIASCAPE_IT_ONLY:-}
-case "$IT_ONLY" in ''|automute) ;; *) echo "LIASCAPE_IT_ONLY: automute (or unset: every section)"; exit 2 ;; esac
+case "$IT_ONLY" in ''|automute|presets) ;; *) echo "LIASCAPE_IT_ONLY: automute | presets (or unset: every section)"; exit 2 ;; esac
 if [ -z "$IT_ONLY" ]; then
 
 echo "== apply / transition"
@@ -895,10 +903,8 @@ IDX=$LIB/workshop/index.json
 setting '.AllowScenes = true | .Volume = 100 | .Speed = 1 | .NoAudio = false | .SceneMonitors = []'
 pe_scenes() { curl -sf -m 5 "$U/player-engine" | jq -c .scenes; }
 curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == true' >/dev/null && ok "/player-engine.scenes: $(pe_scenes)" || bad "/player-engine.scenes: $(pe_scenes)"
-wpid() { ctl state | jq -r --arg id "$1" '.workers[]? | select(.id==$id) | .pid // empty'; }
 waudio() { ctl probe '{"name":"workers"}' | jq -r --arg id "$1" ".workers[] | select(.id==\$id) | .audio.$2"; }
 pid_gone() { ! kill -0 "$1" 2>/dev/null; }
-scene_ready() { [ "$(cur path)" = "$1" ] && [ "$(cur kind)" = scene ] && [ "$(cur ready)" = true ]; }
 
 t_ap=$(ms_now); post /apply "{\"path\":\"$S1\"}" >/dev/null
 waitfor 3000 scene_ready "$S1" && ok "/apply a scene → cur kind scene, ready in $(( $(ms_now) - t_ap )) ms" || bad "/apply a scene → path $(basename "$(cur path)") kind $(cur kind) ready $(cur ready)"
@@ -1071,11 +1077,7 @@ EOF
 sp_get() { curl -sf -m 5 "$U/library/scene-props?path=$S1"; }
 sp_set() { curl -s -m 10 -o "$T/sp.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$1" "$U/library/scene-props"; }
 sp_prev() { curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$1" "$U/library/scene-props/preview"; }
-live_sp() { ctl get "{\"path\":\"$1.scene_props\"}" | jq -c '.value'; }
 idx_sp()  { jq -c '."900000001".sceneProps // null' "$IDX"; }
-# one pixel of a source's own picture (rgb), from a capture
-px() { ctl capture "{\"target\":\"$1\",\"path\":\"$T/px.png\"}" >/dev/null 2>&1 && ffmpeg -nostdin -loglevel error -i "$T/px.png" -vf "crop=1:1:100:100" -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s ' ' | sed 's/^ //;s/ $//'; }
-px_is() { [ "$(px "$1")" = "$2" ]; }
 SPJ=$(sp_get)
 echo "$SPJ" | jq -e '[.props[].name] == ["color","hdr","clock","style","bars","name","dock"]
   and (.props[0] | .type == "color" and .label == "Scheme color" and .value == "1 0 0" and .overridden == false and .editable)
@@ -2325,7 +2327,7 @@ post /library/volume "{\"path\":\"$QB\",\"intValue\":null}" >/dev/null
 setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .Volume = 100'
 stop_now
 
-else
+elif [ "$IT_ONLY" = automute ]; then
   # LIASCAPE_IT_ONLY=automute: only the auto-mute section, from the state the sections before leave it in — the
   # backend's binary a COPY of this build (the upgrade test's), a fresh backend (the app-closed section's last), a player current
   # for it, two synthetic scenes with audio
@@ -2350,7 +2352,9 @@ echo "== auto-mute never hears our own switches (a private PipeWire + pipewire-p
 # The daemons get their own config/state dirs (no D-Bus, WirePlumber's `policy` profile — no ALSA/Bluetooth device
 # monitor, one null sink): sockets in this test's $XDG_RUNTIME_DIR, where the backend's pactl/parec (PULSE_SERVER,
 # exported above) and the player's PipeWire client look. The owner's audio server is never involved.
-if command -v pipewire >/dev/null && command -v pipewire-pulse >/dev/null && command -v wireplumber >/dev/null \
+if [ "$IT_ONLY" = presets ]; then
+  echo "  SKIP (LIASCAPE_IT_ONLY=presets)"
+elif command -v pipewire >/dev/null && command -v pipewire-pulse >/dev/null && command -v wireplumber >/dev/null \
    && command -v pactl >/dev/null && command -v paplay >/dev/null && command -v parec >/dev/null; then
   PW=$T/pw; mkdir -p "$PW/cfg/wireplumber/wireplumber.conf.d" "$PW/state"
   cat > "$PW/pw.conf" <<'EOF'
@@ -2624,6 +2628,152 @@ else
   echo "  SKIP (pipewire / pipewire-pulse / wireplumber / pactl / paplay / parec not all found)"
 fi
 
+if [ -z "$IT_ONLY" ] || [ "$IT_ONLY" = presets ]; then
+echo "== presets: their own items over a synthetic base scene (identity = the preset's folder, scene_dir = its base's)"
+# A Wallpaper Engine preset (.claude/rules/backend/library.md § Presets: project.json with no `type`, a `preset` object and
+# its base's Workshop id) plays as its own scene source: `path` = its folder (crash marks, rotation, /current), `scene_dir`
+# = its base's folder, `scene_props` = the base's defaults → the preset's values → the card's tweaks.
+setting '.AllowScenes = true | .Volume = 100 | .NoAudio = false | .GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .GlobalMaxPlaySeconds = 0 | .GlobalSeparateSceneTiming = false | .GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = ["fade"] | .GlobalTransitionDurationMs = 300 | .TransitionMethod = "full-live" | .GlobalPlaylistStart = "start_over"'
+PS1=$LIB/workshop/900000001; PIDX=$LIB/workshop/index.json
+mk_scene "$PS1" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360]}'
+cat > "$PS1/project.json" <<'EOF'
+{"type":"scene","title":"900000001","file":"scene.json","preview":"preview.png","general":{"properties":{
+ "color":{"order":0,"text":"Colour","type":"color","value":"1 0 0"},
+ "tex":{"order":1,"text":"Image","type":"scenetexture","value":""}}}}
+EOF
+mk_preset() {   # $1 = item folder, $2 = its base's Workshop id, $3 = its values (JSON): WE's shape, its own preview
+  mkdir -p "$1"
+  jq -nc --arg dep "$2" --argjson v "$3" --arg t "$(basename "$1")" \
+    '{dependency: $dep, preset: ({_d0: null, rate: 100} + $v), preview: "preview.jpg", tags: ["Unspecified"], title: $t, visibility: "public"}' > "$1/project.json"
+  ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=white:s=32x18" -frames:v 1 "$1/preview.jpg"
+}
+PR1=$LIB/workshop/910000101; mk_preset "$PR1" 900000001 '{"color":"0 0 1"}'
+# PR2's image names a file it doesn't have: that slot keeps the base's texture, the adapter log says why, the rest plays
+PR2=$LIB/workshop/910000102; mk_preset "$PR2" 900000001 '{"color":"0 1 0","tex":"files/none.png"}'
+psp_set() { curl -s -m 10 -o "$T/psp.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$1" "$U/library/scene-props"; }
+sdir() { ctl get "{\"path\":\"$1.scene_dir\"}" | jq -r .value; }
+reason_of() { curl -sf -m 5 "$U/library" | jq -c --arg p "$1" '[.[] | select(.videoPath == $p)][0] | [.isPreset, .presetReason]'; }
+pr_sched_to() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq --argjson n "$1" --arg p "$2" '[.events[$n:][] | select(.path==$p)] | length'; }
+# the transition.started events since index $1 whose B is $2: "<A's path> <A's id> <B's id>" each
+started_to() { ctl logs '{"kind_prefix":"transition.started","limit":10000}' | jq -r --argjson n "$1" --arg p "$2" '.events[$n:][] | select(.b.path==$p) | "\(.a[0].path // "-") \(.a[0].id // "-") \(.b.id)"'; }
+nstarted() { ctl logs '{"kind_prefix":"transition.started","limit":10000}' | jq '.events|length'; }
+ADAPTER_LOG=$XDG_CACHE_HOME/liascape/liascape-player-adapter.log
+
+[ "$(reason_of "$PR1")" = '[true,null]' ] && ok "GET /library: the preset is its own item over its base, playable" || bad "the preset's library item: $(reason_of "$PR1")"
+post /apply "{\"path\":\"$PR1\"}" >/dev/null
+waitfor $WAIT scene_ready "$PR1" || bad "/apply the preset → $(basename "$(cur path)") kind $(cur kind) ready $(cur ready)"
+PID1=$(srcIdForPath "$PR1"); WP1=$(wpid "$PID1")
+[ "$(sdir "$PID1")" = "$PS1" ] && waitfor $WAIT px_is "$PID1" "0 0 255" && [ "$(curl -sf -m 5 "$U/current" | jq -r .path)" = "$PR1" ] \
+  && ok "/apply a preset → its own source (path = the preset, scene_dir = its base), the preset's blue, /current names the preset" \
+  || bad "/apply a preset: scene_dir $(sdir "$PID1"), pixel $(px "$PID1"), /current $(curl -sf -m 5 "$U/current" | jq -r .path), scene_props $(live_sp "$PID1")"
+[ "$(cur preview)" = "$PR1/preview.jpg" ] && ok "…its own preview (never its base's)" || bad "the preset's source preview → $(cur preview)"
+code=$(psp_set "{\"path\":\"$PR1\",\"name\":\"color\",\"value\":\"1 1 0\"}")
+[ "$code" = 200 ] && waitfor $WAIT px_is "$PID1" "255 255 0" && [ "$(wpid "$PID1")" = "$WP1" ] \
+  && [ "$(jq -c '."910000101".sceneProps // null' "$PIDX")" = '{"color":"1 1 0"}' ] && [ "$(jq -c '."900000001".sceneProps // null' "$PIDX")" = null ] \
+  && ok "a tweak on the preset's card → live on the same worker (yellow), stored on the preset only" \
+  || bad "preset tweak: HTTP $code, pixel $(px "$PID1"), worker $WP1 → $(wpid "$PID1"), index preset $(jq -c '."910000101".sceneProps // null' "$PIDX") base $(jq -c '."900000001".sceneProps // null' "$PIDX")"
+sp1=$(live_sp "$PID1")
+code=$(psp_set "{\"path\":\"$PS1\",\"name\":\"color\",\"value\":\"0 0 1\"}"); sleep 1.5   # an absence: nothing reaches the preset
+[ "$code" = 200 ] && [ "$(live_sp "$PID1")" = "$sp1" ] && px_is "$PID1" "255 255 0" \
+  && ok "a tweak on the base's card never reaches the playing preset (scene_props $sp1)" || bad "base tweak: HTTP $code, the preset's scene_props $sp1 → $(live_sp "$PID1"), pixel $(px "$PID1")"
+psp_set "{\"path\":\"$PS1\",\"reset\":true}" >/dev/null; psp_set "{\"path\":\"$PR1\",\"reset\":true}" >/dev/null
+waitfor $WAIT px_is "$PID1" "0 0 255" || bad "reset the preset's tweaks → pixel $(px "$PID1") (want its own blue)"
+
+# A base found in another folder later (here a `local/<id>` link, found before `workshop/<id>`) never reaches the source on
+# screen: its scene_dir would restart its worker. A resolver pass (a volume change) leaves it; the next play loads the new one.
+mkdir -p "$LIB/local"; cp -r "$PS1" "$T/base-alt"; ln -s "$T/base-alt" "$LIB/local/900000001"
+setting '.Volume = 90'
+waitfor $WAIT eval 'near "$(ctl get "{\"path\":\"$PID1.gain.user\"}" | jq -r .value)" "$(dB 90)"' || bad "precondition: Volume 90 never reached the preset's source"
+[ "$(sdir "$PID1")" = "$PS1" ] && [ "$(wpid "$PID1")" = "$WP1" ] && [ "$(srcIdForPath "$PR1")" = "$PID1" ] \
+  && ok "its base found elsewhere meanwhile: a resolver pass on the playing preset leaves its scene_dir and worker" \
+  || bad "a resolver pass after the base moved: scene_dir $(sdir "$PID1"), worker $WP1 → $(wpid "$PID1"), source $PID1 → $(srcIdForPath "$PR1")"
+post /apply "{\"path\":\"$PR2\"}" >/dev/null; waitfor $WAIT scene_ready "$PR2" || bad "→ PR2: $(basename "$(cur path)")"
+post /apply "{\"path\":\"$PR1\"}" >/dev/null; waitfor $WAIT scene_ready "$PR1" || bad "→ PR1 again: $(basename "$(cur path)")"
+[ "$(sdir "$(srcIdForPath "$PR1")")" = "$LIB/local/900000001" ] && ok "…its next play loads the base where it is now" || bad "next play's scene_dir: $(sdir "$(srcIdForPath "$PR1")")"
+rm "$LIB/local/900000001"; setting '.Volume = 100'
+grep -F "910000102" "$ADAPTER_LOG" | grep -F "'tex'" | grep -qF "missing" && ok "a preset image that doesn't load is in the adapter log with why ($(grep -F "910000102" "$ADAPTER_LOG" | grep -F "'tex'" | tail -1 | cut -c1-160))" \
+  || bad "no adapter log line for PR2's missing image: $(grep -F 910000102 "$ADAPTER_LOG" | tail -2)"
+post /apply "{\"path\":\"$PR2\"}" >/dev/null; waitfor $WAIT scene_ready "$PR2"
+waitfor $WAIT px_is "$(srcIdForPath "$PR2")" "0 255 0" && ok "…and the rest of that preset plays (its green)" || bad "PR2 → pixel $(px "$(srcIdForPath "$PR2")")"
+stop_now
+
+echo "-- presets × rotation: timed (V→S, S→S between two presets of one scene, S→V), advance-on-end, shuffle, restore"
+setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 2'
+n0=$(nstarted); ns=$(nsch)
+post /playlist/play "{\"paths\":[\"$A\",\"$PR1\",\"$PR2\"],\"settings\":{\"Order\":0}}" >/dev/null
+seen_cycle() { [ -n "$(started_to "$n0" "$PR2")" ] && [ "$(started_to "$n0" "$A" | grep -cF "$PR2")" -ge 1 ]; }
+waitfor 20000 seen_cycle
+s2=$(started_to "$n0" "$PR2" | head -1); s1=$(started_to "$n0" "$PR1" | head -1)
+read -r s2a s2ida s2idb <<<"$s2"
+[ -n "$s1" ] && [ "${s1%% *}" = "$A" ] && [ "$s2a" = "$PR1" ] && [ "$s2ida" != "$s2idb" ] && [ "$(started_to "$n0" "$A" | grep -cF "$PR2")" -ge 1 ] \
+  && ok "timed 2 s [clip, P1, P2]: V→S (a → P1), S→S (P1 → P2: two sources, $s2ida → $s2idb), S→V (P2 → a)" \
+  || bad "timed presets: to P1 [$s1], to P2 [$s2], to a after P2 $(started_to "$n0" "$A" | grep -cF "$PR2")"
+waitfor 10000 eval '[ "$(cur path)" = "$PR2" ]' && [ "$(sdir "$(srcIdForPath "$PR2")")" = "$PS1" ] && ok "…a rotation's preset source carries its scene_dir" || bad "rotation's P2 source: scene_dir $(sdir "$(srcIdForPath "$PR2")")"
+stop_now
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 2'
+n0=$(nstarted)
+post /playlist/play "{\"paths\":[\"$PR1\",\"$PR2\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor 20000 eval '[ -n "$(started_to "$n0" "$PR2" | grep -F "$PR1")" ] && [ -n "$(started_to "$n0" "$PR1" | grep -F "$PR2")" ]' \
+  && ok "advance-on-end with a 2 s minimum: P1 → P2 → P1 (a scene's minimum reached is its end)" || bad "advance-on-end × presets: to P2 [$(started_to "$n0" "$PR2")], to P1 [$(started_to "$n0" "$PR1")]"
+stop_now
+setting '.GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 2'
+n0=$(nstarted)
+post /playlist/play "{\"paths\":[\"$A\",\"$Bc\",\"$PR1\",\"$PR2\"],\"settings\":{\"Order\":1}}" >/dev/null
+waitfor 30000 eval '[ -n "$(started_to "$n0" "$PR1")" ] && [ -n "$(started_to "$n0" "$PR2")" ]' && ok "shuffle: both presets of one scene come up as their own items" || bad "shuffle × presets: P1 [$(started_to "$n0" "$PR1")], P2 [$(started_to "$n0" "$PR2")]"
+stop_now
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0'
+post /playlist/play "{\"paths\":[\"$PR2\",\"$PR1\"],\"settings\":{\"Order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$PR2" || bad "precondition: play [P2, P1] → $(basename "$(cur path)")"
+stop_now
+"$DOTNET" "$DLL" restore >> "$T/cli.log" 2>&1
+waitfor $WAIT scene_ready "$PR2" && [ "$(sdir "$(srcIdForPath "$PR2")")" = "$PS1" ] && waitfor $WAIT px_is "$(srcIdForPath "$PR2")" "0 255 0" \
+  && ok "/stop + liascape restore → the preset plays again from its base (scene_dir), its own green" || bad "restore × preset: cur $(basename "$(cur path)"), scene_dir $(sdir "$(srcIdForPath "$PR2")"), $(tail -2 "$T/cli.log" | tr '\n' ' ')"
+stop_now
+
+echo "-- a preset over a crashing base: the crash mark is the preset's"
+BC=$LIB/workshop/900000103; mk_scene "$BC" '{"pattern":"solid","rgb":[0,255,0],"native":[640,360],"crash_after_ms":400}'
+PR3=$LIB/workshop/910000103; mk_preset "$PR3" 900000103 '{}'
+post /playlist/play "{\"paths\":[\"$PR3\",\"$PR1\"],\"settings\":{\"Order\":0}}" >/dev/null
+pbroken() { ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -c --arg p "$PR3" '[.events[] | select(.path==$p)][-1] // empty'; }
+waitfor 30000 eval '[ -n "$(pbroken)" ]' || bad "no source.broken for the preset over a crashing base"
+waitfor $WAIT eval 'jq -e ".\"910000103\".crashed == true" "$PIDX" >/dev/null' && jq -e '."900000103".crashed // false | not' "$PIDX" >/dev/null \
+  && ok "source.broken ($(pbroken | jq -c '{scene_id, restarts}')) marks the preset crashed, never its base" || bad "crash marks: preset $(jq -c '."910000103"' "$PIDX"), base $(jq -c '."900000103"' "$PIDX")"
+waitfor $WAIT scene_ready "$PR1" && ok "…and the rotation went on to the next item" || bad "after the preset broke: cur $(basename "$(cur path)")"
+stop_now
+
+echo "-- the base trashed: its presets can't play (skipped, refused, advanced off) but stay in the playlist; Undo brings them back"
+PLP="[\"$A\",\"$Bc\",\"$PR1\",\"$PR2\"]"
+post /playlist/play-from "{\"paths\":$PLP,\"startIndex\":2,\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT scene_ready "$PR1" || bad "precondition: play-from P1 → $(basename "$(cur path)")"
+base_item=$(curl -sf -m 5 "$U/library" | jq -c --arg p "$PS1" '[.[] | select(.videoPath == $p)][0]')
+[ "$(echo "$base_item" | jq -r .videoPath)" = "$PS1" ] || bad "precondition: the base's library item: $base_item"
+post /library/trash "{\"items\":[$base_item]}" >/dev/null
+waitfor $WAIT eval 'c=$(cur path); [ "$c" = "$A" ] || [ "$c" = "$Bc" ]' && ok "trash the base while its preset plays → the rotation moves on to $(basename "$(cur path)") (its presets skipped)" || bad "trash the base mid-rotation: cur $(basename "$(cur path)")"
+[ "$(reason_of "$PR1")$(reason_of "$PR2")" = '[true,"Needs its base scene"][true,"Needs its base scene"]' ] \
+  && ok "GET /library: both presets \"Needs its base scene\"" || bad "after the base's trash: P1 $(reason_of "$PR1"), P2 $(reason_of "$PR2")"
+[ "$(curl -sf -m 5 "$U/playlist/state" | jq -c --arg a "$PR1" --arg b "$PR2" '[.videoPaths | index($a) != null, index($b) != null]')" = '[true,true]' ] \
+  && ok "…they stay in the playlist" || bad "the playlist after the base's trash: $(curl -sf -m 5 "$U/playlist/state" | jq -c .videoPaths)"
+ns=$(nsch)
+for _ in 1 2 3 4; do post /random '{}' >/dev/null; waitfor $WAIT settled; done
+[ "$(pr_sched_to "$ns" "$PR1")$(pr_sched_to "$ns" "$PR2")" = 00 ] && [ "$(( $(nsch) - ns ))" -ge 2 ] \
+  && ok "/random ×4 never lands on them ($(( $(nsch) - ns )) switches)" || bad "/random after the base's trash: $(pr_sched_to "$ns" "$PR1") to P1, $(pr_sched_to "$ns" "$PR2") to P2 of $(( $(nsch) - ns ))"
+err=$(curl -s -m 10 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$PR1\"}" "$U/apply" | jq -r '.error // empty')
+[ "$err" = "Needs its base scene" ] && [ "$(cur path)" != "$PR1" ] && ok "/apply the preset → refused: \"$err\"" || bad "/apply a preset without its base → error \"$err\", cur $(basename "$(cur path)")"
+undo=$(post /library/undo '{}' | jq -c .ok)
+[ "$undo" = true ] && [ "$(reason_of "$PR1")$(reason_of "$PR2")" = '[true,null][true,null]' ] && ok "Undo → the base is back, both presets playable" || bad "undo: $undo, P1 $(reason_of "$PR1"), P2 $(reason_of "$PR2")"
+ns=$(nsch); hit=0
+for _ in 1 2 3 4; do post /next '{}' >/dev/null; waitfor $WAIT settled; c=$(cur path); { [ "$c" = "$PR1" ] || [ "$c" = "$PR2" ]; } && { hit=1; break; }; done
+[ $hit = 1 ] && waitfor $WAIT scene_ready "$(cur path)" && ok "…the rotation plays them again ($(basename "$(cur path)"))" || bad "after undo: /next never reached a preset (cur $(basename "$(cur path)"))"
+stop_now
+post /apply "{\"path\":\"$PR1\"}" >/dev/null; waitfor $WAIT scene_ready "$PR1" || bad "precondition: /apply P1 → $(basename "$(cur path)")"
+base_item=$(curl -sf -m 5 "$U/library" | jq -c --arg p "$PS1" '[.[] | select(.videoPath == $p)][0]')
+post /library/trash "{\"items\":[$base_item]}" >/dev/null
+waitfor $WAIT nothing_shown && ok "trash the base under a single preset wallpaper → it stops" || bad "trash the base × single preset: cur $(basename "$(cur path)")"
+post /library/undo '{}' >/dev/null
+[ "$(reason_of "$PR1")" = '[true,null]' ] || bad "second undo: P1 $(reason_of "$PR1")"
+setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0'
+fi
+
 echo "== Phase 3 Task 8: legacy's daemon files never existed under liascape-player (the whole run, sampled every 0.2 s)"
 kill "$FWP" 2>/dev/null; wait "$FWP" 2>/dev/null; FWP=""
 [ ! -s "$LEGACY_FILES_LOG" ] && ok "no pending_action.txt / timer.pid / gui_timer.pid / restart.pid / timed_state.json / playlist_observer_paths.json at any sample" \
@@ -2635,6 +2785,10 @@ mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
 kill -0 "$SP" 2>/dev/null && bad "liascape-player supervisor still running after the switch away" || ok "liascape-player supervisor quit on switch away"
 kill -0 "$CP" 2>/dev/null && bad "liascape-player compositor still running after the switch away" || ok "liascape-player compositor quit on switch away"
 [ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "no mpvpaper started/killed" || bad "mpvpaper count changed"
+if [ -n "${PR1:-}" ]; then
+  perr=$(curl -s -m 10 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$PR1\"}" "$U/apply" | jq -r '.error // empty')
+  [ "$perr" = "Presets play only in the Liascape player" ] && [ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "legacy engine: /apply a preset → refused: \"$perr\"" || bad "legacy × /apply a preset: error \"$perr\", mpvpaper $(pgrep -c -f mpvpaper) (was $mp0)"
+fi
 grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 
 echo "== adapter log (tail)"

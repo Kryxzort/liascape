@@ -14,6 +14,8 @@
 #     folder with its merged map and lands under its own path (the stub player answers `scene-loudness`). A bool saved
 #     as 0 / 1 reads as false / true. Preset images: a scenetexture value `files/<name>` goes to the player as the image's
 #     real path inside the preset's own folder; a path out of it, a link out, not an image or a missing file sends nothing.
+#  3. the base trashed: its presets read "Needs its base scene" and the WebSocket says `library-synced`; Undo makes them
+#     playable again (playing them: the adapter IT § presets).
 # Runs in its own network namespace (`unshare -rn`) with a temp HOME + XDG dirs and a private backend whose Steam servers
 # are an empty fixture (LIASCAPE_STEAM_CM_FIXTURE) and which refuses every real server (LIASCAPE_TEST_NO_NETWORK=1). The
 # engine is liascape-player through a stub binary that never runs (nothing is played here); the base scene is synthetic.
@@ -382,6 +384,56 @@ check "the player's map: each preset's own images as real paths, the toggles its
 check "a value for an image slot can't be set on the card (no file picker): 400, the preset's image stays" \
   "$(setp "$F1" custom "\"$T/elsewhere/out.png\"") $(sp workshop 3583880694) $(prop "$F1" custom '.default')" \
   "400 null \"$(real "$F1/files/eeeeee.png")\""
+stopbe
+
+# ---- 3. the base trashed (no player: the library's side) ----------------------------------------------------------------
+echo "== 3. the base trashed: its presets need it again (the WS tells the Library); Undo makes them playable"
+startbe
+# the backend's WebSocket (/events) as the UI opens it: Host 127.0.0.1:<port>, the token as ?token= → one message per line
+python3 - "$PORT" "$TOKEN" > "$T/ws3.log" 2>&1 <<'PY' &
+import socket, sys, base64, os
+port, token = int(sys.argv[1]), sys.argv[2]
+s = socket.create_connection(("127.0.0.1", port))
+s.send(("GET /events?token=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (token, port, base64.b64encode(os.urandom(16)).decode())).encode())
+buf = b""
+def need(n):
+    global buf
+    while len(buf) < n:
+        d = s.recv(65536)
+        if not d: sys.exit(0)
+        buf += d
+need(4)
+while b"\r\n\r\n" not in buf: need(len(buf) + 1)
+head, buf = buf.split(b"\r\n\r\n", 1)
+print(head.split(b"\r\n")[0].decode(), flush=True)
+while True:
+    need(2); n = buf[1] & 0x7f; o = 2
+    if n == 126: need(4); n = int.from_bytes(buf[2:4], "big"); o = 4
+    elif n == 127: need(10); n = int.from_bytes(buf[2:10], "big"); o = 10
+    need(o + n); msg = buf[o:o + n]; op = buf[0] & 0x0f; buf = buf[o + n:]
+    if op == 1: print(msg.decode(errors="replace"), flush=True)
+PY
+WSP=$!
+for _ in $(seq 1 50); do grep -q " 101 " "$T/ws3.log" 2>/dev/null && break; sleep 0.1; done
+grep -q " 101 " "$T/ws3.log" || bad "WebSocket: $(head -c 200 "$T/ws3.log")"
+synced() { grep -c '"library-synced"' "$T/ws3.log"; }
+# the startup passes (library sync, facts) send their own library-synced: wait until 2 s go by without one
+q=0; for _ in $(seq 1 100); do c=$(synced); sleep 0.5; [ "$(synced)" = "$c" ] && q=$((q + 1)) || q=0; [ $q -ge 4 ] && break; done
+check "precondition: both presets play over workshop/900000001" "$(pf "$P1" '.presetReason') $(pf "$P2" '.presetReason')" "null null"
+w0=$(synced)
+st=$(api -o "$T/body" -w '%{http_code}' -X POST "$U/library/trash" -d "$(jq -nc --argjson i "$(item "$BASE")" '{items: [$i]}')")
+check "trash the base → 200; both presets: needs its base scene" \
+  "$st $(pf "$P1" '[.isPreset, .presetReason]') $(pf "$P2" '[.isPreset, .presetReason]')" \
+  '200 [true,"Needs its base scene"] [true,"Needs its base scene"]'
+for _ in $(seq 1 30); do [ "$(synced)" -gt "$w0" ] && break; sleep 0.1; done
+check "…the WS says library-synced (the Library greys them out without a reload)" "$([ "$(synced)" -gt "$w0" ] && echo seen || echo none)" seen
+w1=$(synced)
+check "undo → the base is back, both presets playable again" \
+  "$(api -X POST "$U/library/undo" | jq -c .ok) $(pf "$P1" '.presetReason') $(pf "$P2" '.presetReason')" "true null null"
+for _ in $(seq 1 30); do [ "$(synced)" -gt "$w1" ] && break; sleep 0.1; done
+check "…the WS says library-synced again" "$([ "$(synced)" -gt "$w1" ] && echo seen || echo none)" seen
+kill "$WSP" 2>/dev/null
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

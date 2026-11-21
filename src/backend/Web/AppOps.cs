@@ -496,11 +496,30 @@ public static class AppOps
         var removed = pl?.VideoPaths.Select((p, i) => (p, i)).Where(x => del.Contains(x.p)).ToList() ?? [];
         if (undoable) lock (_undoLock) _undo.Add(new UndoBatch(batchDir, done, removed));
 
-        var playing = shown.FirstOrDefault(del.Contains);
-        if (playing != null) StopOrAdvanceAfterDelete(playing, del, pl);
+        // a trashed base scene's presets can't play now: off screen like a trashed item, skipped by the rotation, but
+        // they stay in the library and the playlist (Undo, or the base downloaded again, makes them playable)
+        var off = PresetsOf(done).Where(p => !del.Contains(p) && PlayerHelper.PresetUnplayableReason(p) != null).ToHashSet();
+        if (off.Count > 0) LiascapePlayerProgram.PushItems();
+        var playing = shown.FirstOrDefault(p => del.Contains(p) || off.Contains(p));
+        if (playing != null) StopOrAdvanceAfterDelete(playing, del, pl, off);
         else if (pl != null && removed.Count > 0)
             SavePlaylistState(new CustomPlaylist { VideoPaths = pl.VideoPaths.Where(p => !del.Contains(p)).ToList(), Settings = pl.Settings, Name = pl.Name });
+        if (off.Count > 0) EventBus.Broadcast("library-synced", new { count = 0 }); // the Library greys them out
         return batchDir;
+    }
+
+    // The library's presets of these items when they are base scenes (by Workshop id: Presets.PresetPathsOf).
+    // Guard: adapter IT § presets "the base trashed", scripts/test-presets.sh § 3
+    private static List<string> PresetsOf(IEnumerable<LibraryItem> items)
+    {
+        var paths = new List<string>();
+        foreach (var i in items)
+        {
+            if (!PlayerHelper.IsScenePath(i.VideoPath) || i.IsPreset) continue;
+            var id = i.WorkshopId ?? (LibraryStore.Locate(i.VideoPath) is { Source: LibraryStore.Local or LibraryStore.Workshop } l ? l.Key : null);
+            if (id != null) paths.AddRange(Presets.PresetPathsOf(id));
+        }
+        return paths.Distinct().ToList();
     }
 
     // what's on screen or about to be (liascape-player: either output, the incoming side of a switch; legacy:
@@ -511,16 +530,17 @@ public static class AppOps
         return PlayerHelper.QueryCurrentPath() is string p ? [p] : [];
     }
 
-    // `playing` (trashed) was on screen. A playlist session plays on from the next surviving item after
-    // it (wrapping), like the old app; a single item / no survivor stops.
-    private static void StopOrAdvanceAfterDelete(string playing, HashSet<string> del, CustomPlaylist? pl)
+    // `playing` (trashed, or a preset of a trashed base: `off`) was on screen. A playlist session plays on from the next
+    // surviving item after it (wrapping), like the old app; a single item / no playable survivor stops. `off` stays in
+    // the playlist (its `skip` flag passes it by).
+    private static void StopOrAdvanceAfterDelete(string playing, HashSet<string> del, CustomPlaylist? pl, IReadOnlySet<string> off)
     {
         if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
         {
             // .claude/rules/backend/api.md § Session and playlist operations: the program's items lose it (the bar's survivors), then the rotation goes
             // on to the next survivor at once — the item after the trashed one's place (the reorder rule)
             var keep = (pl?.VideoPaths ?? LiascapePlayerProgram.Paths?.ToList() ?? []).Where(x => !del.Contains(x)).ToList();
-            if (keep.Count > 0)
+            if (keep.Any(x => !off.Contains(x)))
             {
                 if (pl != null) SavePlaylistState(new CustomPlaylist { VideoPaths = keep, Settings = pl.Settings, Name = pl.Name });
                 else LiascapePlayerProgram.SetItems(keep);
@@ -644,6 +664,12 @@ public static class AppOps
                 if (!paths.Contains(p)) paths.Insert(Math.Min(i, paths.Count), p);
             if (!paths.SequenceEqual(pl.VideoPaths))
                 SavePlaylistState(new CustomPlaylist { VideoPaths = paths, Settings = pl.Settings, Name = pl.Name });
+        }
+        // a base scene back: its presets play again (the rotation's `skip` flags, the Library's greyed cards)
+        if (PresetsOf(batch.Items).Count > 0)
+        {
+            LiascapePlayerProgram.PushItems();
+            EventBus.Broadcast("library-synced", new { count = 0 });
         }
         // undoing a "Delete from Source" un-queues the unsubscribe (a no-op for a plain delete), like the old app — and one
         // Steam already carried out is undone too: subscribed again (else the item comes back while Steam deletes its folder)

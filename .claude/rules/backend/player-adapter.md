@@ -86,6 +86,7 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 
 ## Scenes and loudness (adapter side)
 - `ScenesPlayable(s)` = `AllowScenes` && the running player's `scene` capability (else `liascape-player scene-check`, cached 30 s). A non-playable scene is skipped everywhere; a crashed-and-not-whitelisted one by every picker and rotation (`IsSkippedPath`) while a user's apply still plays it (`Apply`); an all-unplayable library answers 409, never 500.
+- A preset plays as its own source: `path` = its folder, `scene_dir` = its base's (`SourceProps`, create-only: never sent to a live source, a base found elsewhere waits for the next play); gates read `Presets.StatusOf` (`PlayerHelper.PresetUnplayableReason`: `Apply` throws its reason on both engines, both `IsSkippedPath` overloads skip it). Trashing a base takes its presets off screen like trashed items (advance / stop) but keeps them in the playlist; trash and Undo push the items' `skip` and send `library-synced`. A preset image that doesn't load is logged with why, the rest plays. Guard: adapter IT § presets.
 - `source.broken` → `MarkCrashed` + WS `scene-crashed` + advance if it was playing. `scene.vram_exceeded` → WS `scene-vram-stopped` + advance, never `MarkCrashed`.
 - `scene.fonts` (each scene load) → `LibraryService.StoreFontStandIns` (written only when it changed, an empty list clears) + `library-item-changed {fontStandIns}`; a live fact only, never the outbox (the next load reports again). Guard: self-test "scene.fonts reaches the backend".
 - Scene normalization is set once per play: each source keeps a pin (`NormalizePin`); re-pin only on the first complete 60 s window, a normalization-setting change, or a new audio configuration (`loudness_key`). Self-test `SceneLoudnessAssertions`.
@@ -100,6 +101,6 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 - `AudioMonitor` must classify a stream before counting its level and skip the player's own streams by ownership (`OwnStreamFilter`: compositor pid, `node.name` prefix `liascape-player-`, the bus sink). Guard: IT § "auto-mute never hears our own switches".
 
 ## Verify
-- `bash scripts/test-liascape-player-adapter.sh [--no-build]` — hermetic; never touches the owner's player. `LIASCAPE_IT_ONLY=automute` runs one section.
+- `bash scripts/test-liascape-player-adapter.sh [--no-build]` — hermetic; never touches the owner's player. `LIASCAPE_IT_ONLY=automute` (or `presets`) runs one section.
 - `LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`.
 - In tests SIGSTOP/SIGKILL the COMPOSITOR pid (`ctl hello | jq .pid`), never the supervisor; clean up through the supervisor or `ctl quit`.

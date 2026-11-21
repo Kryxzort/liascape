@@ -470,8 +470,40 @@ public static class LiascapePlayerSelfTest
                     fails.Add($"SourceProps({f}) = kind {k}; want video");
         }
         finally { try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(dir))!, true); } catch { } }
+        PresetSourceAssertions(fails);
         SceneLoudnessAssertions(fails);
         FontStandInAssertions(fails);
+    }
+
+    // A preset plays as its own scene source: its identity (`path`, its own preview) is its folder, the folder the worker
+    // loads (`scene_dir`) its base's. The base lookup is the table's own (`loadDirOf`): the real one reads the library,
+    // which the self-test never touches; the adapter IT § presets covers it end to end.
+    private static void PresetSourceAssertions(List<string> fails)
+    {
+        var root = Path.Combine("/tmp", "lpst-preset-src-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            string baseDir = Path.Combine(root, "workshop", "900000001"), presetDir = Path.Combine(root, "workshop", "910000101");
+            Directory.CreateDirectory(baseDir); Directory.CreateDirectory(presetDir);
+            File.WriteAllText(Path.Combine(baseDir, "project.json"), "{\"type\":\"scene\",\"file\":\"scene.json\",\"preview\":\"preview.png\"}");
+            File.WriteAllBytes(Path.Combine(baseDir, "preview.png"), [0x89, 0x50, 0x4e, 0x47]);
+            File.WriteAllText(Path.Combine(presetDir, "project.json"),
+                "{\"dependency\":\"900000001\",\"preset\":{\"color\":\"0 0 1\"},\"preview\":\"preview.jpg\",\"title\":\"P\"}");
+            File.WriteAllBytes(Path.Combine(presetDir, "preview.jpg"), [0xff, 0xd8, 0xff]);
+            var s = new AppSettings();
+            var p = LiascapePlayerMedia.SourceProps(presetDir, s, d => d == presetDir ? baseDir : d);
+            string P(Dictionary<string, object?> m, string k) => m.TryGetValue(k, out var v) ? v?.ToString() ?? "null" : "<absent>";
+            if (P(p, "path") != presetDir) fails.Add($"SourceProps(preset).path = {P(p, "path")}, want the preset's own folder");
+            if (P(p, "kind") != "scene") fails.Add($"SourceProps(preset).kind = {P(p, "kind")}, want scene");
+            if (P(p, "preview") != Path.Combine(presetDir, "preview.jpg")) fails.Add($"SourceProps(preset).preview = {P(p, "preview")}, want its own preview.jpg (never its base's)");
+            if (P(p, "scene_dir") != baseDir) fails.Add($"SourceProps(preset).scene_dir = {P(p, "scene_dir")}, want its base's folder {baseDir}");
+            var plain = LiascapePlayerMedia.SourceProps(baseDir, s, d => d);
+            if (plain.ContainsKey("scene_dir")) fails.Add($"SourceProps(a plain scene) carries scene_dir {P(plain, "scene_dir")}: it loads its own folder");
+            var gone = LiascapePlayerMedia.SourceProps(presetDir, s, _ => null);
+            if (gone.ContainsKey("scene_dir")) fails.Add($"SourceProps(a preset whose base is gone) carries scene_dir {P(gone, "scene_dir")}");
+        }
+        catch (Exception e) { fails.Add($"preset source assertions threw {e.GetType().Name}: {e.Message}"); }
+        finally { try { Directory.Delete(root, true); } catch { } }
     }
 
     // Scene loudness learned on first play (`scene.loudness` → LibMeta → `gain.normalize`): what's stored when, and
@@ -963,6 +995,23 @@ public static class LiascapePlayerSelfTest
                 ? "  scene-skip: linux-wallpaperengine found on PATH — legacy+AllowScenes=true scene reachability verified live"
                 : "  scene-skip: no linux-wallpaperengine on PATH here — stopped at the decision point (task-20c); " +
                   "verified the skip formula has no engine-specific case instead");
+
+            // a preset that can't play (here: its file names no base) is skipped by every picker and refused by Apply with
+            // its reason, scenes playable or not; a plain scene folder beside it is not
+            var root = Path.Combine("/tmp", "lpst-preset-skip-" + Guid.NewGuid().ToString("N")[..8]);
+            try
+            {
+                string noBase = Path.Combine(root, "910000201"), plain = Path.Combine(root, "900000001");
+                Directory.CreateDirectory(noBase); Directory.CreateDirectory(plain);
+                File.WriteAllText(Path.Combine(noBase, "project.json"), "{\"preset\":{\"color\":\"0 0 1\"},\"title\":\"No base\"}");
+                File.WriteAllText(Path.Combine(plain, "project.json"), "{\"type\":\"scene\",\"file\":\"scene.json\"}");
+                if (PlayerHelper.PresetUnplayableReason(noBase) != Presets.NoBaseReason)
+                    fails.Add($"PresetUnplayableReason(a preset naming no base) = {PlayerHelper.PresetUnplayableReason(noBase) ?? "null"}, want \"{Presets.NoBaseReason}\"");
+                if (!PlayerHelper.SkippedForRotation(noBase, scenesPlayable: true)) fails.Add("a preset that can't play must be skipped by the pickers (scenes playable)");
+                if (PlayerHelper.PresetUnplayableReason(plain) != null) fails.Add("PresetUnplayableReason(a plain scene) must be null");
+                if (PlayerHelper.SkippedForRotation(plain, scenesPlayable: true)) fails.Add("a plain scene (playable, not crashed) must not be skipped");
+            }
+            finally { try { Directory.Delete(root, true); } catch { } }
         }
         finally { PlayerEngine.Refresh(SettingsService.Load()); } // restore the real cached engine for RoundTrip
     }

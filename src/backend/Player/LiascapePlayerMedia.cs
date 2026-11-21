@@ -859,7 +859,10 @@ public static class LiascapePlayerMedia
 
     // B's create props: everything the legacy launch/loadfile carried, as live properties — the
     // resolver's own per-source computation (`Desired`, every resolved prop) + path, kind and loop.
-    public static Dictionary<string, object?> SourceProps(string path, AppSettings s)
+    public static Dictionary<string, object?> SourceProps(string path, AppSettings s) => SourceProps(path, s, Presets.LoadDirOf);
+
+    // `loadDirOf`: the folder the player loads for a scene item (Presets.LoadDirOf; the self-test passes its own table)
+    internal static Dictionary<string, object?> SourceProps(string path, AppSettings s, Func<string, string?> loadDirOf)
     {
         bool scene = PlayerHelper.IsScenePath(path); // a scene's play path is its item folder (.claude/rules/backend/library.md)
         var props = new Dictionary<string, object?>
@@ -868,6 +871,16 @@ public static class LiascapePlayerMedia
             ["kind"] = scene ? "scene" : IsImagePath(path) ? "image" : "video",
             ["loop"] = true,
         };
+        // A preset is its own source (`path`: its identity for crash marks, rotation, /current, the loudness book) over
+        // its base's folder (`scene_dir`), found at every play by Workshop id. Create-only, never a resolver value: a
+        // `scene_dir` change restarts the source's worker, so a base found elsewhere meanwhile waits for the next play,
+        // and a source's `loudness_key` (its audio configuration, folder-independent) stays its own.
+        // Guard: player-selftest PresetSourceAssertions, adapter IT § presets
+        if (scene && loadDirOf(path) is { } loadDir && FullPath(loadDir).TrimEnd('/') != FullPath(path).TrimEnd('/'))
+        {
+            props["scene_dir"] = loadDir;
+            LogDroppedPresetImages(path);
+        }
         // what the player shows while no worker frame exists (a crash before the first frame,
         // a broken scene — docs/player/modules/scene-crash-policy.md); the video-only props are stored, no effect
         if (scene && LibraryService.PreviewImageOf(path) is string preview) props["preview"] = preview;
@@ -878,6 +891,15 @@ public static class LiascapePlayerMedia
         if (scene && LibraryService.SceneLoudnessSeed(path) is JsonElement seed) props["loudness_seed"] = seed;
         foreach (var (k, v) in Desired(path, () => s, PlayerHelper.IsMuted, null, item: false)) props[k] = v;
         return props;
+    }
+
+    // (preset path, slot, value, why) already logged: SourceProps runs for every program item at every items push
+    private static readonly ConcurrentDictionary<string, byte> _droppedImagesLogged = new();
+    private static void LogDroppedPresetImages(string presetPath)
+    {
+        foreach (var (name, value, why) in SceneProperties.DroppedPresetImages(presetPath))
+            if (_droppedImagesLogged.TryAdd($"{presetPath}\u001f{name}\u001f{value}\u001f{why}", 0))
+                LiascapePlayerClient.Log($"preset {Path.GetFileName(presetPath.TrimEnd('/'))}: its image for '{name}' ({value}) is {why} — that slot shows its base's own texture");
     }
 
     // A program's `defaults`: what every new B of a rotation runs unless its

@@ -1,8 +1,7 @@
 # liascape-player adapter (C# side)
 
-Covers `src/backend/Player/` (`PlayerEngine.cs`, `LiascapePlayerClient.cs`, `LiascapePlayerMedia.cs`,
-`LiascapePlayerProgram.cs`, `MpvPropertyMap.cs`, `LiascapePlayerSelfTest.cs`), the dispatch in
-`src/backend/Helpers/PlayerHelper.cs` and `scripts/test-liascape-player-adapter.sh`. Rules (threading, lifecycle,
+Covers `src/backend/Player/`, the dispatch in `src/backend/Helpers/PlayerHelper.cs` and
+`scripts/test-liascape-player-adapter.sh`. Rules (threading, lifecycle,
 targeting, pause, rotation, scenes, auto-mute): `.claude/rules/backend/player-adapter.md`.
 
 ## The client (`LiascapePlayerClient`)
@@ -114,6 +113,8 @@ invalidation happened is never stored (epoch).
   it), else `liascape-player scene-check` cached 30 s. `/player-engine` → `scenes {available, reason, assets_dir}`.
 - Create props: `kind: scene`, `preview` (`LibraryService.PreviewImageOf`), `scene_props`, `loudness_key`,
   `loudness_seed`; `af` is always "" (a scene normalizes through `gain.normalize`).
+- **Presets** are their own scene sources: `path` = the preset's folder, `scene_dir` = its base's (create-only,
+  `SourceProps`), `scene_props` the merged map.
 - `scene_props` diff as JSON (numbers within 1e-6). A key the overrides dropped is sent as its project.json default
   (`WithResets`): LWE has no reset.
 - Per-monitor `SceneMonitors[].Fps` → `set out:<name>.scene_fps`, the name mapped like the player's
