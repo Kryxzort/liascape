@@ -122,6 +122,21 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       closed, so it's a layer-shell overlay (the player or a small dedicated window), not the main Electron window.
       Brainstorm first: what it lists (recent, favourites, the playlist, search), and its look.
 
+- [ ] **The logo in the app** (owner): the icon (`app/ui/public/favicon.svg`, Night) shown inside the UI where a logo
+      belongs (the top bar or sidebar header, an About panel, the first-run / empty-library screen). Two variants exist:
+      Night (the installed icon) and Lavender (the same art on a light lavender ground, made by the generator kept with
+      the icon's sources); the in-app logo follows the theme once light themes exist (Lavender on light, Night on
+      dark). The installed icon stays Night: launchers cache it and Wayland takes it from the desktop entry, so it
+      never switches.
+- [ ] **A tray icon** (owner): a StatusNotifierItem with the controls on right-click (play / pause, next, previous,
+      mute and volume, the playlist on/off and which playlist, a recent-wallpapers submenu, open Liascape, quit) and
+      left-click opening the app. It must cost next to nothing while the window is closed: Electron's `Tray` keeps the
+      whole Electron main process alive (100+ MB), so prefer a small native helper (like `src/native/liascape-audio`)
+      that speaks SNI + dbusmenu itself and drives the backend's API / `liascape ctl`, idle on D-Bus with no polling
+      (it listens for the backend's change events), and a setting to turn it off. Its icon can follow the system's
+      light / dark preference (Lavender / Night). Check how Hyprland bars (waybar, DMS, noctalia) render SNI menus
+      before choosing the menu's depth.
+
 ## On a real desktop session (not hermetic)
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
