@@ -38,6 +38,7 @@ public static class LiascapePlayerSelfTest
             StaleThroughWrapperAssertions(fails);
             StartupGraceAssertions(fails);
             StartArgsAssertions(fails);
+            RendererLatchAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
@@ -314,6 +315,23 @@ public static class LiascapePlayerSelfTest
         var d = new AppSettings();
         foreach (var (id, want) in new[] { ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
+    }
+
+    // ---- the scene-renderer latch: the running player's word wins over a scene-check that started before it -------
+    private static void RendererLatchAssertions(List<string> fails)
+    {
+        const string Missing = "The scene renderer is missing — rebuild or reinstall Liascape";
+        var c = new LiascapePlayerClient("/nonexistent/liascape-selftest.sock") { AutoSpawn = false };
+        long mark = c.PlayerWordMark();
+        if (!c.ApplyNoPlayerWord(Missing, mark) || c.RendererMissing != Missing)
+            fails.Add($"latch: with no player, scene-check's word should latch; got {c.RendererMissing ?? "null"}");
+        // a scene-check starts with no player; a player comes up meanwhile and its hello says the renderer loads; the check ends
+        mark = c.PlayerWordMark();
+        c.ApplyPlayerWord(null);
+        if (c.ApplyNoPlayerWord(Missing, mark) || c.RendererMissing != null)
+            fails.Add($"latch: a scene-check started before the player's hello overwrote its word ({c.RendererMissing ?? "null"})");
+        c.ApplyPlayerWord(Missing);
+        if (c.RendererMissing != Missing) fails.Add("latch: the player's word didn't latch");
     }
 
     // ---- what a player is started with (`liascape restore` = a session start; a restart never is) --------------------

@@ -120,18 +120,40 @@ public sealed class LiascapePlayerClient
             assets ?? chk.AssetsDir);
     }
 
-    // Why no scene can play here, latched: a scene worker couldn't load the scene renderer (LWE's core gone; the
-    // player's `hello.scene_renderer_missing`, else `scene-check`'s `renderer_missing`), null once a worker loads it
-    // again (the player's next hello says null). Kept while no player answers. scene-check's word counts only while no
-    // player answers (NoPlayerCheck): the backend's environment may not be the player's. The UI greys every scene with
-    // it under liascape-player. Guard: adapter IT § "a scene worker that can't load the scene renderer"
+    // Why no scene can play here, latched: a scene worker couldn't load the scene renderer (LWE's core gone), null once
+    // one loads it again. Set from every hello's `scene_renderer_missing` (the running player's word, ApplyPlayerWord);
+    // while no player answers, from scene-check's `renderer_missing` (NoPlayerCheck: what a player started now would
+    // run, in the backend's environment), else it keeps its last value. The UI greys every scene with it under
+    // liascape-player. Guards: adapter IT § "a scene worker that can't load the scene renderer", self-test
+    // RendererLatchAssertions.
     public string? RendererMissing { get; private set; }
     // raised (on the thread that read the change) when RendererMissing changes: the handler must not block
     public event Action<string?>? RendererMissingChanged;
-    private void SetRendererMissing(string? reason)
+    private readonly object _rendererLock = new();
+    // hellos that carried the player's renderer word: a scene-check started before one never overwrites it
+    private long _playerWords;
+    internal long PlayerWordMark() { lock (_rendererLock) return _playerWords; }
+    internal void ApplyPlayerWord(string? reason)
     {
-        if (reason == RendererMissing) return;
-        RendererMissing = reason;
+        bool changed;
+        lock (_rendererLock) { _playerWords++; changed = reason != RendererMissing; RendererMissing = reason; }
+        if (changed) RaiseRendererMissing(reason);
+    }
+    // scene-check's word, taken only if no player said anything since `mark` (scene-check runs up to 5 s: a player that
+    // came up meanwhile greeted with its own word, and nothing would correct a stale "missing" over it)
+    internal bool ApplyNoPlayerWord(string? reason, long mark)
+    {
+        bool changed;
+        lock (_rendererLock)
+        {
+            if (_capsKnown || _playerWords != mark) return false;
+            changed = reason != RendererMissing; RendererMissing = reason;
+        }
+        if (changed) RaiseRendererMissing(reason);
+        return true;
+    }
+    private void RaiseRendererMissing(string? reason)
+    {
         try { RendererMissingChanged?.Invoke(reason); } catch (Exception ex) { Log($"renderer handler threw: {ex.Message}"); }
     }
     // the scene word (ScenesAvailable: a hello, else scene-check) refreshed off the caller's thread, one at a time: a
@@ -154,8 +176,9 @@ public sealed class LiascapePlayerClient
     // No player answers: scene-check is the word, its renderer reason included (what a player started now would run).
     private (bool Available, string? Reason, string? AssetsDir) NoPlayerCheck()
     {
+        long mark = PlayerWordMark();
         var r = SceneCheck();
-        SetRendererMissing(r.Renderer);
+        ApplyNoPlayerWord(r.Renderer, mark);
         return (r.Available, r.Reason, r.AssetsDir);
     }
     private readonly object _sceneCheckLock = new();
@@ -437,7 +460,7 @@ public sealed class LiascapePlayerClient
                                 Capabilities = capEl.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToHashSet();
                                 _capsKnown = _capsEver = true;
                                 // the running player's word on the scene renderer (a worker couldn't load it), with its capabilities
-                                SetRendererMissing(result.TryGetProperty("scene_renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object
+                                ApplyPlayerWord(result.TryGetProperty("scene_renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object
                                     ? Prop(rm, "reason") : null);
                             }
                             if (PlayerPid != p)
