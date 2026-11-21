@@ -353,6 +353,12 @@
           pkgs.rustfmt
           pkgs.rust-analyzer
           pkgs.sccache
+          pkgs.mold
+          pkgs.cargo-nextest
+          # language servers for editors and Claude Code's code-intelligence plugins (rust-analyzer is above)
+          pkgs.csharp-ls
+          pkgs.typescript-language-server
+          pkgs.typescript
           electron
         ] ++ runtimeTools;
         DOTNET_ROOT = "${pkgs.dotnet-sdk_10}/share/dotnet";
@@ -361,6 +367,8 @@
         # Shared compile cache (~/.cache/sccache): every git worktree (one per agent) has its own
         # target/, so without it each one recompiles all dependencies from scratch.
         RUSTC_WRAPPER = "sccache";
+        # mold links several times faster than the default linker; dev shell only (the package build keeps the default)
+        CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
         # `cargo build` links liascape-scene-worker against the pinned core (feature `lwe`, default).
         # Patch work on LWE: `LWE_DEV_SRC=<fork checkout> bash scripts/lwe.sh build`, then
         # LIASCAPE_LWE_CORE_DIR=$PWD/build/lwe-core for cargo (UPSTREAM.md § linux-wallpaperengine).

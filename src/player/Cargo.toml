@@ -37,3 +37,14 @@ zbus = { version = "5", default-features = false, features = ["blocking-api", "a
 [build-dependencies]
 bindgen = "0.72"
 pkg-config = "0.3"
+
+# Debug builds keep line tables only (enough for backtraces with file:line) and dependencies no debug info at all: full
+# debug info was most of each target/ (2–6 GB per git worktree, one per agent), and writing and later deleting that much
+# on every checkout is slow. split-debuginfo keeps what is left out of the linked binaries, so links are faster too.
+# Need a full debugger session? `CARGO_PROFILE_DEV_DEBUG=full cargo build`.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false

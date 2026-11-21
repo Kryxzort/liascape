@@ -1,0 +1,16 @@
+# `cargo nextest run` runs every test in its own process. The integration tests (tests/*.rs) serialise on in-process
+# locks (a SERIAL / GPU / CLIP_LOCK mutex: one player, one GPU, one audio server at a time), which separate processes
+# don't share — so they run one at a time here; unit tests run in parallel.
+[test-groups]
+serial = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "kind(test)"
+test-group = "serial"
+
+[profile.default]
+# a flaky test passes on the retry but is reported as FLAKY, so it is seen rather than hidden
+retries = 1
+# a hung test is killed after 5 × 60 s instead of holding the machine's test lock
+slow-timeout = { period = "60s", terminate-after = 5 }
+fail-fast = false
