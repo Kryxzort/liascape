@@ -49,7 +49,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 97. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
-       crash WE under Proton.
+       crash WE under Proton. Also record each scene's GPU memory while it plays (Task Manager → Details, the
+       "Dedicated GPU memory" column for `wallpaper64.exe`, or `nvidia-smi`), with 2921510865 among them (3.6 GB in
+       liascape-player, the heaviest seen), to compare with the player's `vram` probe per scene. And, if convenient,
+       play preset 2843309472 with its Volume up: its slot video should stay silent (#112 assumes WE never plays a
+       video texture's sound).
 112. [ ] A preset's video in a scene's texture slot plays: Workshop presets can put a video file (`files/<name>.mp4`)
        where their base scene has an image slot, and Wallpaper Engine plays it there. Today the slot keeps the base's
        texture and the adapter logs "is not an image" (seen on Workshop preset 2843309472). The scene renderer
