@@ -213,6 +213,7 @@ public static class ServerHost
         {
             we.WorkshopPath = s.WorkshopFolder;
             we.AllowScenes = s.AllowScenes;
+            we.AllowPresets = s.AllowScenes && Liascape.Player.PlayerEngine.IsLiascapePlayer;
         }
     }
 

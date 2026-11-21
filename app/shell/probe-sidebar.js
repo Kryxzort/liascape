@@ -2461,7 +2461,7 @@ app.whenReady().then(async () => {
         }
         if (await page(`return !!m.card("pb");`)) v.push("pb's card still shows after it was trashed");
         const note = await page(`const s = m.side(), n = s.querySelector("[data-preset-note]"); if (!n) return null; const b = n.querySelector("[data-preset-get]");
-          const d = document.createElement("div"); d.style.color = "var(--warn, #f9e2af)"; document.body.appendChild(d); const warn = getComputedStyle(d).color; d.remove();
+          const d = document.createElement("div"); d.style.color = "var(--warn)"; document.body.appendChild(d); const warn = getComputedStyle(d).color; d.remove();
           const tx = getComputedStyle(n.querySelector(".side-crash-text")).color;
           return { text: n.querySelector(".side-crash-text")?.textContent.trim(), crashBlock: n.classList.contains("side-crash"), btn: b?.textContent.trim() ?? null, kind: b?.dataset.presetGet ?? null,
             off: b?.getAttribute("aria-disabled") ?? null, ico: getComputedStyle(n.querySelector(".side-crash-ico")).color, warn, tx, r: b ? m.rect(b) : null };`);

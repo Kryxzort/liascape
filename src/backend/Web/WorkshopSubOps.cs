@@ -97,7 +97,8 @@ public static class WorkshopSubOps
         EventBus.Broadcast("subscribe-progress", new { id, value, status, done, error, skipped });
 
     /// Subscribe without importing. `{subscribed, inSteamTodo, message}`; throws what the subscribe threw (after saying so on WS).
-    public static async Task<object> SubscribeAsync(string id, string? title)
+    /// `viaSteamApp`: through the Steam client whatever the mode (WorkshopDownloader.SubscribeOnlyAsync).
+    public static async Task<object> SubscribeAsync(string id, string? title, bool viaSteamApp = false)
     {
         SteamTodo.RememberTitle(id, title);
         var s = SettingsService.Load();
@@ -106,7 +107,7 @@ public static class WorkshopSubOps
         {
             Progress(id, 0, "Subscribing…");
             var progress = new Progress<(double, string)>(t => Progress(id, Math.Max(0, t.Item1), t.Item2));
-            try { r = await WorkshopDownloader.SubscribeOnlyAsync(id, title, s, progress, CancellationToken.None); }
+            try { r = await WorkshopDownloader.SubscribeOnlyAsync(id, title, s, progress, CancellationToken.None, viaSteamApp); }
             catch (Exception e)
             {
                 Console.WriteLine($"workshop: {id}: subscribing failed — {e.Message}");
@@ -127,7 +128,8 @@ public static class WorkshopSubOps
     }
 
     // the page route: the entry ends with the user's Next (or Steam's files appearing — SteamTodo.Turn), Skip / Stop, or "Let the
-    // Steam app do all N"
+    // Steam app do all N". A preset's base: Next = the user subscribed on its page, whose required-items prompt is Steam's way
+    // to the base; "Let the Steam app do all N" subscribes the base itself (SteamTodo.UseSteamAppAsync)
     static async Task WatchTodoAsync(string id, SteamTodo.Entry e)
     {
         try
@@ -139,7 +141,7 @@ public static class WorkshopSubOps
                 await wake;
             }
             bool ok = e.Outcome is SteamTodo.Outcome.Done or SteamTodo.Outcome.UseSteamApp;
-            if (ok) { _subscribedHere[id] = 1; _ = AfterSubscribeAsync(id); _ = PresetDownloads.SubscribeBaseAsync(id); }
+            if (ok) { _subscribedHere[id] = 1; _ = AfterSubscribeAsync(id); }
             Progress(id, ok ? 1 : 0, ok ? "Subscribed" : "Not subscribed", done: true, skipped: !ok);
         }
         catch (Exception ex) { Console.WriteLine($"workshop: {id}: watching its Steam to-do entry failed: {ex.Message}"); }

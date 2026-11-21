@@ -658,5 +658,40 @@ await setMode("steamapp");
   await unsubDone(); await helpersDone();
   out(calls().includes("unsubscribe 3583880694") && !calls().includes("unsubscribe 3354740764") && fs.existsSync(`${T}/steamlib/sub-3354740764`) && !!(await item("3354740764")),
     "Delete from source of a preset (Use the Steam app): its base stays subscribed and in the library", calls().filter((l) => /33547|35838/.test(l)).join(", "));
+
+  // "Open in the Steam app", then the Steam to-do's "Let the Steam app do all 1": the user's switch for that batch. The client's
+  // subscribe shows no required-items prompt, so the base goes through the client right after its preset — never its own page,
+  // never a wait for a base nobody asked Steam for. Made-up preset ids, each a fixture with its base id rewritten (cm.json).
+  const presetTpl = (id, fixture, dep) => {
+    const d = `${T}/steamlib/template-${id}`; fs.cpSync(`${FIX}/${fixture}`, d, { recursive: true });
+    const pj = JSON.parse(fs.readFileSync(`${d}/project.json`, "utf8")); fs.writeFileSync(`${d}/project.json`, JSON.stringify({ ...pj, dependency: dep }));
+    const b = `${T}/steamlib/template-${dep}`; fs.mkdirSync(b, { recursive: true });
+    fs.writeFileSync(`${b}/project.json`, JSON.stringify({ type: "scene", title: `base-${dep}`, file: "scene.json" }));
+    fs.writeFileSync(`${b}/scene.pkg`, Buffer.alloc(16));
+  };
+  presetTpl("910000101", "3009121253", "900000001");
+  presetTpl("910000104", "3520333138", "900000006");
+  await setMode("steampage");
+  const after = (l, a, b) => l.includes(`subscribe ${a}`) && l.indexOf(`subscribe ${b}`) > l.indexOf(`subscribe ${a}`);
+  n0 = urls().length; todo.length = 0;
+  const pT = settle(dl("910000101"), 60000);
+  await waitTodo((x) => x?.total === 1 && x.current?.id === "910000101");
+  await post("/steam-todo/use-steam-app");
+  const rT = await pT;
+  await until(async () => (await item("900000001")) && (await item("910000101"))?.presetReason === LEGACY, 30000);
+  const cT = calls();
+  out(rT?.status === 200 && after(cT, "910000101", "900000001") && !!(await item("900000001")) && (await item("910000101"))?.presetReason === LEGACY
+    && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000101",
+    "preset (Open in the Steam app → Let the Steam app do all 1): the client subscribes the preset, then its base; both imported, only the preset's page opened",
+    `${rT?.status} | ${cT.filter((l) => /910000101|900000001/.test(l)).join(", ")} | ${(await item("910000101"))?.presetReason} | ${urls().slice(n0).join(" ")}`);
+  n0 = urls().length; todo.length = 0;
+  const rT2 = await post("/workshop/subscribe", { workshopId: "910000104", title: "preset" });
+  await waitTodo((x) => x?.total === 1 && x.current?.id === "910000104");
+  await post("/steam-todo/use-steam-app");
+  await until(() => calls().includes("subscribe 900000006"), 30000);
+  await helpersDone();
+  out(rT2.status === 200 && after(calls(), "910000104", "900000006") && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000104",
+    "Subscribe of a preset (Open in the Steam app → Let the Steam app do all 1): its base is subscribed through the client right after it, no page for it",
+    `${calls().filter((l) => /910000104|900000006/.test(l)).join(", ")} | ${urls().slice(n0).join(" ")}`);
 }
 ws.close();

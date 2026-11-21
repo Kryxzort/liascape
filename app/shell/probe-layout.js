@@ -871,7 +871,7 @@ app.whenReady().then(async () => {
           filledShadowed: filled.filter((e) => ts(e) !== "none").map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)),
           ...(() => { // text in the accent or a state colour is lit already: no shadow on it, nor from a shadowing filter above it
             const col = (v) => { const s = document.createElement("span"); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
-            const lit = new Set(["var(--accent)", "var(--accent-hover)", "var(--danger)", "var(--success)", "var(--warn, #f9e2af)"].map(col));
+            const lit = new Set(["var(--accent)", "var(--accent-hover)", "var(--danger)", "var(--success)", "var(--warn)"].map(col));
             const filtered = (e) => { for (let a = e; a; a = a.parentElement) if (/2px 1\.9px/.test(getComputedStyle(a).filter)) return true; return false; };
             const els = [...document.querySelectorAll("body *")].filter((e) => own(e) && e.getClientRects().length && lit.has(getComputedStyle(e).color));
             return { nLit: els.length, litShadowed: els.filter((e) => ts(e) !== "none" || filtered(e)).map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)) }; })() };`;

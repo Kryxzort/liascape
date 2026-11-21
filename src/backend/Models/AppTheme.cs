@@ -6,5 +6,5 @@ public record AppTheme(
     string Surface0, string Surface1, string Surface2,
     string TextColor, string Subtext, string Muted,
     string Accent, string AccentFg, string AccentHover,
-    string Danger, string DangerBg, string Success
+    string Danger, string DangerBg, string Success, string Warn
 );

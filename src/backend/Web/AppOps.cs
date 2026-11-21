@@ -253,6 +253,7 @@ public static class AppOps
         WallpaperDetail dl = detail;
         string? anim = animatedUrl;
         string? letGo = null; // a one-off's fetching subscription, unsubscribed once the library has its copy
+        bool viaSteamApp = false; // the Steam to-do's "Let the Steam app do all N" fetched it (WorkshopDownloader.TookSteamApp)
         try
         {
             if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
@@ -269,7 +270,10 @@ public static class AppOps
                 else
                     // the Browse sidebar's toggle says "Subscribing…" meanwhile
                     using (WorkshopSubOps.Subscribing(detail.WorkshopId))
+                    {
                         dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
+                        viaSteamApp = WorkshopDownloader.TookSteamApp(detail.WorkshopId);
+                    }
                 string url = dir;
                 if (!detail.IsScene)
                 {
@@ -293,7 +297,7 @@ public static class AppOps
             PreviewBackfill.Kick("download"); // its card's previews
             EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
             // a preset brings its base scene, by this download's own mode and action (in the background, never throws)
-            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) _ = PresetDownloads.FetchBaseAsync(item, oneOff);
+            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) _ = PresetDownloads.FetchBaseAsync(item, oneOff, viaSteamApp);
             return item;
         }
         finally { if (letGo != null) WorkshopDownloader.LetGoOfOneOff(letGo); }

@@ -15,6 +15,8 @@ public class WallpaperEngineService : IBgsProvider
 
     public string WorkshopPath { get; set; } = DefaultWorkshopPath;
     public bool AllowScenes { get; set; } = false;
+    /// Presets list as their own cards (scene support on + the Liascape player: ServerHost.ConfigureProvider)
+    public bool AllowPresets { get; set; } = false;
     public int SortIndex { get; set; } = 0;
 
     public string Name => "Wallpaper Engine (Local)";
@@ -23,10 +25,10 @@ public class WallpaperEngineService : IBgsProvider
     public bool SupportsSorting => true;
 
     public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
-        => WallpaperEngineScraper.GetAllAsync(WorkshopPath, AllowScenes, sortIndex: SortIndex);
+        => WallpaperEngineScraper.GetAllAsync(WorkshopPath, AllowScenes, sortIndex: SortIndex, allowPresets: AllowPresets);
 
     public Task<List<WallpaperResult>> SearchAsync(string query, int page = 1)
-        => WallpaperEngineScraper.GetAllAsync(WorkshopPath, AllowScenes, query, SortIndex);
+        => WallpaperEngineScraper.GetAllAsync(WorkshopPath, AllowScenes, query, SortIndex, AllowPresets);
 
     public Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
         => Task.FromResult(new WallpaperDetail

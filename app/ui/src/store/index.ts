@@ -97,7 +97,7 @@ function applyThemeVars(t: Theme) {
   set("--surface0", t.surface0); set("--surface1", t.surface1); set("--surface2", t.surface2);
   set("--text", t.textColor); set("--subtext", t.subtext); set("--muted", t.muted);
   set("--accent", t.accent); set("--accent-fg", t.accentFg); set("--accent-hover", t.accentHover);
-  set("--danger", t.danger); set("--danger-bg", t.dangerBg); set("--success", t.success);
+  set("--danger", t.danger); set("--danger-bg", t.dangerBg); set("--success", t.success); set("--warn", t.warn);
 }
 
 const DEFAULT_PS: PlaylistSettings = {

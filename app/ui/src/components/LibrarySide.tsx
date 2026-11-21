@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat, Unplug, Download } from "lucide-react";
-import { api, media, still, anim as animUrl, steamPageUrl, CARD_STILL_W, type LibraryItem, type OneOffRoute, type Wallpaper } from "../api/client";
+import { api, media, still, anim as animUrl, steamPageUrl, workshopStub, CARD_STILL_W, type LibraryItem, type OneOffRoute } from "../api/client";
 import { presetReasonOf, useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
 import { SideMedia, SideSection } from "./SidePanel";
@@ -430,10 +430,7 @@ function PresetNotice({ item, reason, closing, arrive }: { item: LibraryItem; re
   const busy = progress !== undefined;
   const get = () => {
     if (!baseId || ws == null || why || asking || busy) return;
-    const w: Wallpaper = { title: item.baseTitle ?? "Its base scene", thumbnailUrl: "", animatedThumbnailUrl: null, pageUrl, resolution: null,
-      isScene: true, workshopId: baseId, addedAt: null, description: null, authorName: null, fileSizeBytes: null, subscriptions: null,
-      favorites: null, tags: null };
-    void download(ws, w, false, oneOff);
+    void download(ws, workshopStub(baseId, item.baseTitle ?? "Its base scene", true), false, oneOff);
   };
   const text = baseId && item.baseTitle ? `Needs its base scene, ${item.baseTitle}` : reason;
   return (

@@ -22,6 +22,7 @@ public static class WorkshopDownloader
     {
         // the one rule (Blocked): a mode that can't download now refuses before anything reaches Steam
         if (Blocked(settings, WorkshopAction.Download) is { } blocked) throw new InvalidOperationException(blocked);
+        _viaSteamApp.TryRemove(workshopId, out _);
         // Already present (WE/Steam downloaded it) — skip re-download.
         // Subscribe mode still subscribes below so the item is tracked online even if present.
         bool alreadyHave = false;
@@ -32,6 +33,14 @@ public static class WorkshopDownloader
 
         return await AcquireViaSubscribeAsync(workshopId, title, settings, alreadyHave, progress, ct);
     }
+
+    // items whose last AcquireAsync the Steam to-do's "Let the Steam app do all N" finished through the Steam client
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _viaSteamApp = new(StringComparer.Ordinal);
+
+    /// Did the item's AcquireAsync that just returned get it through the Steam client because the user handed its Steam to-do
+    /// entry to the Steam app ("Let the Steam app do all N")? Asked once, right after it returns: a preset's base then takes the
+    /// same route (PresetDownloads.FetchBaseAsync), since the client's subscribe shows no required-items prompt.
+    public static bool TookSteamApp(string workshopId) => _viaSteamApp.TryRemove(workshopId, out _);
 
     /// How "Download without subscribing" would get an item: `Route` = the download mode's own way ("steamapp", "subscribe"),
     /// or null with `Missing` = why not, in the user's words (the menu shows it on the disabled entries).
@@ -306,6 +315,7 @@ public static class WorkshopDownloader
                         var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
                         if (viaClient.Folder == null)
                             throw new InvalidOperationException($"The Steam app couldn't subscribe to it — {viaClient.Fallback}");
+                        _viaSteamApp[workshopId] = 0;
                         if (TryGetMediaPath(viaClient.Folder) != null) { delivered = true; return viaClient.Folder; }
                         continue; // Steam's folder without the media we expect: the usual folders' poll decides
                 }
@@ -503,13 +513,15 @@ public static class WorkshopDownloader
     /// entry without a download (the user clicks Subscribe on its page, then Next). A signed-out `subscribe` never borrows
     /// another mode's way: refused (Blocked). Unblocks the id (wanted again). A rate limit throws
     /// (no page — it's steamcommunity.com from the same connection).
+    /// `viaSteamApp`: the Steam client's way whatever the saved mode — only for the base of a preset the Steam to-do's "Let the
+    /// Steam app do all N" subscribed (the user's own switch for that batch; PresetDownloads.SubscribeBaseAsync).
     public static async Task<SubscribeOnlyResult> SubscribeOnlyAsync(string workshopId, string? title, AppSettings settings,
-        IProgress<(double, string)>? progress, CancellationToken ct)
+        IProgress<(double, string)>? progress, CancellationToken ct, bool viaSteamApp = false)
     {
-        if (Blocked(settings, WorkshopAction.Subscribe) is { } blocked) throw new InvalidOperationException(blocked);
+        if (!viaSteamApp && Blocked(settings, WorkshopAction.Subscribe) is { } blocked) throw new InvalidOperationException(blocked);
         WorkshopUnsubQueue.Unblock(workshopId);
         SteamTodo.DropUnsubscribe(workshopId); // its unsubscribe still waited in the Steam to-do: nothing to click any more
-        string mode = settings.WorkshopDownloadMode;
+        string mode = viaSteamApp ? "steamapp" : settings.WorkshopDownloadMode;
         if (mode == "steamapp")
         {
             var r = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);

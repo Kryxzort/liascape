@@ -120,6 +120,11 @@ async function apiError(path: string, r: Response): Promise<ApiError> {
 export type OneOffRoute = { route: "steamapp" | "subscribe" | null; missing: string | null };
 export type WorkshopSubState = { subscribed: boolean; pending: "subscribe" | "unsubscribe" | null; inLibrary: boolean; onDisk: boolean };
 export const steamPageUrl = (workshopId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${workshopId}`;
+// a Workshop item known only by its id and title (a preset's base): a Browse card to show or download it, Steam's page its key
+export const workshopStub = (workshopId: string, title: string, isScene: boolean): Wallpaper => ({
+  title, thumbnailUrl: "", animatedThumbnailUrl: null, pageUrl: steamPageUrl(workshopId), resolution: null, isScene, workshopId,
+  addedAt: null, description: null, authorName: null, fileSizeBytes: null, subscriptions: null, favorites: null, tags: null,
+});
 export type SteamTodo =
   | { finished: true }
   | { finished?: false; action: "subscribe" | "unsubscribe"; index: number; total: number; remaining: number;
@@ -275,7 +280,7 @@ export interface Theme {
   name: string; bgBase: string; bgMantle: string; bgCrust: string;
   surface0: string; surface1: string; surface2: string; textColor: string; subtext: string;
   muted: string; accent: string; accentFg: string; accentHover: string;
-  danger: string; dangerBg: string; success: string;
+  danger: string; dangerBg: string; success: string; warn: string;
 }
 
 export const api = {

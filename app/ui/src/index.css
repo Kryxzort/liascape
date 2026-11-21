@@ -5,7 +5,7 @@
   --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
   --text: #cdd6f4; --subtext: #a6adc8; --muted: #6c7086;
   --accent: #89b4fa; --accent-fg: #11111b; --accent-hover: #74c7ec;
-  --danger: #f38ba8; --danger-bg: #2a1820; --success: #a6e3a1;
+  --danger: #f38ba8; --danger-bg: #2a1820; --success: #a6e3a1; --warn: #f9e2af;
   --gap: 14px; --cols: 5;
   /* translucency of chrome (bars, buttons, dropdowns, fields). OPAQUE by default — chrome only goes
      see-through when the live wallpaper is actually behind the UI (.bg-live, set from the
@@ -472,7 +472,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .card.lib .thumb-wrap > .thumb.anim { transition: opacity .2s ease, filter .3s ease; }
 .card.lib.unplayable .thumb-wrap > .thumb { filter: grayscale(1) brightness(.6); }
 .card.lib.unplayable .thumb-wrap { cursor: default; }
-.warn.preset { color: var(--warn, #f9e2af); filter: drop-shadow(0 0 4px var(--warn, #f9e2af)); opacity: 0; scale: .7; pointer-events: none;
+.warn.preset { color: var(--warn); filter: drop-shadow(0 0 4px var(--warn)); opacity: 0; scale: .7; pointer-events: none;
   transition: opacity .22s ease, scale .3s var(--spring-soft, ease); }
 .warn.preset.on { opacity: 1; scale: 1; pointer-events: auto; }
 :root.no-motion .warn.preset { scale: 1; transition: opacity var(--fade-dur) linear; }
@@ -901,7 +901,7 @@ input[type=range]:focus-visible { outline: none; }
 /* the Settings Steam row: the line + its buttons wrap at a narrow width; the warning keeps its colour (`.hms span` is muted) */
 .hms[data-steam-state] { flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .hms[data-steam-state] > span.shint { max-width: 340px; line-height: 1.4; }
-.hms span.s-warn-text { color: var(--warn, #f9e2af); }
+.hms span.s-warn-text { color: var(--warn); }
 .steam-row-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ---- the Steam to-do (components/SteamTodoPanel.tsx): floating bottom-right, above the item sidebar (40) + the bar's hover
@@ -939,7 +939,7 @@ input[type=range]:focus-visible { outline: none; }
 .st-use-note { margin: 0 2px; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
 .st-bar { height: 5px; border-radius: 999px; }
 .st-hint, .st-msg { margin: 0; line-height: 1.4; color: var(--muted); font-size: 12px; }
-.st-msg { color: var(--warn, #f9e2af); }
+.st-msg { color: var(--warn); }
 .st-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .st-btns .btn { padding: 5px 10px; font-size: 12.5px; }
 .st-btns .st-next { flex: 1 0 100%; justify-content: center; }
@@ -1116,13 +1116,13 @@ input[type=range]:focus-visible { outline: none; }
 /* settings: help text + disabled rows + monitor name + native-picker browse */
 /* a feature a missing build piece / tool breaks (Settings → WarnIcon, /health/features): amber, the reason as tooltip */
 /* a Settings line that needs the user (the Steam row when Steam ended the sign-in) — the warning icon's amber */
-.s-warn-text { color: var(--warn, #f9e2af); }
-.s-warn { display: inline-flex; margin-left: 6px; color: var(--warn, #f9e2af); cursor: help; vertical-align: -2px;
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn, #f9e2af) 60%, transparent)); }
+.s-warn-text { color: var(--warn); }
+.s-warn { display: inline-flex; margin-left: 6px; color: var(--warn); cursor: help; vertical-align: -2px;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn) 60%, transparent)); }
 .health-sum { margin: 4px 0 14px; padding: 9px 12px; border-radius: 10px; font-size: 12px; line-height: 1.45;
-  border: 1px solid color-mix(in srgb, var(--warn, #f9e2af) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
   background: color-mix(in srgb, var(--surface0) var(--tr-strong), transparent); color: var(--subtext); }
-.health-sum-head { display: flex; align-items: center; gap: 7px; color: var(--warn, #f9e2af); font-weight: 600; }
+.health-sum-head { display: flex; align-items: center; gap: 7px; color: var(--warn); font-weight: 600; }
 .health-sum ul { margin: 6px 0 0; padding-left: 20px; }
 .health-sum b { color: var(--text); font-weight: 600; }
 .help { font-size: 11.5px; color: var(--subtext); margin: 2px 2px 9px; line-height: 1.45; }
@@ -1672,8 +1672,8 @@ input[type=range]:focus-visible { outline: none; }
 /* a preset that can't play (LibrarySide.tsx PresetNotice): the crash notice's block, its glyph and stripe in --warn; why
    "Download it again" can't run now under its words. One that turns up with the sidebar open rises in (motion off: fades).
    Guard: probe-sidebar lib:preset:needsBase, lib:preset:needsBaseOff */
-.side-crash.side-preset::before { background: linear-gradient(var(--warn, #f9e2af), color-mix(in srgb, var(--warn, #f9e2af) 30%, transparent)); box-shadow: 0 0 12px -1px var(--warn, #f9e2af); }
-.side-preset .side-crash-ico { color: var(--warn, #f9e2af); }
+.side-crash.side-preset::before { background: linear-gradient(var(--warn), color-mix(in srgb, var(--warn) 30%, transparent)); box-shadow: 0 0 12px -1px var(--warn); }
+.side-preset .side-crash-ico { color: var(--warn); }
 /* its words take the row and the button sits under them, lined up with the words: "Download it again" beside a reason
    would squeeze both into a narrow column */
 .side-crash.side-preset { flex-wrap: wrap; row-gap: 8px; }

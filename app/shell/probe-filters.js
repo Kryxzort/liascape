@@ -86,6 +86,8 @@
 //   lib:drawer        below 900 px the Library's toggle opens its drawer; a switch works in it; Escape closes; a tab visit closes it
 //   local:weFolder    Browse's "Wallpaper Engine (Local)": the column with what the folder's items know, filtered in the page
 //                     (no filter POSTed), "In my library" too, its own saved filter; its client sort in the split, no Workshop sort
+//   local:wePreset    a preset in the WE folder (scene support on, the Liascape player) is its own card there: Type offers Preset,
+//                     which lists exactly it; Scene lists it with the scene; one naming no Workshop base isn't listed
 //   lib:steamTags     an item auto-imported from a Wallpaper Engine folder (its project.json: a genre, no resolution, no age)
 //                     gets Steam's tags from the backend's one look-up (the stack's fake Steam servers, LIASCAPE_STEAM_CM_FIXTURE —
 //                     asked for its id alone): the Library's column grows its rows (3840 x 2160, Questionable) and they filter it
@@ -1772,6 +1774,50 @@ app.whenReady().then(async () => {
         if ((await titles()).length !== 4) v.push("Clear all didn't bring every card back");
       } finally {
         await setSettings({ workshopFolder: s0.workshopFolder });
+        await toWorkshop();
+      }
+      return v;
+    });
+
+    // local:wePreset — a preset in the WE folder is its own card there (a scene: it plays its base) while presets can play, so the
+    // Type column's Preset row lists exactly it, as the Workshop's does; one naming no Workshop base isn't listed
+    await cell("local:wePreset", async () => {
+      const v = [];
+      const s0 = (await http("GET", "/settings")).json;
+      const we = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "fake-we-presets");
+      const put = (id, pj, files = {}) => { const d = path.join(we, id); fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, "project.json"), JSON.stringify(pj)); fs.copyFileSync(THUMBS[0], path.join(d, "preview.jpg"));
+        for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(d, n), b); };
+      put("940000001", { type: "video", file: "v.mp4", title: "wp-video", preview: "preview.jpg" }, { "v.mp4": "" });
+      put("940000002", { type: "scene", file: "scene.json", title: "wp-scene", preview: "preview.jpg" }, { "scene.pkg": Buffer.alloc(16) });
+      put("940000003", { title: "wp-preset", preview: "preview.jpg", dependency: "940000002", preset: { schemecolor: "0 0 1" } });
+      put("940000004", { title: "wp-nobase", preview: "preview.jpg", preset: { schemecolor: "0 0 1" } });
+      await setSettings({ workshopFolder: we, allowScenes: true });
+      try {
+        await loadUi(`localStorage.removeItem("liascape.weLocalFilter"); true`);
+        const src = (await http("GET", "/sources")).json.find((x) => x.supportsLocalFilter);
+        if (!src) return ["no source with supportsLocalFilter in /sources"];
+        await tab("Browse"); await source(src.name); await sleep(800); await page(`await m.ensure();`);
+        const titles = () => page(`return m.qa(".scroll:not(.lib-scroll) .card .lib-title[data-title]").map((e) => e.dataset.title).sort();`);
+        const all = await titles();
+        const type = await typeRows();
+        console.log(`        listed ${J(all)}; Type rows ${J(type)}`);
+        if (!all.includes("wp-video") || !all.includes("wp-scene")) return [`${J(all)} on ${src.name} (want the fake folder's video and scene) — proved nothing`];
+        if (J(all) !== J(["wp-preset", "wp-scene", "wp-video"])) v.push(`listed ${J(all)} (want the video, the scene and the preset with a base; not the one naming none)`);
+        if (J(type) !== J(["Video:off", "Scene:off", "Preset:off"])) v.push(`the Type rows ${J(type)} (want Video, Scene, Preset)`);
+        const pick = async (steps, want) => {
+          for (const [t, st] of steps) if (!(await page(`const s = m.seg(${J(t)}, ${J(st)}); if (!s) return false; s.click(); await m.sleep(250); return true;`))) v.push(`no ${t} row`);
+          const got = await titles();
+          if (J(got) !== J(want)) v.push(`${steps.map((x) => x.join(":")).join(" + ")} → ${J(got)} (want ${J(want)})`);
+        };
+        await pick([["Preset", "inc"]], ["wp-preset"]);
+        await shot("local-we-preset");
+        await pick([["Preset", "off"], ["Scene", "inc"]], ["wp-preset", "wp-scene"]); // a preset is a scene too (facetsOf)
+        await pick([["Preset", "exc"]], ["wp-scene"]);
+        await page(`m.q("[data-wf-clear]")?.click(); await m.sleep(300);`);
+      } finally {
+        await setSettings({ workshopFolder: s0.workshopFolder, allowScenes: s0.allowScenes });
+        await loadUi(`localStorage.removeItem("liascape.weLocalFilter"); true`);
         await toWorkshop();
       }
       return v;

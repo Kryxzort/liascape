@@ -250,6 +250,8 @@ public static class SteamTodo
                         var r = await SteamClientUgc.SubscribeAsync(e.Id, settings, null, CancellationToken.None);
                         Console.WriteLine(r.Folder != null ? $"workshop: {e.Id}: subscribed through the Steam client (the Steam to-do)"
                                                            : $"workshop: {e.Id}: not subscribed through the Steam client — {r.Fallback}");
+                        // the client's subscribe shows no required-items prompt: a preset's base goes the same way, right after it
+                        if (r.Folder != null) await PresetDownloads.SubscribeBaseAsync(e.Id, viaSteamApp: true);
                     }
                 }
                 catch (Exception ex) { Console.WriteLine($"workshop: the Steam app's turn at the Steam to-do failed: {ex.Message}"); }

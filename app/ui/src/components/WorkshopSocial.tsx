@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { Images, Layers, Library as LibraryIcon, LoaderCircle, MessageSquare, PanelRightOpen, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
-import { api, steamPageUrl, thumb, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator } from "../api/client";
+import { api, steamPageUrl, thumb, workshopStub, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator } from "../api/client";
 import { presetsOn, useStore } from "../store";
 import { StatPills } from "./sidePills";
 import { useMotion } from "./motion";
@@ -155,10 +155,7 @@ export function BaseRow({ presetId, local, onShowInLibrary, onShowInBrowse }: {
     const st = useStore.getState();
     const list = st.wsList?.kind === "presets" && st.wsList.id === b.baseId ? st.wsList.scene : null;
     const url = steamPageUrl(b.baseId);
-    st.showBrowseItem(list ?? {
-      title: name ?? "", thumbnailUrl: "", animatedThumbnailUrl: null, pageUrl: url, resolution: null, isScene: b.kind === "scene",
-      workshopId: b.baseId, addedAt: null, description: null, authorName: null, fileSizeBytes: null, subscriptions: null, favorites: null, tags: null,
-    });
+    st.showBrowseItem(list ?? workshopStub(b.baseId, name ?? "", b.kind === "scene"));
     revealCard(`br-${st.wallpapers.find((x) => x.workshopId === b.baseId)?.pageUrl ?? url}`);
     onShowInBrowse?.();
   };

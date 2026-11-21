@@ -16,7 +16,8 @@ public static class PresetDownloads
 {
     public const string WaitingForBase = "Waiting for Steam to download its base scene…";
 
-    // a base being fetched → that fetch: two presets of one scene downloaded together share it (one subscribe, one copy)
+    // a base being fetched + its route (subscribed, one-off, the Steam app) → that fetch: two presets of one scene downloaded
+    // together the same way share it (one subscribe, one copy); a one-off and a subscribed preset each get their own
     static readonly Dictionary<string, Task> _fetching = new(StringComparer.Ordinal);
 
     static string PageUrl(string id) => $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}";
@@ -28,9 +29,11 @@ public static class PresetDownloads
     /// download modes, the user's choice"): "Subscribe with Steam login" / "Use the Steam app" download it as the preset was
     /// (subscribed, or a one-off copy for a one-off preset); "Open in the Steam app" opened only the preset's page, whose
     /// required-items prompt is Steam's way to the base, so it waits for the base's folder with no page of its own and then
-    /// imports it (a timeout leaves it). A base that isn't a scene is never fetched: its kind is saved and the preset says why.
+    /// imports it (a timeout leaves it) — unless the user handed the preset's Steam to-do entry to the Steam app ("Let the Steam
+    /// app do all N", `viaSteamApp`): the client's subscribe shows no required-items prompt, so the base is subscribed through the
+    /// client too. A base that isn't a scene is never fetched: its kind is saved and the preset says why.
     /// The base id: the preset file's `dependency`, else Steam's (WorkshopSocialOps.BaseOfAsync).
-    public static async Task FetchBaseAsync(LibraryItem preset, bool oneOff)
+    public static async Task FetchBaseAsync(LibraryItem preset, bool oneOff, bool viaSteamApp = false)
     {
         string dir = preset.VideoPath, who = preset.WorkshopId ?? System.IO.Path.GetFileName(dir);
         string? baseId = null;
@@ -63,13 +66,16 @@ public static class PresetDownloads
                 return;
             }
             Task fetch;
+            string key = $"{baseId}|{(oneOff ? "one-off" : viaSteamApp ? "steam-app" : "subscribed")}";
             lock (_fetching)
             {
-                if (!_fetching.TryGetValue(baseId, out var running))
+                if (!_fetching.TryGetValue(key, out var running))
                 {
-                    var id = baseId;
-                    running = FetchAsync(id, facts.Title, oneOff).ContinueWith(t => { lock (_fetching) _fetching.Remove(id); return t; }, TaskScheduler.Default).Unwrap();
-                    _fetching[baseId] = running;
+                    var (id, title) = (baseId, facts.Title);
+                    // started off the lock: FetchAsync's synchronous start reads the settings
+                    running = Task.Run(() => FetchAsync(id, title, oneOff, viaSteamApp))
+                        .ContinueWith(t => { lock (_fetching) _fetching.Remove(key); return t; }, TaskScheduler.Default).Unwrap();
+                    _fetching[key] = running;
                 }
                 fetch = running;
             }
@@ -97,13 +103,22 @@ public static class PresetDownloads
     }
 
     // the base by the download mode's own way, imported like any /download of it (its own card's events under its page URL)
-    static async Task FetchAsync(string baseId, string? title, bool oneOff)
+    static async Task FetchAsync(string baseId, string? title, bool oneOff, bool viaSteamApp)
     {
         var s = SettingsService.Load();
         string page = PageUrl(baseId);
         var detail = await ServerHost.Workshop.GetDetailAsync(new WallpaperResult
         { Title = title ?? baseId, ThumbnailUrl = "", PageUrl = page, WorkshopId = baseId, IsScene = true }).ConfigureAwait(false);
-        if (s.WorkshopDownloadMode == "steampage")
+        if (viaSteamApp)
+        {
+            // the preset's own route: the user's switch for that to-do batch, never the saved mode's page
+            Console.WriteLine($"workshop: {baseId}: a preset's base — subscribing it through the Steam client, as the Steam to-do did the preset");
+            var progress = new Progress<(double, string)>(t =>
+                EventBus.Broadcast("download-progress", new { id = page, value = Math.Max(0, t.Item1), status = t.Item2 }));
+            var r = await SteamClientUgc.SubscribeAsync(baseId, s, progress, CancellationToken.None).ConfigureAwait(false);
+            if (r.Folder == null) throw new InvalidOperationException(SteamClientUgc.FailureMessage(r.Fallback));
+        }
+        else if (s.WorkshopDownloadMode == "steampage")
         {
             // a Steam page can't make a one-off (WorkshopDownloader.Blocked), so a one-off preset never gets here
             if (oneOff) throw new InvalidOperationException(WorkshopDownloader.OneOffPageOnly);
@@ -117,7 +132,8 @@ public static class PresetDownloads
             }
         }
         else Console.WriteLine($"workshop: {baseId}: a preset's base — {(oneOff ? "downloading it without subscribing" : "downloading it")} like the preset");
-        // "Open in the Steam app": the folder is there now, so this imports it without opening anything
+        // "Open in the Steam app": the folder is there now (in one of Steam's Workshop folders), so this imports it without
+        // opening anything
         await AppOps.DownloadAsync(detail, "", page, CancellationToken.None, null, oneOff).ConfigureAwait(false);
     }
 
@@ -134,20 +150,22 @@ public static class PresetDownloads
         EventBus.Broadcast("download-progress", new { id = PageUrl(baseId), value = 0.0, error = why });
     }
 
-    /// After a Subscribe (nothing imported: `/workshop/subscribe`, or its Steam to-do entry ending Done) of a preset: its base
-    /// scene is subscribed the same way when it is neither subscribed nor in the library. "Open in the Steam app" relies on
-    /// Steam's required-items prompt on the preset's page. A non-preset or a base that isn't a scene: nothing.
-    public static async Task SubscribeBaseAsync(string presetId)
+    /// After a Subscribe (nothing imported) of a preset: its base scene is subscribed the same way when it is neither subscribed
+    /// nor in the library. `/workshop/subscribe` under "Subscribe with Steam login" / "Use the Steam app": the mode's way; a
+    /// Steam to-do entry the user handed to the Steam app ("Let the Steam app do all N", `viaSteamApp`): the Steam client's.
+    /// "Open in the Steam app" otherwise relies on Steam's required-items prompt on the preset's page. A non-preset or a base
+    /// that isn't a scene: nothing. Guard: test-steam-signin.sh § 2 (presets), § 3 k.
+    public static async Task SubscribeBaseAsync(string presetId, bool viaSteamApp = false)
     {
         try
         {
-            if (SettingsService.Load().WorkshopDownloadMode == "steampage") return;
+            if (!viaSteamApp && SettingsService.Load().WorkshopDownloadMode == "steampage") return;
             var b = await WorkshopSocialOps.BaseOfAsync(presetId, CancellationToken.None).ConfigureAwait(false);
             if (b == null) return;
             if (b.Kind != "scene") { Console.WriteLine($"workshop: {presetId}: its base {b.BaseId} is {(b.Kind == null ? "not on Steam" : $"a {b.Kind} wallpaper")} — not subscribed"); return; }
             if (Presets.BaseDirOf(b.BaseId) != null || WorkshopSubOps.IsSubscribed(b.BaseId)) return;
             Console.WriteLine($"workshop: {presetId}: subscribed to a preset — subscribing its base {b.BaseId} too");
-            await WorkshopSubOps.SubscribeAsync(b.BaseId, b.Title).ConfigureAwait(false);
+            await WorkshopSubOps.SubscribeAsync(b.BaseId, b.Title, viaSteamApp).ConfigureAwait(false);
         }
         catch (Exception e) { Console.WriteLine($"workshop: {presetId}: subscribing its base scene failed: {e.Message}"); }
     }

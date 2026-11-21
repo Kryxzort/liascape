@@ -53,7 +53,9 @@
 #     subscription, the library's own copy, the lingering folder blocked; a client that refuses DownloadItem → subscribe, copy,
 #     unsubscribe through the client; an item already subscribed stays so; Steam unreachable → the reason. Then (k.) presets
 #     through the client (the fake installs $FAKE_UGC_DIR/template-<id>/): the preset then its base subscribed, a one-off's
-#     both DownloadItem'd, a Subscribe of a preset subscribes its base, a Delete from source of the preset keeps the base.
+#     both DownloadItem'd, a Subscribe of a preset subscribes its base, a Delete from source of the preset keeps the base; under
+#     "Open in the Steam app" a preset's download or Subscribe handed to "Let the Steam app do all 1" brings its base through
+#     the client too (no page for it).
 #  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
 #     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), sign-out, and the
 #     keyring path against a STUB secret-tool (the value on stdin, never argv; a refused lookup → signed out, not asked
@@ -134,8 +136,8 @@ EOF
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -t 1 -c:v libx264 -pix_fmt yuv420p "$T/clip.mp4"
 # Steam's item details for every backend here (LIASCAPE_STEAM_CM_FIXTURE: no CM session, no network): the presets and their
 # bases (Web/PresetDownloads.cs asks for a preset's base and its kind). Real Workshop ids for the fixtures' pairs
-# (scripts/test-fixtures/presets/); 910000101 and 910000103 are made up, each a fixture with its base id rewritten (a base
-# that never arrives, a web base). An id not listed = no such public item.
+# (scripts/test-fixtures/presets/); 910000101, 910000103 and 910000104 are made up, each a fixture with its base id rewritten (a base
+# that never arrives or comes through the Steam to-do, a web base). An id not listed = no such public item.
 cat > "$T/cm.json" <<'EOF'
 {"3583880694": {"tags": ["Preset", "Scene"], "title": "Preset fixture 4", "children": ["3354740764"]},
  "3520333138": {"tags": ["Preset", "Scene"], "title": "Preset fixture 3", "children": ["3354740764"]},
@@ -147,7 +149,9 @@ cat > "$T/cm.json" <<'EOF'
  "910000101": {"tags": ["Preset", "Scene"], "title": "Preset, base never arrives", "children": ["900000001"]},
  "900000001": {"tags": ["Scene"], "title": "Base scene D"},
  "910000103": {"tags": ["Preset", "Web"], "title": "Preset of a web wallpaper", "children": ["900000005"]},
- "900000005": {"tags": ["Web"], "title": "A web wallpaper"}}
+ "900000005": {"tags": ["Web"], "title": "A web wallpaper"},
+ "910000104": {"tags": ["Preset", "Scene"], "title": "Preset, subscribed through the to-do", "children": ["900000006"]},
+ "900000006": {"tags": ["Scene"], "title": "Base scene E"}}
 EOF
 # "Download without subscribing" signed in (§ 2, one-off): the sign-in's subscribe / unsubscribe go to a fake community
 # (scripts/test-fixtures/fake-steam-community.mjs, LIASCAPE_STEAM_COMMUNITY); a made-up account and cookie token
@@ -427,7 +431,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const setS = (patch) => fetch(U + "/settings", { method: "POST", headers: json, body: JSON.stringify(patch) });
   const FIX = `${process.env.ROOT}/scripts/test-fixtures/presets`;
   const wsDir = (id) => `${T}/ws/431960/${id}`;
-  // a preset as Steam delivers it: a Task 1 fixture (its own id, or `fixture` with the base id rewritten to `dep`)
+  // a preset as Steam delivers it: one of scripts/test-fixtures/presets/ (its own id, or `fixture` with the base id rewritten to `dep`)
   const dropPreset = (id, fixture = id, dep = null) => {
     const stage = `${T}/stage-${id}`; fs.cpSync(`${FIX}/${fixture}`, stage, { recursive: true });
     if (dep) { const pj = JSON.parse(fs.readFileSync(`${stage}/project.json`, "utf8")); pj.dependency = dep; fs.writeFileSync(`${stage}/project.json`, JSON.stringify(pj)); }
@@ -532,12 +536,12 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const subS = await until(async () => (await subCalls("900000001")).includes("subscribe"), 10000);
   out(rS.status === 200 && (await subCalls("910000101")).includes("subscribe") && subS,
     "Subscribe of a preset (Subscribe with Steam login): its base scene is subscribed too", `${rS.status} | ${(await subCalls("900000001")).join(" ")}`);
-  // unsubscribing the preset (Delete from source) never unsubscribes its base
+  // unsubscribing the preset (the Browse sidebar's Unsubscribe: Delete from source for a library item) never unsubscribes its base
   const rU = await fetch(U + "/workshop/unsubscribe", { method: "POST", headers: json, body: JSON.stringify({ workshopId: "3420428971", title: "p" }) });
   const unsubP = await until(async () => (await subCalls("3420428971")).includes("unsubscribe"), 15000);
   await sleep(1000);
   out(rU.status === 200 && unsubP && !(await subCalls("3419466417")).includes("unsubscribe") && !!(await item("3419466417")),
-    "unsubscribing a preset (Delete from source): its base stays subscribed and in the library", `${(await subCalls("3420428971")).join(" ")} / base ${(await subCalls("3419466417")).join(" ")}`);
+    "unsubscribing a preset (Unsubscribe = Delete from source): its base stays subscribed and in the library", `${(await subCalls("3420428971")).join(" ")} / base ${(await subCalls("3419466417")).join(" ")}`);
   fs.writeFileSync(af, authBefore, { mode: 0o600 });
 }
 ws.close();
@@ -566,7 +570,7 @@ for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
 for _ in $(seq 1 50); do curl -sf -m 2 "$U3/health" >/dev/null && break; sleep 0.1; done
 cp "$ROOT/scripts/test-fixtures/drive-steam-client.mjs" "$T/drive3.mjs"
-(cd "$T" && U=$U3 T=$T ROOT=$ROOT XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout $((360+ 50 * ${FAKE_UGC_OPEN_DELAY_MS:-0} / 1000)) node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
+(cd "$T" && U=$U3 T=$T ROOT=$ROOT XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout $((420 + 50 * ${FAKE_UGC_OPEN_DELAY_MS:-0} / 1000)) node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
 sed 's/^/      /' "$T/drive3.log"
 p=$(grep -c '^PASS' "$T/drive3.log"); f=$(grep -c '^FAIL' "$T/drive3.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))

@@ -13,7 +13,8 @@ namespace Liascape.Scrapers;
 
 public static class WallpaperEngineScraper
 {
-    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath, bool allowScenes = false, string query = "", int sortIndex = 0)
+    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath, bool allowScenes = false, string query = "", int sortIndex = 0,
+        bool allowPresets = false)
     {
         var results = new List<WallpaperResult>();
 
@@ -55,6 +56,26 @@ public static class WallpaperEngineScraper
             }
 
             if (info == null) continue;
+            // a preset (no type: Presets.Read) is its own card, a scene playing its base's folder, listed only while presets can
+            // play (WallpaperEngineService.AllowPresets), as the Workshop lists them; one naming no Workshop base isn't a
+            // subscription's preset (the WE auto-import's rule). Guard: probe-filters local:wePreset
+            if (info.Type == null && Presets.Read(dir) is { BaseId: not null })
+            {
+                if (!allowPresets) continue;
+                if (!string.IsNullOrEmpty(query) && !title.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
+                results.Add(new WallpaperResult
+                {
+                    Title = title,
+                    ThumbnailUrl = FindThumbnail(dir) ?? "",
+                    PageUrl = dir,
+                    IsScene = true,
+                    IsPreset = true,
+                    WorkshopId = workshopId,
+                    AddedAt = addedAt,
+                    Tags = info.Tags, AgeRating = info.Age
+                });
+                continue;
+            }
             if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.IsNullOrEmpty(info.File)) continue;
 
