@@ -114,6 +114,7 @@ export default function App() {
     else if (e.type === "pause-changed") useStore.getState().setWallpaperPaused(e.payload.paused);
     else if (e.type === "toggle-loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
+    else if (e.type === "workshop-favorites") useStore.getState().favoritesChanged(e.payload.version);
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     // API: the sign-in ended (here or by Steam): the Unsubscribe controls follow (SteamOps.SignInLost)
     else if (e.type === "steam-status") useStore.setState({ steam: e.payload });

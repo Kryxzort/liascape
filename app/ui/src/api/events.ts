@@ -32,6 +32,10 @@ export type LiascapeEvent =
   | { type: "library-ops"; payload: { ops: LibraryOp[] } }
   | { type: "playlist-changed"; payload: { client: string | null } }
   | { type: "steam-qr"; payload: { png: string } }
+  // the signed-in account's Workshop favourites changed in the backend's cache (a page of the first load, a star here or on
+  // Steam, the id diff, the count check): the app-wide version it's at now and the first load's progress, never the ids
+  // (Helpers/WorkshopFavorites.cs; the page re-reads GET /workshop/my-favorites)
+  | { type: "workshop-favorites"; payload: { version: number; loading: { done: number; total: number | null } | null } }
   | { type: "steam-signed-in"; payload: { signedIn: boolean; accountName: string; daysLeft: number | null; mode: string } }
   // the sign-in ended (signed out, or Steam turned it down): /steam/status's shape (SteamOps.SignInLost)
   | { type: "steam-status"; payload: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean } }

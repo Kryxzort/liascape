@@ -144,7 +144,7 @@ for f in $FILES; do
     # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
-    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/views/localSet.ts|app/ui/src/components/facets.ts|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
+    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/WsSetLoad.tsx|app/ui/src/views/localSet.ts|app/ui/src/components/facets.ts|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
       add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:, yours:; --probe probe-filters.js — the Workshop filter column, filter:preset:badge; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
