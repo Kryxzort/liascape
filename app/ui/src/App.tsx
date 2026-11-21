@@ -19,6 +19,7 @@ import { SortFilterButton } from "./components/SortFilterButton";
 import { SourcePills } from "./components/SourcePills";
 import { BUTTONS_NARROW, useNarrow } from "./hooks/useTopbarCompact";
 import { WS_LIST_SORTS, WS_SORT_OPTIONS, wsSortPatch, wsSortValue } from "./components/workshopFilter";
+import { effectiveLocalSort, localSortOptions } from "./views/localSet";
 import { Segmented } from "./components/Segmented";
 import LibraryOpsLine from "./components/LibraryOpsLine";
 import { TopbarStatus } from "./components/TopbarStatus";
@@ -53,7 +54,7 @@ const BROWSE_SORTS =["Default", "Name A–Z", "Name Z–A", "Videos first", "Sce
 export default function App() {
   // PERF: only what App reads (useShallow: the store's actions are stable, so the state fields decide), never the whole
   // store: a Library filter change or a selection re-rendered App and its top bar's ~30 icons. Guard: probe-filters lib:interplay
-  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort })));
+  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort, localSetOn: st.localSetOn(), libInc: st.setModes().lib === "inc", localSort: st.localSort, setLocalSort: st.setLocalSort })));
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
   const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
@@ -253,12 +254,14 @@ export default function App() {
 
         {/* "Go to selected": glides the grid to the card whose sidebar is open and rings it, like the Library's go to playing */}
         {tab === "browse" && <BrowseLocate focus={s.browseFocus} motion={motion} />}
-        {/* a Workshop list (favourites, a creator's) has no search: Steam can't search a user's files */}
-        {tab === "browse" && src?.supportsSearch && !(src.supportsTagFilter && s.wsList) && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
+        {/* a Workshop list (favourites, a creator's) has no search: Steam can't search a user's files. A local set (a Yours
+            row ✓, views/localSet.ts) searches itself, inside a list too. Guard: probe-steam yours:search, yours:inList */}
+        {tab === "browse" && src?.supportsSearch && (!(src.supportsTagFilter && s.wsList) || s.localSetOn) && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
         {/* the filter panel's toggle + the sort, one split button (the Workshop's period is in its sort menu) */}
         {tab === "browse" && (
           <SortFilterButton page="browse" scope={s.browseScope()}
-            sort={src?.supportsTagFilter && s.wsList ? { value: s.wsListSort, options: WS_LIST_SORTS, onChange: (v) => s.setWsListSort(v === "toprated" ? "toprated" : "lastupdated") }
+            sort={s.localSetOn ? { value: effectiveLocalSort(s.localSort, s.libInc), options: localSortOptions(s.libInc), onChange: s.setLocalSort }
+              : src?.supportsTagFilter && s.wsList ? { value: s.wsListSort, options: WS_LIST_SORTS, onChange: (v) => s.setWsListSort(v === "toprated" ? "toprated" : "lastupdated") }
               : src?.supportsTagFilter ? { value: wsSortValue(s.browseFilter), options: WS_SORT_OPTIONS, onChange: (v) => s.setBrowseFilter(wsSortPatch(v)) }
               : src?.supportsSorting ? { value: String(s.browseSort), options: BROWSE_SORTS, onChange: (v) => s.setBrowseSort(+v) } : null} />
         )}

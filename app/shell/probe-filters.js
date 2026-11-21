@@ -23,8 +23,9 @@
 //                     the radiogroups' aria-labels
 //   wf:collapse       a group's head collapses / expands it, remembered over a reload
 //   wf:clearAll       Clear all → nothing on, include / exclude [] POSTed, the button disabled
-//   wf:library       the "In my library" row: ✓ = only the owned card, ✕ = all but it, no /browse request for it, never POSTed;
-//                    no download button on the owned card
+//   wf:library       the "In my library" row: ✓ = the library's Workshop items themselves, no /browse; ✕ = the Workshop's
+//                    pages but the owned card (one /browse leaving the ✓, none otherwise), never POSTed; no download button on
+//                    the owned card
 //   wf:yours:rows    the Workshop column's first group is "yours", named "Yours", with the rows @library, @favorites in that
 //                    order (the WE folder's: local:weFolder, @library only; the Library's: lib:column, @favorites only)
 //   wf:yours:signedOut  the stack is signed out: the Favourites row is dimmed (data-wf-off) with "Sign in to Steam" under its
@@ -489,36 +490,49 @@ app.whenReady().then(async () => {
       return v;
     });
     await cell("wf:library", async () => {
-      // "In my library" (show only / hide what the library already has) + no download button on an owned card
+      // "In my library" (show only / hide what the library already has) + no download button on an owned card. Its ✓ shows the
+      // library's Workshop items themselves (views/localSet.ts: s1..s3, scenes: scene support on for the cell), no request;
+      // ✕ alone hides the owned card from the Workshop's pages, asking for them again only when it ends the ✓
       const v = [];
-      const r0 = await page(`return { cards: m.cards(), owned: m.qa(".card [data-in-library]").length,
-        dlOnOwned: [...m.qa(".card")].filter((c) => c.querySelector("[data-in-library]") && c.querySelector(".dl-btn")).length,
-        dl: m.qa(".card .dl-btn").length, row: !!m.q('[data-wf-tag="@library"]') };`);
-      if (!r0.row) v.push("no In my library row");
-      if (r0.owned !== 1) v.push(`${r0.owned} cards marked In library (want 1)`);
-      if (r0.dlOnOwned) v.push("the owned card still has a download button");
-      if (r0.dl !== r0.cards - r0.owned) v.push(`${r0.dl} download buttons for ${r0.cards - r0.owned} cards not in the library`);
-      const n0 = await page(`return window.__browse.length;`);
-      const name = `m.q('[data-wf-tag="@library"] .wf-name').click(); await m.sleep(450);`;
-      await page(name); // · → ✓ (the name toggles include)
-      const only = await page(`return { cards: m.cards(), owned: m.qa(".card [data-in-library]").length };`);
-      if (only.cards !== 1 || only.owned !== 1) v.push(`✓ In my library: ${only.cards} cards, ${only.owned} owned (want 1 / 1)`);
-      await page(`m.seg("@library", "exc").click(); await m.sleep(450);`); // ✕ via its segment
-      const hide = await page(`return { cards: m.cards(), owned: m.qa(".card [data-in-library]").length, st: m.st("@library") };`);
-      if (hide.st !== "exc") v.push(`the row is ${hide.st} after its ✕ segment`);
-      if (hide.owned || hide.cards !== r0.cards - 1) v.push(`✕ In my library: ${hide.cards} cards, ${hide.owned} owned (want ${r0.cards - 1} / 0)`);
-      await page(name); // ✕ → off
-      if (await page(`return m.st("@library");`) !== "off") v.push("a name click on the hidden row didn't turn it off");
-      await page(`m.seg("@library", "exc").click(); await m.sleep(450);`);
-      await page(`await m.sleep(400);`);
-      const n1 = await page(`return window.__browse.length;`);
-      if (n1 !== n0) v.push(`${n1 - n0} /browse request(s) for the library row (want none: it filters what's loaded)`);
-      await page(`m.seg("Anime", "inc").click();`);
-      const b = await page(`return await m.settle(${n1});`);
-      if (!b) v.push("no request after including Anime");
-      else if ([...b.filter.include, ...b.filter.exclude].some((t) => t.startsWith("@"))) v.push(`the pseudo-tag went to the backend: ${J(b.filter)}`);
-      await page(`m.q("[data-wf-clear]").click(); await m.sleep(500);`);
-      if (await page(`return m.cards();`) !== r0.cards) v.push("Clear all didn't bring the owned card back");
+      await setSettings({ allowScenes: true }); await loadUi(); await toWorkshop();
+      try {
+        const r0 = await page(`return { cards: m.cards(), owned: m.qa(".card [data-in-library]").length,
+          dlOnOwned: [...m.qa(".card")].filter((c) => c.querySelector("[data-in-library]") && c.querySelector(".dl-btn")).length,
+          dl: m.qa(".card .dl-btn").length, row: !!m.q('[data-wf-tag="@library"]') };`);
+        if (!r0.row) v.push("no In my library row");
+        if (r0.owned !== 1) v.push(`${r0.owned} cards marked In library (want 1)`);
+        if (r0.dlOnOwned) v.push("the owned card still has a download button");
+        if (r0.dl !== r0.cards - r0.owned) v.push(`${r0.dl} download buttons for ${r0.cards - r0.owned} cards not in the library`);
+        const libWs = ((await http("GET", "/library")).json ?? []).filter((i) => i.workshopId).map((i) => i.title).sort();
+        if (!libWs.length) return [...v, "the stack's library has no Workshop items — proved nothing"];
+        const n0 = await page(`return window.__browse.length;`);
+        const name = `m.q('[data-wf-tag="@library"] .wf-name').click(); await m.sleep(450);`;
+        await page(name); // · → ✓ (the name toggles include)
+        const only = await page(`return { titles: m.qa(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]").map((e) => e.dataset.title).sort(),
+          owned: m.qa(".card [data-in-library]").length, skel: m.qa(".skel-card").length };`);
+        if (J(only.titles) !== J(libWs) || only.owned !== libWs.length) v.push(`✓ In my library: ${J(only.titles)}, ${only.owned} owned (want the library's Workshop items ${J(libWs)}, all owned)`);
+        if (only.skel) v.push(`✓ In my library: ${only.skel} placeholder cards`);
+        const n1 = await page(`return window.__browse.length;`);
+        if (n1 !== n0) v.push(`✓ In my library sent ${n1 - n0} /browse request(s) (want none: it shows the library)`);
+        await page(`m.seg("@library", "exc").click(); await m.sleep(700);`); // ✕ via its segment
+        const hide = await page(`return { cards: m.cards(), owned: m.qa(".card [data-in-library]").length, st: m.st("@library") };`);
+        if (hide.st !== "exc") v.push(`the row is ${hide.st} after its ✕ segment`);
+        if (hide.owned || hide.cards !== r0.cards - 1) v.push(`✕ In my library: ${hide.cards} cards, ${hide.owned} owned (want ${r0.cards - 1} / 0)`);
+        const n2 = await page(`return window.__browse.length;`);
+        if (n2 - n1 !== 1) v.push(`✓ → ✕ sent ${n2 - n1} /browse request(s) (want one: the Workshop's pages again)`);
+        await page(name); // ✕ → off
+        if (await page(`return m.st("@library");`) !== "off") v.push("a name click on the hidden row didn't turn it off");
+        await page(`m.seg("@library", "exc").click(); await m.sleep(450);`);
+        await page(`await m.sleep(400);`);
+        const n3 = await page(`return window.__browse.length;`);
+        if (n3 !== n2) v.push(`${n3 - n2} /browse request(s) for ✕ → – → ✕ (want none: it filters what's loaded)`);
+        await page(`m.seg("Anime", "inc").click();`);
+        const b = await page(`return await m.settle(${n3});`);
+        if (!b) v.push("no request after including Anime");
+        else if ([...b.filter.include, ...b.filter.exclude].some((t) => t.startsWith("@"))) v.push(`the pseudo-tag went to the backend: ${J(b.filter)}`);
+        await page(`m.q("[data-wf-clear]").click(); await m.sleep(500);`);
+        if (await page(`return m.cards();`) !== r0.cards) v.push("Clear all didn't bring the owned card back");
+      } finally { await setSettings({ allowScenes: false }); await loadUi(); await toWorkshop(); }
       return v;
     });
 
