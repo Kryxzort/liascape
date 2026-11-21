@@ -388,9 +388,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 :root.no-motion .libops-fill { transition: none; }
 :root.no-motion .libops-fill::after { animation: none; }
 
-/* ---- the favourites' load line (components/WsSetLoad.tsx): a chip at the top of Browse's grid, in a sticky box of no
-   height, so it floats over the first cards and its coming or going moves nothing; under the docked panels (40) and the
-   filter drawer (45). Its bar is the library line's (.libops): the accent fill with its small glow easing to the count, a
+/* ---- the favourites' load line (components/WsSetLoad.tsx): a chip at the top of Browse's grid. Loading, it sits in a sticky
+   box of no height, floating over the first cards (under the docked panels, 40, and the filter drawer, 45) with every click
+   passing through to them, so its coming or going moves nothing. The error (.flow) takes its own room above the grid, the
+   grid gliding down under it (WsSetLoad's FLIP), so a lasting error never covers a card. Its bar is the library line's (.libops): the accent fill with its small glow easing to the count, a
    highlight sweeping along it (the progress role's loop); a sweep runs over the track while the total isn't known.
    COOL: it rises 6 px and fades in; at the end the bar runs out to the edge (.3 s), then it fades and lifts away; turned off
    (.away) it only fades. Transitions, not keyframes: a line that leaves while still coming in turns back from where it is
@@ -398,8 +399,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* align-items: flex-start: the chip keeps its own height (stretched to the dock's 0, its fill would miss its words) */
 .ws-set-load-dock { position: sticky; top: 0; height: 0; z-index: 30; display: flex; justify-content: center; align-items: flex-start;
   pointer-events: none; }
+/* the error's room: in the flow, the chip where it floated (6 px down), the grid's own gap under it */
+.ws-set-load-dock.flow { position: relative; height: auto; padding: 6px 0 var(--gap); }
 .ws-set-load { position: relative; top: 6px; display: grid; justify-items: center; gap: 8px; min-width: min(300px, 100%); max-width: 100%;
-  padding: 9px 16px 11px; border-radius: 10px; pointer-events: auto; color: var(--subtext); font-size: 13px;
+  padding: 9px 16px 11px; border-radius: 10px; pointer-events: none; color: var(--subtext); font-size: 13px;
   background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); border: 1px solid var(--surface0);
   box-shadow: 0 8px 24px -6px color-mix(in srgb, var(--bg-crust) 70%, transparent);
   transition: opacity .24s ease-out, transform .24s ease-out; }
@@ -410,7 +413,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .wsl-text { animation: nm-in .2s ease-out; }
 .ws-set-load[data-ws-set-load="error"] { grid-auto-flow: column; align-items: center; gap: 12px; padding-bottom: 9px; }
 .ws-set-load[data-ws-set-load="error"] .wsl-text { color: var(--warn); }
-.wsl-retry { padding: 4px 12px; font-size: 12px; }
+.ws-set-load-dock.flow > .ws-set-load { top: 0; }
+/* the line takes no click; only Retry does */
+.wsl-retry { padding: 4px 12px; font-size: 12px; pointer-events: auto; }
+.ws-set-load.closing .wsl-retry { pointer-events: none; }
 .wsl-track { position: relative; width: 100%; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .wsl-fill { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; transform-origin: left; background: var(--accent);
   box-shadow: var(--glow-sm); transition: transform .6s cubic-bezier(.25, .8, .25, 1); }

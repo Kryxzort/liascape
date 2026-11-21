@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
@@ -5,13 +6,17 @@ import { useMotion } from "./motion";
 // The favourites' load line at the top of Browse's grid, while a Favourites row is ✓ / ✕ on the Workshop and the list isn't all
 // in: "Loading your favourites…" before anything has come, "Loading your favourites — 120 so far" while Steam hasn't said how
 // many there are, "Loading your favourites — 120 of 450" once it has, with a thin bar under the words easing to the count (the
-// library line's look: index.css .libops). Steam unreachable: its words and Retry (the load again, sync=open); what loaded
-// stays in the grid. A first Favourites ✓ on a big or private list never sits blank: the line shows from the click. It floats
-// over the grid's top (index.css .ws-set-load-dock: no room of its own), so neither its coming nor its going moves a card.
+// library line's look: index.css .libops). A first Favourites ✓ on a big or private list never sits blank: the line shows from
+// the click. While loading it floats over the grid's top, passing every click to the card under it (index.css
+// .ws-set-load-dock: no room of its own), so its coming and going move no card. Steam unreachable is no passing state: its
+// words and Retry (the load again, sync=open) take their own room above the grid and the cards glide down under them, so
+// nothing covers a card while the error stays; what loaded stays in the grid.
 // Guard: probe-steam yours:loadLine, yours:loadLineOff, yours:loadError
 
 // the leave: the bar fills out to its end, then the line fades (index.css .ws-set-load.closing)
 const LEAVE_MS = 450;
+// the grid's glide when the error's room comes or goes (the sidebar's open: 220 ms ease-out)
+const GLIDE_MS = 240;
 
 type Line = { kind: "load"; done: number; total: number | null } | { kind: "error"; text: string };
 
@@ -33,7 +38,32 @@ export function WsSetLoad() {
   const loadFavorites = useStore((s) => s.loadFavorites);
   const motion = useMotion();
   const { value, closing } = useLinger(key, LEAVE_MS, motion);
-  if (!value) return null;
+  // COOL: the error's room comes and goes as a glide of what's under it (a FLIP on the grid and the empty-set message): the
+  // dock's height change, read in a ResizeObserver callback (after layout, nothing forced), less what the browser's scroll
+  // anchoring took up by scrolling, is played back from the old place on transform. Motion off: at once.
+  // Guard: probe-steam yours:loadError, yours:loadLineOff
+  const dock = useRef<HTMLDivElement>(null);
+  const glide = useRef(motion);
+  useEffect(() => { glide.current = motion; }, [motion]);
+  useEffect(() => {
+    const d = dock.current, sc = d?.parentElement;
+    if (!d || !sc) return;
+    let h0: number | null = null, top0 = 0;
+    const onScroll = () => { top0 = sc.scrollTop; };
+    const ro = new ResizeObserver(([e]) => {
+      const h = e.borderBoxSize?.[0]?.blockSize ?? e.contentRect.height, top = sc.scrollTop;
+      const shift = h0 === null ? 0 : h - h0 - (top - top0);
+      if (glide.current && Math.abs(shift) >= 1)
+        for (let el = d.nextElementSibling; el; el = el.nextElementSibling)
+          if (el.matches(".grid, .wf-none")) el.animate([{ transform: `translateY(${-shift}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: "cubic-bezier(.25, .8, .25, 1)" });
+      h0 = h; top0 = top;
+    });
+    ro.observe(d);
+    sc.addEventListener("scroll", onScroll, { passive: true });
+    return () => { ro.disconnect(); sc.removeEventListener("scroll", onScroll); };
+  }, []);
+  // the dock stays while Browse shows the Workshop, empty without a line: its height is what the glide follows
+  if (!value) return <div className="ws-set-load-dock" ref={dock} />;
   const l = JSON.parse(value) as Line;
   // gone because no Favourites row needs the list any more: it only fades, the bar stays where it was
   const away = closing && !used;
@@ -43,7 +73,7 @@ export function WsSetLoad() {
   // while the total isn't known); at the end the bar runs out to the edge, then the line fades and lifts away. Motion off:
   // it fades in and out in place and the bar steps (index.css § the favourites' load line)
   return (
-    <div className="ws-set-load-dock">
+    <div className={`ws-set-load-dock${l.kind === "error" ? " flow" : ""}`} ref={dock}>
       <div className={`ws-set-load${closing ? " closing" : ""}${away ? " away" : ""}${active ? "" : " idle"}`} data-ws-set-load={l.kind}
         role={l.kind === "error" ? "alert" : "status"}>
         {/* keyed by kind: the words of a load and of an error cross-fade, a count steps in place */}

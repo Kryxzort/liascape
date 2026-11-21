@@ -182,16 +182,19 @@
 //   yours:signFlip       a saved Favourites ✓ alone: signed out the Workshop; a signed-in steam-status → the set (sync=open, no
 //                        placeholders); signed out again → one /browse, the Workshop's cards
 //   yours:loadLine       a first Favourites ✓, the answer held: the load line within a frame ("Loading your favourites…", rising
-//                        in), "— 120 so far" / "— 120 of 450" on workshop-favorites events (the bar eases), the grid fills, the
-//                        line fills out and fades; opacity / transform only. Shots steam-yours-load-*.png
-//   yours:loadLineOff    motion off: a fade in place, the bar at once; no-glow: no glow; bg-live: its words' drop-shadow
-//   yours:loadError      an error answer: its words + Retry, the loaded part kept; Retry asks sync=open
+//                        in), "— 120 so far" / "— 120 of 450" on workshop-favorites events (the bar eases), the grid fills, a
+//                        click on the chip reaches the card under it, the line fills out and fades; opacity / transform only.
+//                        Shots steam-yours-load-*.png
+//   yours:loadLineOff    motion off: a fade in place, the bar at once, the error's room at once; no-glow: no glow; bg-live: its
+//                        words' drop-shadow; the error covers no card. Shots steam-yours-load-error-{off,live}.png
+//   yours:loadError      Steam unreachable mid-load: the error takes its own room above the grid (the cards glide down, none
+//                        covered), its words + Retry, the loaded part kept; Retry asks sync=open
 //   yours:starLive       the sidebar's star (stubbed POST) + workshop-favorites: the card leaves / joins, no reload, no /browse
 //   yours:check          Browse open with Favourites ✕: one sync=open, then sync=check per (shortened) minute; none inactive or
 //                        with no Favourites row
 //   yours:oneOpen        the start and a reconnect with the favourites unread share one sync=open
 //   yours:steamUnknown   /steam/status unreadable: Favourites not dimmed, ✓ refused until a signed-in status
-//   yours:empty          "Nothing here matches" on an empty set (in a creator's list too); its clear keeps the Yours rows;
+//   yours:empty          "Nothing here matches" on an empty set (in a creator's and a scene's presets list too); its clear keeps the Yours rows;
 //                        motion off + bg-live
 //   yours:signOut        signed out: the favourites leave at once, the row dims; another account never sees them
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
@@ -3602,6 +3605,25 @@ app.whenReady().then(async () => {
         if (t < ${ms}) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); });
       ${act}
       return await rec;`);
+    // the cards the line's box overlaps (their titles)
+    const covered = () => js(`(() => { const e = document.querySelector(${J(LINE)}); if (!e) return null; const c = e.getBoundingClientRect();
+      return [...document.querySelectorAll(${J(YCARDS)})].filter((k) => { const r = k.getBoundingClientRect();
+        return Math.min(c.right, r.right) - Math.max(c.left, r.left) > 0.5 && Math.min(c.bottom, r.bottom) - Math.max(c.top, r.top) > 0.5; })
+        .map((k) => k.querySelector("[data-title]")?.dataset.title ?? "?"); })()`);
+    const CARD_Y = `(() => { const c = document.querySelector(${J(YCARDS)}); return c ? +c.getBoundingClientRect().y.toFixed(1) : null; })()`;
+    // the first card's y per frame for `ms`, the sampling started before `act`: [[t, y]]
+    const cardFrames = (act, ms) => page(`const out = [], t0 = performance.now();
+      const rec = new Promise((res) => { const f = () => { const t = Math.round(performance.now() - t0); out.push([t, ${CARD_Y}]); if (t < ${ms}) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); });
+      ${act}
+      return await rec;`);
+    // the error taking its own room above the grid: [y before, y after, in-between frames]
+    const errorRoom = async (version, items) => {
+      const y0 = await js(CARD_Y);
+      await js(`window.__favs.answer = ${J(fv(version, items, { error: LOAD_ERR }))}; true`);
+      const fr = await cardFrames(`window.__fakeWs("workshop-favorites", ${J({ version, loading: null })});`, 700);
+      const y1 = fr.at(-1)[1];
+      return { y0, y1, mid: fr.filter(([, y]) => y != null && y > y0 + 0.75 && y < y1 - 0.75).length, ys: fr.map(([, y]) => y).filter((y, i, a) => i === 0 || y !== a[i - 1]).slice(0, 12) };
+    };
     const moved = (frs, allowed) => [...new Set(frs.flatMap((f) => f[5] ?? []))].filter((p) => !allowed.includes(p));
     const SIX = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
     const fv = (version, items, o = {}) => ({ signedIn: true, version, loading: null, error: null, items, ...o });
@@ -3651,6 +3673,22 @@ app.whenReady().then(async () => {
         if (eased < 3) v.push(`the bar jumped to 120 / 450 (${eased} in-between value(s))`);
         const g3 = await shownAs(T("Aurora", "Bamboo", "Cinder"));
         if (J(sorted(g3)) !== J(T("Aurora", "Bamboo", "Cinder"))) v.push(`120 of 450: the grid shows ${J(g3)} (want Aurora, Bamboo, Cinder)`);
+        // the loading chip takes no click: a real click on it where it lies over a card reaches the card (its sidebar opens)
+        const over = await js(`(() => { const c = document.querySelector(${J(LINE)}).getBoundingClientRect();
+          for (const k of document.querySelectorAll(${J(YCARDS)})) { const r = k.getBoundingClientRect();
+            const x0 = Math.max(c.left, r.left), x1 = Math.min(c.right, r.right), y0 = Math.max(c.top, r.top), y1 = Math.min(c.bottom, r.bottom);
+            if (x1 - x0 > 8 && y1 - y0 > 8) return { title: k.querySelector("[data-title]")?.dataset.title ?? null, x: Math.round((x0 + x1) / 2), y: Math.round((y0 + y1) / 2) }; }
+          return null; })()`);
+        if (!over) v.push("the loading chip lies over no card — the click-through check proved nothing");
+        else {
+          send({ type: "mouseMove", x: over.x, y: over.y }); await sleep(60);
+          send({ type: "mouseDown", x: over.x, y: over.y, button: "left", clickCount: 1 }); await sleep(40);
+          send({ type: "mouseUp", x: over.x, y: over.y, button: "left", clickCount: 1 });
+          const got = await waitFor(() => js(`document.querySelector("${SIDE} .side-title, ${SIDE} h2")?.textContent.trim() ?? null`), 1500);
+          console.log(`        a click on the chip over ${over.title}: the sidebar shows ${J(got)}`);
+          if (got !== over.title) v.push(`a click on the loading chip over ${over.title} didn't reach the card (the sidebar shows ${J(got)})`);
+          await key("Escape"); await sleep(400);
+        }
         await js(`window.__favs.answer = ${J(fv(5, favs))}; true`);
         const fr2p = lineFrames(`window.__fakeWs("workshop-favorites", ${J({ version: 5, loading: null })});`, 1200);
         await sleep(260); await shot("yours-load-end");
@@ -3699,9 +3737,17 @@ app.whenReady().then(async () => {
         const bad = moved(fr, ["opacity"]);
         if (bad.length) v.push(`motion off: the line animates ${J(bad)} (only a fade)`);
         await shot("yours-load-off");
-        await js(`window.__favs.answer = ${J(fv(4, favs))}; true`);
+        // the error under motion off: its room comes at once, no glide; it covers no card
+        const room = await errorRoom(4, favs.slice(0, 3));
+        console.log(`        motion off, the error's room: ${room.y0} → ${room.y1}, y [${room.ys}]`);
+        if (!(room.y1 > room.y0 + 5)) v.push(`motion off: the error took no room above the grid (${room.y0} → ${room.y1})`);
+        else if (room.mid > 1) v.push(`motion off: the cards glided for the error (${room.mid} in-between frames; want it at once)`);
+        const covOff = await covered();
+        if (covOff?.length) v.push(`motion off: the error covers ${J(covOff)}`);
+        await sleep(300); await shot("yours-load-error-off");
+        await js(`window.__favs.answer = ${J(fv(5, favs))}; true`);
         const smp2 = js(MO.SAMPLE({ line: LINE }, 600)); await sleep(40);
-        await ev("workshop-favorites", { version: 4, loading: null });
+        await ev("workshop-favorites", { version: 5, loading: null });
         const sOut = await smp2;
         console.log(`        motion off: out ${MO.brief(sOut.line)}`);
         v.push(...MO.judge("motion off: the line leaving", sOut.line, { leave: true }));
@@ -3723,6 +3769,14 @@ app.whenReady().then(async () => {
           if (!/drop-shadow/.test(l.textFilter ?? "")) v.push(`bg-live: its words have no drop-shadow (${l.textFilter})`);
         }
         await shot("yours-load-off-live");
+        await js(`window.__favs.answer = ${J(fv(3, yFavs().slice(0, 3), { error: LOAD_ERR }))}; true`);
+        await ev("workshop-favorites", { version: 3, loading: null });
+        await sleep(700);
+        const covLive = await covered(), le = await lineNow();
+        if (le?.kind !== "error") v.push(`no-glow + bg-live: the error line ${J(le)}`);
+        if (covLive?.length) v.push(`no-glow + bg-live: the error covers ${J(covLive)}`);
+        if (le?.outside?.length) v.push(`no-glow + bg-live: parts of the error line lie outside its box ${J(le.outside)}`);
+        await shot("yours-load-error-live");
       } finally { await yoursDone(); }
       return v;
     });
@@ -3737,13 +3791,24 @@ app.whenReady().then(async () => {
         await js(`window.__favs = { hold: true }; true`);
         await setRow("@library", "off", 450);
         await page(FAV_INC); await sleep(300);
-        await js(`window.__favsLet(${J(fv(2, favs.slice(0, 2), { error: LOAD_ERR }))})`);
+        // two loaded, the load still going: the chip floats over the grid's top
+        await js(`window.__favsLet(${J(fv(2, favs.slice(0, 2), { loading: { done: 2, total: null } }))})`);
+        await shownAs(T("Aurora", "Bamboo")); await sleep(400);
+        // Steam unreachable: the error takes its own room above the grid, the cards glide down under it
+        const room = await errorRoom(3, favs.slice(0, 2));
+        console.log(`        the error's room: the first card ${room.y0} → ${room.y1}, y [${room.ys}]`);
+        if (!(room.y1 > room.y0 + 5)) v.push(`the error took no room above the grid (the first card ${room.y0} → ${room.y1})`);
+        else if (room.mid < 2) v.push(`the cards jumped down for the error (${room.mid} in-between frame(s); want a glide)`);
         const l = (await waitFor(async () => { const x = await lineNow(); return x?.kind === "error" ? x : null; }, 2000)) ?? await lineNow();
+        const cov = await covered();
+        if (cov?.length) v.push(`the error covers ${J(cov)}`);
         console.log(`        error: ${J(l)}`);
         await sleep(400); // the words cross-fade in
         const ew = await js(`(() => { const t = document.querySelector(${J(LINE + " .wsl-text")}); if (!t) return null; let op = 1; for (let x = t; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
-          const r = t.getBoundingClientRect(); return { op: +op.toFixed(2), top: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === t }; })()`);
-        if (!ew || ew.op < 0.95 || !ew.top) v.push(`the error's words don't show: ${J(ew)} (want them at full opacity, on top)`);
+          // the line takes no click (hit-testing looks through it): what lies at its words' centre must not be a card
+          const r = t.getBoundingClientRect(), at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return { op: +op.toFixed(2), card: !!at?.closest(".card") }; })()`);
+        if (!ew || ew.op < 0.95 || ew.card) v.push(`the error's words don't show: ${J(ew)} (want them at full opacity, over no card)`);
         if (l?.kind !== "error" || l.text !== LOAD_ERR) v.push(`the line on an error: ${J(l)} (want kind error, ${J(LOAD_ERR)})`);
         if (!l?.retry) v.push("the error line has no Retry");
         if (l?.outside?.length) v.push(`the error: parts of the line lie outside its box ${J(l.outside)}`);
@@ -3751,7 +3816,7 @@ app.whenReady().then(async () => {
         if (J(sorted(g0)) !== J(T("Aurora", "Bamboo"))) v.push(`the error: the grid shows ${J(g0)} (want the two loaded, kept)`);
         await shot("yours-load-error");
         const n0 = (await favAsks()).length;
-        await js(`window.__favs.answer = ${J(fv(3, favs))}; true`);
+        await js(`window.__favs.answer = ${J(fv(4, favs))}; true`);
         await page(`document.querySelector(${J(LINE + " [data-wsl-retry]")})?.click();`);
         await sleep(400);
         const asks = (await favAsks()).slice(n0);
@@ -3946,6 +4011,26 @@ app.whenReady().then(async () => {
         await page(`document.querySelector(${J(NONE + " button")})?.click();`);
         const c1 = await shownAs(T("Aurora", "Bamboo"));
         if (J(sorted(c1)) !== J(T("Aurora", "Bamboo"))) v.push(`in a creator's list, cleared: ${J(c1)} (want Aurora, Bamboo)`);
+        // inside a scene's presets list (its Type ignored: views/Browse.tsx withoutType)
+        await yoursDone();
+        await yoursOn(yData({ preset: true }), { scenes: true });
+        await openSide((await shown()).indexOf("Base Scene"));
+        if (!(await waitFor(() => js(`!!document.querySelector("${SIDE} [data-ws-presets]")`), 3000))) return [...v, "Base Scene's sidebar has no Presets row"];
+        await page(`document.querySelector("${SIDE} [data-ws-presets]").click();`);
+        if (J(sorted(await shownAs(T("ws-preset-x", "Dune")))) !== J(T("Dune", "ws-preset-x"))) return [...v, `the presets list shows ${J(await shown())} — proved nothing`];
+        await waitFor(() => js(`document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length === 0`), 3000);
+        await setRow("@favorites", "inc");
+        if (J(await shownAs(T("Dune"))) !== J(T("Dune"))) return [...v, `the presets list's favourites: ${J(await shown())} — proved nothing`];
+        await search("zzz-nothing");
+        const n4 = await waitFor(none, 2000);
+        const note4 = await js(`document.querySelector("[data-ws-list-note]")?.textContent ?? null`);
+        console.log(`        in a presets list: ${J(n4)}, list note ${J(note4)}`);
+        if (n4?.text !== "Nothing here matches") v.push(`in a presets list: ${J(n4?.text)} (want "Nothing here matches")`);
+        if (note4) v.push(`in a presets list: the list's own note shows too (${J(note4)})`);
+        await sleep(300); await shot("yours-empty-presets");
+        await page(`document.querySelector(${J(NONE + " button")})?.click();`);
+        const p1 = await shownAs(T("Dune"));
+        if (J(p1) !== J(T("Dune"))) v.push(`in a presets list, cleared: ${J(p1)} (want Dune)`);
         await yoursDone();
         await yoursOn(yData(), { looks: { morphs: false, liveWallpaperBehindAllTabs: true } });
         await setRow("@favorites", "inc");
