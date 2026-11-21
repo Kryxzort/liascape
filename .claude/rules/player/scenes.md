@@ -158,7 +158,7 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   (`wp_project_pointer_jump`). Guard: `tests/api.rs::pointer_enter_is_a_jump_and_rate_is_the_demand`.
 - Desktop pointer (`signal/cursor.rs`) polls Hyprland only while an unpaused scene wants it; fall back to the
   surface pointer. Guard: `tests/api.rs::desktop_pointer_from_a_fake_hyprland`.
-- `scene_props` apply after load and live via `SetProperty`; a removed key keeps its value until reopened. A `scenetexture` set to an image file's absolute path (png, jpg, jpeg, bmp, tga, gif: its first frame; a preset's own image) is that image in its slot, bound at the build (send it at open); one that doesn't load, or is over 64 MiB or 16384 px a side, keeps the slot's texture.
+- `scene_props` apply after load and live via `SetProperty`; a removed key keeps its value until reopened. A `scenetexture` set to an image file's absolute path (png, jpg, jpeg, bmp, tga, gif: its first frame; a preset's own image) is that image in its slot, bound at the build (send it at open); one that doesn't load, or is over 64 MiB, 16384 px a side or 64 Mpx, keeps the slot's texture.
   Guards: `tests/api.rs::scene_props_apply_at_open_and_live`, host_api_test `usertexture_loads_an_image_file`, `usertexture_caps_an_image_file`.
 - Run the visualiser capture only while a ready scene `wants_audio_input`; never capture `node.virtual`
   streams or the microphone. Guard: `tests/api.rs::visualiser_input_reaches_only_scenes_that_want_it`.

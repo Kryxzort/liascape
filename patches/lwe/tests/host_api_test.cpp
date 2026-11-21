@@ -38,6 +38,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <zlib.h>
 
 #include "linux-wallpaperengine/configuration.h"
 #include "linux-wallpaperengine/context.h"
@@ -3734,9 +3735,57 @@ static bool usertexture_loads_an_image_file () {
     return true;
 }
 
-// an image file past the caps (64 MiB on disk, 16384 px a side decoded) is refused before it is read whole or decoded:
-// logged, the slot keeps its texture; one at the side cap still loads. A scene's own files name textures too, so an
-// image path is no promise of a sane size (unpatched: any file was read whole into memory and any size decoded)
+// a w×h PNG of one colour, zlib-compressed: a small file whose image is as large as its header says (an 8193×8192 one
+// is well under 1 MiB on disk and 256 MiB decoded)
+static std::string deflated_png (int w, int h, unsigned char r, unsigned char g, unsigned char b) {
+    const auto be32 = [] (std::string& out, uint32_t v) {
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            out += static_cast<char> ((v >> shift) & 0xff);
+        }
+    };
+    const auto chunk = [&] (std::string& out, const char* type, const std::string& data) {
+        be32 (out, static_cast<uint32_t> (data.size ()));
+        const std::string body = std::string (type, 4) + data;
+        out += body;
+        be32 (out, static_cast<uint32_t> (crc32 (0, reinterpret_cast<const Bytef*> (body.data ()), static_cast<uInt> (body.size ()))));
+    };
+    std::string row (1 + 3 * static_cast<size_t> (w), '\0'); // filter: none, then the pixels
+    for (int x = 0; x < w; x++) {
+        row[1 + 3 * x] = static_cast<char> (r);
+        row[2 + 3 * x] = static_cast<char> (g);
+        row[3 + 3 * x] = static_cast<char> (b);
+    }
+    z_stream z {};
+    deflateInit (&z, Z_BEST_SPEED);
+    std::string idat;
+    std::vector<unsigned char> out (1 << 16);
+    for (int y = 0; y < h; y++) {
+        z.next_in = reinterpret_cast<Bytef*> (row.data ());
+        z.avail_in = static_cast<uInt> (row.size ());
+        const int flush = y + 1 == h ? Z_FINISH : Z_NO_FLUSH;
+        do {
+            z.next_out = out.data ();
+            z.avail_out = static_cast<uInt> (out.size ());
+            deflate (&z, flush);
+            idat.append (reinterpret_cast<const char*> (out.data ()), out.size () - z.avail_out);
+        } while (z.avail_out == 0);
+    }
+    deflateEnd (&z);
+    std::string ihdr;
+    be32 (ihdr, static_cast<uint32_t> (w));
+    be32 (ihdr, static_cast<uint32_t> (h));
+    ihdr += std::string ("\x08\x02\x00\x00\x00", 5);
+    std::string png ("\x89PNG\r\n\x1a\n", 8);
+    chunk (png, "IHDR", ihdr);
+    chunk (png, "IDAT", idat);
+    chunk (png, "IEND", "");
+    return png;
+}
+
+// an image file past the caps (64 MiB on disk; 16384 px a side or 64 Mpx decoded) is refused before it is read whole
+// or decoded: logged, the slot keeps its texture; one at a cap still loads. A scene's own files name textures too, and
+// a preset can fill every slot of its base, so an image path is no promise of a sane size (unpatched: any file was read
+// whole into memory and any size decoded: a flat 16384² PNG of under 1 MiB is a 1 GiB texture)
 static bool usertexture_caps_an_image_file () {
     if (!script_tests_can_run ()) {
         return true;
@@ -3764,7 +3813,7 @@ static bool usertexture_caps_an_image_file () {
         px = b9_pixel (rig);
         return true;
     };
-    std::array<unsigned char, 4> big {}, wide {}, edge {};
+    std::array<unsigned char, 4> big {}, wide {}, edge {}, many {}, budget {};
     std::string dir;
     CHECK (draw (solid_png (6, 4, 200, 40, 10), (off_t (64) << 20) + 1, big, dir), "load/build of %s with a 64 MiB + 1 file failed", dir.c_str ());
     CHECK (draw (solid_png (16385, 1, 200, 40, 10), 0, wide, dir), "load/build of %s with a 16385 px wide image failed", dir.c_str ());
@@ -3775,6 +3824,15 @@ static bool usertexture_caps_an_image_file () {
     CHECK (wide[0] > 250 && wide[1] > 250 && wide[2] > 250, "an image over 16384 px a side took the slot (%d %d %d)", wide[0], wide[1], wide[2]);
     CHECK (near (edge[0], 200) && near (edge[1], 40) && near (edge[2], 10), "an image 16384 px wide isn't the file's 200 40 10 (%d %d %d)",
            edge[0], edge[1], edge[2]);
+    const std::string over = deflated_png (8193, 8192, 200, 40, 10), at = deflated_png (8192, 8192, 200, 40, 10);
+    CHECK (over.size () < (size_t (1) << 20), "the 8193×8192 PNG is %zu bytes, want under 1 MiB (the pixel cap's case)", over.size ());
+    CHECK (draw (over, 0, many, dir), "load/build of %s with an 8193×8192 image failed", dir.c_str ());
+    CHECK (draw (at, 0, budget, dir), "load/build of %s with an 8192×8192 image failed", dir.c_str ());
+    printf ("    g_Texture0: 8193×8192 (%zu bytes) %d %d %d; 8192×8192 %d %d %d\n", over.size (), many[0], many[1], many[2],
+            budget[0], budget[1], budget[2]);
+    CHECK (many[0] > 250 && many[1] > 250 && many[2] > 250, "an image over 64 Mpx took the slot (%d %d %d)", many[0], many[1], many[2]);
+    CHECK (near (budget[0], 200) && near (budget[1], 40) && near (budget[2], 10), "an image of 64 Mpx isn't the file's 200 40 10 (%d %d %d)",
+           budget[0], budget[1], budget[2]);
     return true;
 }
 

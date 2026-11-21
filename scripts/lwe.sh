@@ -195,7 +195,7 @@ cmd_test() {
     mkdir -p "$ROOT/build"
     c++ -std=c++20 -O1 -g -Wall "$PATCH_DIR/tests/host_api_test.cpp" \
         -I"$CORE/include" -L"$CORE/lib" -llinux-wallpaperengine-core -Wl,-rpath,"$CORE/lib" \
-        $(pkg-config --cflags --libs sdl2 egl liblz4 libavcodec libavutil) -o "$out"
+        $(pkg-config --cflags --libs sdl2 egl liblz4 libavcodec libavutil zlib) -o "$out"
     local empty nv rc=0
     empty="$(mktemp -d)"
     # NVIDIA's shader cache of the test's own: the caller's __GL_SHADER_DISK_CACHE_PATH is the user's real one, and

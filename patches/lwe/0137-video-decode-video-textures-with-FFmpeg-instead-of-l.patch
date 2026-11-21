@@ -1,7 +1,7 @@
 From 90e63b584ec61839c9a683173aeecd1103c7966a Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 20 Nov 2026 08:40:25 +0530
-Subject: [PATCH 137/140] video: decode video textures with FFmpeg instead of
+Subject: [PATCH 137/141] video: decode video textures with FFmpeg instead of
  libmpv
 
 Every video texture (and video wallpaper) ran a libmpv core with a render context of its own: mpv's CUDA interop made a

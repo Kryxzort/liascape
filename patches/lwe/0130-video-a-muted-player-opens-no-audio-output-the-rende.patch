@@ -1,7 +1,7 @@
 From e4b565e6a0e83b776077f5a1ee2d4729bedcc2dd Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sat, 14 Nov 2026 09:31:17 +0530
-Subject: [PATCH 130/140] video: a muted player opens no audio output, the
+Subject: [PATCH 130/141] video: a muted player opens no audio output, the
  render thread never waits on mpv
 
 A video texture's first draw could stall for 20-30 s. GLPlayer::render read the frame size with mpv_get_property

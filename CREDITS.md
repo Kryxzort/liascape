@@ -172,3 +172,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0138-project-a-C-string-the-host-sets-by-name-is-a-string.patch` | project: a C string the host sets by name is a string, not true | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0139-render-a-scenetexture-set-to-an-image-file-s-path-lo.patch` | render: a scenetexture set to an image file's path loads that image | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0140-render-an-image-file-over-64-MiB-or-16384-px-a-side-.patch` | render: an image file over 64 MiB or 16384 px a side keeps the slot's texture | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0141-render-an-image-file-over-64-Mpx-keeps-the-slot-s-te.patch` | render: an image file over 64 Mpx keeps the slot's texture, and none is read past the cap | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

@@ -1,7 +1,7 @@
 From 1c9648c4172bdaf43039b921bb04917a4fc79564 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sat, 14 Nov 2026 08:17:01 +0530
-Subject: [PATCH 129/140] render: keep shader text work on disk across launches
+Subject: [PATCH 129/141] render: keep shader text work on disk across launches
 
 Every load of a scene redid all of its shader text work, though a scene feeds it the same texts at every launch and
 many times within one build (3042492564 builds 253 programs from 68 distinct shader pairs): each unit's WE text
