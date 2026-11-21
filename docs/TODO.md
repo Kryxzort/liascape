@@ -58,6 +58,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        preset item (as from the Workshop or "Wallpaper Engine (Local)"), linked or copied like any imported item, and
        brings its base scene from the same folder tree when it's there; otherwise it shows "needs its base scene".
        Sources are never touched; covered in `scripts/test-folder-import.sh`.
+112. [ ] A preset's video in a scene's texture slot plays: Workshop presets can put a video file (`files/<name>.mp4`)
+       where their base scene has an image slot, and Wallpaper Engine plays it there. Today the slot keeps the base's
+       texture and the adapter logs "is not an image" (seen on Workshop preset 2843309472). The scene renderer
+       already decodes scene video textures with FFmpeg: let a slot set to a video file's path (inside the preset's
+       folder, size-capped like images) play that video, looped and muted unless the scene's own audio says otherwise;
+       guard it in `host_api_test` and `scripts/test-presets.sh`.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
