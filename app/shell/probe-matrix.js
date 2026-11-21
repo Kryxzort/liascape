@@ -212,8 +212,13 @@ const PAGE = `window.__mx = {
   // what the page shows: the Library page and the playlist bar stay in the document, hidden, while another tab shows (App.tsx),
   // and a hidden page's marks wait for it to show again
   shown(e) { return e.getClientRects().length > 0; },
-  cards() { return [...document.querySelectorAll(".card.lib")].filter((c) => this.shown(c)); },
+  // the Library's cards only: Browse's cards and their skeletons are \`.card.lib\` too (Card.tsx)
+  cards() { return [...document.querySelectorAll(".lib-scroll .card.lib")].filter((c) => this.shown(c)); },
+  // back on the Library tab with its cards up: a fuzz chain or a control can leave the page on another tab
+  async toLibrary() { if (document.querySelector(".app")?.dataset.page !== "library") this.tab("Library");
+    for (let i = 0; i < 40 && !this.cards().length; i++) await this.sleep(50); await this.sleep(150); },
   card(t) { return this.cards().find((c) => c.querySelector(".lib-title")?.dataset.title === t); },
+  browseCard(t) { return [...document.querySelectorAll(".br-scroll .card.lib")].find((c) => this.shown(c) && c.querySelector(".lib-title")?.dataset.title === t); },
   barItems() { return [...document.querySelectorAll(".pl-item")].filter((e) => this.shown(e)); },
   playlistBar(t) { return this.barItems().find((e) => e.dataset.title === t); },
   ctx(el, what) { if (!el) throw new Error("not found: " + what); const r = el.getBoundingClientRect();
@@ -252,15 +257,28 @@ const PAGE = `window.__mx = {
   plCheck(text) { return [...document.querySelectorAll(".pl-modal label.ck")].find((l) => l.textContent.trim().startsWith(text))?.querySelector("input"); },
   playing() { return { playlistBar: this.barItems().filter((e) => e.classList.contains("playing")).map((e) => e.dataset.title), cards: this.cards().filter((c) => c.classList.contains("playing")).map((c) => c.querySelector(".lib-title")?.dataset.title) }; },
 }; true`;
+// what the page shows, for a failure's print: its tab, the Library's cards against every `.card.lib` (Browse's too), the bar
+const PAGE_SEEN = `({ url: location.pathname, page: document.querySelector(".app")?.dataset.page ?? null, tab: document.querySelector(".tab.active")?.textContent.trim(),
+  libCards: document.querySelectorAll(".lib-scroll .card.lib").length, cards: document.querySelectorAll(".card.lib").length,
+  libraryEmpty: [...document.querySelectorAll(".center-msg")].some((e) => e.textContent.startsWith("Library is empty")),
+  plItems: document.querySelectorAll(".pl-item").length, playing: document.querySelectorAll(".lib-scroll .card.lib.playing").length, mx: !!window.__mx,
+  status: document.querySelector(".topbar > .status")?.textContent ?? null, ready: document.readyState, vis: document.visibilityState, focus: document.hasFocus() })`;
+// The page's first read applies the library, the playlist and the rest in one go (store/index.ts readBackend): until it
+// lands the Library has no cards and the bar no items, which every later check would read as no mark and an empty bar.
+// Returns null once it landed (>= 4 Library cards and the backend playlist's items on the bar), else why: a cell reports
+// that as SETUP (the run's timing), not as a FAIL of what it tests.
 async function loadUi() {
+  const bar = ((await http("GET", "/playlist/state")).json?.videoPaths || []).filter((p) => K.includes(p) || SC.includes(p)).map(TITLE);
   await win.loadURL(withToken(U + "/"));
   // record what the page POSTs to /preview (its bodies — the backend only sees what arrives), and count its requests
   // in flight (a fuzz step waits for them: under load a persist was still on its way when the step looked)
   await js(`(() => { window.__mxReq = []; window.__mxInflight = 0; const f = window.fetch; window.fetch = (u, o) => { if (String(u).includes("/preview")) window.__mxReq.push(o?.body ?? null);
     window.__mxInflight++; return f(u, o).finally(() => { window.__mxInflight--; }); }; })(); true`);
-  for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.card.lib').length`) >= 4) break; await sleep(100); }
+  const read = await waitFor(() => js(`(() => { const t = new Set([...document.querySelectorAll(".pl-item")].map((e) => e.dataset.title));
+    return document.querySelectorAll(".lib-scroll .card.lib").length >= 4 && ${JSON.stringify(bar)}.every((x) => t.has(x)); })()`), 20000, 100);
   await js(PAGE);
   await sleep(300);
+  return read ? null : `page never finished its first read (20 s): ${JSON.stringify(await js(PAGE_SEEN).catch((e) => String(e)))}, playlist ${JSON.stringify(bar)}`;
 }
 const ui = (code) => js(`(async () => { const m = window.__mx; ${code} })()`);
 
@@ -795,8 +813,8 @@ C["browse:inLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
       const srcs = (await http("GET", "/sources")).json || [];
       const weName = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
       await ui(`m.tab("Browse"); await m.sleep(500); m.click(m.byText(".pill", ${JSON.stringify(weName)}), "source pill");`);
-      c.listed = await waitFor(() => ui(`return !!m.card("weIn") && !!m.card("weOut");`), 8000, 150);
-      c.badges = await ui(`return Object.fromEntries(["weIn", "weOut"].map((t) => [t, m.card(t)?.querySelector("[data-in-library]")?.textContent?.trim() ?? null]));`);
+      c.listed = await waitFor(() => ui(`return !!m.browseCard("weIn") && !!m.browseCard("weOut");`), 8000, 150);
+      c.badges = await ui(`return Object.fromEntries(["weIn", "weOut"].map((t) => [t, m.browseCard(t)?.querySelector("[data-in-library]")?.textContent?.trim() ?? null]));`);
     } finally {
       await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary });
       await ui(`m.tab("Library"); await m.sleep(400);`);
@@ -844,7 +862,7 @@ C["browse:switchSource"] = { states: ["idle"], noSwitch: true, async run(c) {
       c.pending = live.size;
       const t0 = Date.now();
       await ui(`m.click(m.byText(".pill", ${JSON.stringify(c.to)}), "source pill");`);
-      c.shown = await waitFor(() => ui(`return !!m.card("weSw") && !m.card("sw-1");`), 12000, 50);
+      c.shown = await waitFor(() => ui(`return !!m.browseCard("weSw") && !m.browseCard("sw-1");`), 12000, 50);
       c.ms = Date.now() - t0;
       console.log(`        switchSource: ${c.pending} /img loads in flight at the switch, ${c.to}'s list after ${c.ms} ms`);
     } finally {
@@ -894,7 +912,7 @@ C["browse:mediaPool"] = { states: ["idle"], noSwitch: true, async run(c) {
       c.pending = live.size;
       const t0 = Date.now();
       await ui(`m.setValue(document.querySelector("input.search"), "wePool", "search box");`);
-      c.shown = await waitFor(() => ui(`return !!m.card("wePool") && !m.card("mp-1");`), 12000, 50);
+      c.shown = await waitFor(() => ui(`return !!m.browseCard("wePool") && !m.browseCard("mp-1");`), 12000, 50);
       c.ms = Date.now() - t0;
       c.hosts = [...hosts];
       console.log(`        mediaPool: ${c.pending} /img loads in flight (${c.hosts.join(", ")}) at the search, its list after ${c.ms} ms`);
@@ -4618,7 +4636,8 @@ async function runCell(stateName, ctlName) {
   if (K_.pre) await K_.pre(c); // before the UI loads: it reads overrides/settings at start, like a real session
   const logAt = logSizes();
   await S.enter(c); lap("enter");
-  if (c.ok !== false) { await loadUi(); lap("ui"); }
+  if (c.ok !== false) { const miss = await loadUi(); lap("ui");
+    if (miss) return { state: stateName, control: ctlName, result: "SETUP", violations: [miss], logs: logsSince(logAt) }; }
   if (c.ok !== false && S.late) { await S.late(c); lap("enter"); }
   if (c.ok === false) return { state: stateName, control: ctlName, ...(await notReached(stateName, logAt)) };
   c.before = await snapshot(); lap("snap");
@@ -4707,16 +4726,16 @@ async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }
   const noSuchItem = /\/workshop\/(comments|creator|counts)\?/;
   for (const r of httpLog.slice(h0)) if (r.status >= 400 && r.status !== 409 && !asset.test(r.url) && !(r.status === 404 && noSuchItem.test(r.url))) v.push(`HTTP ${r.status} ${r.method} ${r.url.replace(U, "")}`);
   if (c.exp.settled && !c.noOutput) {
-    const p = await ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); } return m.playing();`).catch(() => null);
+    const p = await ui(`await m.toLibrary(); return m.playing();`).catch(() => null);
     const cur = c.after.cur?.path ? TITLE(c.after.cur.path) : null;
     if (p && cur && !p.cards.includes(cur)) v.push(`UI marks ${JSON.stringify(p.cards)} as playing, backend plays ${cur}`);
   }
   // the playlist bar the UI shows == the backend's playlist (a stale playlistBar saves itself back over it)
-  const playlistBar = await ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); } return m.barItems().map((e) => e.dataset.title);`).catch(() => null);
+  const playlistBar = await ui(`await m.toLibrary(); return m.barItems().map((e) => e.dataset.title);`).catch(() => null);
   const want = (c.after.ps?.videoPaths || []).map(TITLE);
   if (playlistBar && JSON.stringify(playlistBar) !== JSON.stringify(want)) v.push(`UI playlistBar ${JSON.stringify(playlistBar)}, backend playlist ${JSON.stringify(want)}`);
   // what the page showed when its marks or bar disagreed (another tab, still loading, reloaded, "nothing plays")
-  if (v.some((x) => /^UI (marks|playlistBar)/.test(x))) v.push(`  the page: ${JSON.stringify(await js(`({ url: location.pathname, tab: document.querySelector(".tab.active")?.textContent.trim(), cards: document.querySelectorAll(".card.lib").length, plItems: document.querySelectorAll(".pl-item").length, playing: document.querySelectorAll(".card.lib.playing").length, mx: !!window.__mx, status: document.querySelector(".topbar > .status")?.textContent ?? null, ready: document.readyState, vis: document.visibilityState, focus: document.hasFocus() })`).catch((e) => String(e)))}`);
+  if (v.some((x) => /^UI (marks|playlistBar)/.test(x))) v.push(`  the page: ${JSON.stringify(await js(PAGE_SEEN).catch((e) => String(e)))}`);
   if (c.cli && c.cli.code !== 0) v.push(`the command exit ${c.cli.code} (${c.cli.ms} ms): ${c.cli.out.trim().slice(0, 200)}`);
   // load-dependent (the user's desktop shares the machine): a warning with the CLI's own phase line, not a FAIL
   const warnings = c.cli && c.cli.code === 0 && c.cli.ms > 3000 ? [`the command took ${c.cli.ms} ms: ${c.cli.out.trim().slice(0, 300)}`] : undefined;
@@ -4866,12 +4885,13 @@ function fuzzContext(snap, fz) {
 // a page (re)load in a chain: the Settings view is a lazy chunk, loaded on its first visit — under load that took past
 // the 500 ms a Settings control waits ("not found: Speed" after a reload). Load it once now, back on the Library tab.
 async function loadUiFuzz() {
-  await loadUi();
+  const miss = await loadUi();
   await ui(`m.tab("Settings"); for (let i = 0; i < 100 && !document.querySelector(".settings .srow"); i++) await m.sleep(50);
-    m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150);`).catch(() => {});
+    await m.toLibrary();`).catch(() => {});
+  return miss;
 }
 // between steps: the Library tab, no selection (a click on the grid's background clears it)
-const tidyUi = () => ui(`if (!m.cards().length) { m.tab("Library"); for (let i = 0; i < 40 && !m.cards().length; i++) await m.sleep(50); await m.sleep(150); }
+const tidyUi = () => ui(`await m.toLibrary();
   const g = document.querySelector(".lib-scroll .grid"); if (g) { g.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); await m.sleep(80); }`).catch(() => {});
 
 async function fuzzStep(name, x, fz) {
@@ -4881,7 +4901,7 @@ async function fuzzStep(name, x, fz) {
   let tp = Date.now(); const ph = {}; const lap = (k) => { const n = Date.now(); ph[k] = (ph[k] ?? 0) + n - tp; tp = n; };
   const base = { control: name, state: x.label, shown: x.shown ? TITLE(x.shown) : undefined, other: x.other ? TITLE(x.other) : undefined, phases: ph };
   const logAt = logSizes();
-  if (K_.pre) { await K_.pre(c); await loadUiFuzz(); c.before = await snapshot(); lap("pre"); }
+  if (K_.pre) { await K_.pre(c); const miss = await loadUiFuzz(); if (miss) return { ...base, result: "SETUP", violations: [miss] }; c.before = await snapshot(); lap("pre"); }
   await tidyUi(); lap("tidy");
   const t0 = Date.now(), h0 = httpLog.length;
   try { await K_.run(c); } catch (e) { return { ...base, result: "ERROR", violations: [`control failed: ${e.message}`] }; }
@@ -4924,7 +4944,8 @@ async function fuzzRun({ run, seed, steps, replay }) {
   await reset(S.playlist?.());
   if (S.pre) await S.pre(c0);
   await S.enter(c0);
-  if (c0.ok !== false) await loadUiFuzz();
+  const miss = c0.ok !== false ? await loadUiFuzz() : null;
+  if (miss) return { ...rec, result: "SETUP", violations: [miss], logs: logsSince(logAt), replay: `${start}:` };
   if (c0.ok !== false && S.late) await S.late(c0);
   rec.setupMs = Date.now() - t0;
   if (c0.ok === false) return { ...rec, ...(await notReached(start, logAt)), replay: `${start}:` };
@@ -4946,7 +4967,7 @@ async function fuzzRun({ run, seed, steps, replay }) {
     } catch (e) { r = { control: name, state: x?.label, result: "ERROR", violations: [String((e && e.stack) || e)] }; }
     rec.steps.push(r);
     console.log(`  ${String(k + 1).padStart(2)}/${n} ${r.result.padEnd(5)} [${r.state}] ${name}${r.skip ? ` (skip: ${r.skip})` : ""}${r.rotated ? " (an advance-on-end switch fired in the step: its own check skipped)" : ""}`);
-    if (r.result === "FAIL" || r.result === "ERROR") { rec.failedAt = k; break; }
+    if (r.result === "FAIL" || r.result === "ERROR" || r.result === "SETUP") { rec.failedAt = k; break; }
   }
   rec.result = rec.failedAt === undefined ? "PASS" : rec.steps[rec.failedAt].result;
   rec.replay = `${start}:${rec.sequence.join(",")}`;

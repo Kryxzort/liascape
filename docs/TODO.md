@@ -22,30 +22,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
        below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
        eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
-67. [ ] UI matrix `playlist × cli:next` failed once in a full run (the UI showed no playing mark and an empty playlist
-       bar while the backend played k2) and hasn't come back in five full runs since. Ruled out: the keybind touches no
-       playlist state, playlist_state.json is written atomically, and a stalled player's /current no longer reads
-       "nothing plays" (a likely cause of the missing mark: matrix load:duringStall). Unexplained: the empty bar. A failing mark/bar
-       check now prints what the page showed (tab, cards, bar items, status line): read it on the next failure.
-       Not reproduced under load: `--only ' × cli:next$'` 18/18 cells in 2 runs with 16 CPU burners + 4 fsync-ing
-       writers + page-cache eviction (2 more runs there never reached their states), and the `playlist × ` cells' run
-       under that load failed 18 others but never this cell or its signature. Both symptoms fit a page with no cards at
-       all (just reloaded, or its first read still pending: `restart:backend` showed `cards: [], playlistBar: []`
-       under that load); the printed `cards` count tells. Also not reproduced: 20 more runs of `--only ' × cli:next$'`
-       (`--jobs 2`, `LIASCAPE_MATRIX_NICE=1`, 16 nice-19 busy loops; 180 cells, 20 of them this one) all passed. Each
-       cell reloads the page on the Library tab, so "another tab" needs something in the cell to switch. One gap in the
-       check if it does: its Library fallback (`afterControl`, `if (!m.cards().length) m.tab("Library")`) counts
-       Browse's cards too (`Card.tsx` and its skeletons are `.card.lib`), so a page left on Browse reads as no mark and
-       an empty bar (the bar mounts on Library only) without switching; the printed `tab` tells.
-       Read (2026-11-21): the cell can't reach the Browse gap (first tab is Library, every cell reloads, `cli:next`
-       touches no UI); the one cause of both symptoms is a page whose first read hasn't landed: `readBackend`
-       (`store/index.ts`) applies all 11 reads in one `set()` after one `Promise.all`, so a slow side read keeps cards
-       and bar empty, and `loadUi` (`probe-matrix.js`) gives up waiting after 10 s without saying so. Fix: `loadUi` waits
-       up to 20 s for ≥ 4 Library cards and the reset playlist's `.pl-item`s, else SETUP "page never finished its first
-       read"; `cards()` scoped to `.lib-scroll .card.lib` and one `m.toLibrary()` for the fallbacks (fuzz chains and
-       `tidyUi` can reach Browse); the failure print adds `data-page`, the Library card count and "Library is empty".
-       Optional app side: apply library / playlist / `/current` / settings as each lands, a loadbar before the first
-       `/library` instead of "Library is empty".
 97. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
