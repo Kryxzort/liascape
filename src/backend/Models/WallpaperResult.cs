@@ -29,4 +29,10 @@ public class WallpaperResult
     // The UI posts the result back to /detail as it got it, so these ride along untouched.
     public string? YoutubeUrl { get; init; }
     public bool TrailerKnown { get; init; }
+    // Workshop results: what a local sort of a list needs (created time, Steam's vote score 0–1) and the items it
+    // requires (a preset: its base scene)
+    // Guard: scripts/test-workshop-social.sh § 6 "details: the found items in order, with created / score"
+    public DateTime? CreatedAt { get; init; }
+    public double? Score { get; init; }
+    public string[]? Children { get; init; }
 }

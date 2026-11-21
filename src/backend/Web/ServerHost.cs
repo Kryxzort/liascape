@@ -829,6 +829,8 @@ public static class ServerHost
         app.MapGet("/workshop/counts", (string? id, HttpContext ctx) => WorkshopSocialOps.CountsAsync(id, ctx.RequestAborted));
         // a Workshop preset's base scene: its id, title and kind from Steam, and its folder when it is in the library
         app.MapGet("/workshop/base", (string? id, HttpContext ctx) => WorkshopSocialOps.BaseAsync(id, ctx.RequestAborted));
+        // many Workshop items' details at once, from the on-disk details cache (Helpers/WorkshopDetailsCache.cs)
+        app.MapPost("/workshop/details", (IdsReq r, HttpContext ctx) => WorkshopSocialOps.DetailsBatchAsync(r.Ids, ctx.RequestAborted));
         app.MapPost("/workshop/unsubscribe-keep", async (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : NoUnsubscribe() ?? Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));

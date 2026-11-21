@@ -262,6 +262,10 @@ public static class SteamWorkshopScraper
                 // QueryFiles carries the previews: the detail then needs no page read for the trailer
                 TrailerKnown = d.TrailerKnown,
                 YoutubeUrl = d.YoutubeId is { } y ? $"https://www.youtube.com/watch?v={y}" : null,
+                // Guard: scripts/test-workshop-social.sh § 6 "details: the found items in order, with created / score"
+                CreatedAt = d.TimeCreated != DateTime.MinValue ? d.TimeCreated : null,
+                Score = d.VoteScore,
+                Children = d.Children.Length > 0 ? d.Children.Select((c) => c.ToString()).ToArray() : null,
             });
         }
 

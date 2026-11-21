@@ -43,7 +43,12 @@ public static class WorkshopSocialOps
     {
         var got = await SteamWorkshopDetails.GetDetailsAsync([id]).ConfigureAwait(false);
         // Steam answered and has no such public item: a real answer (kept); unreachable: null (not kept)
-        return got == null ? null : got.TryGetValue(id, out var d) ? d : new SteamWorkshopDetails.Details(false, null, []);
+        if (got == null) return null;
+        if (!got.TryGetValue(id, out var d)) return new SteamWorkshopDetails.Details(false, null, []);
+        // an opened Library sidebar's fresh counts update the cached copy a local sort of a list reads
+        // Guard: scripts/test-workshop-social.sh § 6 "a Library sidebar's counts refresh the cached copy"
+        if (d.Found && d.File is { } f) WorkshopDetailsCache.Refresh(f with { Id = id.ToString() });
+        return d;
     }
 
     static IResult Fail(Exception e) => e switch
@@ -80,6 +85,25 @@ public static class WorkshopSocialOps
             };
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
+    }
+
+    // the most ids one /workshop/details takes: a whole favourites list in one ask (GetDetailsAsync splits it into Steam's
+    // 1000-id requests); a bigger one is a caller's bug
+    // Guard: scripts/test-workshop-social.sh § 6 "details: 2001 ids → 400"
+    const int DetailsBatchMax = 2000;
+
+    /// POST /workshop/details {ids} → {items: WallpaperResult[]} in the asked order: each item's details from the on-disk cache,
+    /// the rest asked of Steam in one go (Helpers/WorkshopDetailsCache.cs). Ids Steam has no public item for, or that
+    /// couldn't be asked (Steam unreachable), and unplayable items are left out. More than 2000 ids or a non-digit id → 400,
+    /// nothing asked.
+    /// Guard: scripts/test-workshop-social.sh § 6
+    public static async Task<IResult> DetailsBatchAsync(List<string>? ids, CancellationToken ct)
+    {
+        ids ??= [];
+        if (ids.Count > DetailsBatchMax) return Results.BadRequest(new { error = $"at most {DetailsBatchMax} ids" });
+        if (!ids.All(WorkshopSubOps.ValidId)) return Results.BadRequest(new { error = "ids must be digits" });
+        var got = await WorkshopDetailsCache.GetAsync(ids, ct).ConfigureAwait(false);
+        return Results.Json(new { items = Scrapers.SteamWorkshopScraper.MapToResults(ids, got, allowScenes: true, allowPresets: true) });
     }
 
     public sealed record PresetBaseInfo(string BaseId, string? Title, string? Kind);
