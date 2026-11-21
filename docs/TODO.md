@@ -71,13 +71,18 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        watches that item's favourite state for a few minutes after. The Steam page is #116's last resort, so this is
        that rule applied to the social controls.
 116. [ ] Two Workshop download modes, the Steam page the last resort. Owner: the page needs no login and gives Liascape
-       nothing, so falling back to it never exceeds the trust chosen. No other route stands in for a chosen mode.
+       nothing, so falling back to it never exceeds the trust chosen; the Steam sign-in backs up the Steam app because
+       the user signed in themselves. Nothing else stands in for a chosen mode.
        Rewrite `docs/decisions.md` § "Offer three Workshop download modes" to this in the same commit.
        - Settings → Getting Workshop wallpapers drops the "Open in the Steam app" radio. A saved `steampage` reads as
          the default mode; no migration, since nothing has shipped.
-       - Signed out under "Subscribe with Steam login", or when the chosen route can't reach Steam (Steam not
-         running, Wallpaper Engine not owned, the client or the sign-in refused), Download / Subscribe open the item's
-         Steam page. A short note says "Opened in Steam: subscribe there and it downloads here".
+       - The fallback order, each step only when the one before can't do it:
+         - the chosen mode;
+         - in "Use the Steam app" (Steam not running, Wallpaper Engine not owned, the client refused), the Steam
+           sign-in when one is usable (owner: the sign-in is the Steam app's backup; the user gave that trust by
+           signing in);
+         - the item's Steam page, with a short note: "Opened in Steam: subscribe there and it downloads here".
+       - Signed out under "Subscribe with Steam login" goes straight to the page.
        - A one-off download stays disabled with why.
        - "Use the Steam app" becomes the default mode (owner): the Settings model's default and the UI's
          `g("workshopDownloadMode", …)` fallback. The page fallback covers its failures (no Steam running, no Wallpaper
