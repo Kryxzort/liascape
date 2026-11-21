@@ -10,10 +10,36 @@
 # LIASCAPE_TEST_LOCK_HELD=1 in the environment = an outer run holds it already (a suite that calls another one).
 # LIASCAPE_TEST_LOCK=<path> overrides the lock file (default: $XDG_RUNTIME_DIR/liascape-tests.lock).
 # LIASCAPE_TEST_LOCK_MAX=<seconds>: the wrapped command's ceiling (default 5400; 0 = none).
+# LIASCAPE_TEST_THERMAL_PAUSE / _RESUME=<milli-°C> (default 88000 / 80000; LIASCAPE_TEST_THERMAL=0 = off): once the lock
+# is taken, a run waits while the hottest NVMe sensor is above PAUSE until it is below RESUME, at most 15 min. A drive
+# that throttles turns IO-heavy runs into minutes-long stalls of the whole desktop; waiting here means no run has to
+# remember to check. A hot drive's controller sensor can idle in the mid-70s, so a PAUSE much lower than the default
+# would hold runs forever.
 #
 # The lock is held by a small helper beside the run, never by the run's own shell: an open lock fd is inherited by every
 # child, and a child that outlives the run (dotnet's VBCSCompiler build server, a backend) would hold the lock for
 # minutes with nothing behind it. The helper watches the run's pid and lets go within half a second of it exiting.
+
+# the hottest NVMe temperature in milli-°C (every temp*_input of every nvme hwmon), empty without one
+__lt_nvme_temp() {
+  local t m=
+  for t in /sys/class/nvme/nvme*/hwmon*/temp*_input; do
+    [ -r "$t" ] || continue; t=$(cat "$t" 2>/dev/null) || continue
+    [ -z "$m" ] || [ "$t" -gt "$m" ] && m=$t
+  done
+  echo "$m"
+}
+__lt_thermal() {
+  [ "${LIASCAPE_TEST_THERMAL:-1}" = 0 ] && return 0
+  local pause=${LIASCAPE_TEST_THERMAL_PAUSE:-88000} resume=${LIASCAPE_TEST_THERMAL_RESUME:-80000} t t0=$SECONDS
+  t=$(__lt_nvme_temp); [ -n "$t" ] && [ "$t" -gt "$pause" ] || return 0
+  echo "test-lock: an NVMe drive is at $((t / 1000)) °C — waiting for it to cool below $((resume / 1000)) °C" >&2
+  while t=$(__lt_nvme_temp); [ -n "$t" ] && [ "$t" -ge "$resume" ]; do
+    [ $((SECONDS - t0)) -ge 900 ] && { echo "test-lock: still $((t / 1000)) °C after 15 min — running anyway" >&2; return 0; }
+    sleep 5
+  done
+  echo "test-lock: cooled to $((t / 1000)) °C after $((SECONDS - t0)) s" >&2
+}
 
 __lt_lock() {
   [ -n "${LIASCAPE_TEST_LOCK_HELD:-}" ] && return 0
@@ -34,6 +60,7 @@ __lt_lock() {
   rm -f "$ready"
   [ -n "$said" ] && echo "test-lock: got it after $((SECONDS - t0)) s" >&2
   echo "pid $run since $(date +%T): ${__lt_what:-$0}" >"$f.who"
+  __lt_thermal
   export LIASCAPE_TEST_LOCK_HELD=1 LIASCAPE_TEST_LOCK="$f"
 }
 

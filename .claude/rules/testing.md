@@ -63,6 +63,8 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
 - Every `scripts/test-*.sh` and `scripts/bench-live-ui.mjs` take the machine's test lock (`scripts/test-lock.sh`): a second
   run waits its turn and says who holds it. Run anything else heavy through it too: `bash scripts/test-lock.sh <command>`
   (`cargo test`, the on-machine batteries). Never work around it: overlapping runs make every count and timing meaningless.
+- The lock also waits for a hot NVMe drive to cool (above 88 °C, until below 80 °C, at most 15 min) before a run starts;
+  never check the temperature yourself or set `LIASCAPE_TEST_THERMAL=0` to skip it.
 - Give every one-off script you run under the lock (a CDP driver, a bench) its own overall timeout that exits the process:
   a page replaced by hot reload leaves its promises pending forever, and it holds the lock (the wrapper's ceiling is 90 min).
 - A perf or count failure seen while the machine was loaded (`uptime`'s load above the core count) proves nothing: rerun it
