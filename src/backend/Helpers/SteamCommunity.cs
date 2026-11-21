@@ -327,6 +327,8 @@ public static class SteamCommunity
     // Ids = the page's Workshop ids in Steam's order. Total stays null: the page's "of N entries" isn't the list's size
     // (measured signed out, N leaves mature items out: 39 of a 41-item list, 1,662 of 10,559), so a caller compares a page's
     // ids, never a count. Page 1's order matches neither `lastupdated` nor `score`.
+    // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: ids parsed, the signed-out total left
+    // unread", "favourites page: the last, short page".
     public sealed record FavoritesPage(List<string> Ids, int? Total);
 
     public static FavoritesPage ParseFavoritesPage(string html)
@@ -337,6 +339,8 @@ public static class SteamCommunity
 
     /// One page (30) of the signed-in account's Workshop favourites for Wallpaper Engine, paced as `kind` (the user's own
     /// Browse page = Interactive; a cache's check = Background).
+    // Guard: scripts/test-workshop-social.sh "favourites of a private profile: the community page (with the cookie) + the
+    // keyless details"; its parsing: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: …".
     public static async Task<FavoritesPage> MyFavoritesPageAsync(int page, SteamGate.Kind kind, CancellationToken ct = default)
     {
         var who = await SignInAsync(ct).ConfigureAwait(false) ?? throw new SignInRequiredException("Sign in to Steam to see your Workshop favourites (Settings → Getting Workshop wallpapers).");
