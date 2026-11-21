@@ -210,11 +210,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       triggers/actions can't express (the escape hatch, not just one more action type).
 
 ## Legacy player (current app) — small fixes
-- [ ] One source of truth for the player's command API: the C# adapter's request/result/event types
-      (`src/backend/Player/`) are hand-written copies of `src/player/src/api/` shapes; a renamed field only shows up
-      when the adapter integration test happens to exercise it. Derive a JSON Schema from the Rust types (`schemars`),
-      commit it, and add a test that checks it is current and that every C# DTO field exists in it with a matching
-      type (or generate the C# types from it). Same idea later for the UI's `api/client.ts` vs the backend's web API.
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
       - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
         `duration + coverMs` for every method; `--align-a-end` only exists for full-live). So A freezes several
@@ -563,6 +558,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] Desktop pointer on Sway/other compositors: no global cursor source (Sway's IPC has none) → surface pointer.
 
 ## Backend structure
+- [ ] One source of truth for the player's command API: the C# adapter's request/result/event types
+      (`src/backend/Player/`) are hand-written copies of `src/player/src/api/` shapes; a renamed field only shows up
+      when the adapter integration test happens to exercise it. Derive a JSON Schema from the Rust types (`schemars`),
+      commit it, and add a test that checks it is current and that every C# DTO field exists in it with a matching
+      type (or generate the C# types from it). Same idea later for the UI's `api/client.ts` vs the backend's web API.
 Two bug classes kept recurring; fix the class, not the instance:
 
 ## Older backlog
