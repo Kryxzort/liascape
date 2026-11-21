@@ -191,7 +191,14 @@ export interface Wallpaper {
   ageRating?: string | null;
   // API: a Workshop preset (also isScene: it plays its base scene) — listed only while presets can play (WorkshopTags.Build)
   isPreset?: boolean;
+  // API: POST /workshop/details and GET /workshop/my-favorites (SteamWorkshopScraper.MapToResults): when Steam's item was made,
+  // its vote score (0–1) and the items it requires (a preset: its base scene); null = unknown
+  createdAt?: string | null; score?: number | null; children?: string[] | null;
 }
+// API: GET /workshop/my-favorites (Web/WorkshopSocialOps.cs MyFavoritesAsync): the signed-in account's cached Workshop
+// favourites that have details, in the list's order; `version` grows with every change, `loading` = the first load's progress
+// (total null = not known yet), `error` = why the last load or check stopped. Signed out: signedIn false and nothing else.
+export type FavoritesState = { signedIn: boolean; version: number; loading: { done: number; total: number | null } | null; error: string | null; items: Wallpaper[] };
 export interface Detail {
   title: string; previewUrl: string; downloadUrl: string; needsReferrer: boolean;
   referrer: string | null; isScene: boolean; workshopId: string | null; isWorkshopAcquire: boolean;
@@ -406,6 +413,14 @@ export const api = {
     jget<WsComments>(`/workshop/comments?id=${encodeURIComponent(id)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}&start=${start}&count=${count}`),
   workshopPostComment: (workshopId: string, owner: string | null | undefined, text: string, count: number) =>
     jpost<WsComments>("/workshop/comment", { workshopId, owner, text, count }),
+  // API: the favourites cache: `open` (the set shows) starts the first load or the id diff, `check` the count check, both in
+  // the background (the backend's own pace); `none` only reads. Signed out → {signedIn: false}, filled in here.
+  workshopMyFavorites: (sync: "none" | "open" | "check") =>
+    jget<Partial<FavoritesState>>(`/workshop/my-favorites?sync=${sync}`).then((r): FavoritesState =>
+      ({ signedIn: !!r.signedIn, version: r.version ?? 0, loading: r.loading ?? null, error: r.error ?? null, items: r.items ?? [] })),
+  // API: the shared details cache (Web/WorkshopSocialOps.cs DetailsBatchAsync): at most 2000 digit ids; the ones Steam has
+  // no public, playable item for are left out
+  workshopDetails: (ids: string[]) => jpost<{ items: Wallpaper[] }>("/workshop/details", { ids }),
   // API: Steam's current counts of one item (the Library sidebar; a Browse result carries its own)
   workshopCounts: (id: string) => jget<WsCounts>(`/workshop/counts?id=${encodeURIComponent(id)}`),
   // API: a preset's base (WorkshopSocialOps.BaseAsync): title / kind null when Steam has no such public item, libraryPath its

@@ -1,8 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { filterOf, useStore } from "../store";
+import { useShallow } from "zustand/react/shallow";
+import { PRESET_TAG, presetsOn, useStore } from "../store";
 import { Card } from "../components/Card";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
-import { LIBRARY_TAG, facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
+import { LIBRARY_TAG, WF_GROUPS, facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
@@ -18,8 +19,9 @@ import { useMarquee } from "../hooks/useMarquee";
 import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
-import type { Wallpaper } from "../api/client";
+import type { Wallpaper, WorkshopFilter } from "../api/client";
 import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
+import { buildLocalSet, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // WE-local browse sort menu (client-side over the single loaded page).
@@ -36,6 +38,12 @@ function sortBrowse(list: Wallpaper[], idx: number): Wallpaper[] {
     default: return a.sort((x, y) => d(x) - d(y));
   }
 }
+
+// a scene's presets list ignores Type, as the Workshop does for it (the backend's WorkshopTags.ForPresets): every item is a preset
+const TYPE_TAGS = new Set(WF_GROUPS.find((g) => g.id === "type")!.subs[0].tags.map((t) => t.tag).concat(PRESET_TAG));
+const withoutType = (f: WorkshopFilter): WorkshopFilter =>
+  ({ ...f, include: f.include.filter((t) => !TYPE_TAGS.has(t)), exclude: f.exclude.filter((t) => !TYPE_TAGS.has(t)) });
+const NO_IDS = new Set<string>();
 
 // PERF: memo'd (App passes a stable onShowInLibrary) — App's re-renders don't reach the grid
 export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) => void }) {
@@ -63,20 +71,41 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const libKeys = useMemo(() => libraryKeys(libItems), [libItems]);
   // the source's filter column: the Workshop's (its tags go to Steam), the local WE folder's (matched here), or none
   const scope = useStore((s) => s.browseScope());
-  // the filter column's "In my library" row (UI-only, workshopFilter.ts LIBRARY_TAG): ✓ = only owned, ✕ = hide owned —
-  // filtered here, over the pages already loaded (the placeholders keep loading while a page thins out)
-  const libMode = useStore((s) => { const sc = s.browseScope(); if (!sc) return null; const f = filterOf(s, sc);
+  // the local WE folder's "In my library" row: ✓ = only owned, ✕ = hide owned, filtered here over what it holds
+  const libMode = useStore((s) => { if (s.browseScope() !== "weLocal") return null; const f = s.weFilter;
     return f.include.includes(LIBRARY_TAG) ? "only" : f.exclude.includes(LIBRARY_TAG) ? "hide" : null; });
   // the local WE folder holds its whole list: its tags filter it here, no request (workshopFilter.ts localMatcher)
   const weFilter = useStore((s) => s.weFilter);
   const local = scope === "weLocal";
   const match = useMemo(() => (local ? localMatcher(weFilter) : null), [local, weFilter]);
   const known = useMemo(() => (local ? knownTags(wallpapers, (w) => w.pageUrl) : null), [local, wallpapers]);
+  // the Workshop's Yours rows (views/localSet.ts): a ✓ shows the set itself — the favourites, the library's Workshop items —
+  // with the filter, the search and its own sort applied here; ✕ alone takes the set out of the Workshop's pages
+  const ws = scope === "workshop";
+  const modes = useStore(useShallow((s) => s.setModes()));
+  const setOn = ws && isLocalSet(modes);
+  const favs = useStore((s) => s.wsFavs);
+  const libDetails = useStore((s) => s.wsLibDetails);
+  const browseFilter = useStore((s) => s.browseFilter);
+  const wsList = useStore((s) => s.wsList);
+  const query = useStore((s) => s.query);
+  const localSort = useStore((s) => effectiveLocalSort(s.localSort, s.setModes().lib === "inc"));
+  const scenesOn = useStore((s) => !!s.settings?.allowScenes);
+  const presetsCan = useStore((s) => presetsOn(s.settings));
+  const loadLibDetails = useStore((s) => s.loadLibDetails);
+  const libCards = useMemo(() => (setOn && modes.lib ? libraryCards(libItems, libDetails) : []), [setOn, modes.lib, libItems, libDetails]);
+  const libAdded = useMemo(() => new Map(libItems.flatMap((i) => (i.workshopId ? [[i.workshopId, Date.parse(i.addedAt)] as const] : []))), [libItems]);
+  const setMatch = useMemo(() => (ws ? localMatcher(wsList?.kind === "presets" ? withoutType(browseFilter) : browseFilter) : null), [ws, wsList, browseFilter]);
+  // the library's new Workshop items get their details while In my library ✓ shows them (only the ones not held yet)
+  useEffect(() => { if (setOn && modes.lib === "inc") loadLibDetails(); }, [setOn, modes.lib, libItems, loadLibDetails]);
   const sorted = useMemo(() => {
+    if (setOn) return buildLocalSet({ modes, favs: favs?.items ?? [], lib: libCards, libAdded, list: wsList, query, match: setMatch, scenesOn,
+      presetsOn: presetsCan, presetTicked: browseFilter.include.includes(PRESET_TAG), sort: localSort });
     let all = sortBrowse(wallpapers, browseSort);
+    if (ws) all = hideSets(all, modes, favs?.ids ?? NO_IDS, libKeys);
     if (libMode) all = all.filter((w) => inLibrary(libKeys, w) === (libMode === "only"));
     return match ? all.filter((w) => match(facetsOf(w, w.pageUrl))) : all;
-  }, [wallpapers, browseSort, libMode, libKeys, match]);
+  }, [setOn, modes, favs, libCards, libAdded, wsList, query, setMatch, scenesOn, presetsCan, browseFilter, localSort, wallpapers, browseSort, ws, libKeys, libMode, match]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
@@ -85,7 +114,9 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   // the page is built on each visit (App.tsx): back on it, the list (kept in the store, no request) shows where it was
   // left; another source, search, filter or sort starts at the top. Guard: probe-layout tabs:browse
   const browseFor = useStore((s) => s.browseFor);
-  const localView = local ? JSON.stringify([weFilter.include, weFilter.exclude, weFilter.featureMatch, weFilter.genreMatch]) : "";
+  const localView = local ? JSON.stringify([weFilter.include, weFilter.exclude, weFilter.featureMatch, weFilter.genreMatch])
+    : setOn ? JSON.stringify([browseFilter.include, browseFilter.exclude, browseFilter.featureMatch, browseFilter.genreMatch, query, localSort, wsList && [wsList.kind, "id" in wsList ? wsList.id : null]])
+    : ws ? JSON.stringify(modes) : "";
   useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}|${localView}`);
 
   // any placeholder near the view asks for the next page, not only the first: a jump past it (End, the scrollbar dragged

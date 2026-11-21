@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { FAVORITES_TAG, PRESET_TAG, WF_DOCK_QUERY, filterOf, presetsOn, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
+import { PRESET_TAG, WF_DOCK_QUERY, filterOf, presetsOn, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
 import type { WorkshopFilter } from "../api/client";
 import { useMotion } from "./motion";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { keepCardInView } from "../hooks/gridKeys";
+import { FAVORITES_TAG, LIBRARY_TAG } from "../views/localSet";
+import { facetsOf, type Facetable } from "./facets";
 
 // The Workshop filter column's data + hooks (components/WorkshopFilterColumn.tsx) — a module of its own so the component file
 // exports components only (fast refresh).
@@ -20,12 +22,12 @@ const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "
 // Hidden group — no-ops), "No Animation" (a Script Type tag), "User Shortcut" / "Asset Pack" (not playable wallpapers).
 // Yours: the user's own relation to an item, as UI-only pseudo-tags in the same include / exclude sets. Never sent to Steam
 // (`wireFilter` strips every "@" tag; the backend's WorkshopFilter.Effective ignores them too).
-// "In my library": ✓ = only what the library has, ✕ = hide it; filtered in Browse's render against the library (`inLibrary`),
-// so toggling it needs no request and leaves the prefetched page valid. Not on the Library (everything in it is).
+// "In my library": the library's items. Not on the Library (everything in it is).
 // "Favourites": the signed-in account's Workshop favourites; signed out it's dimmed and can only be cleared (store
 // favoritesUsable). Not on the local WE folder.
-export const LIBRARY_TAG = "@library";
-export { FAVORITES_TAG };
+// On the Workshop a ✓ on either shows that set itself with no request (views/localSet.ts) and ✕ alone hides it from the
+// Workshop's pages; on the local WE folder "In my library" keeps or hides its owned items (Browse's render, `inLibrary`).
+export { FAVORITES_TAG, LIBRARY_TAG };
 const YOURS = { id: "yours", name: "Yours" };
 export const WF_GROUPS: Group[] = [
   { ...YOURS, subs: [{ tags: [t(LIBRARY_TAG, "In my library"), t(FAVORITES_TAG, "Favourites")] }] },
@@ -96,27 +98,8 @@ export const groupsFor = (scope: FilterScope, presets: boolean) =>
     : presets ? GROUPS.allP : GROUPS.all;
 export const usePresetsOn = () => useStore((s) => presetsOn(s.settings));
 
-// what a local item knows, as lower-cased tag names: its tags (Steam's, saved at download, else its project.json's genres +
-// the features the file declares — the backend's WorkshopTags.FromProject), its age rating, its type and its resolution
-type Facetable = { tags: string[] | null; isScene: boolean; isPreset?: boolean; ageRating?: string | null; resolution: string | null };
-const IMAGE = /\.(png|jpe?g|webp|gif|bmp)$/i;
-const RES = /^\s*(\d{3,5})\s*[x×]\s*(\d{3,5})\s*$/i;
-// PERF: per item object, computed once — a library re-read keeps the objects whose content didn't change (store keepSame)
-const facetCache = new WeakMap<object, Set<string>>();
-export function facetsOf(x: Facetable, path: string): Set<string> {
-  let f = facetCache.get(x);
-  if (f) return f;
-  f = new Set<string>();
-  for (const t of x.tags ?? []) f.add(t.toLowerCase());
-  if (x.ageRating) f.add(x.ageRating.toLowerCase());
-  // an image (an imported still) is neither a Video nor a Scene; a preset is both a Preset and a Scene (it plays as one)
-  if (x.isScene) f.add("scene"); else if (!IMAGE.test(path)) f.add("video");
-  if (x.isPreset) f.add("preset");
-  const r = x.resolution ? RES.exec(x.resolution) : null;
-  if (r) f.add(`${r[1]} x ${r[2]}`);
-  facetCache.set(x, f);
-  return f;
-}
+// what a local item knows (components/facets.ts)
+export { facetsOf };
 
 const AGE = WF_GROUPS.find((g) => g.id === "age")!.subs[0].tags.map((t) => t.tag.toLowerCase());
 const GROUP_OF = new Map(GROUPS.allP.flatMap((g) => g.subs.flatMap((s) => s.tags.map((t) => [t.tag.toLowerCase(), g.id] as const))));

@@ -1,15 +1,18 @@
 import { create } from "zustand";
 import {
   steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
-  type LibraryOp, type CacheCleared, type WsList, type WsListSort, ApiError,
+  type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState, ApiError,
 } from "../api/client";
+import {
+  DEFAULT_LOCAL_SORT, FAVORITES_TAG, LIBRARY_TAG, isLocalSet, isLocalSort, setModesOf, type LocalSort, type SetModes,
+} from "../views/localSet";
 import { eventsOpened } from "../api/events";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
 
-// what the backend gets: the filter without the UI-only "@" pseudo-tags (workshopFilter.ts LIBRARY_TAG, FAVORITES_TAG)
+// what the backend gets: the filter without the UI-only "@" pseudo-tags (views/localSet.ts LIBRARY_TAG, FAVORITES_TAG)
 const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
   ({ ...f, include: f.include.filter((t) => !t.startsWith("@")), exclude: f.exclude.filter((t) => !t.startsWith("@")) });
 // the filter panel docks beside the grid from this width; below it, it floats over the grid. The item sidebar's own breakpoint
@@ -25,9 +28,8 @@ const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boo
 // row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
 export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine === "liascape-player";
 export const PRESET_TAG = "Preset";
-// the filter column's "Favourites" row (workshopFilter.ts, which re-exports it): a UI-only pseudo-tag for the signed-in
-// account's Workshop favourites. It lives here because setTagState guards it and workshopFilter.ts imports the store.
-export const FAVORITES_TAG = "@favorites";
+// the filter column's "Favourites" row: a UI-only pseudo-tag for the signed-in account's Workshop favourites (views/localSet.ts)
+export { FAVORITES_TAG };
 // the favourites can be read only for a signed-in account Steam hasn't rejected: otherwise the row is dimmed, a saved ✓ / ✕
 // stays (it comes back with the sign-in) but means nothing, and it can only be cleared
 export const favoritesUsable = (steam: State["steam"]) => !!steam?.signedIn && !steam.rejected;
@@ -137,6 +139,10 @@ interface State {
   wsList: WsList; wsListSort: WsListSort; wsListNote: { text: string; signIn: boolean } | null;
   // a Workshop item the Browse sidebar shows though the list doesn't hold it (a preset's base scene: showBrowseItem)
   browseExtra: Wallpaper | null;
+  // the Yours rows' sets on the Workshop (views/localSet.ts): the favourites cache as last read (null = not read yet; `ids` =
+  // its items' Workshop ids), the library's Workshop items' details (by id; one without any is built from the library), and
+  // a local set's own sort, saved apart from the Workshop's (browseFilter.sort keeps its trend period untouched)
+  wsFavs: (FavoritesState & { ids: Set<string> }) | null; wsLibDetails: Record<string, Wallpaper>; localSort: LocalSort;
   // library
   libraryItems: LibraryItem[]; libQuery: string; libSort: number; undoDepth: number;
   // playlist
@@ -199,6 +205,12 @@ interface State {
   // shows a Workshop list on the Workshop source (switching to it); null = the whole Workshop
   setWsList(l: WsList): void; setWsListSort(s: WsListSort): void;
   setBrowseFilter(p: Partial<WorkshopFilter>): void; isWorkshop(): boolean; setBrowseSort(i: number): void;
+  // the Yours rows' states on the Workshop (Favourites none while it can't be used: favoritesUsable); a local set shows (a ✓
+  // on the Workshop source): Browse then sends no /browse
+  setModes(): SetModes; localSetOn(): boolean;
+  // one read of the favourites at a time (a call meanwhile reads once more after it); the library's Workshop items' details
+  // not held yet, in one ask
+  loadFavorites(sync: "none" | "open" | "check"): Promise<void>; loadLibDetails(): Promise<void>; setLocalSort(v: string): void;
   // the active Browse source's filter column, if it has one: the Workshop's or the local WE folder's
   browseScope(): FilterScope | null;
   // the filter column (components/WorkshopFilterColumn.tsx), per scope: one tag's state (include / exclude / off), the
@@ -312,6 +324,13 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 }
 
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
+// a local set's list: nothing from /browse, and one key for every set (Browse keys its kept scroll on the set's own view)
+const NO_ITEMS: Wallpaper[] = [];
+const LOCAL_FOR = "local";
+let favReading: Promise<void> | null = null, favAgain: "none" | "open" | "check" | null = null;
+const FAV_RANK = { none: 0, check: 1, open: 2 } as const;
+let libDetailsReading: Promise<void> | null = null;
+const libDetailsAsked = new Set<string>();
 // an item's sidebar opening on `page` closes that page's filter panel, if it shows (docked: remembered closed; a drawer: shut)
 function closeFiltersFor(page: FilterPage) {
   const s = useStore.getState();
@@ -323,6 +342,7 @@ export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   wsList: null, wsListSort: LS.get<WsListSort>("wsListSort", "lastupdated") === "toprated" ? "toprated" : "lastupdated", wsListNote: null, browseExtra: null,
+  wsFavs: null, wsLibDetails: {}, localSort: (() => { const v = LS.get<unknown>("wsLocalSort", DEFAULT_LOCAL_SORT); return isLocalSort(v) ? v : DEFAULT_LOCAL_SORT; })(),
   weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   scenePropsFolded: LS.get<boolean>("scenePropsFolded", false) === true,
@@ -383,6 +403,46 @@ export const useStore = create<State>((set, get) => ({
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
   browseScope() { const src = get().sources[get().activeSource]; return src?.supportsTagFilter ? "workshop" : src?.supportsLocalFilter ? "weLocal" : null; },
+  setModes() { return setModesOf(get().browseFilter, favoritesUsable(get().steam)); },
+  localSetOn() { return get().isWorkshop() && isLocalSet(get().setModes()); },
+  // API: GET /workshop/my-favorites. A read is dropped when the store already holds a newer version (a later read landed
+  // first); one asked while another runs is read right after it, so a version announced meanwhile is never missed.
+  async loadFavorites(sync) {
+    if (favReading) { if (!favAgain || FAV_RANK[sync] > FAV_RANK[favAgain]) favAgain = sync; return favReading; }
+    favReading = (async () => {
+      let s: "none" | "open" | "check" | null = sync;
+      while (s) {
+        favAgain = null;
+        try {
+          const r = await api.workshopMyFavorites(s);
+          const cur = get().wsFavs;
+          if (!r.signedIn || !cur || r.version >= cur.version)
+            set({ wsFavs: { ...r, ids: new Set(r.items.map((w) => w.workshopId).filter((x): x is string => !!x)) } });
+        } catch { /* the backend is away: what shows stays */ }
+        s = favAgain;
+      }
+    })().finally(() => { favReading = null; });
+    return favReading;
+  },
+  // API: POST /workshop/details, at most 2000 ids an ask
+  async loadLibDetails() {
+    if (libDetailsReading) return libDetailsReading;
+    libDetailsReading = (async () => {
+      const held = get().wsLibDetails;
+      const ids = [...new Set(get().libraryItems.map((i) => i.workshopId).filter((id): id is string => !!id && /^\d+$/.test(id)))]
+        .filter((id) => !(id in held) && !libDetailsAsked.has(id));
+      for (let i = 0; i < ids.length; i += 2000) {
+        const batch = ids.slice(i, i + 2000);
+        try {
+          const r = await api.workshopDetails(batch);
+          for (const id of batch) libDetailsAsked.add(id); // Steam has nothing on the rest: their cards come from the library
+          if (r.items.length) set({ wsLibDetails: { ...get().wsLibDetails, ...Object.fromEntries(r.items.map((w) => [w.workshopId!, w])) } });
+        } catch { /* asked again the next time the set shows */ }
+      }
+    })().finally(() => { libDetailsReading = null; });
+    return libDetailsReading;
+  },
+  setLocalSort(v) { if (!isLocalSort(v)) return; set({ localSort: v }); LS.set("wsLocalSort", v); },
   // update the filter instantly (UI is snappy) but DEBOUNCE the network reload — rapid chip toggles
   // would otherwise fire a full refetch + grid re-render each → laggy.
   setBrowseFilter(p) { const bf = { ...get().browseFilter, ...p }; set({ browseFilter: bf }); LS.set("browseFilter", bf); clearTimeout(filterTimer); filterTimer = setTimeout(() => get().reload(), 280); },
@@ -394,8 +454,17 @@ export const useStore = create<State>((set, get) => ({
     const { include, exclude } = filterOf(get(), scope);
     const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
     if (st === "inc") inc.push(tag); else if (st === "exc") exc.push(tag);
-    // "In my library" filters the list already loaded (Browse's render) — no reload for it
-    if (scope === "workshop" && tag.startsWith("@")) { const bf = { ...get().browseFilter, include: inc, exclude: exc }; set({ browseFilter: bf }); LS.set("browseFilter", bf); return; }
+    // a Yours row filters what the page holds (Browse's render; views/localSet.ts): no request, unless it starts or ends a
+    // local set: then the list is the set (reload sends nothing) or the Workshop's pages again (reload asks for them now; a
+    // debounced reload pending from another switch would ask twice). Guard: probe-steam yours:combos, yours:noScan
+    if (scope === "workshop" && tag.startsWith("@")) {
+      const was = get().localSetOn();
+      const bf = { ...get().browseFilter, include: inc, exclude: exc }; set({ browseFilter: bf }); LS.set("browseFilter", bf);
+      if (tag === FAVORITES_TAG && st !== null) get().loadFavorites("open");
+      if (tag === LIBRARY_TAG && st === "inc") get().loadLibDetails();
+      if (get().localSetOn() !== was) { clearTimeout(filterTimer); get().reload(); }
+      return;
+    }
     get().setFilterIn(scope, { include: inc, exclude: exc });
   },
   // the Workshop's filter reloads (debounced); a local one is the list's own render — no request, nothing to wait for
@@ -424,6 +493,16 @@ export const useStore = create<State>((set, get) => ({
   // source the user switched to and replaces (or extends) its list, under the new source's pill (seen in the
   // morph probe: MotionBgs' list shown under "Wallpaper Engine (Local)")
   async reload() {
+    // a local set is the page's own: no /browse and no placeholders (hasMore false); the shown set follows the store's
+    // favourites and library. Guard: probe-steam yours:noScan, yours:big
+    if (get().localSetOn()) {
+      ++browseGen; // a Workshop page still on its way belongs to the list before
+      set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseFor: LOCAL_FOR });
+      const m = get().setModes();
+      if (m.fav && !get().wsFavs) get().loadFavorites("open");
+      if (m.lib === "inc") get().loadLibDetails();
+      return;
+    }
     const { activeSource } = get();
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const list = wireList(get());
@@ -449,7 +528,7 @@ export const useStore = create<State>((set, get) => ({
   },
   async loadMore() {
     const { activeSource, page, loading, hasMore, wallpapers } = get();
-    if (loading || !hasMore) return;
+    if (loading || !hasMore || get().localSetOn()) return;
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const wl = wireList(get());
     const query = wl ? "" : get().query;

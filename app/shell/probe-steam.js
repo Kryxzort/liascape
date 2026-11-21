@@ -166,6 +166,19 @@
 //   ws:presetsEmpty       a scene with no presets: the list says so in the grid
 //   ws:presetBase         a preset's sidebar: "Uses" + its base's title (asked once); a click shows the base's Library card, else
 //                         its Browse card (the list's own, else one of its own), never a Steam page
+//   yours:combos         the filter's Yours rows on the Workshop (STUB __probe_yours: six favourites, the library's four Workshop
+//                        items, two shared, one Steam has nothing on): every pair of row states shows its set (✓ the set, both ✓
+//                        the intersection, ✓ + ✕ the difference, ✕ alone the Workshop's page minus the set). Shots steam-yours-*.png
+//   yours:noScan         a ✓ on: tags, the search, a sort and a scroll to the end send no /browse, no placeholder cards; the
+//                        last ✓ off → one /browse with the Workshop's own sort
+//   yours:search         a local set's search: a title word, an author's name, a tag, any case
+//   yours:sort           the local sort menu (Date Added only with In my library ✓); each orders by its field, the item Steam
+//                        has nothing on last, none a no-op; saved apart from the Workshop's sort
+//   yours:trendSort      Most Popular · Week → Favourites ✓ reads Most Subscribed (no Most Popular) → ✓ off: Week again, trend / 7
+//   yours:switches       Type, an age and a genre narrow a local set; an age filter drops the untagged
+//   yours:inList         inside a creator's list / a scene's presets list: ✓ its favourites only, ✕ hides them from the pages
+//   yours:scenes         a favourite preset only with Type's Preset ticked; scene support off → scenes and presets leave at once
+//   yours:big            2,000 favourites: all at once, a typed search sends nothing, content-visibility kept
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
@@ -226,12 +239,28 @@ const STUB = `(() => {
     workshopId: String(930000 + i), addedAt: null, description: "fake", authorName: "probe", authorId: "76561190000000007", fileSizeBytes: 1000,
     subscriptions: 1234 + i, favorites: 56 + i, tags: ["Anime"], trailerKnown: true }));
   const f = window.fetch.bind(window);
+  // the Yours rows' local sets (yours:*): __probe_yours (localStorage) = { favs: GET /workshop/my-favorites' answer, details:
+  // POST /workshop/details' items by id, lib: the library's Workshop items (laid over the stack's k1..k4; the rest of the
+  // library left out), page / creatorPage / presetsPage: the Workshop's page 1, a creator's list and a scene's presets list };
+  // every favourites and details ask recorded (st.favAsks, st.detailAsks)
+  let yRaw = null, yVal = null;
+  const Y = () => { const r = localStorage.getItem("__probe_yours"); if (r !== yRaw) { yRaw = r; yVal = r ? JSON.parse(r) : null; } return yVal; };
   window.fetch = (u, o = {}) => {
     const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
     const m = (o.method || "GET").toUpperCase();
     st.bodies.push({ p, m, body: typeof o.body === "string" ? o.body : null });
     const res = (b, status = 200) => Promise.resolve(new Response(b == null ? "" : JSON.stringify(b), { status, headers: b == null ? {} : { "Content-Type": "application/json" } }));
     if (p === "/steam/status") return res(st.status);
+    if (p === "/workshop/my-favorites") { (st.favAsks ??= []).push(new URL(String(u), location.href).searchParams.get("sync")); if (Y()) return res(Y().favs); }
+    if (p === "/workshop/details" && m === "POST" && Y()) {
+      const ids = JSON.parse(o.body).ids || [], d = Y().details || {}; (st.detailAsks ??= []).push(ids);
+      return res({ items: ids.filter((id) => d[id]).map((id) => d[id]) });
+    }
+    if (p === "/library" && m === "GET" && Y()?.lib) {
+      const lib = Y().lib;
+      return f(u, o).then((r) => r.json()).then((list) => { const ks = list.filter((x) => /^k\\d$/.test(x.title)).sort((a, b) => a.title.localeCompare(b.title));
+        return res(lib.map((l, i) => ({ ...ks[i], ...l }))); });
+    }
     if (p.startsWith("/steam/")) {
       st.calls.push({ p, body: o.body ? JSON.parse(o.body) : null });
       const r = (window.__replies || {})[p];
@@ -312,6 +341,8 @@ const STUB = `(() => {
     if (p === "/browse" && m === "POST") {
       const b = JSON.parse(o.body);
       (st.browses ??= []).push(b); // every list read (ws:*), apart from the cells' own calls
+      const y = Y();
+      if (y) return res(b.page > 1 ? [] : b.list?.kind === "creator" ? y.creatorPage ?? [] : b.list?.kind === "presets" ? y.presetsPage ?? [] : y.page ?? []);
       // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
       // a scene's presets (ws:presets*): the stack's own backend answers, from its fake Steam servers (scripts/test-ui-matrix.sh)
       if (b.list) { if (b.list.kind === "presets") return f(u, o);
@@ -3090,6 +3121,378 @@ app.whenReady().then(async () => {
           if (pages.length) v.push(`${k.what}: the click opened a Steam page (${J(pages)})`);
         }
       } finally { await presetsDone(); }
+      return v;
+    });
+
+    // ---- the Yours rows as local sets (views/localSet.ts): a ✓ shows the favourites / the library's Workshop items from the
+    // store (no /browse, no placeholders), ✕ alone hides them from the Workshop's pages. The data: six favourites (F1–F6,
+    // every sort field distinct), the library's four Workshop items (F5, F6 shared; Glacier with details; Zephyr with none),
+    // the Workshop's page (three of its own, Aurora, Glacier, Ember) — answered by the STUB from __probe_yours ----
+    const WSP = (id) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
+    const yItem = (id, title, o = {}) => ({ title, thumbnailUrl: libThumb ?? "", animatedThumbnailUrl: null, pageUrl: WSP(id), resolution: "1920 x 1080",
+      isScene: false, workshopId: String(id), addedAt: null, description: "fake", authorName: null, authorId: "76561190000000099", fileSizeBytes: 1000,
+      subscriptions: null, favorites: null, tags: ["Video"], trailerKnown: true, createdAt: null, score: null, children: null, ...o });
+    const ym = (s) => new Date(`${s}-15T00:00:00Z`).toISOString();
+    const yFavs = ({ scene = false, preset = false } = {}) => [
+      yItem(950001, "Aurora", { authorName: "Probe Creator", authorId: "76561190000000007", createdAt: ym("2024-01"), addedAt: ym("2026-01"), subscriptions: 3000, score: 0.91, favorites: 400, tags: ["Video", "Everyone", "Anime"] }),
+      yItem(950002, "Bamboo", { authorName: "Probe Creator", authorId: "76561190000000007", createdAt: ym("2023-01"), addedAt: ym("2026-04"), subscriptions: 6000, score: 0.92, favorites: 200, tags: ["Video", "Mature", "Anime"] }),
+      yItem(950003, "Cinder", { authorName: "Nimbus Works", createdAt: ym("2024-06"), addedAt: ym("2026-05"), subscriptions: 2000, score: 0.93, favorites: 100,
+        ...(scene ? { isScene: true, tags: ["Scene", "Everyone", "Landscape"] } : { tags: ["Video", "Everyone", "Landscape"] }) }),
+      yItem(950004, "Dune", { createdAt: ym("2022-01"), addedAt: ym("2026-02"), subscriptions: 5000, score: 0.94, favorites: 600,
+        ...(preset ? { isScene: true, isPreset: true, tags: ["Preset", "Scene", "Questionable"], children: ["950009"] } : { tags: ["Video", "Questionable", "Anime"] }) }),
+      yItem(950005, "Ember", { createdAt: ym("2022-06"), addedAt: ym("2026-06"), subscriptions: 1000, score: 0.95, favorites: 300, tags: ["Video", "Anime"] }),
+      yItem(950006, "Fjord", { createdAt: ym("2023-06"), addedAt: ym("2026-03"), subscriptions: 4000, score: 0.96, favorites: 500, tags: ["Video", "Everyone", "Landscape"] }),
+    ];
+    const GLACIER = yItem(950007, "Glacier", { createdAt: ym("2024-03"), addedAt: ym("2025-12"), subscriptions: 2500, score: 0.5, favorites: 450, tags: ["Video", "Everyone"] });
+    const BASE_SCENE = yItem(950009, "Base Scene", { isScene: true, tags: ["Scene", "Everyone"] });
+    const favState = (items) => ({ signedIn: true, version: 1, loading: null, error: null, items });
+    // the library's own data: the date each was added (Date Added), Zephyr known to Steam not at all
+    const Y_LIB = [{ title: "Ember", workshopId: "950005", addedAt: ym("2026-03"), tags: ["Anime"] }, { title: "Fjord", workshopId: "950006", addedAt: ym("2026-01"), tags: ["Landscape"] },
+      { title: "Glacier", workshopId: "950007", addedAt: ym("2026-05"), tags: ["Anime"] }, { title: "Zephyr", workshopId: "950008", addedAt: ym("2025-01"), tags: ["Anime"], ageRating: null, isScene: false }];
+    const yData = (o = {}) => {
+      const favs = yFavs(o);
+      return { favs: favState(favs), details: { 950005: favs[4], 950006: favs[5], 950007: GLACIER }, lib: Y_LIB,
+        page: [yItem(930000, "ws-a", { authorId: "76561190000000007" }), yItem(930001, "ws-b"), favs[0], GLACIER, favs[4], yItem(930002, "ws-c"), ...(o.preset ? [BASE_SCENE] : [])],
+        creatorPage: [yItem(930000, "ws-a", { authorId: "76561190000000007" }), favs[0], yItem(930001, "ws-b")],
+        presetsPage: [yItem(930010, "ws-preset-x", { isScene: true, isPreset: true, tags: ["Preset", "Scene"], children: ["950009"] }), favs[3]] };
+    };
+    const BF0 = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
+    const YCARDS = ".scroll:not(.lib-scroll) .card:not(.skel-card)";
+    const shown = () => js(`[...document.querySelectorAll(${J(YCARDS + " [data-title]")})].map((e) => e.dataset.title)`);
+    const sorted = (xs) => [...xs].sort();
+    // the cards once they read `want` (in order: ordered; else as a set), else what shows after `ms`
+    const shownAs = async (want, ordered = false, ms = 3000) => {
+      const norm = (xs) => J(ordered ? xs : sorted(xs));
+      return (await waitFor(async () => { const t = await shown(); return norm(t) === norm(want) ? t : null; }, ms)) ?? await shown();
+    };
+    const yoursOn = async (data, { scenes = false } = {}) => {
+      await setSettings({ allowScenes: scenes, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await js(`localStorage.setItem("__probe_yours", ${J(J(data))}); localStorage.removeItem("liascape.wsLocalSort");
+        localStorage.setItem("liascape.browseFilter", ${J(J(BF0))}); localStorage.setItem("liascape.browseFilterHidden", "false"); true`);
+      await browseWs(SIGNED_IN);
+      await waitFor(async () => (await shown()).length >= data.page.length, 3000);
+    };
+    const yoursDone = async () => {
+      await js(`localStorage.removeItem("__probe_yours"); localStorage.removeItem("liascape.wsLocalSort"); localStorage.setItem("liascape.browseFilter", ${J(J(BF0))}); true`);
+      await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await load(SIGNED_OUT);
+    };
+    // a filter row's segment ("inc" ✓, "exc" ✕, "off" –), clicked in the Workshop's filter panel (opened when it isn't)
+    const setRow = async (tag, s, wait = 600) => {
+      const ok = await page(`const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") { t?.click(); await new Promise((r) => setTimeout(r, 450)); }
+        const b = document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag=${J(tag)}] [data-seg=${J(s)}]'); if (!b) return false; b.click(); return true;`);
+      if (!ok) throw new Error(`no ${s} segment on the ${tag} row`);
+      await sleep(wait);
+    };
+    const search = (q) => page(`const i = document.querySelector(".tsearch input.search"); if (!i) return false;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${J(q)}); i.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
+    const sortLabel = () => js(`document.querySelector("[data-sortsplit=browse] .ss-sort")?.textContent.trim() ?? null`);
+    const sortOpts = () => page(`document.querySelector("[data-sortsplit=browse] .ss-sort").click(); await new Promise((r) => setTimeout(r, 200));
+      const o = [...document.querySelectorAll(".sel-pop .sel-opt")].map((x) => x.textContent.trim()); document.querySelector(".sel-backdrop")?.click();
+      await new Promise((r) => setTimeout(r, 150)); return o;`);
+    const pickSort = async (label) => {
+      const ok = await page(`document.querySelector("[data-sortsplit=browse] .ss-sort").click(); await new Promise((r) => setTimeout(r, 200));
+        const o = [...document.querySelectorAll(".sel-pop .sel-opt")].find((x) => x.textContent.trim() === ${J(label)}); if (!o) { document.querySelector(".sel-backdrop")?.click(); return false; }
+        o.click(); return true;`);
+      await sleep(300);
+      return ok;
+    };
+    const LOCAL_SORTS = ["Most Recent", "Recently Updated", "Most Subscribed", "Top Rated", "Most Favourited", "Title A–Z", "Date Added"];
+    // each sort's field (newest / most first; missing last; ties by title)
+    const libAdded = Object.fromEntries(Y_LIB.map((l) => [l.workshopId, Date.parse(l.addedAt)]));
+    const FIELD = { "Most Recent": (w) => (w.createdAt ? Date.parse(w.createdAt) : null), "Recently Updated": (w) => (w.addedAt ? Date.parse(w.addedAt) : null),
+      "Most Subscribed": (w) => w.subscriptions, "Top Rated": (w) => w.score, "Most Favourited": (w) => w.favorites, "Date Added": (w) => libAdded[w.workshopId] ?? null };
+    const byTitle = (a, b) => a.title.localeCompare(b.title);
+    const orderOf = (items, label) => [...items].sort(label === "Title A–Z" ? byTitle : (a, b) => {
+      const x = FIELD[label](a), y = FIELD[label](b);
+      return x == null && y == null ? byTitle(a, b) : x == null ? 1 : y == null ? -1 : y - x || byTitle(a, b); }).map((w) => w.title);
+    const T = (...xs) => xs;
+
+    // yours:combos — every pair of the two rows' states, by the shown cards: ✓ = the set, both ✓ = the intersection, ✓ + ✕ = the
+    // set minus the other, ✕ alone = the Workshop's page minus the set(s), – – = the page. Shots steam-yours-*.png
+    await cell("yours:combos", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        const page0 = await shown();
+        if (J(sorted(page0)) !== J(sorted(["ws-a", "ws-b", "Aurora", "Glacier", "Ember", "ws-c"]))) return [`the Workshop shows ${J(page0)} before any row — proved nothing`];
+        const cases = [
+          ["inc", "off", T("Ember", "Fjord", "Glacier", "Zephyr"), "lib"],
+          ["off", "inc", T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord"), "favs"],
+          ["inc", "inc", T("Ember", "Fjord"), "both"],
+          ["exc", "inc", T("Aurora", "Bamboo", "Cinder", "Dune"), null],
+          ["inc", "exc", T("Glacier", "Zephyr"), null],
+          ["exc", "exc", T("ws-a", "ws-b", "ws-c"), null],
+          ["exc", "off", T("ws-a", "ws-b", "Aurora", "ws-c"), null],
+          ["off", "exc", T("ws-a", "ws-b", "Glacier", "ws-c"), null],
+          ["off", "off", T("ws-a", "ws-b", "Aurora", "Glacier", "Ember", "ws-c"), null],
+        ];
+        for (const [lib, fav, want, name] of cases) {
+          await setRow("@library", lib, 300); await setRow("@favorites", fav);
+          const got = await shownAs(want);
+          console.log(`        library ${lib}, favourites ${fav}: ${J(got)}`);
+          if (J(sorted(got)) !== J(sorted(want))) v.push(`library ${lib}, favourites ${fav}: ${J(sorted(got))} (want ${J(sorted(want))})`);
+          if (name) await shot(`yours-${name}`);
+        }
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:noScan — a ✓ on: toggling a tag, searching, sorting and scrolling to the end send no /browse and show no
+    // placeholder card; the last ✓ off → one /browse (page 1) with the Workshop's own sort
+    await cell("yours:noScan", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        await setRow("@favorites", "inc");
+        const favs = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
+        if (J(sorted(await shownAs(favs))) !== J(favs)) return [`Favourites ✓ shows ${J(await shown())} — proved nothing`];
+        const n0 = (await browses()).length;
+        const asks = await js(`window.__st.favAsks ?? []`);
+        if (!asks.includes("open")) v.push(`Favourites ✓ never asked the favourites with sync=open (${J(asks)})`);
+        await setRow("Anime", "inc");
+        const anime = await shownAs(T("Aurora", "Bamboo", "Dune", "Ember"));
+        if (J(sorted(anime)) !== J(T("Aurora", "Bamboo", "Dune", "Ember"))) v.push(`Anime ✓ narrowed it to ${J(anime)}`);
+        await setRow("Anime", "off");
+        if (!(await search("ember"))) v.push("no search box on the local set");
+        await sleep(500);
+        await search(""); await sleep(400);
+        if (!(await pickSort("Top Rated"))) v.push("no Top Rated in the local sort menu");
+        await page(`const s = document.querySelector(".scroll.br-scroll"); s.scrollTop = s.scrollHeight; await new Promise((r) => setTimeout(r, 300)); s.scrollTop = s.scrollHeight;`);
+        await sleep(900);
+        const skel = await js(`document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length`);
+        const mid = (await browses()).slice(n0);
+        if (mid.length) v.push(`${mid.length} /browse request(s) while a ✓ was on: ${J(mid.map((b) => [b.page, b.query ?? null, b.filter?.include]))}`);
+        if (skel) v.push(`${skel} placeholder cards with a ✓ on`);
+        await setRow("@favorites", "off", 1200);
+        const after = (await browses()).slice(n0 + mid.length).filter((b) => b.page === 1);
+        if (after.length !== 1 || after[0].filter?.sort !== "trend" || after[0].filter?.trendDays !== 7)
+          v.push(`the ✓ off sent ${J(after.map((b) => b.filter && [b.filter.sort, b.filter.trendDays]))} (want one /browse with trend / 7)`);
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:search — on a local set the search narrows by a title word, an author's name and a tag, ignoring case; no request
+    await cell("yours:search", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        await setRow("@favorites", "inc");
+        const all = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
+        if (J(sorted(await shownAs(all))) !== J(all)) return [`Favourites ✓ shows ${J(await shown())} — proved nothing`];
+        const n0 = (await browses()).length;
+        for (const [q, want] of [["AURORA", T("Aurora")], ["nimbus", T("Cinder")], ["LandScape", T("Cinder", "Fjord")], ["probe CREATOR", T("Aurora", "Bamboo")], ["", all]]) {
+          await search(q);
+          const got = await shownAs(want, false, 2000);
+          console.log(`        search ${J(q)}: ${J(got)}`);
+          if (J(sorted(got)) !== J(sorted(want))) v.push(`search ${J(q)}: ${J(sorted(got))} (want ${J(want)})`);
+        }
+        await search("landscape"); await sleep(400); await shot("yours-search"); await search(""); await sleep(300);
+        const n1 = (await browses()).length;
+        if (n1 !== n0) v.push(`${n1 - n0} /browse request(s) for a search on the local set`);
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:sort — the local sort menu's labels (Date Added only with In my library ✓); each orders the set by its field, the
+    // library item Steam has nothing on last; no option a no-op (Library ✓: each pick changes the order; Favourites ✓: all six
+    // orders differ). The default is Most Subscribed; Date Added falls back to it once Library ✓ goes
+    await cell("yours:sort", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        const favs = yFavs(), Z = { title: "Zephyr", workshopId: "950008", createdAt: null, addedAt: null, subscriptions: null, score: null, favorites: null };
+        const libSet = [favs[4], favs[5], GLACIER, Z];
+        await setRow("@library", "inc");
+        if (J(sorted(await shownAs(libSet.map((w) => w.title)))) !== J(T("Ember", "Fjord", "Glacier", "Zephyr"))) return [`Library ✓ shows ${J(await shown())} — proved nothing`];
+        const lbl0 = await sortLabel();
+        if (lbl0 !== "Most Subscribed") v.push(`the local sort starts at ${J(lbl0)} (want "Most Subscribed")`);
+        const o1 = await sortOpts();
+        if (J(o1) !== J(LOCAL_SORTS)) v.push(`Library ✓: the sort menu ${J(o1)} (want ${J(LOCAL_SORTS)})`);
+        let prev = await shown();
+        if (J(prev) !== J(orderOf(libSet, "Most Subscribed"))) v.push(`the default order ${J(prev)} (want ${J(orderOf(libSet, "Most Subscribed"))})`);
+        for (const l of LOCAL_SORTS) {
+          if (!(await pickSort(l))) { v.push(`Library ✓: no ${l} option`); continue; }
+          const want = orderOf(libSet, l), got = await shownAs(want, true, 2000);
+          console.log(`        Library ✓, ${l}: ${J(got)}`);
+          if (J(got) !== J(want)) v.push(`Library ✓, ${l}: ${J(got)} (want ${J(want)})`);
+          if (got.at(-1) !== "Zephyr") v.push(`Library ✓, ${l}: the item Steam has nothing on isn't last (${J(got)})`);
+          if (J(got) === J(prev)) v.push(`Library ✓, ${l}: the order didn't change (${J(got)})`);
+          if (l === "Date Added") await shot("yours-sort-added");
+          prev = got;
+        }
+        // Date Added picked → Library ✓ off, Favourites ✓: the menu has no Date Added and reads Most Subscribed
+        await setRow("@favorites", "inc"); await setRow("@library", "off");
+        await shownAs(favs.map((w) => w.title));
+        const o2 = await sortOpts(), lbl2 = await sortLabel();
+        if (J(o2) !== J(LOCAL_SORTS.slice(0, 6))) v.push(`Favourites ✓: the sort menu ${J(o2)} (want ${J(LOCAL_SORTS.slice(0, 6))})`);
+        if (lbl2 !== "Most Subscribed") v.push(`Date Added without Library ✓ reads ${J(lbl2)} (want "Most Subscribed")`);
+        const seen = new Map();
+        for (const l of LOCAL_SORTS.slice(0, 6)) {
+          if (!(await pickSort(l))) { v.push(`Favourites ✓: no ${l} option`); continue; }
+          const want = orderOf(favs, l), got = await shownAs(want, true, 2000);
+          console.log(`        Favourites ✓, ${l}: ${J(got)}`);
+          if (J(got) !== J(want)) v.push(`Favourites ✓, ${l}: ${J(got)} (want ${J(want)})`);
+          if (seen.has(J(got))) v.push(`Favourites ✓, ${l} orders like ${seen.get(J(got))} (${J(got)})`);
+          seen.set(J(got), l);
+        }
+        const kept = await js(`localStorage.getItem("liascape.wsLocalSort")`);
+        if (kept !== J("title")) v.push(`the local sort saved as ${kept} (want "title")`);
+        const bf = JSON.parse(await js(`localStorage.getItem("liascape.browseFilter")`) || "{}");
+        if (bf.sort !== "trend" || bf.trendDays !== 7) v.push(`the local sorts changed the Workshop's sort (${bf.sort} / ${bf.trendDays})`);
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:trendSort — the Workshop's "Most Popular · Week"; Favourites ✓ → the menu reads Most Subscribed and offers no Most
+    // Popular; ✓ off → "Most Popular · Week" again and the next /browse carries trend / 7
+    await cell("yours:trendSort", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        await pickSort("Most Recent"); await sleep(400);
+        if (!(await pickSort("Most Popular · Week"))) return ["no Most Popular · Week in the Workshop's menu — proved nothing"];
+        await sleep(500);
+        if (await sortLabel() !== "Most Popular · Week") return [`the Workshop's sort reads ${J(await sortLabel())} — proved nothing`];
+        await setRow("@favorites", "inc");
+        await shownAs(T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord"));
+        const l1 = await sortLabel(), o1 = await sortOpts();
+        if (l1 !== "Most Subscribed") v.push(`Favourites ✓: the sort reads ${J(l1)} (want "Most Subscribed")`);
+        if (o1.some((x) => /Most Popular/.test(x))) v.push(`Favourites ✓ offers ${J(o1)}`);
+        await pickSort("Top Rated");
+        const n0 = (await browses()).length;
+        await setRow("@favorites", "off", 1000);
+        const l2 = await sortLabel(), b = (await browses()).slice(n0).find((x) => x.page === 1);
+        if (l2 !== "Most Popular · Week") v.push(`✓ off: the sort reads ${J(l2)} (want "Most Popular · Week")`);
+        if (b?.filter?.sort !== "trend" || b.filter.trendDays !== 7) v.push(`✓ off: the next /browse carried ${J(b?.filter && [b.filter.sort, b.filter.trendDays])} (want trend / 7)`);
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:switches — on Favourites ✓ (Cinder a scene, scenes on) Type Video, an age and a genre narrow the set; any age
+    // filter drops the untagged Ember
+    await cell("yours:switches", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData({ scene: true }), { scenes: true });
+        await setRow("@favorites", "inc");
+        const all = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
+        if (J(sorted(await shownAs(all))) !== J(all)) return [`Favourites ✓ shows ${J(await shown())} — proved nothing`];
+        for (const [tag, s, want] of [["Video", "inc", T("Aurora", "Bamboo", "Dune", "Ember", "Fjord")], ["Everyone", "inc", T("Aurora", "Cinder", "Fjord")],
+          ["Mature", "exc", T("Aurora", "Cinder", "Dune", "Fjord")], ["Landscape", "inc", T("Cinder", "Fjord")]]) {
+          await setRow(tag, s);
+          const got = await shownAs(want);
+          console.log(`        ${tag} ${s}: ${J(got)}`);
+          if (J(sorted(got)) !== J(sorted(want))) v.push(`${tag} ${s}: ${J(sorted(got))} (want ${J(want)})`);
+          await setRow(tag, "off");
+        }
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:inList — inside a creator's list ✓ shows that creator's favourites only, ✕ hides the favourites from the list's
+    // pages; inside a scene's presets list ✓ shows its presets among the favourites, ✕ hides them; the search shows on a local
+    // set inside a list
+    await cell("yours:inList", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData({ preset: true }), { scenes: true });
+        const at = async (t) => (await shown()).indexOf(t);
+        await openSide(await at("ws-a"));
+        if (!(await waitFor(() => js(`document.querySelector("${SIDE} [data-ws-creator]")?.dataset.wsCreator === "known"`), 3000))) return ["ws-a's sidebar has no creator row"];
+        await page(`document.querySelector("${SIDE} [data-ws-creator]").click();`);
+        const list = T("ws-a", "Aurora", "ws-b");
+        if (J(sorted(await shownAs(list))) !== J(sorted(list))) return [`the creator's list shows ${J(await shown())} — proved nothing`];
+        const searchIn = () => js(`!!document.querySelector(".tsearch input.search")`);
+        if (await searchIn()) v.push("a creator's list (no ✓) shows the search");
+        // the list's own paging settles first (its page 2 answers [], its placeholders go)
+        await waitFor(() => js(`document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length === 0`), 3000);
+        const n0 = (await browses()).length;
+        await setRow("@favorites", "inc");
+        const c1 = await shownAs(T("Aurora", "Bamboo"));
+        console.log(`        creator, Favourites ✓: ${J(c1)}`);
+        if (J(sorted(c1)) !== J(T("Aurora", "Bamboo"))) v.push(`creator, Favourites ✓: ${J(sorted(c1))} (want the creator's favourites, Aurora and Bamboo)`);
+        const sentC = (await browses()).slice(n0);
+        if (sentC.length) v.push(`creator, Favourites ✓ sent /browse ${J(sentC.map((b) => [b.page, b.list?.kind ?? null]))}`);
+        if (!(await searchIn())) v.push("creator, Favourites ✓: no search");
+        // the list's empty / error note is the list's pages', never the set's (WorkshopSocial.tsx WsListNote)
+        const note = await js(`document.querySelector("[data-ws-list-note]")?.textContent ?? null`);
+        if (note) v.push(`creator, Favourites ✓ shows the list's note ${J(note)}`);
+        if (await js(`document.querySelector('[data-ws-pill="creator"] .pill.active') == null`)) v.push("creator, Favourites ✓: the creator's pill isn't lit");
+        await shot("yours-inlist-creator");
+        await setRow("@favorites", "exc", 900);
+        const c2 = await shownAs(T("ws-a", "ws-b"));
+        const lb = (await browses()).at(-1);
+        if (J(sorted(c2)) !== J(T("ws-a", "ws-b"))) v.push(`creator, Favourites ✕: ${J(sorted(c2))} (want ws-a, ws-b)`);
+        if (lb?.list?.kind !== "creator") v.push(`creator, Favourites ✕ asked ${J(lb?.list)} (want the creator's list)`);
+        await setRow("@favorites", "off");
+        await page(`document.querySelector('[data-ws-pill="creator"] .ws-pill-x')?.click();`); await sleep(700);
+        await openSide(await at("Base Scene"));
+        if (!(await waitFor(() => js(`!!document.querySelector("${SIDE} [data-ws-presets]")`), 3000))) return [...v, "Base Scene's sidebar has no Presets row"];
+        await page(`document.querySelector("${SIDE} [data-ws-presets]").click();`);
+        const pl = T("ws-preset-x", "Dune");
+        if (J(sorted(await shownAs(pl))) !== J(sorted(pl))) return [...v, `the presets list shows ${J(await shown())} — proved nothing`];
+        await setRow("@favorites", "inc");
+        const p1 = await shownAs(T("Dune"));
+        if (J(p1) !== J(T("Dune"))) v.push(`presets, Favourites ✓: ${J(p1)} (want its preset among the favourites, Dune)`);
+        await setRow("@favorites", "exc", 900);
+        const p2 = await shownAs(T("ws-preset-x"));
+        if (J(p2) !== J(T("ws-preset-x"))) v.push(`presets, Favourites ✕: ${J(p2)} (want ws-preset-x)`);
+        await setRow("@favorites", "off");
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:scenes — Favourites ✓ with scene support on: the scene shows, the preset only with Type's Preset ticked (as the
+    // Workshop lists them); scene support off → the scene and the preset leave at once
+    await cell("yours:scenes", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData({ scene: true, preset: true }), { scenes: true });
+        await setRow("@favorites", "inc");
+        const noPreset = T("Aurora", "Bamboo", "Cinder", "Ember", "Fjord");
+        const g0 = await shownAs(noPreset);
+        if (J(sorted(g0)) !== J(noPreset)) v.push(`Preset unticked: ${J(sorted(g0))} (want every favourite but the preset Dune)`);
+        await setRow("Preset", "inc");
+        const g1 = await shownAs(T("Dune"));
+        if (J(g1) !== J(T("Dune"))) v.push(`Preset ✓: ${J(g1)} (want the preset Dune)`);
+        await setRow("Video", "inc", 200); await setRow("Scene", "inc");
+        const all = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
+        const g2 = await shownAs(all);
+        if (J(sorted(g2)) !== J(all)) v.push(`Video + Scene + Preset ✓: ${J(sorted(g2))} (want all six)`);
+        await ev("settings-changed", { allowScenes: false });
+        await sleep(150);
+        const g3 = await shown(), want = T("Aurora", "Bamboo", "Ember", "Fjord");
+        console.log(`        scene support off: ${J(g3)}`);
+        if (J(sorted(g3)) !== J(want)) v.push(`scene support off: ${J(sorted(g3))} at once (want ${J(want)})`);
+        await ev("settings-changed", { allowScenes: true });
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:big — 2,000 favourites: all of them show at once, no placeholder; typing a search sends no request and narrows the
+    // count; every card keeps content-visibility: auto
+    await cell("yours:big", async () => {
+      const v = [];
+      try {
+        const big = Array.from({ length: 2000 }, (_, i) => yItem(960000 + i, `big-${String(i).padStart(4, "0")}`, { subscriptions: i, tags: ["Video", "Anime"] }));
+        await yoursOn({ ...yData(), favs: favState(big) });
+        await setRow("@favorites", "inc");
+        const n = await waitFor(async () => { const c = await js(`document.querySelectorAll(${J(YCARDS)}).length`); return c === 2000 ? c : null; }, 8000)
+          ?? await js(`document.querySelectorAll(${J(YCARDS)}).length`);
+        if (n !== 2000) return [`Favourites ✓ shows ${n} cards (want 2000)`];
+        const cv = await js(`(() => { const cs = [...document.querySelectorAll(${J(YCARDS)})]; return [cs.filter((c) => getComputedStyle(c).contentVisibility !== "auto").length, document.querySelectorAll(".skel-card").length]; })()`);
+        if (cv[0]) v.push(`${cv[0]} cards without content-visibility: auto`);
+        if (cv[1]) v.push(`${cv[1]} placeholder cards`);
+        const b0 = (await js(`window.__st.bodies.length`));
+        await page(`document.querySelector(".tsearch input.search").focus();`);
+        await type("BIG-01");
+        const m = await waitFor(async () => { const c = await js(`document.querySelectorAll(${J(YCARDS)}).length`); return c === 100 ? c : null; }, 3000)
+          ?? await js(`document.querySelectorAll(${J(YCARDS)}).length`);
+        if (m !== 100) v.push(`"BIG-01" shows ${m} cards (want 100: big-0100 … big-0199)`);
+        const sent = (await js(`window.__st.bodies.slice(${b0}).map((b) => b.p)`)).filter((p) => /^\/(browse|detail|workshop\/)/.test(p));
+        if (sent.length) v.push(`typing the search sent ${J(sent)}`);
+      } finally { await yoursDone(); }
       return v;
     });
 
