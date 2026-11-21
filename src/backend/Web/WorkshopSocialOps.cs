@@ -106,6 +106,27 @@ public static class WorkshopSocialOps
         return Results.Json(new { items = Scrapers.SteamWorkshopScraper.MapToResults(ids, got, allowScenes: true, allowPresets: true) });
     }
 
+    /// GET /workshop/my-favorites?sync=none|open|check → {signedIn: false} without a usable sign-in (nothing sent), else
+    /// {signedIn: true, version, loading: {done, total} | null, error, items}: the signed-in account's own cached favourites
+    /// (Helpers/WorkshopFavorites.cs) that have details in the details cache, in the list's order, web / application left
+    /// out, each with its creator's name only when this run already knows it. `open` and `check` start a sync in the
+    /// background; the page follows it through the `workshop-favorites` event and re-reads with `none`.
+    // Guard: scripts/test-workshop-social.sh § 7
+    public static Task<IResult> MyFavoritesAsync(string? sync, CancellationToken ct)
+    {
+        sync ??= "none";
+        if (sync is not ("none" or "open" or "check")) return Task.FromResult(Results.BadRequest(new { error = "sync must be none, open or check" }));
+        var account = SteamCommunity.SignedInAccount();
+        if (account == 0) return Task.FromResult(Results.Json(new { signedIn = false }));
+        if (sync != "none") WorkshopFavorites.Sync(account);
+        var v = WorkshopFavorites.Get(account);
+        var details = new Dictionary<string, Scrapers.SteamWorkshopScraper.PublishedFileDetail>();
+        foreach (var id in v.Ids)
+            if (WorkshopDetailsCache.TryGet(id, out var d)) details[id] = d;
+        var items = Scrapers.SteamWorkshopScraper.MapToResults(v.Ids, details, allowScenes: true, allowPresets: true, authorName: SteamCommunity.KnownName);
+        return Task.FromResult(Results.Json(new { signedIn = true, version = v.Version, loading = v.Loading, error = v.Error, items }));
+    }
+
     public sealed record PresetBaseInfo(string BaseId, string? Title, string? Kind);
 
     // A Workshop preset's base: the item Steam lists as the preset's required one (its first child; a preset names one),

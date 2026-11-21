@@ -30,6 +30,13 @@
 #     Steam has none of remembered for the run, not on disk), kept in $XDG_CACHE_HOME/liascape/workshop/details.json (saves
 #     at most once a second), Steam unreachable → only what's cached, 2001 ids / a non-digit id → 400 with nothing asked, a
 #     Library sidebar's counts refresh a cached copy (an uncached one isn't added); after a restart the same ask sends nothing.
+#  7. the signed-in account's favourites cache (GET /workshop/my-favorites, Helpers/WorkshopFavorites.cs), on a backend
+#     without § 4's cooldown: signed out → {signedIn:false} with nothing asked; Steam gone between page 1 and page 2 of a
+#     first load → the error line, page 1's items kept, nothing written; the first load streamed as `workshop-favorites`
+#     events (no ids in them) up to 250, then 248 items (web left out) in Steam's order with their created times, the
+#     creator's name only when this run already read it; no Steam ID or item id in the log; sync=none and a restart ask
+#     nothing; another account sees none of these, signed out again → {signedIn:false}; a private profile → the community
+#     pages with the cookie (3 of them for 65 ids), then the items' details in one GetDetails.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -142,6 +149,7 @@ start_backend
 
 cat > "$T/drive.mjs" <<'EOF'
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 const { U, FAKE, ME, TOKEN, OWNER, T } = process.env;
 const TOKEN_API = fs.readFileSync(`${process.env.XDG_CONFIG_HOME}/liascape/serve.token`, "utf8").trim();
 const H = { "X-Liascape-Token": TOKEN_API, "Content-Type": "application/json" };
@@ -175,6 +183,147 @@ if (process.argv[2] === "after-restart") {
   out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5001"]) && count(/GetDetails of/) === before + 1 && count(/GetDetails of 1 id\(s\).*fixture: 9999\)/) === 1,
     "details after a restart: an id Steam had no public item for is asked again (remembered for a run, not on disk)", J({ r, asks: count(/GetDetails of/) - before }));
   process.exit(0);
+}
+
+// ---- 7. the signed-in account's favourites cache (three phases, a backend restart before each of the last two) ----
+if (process.argv[2]?.startsWith("fav")) {
+  const MODE = process.argv[2];
+  const ME2 = "76561198000000043", OWNER2 = "76561198000000008";
+  const FX = `${T}/steam-cm.json`;
+  // 250 favourites in Steam's lastupdated order, 2 of them web (left out), 5 by a creator this run never reads
+  const FAVS = Array.from({ length: 250 }, (_, i) => String(3200000500 + i));
+  const WEB = new Set([150, 249]);
+  const shown = FAVS.map((_, i) => i).filter((i) => !WEB.has(i)).map((i) => `fav-${i}`);
+  // a private profile's 65 favourites (the community page's list) and their details
+  const PRIV = Array.from({ length: 65 }, (_, i) => String(3300000000 + i));
+  const FF = (id) => `${process.env.XDG_CACHE_HOME}/liascape/workshop/favorites-${id}.json`;
+  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+  const AUTH = `${process.env.XDG_CONFIG_HOME}/liascape/steam-auth.json`;
+  const signIn = (id) => fs.writeFileSync(AUTH, J({ "steam-login-secure": `${id}||${TOKEN}` }), { mode: 0o600 });
+  const signOut = () => fs.rmSync(AUTH, { force: true });
+  const L0 = blog().length, logNow = () => blog().slice(L0);
+  const favs = (sync = "none") => get(`/workshop/my-favorites?sync=${sync}`);
+  const titles = (x) => (x.json?.items ?? []).map((w) => w.title);
+  const waitAsync = async (f, ms = 8000) => { for (let t = 0; t < ms; t += 100) { if (await f()) return true; await sleep(100); } return !!(await f()); };
+  const evs = [];
+  const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN_API));
+  await new Promise((res) => { ws.onopen = res; ws.onerror = res; setTimeout(res, 3000); });
+  ws.onmessage = (m) => { try { const e = JSON.parse(m.data); if (e.type === "workshop-favorites") evs.push(e.payload); } catch { } };
+
+  if (MODE === "fav") {
+    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    fx["@userfiles"][`${ME}:myfavorites`] = FAVS.map((id, i) => ({ publishedfileid: id, title: `fav-${i}`, preview_url: `https://images.example.invalid/f${i}.jpg`,
+      creator: i % 50 === 7 ? OWNER2 : OWNER, time_created: 1700000000 + i, time_updated: 1790000000 - i, subscriptions: 692, favorited: 34, score: 0.5,
+      tags: [WEB.has(i) ? "Web" : "Video"] }));
+    fs.writeFileSync(FX, J(fx));
+    // a. signed out
+    signOut();
+    let n0 = (await fakeLog()).length;
+    let r = await favs("open");
+    await sleep(300);
+    out(r.status === 200 && r.json?.signedIn === false && !("items" in r.json) && (await since(n0)).length === 0 && !/GetUserFiles myfavorites/.test(logNow()),
+      "my-favorites signed out: {signedIn:false}, nothing asked", J(r));
+    signIn(ME);
+    // k. Steam gone mid-load: the fixture becomes a FIFO the test feeds, so page 1 reads the fixture and page 2 an empty
+    // file (unreadable = Steam unreachable) exactly between the two
+    fs.renameSync(FX, `${T}/steam-cm.real`);
+    execFileSync("mkfifo", [FX]);
+    const feed = fs.promises.writeFile(FX, fs.readFileSync(`${T}/steam-cm.real`));
+    r = await favs("open");
+    const fed = await Promise.race([feed.then(() => true), sleep(5000).then(() => false)]);
+    const page1 = fed && waitFor(() => evs.some((e) => e.loading?.done === 100), 5000);
+    const cut = (await page1) && await Promise.race([fs.promises.writeFile(FX, "").then(() => true), sleep(5000).then(() => false)]);
+    // a write the backend never read (it didn't load) waits on the FIFO for ever: read it here so it ends
+    if (!fed || !cut) { try { execFileSync("timeout", ["5", "sh", "-c", 'cat "$0" > /dev/null', FX]); } catch { } }
+    fs.rmSync(FX, { force: true }); fs.renameSync(`${T}/steam-cm.real`, FX);
+    await waitAsync(async () => (await favs()).json?.error);
+    r = await favs();
+    out(r.status === 200 && fed && cut && r.json?.error === "Couldn't load your favourites from Steam. Try again in a moment." && r.json.loading === null
+      && titles(r).length === 100 && titles(r)[0] === "fav-0" && !fs.existsSync(FF(ME)),
+      "first load cut off by Steam mid-load: the error line, page 1's items kept, no favorites-<id>.json written", J({ fed, cut, r: { ...r.json, items: titles(r).length } }));
+    // b. the first load again, streamed
+    evs.length = 0;
+    const L1 = blog().length;
+    r = await favs("open");
+    await waitFor(() => evs.at(-1)?.loading === null && evs.length > 1, 8000);
+    r = await favs();
+    const dones = evs.filter((e) => e.loading).map((e) => e.loading.done);
+    out(evs.length >= 3 && evs.at(-1).loading === null && evs.some((e) => e.loading?.total === 250) && dones.every((d, i) => i === 0 || d >= dones[i - 1]) && dones.at(-1) === 250,
+      "first load: progress streamed, rising to 250 of 250", J(evs));
+    out(evs.length > 0 && evs.every((e) => J(Object.keys(e).sort()) === J(["loading", "version"])) && !evs.some((e) => /3200000|7656119/.test(J(e)))
+      && evs.every((e, i) => i === 0 || e.version > evs[i - 1].version) && r.json?.version === evs.at(-1).version,
+      "first load: the events carry a rising version and the progress, no ids", J(evs.slice(-2)));
+    out(r.json?.signedIn === true && r.json.error === null && r.json.loading === null && J(titles(r)) === J(shown) && r.json.items.every((w) => w.createdAt),
+      "first load: the list, web left out (248 in Steam's order, with created times)", J({ n: titles(r).length, first: titles(r).slice(0, 3), e: r.json?.error }));
+    const saved = readJson(FF(ME));
+    out(J(saved?.ids) === J(FAVS) && saved.viaPage === false && saved.total === 250, "first load: the whole list kept on disk ({ids, viaPage, total})", J(saved && { n: saved.ids?.length, v: saved.viaPage, t: saved.total }));
+    out(!logNow().includes(ME) && !FAVS.some((id) => logNow().includes(id)) && /GetUserFiles myfavorites sort=lastupdated page 3/.test(blog().slice(L1)),
+      "first load: no Steam ID or item ID in the log", J(logNow().split("\n").filter((l) => l.includes(ME) || /32000005/.test(l)).slice(0, 3)));
+    // the creator's name: one this run already read (the sidebar's creator), never a profile read for the list
+    await get(`/workshop/creator?id=${FAVS[0]}&owner=${OWNER}`);
+    n0 = (await fakeLog()).length;
+    r = await favs();
+    const byTitle = Object.fromEntries((r.json?.items ?? []).map((w) => [w.title, w]));
+    out(byTitle["fav-0"]?.authorName === `Creator Bold ${OWNER.slice(-2)}` && byTitle["fav-7"] && byTitle["fav-7"].authorName == null && (await since(n0)).length === 0,
+      "authorName: a creator this run read by name, another null, no profile read for it", J([byTitle["fav-0"]?.authorName, byTitle["fav-7"]?.authorName]));
+    // c. sync=none: nothing asked
+    n0 = (await fakeLog()).length;
+    const L2 = blog().length;
+    r = await favs("none");
+    await sleep(300);
+    out(J(titles(r)) === J(shown) && (await since(n0)).length === 0 && !/GetUserFiles|GetDetails/.test(blog().slice(L2)),
+      "sync=none: the cached list, no Steam call", J({ n: titles(r).length, log: blog().slice(L2) }));
+    process.exit(0);
+  }
+
+  if (MODE === "fav-restart") {
+    // d. after a restart: the list and its details read back from disk
+    const n0 = (await fakeLog()).length;
+    let r = await favs("none");
+    await sleep(300);
+    out(r.json?.signedIn === true && J(titles(r)) === J(shown) && r.json.items.every((w) => w.createdAt) && (await since(n0)).length === 0 && !/GetUserFiles|GetDetails/.test(logNow()),
+      "after a backend restart: the same items, no Steam call", J({ n: titles(r).length, log: logNow().split("\n").filter((l) => /steam-cm/.test(l)) }));
+    // j. another account: none of these; signed out again: nothing
+    signIn(ME2);
+    r = await favs("none");
+    const other = (x) => (x.json?.items ?? []).filter((w) => FAVS.includes(w.workshopId)).length;
+    const r1 = r;
+    r = await favs("open");
+    await waitAsync(async () => (await favs()).json?.loading === null);
+    const r2 = await favs();
+    out(r1.json?.signedIn === true && r1.json.items?.length === 0 && other(r) === 0 && r2.json?.signedIn === true && other(r2) === 0 && r2.json.items.length === 0,
+      "another account: none of the first account's favourites, before or after its own load", J([r1.json, r2.json]));
+    signOut();
+    r = await favs("open");
+    out(r.json?.signedIn === false && !("items" in r.json), "signed out again: {signedIn:false}, no list", J(r.json));
+    // set up the private profile: the account's list gone from the client protocol, 65 on its community page; no cached list
+    signIn(ME);
+    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    delete fx["@userfiles"][`${ME}:myfavorites`];
+    PRIV.forEach((id, i) => { fx[id] = { tags: ["Video"], title: `pfav-${i}`, time_created: 1700000000 + i, creator: OWNER }; });
+    fs.writeFileSync(FX, J(fx));
+    await fetch(`${FAKE}/__myfavs`, { method: "POST", body: J({ ids: PRIV }) });
+    fs.rmSync(FF(ME), { force: true });
+    process.exit(0);
+  }
+
+  if (MODE === "fav-private") {
+    // i. a private profile: the community pages with the cookie, then the details in one GetDetails
+    const n0 = (await fakeLog()).length;
+    let r = await favs("open");
+    await waitFor(() => evs.at(-1)?.loading === null, 8000);
+    r = await favs();
+    const pages = (await since(n0)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`);
+    out(J(titles(r)) === J(PRIV.map((_, i) => `pfav-${i}`)) && pages.length === 3 && pages.every((x) => x.signedIn) && J(pages.map((x) => x.query.p)) === J(["1", "2", "3"])
+      && /GetDetails of 65 id\(s\)/.test(logNow()),
+      "private profile: 3 community pages with the cookie, the 65 items' details via GetDetails, in the page's order", J({ n: titles(r).length, pages: pages.map((x) => [x.query.p, x.signedIn]) }));
+    out(evs.some((e) => e.loading?.total === null && e.loading.done === 30) && evs.some((e) => e.loading?.total === 65) && evs.at(-1)?.loading === null,
+      "private profile: progress 'so far' while paging, then of 65 for the details", J(evs));
+    const saved = readJson(FF(ME));
+    out(J(saved?.ids) === J(PRIV) && saved.viaPage === true, "private profile: the list kept on disk as viaPage", J(saved && { n: saved.ids?.length, v: saved.viaPage }));
+    out(pages.length > 0 && !logNow().includes(ME), "private profile: no Steam ID in the log", J(logNow().split("\n").filter((l) => l.includes(ME)).slice(0, 3)));
+    process.exit(0);
+  }
 }
 
 // ---- 1. signed out ----
@@ -402,6 +551,12 @@ EOF
 # § 6 after a restart: what the details cache kept on disk
 stop_backend; start_backend
 (cd "$T" && timeout 60 node drive.mjs after-restart) >> "$T/drive.log" 2>&1 || rc=$?
+# § 7 on a backend without § 4's cooldown (a private profile's community pages must go out), restarted before each phase
+stop_backend; rm -f "$XDG_CACHE_HOME/liascape/steam-cooldown.json"; start_backend
+for phase in fav fav-restart fav-private; do
+  [ $phase = fav ] || { stop_backend; start_backend; }
+  (cd "$T" && timeout 60 node drive.mjs $phase) >> "$T/drive.log" 2>&1 || rc=$?
+done
 sed 's/^/      /' "$T/drive.log"
 p=$(grep -c '^PASS' "$T/drive.log"); f=$(grep -c '^FAIL' "$T/drive.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))

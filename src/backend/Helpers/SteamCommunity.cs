@@ -69,6 +69,21 @@ public static class SteamCommunity
 
     public static bool HasSignIn() => SteamAuthService.HasUsableSignIn(SettingsService.Load());
 
+    /// The usable sign-in's Steam ID without asking Steam (SignInAsync may mint a cookie first), 0 = none: the account a
+    /// cached per-account list belongs to. The id SignInAsync would use: settings' SteamId, else a stored cookie's
+    /// "<steamid>||<token>" head.
+    // Guard: scripts/test-workshop-social.sh § 7 "my-favorites signed out: {signedIn:false}, nothing asked", "another
+    // account: none of the first account's favourites, …"
+    public static ulong SignedInAccount()
+    {
+        var s = SettingsService.Load();
+        if (!SteamAuthService.HasUsableSignIn(s)) return 0;
+        if (s.SteamId != 0) return s.SteamId;
+        foreach (var name in new[] { SecretStore.LoginSecure, SecretStore.AccessToken })
+            if (SecretStore.Get(name) is { Length: > 0 } c && ulong.TryParse(Uri.UnescapeDataString(c.Trim()).Split("||", 2)[0], out var id) && id != 0) return id;
+        return 0;
+    }
+
     // ---- requests -----------------------------------------------------------------------------------------------------
     static HttpRequestMessage Request(HttpMethod m, string path, string? cookie, string? sessionId, IDictionary<string, string>? form)
     {
@@ -308,6 +323,11 @@ public static class SteamCommunity
             finally { _profileReads.TryRemove(id, out _); }
         }));
     }
+
+    /// A Steam account's name when this run already read its profile; never a request (a list of many creators would
+    /// trip the community site's per-IP limit).
+    // Guard: scripts/test-workshop-social.sh § 7 "authorName: a creator this run read by name, another null, no profile read for it"
+    public static string? KnownName(string steamId) => _profiles.TryGetValue(steamId, out var p) ? p.Name : null;
 
     public static Profile? ParseProfile(string steamId, string xml)
     {

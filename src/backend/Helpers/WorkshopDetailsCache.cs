@@ -102,7 +102,9 @@ public static class WorkshopDetailsCache
         QueueSave();
     }
 
-    // Guard: scripts/test-workshop-social.sh § 6 "a second ask … sends nothing"
+    // the cached copy alone, never a request: a list read often (the favourites) shows what is cached
+    // Guard: scripts/test-workshop-social.sh § 7 "first load: the list, web left out (248 in Steam's order, with created
+    // times)", "after a backend restart: the same items, no Steam call"
     public static bool TryGet(string id, out PublishedFileDetail d)
     {
         lock (_lock)
