@@ -79,14 +79,16 @@ public static class SteamCommunity
         return req;
     }
 
-    // Through SteamGate (Interactive: the user opened it or clicked it). Steam's 429 or 403 "too many" → the app-wide
-    // cooldown, thrown as SteamCooldownException (the endpoint answers 429 with its "try again in N min").
-    static async Task<(int Status, string Body)> SendAsync(HttpRequestMessage req, CancellationToken ct)
+    // Through SteamGate, Interactive unless a caller says otherwise (the user opened it or clicked it). Steam's 429 or 403
+    // "too many" → the app-wide cooldown, thrown as SteamCooldownException (the endpoint answers 429 with its "try again in
+    // N min").
+    static async Task<(int Status, string Body)> SendAsync(HttpRequestMessage req, CancellationToken ct, SteamGate.Kind kind = SteamGate.Kind.Interactive)
     {
         using var _req = req;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(15));
-        using var resp = await SteamGate.SendAsync(req, SteamGate.Kind.Interactive, cts.Token).ConfigureAwait(false);
+        // the cap covers the gate's wait too: a Background request may first sit out the gate's quiet time after a click
+        cts.CancelAfter(TimeSpan.FromSeconds(kind == SteamGate.Kind.Background ? 60 : 15));
+        using var resp = await SteamGate.SendAsync(req, kind, cts.Token).ConfigureAwait(false);
         var body = await resp.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
         int status = (int)resp.StatusCode;
         if (status == 429) throw new SteamCooldownException(SteamGate.CooldownRemaining);
@@ -322,14 +324,25 @@ public static class SteamCommunity
     // ---- the signed-in account's favourites page (a private profile's: Steam's client protocol only sees public ones) ----
     static readonly Regex _idRe = new(@"filedetails/\?id=(\d+)", RegexOptions.Compiled);
 
-    /// One page (30) of the signed-in account's Workshop favourites for Wallpaper Engine, as Workshop ids in Steam's order.
-    public static async Task<List<string>> MyFavoritesPageAsync(int page, CancellationToken ct = default)
+    // Ids = the page's Workshop ids in Steam's order. Total stays null: the page's "of N entries" isn't the list's size
+    // (measured signed out, N leaves mature items out: 39 of a 41-item list, 1,662 of 10,559), so a caller compares a page's
+    // ids, never a count. Page 1's order matches neither `lastupdated` nor `score`.
+    public sealed record FavoritesPage(List<string> Ids, int? Total);
+
+    public static FavoritesPage ParseFavoritesPage(string html)
+    {
+        var seen = new HashSet<string>();
+        return new FavoritesPage(_idRe.Matches(html).Select((m) => m.Groups[1].Value).Where(seen.Add).ToList(), null);
+    }
+
+    /// One page (30) of the signed-in account's Workshop favourites for Wallpaper Engine, paced as `kind` (the user's own
+    /// Browse page = Interactive; a cache's check = Background).
+    public static async Task<FavoritesPage> MyFavoritesPageAsync(int page, SteamGate.Kind kind, CancellationToken ct = default)
     {
         var who = await SignInAsync(ct).ConfigureAwait(false) ?? throw new SignInRequiredException("Sign in to Steam to see your Workshop favourites (Settings → Getting Workshop wallpapers).");
         var (status, html) = await SendAsync(Request(HttpMethod.Get,
-            $"/profiles/{who.SteamId}/myworkshopfiles/?appid={AppId}&browsefilter=myfavorites&numperpage=30&p={Math.Max(1, page)}", who.Cookie, null, null), ct).ConfigureAwait(false);
+            $"/profiles/{who.SteamId}/myworkshopfiles/?appid={AppId}&browsefilter=myfavorites&numperpage=30&p={Math.Max(1, page)}", who.Cookie, null, null), ct, kind).ConfigureAwait(false);
         if (status is < 200 or >= 300) throw new InvalidOperationException($"Steam didn't return your favourites ({status})");
-        var seen = new HashSet<string>();
-        return _idRe.Matches(html).Select((m) => m.Groups[1].Value).Where(seen.Add).ToList();
+        return ParseFavoritesPage(html);
     }
 }

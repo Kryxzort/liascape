@@ -202,7 +202,7 @@ public class SteamWorkshopService : IBgsProvider
         }
         // the favourites page (30 a page; app page = its page); a page the filter empties is an empty app page
         Served(Path.Fallback, "the community's favourites page (a private profile — the sign-in's cookie, SteamGate-paced)");
-        var ids = await SteamCommunity.MyFavoritesPageAsync(appPage, ct).ConfigureAwait(false);
+        var ids = (await SteamCommunity.MyFavoritesPageAsync(appPage, SteamGate.Kind.Interactive, ct).ConfigureAwait(false)).Ids;
         if (ids.Count == 0) return [];
         var details = await SteamWorkshopScraper.GetDetailsBatchAsync(ids).ConfigureAwait(false);
         return Keep(ids.Where(details.ContainsKey).Select((id) => details[id]).ToList());

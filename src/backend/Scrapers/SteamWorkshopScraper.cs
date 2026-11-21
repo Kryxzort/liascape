@@ -194,6 +194,9 @@ public static class SteamWorkshopScraper
                 TimeUpdated = item.TryGetProperty("time_updated", out var tu)
                     ? DateTimeOffset.FromUnixTimeSeconds(tu.GetInt64()).UtcDateTime
                     : DateTime.MinValue,
+                TimeCreated = item.TryGetProperty("time_created", out var tc) && tc.TryGetInt64(out var tcN) && tcN > 0
+                    ? DateTimeOffset.FromUnixTimeSeconds(tcN).UtcDateTime
+                    : DateTime.MinValue,
                 // the current counts (Steam's own page shows these): the lifetime ones also count everyone who has since left
                 Subscriptions = item.TryGetProperty("subscriptions", out var subs) ? subs.GetInt64() : 0,
                 Favorites = item.TryGetProperty("favorited", out var fav) ? fav.GetInt64() : 0,
@@ -274,6 +277,9 @@ public static class SteamWorkshopScraper
         public long FileSizeBytes { get; init; }
         public string CreatorId { get; init; } = "";
         public DateTime TimeUpdated { get; init; }
+        public DateTime TimeCreated { get; init; }
+        // Steam's vote_data.score, 0–1; null = not asked for or not answered
+        public double? VoteScore { get; init; }
         public long Subscriptions { get; init; }
         public long Favorites { get; init; }
         public string[] Tags { get; init; } = [];

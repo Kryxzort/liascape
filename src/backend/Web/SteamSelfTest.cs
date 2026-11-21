@@ -202,6 +202,59 @@ public static class SteamSelfTest
         }
     }
 
+    // What the favourites cache reads (with the fixture set by the caller's no-network block): a user's whole list as ids in
+    // Steam's order, its total alone, each item's created time / score / children, a details answer's own file, and the
+    // signed-in favourites page's ids (its "of N entries" left unread: signed out it leaves mature items out).
+    private static async Task UserFileCalls(string dir, TimeSpan t)
+    {
+        const ulong me = 76561190000000001;
+        var t0 = DateTimeOffset.FromUnixTimeSeconds(1780000000).UtcDateTime;
+        var expectedOrder = Enumerable.Range(0, 230).Select((i) => 5_000_000_000UL + (ulong)(i * 7 % 230)).ToList();
+        var items = expectedOrder.Select((id, i) => i == 0
+            ? (object)new Dictionary<string, object> { ["publishedfileid"] = id.ToString(), ["title"] = "first", ["time_created"] = 1780000000,
+                ["time_updated"] = 1790000000, ["score"] = 0.75, ["children"] = new[] { "1003" } }
+            : new Dictionary<string, object> { ["publishedfileid"] = id.ToString(), ["title"] = $"item {i}" }).ToList();
+        var fixture = new Dictionary<string, object>
+        {
+            ["@userfiles"] = new Dictionary<string, object> { [$"{me}:myfavorites"] = items },
+            ["1003"] = new Dictionary<string, object> { ["tags"] = new[] { "Scene" }, ["title"] = "Query Scene", ["time_created"] = 1780000000,
+                ["preview_url"] = "https://images.example.invalid/1003.jpg" },
+        };
+        string file = Path.Combine(dir, "steam-cm-userfiles.json");
+        File.WriteAllText(file, JsonSerializer.Serialize(fixture));
+        string? was = Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE");
+        Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", file);
+        try
+        {
+            var ids = await SteamWorkshopDetails.UserFileIdsAsync(me, "myfavorites", t);
+            Check(ids?.Count == 230 && ids.SequenceEqual(expectedOrder), $"user files: ids only = the whole list in Steam's order ({ids?.Count.ToString() ?? "null"})");
+            var total = await SteamWorkshopDetails.UserFilesTotalAsync(me, "myfavorites", t);
+            Check(total == 230, $"user files: total only ({total?.ToString() ?? "null"})");
+            var page = await SteamWorkshopDetails.UserFilesAsync(me, "myfavorites", "lastupdated", 1, 100, t);
+            Check(page != null && page.Items[0].TimeCreated == t0 && page.Items[0].VoteScore == 0.75 && page.Items[0].Children.SequenceEqual(new[] { 1003UL }),
+                "user files: created / score / children");
+            var d = await SteamWorkshopDetails.GetDetailsAsync([1003]);
+            Check(d != null && d[1003].File is { TimeCreated: var c, PreviewUrl: "https://images.example.invalid/1003.jpg", Id: "1003" } && c == t0,
+                "details: File carries created / preview");
+            Check(SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 1)) is { Ids.Count: 30, Total: null },
+                "favourites page: ids parsed, the signed-out total left unread");
+            Check(SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 3)) is { Ids.Count: 5, Total: null }, "favourites page: the last, short page");
+        }
+        finally { Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", was); }
+    }
+
+    // Steam's favourites page markup (the parts read): each item's filedetails link twice (picture + title), the paging text
+    private static string SampleFavoritesPage(int total, int page)
+    {
+        int from = (page - 1) * 30, to = Math.Min(total, from + 30);
+        var sb = new StringBuilder("<html><body>");
+        sb.Append($"<div class=\"workshopBrowsePagingInfo\">Showing {from + 1}-{to} of {total:N0} entries</div>");
+        for (int i = from; i < to; i++)
+            sb.Append($"<div class=\"workshopItem\"><a href=\"https://steamcommunity.com/sharedfiles/filedetails/?id={3_100_000_000 + i}&searchtext=\"><img></a>"
+                + $"<a href=\"https://steamcommunity.com/sharedfiles/filedetails/?id={3_100_000_000 + i}&searchtext=\">t</a></div>");
+        return sb.Append("</body></html>").ToString();
+    }
+
     // A hermetic stack's Browse: the Workshop's pages from the fixture's "@query" (Steam's matching done roughly: search,
     // tag groups, page), and with LIASCAPE_TEST_NO_NETWORK=1 every real connection refused before it is made — the shared
     // HTTP connect (loopback still connects: the tests' fake servers) and Steam's client protocol (no fixture → null, no
@@ -274,6 +327,7 @@ public static class SteamSelfTest
             Check(Ids(SteamWorkshopScraper.MapToResults(["2001", "2004", "1003"], pd, true, true)) == "2001ps,1003s",
                 $"presets: with allowPresets a preset is IsPreset + IsScene, a web-based one still dropped ({Ids(SteamWorkshopScraper.MapToResults(["2001", "2004", "1003"], pd, true, true))})");
             Check(Ids(SteamWorkshopScraper.MapToResults(["2001", "1003"], pd, false, true)) == "", "presets: scenes off drops presets too");
+            await UserFileCalls(Path.GetDirectoryName(file)!, t);
             Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", Path.Combine(Path.GetDirectoryName(file)!, "no-such-fixture.json"));
             Check(await Q(all, true, null, 1) == "null", "fixture query: no fixture file = Steam unreachable (the fallback's cue)");
             // no fixture at all: the client protocol's session is refused before it connects
