@@ -454,15 +454,12 @@ export const useStore = create<State>((set, get) => ({
     const { include, exclude } = filterOf(get(), scope);
     const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
     if (st === "inc") inc.push(tag); else if (st === "exc") exc.push(tag);
-    // a Yours row filters what the page holds (Browse's render; views/localSet.ts): no request, unless it starts or ends a
-    // local set: then the list is the set (reload sends nothing) or the Workshop's pages again (reload asks for them now; a
-    // debounced reload pending from another switch would ask twice). Guard: probe-steam yours:combos, yours:noScan
+    // a Yours row filters what the page holds (Browse's render; views/localSet.ts): no request of its own; one that starts or
+    // ends a local set reloads through the localSetOn subscription below. Guard: probe-steam yours:combos, yours:noScan
     if (scope === "workshop" && tag.startsWith("@")) {
-      const was = get().localSetOn();
       const bf = { ...get().browseFilter, include: inc, exclude: exc }; set({ browseFilter: bf }); LS.set("browseFilter", bf);
       if (tag === FAVORITES_TAG && st !== null) get().loadFavorites("open");
       if (tag === LIBRARY_TAG && st === "inc") get().loadLibDetails();
-      if (get().localSetOn() !== was) { clearTimeout(filterTimer); get().reload(); }
       return;
     }
     get().setFilterIn(scope, { include: inc, exclude: exc });
@@ -872,6 +869,20 @@ useStore.subscribe((s) => {
       st.setFilterIn(scope, { include: f.include.filter((t) => t !== PRESET_TAG), exclude: f.exclude.filter((t) => t !== PRESET_TAG) });
   }
   if (useStore.getState().wsList?.kind === "presets") st.setSource(useStore.getState().activeSource);
+});
+
+// A local set starts or ends with whatever flips localSetOn(): a Yours row, a sign-in or sign-out (Favourites counts only while
+// usable), Steam turning the sign-in down, a resync, a source switch. Each flip reloads: the set itself (no request; its
+// favourites read if not yet) or the Workshop's pages again. In a microtask, and only when nothing reloaded since the flip: a
+// source switch reloads itself, and a debounced filter reload still pending would ask a second time.
+// Guard: probe-steam yours:combos, yours:noScan, yours:signFlip
+let localWas = false;
+useStore.subscribe((s) => {
+  const on = s.localSetOn();
+  if (on === localWas) return;
+  localWas = on;
+  const gen = browseGen;
+  queueMicrotask(() => { if (gen !== browseGen) return; clearTimeout(filterTimer); useStore.getState().reload(); });
 });
 
 // A library listing depends on the engine and scene support (a preset's legacy reason, the presets the WE auto-import brings):

@@ -179,6 +179,8 @@
 //   yours:inList         inside a creator's list / a scene's presets list: ✓ its favourites only, ✕ hides them from the pages
 //   yours:scenes         a favourite preset only with Type's Preset ticked; scene support off → scenes and presets leave at once
 //   yours:big            2,000 favourites: all at once, a typed search sends nothing, content-visibility kept
+//   yours:signFlip       a saved Favourites ✓ alone: signed out the Workshop; a signed-in steam-status → the set (sync=open, no
+//                        placeholders); signed out again → one /browse, the Workshop's cards
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
@@ -360,6 +362,9 @@ const STUB = `(() => {
       const b = JSON.parse(o.body);
       (st.browses ??= []).push(b); // every list read (ws:*), apart from the cells' own calls
       const y = Y();
+      // y.endless: every later Workshop page holds six more (the list never ends: its placeholders stay)
+      if (y?.endless && !b.list && b.page > 1) return res(Array.from({ length: 6 }, (_, i) => ({ ...y.page[0], title: "ws-p" + b.page + "-" + i,
+        workshopId: String(931000 + b.page * 10 + i), pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + (931000 + b.page * 10 + i) })));
       if (y) return res(b.page > 1 ? [] : b.list?.kind === "creator" ? y.creatorPage ?? [] : b.list?.kind === "presets" ? y.presetsPage ?? [] : y.page ?? []);
       // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
       // a scene's presets (ws:presets*): the stack's own backend answers, from its fake Steam servers (scripts/test-ui-matrix.sh)
@@ -3510,6 +3515,53 @@ app.whenReady().then(async () => {
         if (m !== 100) v.push(`"BIG-01" shows ${m} cards (want 100: big-0100 … big-0199)`);
         const sent = (await js(`window.__st.bodies.slice(${b0}).map((b) => b.p)`)).filter((p) => /^\/(browse|detail|workshop\/)/.test(p));
         if (sent.length) v.push(`typing the search sent ${J(sent)}`);
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:signFlip — a saved Favourites ✓ alone follows the sign-in: signed out the Workshop shows (its pages, endless: its
+    // placeholders stay); a signed-in steam-status event → the favourites set (sync=open asked, no placeholder card, no
+    // /browse); signed out again → one /browse and the Workshop's cards
+    await cell("yours:signFlip", async () => {
+      const v = [];
+      try {
+        const data = { ...yData(), endless: true }, pageTitles = data.page.map((w) => w.title), favs = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
+        await js(`localStorage.setItem("__probe_yours", ${J(J(data))}); localStorage.removeItem("liascape.wsLocalSort");
+          localStorage.setItem("liascape.browseFilter", ${J(J({ ...BF0, include: ["@favorites"] }))}); localStorage.setItem("liascape.browseFilterHidden", "false"); true`);
+        await browseWs(SIGNED_OUT);
+        const hasPage = async () => { const t = await shown(); return pageTitles.every((x) => t.includes(x)) && t.every((x) => pageTitles.includes(x) || /^ws-p\d+-/.test(x)) ? t : null; };
+        const g0 = await waitFor(hasPage, 3000);
+        const skel0 = await js(`document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length`);
+        console.log(`        signed out, saved Favourites ✓: ${J(g0)}, ${skel0} placeholders`);
+        if (!g0) v.push(`signed out, a saved Favourites ✓ alone: ${J(await shown())} (want the Workshop's pages)`);
+        if (!skel0) return [...v, "the Workshop's pages show no placeholders before the sign-in — proved nothing"];
+        const asks0 = (await js(`window.__st.favAsks ?? []`)).filter((x) => x === "open").length;
+        const n0 = (await browses()).length;
+        await js(`window.__st.status = ${J(SIGNED_IN)}; true`);
+        await ev("steam-status", SIGNED_IN);
+        const g1 = await shownAs(favs);
+        const skel1 = await js(`document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length`);
+        const asks1 = (await js(`window.__st.favAsks ?? []`)).filter((x) => x === "open").length;
+        // the Workshop's endless pages may still have had one page on its way when the event landed: no page 1 (a reload), and
+        // nothing at all once the set shows
+        const n1a = (await browses()).length;
+        await sleep(800);
+        const sent1 = (await browses()).slice(n0).filter((b) => b.page === 1).concat((await browses()).slice(n1a));
+        console.log(`        signed in: ${J(g1)}, ${skel1} placeholders, ${asks1 - asks0} sync=open, ${sent1.length} /browse`);
+        if (J(sorted(g1)) !== J(favs)) v.push(`signed in: ${J(sorted(g1))} (want the favourites ${J(favs)})`);
+        if (skel1) v.push(`signed in: ${skel1} placeholder cards over the set`);
+        if (asks1 <= asks0) v.push("signed in: the favourites were never asked with sync=open");
+        if (sent1.length) v.push(`signed in: ${sent1.length} /browse request(s) for the set`);
+        await shot("yours-signflip-in");
+        const n1 = (await browses()).length;
+        await js(`window.__st.status = ${J(SIGNED_OUT)}; true`);
+        await ev("steam-status", SIGNED_OUT);
+        const g2 = (await waitFor(hasPage, 3000)) ?? await shown();
+        await sleep(600);
+        const sent2 = (await browses()).slice(n1).filter((b) => b.page === 1);
+        console.log(`        signed out again: ${J(g2)}, ${sent2.length} /browse page 1`);
+        if (!pageTitles.every((x) => g2.includes(x)) || favs.some((x) => !pageTitles.includes(x) && g2.includes(x))) v.push(`signed out again: ${J(g2)} (want the Workshop's pages)`);
+        if (sent2.length !== 1) v.push(`signed out again: ${sent2.length} /browse page-1 request(s) (want one)`);
       } finally { await yoursDone(); }
       return v;
     });
