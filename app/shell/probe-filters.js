@@ -70,6 +70,8 @@
 //   filter:preset:on  ticking Preset POSTs include ["Preset"] and lists exactly the two presets
 //   filter:preset:cleared  Preset ticked, then Settings → Play scenes off: the row and the saved tag go, the list is asked
 //                     again without it and holds no preset. Screenshots wf-preset-*.png
+//   filter:preset:badge  the presets' cards say PRESET, the base scene's SCENE: the same badge, corner and look, two themes ×
+//                     glow on / off
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
@@ -1543,6 +1545,48 @@ app.whenReady().then(async () => {
         if (!t.length || t.some((y) => PRESETS.includes(y))) v.push(`the list ${J(t)} (want the default one, no preset)`);
         await shot("preset-cleared");
       } finally { await realDone(); }
+      return v;
+    });
+
+    // filter:preset:badge — a preset's card says PRESET, its base and every other scene SCENE, in the same corner and the same
+    // look (one `.badge`, Card.tsx), under two themes with glow on and off: the default list's base (Fixture Workshop Three)
+    // against the Preset list's two presets
+    await cell("filter:preset:badge", async () => {
+      const v = [];
+      const s0 = (await http("GET", "/settings")).json ?? {}, themes = (await http("GET", "/themes")).json ?? [];
+      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name;
+      if (!t0 || !t1) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
+      const read = (titles) => page(`return ${J(titles)}.map((t) => { const c = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === t);
+        const b = c?.querySelector(".thumb-wrap > .badge:not(.inlib)"); if (!b) return { t, text: null };
+        const s = getComputedStyle(b), w = c.querySelector(".thumb-wrap").getBoundingClientRect(), r = b.getBoundingClientRect();
+        return { t, text: b.textContent.trim(), cls: b.className, dx: Math.round(r.left - w.left), dy: Math.round(r.top - w.top), h: Math.round(r.height),
+          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | ") }; });`);
+      try {
+        for (const theme of [t0, t1]) for (const glows of [true, false]) {
+          const tag = `${theme}${glows ? "" : " no-glow"}`;
+          await setSettings({ theme, glows });
+          await realWs(true);
+          const d = await waitTitles((x) => J(x) === J(DEFAULT_SCENES));
+          if (J(d) !== J(DEFAULT_SCENES)) return [...v, `${tag}: the default list ${J(d)} — proved nothing`];
+          const [base, vid] = await read(["Fixture Workshop Three", "Fixture Workshop One"]);
+          await page(`m.seg("Preset", "inc")?.click();`);
+          const p = await waitTitles((x) => J(x) === J(PRESETS));
+          if (J(p) !== J(PRESETS)) return [...v, `${tag}: Preset ticked lists ${J(p)} — proved nothing`];
+          await sleep(300);
+          const pres = await read(PRESETS);
+          console.log(`        ${tag}: base ${J(base)} / presets ${J(pres.map((x) => x.text))}`);
+          if (base.text !== "SCENE") v.push(`${tag}: the base scene's card says ${J(base.text)}, want SCENE`);
+          if (vid.text != null) v.push(`${tag}: a video's card has a badge ${J(vid.text)}`);
+          for (const x of pres) {
+            if (x.text !== "PRESET") v.push(`${tag}: ${x.t} says ${J(x.text)}, want PRESET`);
+            else for (const k of ["cls", "dx", "dy", "h", "look"]) if (x[k] !== base[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ the scene's ${J(base[k])}`);
+          }
+          const sh = base.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
+          if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${base.look})`);
+          if (theme === t1 && glows) await shot("preset-badge");
+          await realDone();
+        }
+      } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); await realDone(); }
       return v;
     });
 

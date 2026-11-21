@@ -5,11 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-113. [ ] (owner) A preset's card says PRESET, not SCENE: Library and Browse cards badge a Workshop preset the same
-       as its base scene (`Card.tsx` shows SCENE for every `isScene`), so "Black and White" and its base "Angled
-       Waves" look alike on the grid. Badge presets PRESET in the same corner and style (`isPreset` on library items;
-       the Workshop's Preset tag on Browse results); the sidebar's base row already names the base. Guard it in a probe
-       (a preset card, its base and a plain scene side by side, every theme / glow toggle).
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips

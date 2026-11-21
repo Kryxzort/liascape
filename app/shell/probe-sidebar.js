@@ -79,6 +79,8 @@
 //   lib:preset:uses      "Uses <base>" (WsListRow) from the preset's own file, no Steam ask; a click focuses the base's card
 //   lib:presets:scene    a Library scene with a Workshop id: "Presets" lists its presets on the Browse tab (the CM fixture's
 //                        two, marked In library); none on a preset; the Library's Preset filter keeps exactly the presets
+//   lib:preset:badge     a preset's card says PRESET, its base and a plain scene SCENE: the same badge, corner and look, two
+//                        themes × glow on / off. Shot side-preset-badge.png
 //   lib:preset:needsBase[Off]  the base goes with the preset's sidebar open: the cards grey out (status icon fading in, the
 //                        reason as its tooltip), the notice (the crash notice's block, --warn) rises in (Off: fades); a click
 //                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
@@ -2423,6 +2425,35 @@ app.whenReady().then(async () => {
       }
       return v;
     }));
+
+    // lib:preset:badge — side by side in the Library, a preset's card (pp1) says PRESET and its base (pb) and a plain scene
+    // (s1) SCENE: one `.badge` in the same corner with the same look (LibraryCard.tsx), under two themes with glow on and off
+    await cell("lib:preset:badge", async () => {
+      const v = [], J = JSON.stringify;
+      const s0 = await getSettings(), themes = (await http("GET", "/themes")).json ?? [];
+      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name;
+      if (!t0 || !t1) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
+      const read = () => page(`return ["pp1", "pb", "s1"].map((t) => { const c = m.card(t), b = c?.querySelector(".thumb-wrap > .badge"); if (!b) return { t, text: null };
+        const s = getComputedStyle(b), w = c.querySelector(".thumb-wrap").getBoundingClientRect(), r = b.getBoundingClientRect();
+        return { t, text: b.textContent.trim(), cls: b.className, dx: Math.round(r.left - w.left), dy: Math.round(r.top - w.top), h: Math.round(r.height),
+          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | ") }; });`);
+      try {
+        for (const theme of [t0, t1]) for (const glows of [true, false]) await withPresets(async () => {
+          const tag = `${theme}${glows ? "" : " no-glow"}`;
+          if (!(await page(`return !!m.card("pp1") && !!m.card("pb") && !!m.card("s1");`))) { v.push(`${tag}: pp1 / pb / s1 not all in the Library — proved nothing`); return; }
+          const [pre, base, plain] = await read();
+          console.log(`        ${tag}: ${J([pre.text, base.text, plain.text])}`);
+          if (pre.text !== "PRESET") v.push(`${tag}: pp1 (a preset) says ${J(pre.text)}, want PRESET`);
+          if (base.text !== "SCENE") v.push(`${tag}: pb (its base) says ${J(base.text)}, want SCENE`);
+          if (plain.text !== "SCENE") v.push(`${tag}: s1 (a plain scene) says ${J(plain.text)}, want SCENE`);
+          for (const x of [pre, base]) if (x.text) for (const k of ["cls", "dx", "dy", "h", "look"]) if (x[k] !== plain[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ s1's ${J(plain[k])}`);
+          const sh = plain.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
+          if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${plain.look})`);
+          if (theme === t1 && glows) await shot("preset-badge");
+        }, { theme, glows });
+      } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); }
+      return v;
+    });
 
     // lib:preset:needsBase:<on|off> — the base goes while pp1's sidebar is open (trashed by the backend, the page told
     // through library-synced): pp1 and pp2 grey out (the picture greyscale, a status icon in --warn fading in, its tooltip the

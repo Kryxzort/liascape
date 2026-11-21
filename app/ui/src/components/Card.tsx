@@ -61,7 +61,9 @@ export const Card = memo(function Card({
           <img className="thumb anim" src={gifSrc} decoding="async" alt=""
             style={{ opacity: active ? 1 : 0, backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center" }} />
         )}
-        {w.isScene && <span className="badge">SCENE</span>}
+        {/* a Workshop preset is a scene for everything else (greying, "Play scenes" off); only its badge names it. Guard:
+            probe-filters filter:preset:badge */}
+        {w.isScene && <span className="badge">{w.isPreset ? "PRESET" : "SCENE"}</span>}
         {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
         {inLibrary && <span className="badge inlib ico" data-in-library><Check size={11} strokeWidth={3} />In library</span>}
         {/* hover download button (bottom-right, the Library card's trash spot): a solid accent arrow on a dark round chip (index.css
