@@ -208,6 +208,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] Settings → "Video memory cap (MiB)" accepts up to 1048576 (1 TiB: `views/Settings.tsx` NumInput `max`). Bound it by the
+      card's real VRAM: the player already reads the total (`src/player/src/vram.rs` Probe: NVML, else AMD's
+      `mem_info_vram_total`); surface it to the UI, make it the field's `max`, and clamp a saved value above it with a
+      line saying why. When the total is unknown, fall back to a sane ceiling (e.g. 65536) rather than 1 TiB. Guard: a
+      probe-settings cell with a stubbed total.
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in
