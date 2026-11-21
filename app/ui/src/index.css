@@ -388,6 +388,48 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 :root.no-motion .libops-fill { transition: none; }
 :root.no-motion .libops-fill::after { animation: none; }
 
+/* ---- the favourites' load line (components/WsSetLoad.tsx): a chip at the top of Browse's grid, in a sticky box of no
+   height, so it floats over the first cards and its coming or going moves nothing; under the docked panels (40) and the
+   filter drawer (45). Its bar is the library line's (.libops): the accent fill with its small glow easing to the count, a
+   highlight sweeping along it (the progress role's loop); a sweep runs over the track while the total isn't known.
+   COOL: it rises 6 px and fades in; at the end the bar runs out to the edge (.3 s), then it fades and lifts away; turned off
+   (.away) it only fades. Transitions, not keyframes: a line that leaves while still coming in turns back from where it is
+   (a quick answer never flashes it to full first). Guard: probe-steam yours:loadLine, yours:loadLineOff, yours:loadError */
+/* align-items: flex-start: the chip keeps its own height (stretched to the dock's 0, its fill would miss its words) */
+.ws-set-load-dock { position: sticky; top: 0; height: 0; z-index: 30; display: flex; justify-content: center; align-items: flex-start;
+  pointer-events: none; }
+.ws-set-load { position: relative; top: 6px; display: grid; justify-items: center; gap: 8px; min-width: min(300px, 100%); max-width: 100%;
+  padding: 9px 16px 11px; border-radius: 10px; pointer-events: auto; color: var(--subtext); font-size: 13px;
+  background: color-mix(in srgb, var(--bg-mantle) var(--tr-strong), transparent); border: 1px solid var(--surface0);
+  box-shadow: 0 8px 24px -6px color-mix(in srgb, var(--bg-crust) 70%, transparent);
+  transition: opacity .24s ease-out, transform .24s ease-out; }
+@starting-style { .ws-set-load { opacity: 0; transform: translateY(-6px); } }
+.ws-set-load.closing { opacity: 0; transform: translateY(-6px); pointer-events: none;
+  transition: opacity .2s ease-in .25s, transform .2s ease-in .25s; }
+.ws-set-load.closing.away { transition-delay: 0s; }
+.wsl-text { animation: nm-in .2s ease-out; }
+.ws-set-load[data-ws-set-load="error"] { grid-auto-flow: column; align-items: center; gap: 12px; padding-bottom: 9px; }
+.ws-set-load[data-ws-set-load="error"] .wsl-text { color: var(--warn); }
+.wsl-retry { padding: 4px 12px; font-size: 12px; }
+.wsl-track { position: relative; width: 100%; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.wsl-fill { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; transform-origin: left; background: var(--accent);
+  box-shadow: var(--glow-sm); transition: transform .6s cubic-bezier(.25, .8, .25, 1); }
+.ws-set-load.closing .wsl-fill { transition-duration: .3s; }
+.wsl-sweep { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+.wsl-fill::after, .wsl-sweep::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 400%;
+  background: linear-gradient(90deg, transparent, var(--accent-hover), transparent) 0 0 / 50% 100%; animation: slide 1.6s linear infinite; }
+.wsl-sweep::after { background-image: linear-gradient(90deg, transparent, var(--accent), transparent); animation-duration: 1.2s; }
+.ws-set-load.idle :is(.wsl-fill, .wsl-sweep)::after { animation-play-state: paused; }
+/* the live wallpaper behind: its words carry the shadow loose text over the wallpaper has */
+:root.bg-live .wsl-text { filter: drop-shadow(0 0 3.5px #000); }
+/* motion off: it fades in and out in place; the bar steps to each count, nothing sweeps (the track's still peak at its middle) */
+:root.no-motion .ws-set-load { transform: none; transition: opacity var(--fade-dur) linear; }
+:root.no-motion .ws-set-load.closing { transform: none; transition: opacity var(--fade-dur) linear; }
+:root.no-motion .wsl-text { animation: nm-in var(--fade-dur) linear; }
+:root.no-motion .wsl-fill { transition: none; }
+:root.no-motion :is(.wsl-fill, .wsl-sweep)::after { animation: none; }
+:root.no-motion .wsl-sweep::after { transform: translateX(-12.5%); }
+
 .theme-pick { background: color-mix(in srgb, var(--surface0) var(--tr), transparent); border: 1px solid var(--surface1); color: var(--text);
   border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color .15s, box-shadow .2s; }
 .theme-pick:hover, .theme-pick:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
@@ -1401,7 +1443,7 @@ input[type=range]:focus-visible { outline: none; }
   filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
 :root.text-shadow .seg-opt.on { text-shadow: none; }
 /* under bg-live the loose text over the wallpaper already carries this shadow as a filter: never twice */
-:root.text-shadow.bg-live :is(.wf-none > span, .side-sub-text b, .side-sub-hint, .wf-title, .wf-clear) { text-shadow: none; }
+:root.text-shadow.bg-live :is(.wf-none > span, .side-sub-text b, .side-sub-hint, .wf-title, .wf-clear, .wsl-text) { text-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, .claude/rules/ui/state-and-api.md § Settings page) */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

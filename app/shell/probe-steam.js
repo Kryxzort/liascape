@@ -181,6 +181,19 @@
 //   yours:big            2,000 favourites: all at once, a typed search sends nothing, content-visibility kept
 //   yours:signFlip       a saved Favourites ✓ alone: signed out the Workshop; a signed-in steam-status → the set (sync=open, no
 //                        placeholders); signed out again → one /browse, the Workshop's cards
+//   yours:loadLine       a first Favourites ✓, the answer held: the load line within a frame ("Loading your favourites…", rising
+//                        in), "— 120 so far" / "— 120 of 450" on workshop-favorites events (the bar eases), the grid fills, the
+//                        line fills out and fades; opacity / transform only. Shots steam-yours-load-*.png
+//   yours:loadLineOff    motion off: a fade in place, the bar at once; no-glow: no glow; bg-live: its words' drop-shadow
+//   yours:loadError      an error answer: its words + Retry, the loaded part kept; Retry asks sync=open
+//   yours:starLive       the sidebar's star (stubbed POST) + workshop-favorites: the card leaves / joins, no reload, no /browse
+//   yours:check          Browse open with Favourites ✕: one sync=open, then sync=check per (shortened) minute; none inactive or
+//                        with no Favourites row
+//   yours:oneOpen        the start and a reconnect with the favourites unread share one sync=open
+//   yours:steamUnknown   /steam/status unreadable: Favourites not dimmed, ✓ refused until a signed-in status
+//   yours:empty          "Nothing here matches" on an empty set (in a creator's list too); its clear keeps the Yours rows;
+//                        motion off + bg-live
+//   yours:signOut        signed out: the favourites leave at once, the row dims; another account never sees them
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
@@ -236,6 +249,16 @@ const STUB = `(() => {
     send(d) { st.wsSent.push(String(d)); return super.send(d); }
   };
   window.__fakeWs = (type, payload) => { let n = 0; for (const s of sockets) if (s.readyState === 1 && s.onmessage) { s.onmessage({ data: JSON.stringify({ type, payload }) }); n++; } return n; };
+  // the page's socket dropped (the app reconnects and re-reads what it mirrors: yours:oneOpen)
+  window.__wsDrop = () => { for (const s of sockets) if (s.readyState === 1) s.close(); return true; };
+  // the favourites' minute check, shortened for the probe only (yours:check): __probe_fav_tick = the interval in ms
+  const si = window.setInterval.bind(window);
+  window.setInterval = (fn, ms, ...a) => si(fn, ms === 60000 && localStorage.getItem("__probe_fav_tick") ? +localStorage.getItem("__probe_fav_tick") : ms, ...a);
+  // GET /workshop/my-favorites held or answered by the cell (yours:load*, yours:signOut, yours:oneOpen): window.__favs =
+  // { hold, answer }; a held ask waits for __favsLet(answer) (else the answer / __probe_yours' favs); __probe_favs_hold = held
+  // from the page's start
+  window.__favs = localStorage.getItem("__probe_favs_hold") === "1" ? { hold: true } : null;
+  window.__favsLet = (b) => { const F = window.__favs ?? {}; F.hold = false; if (b) F.answer = b; for (const r of (F.pending ?? []).splice(0)) r(); return true; };
   const items = Array.from({ length: 6 }, (_, i) => ({ title: "ws-" + (i + 1), thumbnailUrl: "", animatedThumbnailUrl: null,
     pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + (930000 + i), resolution: "1920 x 1080", isScene: false,
     workshopId: String(930000 + i), addedAt: null, description: "fake", authorName: "probe", authorId: "76561190000000007", fileSizeBytes: 1000,
@@ -252,8 +275,14 @@ const STUB = `(() => {
     const m = (o.method || "GET").toUpperCase();
     st.bodies.push({ p, m, body: typeof o.body === "string" ? o.body : null });
     const res = (b, status = 200) => Promise.resolve(new Response(b == null ? "" : JSON.stringify(b), { status, headers: b == null ? {} : { "Content-Type": "application/json" } }));
-    if (p === "/steam/status") return res(st.status);
-    if (p === "/workshop/my-favorites") { (st.favAsks ??= []).push(new URL(String(u), location.href).searchParams.get("sync")); if (Y()) return res(Y().favs); }
+    // __probe_steam_status_fail: the status can't be read (Steam's state stays unknown: yours:steamUnknown)
+    if (p === "/steam/status") return localStorage.getItem("__probe_steam_status_fail") === "1" ? res({ error: "the backend's status read failed" }, 500) : res(st.status);
+    if (p === "/workshop/my-favorites") {
+      (st.favAsks ??= []).push(new URL(String(u), location.href).searchParams.get("sync"));
+      const F = window.__favs, answer = () => F?.answer ?? Y()?.favs;
+      if (F?.hold) return new Promise((r) => (F.pending ??= []).push(r)).then(() => res(answer()));
+      if (answer()) return res(answer());
+    }
     if (p === "/workshop/details" && m === "POST" && Y()) {
       const ids = JSON.parse(o.body).ids || [], d = Y().details || {}; (st.detailAsks ??= []).push(ids);
       return res({ items: ids.filter((id) => d[id]).map((id) => d[id]) });
@@ -3170,8 +3199,8 @@ app.whenReady().then(async () => {
       const norm = (xs) => J(ordered ? xs : sorted(xs));
       return (await waitFor(async () => { const t = await shown(); return norm(t) === norm(want) ? t : null; }, ms)) ?? await shown();
     };
-    const yoursOn = async (data, { scenes = false } = {}) => {
-      await setSettings({ allowScenes: scenes, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+    const yoursOn = async (data, { scenes = false, looks = {} } = {}) => {
+      await setSettings({ allowScenes: scenes, morphs: true, glows: true, liveWallpaperBehindAllTabs: false, ...looks });
       await js(`localStorage.setItem("__probe_yours", ${J(J(data))}); localStorage.removeItem("liascape.wsLocalSort");
         localStorage.setItem("liascape.browseFilter", ${J(J(BF0))}); localStorage.setItem("liascape.browseFilterHidden", "false"); true`);
       await browseWs(SIGNED_IN);
@@ -3545,6 +3574,431 @@ app.whenReady().then(async () => {
         if (!pageTitles.every((x) => g2.includes(x)) || favs.some((x) => !pageTitles.includes(x) && g2.includes(x))) v.push(`signed out again: ${J(g2)} (want the Workshop's pages)`);
         if (sent2.length !== 1) v.push(`signed out again: ${sent2.length} /browse page-1 request(s) (want one)`);
       } finally { await yoursDone(); }
+      return v;
+    });
+
+    // ---- the favourites' load line (components/WsSetLoad.tsx) and the favourites following Liascape and Steam live ----
+    const LINE = "[data-ws-set-load]";
+    const LOAD_ERR = "Couldn't load your favourites from Steam. Try again in a moment.";
+    const FAV_INC = `document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"] [data-seg="inc"]').click();`;
+    const favAsks = () => js(`window.__st.favAsks ?? []`);
+    const glowless = (x) => !x || x === "none" || x.split(/,(?![^(]*\))/).every((p) => /rgba\(0, 0, 0, 0\)/.test(p) || /0px 0px 0px 0px/.test(p));
+    const lineNow = () => js(`(() => { const e = document.querySelector(${J(LINE)}); if (!e) return null; const f = e.querySelector(".wsl-fill"), t = e.querySelector(".wsl-text");
+      return { kind: e.dataset.wsSetLoad, text: t?.textContent ?? null, op: +getComputedStyle(e).opacity, closing: e.classList.contains("closing"),
+        retry: !!e.querySelector("[data-wsl-retry]"), fill: f ? +new DOMMatrix(getComputedStyle(f).transform).a.toFixed(3) : null,
+        fillGlow: f ? getComputedStyle(f).boxShadow : null, textFilter: t ? getComputedStyle(t).filter : null,
+        // what of its words and its bar / Retry lies outside its own drawn box (its fill), in px: [] = all inside
+        outside: [t, f?.parentElement, e.querySelector("[data-wsl-retry]")].filter(Boolean).flatMap((x) => { const a = e.getBoundingClientRect(), b = x.getBoundingClientRect();
+          return !b.width || !b.height ? [x.className + ": empty"] : b.left < a.left - 0.5 || b.right > a.right + 0.5 || b.top < a.top - 0.5 || b.bottom > a.bottom + 0.5
+            ? [x.className + ": " + [b.left - a.left, a.right - b.right, b.top - a.top, a.bottom - b.bottom].map((n) => n.toFixed(1)).join(" ")] : []; }) }; })()`);
+    // the line per frame for `ms`, the sampling started before `act` runs in the page: [t, opacity, translateY, its words, the
+    // fill's scaleX, the properties its running animations / transitions change] | [t, null] while it isn't there
+    const lineFrames = (act, ms) => page(`const out = [], t0 = performance.now();
+      const props = (e) => [...new Set(e.getAnimations({ subtree: true }).flatMap((a) => a.transitionProperty ? [a.transitionProperty]
+        : (a.effect?.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((x) => !["offset", "easing", "composite", "computedOffset"].includes(x)))))];
+      const rec = new Promise((res) => { const f = () => { const t = Math.round(performance.now() - t0), e = document.querySelector(${J(LINE)});
+        if (!e) out.push([t, null]); else { const m = new DOMMatrix(getComputedStyle(e).transform), fl = e.querySelector(".wsl-fill");
+          out.push([t, +(+getComputedStyle(e).opacity).toFixed(3), +m.m42.toFixed(2), e.querySelector(".wsl-text")?.textContent ?? "", fl ? +new DOMMatrix(getComputedStyle(fl).transform).a.toFixed(3) : null, props(e)]); }
+        if (t < ${ms}) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); });
+      ${act}
+      return await rec;`);
+    const moved = (frs, allowed) => [...new Set(frs.flatMap((f) => f[5] ?? []))].filter((p) => !allowed.includes(p));
+    const SIX = T("Aurora", "Bamboo", "Cinder", "Dune", "Ember", "Fjord");
+    const fv = (version, items, o = {}) => ({ signedIn: true, version, loading: null, error: null, items, ...o });
+
+    // yours:loadLine — a first Favourites ✓ with the answer held: the line shows within a frame of the click ("Loading your
+    // favourites…", rising in), "— 120 so far" then "— 120 of 450" as workshop-favorites events land (the bar eases), the grid
+    // fills with what's loaded, and at the end the line fills out and fades; per frame only opacity / transform change.
+    // Shots steam-yours-load-*.png
+    await cell("yours:loadLine", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        const favs = yFavs();
+        await js(`window.__favs = { hold: true }; true`);
+        await setRow("@library", "off", 450);
+        if (await lineNow()) return ["the load line shows before any Favourites row — proved nothing"];
+        const fr0 = await lineFrames(FAV_INC, 500);
+        const i0 = fr0.findIndex((f) => f[1] != null);
+        console.log(`        appear: first at frame ${i0}, opacity ${MO.brief(fr0)}, y [${fr0.filter((f) => f[1] != null).slice(0, 8).map((f) => f[2])}]`);
+        if (i0 < 0) return ["Favourites ✓ with the answer held: no load line"];
+        if (i0 > 1) v.push(`the line first showed ${i0} frames after the click (want within one)`);
+        if (fr0[i0][3] !== "Loading your favourites…") v.push(`held: it reads ${J(fr0[i0][3])} (want "Loading your favourites…")`);
+        const midOp = fr0.filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length, midY = fr0.filter((f) => f[1] != null && Math.abs(f[2]) > 0.3 && Math.abs(f[2]) < 5.9).length;
+        if (midOp < 2) v.push(`it popped in: ${midOp} in-between opacity frame(s)`);
+        if (midY < 1) v.push(`it didn't rise in: ${midY} in-between offset frame(s)`);
+        await sleep(300); await shot("yours-load-held");
+        const lh = await lineNow();
+        if (lh?.outside?.length) v.push(`held: parts of the line lie outside its box ${J(lh.outside)}`);
+        await js(`window.__favsLet(${J(fv(2, [], { loading: { done: 0, total: null } }))})`);
+        await sleep(300);
+        const l1 = await lineNow();
+        if (l1?.text !== "Loading your favourites…") v.push(`nothing loaded yet: it reads ${J(l1?.text)} (want "Loading your favourites…")`);
+        await js(`window.__favs.answer = ${J(fv(3, favs.slice(0, 2), { loading: { done: 120, total: null } }))}; true`);
+        await ev("workshop-favorites", { version: 3, loading: { done: 120, total: null } });
+        const l2 = (await waitFor(async () => { const l = await lineNow(); return l?.text === "Loading your favourites — 120 so far" ? l : null; }, 2000)) ?? await lineNow();
+        if (l2?.text !== "Loading your favourites — 120 so far") v.push(`the total unknown: it reads ${J(l2?.text)} (want "Loading your favourites — 120 so far")`);
+        const g2 = await shownAs(T("Aurora", "Bamboo"));
+        if (J(sorted(g2)) !== J(T("Aurora", "Bamboo"))) v.push(`120 so far: the grid shows ${J(g2)} (want what's loaded, Aurora and Bamboo)`);
+        await js(`window.__favs.answer = ${J(fv(4, favs.slice(0, 3), { loading: { done: 120, total: 450 } }))}; true`);
+        const fr1p = lineFrames(`window.__fakeWs("workshop-favorites", ${J({ version: 4, loading: { done: 120, total: 450 } })});`, 900);
+        await sleep(160); await shot("yours-load-mid");
+        const fr1 = await fr1p, want = +(120 / 450).toFixed(3), last1 = fr1.at(-1);
+        const eased = new Set(fr1.filter((f) => f[4] != null && f[4] > 0.005 && f[4] < want - 0.005).map((f) => f[4])).size;
+        console.log(`        120 of 450: ${J(last1?.[3])}, bar [${fr1.map((f) => f[4]).filter((x, i, a) => i === 0 || x !== a[i - 1]).slice(0, 10)}]`);
+        if (last1?.[3] !== "Loading your favourites — 120 of 450") v.push(`the total known: it reads ${J(last1?.[3])} (want "Loading your favourites — 120 of 450")`);
+        if (!(Math.abs((last1?.[4] ?? -1) - want) < 0.01)) v.push(`the bar ends at ${last1?.[4]} (want ${want})`);
+        if (eased < 3) v.push(`the bar jumped to 120 / 450 (${eased} in-between value(s))`);
+        const g3 = await shownAs(T("Aurora", "Bamboo", "Cinder"));
+        if (J(sorted(g3)) !== J(T("Aurora", "Bamboo", "Cinder"))) v.push(`120 of 450: the grid shows ${J(g3)} (want Aurora, Bamboo, Cinder)`);
+        await js(`window.__favs.answer = ${J(fv(5, favs))}; true`);
+        const fr2p = lineFrames(`window.__fakeWs("workshop-favorites", ${J({ version: 5, loading: null })});`, 1200);
+        await sleep(260); await shot("yours-load-end");
+        const fr2 = await fr2p, lastShown = fr2.findLastIndex((f) => f[1] != null);
+        console.log(`        the end: opacity ${MO.brief(fr2)}, bar [${fr2.map((f) => f[4]).filter((x, i, a) => x != null && (i === 0 || x !== a[i - 1])).slice(0, 10)}]`);
+        if (fr2.at(-1)[1] != null) v.push("the line never left at the end of the load");
+        else {
+          const outOp = fr2.slice(0, lastShown + 1).filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length;
+          if (outOp < 2) v.push(`it popped out: ${outOp} in-between opacity frame(s)`);
+          if (!fr2.some((f) => f[4] != null && f[4] > 0.99)) v.push("the bar didn't fill out before the line left");
+        }
+        const g4 = await shownAs(SIX);
+        if (J(sorted(g4)) !== J(SIX)) v.push(`the end: the grid shows ${J(g4)} (want all six)`);
+        const bad = moved([...fr0, ...fr1, ...fr2], ["opacity", "transform"]);
+        if (bad.length) v.push(`the line animates ${J(bad)} (only opacity / transform)`);
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:loadLineOff — motion off: the line fades in and out in place (motion-off.js) and its bar changes at once (no sweep);
+    // Glow effects off: no glow on the bar; the live wallpaper behind: its words carry the drop-shadow. Shots steam-yours-load-off*.png
+    await cell("yours:loadLineOff", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData(), { looks: { morphs: false } });
+        if (!(await js(`document.documentElement.classList.contains("no-motion")`))) return ["motion off: the page isn't in no-motion — proved nothing"];
+        const favs = yFavs();
+        await js(`window.__favs = { hold: true }; true`);
+        await setRow("@library", "off", 450);
+        const smp = js(MO.SAMPLE({ line: LINE }, 500)); await sleep(40);
+        await page(FAV_INC);
+        const sIn = await smp;
+        console.log(`        motion off: in ${MO.brief(sIn.line)}`);
+        v.push(...MO.judge("motion off: the line appearing", sIn.line, { appear: true }));
+        const g0 = await lineNow();
+        if (glowless(g0?.fillGlow)) v.push(`Glow effects on: the bar has no glow (${g0?.fillGlow}) — the no-glow check below would prove nothing`);
+        await js(`window.__favsLet(${J(fv(2, [], { loading: { done: 0, total: null } }))})`);
+        await sleep(300);
+        await js(`window.__favs.answer = ${J(fv(3, favs.slice(0, 3), { loading: { done: 120, total: 450 } }))}; true`);
+        const want = +(120 / 450).toFixed(3);
+        const fr = await lineFrames(`window.__fakeWs("workshop-favorites", ${J({ version: 3, loading: { done: 120, total: 450 } })});`, 600);
+        const mid = fr.filter((f) => f[4] != null && f[4] > 0.005 && f[4] < want - 0.005).length;
+        console.log(`        motion off: bar [${fr.map((f) => f[4]).filter((x, i, a) => i === 0 || x !== a[i - 1]).slice(0, 10)}]`);
+        if (!fr.some((f) => f[4] != null && Math.abs(f[4] - want) < 0.01)) v.push(`motion off: the bar never reached 120 / 450 — proved nothing`);
+        if (mid > 1) v.push(`motion off: the bar eased (${mid} in-between frames; want it to change at once)`);
+        const bad = moved(fr, ["opacity"]);
+        if (bad.length) v.push(`motion off: the line animates ${J(bad)} (only a fade)`);
+        await shot("yours-load-off");
+        await js(`window.__favs.answer = ${J(fv(4, favs))}; true`);
+        const smp2 = js(MO.SAMPLE({ line: LINE }, 600)); await sleep(40);
+        await ev("workshop-favorites", { version: 4, loading: null });
+        const sOut = await smp2;
+        console.log(`        motion off: out ${MO.brief(sOut.line)}`);
+        v.push(...MO.judge("motion off: the line leaving", sOut.line, { leave: true }));
+        await yoursDone();
+        await yoursOn(yData(), { looks: { glows: false, liveWallpaperBehindAllTabs: true } });
+        const html = await js(`document.documentElement.className`);
+        if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
+        await js(`window.__favs = { hold: true }; true`);
+        await setRow("@library", "off", 450);
+        await page(FAV_INC); await sleep(300);
+        await js(`window.__favsLet(${J(fv(2, yFavs().slice(0, 3), { loading: { done: 120, total: 450 } }))})`);
+        await sleep(900);
+        const l = await lineNow();
+        console.log(`        no-glow + bg-live: ${J({ glow: l?.fillGlow, words: l?.textFilter })}`);
+        if (!l) v.push("no-glow + bg-live: no load line");
+        else {
+          if (l.outside?.length) v.push(`bg-live: parts of the line lie outside its box ${J(l.outside)}`);
+          if (!glowless(l.fillGlow)) v.push(`no-glow: the bar glows (${l.fillGlow})`);
+          if (!/drop-shadow/.test(l.textFilter ?? "")) v.push(`bg-live: its words have no drop-shadow (${l.textFilter})`);
+        }
+        await shot("yours-load-off-live");
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:loadError — Steam unreachable mid-load: the line says so with Retry, the favourites loaded so far stay in the grid;
+    // Retry asks sync=open once and the rest comes in. Shot steam-yours-load-error.png
+    await cell("yours:loadError", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        const favs = yFavs();
+        await js(`window.__favs = { hold: true }; true`);
+        await setRow("@library", "off", 450);
+        await page(FAV_INC); await sleep(300);
+        await js(`window.__favsLet(${J(fv(2, favs.slice(0, 2), { error: LOAD_ERR }))})`);
+        const l = (await waitFor(async () => { const x = await lineNow(); return x?.kind === "error" ? x : null; }, 2000)) ?? await lineNow();
+        console.log(`        error: ${J(l)}`);
+        await sleep(400); // the words cross-fade in
+        const ew = await js(`(() => { const t = document.querySelector(${J(LINE + " .wsl-text")}); if (!t) return null; let op = 1; for (let x = t; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
+          const r = t.getBoundingClientRect(); return { op: +op.toFixed(2), top: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === t }; })()`);
+        if (!ew || ew.op < 0.95 || !ew.top) v.push(`the error's words don't show: ${J(ew)} (want them at full opacity, on top)`);
+        if (l?.kind !== "error" || l.text !== LOAD_ERR) v.push(`the line on an error: ${J(l)} (want kind error, ${J(LOAD_ERR)})`);
+        if (!l?.retry) v.push("the error line has no Retry");
+        if (l?.outside?.length) v.push(`the error: parts of the line lie outside its box ${J(l.outside)}`);
+        const g0 = await shownAs(T("Aurora", "Bamboo"));
+        if (J(sorted(g0)) !== J(T("Aurora", "Bamboo"))) v.push(`the error: the grid shows ${J(g0)} (want the two loaded, kept)`);
+        await shot("yours-load-error");
+        const n0 = (await favAsks()).length;
+        await js(`window.__favs.answer = ${J(fv(3, favs))}; true`);
+        await page(`document.querySelector(${J(LINE + " [data-wsl-retry]")})?.click();`);
+        await sleep(400);
+        const asks = (await favAsks()).slice(n0);
+        if (J(asks) !== J(["open"])) v.push(`Retry asked ${J(asks)} (want one sync=open)`);
+        const g1 = await shownAs(SIX);
+        if (J(sorted(g1)) !== J(SIX)) v.push(`after Retry: ${J(g1)} (want all six)`);
+        if (!(await waitFor(async () => !(await lineNow()), 2000))) v.push("after Retry: the line stayed");
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:starLive — on Favourites ✓, the sidebar's star (the POST stubbed) and the workshop-favorites event that follows:
+    // unstarred, the card leaves the grid; starred again (a non-favourite now), it joins; no reload, no /browse
+    await cell("yours:starLive", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        const favs = yFavs();
+        await setRow("@favorites", "inc");
+        if (J(sorted(await shownAs(SIX))) !== J(SIX)) return [`Favourites ✓ shows ${J(await shown())} — proved nothing`];
+        await W({ fav: { signedIn: true, favorited: true } });
+        await openSide((await shown()).indexOf("Aurora"));
+        const FAV = `${SIDE} [data-ws-fav]`;
+        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "on"`), 3000))) return ["Aurora's favourite tile never read as on"];
+        await js(`window.__noReload = true; true`);
+        const b0 = (await browses()).length;
+        await page(`document.querySelector(${J(FAV)}).click();`); await sleep(300);
+        const posts = (await calls()).filter((c) => c.p === "/workshop/favorite" && c.m === "POST");
+        if (posts.at(-1)?.body?.favorite !== false) v.push(`the unstar posted ${J(posts.at(-1)?.body)}`);
+        const five = SIX.filter((t) => t !== "Aurora");
+        await js(`window.__favs = { answer: ${J(fv(2, favs.filter((w) => w.title !== "Aurora")))} }; true`);
+        await ev("workshop-favorites", { version: 2, loading: null });
+        const g1 = await shownAs(five);
+        console.log(`        unstarred: ${J(g1)}`);
+        if (J(sorted(g1)) !== J(five)) v.push(`unstarred: ${J(sorted(g1))} (want Aurora gone)`);
+        if (!(await js(`!!document.querySelector(${J(FAV)})`))) return [...v, "the sidebar closed with its card: no star to click again"];
+        await page(`document.querySelector(${J(FAV)}).click();`); await sleep(300);
+        const posts2 = (await calls()).filter((c) => c.p === "/workshop/favorite" && c.m === "POST");
+        if (posts2.at(-1)?.body?.favorite !== true) v.push(`the star posted ${J(posts2.at(-1)?.body)}`);
+        await js(`window.__favs = { answer: ${J(fv(3, favs))} }; true`);
+        await ev("workshop-favorites", { version: 3, loading: null });
+        const g2 = await shownAs(SIX);
+        console.log(`        starred: ${J(g2)}`);
+        if (J(sorted(g2)) !== J(SIX)) v.push(`starred: ${J(sorted(g2))} (want Aurora back)`);
+        if (!(await js(`window.__noReload === true`))) v.push("the page reloaded");
+        const sent = (await browses()).slice(b0);
+        if (sent.length) v.push(`${sent.length} /browse request(s)`);
+      } finally { await js(`window.__favs = null; true`).catch(() => {}); await yoursDone(); }
+      return v;
+    });
+
+    // yours:check — Browse open with Favourites ✕: one sync=open, then sync=check each (shortened) minute; none while the window
+    // is inactive, again once it's back; none with no Favourites row on
+    await cell("yours:check", async () => {
+      const v = [];
+      const since = async (n) => (await favAsks()).slice(n);
+      try {
+        await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        await js(`localStorage.setItem("__probe_yours", ${J(J(yData()))}); localStorage.setItem("__probe_fav_tick", "400"); localStorage.removeItem("liascape.wsLocalSort");
+          localStorage.setItem("liascape.browseFilter", ${J(J({ ...BF0, exclude: ["@favorites"] }))}); localStorage.setItem("liascape.browseFilterHidden", "true"); true`);
+        await browseWs(SIGNED_IN);
+        await sleep(200);
+        const a0 = await favAsks();
+        console.log(`        Browse open, Favourites ✕: ${J(a0)}`);
+        const opens = a0.filter((x) => x === "open").length;
+        if (opens !== 1) v.push(`Browse open with Favourites ✕ asked sync=open ${opens} time(s) (want once)`);
+        let n = (await favAsks()).length; await sleep(1300);
+        const a1 = await since(n);
+        console.log(`        active, 1.3 s: ${J(a1)}`);
+        if (a1.filter((x) => x === "check").length < 2) v.push(`active: ${J(a1)} in 1.3 s (want a sync=check each 400 ms)`);
+        if (a1.some((x) => x !== "check")) v.push(`active: asks other than the check ${J(a1)}`);
+        await js(`document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); true`);
+        await sleep(100); n = (await favAsks()).length; await sleep(1300);
+        const a2 = await since(n);
+        if (a2.length) v.push(`the window inactive: ${J(a2)} (want none)`);
+        await js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); true`);
+        n = (await favAsks()).length; await sleep(1000);
+        const a3 = await since(n);
+        if (!a3.includes("check")) v.push(`active again: ${J(a3)} (want the check back)`);
+        await setRow("@favorites", "off", 300);
+        n = (await favAsks()).length; await sleep(1300);
+        const a4 = await since(n);
+        console.log(`        inactive: ${J(a2)}, active again: ${J(a3)}, no row: ${J(a4)}`);
+        if (a4.length) v.push(`no Favourites row on: ${J(a4)} (want none)`);
+      } finally { await js(`localStorage.removeItem("__probe_fav_tick"); true`); await yoursDone(); }
+      return v;
+    });
+
+    // yours:oneOpen — the favourites unread (the answer held from the start) with Favourites ✓ saved: the start's reads and a
+    // socket reconnect's all share one sync=open
+    await cell("yours:oneOpen", async () => {
+      const v = [];
+      try {
+        await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        await js(`localStorage.setItem("__probe_yours", ${J(J(yData()))}); localStorage.setItem("__probe_favs_hold", "1"); localStorage.removeItem("liascape.wsLocalSort");
+          localStorage.setItem("liascape.browseFilter", ${J(J({ ...BF0, include: ["@favorites"] }))}); localStorage.setItem("liascape.browseFilterHidden", "true"); true`);
+        await browseWs(SIGNED_IN);
+        await js(`localStorage.removeItem("__probe_favs_hold"); true`);
+        const a0 = await favAsks();
+        if (!a0.includes("open")) return [`the held start never asked the favourites (${J(a0)}) — proved nothing`];
+        const s0 = await js(`window.__st.bodies.filter((b) => b.p === "/steam/status").length`);
+        await js(`window.__wsDrop()`);
+        if (!(await waitFor(async () => (await js(`window.__st.bodies.filter((b) => b.p === "/steam/status").length`)) > s0, 4000))) v.push("the socket's reconnect never re-read the backend — proved nothing");
+        await sleep(400);
+        await js(`window.__favsLet()`);
+        const g = await shownAs(SIX);
+        await sleep(400);
+        const asks = await favAsks();
+        console.log(`        asks: ${J(asks)}, shown ${J(g)}`);
+        const opens = asks.filter((x) => x === "open").length;
+        if (opens !== 1) v.push(`the start and a reconnect with the favourites unread asked sync=open ${opens} times (want one shared ask)`);
+        if (J(sorted(g)) !== J(SIX)) v.push(`then: ${J(g)} (want the six favourites)`);
+      } finally { await js(`localStorage.removeItem("__probe_favs_hold"); true`); await yoursDone(); }
+      return v;
+    });
+
+    // yours:steamUnknown — /steam/status can't be read: the Favourites row isn't dimmed ("Sign in to Steam" would be a guess),
+    // but ✓ can't be set until the status says signed in; then it can
+    await cell("yours:steamUnknown", async () => {
+      const v = [];
+      const row = () => js(`(() => { const r = document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"]'); if (!r) return null; const w = r.querySelector("[data-wf-why]");
+        return { off: r.hasAttribute("data-wf-off"), why: w && w.checkVisibility() ? w.textContent.trim() : null, st: r.dataset.state }; })()`);
+      try {
+        await js(`localStorage.setItem("__probe_steam_status_fail", "1"); true`);
+        await yoursOn(yData());
+        await setRow("@library", "off", 450);
+        if (!(await js(`window.__st.bodies.some((b) => b.p === "/steam/status")`))) return ["the page never asked /steam/status — proved nothing"];
+        const r0 = await row();
+        console.log(`        status unknown: ${J(r0)}`);
+        if (!r0) return ["no Favourites row on the Workshop's column"];
+        if (r0.off || r0.why) v.push(`Steam's status unknown: the row is dimmed (${J(r0)}) as if signed out`);
+        await page(FAV_INC); await sleep(400);
+        const r1 = await row();
+        if (r1?.st !== "off") v.push(`unknown: a click on ✓ turned it ${r1?.st} (want it refused until the status is known)`);
+        const asked = (await favAsks()).length;
+        if (asked) v.push(`unknown: the favourites were asked ${asked} time(s)`);
+        await js(`window.__st.status = ${J(SIGNED_IN)}; true`);
+        await ev("steam-status", SIGNED_IN); await sleep(200);
+        await page(FAV_INC);
+        const g = await shownAs(SIX);
+        if (J(sorted(g)) !== J(SIX)) v.push(`signed in, Favourites ✓: ${J(g)} (want the six favourites)`);
+      } finally { await js(`localStorage.removeItem("__probe_steam_status_fail"); true`); await yoursDone(); }
+      return v;
+    });
+
+    // yours:empty — a local set nothing matches: "Nothing here matches" with a control that clears the search and the other tags
+    // but never the Yours rows; inside a creator's list too (its own empty note hidden on a set); motion off it fades in place,
+    // over the live wallpaper its words carry the drop-shadow. Shots steam-yours-empty*.png
+    await cell("yours:empty", async () => {
+      const v = [];
+      const NONE = "[data-wf-none=set]";
+      const none = () => js(`(() => { const e = document.querySelector(${J(NONE)}); if (!e) return null; const b = e.querySelector("button"), s = e.querySelector("span");
+        return { text: s?.textContent ?? null, btn: b?.textContent.trim() ?? null, filter: s ? getComputedStyle(s).filter : null }; })()`);
+      const rowSt = (tag) => js(`document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag=${J(tag)}]')?.dataset.state ?? null`);
+      const typed = () => js(`document.querySelector(".tsearch input.search")?.value ?? null`);
+      try {
+        await yoursOn(yData());
+        await setRow("@favorites", "inc");
+        if (J(sorted(await shownAs(SIX))) !== J(SIX)) return [`Favourites ✓ shows ${J(await shown())} — proved nothing`];
+        if (await none()) v.push("the whole set shows the empty message");
+        await setRow("Landscape", "inc");
+        await shownAs(T("Cinder", "Fjord"));
+        await search("zzz-nothing");
+        const n1 = await waitFor(none, 2000);
+        console.log(`        nothing matches: ${J(n1)}`);
+        if (n1?.text !== "Nothing here matches") v.push(`an empty set: ${J(n1?.text)} (want "Nothing here matches")`);
+        if (!n1?.btn) v.push("an empty set: no control to clear the search and the tags");
+        await sleep(400); await shot("yours-empty");
+        await page(`document.querySelector(${J(NONE + " button")})?.click();`);
+        const g1 = await shownAs(SIX);
+        const after = { fav: await rowSt("@favorites"), landscape: await rowSt("Landscape"), search: await typed() };
+        console.log(`        cleared: ${J(g1)} ${J(after)}`);
+        if (J(sorted(g1)) !== J(SIX)) v.push(`the clear shows ${J(g1)} (want the six favourites)`);
+        if (after.fav !== "inc") v.push(`the clear turned Favourites ${after.fav} (the Yours rows stay)`);
+        if (after.landscape !== "off" || after.search !== "") v.push(`the clear left ${J(after)} (want Landscape off, the search empty)`);
+        // inside a creator's list
+        await setRow("@favorites", "off");
+        await openSide((await shown()).indexOf("ws-a"));
+        if (!(await waitFor(() => js(`document.querySelector("${SIDE} [data-ws-creator]")?.dataset.wsCreator === "known"`), 3000))) return [...v, "ws-a's sidebar has no creator row"];
+        await page(`document.querySelector("${SIDE} [data-ws-creator]").click();`);
+        await shownAs(T("ws-a", "Aurora", "ws-b"));
+        await waitFor(() => js(`document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length === 0`), 3000);
+        await setRow("@favorites", "inc");
+        const c0 = await shownAs(T("Aurora", "Bamboo"));
+        if (J(sorted(c0)) !== J(T("Aurora", "Bamboo"))) return [...v, `the creator's favourites: ${J(c0)} — proved nothing`];
+        await search("zzz-nothing");
+        const n2 = await waitFor(none, 2000);
+        const note = await js(`document.querySelector("[data-ws-list-note]")?.textContent ?? null`);
+        console.log(`        in a creator's list: ${J(n2)}, list note ${J(note)}`);
+        if (n2?.text !== "Nothing here matches") v.push(`in a creator's list: ${J(n2?.text)} (want "Nothing here matches")`);
+        if (note) v.push(`in a creator's list: the list's own note shows too (${J(note)})`);
+        await page(`document.querySelector(${J(NONE + " button")})?.click();`);
+        const c1 = await shownAs(T("Aurora", "Bamboo"));
+        if (J(sorted(c1)) !== J(T("Aurora", "Bamboo"))) v.push(`in a creator's list, cleared: ${J(c1)} (want Aurora, Bamboo)`);
+        await yoursDone();
+        await yoursOn(yData(), { looks: { morphs: false, liveWallpaperBehindAllTabs: true } });
+        await setRow("@favorites", "inc");
+        await shownAs(SIX);
+        const smp = js(MO.SAMPLE({ none: NONE }, 500)); await sleep(40);
+        await search("zzz-nothing");
+        const s = await smp;
+        console.log(`        motion off: in ${MO.brief(s.none)}`);
+        v.push(...MO.judge("motion off: the message appearing", s.none, { appear: true }));
+        const n3 = await none();
+        if (!/drop-shadow/.test(n3?.filter ?? "")) v.push(`bg-live: its words have no drop-shadow (${n3?.filter})`);
+        await sleep(300); await shot("yours-empty-live");
+      } finally { await yoursDone(); }
+      return v;
+    });
+
+    // yours:signOut — Favourites ✓ showing: a signed-out steam-status → the favourites leave the grid at once and the row dims with
+    // its reason; another account signing in (its answer held) never shows the first one's favourites: the line, sync=open, then
+    // its own. Shots steam-yours-signout*.png
+    await cell("yours:signOut", async () => {
+      const v = [];
+      try {
+        await yoursOn(yData());
+        await setRow("@favorites", "inc");
+        if (J(sorted(await shownAs(SIX))) !== J(SIX)) return [`Favourites ✓ shows ${J(await shown())} — proved nothing`];
+        const onlyFavs = T("Bamboo", "Cinder", "Dune", "Fjord"); // not on the Workshop's page
+        await js(`window.__st.status = ${J(SIGNED_OUT)}; true`);
+        await ev("steam-status", SIGNED_OUT);
+        await sleep(50);
+        const g0 = await shown();
+        const r0 = await js(`(() => { const r = document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"]'); const w = r?.querySelector("[data-wf-why]");
+          return { off: !!r?.hasAttribute("data-wf-off"), why: w ? w.textContent.trim() : null }; })()`);
+        console.log(`        signed out: ${J(g0)} ${J(r0)}`);
+        if (g0.some((t) => onlyFavs.includes(t))) v.push(`signed out: the favourites still show (${J(g0)})`);
+        if (!r0.off || r0.why !== "Sign in to Steam") v.push(`signed out: the row ${J(r0)} (want dimmed, "Sign in to Steam")`);
+        await shot("yours-signout");
+        // another account signs in, its favourites held
+        const B = { ...SIGNED_IN, accountName: "probe-acct-2" };
+        await js(`window.__favs = { hold: true }; true`);
+        const n0 = (await favAsks()).length;
+        await js(`window.__st.status = ${J(B)}; true`);
+        await ev("steam-status", B);
+        await sleep(400);
+        const g1 = await shown(), l1 = await lineNow(), asks = (await favAsks()).slice(n0);
+        console.log(`        another account, held: ${J(g1)}, line ${J(l1?.text)}, asks ${J(asks)}`);
+        if (g1.some((t) => SIX.includes(t))) v.push(`another account signed in: the first one's favourites show (${J(g1)})`);
+        if (l1?.text !== "Loading your favourites…") v.push(`another account signed in: the line reads ${J(l1?.text)} (want "Loading your favourites…")`);
+        if (!asks.includes("open")) v.push(`another account signed in: no sync=open (${J(asks)})`);
+        await js(`window.__favsLet(${J(fv(9, [GLACIER]))})`);
+        const g2 = await shownAs(T("Glacier"));
+        if (J(g2) !== J(T("Glacier"))) v.push(`another account's favourites: ${J(g2)} (want its own, Glacier)`);
+        await shot("yours-signout-other");
+      } finally { await js(`window.__favs = null; true`).catch(() => {}); await yoursDone(); }
       return v;
     });
 

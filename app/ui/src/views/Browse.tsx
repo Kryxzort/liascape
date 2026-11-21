@@ -8,6 +8,7 @@ import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
 import { WsListNote } from "../components/WorkshopSocial";
+import { WsSetLoad } from "../components/WsSetLoad";
 import { useMotion } from "../components/motion";
 import { firstPreview, useHoverOrder, useIdleOrder } from "../components/mediaAssets";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
@@ -21,7 +22,7 @@ import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper, WorkshopFilter } from "../api/client";
 import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
-import { buildLocalSet, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
+import { FAVORITES_TAG, buildLocalSet, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // WE-local browse sort menu (client-side over the single loaded page).
@@ -44,6 +45,9 @@ const TYPE_TAGS = new Set(WF_GROUPS.find((g) => g.id === "type")!.subs[0].tags.m
 const withoutType = (f: WorkshopFilter): WorkshopFilter =>
   ({ ...f, include: f.include.filter((t) => !TYPE_TAGS.has(t)), exclude: f.exclude.filter((t) => !TYPE_TAGS.has(t)) });
 const NO_IDS = new Set<string>();
+// the favourites' count check while Browse shows (the backend asks Steam at most every 50 s of these)
+const FAV_CHECK_MS = 60_000;
+const isYours = (t: string) => t === LIBRARY_TAG || t === FAVORITES_TAG;
 
 // PERF: memo'd (App passes a stable onShowInLibrary) — App's re-renders don't reach the grid
 export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrary: (path: string) => void }) {
@@ -93,6 +97,20 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const scenesOn = useStore((s) => !!s.settings?.allowScenes);
   const presetsCan = useStore((s) => presetsOn(s.settings));
   const loadLibDetails = useStore((s) => s.loadLibDetails);
+  const loadFavorites = useStore((s) => s.loadFavorites);
+  const setBrowseFilter = useStore((s) => s.setBrowseFilter);
+  const setQuery = useStore((s) => s.setQuery);
+  const appActive = useStore((s) => s.appActive);
+  // Browse showing the Workshop with a Favourites row ✓ / ✕ (its sign-in usable): the id diff when it opens, or when the row,
+  // the sign-in or the source brings it (sync=open, shared with a row's own in the store), then the count check about once a
+  // minute while it shows and the window is active; no other timed refresh. Guard: probe-steam yours:check, yours:oneOpen
+  const favOn = ws && modes.fav !== null;
+  useEffect(() => { if (favOn) loadFavorites("open"); }, [favOn, loadFavorites]);
+  useEffect(() => {
+    if (!favOn || !appActive) return;
+    const t = setInterval(() => loadFavorites("check"), FAV_CHECK_MS);
+    return () => clearInterval(t);
+  }, [favOn, appActive, loadFavorites]);
   const libCards = useMemo(() => (setOn && modes.lib ? libraryCards(libItems, libDetails) : []), [setOn, modes.lib, libItems, libDetails]);
   const libAdded = useMemo(() => new Map(libItems.flatMap((i) => (i.workshopId ? [[i.workshopId, Date.parse(i.addedAt)] as const] : []))), [libItems]);
   const setMatch = useMemo(() => (ws ? localMatcher(wsList?.kind === "presets" ? withoutType(browseFilter) : browseFilter) : null), [ws, wsList, browseFilter]);
@@ -211,6 +229,17 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     ? openExternal({ url: x.pageUrl })
     : openExternal({ path: x.pageUrl, reveal: true, isScene: x.isScene, workshopId: x.workshopId }));
 
+  // a local set nothing in it matches (inside a creator's or a scene's presets list too, where the list's own note stays
+  // hidden): say so, with a way out that clears the search and the other tags but never the Yours rows, the set itself. Not
+  // while the favourites are still coming or couldn't be read: the load line speaks then. Guard: probe-steam yours:empty
+  const setEmpty = setOn && !sorted.length && !(modes.fav === "inc" && (!favs || !!favs.loading || !!favs.error));
+  const others = browseFilter.include.some((t) => !isYours(t)) || browseFilter.exclude.some((t) => !isYours(t));
+  const setClear = query && others ? "Clear search and filters" : query ? "Clear search" : others ? "Clear filters" : null;
+  const clearOthers = () => {
+    if (others) setBrowseFilter({ include: browseFilter.include.filter(isYours), exclude: browseFilter.exclude.filter(isYours) });
+    if (query) setQuery("");
+  };
+
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
   // the filter panel: docked from WF_DOCK_QUERY up, a drawer below (its toggle is the top bar's split button, App.tsx)
   const col = useFilterPanel("browse", !!scope);
@@ -219,7 +248,9 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   return (
     <>
     <div className="scroll br-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+      {ws && <WsSetLoad />}
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
+      {setEmpty && <NoMatch kind="set" text="Nothing here matches" clear={setClear} onClear={clearOthers} />}
       <WsListNote />
       <div className="grid">
           {sorted.map((w) => (

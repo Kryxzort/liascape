@@ -33,6 +33,10 @@ export { FAVORITES_TAG };
 // the favourites can be read only for a signed-in account Steam hasn't rejected: otherwise the row is dimmed, a saved ✓ / ✕
 // stays (it comes back with the sign-in) but means nothing, and it can only be cleared
 export const favoritesUsable = (steam: State["steam"]) => !!steam?.signedIn && !steam.rejected;
+// the Favourites row reads as signed out only once Steam's status is known: before it (or when /steam/status couldn't be read,
+// steam null) "Sign in to Steam" would be a guess, so the row isn't dimmed, though ✓ / ✕ still can't be set until it's usable.
+// Guard: probe-steam yours:steamUnknown
+export const favoritesSignedOut = (steam: State["steam"]) => steam !== null && !favoritesUsable(steam);
 // API: Helpers/Presets.cs LegacyReason, word for word
 export const PRESET_LEGACY = "Presets play only in the Liascape player";
 // Why a library item can't play now, or null: a preset's own reason (GET /library), and under the legacy engine every preset
@@ -208,9 +212,11 @@ interface State {
   // the Yours rows' states on the Workshop (Favourites none while it can't be used: favoritesUsable); a local set shows (a ✓
   // on the Workshop source): Browse then sends no /browse
   setModes(): SetModes; localSetOn(): boolean;
-  // one read of the favourites at a time (a call meanwhile reads once more after it); the library's Workshop items' details
-  // not held yet, in one ask
+  // one read of the favourites at a time (a call meanwhile shares it, or reads once more after it); the library's Workshop
+  // items' details not held yet, in one ask
   loadFavorites(sync: "none" | "open" | "check"): Promise<void>; loadLibDetails(): Promise<void>; setLocalSort(v: string): void;
+  // WS workshop-favorites: the backend's favourites are at `version` now
+  favoritesChanged(version: number): void;
   // the active Browse source's filter column, if it has one: the Workshop's or the local WE folder's
   browseScope(): FilterScope | null;
   // the filter column (components/WorkshopFilterColumn.tsx), per scope: one tag's state (include / exclude / off), the
@@ -327,7 +333,11 @@ let browseGen = 0; // the Browse list's generation (reload / loadMore)
 // a local set's list: nothing from /browse, and one key for every set (Browse keys its kept scroll on the set's own view)
 const NO_ITEMS: Wallpaper[] = [];
 const LOCAL_FOR = "local";
-let favReading: Promise<void> | null = null, favAgain: "none" | "open" | "check" | null = null;
+type FavSync = "none" | "open" | "check";
+// the favourites' read on its way (loadFavorites): its promise, the sync it sent and the account epoch it started in, and the
+// read wanted after it. favEpoch grows with every change of the usable sign-in (the subscription at the end of this file): a
+// read that started for another account is dropped.
+let favReading: Promise<void> | null = null, favAgain: FavSync | null = null, favFlight: { sync: FavSync; epoch: number } | null = null, favEpoch = 0;
 const FAV_RANK = { none: 0, check: 1, open: 2 } as const;
 let libDetailsReading: Promise<void> | null = null;
 const libDetailsAsked = new Set<string>();
@@ -405,24 +415,42 @@ export const useStore = create<State>((set, get) => ({
   browseScope() { const src = get().sources[get().activeSource]; return src?.supportsTagFilter ? "workshop" : src?.supportsLocalFilter ? "weLocal" : null; },
   setModes() { return setModesOf(get().browseFilter, favoritesUsable(get().steam)); },
   localSetOn() { return get().isWorkshop() && isLocalSet(get().setModes()); },
-  // API: GET /workshop/my-favorites. A read is dropped when the store already holds a newer version (a later read landed
-  // first); one asked while another runs is read right after it, so a version announced meanwhile is never missed.
+  // API: GET /workshop/my-favorites. One read at a time. A call while one runs for the same account and reaches as far (an
+  // open covers a check; the start's and a reconnect's reloads, Browse's open beside a row's) is that read: the backend's open
+  // isn't throttled, so each one asked would start Steam's diff again. A "none" (a newer version was announced, and the read
+  // on its way may predate it), a farther reach or another account's reads once more right after it. A read is dropped when
+  // the store already holds a newer version (a later read landed first) or the account changed meanwhile.
+  // Guard: probe-steam yours:oneOpen, yours:signOut
   async loadFavorites(sync) {
-    if (favReading) { if (!favAgain || FAV_RANK[sync] > FAV_RANK[favAgain]) favAgain = sync; return favReading; }
+    if (favReading) {
+      const f = favFlight;
+      if (sync !== "none" && f && f.epoch === favEpoch && FAV_RANK[sync] <= FAV_RANK[f.sync]) return favReading;
+      if (!favAgain || FAV_RANK[sync] > FAV_RANK[favAgain]) favAgain = sync;
+      return favReading;
+    }
     favReading = (async () => {
-      let s: "none" | "open" | "check" | null = sync;
+      let s: FavSync | null = sync;
       while (s) {
         favAgain = null;
+        const epoch = favEpoch;
+        favFlight = { sync: s, epoch };
         try {
           const r = await api.workshopMyFavorites(s);
           const cur = get().wsFavs;
-          if (!r.signedIn || !cur || r.version >= cur.version)
+          if (epoch === favEpoch && (!r.signedIn || !cur || r.version >= cur.version))
             set({ wsFavs: { ...r, ids: new Set(r.items.map((w) => w.workshopId).filter((x): x is string => !!x)) } });
         } catch { /* the backend is away: what shows stays */ }
         s = favAgain;
       }
-    })().finally(() => { favReading = null; });
+    })().finally(() => { favReading = null; favFlight = null; });
     return favReading;
+  },
+  // API: WS workshop-favorites (no ids): read the list again while a Favourites row uses it and the copy held is older — a
+  // first load's pages fill the grid as they come, a star (here, on Steam) joins or leaves it with no reload.
+  // Guard: probe-steam yours:loadLine, yours:starLive
+  favoritesChanged(version) {
+    const f = get().wsFavs;
+    if (get().setModes().fav !== null && (!f || version > f.version)) get().loadFavorites("none");
   },
   // API: POST /workshop/details, at most 2000 ids an ask
   async loadLibDetails() {
@@ -883,6 +911,23 @@ useStore.subscribe((s) => {
   localWas = on;
   const gen = browseGen;
   queueMicrotask(() => { if (gen !== browseGen) return; clearTimeout(filterTimer); useStore.getState().reload(); });
+});
+
+// The favourites are one account's: when the usable sign-in changes (signed out, Steam turning it down, another account),
+// the copy held goes at once and a read on its way is dropped (favEpoch), so no account sees another's favourites for a
+// frame; signed in with a Favourites row on, it reads its own (sync=open). Steam's status read for the first time is no
+// change: the page's first reads ask for the favourites themselves. Guard: probe-steam yours:signOut
+let favAccount: string | null | undefined; // undefined = Steam's status not known yet
+useStore.subscribe((s) => {
+  if (s.steam === null) return;
+  const acct = favoritesUsable(s.steam) ? s.steam.accountName : null;
+  if (acct === favAccount) return;
+  const first = favAccount === undefined;
+  favAccount = acct;
+  if (first) return;
+  favEpoch++;
+  if (s.wsFavs) useStore.setState({ wsFavs: null });
+  if (acct !== null && useStore.getState().setModes().fav !== null) useStore.getState().loadFavorites("open");
 });
 
 // A library listing depends on the engine and scene support (a preset's legacy reason, the presets the WE auto-import brings):

@@ -1,6 +1,6 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
 import { Check, ChevronDown, Dot, Layers, Monitor, Palette, Shield, Sparkles, Tags, UserRound, X, type LucideIcon } from "lucide-react";
-import { favoritesUsable, filterOf, useStore, type FilterScope, type TagState } from "../store";
+import { favoritesSignedOut, filterOf, useStore, type FilterScope, type TagState } from "../store";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
@@ -110,7 +110,7 @@ function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState
   const included = tags.filter((x) => states.get(x.tag) === "inc").length;
   const bodyId = useId();
   const match = useStore((s) => (g.match ? filterOf(s, scope)[g.match.key] : "any"));
-  const favOff = useStore((s) => !favoritesUsable(s.steam));
+  const favOff = useStore((s) => favoritesSignedOut(s.steam));
   return (
     <section className={`wf-grp${n ? " has-active" : ""}`} data-wf-group={g.id} data-wf-collapsed={collapsed || undefined}
       role="group" aria-label={`${g.name} (${match === "all" ? "all of" : "any of"})`}>
@@ -188,12 +188,14 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
   );
 });
 
-// a local filter that leaves nothing of the list: say so where the grid would be, with the way out
-export function NoMatch({ onClear }: { onClear: () => void }) {
+// a local filter that leaves nothing of the list: say so where the grid would be, with the way out (`clear` its words; null =
+// nothing to clear, no button). `kind` tells the cases apart: "" a local folder's filter, "set" a Yours row's set (Browse)
+export function NoMatch({ onClear, text = "No wallpapers match these filters.", clear = "Clear filters", kind = "" }:
+  { onClear: () => void; text?: string; clear?: string | null; kind?: string }) {
   return (
-    <div className="wf-none" data-wf-none>
-      <span>No wallpapers match these filters.</span>
-      <button type="button" className="btn ghost" onClick={onClear}>Clear filters</button>
+    <div className="wf-none" data-wf-none={kind}>
+      <span>{text}</span>
+      {clear && <button type="button" className="btn ghost" onClick={onClear}>{clear}</button>}
     </div>
   );
 }
