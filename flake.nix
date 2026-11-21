@@ -291,11 +291,13 @@
           Name=Liascape
           Comment=Live wallpaper manager (Wayland)
           Exec=$out/bin/liascape
+          Icon=liascape
           Type=Application
           Categories=Utility;
           Keywords=wallpaper;live;wayland;video;
           StartupWMClass=liascape
           EOF
+          install -Dm644 ${./app/ui/public/favicon.svg} $out/share/icons/hicolor/scalable/apps/liascape.svg
 
           runHook postInstall
         '';

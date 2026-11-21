@@ -71,9 +71,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
             calls `pactl`/`parec` any more), and `libxkbcommon` / `zlib` if still nothing links them (`namcap` flags both;
             install.sh still preflights xkbcommon), then publish `liascape-git` to the AUR.
-      - [ ] An app icon: none exists (`app/ui/public/favicon.svg` and `app/ui/src/assets/hero.png` are Vite's template
-            art), so the desktop entry has no `Icon=`. Add one to `scripts/install.sh` and the flake under
-            `share/icons/hicolor/scalable/apps/` once there is an icon.
       - [ ] After the switch-over, rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
             from install.sh's staged tree on an old glibc (an Ubuntu 22.04 container); bundle libmpv and its FFmpeg,
             libplacebo, libass, SDL2, harfbuzz/freetype, lz4, libxkbcommon and static `ffmpeg`/`ffprobe`; take glibc,

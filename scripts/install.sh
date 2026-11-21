@@ -23,6 +23,8 @@
 #                                           liascape-scene-worker, liascape-transition, liascape-audio
 #   $PREFIX/lib/liascape/                   backend/ ui/ shell/ transitions/ + LWE's core library
 #   $PREFIX/share/applications/liascape.desktop
+#   $PREFIX/share/icons/hicolor/scalable/apps/liascape.svg   (app/ui/public/favicon.svg: one icon for the page, the
+#                                           desktop entry and the AppImage)
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 
@@ -48,6 +50,7 @@ S_BIN="$DESTDIR$BINDIR"
 S_LIBEXEC="$DESTDIR$LIBEXEC"
 S_LIB="$DESTDIR$LIBDIR"
 S_APPS="$DESTDIR$APPSDIR"
+S_ICONS="$DESTDIR$PREFIX/share/icons/hicolor/scalable/apps"
 
 if [ "$DRY" = 1 ]; then
   cat <<EOF
@@ -61,6 +64,7 @@ $(for d in "$ROOT"/src/native/*/; do [ -f "${d}Makefile" ] && echo "  $S_LIBEXEC
   $S_LIB/ui/  $S_LIB/shell/  $S_LIB/transitions/
 $([ "$NO_SCENES" = 0 ] && echo "  $S_LIB/liblinux-wallpaperengine-core.so*")
   $S_APPS/liascape.desktop
+  $S_ICONS/liascape.svg
 EOF
   exit 0
 fi
@@ -203,6 +207,7 @@ cat > "$S_APPS/liascape.desktop" <<EOF
 Name=Liascape
 Comment=Live wallpaper manager (Wayland)
 Exec=$BINDIR/liascape
+Icon=liascape
 Type=Application
 Categories=Utility;
 Keywords=wallpaper;live;wayland;video;
@@ -211,6 +216,8 @@ EOF
 # only for a direct install: in a package the cache belongs to the system (its package manager rebuilds it), and a staged
 # mimeinfo.cache would clash with the one already on disk
 if [ -z "$DESTDIR" ]; then update-desktop-database "$S_APPS" 2>/dev/null || true; fi
+install -Dm644 "$ROOT/app/ui/public/favicon.svg" "$S_ICONS/liascape.svg"
+if [ -z "$DESTDIR" ]; then gtk-update-icon-cache -qtf "$PREFIX/share/icons/hicolor" 2>/dev/null || true; fi
 
 echo ""
 echo "Done. Installed to $PREFIX (bin/liascape, $LIBEXEC, lib/liascape/)."
