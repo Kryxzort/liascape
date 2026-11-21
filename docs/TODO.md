@@ -79,6 +79,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          running, Wallpaper Engine not owned, the client or the sign-in refused), Download / Subscribe open the item's
          Steam page. A short note says "Opened in Steam: subscribe there and it downloads here".
        - A one-off download stays disabled with why.
+       - "Use the Steam app" becomes the default mode (owner): the Settings model's default and the UI's
+         `g("workshopDownloadMode", …)` fallback. The page fallback covers its failures (no Steam running, no Wallpaper
+         Engine), so a fresh install works either way. The README's download lines name the new default.
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
