@@ -37,6 +37,15 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        check if it does: its Library fallback (`afterControl`, `if (!m.cards().length) m.tab("Library")`) counts
        Browse's cards too (`Card.tsx` and its skeletons are `.card.lib`), so a page left on Browse reads as no mark and
        an empty bar (the bar mounts on Library only) without switching; the printed `tab` tells.
+       Read (2026-11-21): the cell can't reach the Browse gap (first tab is Library, every cell reloads, `cli:next`
+       touches no UI); the one cause of both symptoms is a page whose first read hasn't landed: `readBackend`
+       (`store/index.ts`) applies all 11 reads in one `set()` after one `Promise.all`, so a slow side read keeps cards
+       and bar empty, and `loadUi` (`probe-matrix.js`) gives up waiting after 10 s without saying so. Fix: `loadUi` waits
+       up to 20 s for ≥ 4 Library cards and the reset playlist's `.pl-item`s, else SETUP "page never finished its first
+       read"; `cards()` scoped to `.lib-scroll .card.lib` and one `m.toLibrary()` for the fallbacks (fuzz chains and
+       `tidyUi` can reach Browse); the failure print adds `data-page`, the Library card count and "Library is empty".
+       Optional app side: apply library / playlist / `/current` / settings as each lands, a loadbar before the first
+       `/library` instead of "Library is empty".
 97. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
@@ -206,6 +215,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       owner's call.
 
 ## liascape-player (after design approval)
+- [ ] A PipeWire restart can wedge an mpv core for good (about 1 kill in 6 under load): the audio bus reconnects but
+      that player's mpv stays stuck. Found while hardening `i7_bus_reconnects_after_pipewire_restart`; unlanded work
+      (probe `sources {mpv: false}` skipping the synchronous mpv reads, an `audio_device` probe field, the test
+      detecting the wedge and rerunning) saved as `~/Projects/liascape-salvage/a552e4be-probe-mpv-false.diff` (base
+      516c8fa9). Find why the core wedges before taking the test half.
 - [x] **Advance-on-end play-time limits** (owner, 2026-10-28: "maximum minimum when end on wallpaper"): a minimum
       (a shorter clip loops and advances at the end of the loop that reaches it — never mid-loop; a still image shows
       for it) and a maximum (a longer clip, and a scene, advances once it played that long — now, with its transition),
