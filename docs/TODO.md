@@ -5,13 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-83. [ ] (owner) Bug: a card whose preview is a gif gets a darker name strip while the window is unfocused. Not
-       reproduced: the strip (`.lib-title`, a fixed 40 % black) stays 0.600 × the picture under it focused, unfocused
-       and refocused, in the matrix (software GL) and the agent window (hardware GL, bg-live + text shadow), on 16 gif
-       cards. What does change on blur is the picture: the gif hides and its still shows (docs/decisions.md § "Let a
-       hidden gif preview keep its own clock"), a different frame, so the strip over it can look darker or lighter.
-       Needs from the owner: which card, and a focused / unfocused screenshot of it. If it's the gif → still swap,
-       "Play GIF previews as videos" already holds the frame.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
