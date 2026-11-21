@@ -6,6 +6,7 @@
 #  - every backticked repo path in CLAUDE.md, the rules and the skills exists (exact, a tracked directory, a glob, or
 #    a suffix of a tracked path such as `hooks/useLinger.ts`; runtime and build-output paths are skipped);
 #  - no "see memory X" pointers (auto memory is invisible to subagents); no emails / real IPs in rules and docs (public repo);
+#  - code paths named in rules, reference docs and the README exist (plans, specs, spikes, reports exempt).
 #  - guards resolve: every `Guard: probe-<area> <cell>` names a cell in that probe, every `Guard: scripts/….sh` exists.
 #  - no dead citations: every `.claude/rules/….md` or `docs/….md` path named in any tracked or new text file (code
 #    comments included) exists — one problem per missing path, with its count and the files citing it.
@@ -194,6 +195,20 @@ for f in sorted(set(listed)):
                 with open(pf, encoding='utf-8', errors='replace') as fh: _probe[pf] = fh.read()
             if not cell_found(_probe[pf], cell): bad(f, f'guard names a cell {pr} lacks: {cell}')
 print(f'guards: {nguards} checked')
+
+# Code paths in the rules, reference docs and README (`scripts/….sh`, `src/…/x.rs`, `app/shell/probe-x.js`) exist: a rule
+# that sends an agent to a moved file costs it a search, and a README command that names a deleted script fails for a
+# user. Plans and specs (they name files still to be written), spikes and dated reports are exempt.
+CODE = re.compile(r"(?<![\w./-])((?:scripts|app/shell|app/ui/src|src/[\w-]+)/[\w./-]*[\w-]\.(?:sh|mjs|js|ts|tsx|cs|rs))\b")
+ncode = 0
+for f in sorted(set(listed)):
+    if not f.endswith('.md') or not (f in ('CLAUDE.md', 'README.md') or f.startswith(('.claude/', 'docs/'))): continue
+    if re.match(r'docs/(superpowers|player/spikes|player/reports)/', f) or not os.path.isfile(f): continue
+    with open(f, encoding='utf-8', errors='replace') as fh: text = fh.read()
+    for cp in CODE.findall(text):
+        ncode += 1
+        if not os.path.exists(cp) and not ignored(cp): bad(f, f'names a code path that does not exist: {cp}')
+print(f'code paths in docs: {ncode} checked')
 
 if not yaml: print("(PyYAML not installed: frontmatter checked with the strict built-in parser)")
 for p in problems: print("PROBLEM " + p)
