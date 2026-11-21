@@ -166,6 +166,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] Settings → Watched folders: the card's height snaps (and every section below jumps) when a removed row's exit
+      ends, and it grows at once when a folder is added; the rows and "Add folder" already glide (`ROW_GLIDE`, the
+      held `min-height` in `views/Settings.tsx`). Gliding the section's own height means making the shared `Section` a
+      framer layout node, which fights `.ssection`'s hover `transform`; animate the height another way (a measured
+      height transition) or move the hover lift onto an inner element. Guard: probe-import `import:settings` sampling
+      the next section's y per frame on the remove.
 - [ ] `--probe probe-libops.js` `libops:backfill` fails in a whole-probe run (twice on 2026-11-20, this tree's UI and the
       previous bundle alike) and passes with `--only 'libops:(combined|backfill)'`: mid-run the line's name turns from
       "Making previews" to "Making Low previews" (ClipStore's phase leaves `make` for a quality) and an operation is still
