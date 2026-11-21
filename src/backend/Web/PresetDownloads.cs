@@ -86,6 +86,44 @@ public static class PresetDownloads
         catch (Exception e) { Console.WriteLine($"workshop: {who}: fetching its base scene failed: {e.Message}"); }
     }
 
+    /// After a preset is added from the Wallpaper Engine folder (Browse's "Wallpaper Engine (Local)", `presetDir` = its folder
+    /// there): its base scene from the same folder, added the way the preset was (the same source's detail through
+    /// AppOps.DownloadAsync: a link, or the library's own copy), unless the library has it. Nothing is asked of Steam and no
+    /// download mode is involved; a base that isn't there (or isn't a scene) leaves the preset "Needs its base scene", whose
+    /// button fetches it by the download mode. Never throws. Guard: test-presets.sh § 1 Wallpaper Engine (Local)
+    public static async Task AddLocalBaseAsync(LibraryItem preset, string presetDir, bool oneOff)
+    {
+        string who = preset.WorkshopId ?? System.IO.Path.GetFileName(presetDir);
+        try
+        {
+            if (Presets.Read(presetDir) is not { BaseId: { } baseId } || baseId == preset.WorkshopId) return;
+            if (Presets.BaseDirOf(baseId) != null) { Done(preset); return; }
+            if (System.IO.Path.GetDirectoryName(System.IO.Path.TrimEndingDirectorySeparator(presetDir)) is not { } weDir) return;
+            string baseDir = System.IO.Path.Combine(weDir, baseId);
+            if (Presets.KindOf(baseDir) != "scene")
+            {
+                Console.WriteLine($"workshop: {who}: its base {baseId} isn't a scene in the Wallpaper Engine folder — not added");
+                return;
+            }
+            Console.WriteLine($"workshop: {who}: adding its base {baseId} from the Wallpaper Engine folder too");
+            var detail = await new Liascape.Services.WallpaperEngineService().GetDetailAsync(new WallpaperResult
+            { Title = TitleOf(baseDir) ?? baseId, ThumbnailUrl = "", PageUrl = baseDir, WorkshopId = baseId, IsScene = true }).ConfigureAwait(false);
+            await AppOps.DownloadAsync(detail, "", baseDir, CancellationToken.None, null, oneOff).ConfigureAwait(false);
+            if (Presets.BaseDirOf(baseId) != null) Done(preset);
+        }
+        catch (Exception e) { Console.WriteLine($"workshop: {who}: adding its base scene from the Wallpaper Engine folder failed: {e.Message}"); }
+    }
+
+    static string? TitleOf(string dir)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "project.json")));
+            return doc.RootElement.TryGetProperty("title", out var t) && t.GetString() is { Length: > 0 } s ? s : null;
+        }
+        catch { return null; }
+    }
+
     // the base's details from Steam: BaseOfAsync's when it names the same base (the shared details cache), else the base's own;
     // null = Steam couldn't be reached
     static async Task<BaseFacts?> FactsAsync(string? presetId, string baseId, WorkshopSocialOps.PresetBaseInfo? info)

@@ -298,7 +298,7 @@ public static class WorkshopDownloader
         // "Report Workshop download phases, not a percent"). Phases only, no percent: Steam may reserve a staged file's full size before writing it.
         string? shown = null;
         void Phase(string s) { if (s != shown) { shown = s; progress?.Report((-1, s)); } }
-        bool delivered = false;
+        bool delivered = false, viaClient = false;
         var entry = todo;
         try
         {
@@ -312,11 +312,11 @@ public static class WorkshopDownloader
                     case SteamTodo.Outcome.UseSteamApp:
                         // "Let the Steam app do all N" — the Steam client subscribes it (one helper at a time, app-wide)
                         todo = null; shown = null;
-                        var viaClient = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
-                        if (viaClient.Folder == null)
-                            throw new InvalidOperationException($"The Steam app couldn't subscribe to it — {viaClient.Fallback}");
-                        _viaSteamApp[workshopId] = 0;
-                        if (TryGetMediaPath(viaClient.Folder) != null) { delivered = true; return viaClient.Folder; }
+                        var client = await SteamClientUgc.SubscribeAsync(workshopId, settings, progress, ct);
+                        if (client.Folder == null)
+                            throw new InvalidOperationException($"The Steam app couldn't subscribe to it — {client.Fallback}");
+                        viaClient = true;
+                        if (TryGetMediaPath(client.Folder) != null) { delivered = true; return client.Folder; }
                         continue; // Steam's folder without the media we expect: the usual folders' poll decides
                 }
                 // still waiting for its page's turn: no 10-minute clock yet (item 5 of a bulk download would time out queued)
@@ -345,7 +345,11 @@ public static class WorkshopDownloader
                 else await Task.WhenAny(Task.Delay(pollMs, ct), wake); // a Skip / its turn wakes it at once
             }
         }
-        finally { if (entry != null) SteamTodo.Finish(entry, delivered); }
+        finally
+        {
+            if (entry != null) SteamTodo.Finish(entry, delivered);
+            if (delivered && viaClient) _viaSteamApp[workshopId] = 0; // only a delivered item: AcquireAsync's caller reads it next
+        }
     }
 
     /// What a "Subscribe with Steam login" download / subscribe without a usable sign-in says: why, and what to do.

@@ -298,6 +298,10 @@ public static class AppOps
             EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
             // a preset brings its base scene, by this download's own mode and action (in the background, never throws)
             if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) _ = PresetDownloads.FetchBaseAsync(item, oneOff, viaSteamApp);
+            // …and one added from the Wallpaper Engine folder (Browse's "Wallpaper Engine (Local)") its base from beside it
+            else if (!detail.IsWorkshopAcquire && detail.WorkshopId != null && item.IsScene && Directory.Exists(detail.DownloadUrl)
+                && Presets.Read(item.VideoPath) != null)
+                _ = PresetDownloads.AddLocalBaseAsync(item, detail.DownloadUrl, oneOff);
             return item;
         }
         finally { if (letGo != null) WorkshopDownloader.LetGoOfOneOff(letGo); }

@@ -48,6 +48,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        whenever the dev shell builds against it (e.g. `nix build .#lwe-core -o src/player/target/lwe-core-gcroot` in
        the devShell hook or `scripts/dev.sh`), and make a worker that can't load its core report that reason (not
        "crashed") so the card says what's wrong.
+110. [ ] Three layout checks fail, on the build before preset wallpapers too (`LIASCAPE_MATRIX_SCREEN=2560x1440
+       scripts/test-ui-matrix.sh --probe probe-layout.js`): switching to Settings forces 4–6 layouts from script
+       (framer's `measureScroll`) and switching to Library runs a stray animation frame (`perf:tabs`); the text-shadow
+       check finds no "Text shadow" row (an Advanced-level row: likely the cell never raises the level;
+       `look:textShadow`); Browse's grid has nothing to scroll in the wheel-glide check (`scroll:glide:browse`). Find
+       each cause; fix the tab switch's forced layouts, and make the other two cells set up what they need.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

@@ -30,7 +30,9 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Steam's Workshop page CSS classes are hashed: parse item ids from `filedetails/?id=` hrefs.
 - WE local: `project.json` `type` video → video, scene or `scene.pkg` → scene (only with `AllowScenes`), a preset naming a Workshop
   base → its own card, `isPreset` + `isScene` (only while presets can play: `WallpaperEngineService.AllowPresets`, set like
-  the Workshop's), web/application → skipped. Guard: probe-filters `local:wePreset`.
+  the Workshop's), web/application → skipped. Guard: probe-filters `local:wePreset`. Adding such a preset adds its base from
+  the same folder the same way (`PresetDownloads.AddLocalBaseAsync`: that source's detail through `AppOps.DownloadAsync`,
+  no download mode); no base there → "Needs its base scene". Guard: `scripts/test-presets.sh` § 1 Wallpaper Engine (Local).
 
 ## Steam Community rate limits (`Helpers/SteamGate.cs`)
 - Send EVERY steamcommunity.com request through `SteamGate.SendAsync(req, kind)`; never call it around the gate. Steam blocks the user's IP for 30+ min once tripped.

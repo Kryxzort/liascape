@@ -182,13 +182,13 @@ Every player path loops a lone video; there is no `Loop` setting.
 A plain click applies in the Library, opens the item to look over in Browse (double-click, Enter or the hover button
 downloads and applies; a library item's card has no button). A right-click opens the sidebar everywhere, applies nothing, keeps
 the selection; no item menus. Ctrl / Shift-click only select. An open Library sidebar follows a click.
-`.claude/rules/ui/design.md` § Interaction rules; probe-select `*:plainClick`, `modClick`, `rightClickSel`.
+`.claude/rules/ui/design.md` § Interaction rules (its guards).
 
 ### Fade, never move, with motion off — 2026-11-12
 "Smooth window animations" off and `prefers-reduced-motion` mean nothing moves and what appears, leaves or swaps
-cross-fades in place on opacity alone, in 120 ms — not "every change is instant": an opacity fade moves nothing and runs
-on the compositor, while an instant change makes panels and menus pop. Enforced: `.claude/rules/ui/design.md` § Motion
-off; the motion-off probe cells (`app/shell/motion-off.js`).
+cross-fades in place on opacity alone, in 120 ms — not "every change is instant": the setting serves people sensitive to
+motion and people saving its cost; an opacity fade moves nothing and runs on the compositor, while an instant change makes
+panels and menus pop. Enforced: `.claude/rules/ui/design.md` § Motion off; the motion-off probe cells.
 
 ### Let a hidden gif preview keep its own clock; hold its frame only as a video — 2026-11-18
 A gif preview out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and undecoded,

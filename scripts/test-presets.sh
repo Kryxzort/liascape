@@ -5,8 +5,9 @@
 #     linked to its base scene by Workshop id whatever form the base has (a `local/<id>` link, the library's own copy at
 #     that path once Steam's folder is gone, `workshop/<id>`, an `imported/` folder with that Workshop id), greyed with
 #     its reason when it can't play (no base, a malformed preset file, a base that is a preset / a video / a web
-#     wallpaper, the legacy engine); the WE auto-import brings presets in only with scene support on; trashing a preset
-#     leaves its base alone.
+#     wallpaper, the legacy engine); the WE auto-import brings presets in only with scene support on; a preset added from
+#     Browse's "Wallpaper Engine (Local)" brings its base from that folder the same way (a link), one whose base isn't
+#     there needs it; trashing a preset leaves its base alone.
 #  2. layered properties (SceneProperties): a preset's sidebar lists its base's properties with the preset's values as
 #     their defaults (conditions read them too); the card's own tweaks go to the preset's index entry only (a tweak equal
 #     to the preset's value drops, Reset returns to it); the base's tweaks never reach the preset or the other way round;
@@ -251,6 +252,25 @@ check "scene support on: /library/sync adds local/910000301 (a link), its index 
   "[\"$LIB/local/910000301\"] link [true,\"910000301\",\"Subscribed preset\"]"
 check "…a preset over its base, playable" "$(pf "$LIB/local/910000301" '[.isPreset, .presetReason, .basePath]')" "[true,null,\"$LIB/workshop/900000001\"]"
 check "…one with no Workshop id as its dependency stays out" "$([ -e "$LIB/local/910000302" ] && echo linked || echo none)" none
+
+echo "== 1. Wallpaper Engine (Local): adding a preset brings its base from that folder the same way"
+# Browse's "Wallpaper Engine (Local)" card of a preset (WallpaperEngineScraper: its folder as the page, isPreset); its base
+# 900000031 sits beside it in the Wallpaper Engine folder, 900000032 (the other preset's) doesn't
+mk_base "$WE/900000031" "Base scene (WE folder)"
+mk_preset "$WE/910000331" '"900000031"' "Local preset" '{"color":"0 0 1"}' preview.jpg
+mk_preset "$WE/910000332" '"900000032"' "Local preset, base elsewhere" '{"color":"0 0 1"}' preview.jpg
+WESRC=$(api "$U/sources" | jq '[.[] | select(.supportsLocalFilter)][0].index')
+weadd() { api -o "$T/body" -w '%{http_code}' -X POST "$U/download" -d "$(jq -nc --argjson s "$WESRC" --arg d "$WE/$1" --arg id "$1" \
+  '{source: $s, result: {title: $id, thumbnailUrl: "", pageUrl: $d, isScene: true, isPreset: true, workshopId: $id}, apply: false}')"; }
+check "add the preset from the Wallpaper Engine folder → 200, local/910000331 a link" \
+  "$(weadd 910000331) $([ -L "$LIB/local/910000331" ] && echo link)" "200 link"
+for _ in $(seq 1 50); do [ "$(pf "$LIB/local/910000331" '.presetReason')" = null ] && break; sleep 0.1; done
+check "…its base comes from the same folder the same way (local/900000031, a link), and the preset plays over it" \
+  "$([ -L "$LIB/local/900000031" ] && readlink "$LIB/local/900000031") $(pf "$LIB/local/900000031" '[.isScene, .isPreset]') $(pf "$LIB/local/910000331" '[.presetReason, .basePath]')" \
+  "$WE/900000031 [true,false] [null,\"$LIB/local/900000031\"]"
+check "a preset whose base isn't in the folder → 200, it needs its base scene, nothing else added" \
+  "$(weadd 910000332) $(sleep 1; pf "$LIB/local/910000332" '.presetReason') $([ -e "$LIB/local/900000032" ] && echo added || echo none)" \
+  '200 "Needs its base scene" none'
 
 echo "== 1. trash: a preset goes, its base stays"
 # the base's own fields (the background facts pass may add its frame size or size on disk meanwhile)
