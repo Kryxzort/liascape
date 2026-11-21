@@ -7,10 +7,9 @@ Choices that ruled out a tempting alternative, so nobody "fixes" them back. Form
 
 ### Run the agent window in a private compositor, not an output of the session's Hyprland — 2026-11-12
 Agents drive their own Liascape window (`scripts/agent-window.sh`) in a headless gamescope (no seat, input or DRM; bwrap,
-its own network namespace), never a headless output added to the owner's Hyprland: removing an
-output always warps the cursor to another monitor's centre and focuses it (`CMonitor::onDisconnect`, a forced warp that
-`cursor:no_warps` doesn't stop), and an output that stays is a workspace the owner's keys can land on. The script only
-reads Hyprland; its watcher aborts on any owner-side event. `.claude/rules/ui/shell-and-probes.md`.
+its own network namespace), never a headless output added to the owner's Hyprland: removing an output always warps the
+cursor to another monitor's centre (`CMonitor::onDisconnect`; `cursor:no_warps` doesn't stop it), and an output that
+stays is a workspace the owner's keys can land on. The script only reads Hyprland. `.claude/rules/ui/shell-and-probes.md`.
 
 ### Serve media from a second listener — 2026-11-12
 Chromium opens 6 HTTP/1.1 connections per origin; slow media loads held them all and API calls queued behind. Media
@@ -111,8 +110,8 @@ attempts extend Steam's block. `Web/SteamOps.cs`; `.claude/rules/backend/sources
 Owner: "steam token is kept in plaintext??" → "system keyring and then fallback to some file other than settings.json".
 settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`: the Secret
 Service, else `~/.config/liascape/steam-auth.json` (0600). Keyring-only was rejected: with no Secret Service (bare
-compositors) signing in wouldn't work; the file is as safe as Discord's and Chromium's "basic" store. A denied keyring
-means signed out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
+compositors) signing in wouldn't work; the file is as safe as Chromium's "basic" store. A denied keyring means signed
+out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
 
 ### Ask Steam for a whole library's details in one request; never cache "can't tell" as "none" — 2026-11-12
 Tags and trailers are Workshop listing, not files: auto-imported items lack them. CM `GetDetails` takes 1000 ids, not 100
@@ -125,6 +124,12 @@ arrive page by page in Steam's order, so a client-side sort would reshuffle what
 the local Wallpaper Engine source sorts client-side.
 
 ## Library
+
+### Play a preset as its own item over its base scene's folder — 2026-11-20
+A Workshop preset is its own Library card (title, preview, favourite, crash mark, playlist entry) whose source loads its
+base scene's folder with the preset's values layered on, so several presets of one scene share a playlist. Copying the
+scene into each preset was ruled out: hundreds of MB each, stale when the base updates, and it fights the overrides.
+`.claude/rules/backend/library.md` § Presets; guard: the adapter IT § presets, `scripts/test-presets.sh`.
 
 ### Remove only the link when a watched folder's file goes — 2026-11-18
 A source gone from a watched folder takes out its item only when the library links to it; a copy stays as the user's
@@ -181,11 +186,9 @@ the selection; no item menus. Ctrl / Shift-click only select. An open Library si
 
 ### Fade, never move, with motion off — 2026-11-12
 "Smooth window animations" off and `prefers-reduced-motion` mean nothing moves and what appears, leaves or swaps
-cross-fades in place on opacity alone, in 120 ms — not "every change is instant": the setting serves people sensitive to
-motion and people saving its cost; an opacity fade moves nothing and runs on the compositor, while an instant change
-makes panels and menus pop. Hover holds and pointer feedback just stay still; highlights and carets change at once; loops
-stand still but the spinner. Enforced: `.claude/rules/ui/design.md` § Motion off; the motion-off probe cells
-(`app/shell/motion-off.js`).
+cross-fades in place on opacity alone, in 120 ms — not "every change is instant": an opacity fade moves nothing and runs
+on the compositor, while an instant change makes panels and menus pop. Enforced: `.claude/rules/ui/design.md` § Motion
+off; the motion-off probe cells (`app/shell/motion-off.js`).
 
 ### Let a hidden gif preview keep its own clock; hold its frame only as a video — 2026-11-18
 A gif preview out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and undecoded,
@@ -195,8 +198,8 @@ GIF previews as videos" (off by default) holds it: the gif plays as its clip, pa
 Guard: matrix `appear:gifResume`, `appear:gifVideo`; `.claude/rules/ui/design.md` § Performance.
 
 ### Play every on-screen video preview, each as a small clip — 2026-11-18
-Every on-screen video preview plays a backend-made clip (`Web/ClipStore.cs`), never the wallpaper's file (it holds one of
-Chromium's 6 connections). Owner's terms: no storage options; one clip per item, box × dpr × "Video preview quality", up
+Every on-screen video preview plays a backend-made clip (`Web/ClipStore.cs`), never the wallpaper's file (it holds a
+connection). Owner's terms: no storage options; one clip per item, box × dpr × "Video preview quality", up
 to 5 min; re-made wider, shrunk when 2× too wide while idle. Each card's still, gif and clip is made ahead of it on the
 same worker and line, never a second queue; it waits while the PC is busy, not for a maximized window. Guard:
 `scripts/test-clip-sweep.sh`, `scripts/test-preview-backfill.sh`, matrix `clip:*`.
@@ -207,10 +210,9 @@ was the rebuild plus whole-page restyles, and windowing breaks keyboard reveal, 
 that find off-screen cards. Guard: probe-layout `tabs:keep`, `perf:tabs`; `.claude/rules/ui/design.md` § Performance.
 
 ### Make the UI itself a work of art — 2026-11-12
-The goal is an interface people would open just to interact with. Every control is designed, not defaulted: motion has
-physics (springs, overshoot that settles), icons act out their meaning, the cursor gets a response before the click, and
-nothing is the browser's stock look. "Correct and consistent" is the floor, not the bar. Every effect still follows the
-motion / glow / translucency toggles and the frame budget (`.claude/rules/testing.md`). Checklist: `.claude/rules/ui/design.md`.
+An interface people would open just to interact with: every control designed, not defaulted (springy motion, icons
+acting out their meaning, a response before the click); "correct and consistent" is the floor. Every effect still follows
+the motion / glow / translucency toggles and the frame budget. Checklist: `.claude/rules/ui/design.md`.
 
 ### Show tooltips only for what can't be seen — 2026-11-11
 Owner: "the tooltips everywhere is really annoying and redundant, not everything needs a tooltip".
@@ -236,16 +238,16 @@ YouTube's `loop=1&playlist=<id>` restarted early; `seekTo(0)` + `playVideo` on "
 
 ### Filter the Library and the local Wallpaper Engine folder in the page — 2026-11-12
 Owner's call: the Workshop's column and semantics (`WorkshopTags.Build`), matched in the page against each item's saved
-Steam tags, else its project.json's genres, rating and features (cached by write time, never written to the index).
-Each list keeps its own filter (a shared one would empty a local list with tags it can't know); a local column offers
-only tags some item has. Not a backend `/library` filter: the page holds every item and a request per click is slower.
+Steam tags, else its project.json's genres, rating and features. Each list keeps its own filter (a shared one would
+empty a local list with tags it can't know); a local column offers only tags some item has. Not a backend `/library`
+filter: the page holds every item and a request per click is slower.
 `components/workshopFilter.ts` `localMatcher`; guard probe-filters `lib:*`, `local:weFolder`.
 ### Filter the Workshop in a column of three-way switches — 2026-11-11
 The owner picked Wallpaper Engine's filter column over dropdowns and chips. Each tag is include / off / hide; clicking
 the name toggles include only, so hiding is deliberate (✕ or right-click). `components/WorkshopFilterColumn.tsx`.
 Placement (owner's pick): on the right, one panel at a time with the item sidebar and in its shape, toggled by the left
-half of the split sort button (`components/SortFilterButton.tsx`). Rejected: a left column under a pill (scrolled away),
-the pill in the top bar (wrapped it), an edge handle (cost grid width), a sticky row. Guard probe-filters `split:*`, `panel:*`, `swap:*`.
+half of the split sort button (`components/SortFilterButton.tsx`); a left column, a top-bar pill, an edge handle and a
+sticky row were rejected. Guard probe-filters `split:*`, `panel:*`, `swap:*`.
 ### Keep the playlist bar's items 112 px tall at every Thumbnail shape; the dock aims at a fixed rise — 2026-11-12
 The width follows the shape (Widescreen ≈ 199 × 112) rather than a fixed 112 px width: widescreen items were "too small"
 and the bar's height changed with the setting. The dock rises a fixed 12 px (not a fixed 1.16×, which on 112 px items

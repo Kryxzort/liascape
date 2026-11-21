@@ -42,11 +42,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-108. [ ] (owner) Preset wallpapers: browse, download and play other people's Wallpaper Engine presets as their own
-       Library items over their base scene, plus a scene's "Presets" list. Design approved 2026-11-20:
-       `docs/superpowers/specs/2026-11-20-preset-wallpapers-design.md`. Application wallpapers stay unplayable
-       (Wallpaper Engine removed the type from the Workshop after malware; running them means executing downloaded
-       Windows programs).
 109. [ ] A dev build's scene worker links the LWE core by its Nix store path (`LIASCAPE_LWE_CORE_DIR` from `nix develop`),
        which nothing roots: a Nix garbage collection removed it and every scene worker of the owner's release build
        exited 127 ("cannot open liblinux-wallpaperengine-core.so.0"), so every scene got a crash mark. Root the core

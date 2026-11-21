@@ -21,7 +21,9 @@ change between versions.
 **Finds wallpapers.** The Browse tab searches MotionBgs, Moewalls, Desktophut and the Wallpaper Engine Steam
 Workshop. You can browse the Workshop without signing in: filter by tags and age rating, sort the way Steam does, read
 comments, and see a creator's other wallpapers. Your local Wallpaper Engine folder shows up as a source too.
-Wallpaper Engine's web, application and preset wallpapers don't play yet, so Browse leaves them out.
+Wallpaper Engine's web and application wallpapers don't play, so Browse leaves them out. Presets (someone's saved
+settings for a scene) play over their scene in liascape-player: tick Preset in the Workshop's Type filter, or open a
+scene's Presets from its sidebar. Getting a preset gets its scene too.
 
 **Keeps a library.** Downloads land in your library, and so does anything new in your Wallpaper Engine Workshop folder
 (you can turn that off). Import a folder of your own videos, GIFs and pictures, or a backed-up Workshop folder, with the
