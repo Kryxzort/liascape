@@ -168,7 +168,12 @@ public static class LibraryStore
     {
         try { AtomicFile.WriteAllText(IndexPath(source), JsonSerializer.Serialize(idx, _json)); }
         catch { }
+        Saved?.Invoke(source);
     }
+
+    // After every index write of this process (the source's name), under the index lock: a listener only notes it (a
+    // timer kick), never reads or writes the library here. Every way an item comes, goes or changes form writes an index.
+    public static event Action<string>? Saved;
 
     // Read-modify-write a whole source's index under the same lock as SetMeta; `mutate` returns whether to save.
     // Reentrant (Monitor), so a writer touching two indexes can nest them and save in the order it needs.

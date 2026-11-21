@@ -34,6 +34,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` �
 - `RandomAndLaunch` re-seats both cursors (`_timedIndex` = the pick, forward history dropped). Guard: matrix `seq:random+next` / `seq:random+prev`.
 - `UpdateTimedSettings` keeps the elapsed time proportionally; it never restarts the current wallpaper.
 - A superseded aligned switch re-arms for A's end (backoff), it never switches now.
+- A timed session starts at its first item that isn't a preset (`ApplyTimedPlaylist`: Play, play-from, shuffle and every replay), and a resumed one moves past a preset (`RestoreTimedPlaylist`): LWE on a preset's folder dies behind a screen the old wallpaper left, with no crash advance. Guard: `scripts/test-legacy-launch.sh` § presets.
 
 ## Restart daemon (mpvpaper frame-buffer leak)
 - `RestartMpvpaperEverySeconds <= 0` → every restart path is a no-op. Under a timed playlist write `restart` to `pending_action.txt` instead of restarting directly; skip it while paused.

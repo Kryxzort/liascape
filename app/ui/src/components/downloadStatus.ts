@@ -10,6 +10,7 @@ export function shortDownloadStatus(status: string | undefined): string {
   if (status.startsWith("Steam is downloading")) return "Steam is downloading…";
   if (status.startsWith("Steam is finishing")) return "Steam is finishing…";
   if (status.startsWith("Subscribing")) return "Subscribing…";
+  if (status.startsWith("Getting its base scene")) return "Getting its base scene…"; // API: PresetDownloads.GettingBase
   if (status.includes("waiting for Steam")) return "Waiting for Steam…";
   return "Downloading…";
 }

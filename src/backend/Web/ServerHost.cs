@@ -171,6 +171,7 @@ public static class ServerHost
         {
             try { Program.RunHeadlessAutoSync(); EventBus.Broadcast("library-synced", new { count = 0 }); }
             catch { }
+            PresetBases.Watch(); // from here every base that comes, goes or moves reaches a running rotation
             // every scene without an offline loudness estimate for its current configuration (new since the last run,
             // incomplete then, or a run cancelled / cut short by a restart) — one nice'd child at a time
             SceneLoudnessOps.AfterImport("startup");
@@ -691,8 +692,26 @@ public static class ServerHost
             try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl, r.OneOff); }
             // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (.claude/rules/backend/sources-steam.md § Workshop downloads)
             catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
-            if (r.Apply) { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
-                SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } }); }
+            if (r.Apply)
+            {
+                // a preset plays once its base scene is here: wait for the base fetch its download started (the base's own
+                // mode and bounds; a cancelled request stops waiting, the fetch goes on). One that still can't play
+                // downloaded fine: the item and the reason it isn't applied, never a "Download failed".
+                // Guard: test-steam-signin.sh § 2 (presets) "download & apply"
+                if (PresetDownloads.Pending(item.VideoPath) is { } baseFetch)
+                {
+                    EventBus.Broadcast("download-progress", new { id = r.Result.PageUrl, value = 1.0, status = PresetDownloads.GettingBase });
+                    await baseFetch.WaitAsync(ctx.RequestAborted);
+                }
+                if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why)
+                {
+                    var o = JsonSerializer.SerializeToNode(item, new JsonSerializerOptions(JsonSerializerDefaults.Web))!.AsObject();
+                    o["notApplied"] = why;
+                    return Results.Json(o);
+                }
+                var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
+                SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } });
+            }
             return Results.Json(item);
         });
 

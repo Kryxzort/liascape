@@ -6,9 +6,12 @@
 #          superseded by a newer cold apply, or stopped, before its IPC answered never announces its file afterwards.
 #  monitor: a forwarded `liascape play` on a `serve` that runs auto-mute itself spawns no `monitor-daemon`; closing that
 #          backend still hands auto-mute to exactly one.
-# mpvpaper, pactl, parec and playerctl are stubs on PATH: the mpvpaper stub answers mpv's IPC (`path` = its file, a
-# loadfile moves it) after a delay read from $T/mpv-delay, plays nothing, needs no Wayland output; the audio stubs log
-# their arguments and never reach an audio server. Runs in its own user, network, mount and PID namespaces
+#  presets: a legacy playlist never starts linux-wallpaperengine on a preset (presets play only in the Liascape player):
+#          Play and shuffle start at the next item that plays, play-from on one and a playlist of only presets are
+#          refused with the reason.
+# mpvpaper, linux-wallpaperengine, pactl, parec and playerctl are stubs on PATH: the mpvpaper stub answers mpv's IPC
+# (`path` = its file, a loadfile moves it) after a delay read from $T/mpv-delay, plays nothing, needs no Wayland output;
+# the LWE stub logs its arguments and idles; the audio stubs log their arguments and never reach an audio server. Runs in its own user, network, mount and PID namespaces
 # (`unshare -rnpf --mount-proc`): the backend's process scans (mpvpaper by cmdline, LWE, liascape-transition) see only
 # this run's processes, and every one dies with the namespace. Temp HOME + XDG dirs; never touches ~/.config/liascape,
 # the session's player, its audio or its outputs.
@@ -98,15 +101,18 @@ PY
 for t in pactl parec playerctl; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/audio.log"\ncase "$1" in subscribe) exec sleep 3600 ;; esac\nexit 0\n' "$t" "$T" > "$T/bin/$t"
 done
+# linux-wallpaperengine: each launch's arguments (the scene is the last), then it idles like a running scene
+printf '#!/bin/sh\necho "$*" >> "%s/lwe.log"\nexec sleep 3600\n' "$T" > "$T/bin/linux-wallpaperengine"
 chmod +x "$T/bin/"*
-: > "$T/audio.log"; : > "$T/mpvpaper.log"
+: > "$T/audio.log"; : > "$T/mpvpaper.log"; : > "$T/lwe.log"
 export PATH=$T/bin:$PATH
 
 V=$T/media; mkdir -p "$V"
 for n in v1 v2 v3; do head -c 64 /dev/zero > "$V/$n.mp4"; done
+# scenes on (LWE is the stub, one named monitor to launch it on) for § presets; the videos above never notice
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"legacy","AutoMute":true,"NoAudio":true,"RestartMpvpaperEverySeconds":0,"AutoAddWeWallpapersToLibrary":false,
- "LastSession":{"Paths":["$V/v1.mp4"]}}
+ "AllowScenes":true,"SceneMonitors":[{"Name":"TEST-1","IsPrimary":true}],"LastSession":{"Paths":["$V/v1.mp4"]}}
 EOF
 
 LOG=$T/backend.log
@@ -229,6 +235,53 @@ for _ in $(seq 1 50); do [ "$(procs monitor-daemon)" -ge 1 ] && break; sleep 0.1
 sleep 1
 n=$(procs monitor-daemon)
 [ "$n" = 1 ] && ok "one monitor-daemon after the backend closed" || bad "$n monitor-daemon(s) after the backend closed, want 1"
+
+echo "== presets: a legacy playlist never starts linux-wallpaperengine on a preset"
+# a scene and a preset of it (Wallpaper Engine's shape: no type, a `preset` object, the base's Workshop id): the base is
+# here, so the only reason the preset can't play is the engine
+LIB=$XDG_DATA_HOME/liascape/library
+BASE=$LIB/workshop/900000001; P=$LIB/workshop/910000101
+mkdir -p "$BASE" "$P"
+printf '{"type":"scene","title":"Base","file":"scene.json"}' > "$BASE/project.json"; head -c 16 /dev/zero > "$BASE/scene.pkg"
+printf '{"dependency":"900000001","preset":{"color":"0 0 1"},"title":"Preset","tags":["Unspecified"],"visibility":"public"}' > "$P/project.json"
+LEG="Presets play only in the Liascape player"
+echo 0.3 > "$T/mpv-delay"
+startbe
+reason=$(api "$U/library" | jq -r --arg p "$P" '[.[] | select(.videoPath == $p)][0].presetReason')
+[ "$reason" = "$LEG" ] || bad "precondition: the preset's library reason is \"$reason\", want \"$LEG\""
+play() { api -X POST "$U/playlist/$1" -d "$2" | jq -r '.message // "?"'; }
+lwe_on_preset() { grep -c "910000101" "$T/lwe.log"; }
+starts() { wc -l < "$T/mpvpaper.log"; }
+# what plays after a Play: the mpvpaper launch it made, if any, and /current once mpv answers
+after_play() { local m0=$1 p; for _ in $(seq 1 40); do [ "$(starts)" -gt "$m0" ] && break; sleep 0.1; done
+  for _ in $(seq 1 30); do p=$(current); [ "$p" != null ] && break; sleep 0.1; done; echo "$p"; }
+m0=$(starts)
+msg=$(play play "{\"paths\":[\"$P\",\"$V/v1.mp4\"],\"settings\":{\"order\":0}}")
+cur=$(after_play "$m0")
+[ "$msg" = "" ] && [ "$cur" = "$V/v1.mp4" ] && [ "$(lwe_on_preset)" = 0 ] \
+  && ok "Play [preset, v1] → v1 plays, LWE never started on the preset" \
+  || bad "Play [preset, v1]: message \"$msg\", /current $cur, LWE launches on the preset $(lwe_on_preset) ($(tail -1 "$T/lwe.log"))"
+m0=$(starts)
+msg=$(play play-from "{\"paths\":[\"$V/v2.mp4\",\"$P\"],\"startIndex\":1,\"settings\":{\"order\":0}}")
+sleep 1
+[ "$msg" = "$LEG" ] && [ "$(starts)" = "$m0" ] && [ "$(current)" = "$V/v1.mp4" ] && [ "$(lwe_on_preset)" = 0 ] \
+  && ok "play-from the preset → refused: \"$msg\" (v1 plays on)" \
+  || bad "play-from the preset: message \"$msg\", mpvpaper launches $(( $(starts) - m0 )), /current $(current), LWE on the preset $(lwe_on_preset)"
+shuffled=""
+for i in 1 2 3 4; do
+  m0=$(starts)
+  play play "{\"paths\":[\"$P\",\"$V/v$((i % 2 + 2)).mp4\"],\"settings\":{\"order\":1}}" >/dev/null
+  shuffled="$shuffled $(basename "$(after_play "$m0")")"
+done
+[ "$(lwe_on_preset)" = 0 ] && [ "$shuffled" = " v3.mp4 v2.mp4 v3.mp4 v2.mp4" ] \
+  && ok "shuffle [preset, video] ×4 → the video each time ($shuffled), LWE never on the preset" \
+  || bad "shuffle [preset, video] ×4: played$shuffled, LWE on the preset $(lwe_on_preset)"
+msg=$(play play "{\"paths\":[\"$P\"],\"settings\":{\"order\":0}}")
+sleep 1
+[ "$msg" = "$LEG" ] && [ "$(lwe_on_preset)" = 0 ] && ok "Play [preset] alone → refused: \"$msg\"" \
+  || bad "Play [preset] alone: message \"$msg\", LWE on the preset $(lwe_on_preset)"
+grep -q "skipping 910000101: $LEG" "$LOG" && ok "the backend log says why the preset was skipped" || bad "no 'skipping 910000101: …' in the backend log"
+stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"
 [ $FAIL = 0 ]

@@ -29,8 +29,8 @@
 #     scripts/test-fixtures/presets/, Steam's details from a CM fixture): a preset's download brings its base scene by the same
 #     mode and action — the page mode opens only the preset's page and imports the base once Steam delivers it (a base that
 #     never comes: given up, "Needs its base scene"); signed in the base is subscribed after the preset, a one-off's base is a
-#     one-off too; a base in the library is reused; a web base is never asked for; a Subscribe of a preset subscribes its
-#     base; unsubscribing the preset leaves the base alone.
+#     one-off too; a download & apply waits for the base, then applies (or says why not); a base in the library is reused;
+#     a web base is never asked for; a Subscribe of a preset subscribes its base; unsubscribing the preset leaves the base alone.
 #  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
@@ -136,8 +136,8 @@ EOF
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -t 1 -c:v libx264 -pix_fmt yuv420p "$T/clip.mp4"
 # Steam's item details for every backend here (LIASCAPE_STEAM_CM_FIXTURE: no CM session, no network): the presets and their
 # bases (Web/PresetDownloads.cs asks for a preset's base and its kind). Real Workshop ids for the fixtures' pairs
-# (scripts/test-fixtures/presets/); 910000101, 910000103 and 910000104 are made up, each a fixture with its base id rewritten (a base
-# that never arrives or comes through the Steam to-do, a web base). An id not listed = no such public item.
+# (scripts/test-fixtures/presets/); 910000101, 910000103, 910000104 and 910000105 are made up, each a fixture with its base id
+# rewritten (a base that never arrives, comes through the Steam to-do or is waited for by a download & apply, a web base). An id not listed = no such public item.
 cat > "$T/cm.json" <<'EOF'
 {"3583880694": {"tags": ["Preset", "Scene"], "title": "Preset fixture 4", "children": ["3354740764"]},
  "3520333138": {"tags": ["Preset", "Scene"], "title": "Preset fixture 3", "children": ["3354740764"]},
@@ -151,7 +151,9 @@ cat > "$T/cm.json" <<'EOF'
  "910000103": {"tags": ["Preset", "Web"], "title": "Preset of a web wallpaper", "children": ["900000005"]},
  "900000005": {"tags": ["Web"], "title": "A web wallpaper"},
  "910000104": {"tags": ["Preset", "Scene"], "title": "Preset, subscribed through the to-do", "children": ["900000006"]},
- "900000006": {"tags": ["Scene"], "title": "Base scene E"}}
+ "900000006": {"tags": ["Scene"], "title": "Base scene E"},
+ "910000105": {"tags": ["Preset", "Scene"], "title": "Preset, download & apply", "children": ["900000007"]},
+ "900000007": {"tags": ["Scene"], "title": "Base scene F"}}
 EOF
 # "Download without subscribing" signed in (§ 2, one-off): the sign-in's subscribe / unsubscribe go to a fake community
 # (scripts/test-fixtures/fake-steam-community.mjs, LIASCAPE_STEAM_COMMUNITY); a made-up account and cookie token
@@ -441,7 +443,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
     fs.writeFileSync(`${stage}/project.json`, JSON.stringify({ type: "scene", title: `base-${id}`, file: "scene.json" }));
     fs.writeFileSync(`${stage}/scene.pkg`, Buffer.alloc(16)); fs.renameSync(stage, wsDir(id)); };
   const presetResult = (id) => ({ ...result(id), isScene: true, isPreset: true });
-  const dl = (id, oneOff = false) => fetch(U + "/download", { method: "POST", headers: json, body: JSON.stringify({ source: src, result: presetResult(id), apply: false, oneOff }) });
+  const dl = (id, oneOff = false, apply = false) => fetch(U + "/download", { method: "POST", headers: json, body: JSON.stringify({ source: src, result: presetResult(id), apply, oneOff }) });
   const item = async (id) => (await lib()).find((i) => i.workshopId === id);
   const until = async (pred, ms) => { for (let i = 0; i < ms / 100; i++) { if (await pred()) return true; await sleep(100); } return !!(await pred()); };
   const settle = (p, ms = 30000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), sleep(ms).then(() => null)]);
@@ -498,6 +500,19 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const iP = ord.indexOf("subscribe 3420428971"), iB = ord.indexOf("subscribe 3419466417");
   out(rC?.status === 200 && subB && iP >= 0 && iB > iP && !!(await item("3419466417")) && (await item("3420428971"))?.presetReason === LEGACY && urls().length === n0,
     "preset (Subscribe with Steam login): Steam is asked to subscribe the preset, then its base; both imported, nothing opened", `${rC?.status} | ${ord.join(", ")}`);
+  // "Download & apply" of a preset whose base isn't here: the answer waits for the base its download fetches, then applies;
+  // this backend runs the legacy engine, so it answers the item with why it isn't applied — never a 500 "Download failed"
+  const pG = settle(dl("910000105", false, true));
+  await until(async () => (await subCalls("910000105")).includes("subscribe"), 10000);
+  dropPreset("910000105", "3420428971", "900000007");
+  const subG = await until(async () => (await subCalls("900000007")).includes("subscribe"), 10000);
+  const early = await Promise.race([pG.then(() => "answered"), sleep(1500).then(() => "waiting")]);
+  dropBase("900000007");
+  const rG = await pG;
+  out(rG?.status === 200 && subG && early === "waiting" && rG.body?.videoPath?.endsWith("/910000105") && rG.body?.notApplied === LEGACY
+    && (status[pageUrl("910000105")] ?? []).includes("Getting its base scene…") && !!(await item("900000007")),
+    "…download & apply: waits for its base (\"Getting its base scene…\"), then answers the preset with why it isn't applied, not a failure",
+    `${rG?.status} ${early} | ${JSON.stringify(rG?.body && { error: rG.body.error, notApplied: rG.body.notApplied })} | ${(status[pageUrl("910000105")] ?? []).join(" / ")}`);
   // its base already in the library (3354740764, above): reused — never subscribed, downloaded or duplicated
   const pE = settle(dl("3520333138"));
   await until(async () => (await subCalls("3520333138")).includes("subscribe"), 10000);

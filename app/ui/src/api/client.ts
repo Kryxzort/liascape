@@ -227,7 +227,7 @@ export interface LibraryItem {
   fontStandIns?: { font: string; shown: string }[] | null;
   // API: a Wallpaper Engine preset (Helpers/Presets.cs; also isScene: it plays its base scene): its base's Workshop id, the
   // base's library folder (null = the library has none), the base's title, and why it can't play now (null = it plays:
-  // "Needs its base scene", "Its preset file names no base scene", "Its base is a … wallpaper, not a scene", "Presets play
+  // "Needs its base scene", "Its preset file names no base scene", "Its base is a(n) … wallpaper, not a scene", "Presets play
   // only in the Liascape player")
   isPreset?: boolean; baseWorkshopId?: string | null; basePath?: string | null; baseTitle?: string | null; presetReason?: string | null;
 }
@@ -345,8 +345,9 @@ export const api = {
   // API: `oneOff` = a Workshop item's "Download without subscribing" (a one-off copy, never a subscription; the backend's
   // WorkshopDownloader.AcquireOneOffAsync)
   download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal, oneOff = false) =>
-    // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure
-    jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string }>("/download", { source, result, apply, oneOff }, signal),
+    // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure. `notApplied`: downloaded, but a preset
+    // that still can't play (its base scene didn't come, the legacy engine): the reason, nothing applied
+    jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string; notApplied?: string }>("/download", { source, result, apply, oneOff }, signal),
   transitions: () => jget<TransitionEffect[]>("/transitions"),
   // cache-bust frag/vert: the GLSL is regenerated during dev, and a stale Electron HTTP-cache
   // entry would replay an old (possibly broken) shader. Tiny text, fetched once per picker open.

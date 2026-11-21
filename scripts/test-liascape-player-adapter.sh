@@ -2771,7 +2771,36 @@ post /library/trash "{\"items\":[$base_item]}" >/dev/null
 waitfor $WAIT nothing_shown && ok "trash the base under a single preset wallpaper → it stops" || bad "trash the base × single preset: cur $(basename "$(cur path)")"
 post /library/undo '{}' >/dev/null
 [ "$(reason_of "$PR1")" = '[true,null]' ] || bad "second undo: P1 $(reason_of "$PR1")"
-setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0'
+
+echo "-- the base back by another way than Undo (the WE auto-import): the rotation plays its presets again, from its new folder"
+# Steam delivers the base again (a re-subscription, the required-items prompt) and the WE auto-import links it as
+# local/900000001: no Undo, no playlist or settings edit (each pushes the items by itself) between the trash and the /next.
+# A one-hour timer: nothing moves but the /next below (advance-on-end would carry a.mp4 on to a preset by itself)
+WEF=$T/we-folder; mkdir -p "$WEF"
+setting ".WorkshopFolder = \"$WEF\" | .GlobalSwitchWhenVideoEnds = false | .GlobalIntervalSeconds = 3600"
+post /playlist/play-from "{\"paths\":$PLP,\"startIndex\":0,\"settings\":{\"order\":0}}" >/dev/null
+waitfor $WAIT shows "$A" || bad "precondition: play-from a → $(basename "$(cur path)")"
+base_item=$(curl -sf -m 5 "$U/library" | jq -c --arg p "$PS1" '[.[] | select(.videoPath == $p)][0]')
+cp "$PS1/project.json" "$T/base-project.json"
+post /library/trash "{\"items\":[$base_item]}" >/dev/null
+[ "$(reason_of "$PR1")" = '[true,"Needs its base scene"]' ] || bad "precondition: after the trash P1 $(reason_of "$PR1")"
+# the rotation's item for a path: "<skip> <scene_dir>" ("-" = none)
+item_skip() { ctl get '{"path":"prog:main.items"}' | jq -r --arg p "$1" '.value[]? | select(.path == $p) | "\(.skip) \(.props.scene_dir // "-")"'; }
+waitfor $WAIT eval '[ "$(item_skip "$PR1")" = "true -" ]' || bad "precondition: after the trash the rotation's P1 item is \"$(item_skip "$PR1")\", want skipped"
+mk_scene "$WEF/900000001" '{"pattern":"solid","rgb":[255,0,0],"native":[640,360]}'
+cp "$T/base-project.json" "$WEF/900000001/project.json"
+added=$(post /library/sync '{}' | jq -c '.added')
+[ "$added" = "[\"$LIB/local/900000001\"]" ] && [ "$(reason_of "$PR1")" = '[true,null]' ] \
+  && ok "/library/sync links Steam's base as local/900000001; its presets play again in the Library" || bad "sync of the base: added $added, P1 $(reason_of "$PR1")"
+waitfor $WAIT eval '[ "$(item_skip "$PR1")" = "false $LIB/local/900000001" ]' \
+  && ok "…the rotation's items follow: P1 no longer skipped, its scene_dir the base's new folder" || bad "the rotation's P1 item after the base came back: \"$(item_skip "$PR1")\""
+hit=0
+for _ in 1 2 3 4; do post /next '{}' >/dev/null; waitfor $WAIT settled; c=$(cur path); { [ "$c" = "$PR1" ] || [ "$c" = "$PR2" ]; } && { hit=1; break; }; done
+[ $hit = 1 ] && waitfor $WAIT scene_ready "$(cur path)" && [ "$(sdir "$(srcIdForPath "$(cur path)")")" = "$LIB/local/900000001" ] \
+  && ok "…the rotation reaches its presets again ($(basename "$(cur path)")), loading the base's new folder" \
+  || bad "after the base came back by the auto-import: /next ×4 never reached a preset (cur $(basename "$(cur path)"), scene_dir $(sdir "$(srcIdForPath "$(cur path)")"))"
+stop_now
+setting '.WorkshopFolder = "" | .GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0'
 fi
 
 echo "== Phase 3 Task 8: legacy's daemon files never existed under liascape-player (the whole run, sampled every 0.2 s)"

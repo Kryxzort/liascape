@@ -465,6 +465,8 @@ export const useStore = create<State>((set, get) => ({
       if ("skipped" in item && item.skipped) { get().setStatus(`Skipped: ${w.title}`); return; } // the Steam to-do's Skip / Stop
       if ("error" in item && item.error) { get().setError(`Download failed: ${item.error}`); return; }
       await get().loadLibrary();
+      // a preset the backend downloaded (and waited for its base) but can't play: downloaded, with why it isn't applied
+      if (item.notApplied) { get().setStatus(`Downloaded: ${w.title}. ${cantPlay("it", item.notApplied)}`, true, true); return; }
       // auto-import on + the "subscribe" mode: the download was the subscription (components/BrowseSide.tsx subIsDownload)
       const sub = !oneOff && subscribeIsDownload(get().settings) && isWorkshopItem(w);
       get().setStatus(apply ? `Applied: ${w.title}` : `${sub ? "Subscribed" : "Downloaded"}: ${w.title}`);

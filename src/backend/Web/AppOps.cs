@@ -35,6 +35,9 @@ public static class AppOps
         int? playFrom = null)
     {
         if (paths.Count == 0) return "Playlist is empty";
+        // a playlist of presets that can't play (their base gone, the legacy engine) plays nothing: say why rather than
+        // leave the screen as it was with no word. Guard: test-legacy-launch.sh § presets
+        if (paths.All(p => PlayerHelper.PresetUnplayableReason(p) != null)) return PlayerHelper.PresetUnplayableReason(paths[0])!;
         // Persist what's actually playing as the current playlist state. TransitionService.CurrentConfig()
         // (the transition/crossfade gate) reads playlist_state.json — without this, /playlist/play only
         // saved LastSession, so the state stayed stale and scene switches never transitioned/crossfaded.
@@ -83,6 +86,9 @@ public static class AppOps
     public static string PlayFrom(List<string> paths, int startIndex, PlaylistSettings ps)
     {
         if (paths.Count == 0 || startIndex < 0 || startIndex >= paths.Count) return "bad index";
+        // the clicked item is a preset that can't play: refused with its reason, as /apply is (both engines), never
+        // quietly the item after it. Guard: test-legacy-launch.sh § presets
+        if (PlayerHelper.PresetUnplayableReason(paths[startIndex]) is string why) return why;
         // liascape-player: the program plays from that item (`from: index` — an explicit play-from beats the
         // start setting) in the playlist's own order; the player shuffles the rest of a shuffled cycle
         if (PlayerEngine.IsLiascapePlayer) return PlayPlaylist(paths, ps, playFrom: startIndex);
@@ -297,11 +303,11 @@ public static class AppOps
             PreviewBackfill.Kick("download"); // its card's previews
             EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
             // a preset brings its base scene, by this download's own mode and action (in the background, never throws)
-            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) _ = PresetDownloads.FetchBaseAsync(item, oneOff, viaSteamApp);
+            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) PresetDownloads.Start(item, () => PresetDownloads.FetchBaseAsync(item, oneOff, viaSteamApp));
             // …and one added from the Wallpaper Engine folder (Browse's "Wallpaper Engine (Local)") its base from beside it
             else if (!detail.IsWorkshopAcquire && detail.WorkshopId != null && item.IsScene && Directory.Exists(detail.DownloadUrl)
                 && Presets.Read(item.VideoPath) != null)
-                _ = PresetDownloads.AddLocalBaseAsync(item, detail.DownloadUrl, oneOff);
+                PresetDownloads.Start(item, () => PresetDownloads.AddLocalBaseAsync(item, detail.DownloadUrl, oneOff));
             return item;
         }
         finally { if (letGo != null) WorkshopDownloader.LetGoOfOneOff(letGo); }
@@ -580,16 +586,21 @@ public static class AppOps
             int at = playlistBar.IndexOf(playing);
             if (at >= 0 && survivors.Count > 0)
             {
-                string next = Enumerable.Range(1, playlistBar.Count).Select(k => playlistBar[(at + k) % playlistBar.Count]).First(p => !del.Contains(p));
-                PlayFrom(survivors, survivors.IndexOf(next), ps); // saves the playlist bar's survivors as the playlist
-                return;
+                // the next survivor that can play: a preset that can't is refused by PlayFrom, which would leave the trashed
+                // item on screen; none left → stop
+                var next = Enumerable.Range(1, playlistBar.Count).Select(k => playlistBar[(at + k) % playlistBar.Count])
+                    .FirstOrDefault(p => !del.Contains(p) && PlayerHelper.PresetUnplayableReason(p) == null);
+                if (next != null)
+                {
+                    PlayFrom(survivors, survivors.IndexOf(next), ps); // saves the playlist bar's survivors as the playlist
+                    return;
+                }
             }
-            // the session plays something the playlist bar doesn't hold — play on from its own survivors
-            var rest = sess.Paths.Where(p => !del.Contains(p)).ToList();
-            if (rest.Count > 0)
+            else
             {
-                PlayPlaylist(rest, ps, persistPaths: pl != null ? survivors : null);
-                return;
+                // the session plays something the playlist bar doesn't hold — play on from its own survivors
+                var rest = sess.Paths.Where(p => !del.Contains(p)).ToList();
+                if (rest.Count > 0 && PlayPlaylist(rest, ps, persistPaths: pl != null ? survivors : null) == "") return;
             }
         }
         if (pl != null && survivors.Count != playlistBar.Count)

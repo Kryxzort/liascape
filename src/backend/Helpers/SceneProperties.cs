@@ -45,6 +45,9 @@ public sealed record SceneProp
     public bool Fraction { get; init; } = true;
     public int? Precision { get; init; }
     public List<SceneComboOption>? Options { get; init; }
+    // a scenetexture whose Default is a preset's own image (`WithPreset`: confined to the preset's folder): the only
+    // file path PlayerMap ever sends; a scene's own default naming a file is never sent
+    [System.Text.Json.Serialization.JsonIgnore] public bool PresetImage { get; init; }
 }
 
 public sealed record SceneComboOption(string Label, string Value);
@@ -114,7 +117,7 @@ public static class SceneProperties
             if (!presetValues.TryGetValue(p.Name, out var v)) list.Add(p);
             else if (p.Editable && SavedAs(p, v) && Coerce(p, v) is ({ } c, null)) list.Add(p with { Default = c, SceneDefault = p.SceneDefault });
             else if (p.Type == "scenetexture" && presetDir != null && PresetImage(presetDir, v) is { } image)
-                list.Add(p with { Default = JsonValue.Create(image), SceneDefault = p.SceneDefault });
+                list.Add(p with { Default = JsonValue.Create(image), SceneDefault = p.SceneDefault, PresetImage = true });
             else list.Add(p);
         }
         return list;
@@ -374,11 +377,11 @@ public static class SceneProperties
         var m = new SortedDictionary<string, object?>(StringComparer.Ordinal);
         foreach (var p in props)
         {
-            // a preset's own image for a scenetexture slot (its absolute path, `WithPreset`); the base's own is never sent.
-            // Re-checked here: the cached merge doesn't see the file go
-            if (p.Type == "scenetexture" && Str(p.Default) is { } image)
+            // a preset's own image for a scenetexture slot (its absolute path, `WithPreset`); the scene's own default is
+            // never sent, even one naming a file that exists. Re-checked here: the cached merge doesn't see the file go
+            if (p.Type == "scenetexture")
             {
-                if (File.Exists(image)) m[p.Name] = image;
+                if (p.PresetImage && Str(p.Default) is { } image && File.Exists(image)) m[p.Name] = image;
                 continue;
             }
             if (!p.Editable) continue;

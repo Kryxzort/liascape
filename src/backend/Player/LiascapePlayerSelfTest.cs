@@ -938,6 +938,12 @@ public static class LiascapePlayerSelfTest
             }
             Want("without the preset's folder nothing resolves", Default("\"files/tint.png\"", null), null);
             Want("the base's own (empty) value is never sent", JsonSerializer.Serialize(SceneProperties.PlayerMap(scene, null)), "{}");
+            // a scene's own default that happens to name an existing file (an absolute path written into a downloaded
+            // project.json) is never sent: only an image WithPreset resolved inside a preset's folder goes to the core
+            var own = scene.Select(p => p.Name == "tex" ? p with { Default = System.Text.Json.Nodes.JsonValue.Create(Path.Combine(root, "outside.png")) } : p).ToList();
+            Want("a scene's own existing-file default is never sent", JsonSerializer.Serialize(SceneProperties.PlayerMap(own, null)), "{}");
+            Want("…nor on a preset that leaves that slot alone",
+                JsonSerializer.Serialize(SceneProperties.PlayerMap(SceneProperties.WithPreset(own, Tex("\"files/missing.png\""), dir), null)), "{}");
         }
         catch (Exception e) { fails.Add($"preset image assertions threw {e.GetType().Name}: {e.Message}"); }
         finally { try { Directory.Delete(root, true); } catch { } }
@@ -1038,6 +1044,7 @@ public static class LiascapePlayerSelfTest
         Row("a base folder of no kind (not whole yet)", F("123"), "910", null, baseDir, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
         Row("the base is a preset", F("123"), "910", null, baseDir, "preset", true, PresetProblem.BaseNotScene, baseDir, "Its base is a preset wallpaper, not a scene");
         Row("the base is a video", F("123"), "910", null, baseDir, "video", true, PresetProblem.BaseNotScene, baseDir, "Its base is a video wallpaper, not a scene");
+        Row("the download said application", F("123"), "910", "application", baseDir, "scene", true, PresetProblem.BaseNotScene, null, "Its base is an application wallpaper, not a scene");
         Row("all fine, legacy engine", F("123"), "910", null, baseDir, "scene", false, PresetProblem.Legacy, baseDir, "Presets play only in the Liascape player");
         Row("no base folder, legacy engine", F("123"), "910", null, null, null, false, PresetProblem.NeedsBase, null, "Needs its base scene");
 

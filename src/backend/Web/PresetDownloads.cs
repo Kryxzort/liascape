@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
@@ -15,10 +16,36 @@ namespace Liascape.Web;
 public static class PresetDownloads
 {
     public const string WaitingForBase = "Waiting for Steam to download its base scene…";
+    // the preset's own card while a "Download & apply" waits for its base
+    public const string GettingBase = "Getting its base scene…";
 
     // a base being fetched + its route (subscribed, one-off, the Steam app) → that fetch: two presets of one scene downloaded
     // together the same way share it (one subscribe, one copy); a one-off and a subscribed preset each get their own
     static readonly Dictionary<string, Task> _fetching = new(StringComparer.Ordinal);
+    // a preset's item folder → its base fetch while it runs: a "Download & apply" waits on it before it applies
+    static readonly Dictionary<string, Task> _forPreset = new(StringComparer.Ordinal);
+
+    /// A preset's base fetch (FetchBaseAsync, AddLocalBaseAsync) in the background, remembered under the preset's folder
+    /// until it ends (`Pending`).
+    public static void Start(LibraryItem preset, Func<Task> fetch)
+    {
+        var path = preset.VideoPath;
+        Task t;
+        lock (_forPreset)
+        {
+            t = fetch();
+            if (t.IsCompleted) return;
+            _forPreset[path] = t;
+        }
+        t.ContinueWith(_ => { lock (_forPreset) if (_forPreset.TryGetValue(path, out var cur) && cur == t) _forPreset.Remove(path); },
+            TaskScheduler.Default);
+    }
+
+    /// The base fetch a preset's download started and that still runs, else null.
+    public static Task? Pending(string presetPath)
+    {
+        lock (_forPreset) return _forPreset.GetValueOrDefault(presetPath);
+    }
 
     static string PageUrl(string id) => $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}";
 
@@ -207,4 +234,78 @@ public static class PresetDownloads
         }
         catch (Exception e) { Console.WriteLine($"workshop: {presetId}: subscribing its base scene failed: {e.Message}"); }
     }
+}
+
+// A preset's base comes into the library, goes, or changes folder by many ways: a download (the needs-base "Download it
+// again", Browse), the WE auto-import (a subscription, Steam's required-items prompt), a direct download handed over to
+// Steam's folder, a folder import, trash and Undo. Each writes an index, so one pass after the writes settle compares every
+// library preset's state (can it play, from which base folder) with the last pass; on a change a running rotation gets its
+// items again (each preset's `skip` and `scene_dir`) and the pages re-read the library. A base that changes behind the
+// library's back with no write (Steam re-filling the folder a link points at) shows at the next write or sync.
+// Guard: scripts/test-liascape-player-adapter.sh § presets "the base back through the WE auto-import"
+public static class PresetBases
+{
+    const int SettleMs = 300;
+    static readonly object _gate = new(), _pass = new();
+    static Timer? _timer;
+    static bool _pending;
+    static Dictionary<string, (PresetProblem Problem, string? BaseDir)>? _last;
+
+    /// Start watching (serve only): the first pass is the reference, later ones report changes.
+    public static void Watch()
+    {
+        LibraryStore.Saved += _ => Kick();
+        Kick();
+    }
+
+    // a pass SettleMs after the first write of a burst, never pushed further back: a steady stream of writes (the facts
+    // pass, loudness estimates) can't starve it; a write during a pass kicks the next
+    static void Kick()
+    {
+        lock (_gate)
+        {
+            if (_pending) return;
+            _pending = true;
+            _timer ??= new Timer(_ => Pass(), null, Timeout.Infinite, Timeout.Infinite);
+            _timer.Change(SettleMs, Timeout.Infinite);
+        }
+    }
+
+    static void Pass()
+    {
+        lock (_gate) _pending = false;
+        lock (_pass)
+        {
+            Dictionary<string, (PresetProblem, string?)> now;
+            try { now = Snapshot(); }
+            catch (Exception e) { Console.WriteLine($"library: checking the presets' base scenes failed: {e.Message}"); return; }
+            var last = _last;
+            _last = now;
+            if (last == null || Same(last, now)) return;
+            Console.WriteLine("library: a preset's base scene came, went or moved — a running rotation's items follow");
+            LiascapePlayerProgram.PushItems();
+            EventBus.Broadcast("library-synced", new { count = 0 });
+        }
+    }
+
+    // every library preset → its state with the Liascape player (the engine changes nothing about where its base is)
+    static Dictionary<string, (PresetProblem, string?)> Snapshot()
+    {
+        var map = new Dictionary<string, (PresetProblem, string?)>(StringComparer.Ordinal);
+        foreach (var src in new[] { LibraryStore.Local, LibraryStore.Workshop, LibraryStore.Imported })
+        {
+            string[] dirs;
+            try { dirs = System.IO.Directory.GetDirectories(LibraryStore.SourceDir(src)); } catch { continue; }
+            foreach (var d in dirs)
+                if (Presets.Read(d) != null)
+                {
+                    var st = Presets.StatusOf(d, liascapePlayer: true);
+                    map[d] = (st.Problem, st.BaseDir);
+                }
+        }
+        return map;
+    }
+
+    static bool Same(Dictionary<string, (PresetProblem, string?)> a, Dictionary<string, (PresetProblem, string?)> b) =>
+        a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var v) && v == kv.Value);
 }

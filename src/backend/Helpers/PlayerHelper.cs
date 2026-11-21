@@ -930,15 +930,14 @@ public static class PlayerHelper
             if (paths.Count == 0) { KillCurrentProcess(); return; }
 
             var ordered = new List<string>(paths); // caller is responsible for initial order; shuffle flag only controls cycle-end reshuffle
-            // liascape-player: start at the first item that can play — a scene marked crashed (D6) first in the
-            // list would reach SwitchToFile, which stops playback for an unplayable scene (legacy unchanged)
-            int first = 0;
-            if (PlayerEngine.IsLiascapePlayer && IsSkippedPath(ordered[0]))
-            {
-                bool ok = PlayerEngine.ScenesPlayable(SettingsService.Load());
-                first = ordered.FindIndex(p => !IsSkippedPath(p, ok));
-                if (first < 0) { KillCurrentProcess(); return; }
-            }
+            // start at the first item that isn't a preset: under legacy none plays (PresetUnplayableReason), and LWE launched
+            // on a preset's folder (no scene in it) dies behind a screen the old wallpaper already left, with no crash
+            // advance (the tick skips a skipped path). Play, play-from, shuffle and every replay (an engine switch, restore,
+            // the timer daemon) start here. A crashed scene keeps legacy's own handling. Guard: test-legacy-launch.sh § presets
+            int first = ordered.FindIndex(p => PresetUnplayableReason(p) == null);
+            for (int i = 0; i < (first < 0 ? ordered.Count : first); i++)
+                Console.Error.WriteLine($"timed playlist: skipping {Path.GetFileName(ordered[i])}: {PresetUnplayableReason(ordered[i])}");
+            if (first < 0) { KillCurrentProcess(); return; }
 
             _timedPaths = ordered;
             _timedIndex = first;
@@ -1044,7 +1043,17 @@ public static class PlayerHelper
             // When WaitingForVideoEnd=true the saved _historyIndex is pre-fetched one step ahead;
             // restore to the actually-playing item (one step back).
             var playingHistIdx = PlayingHistoryIndex;
-            SwitchToFile(_history[playingHistIdx], _timedOptions);
+            var target = _history[playingHistIdx];
+            // a saved session on a preset (legacy never plays one): on to the next item that plays, never LWE on its folder
+            if (PresetUnplayableReason(target) is string why)
+            {
+                _waitingForVideoEnd = false;
+                _historyIndex = playingHistIdx;
+                Console.Error.WriteLine($"timed playlist: not resuming {Path.GetFileName(target)}: {why}");
+                if (AdvanceToNext() is not { } next) { KillCurrentProcess(); return false; }
+                target = next;
+            }
+            SwitchToFile(target, _timedOptions);
             SaveTimedState();
 
             EnsureTimedTick();
@@ -3579,11 +3588,12 @@ public static class PlayerHelper
     private static string? AdvanceToNext()
     {
         // forward through the history (a next after a previous) — under liascape-player past an item skipped
-        // since it played (a scene marked crashed, D6); legacy unchanged
+        // since it played (a scene marked crashed); under legacy past a preset only (it never plays there)
         while (_history != null && _historyIndex < _history.Count - 1)
         {
             _historyIndex++;
-            if (!PlayerEngine.IsLiascapePlayer || !IsSkippedPath(_history[_historyIndex])) return _history[_historyIndex];
+            var h = _history[_historyIndex];
+            if (PlayerEngine.IsLiascapePlayer ? !IsSkippedPath(h) : PresetUnplayableReason(h) == null) return h;
         }
 
         var p = _timedPaths;

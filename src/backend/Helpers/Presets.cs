@@ -29,7 +29,11 @@ public static class Presets
     public const string NeedsBaseReason = "Needs its base scene";
     public const string NoBaseReason = "Its preset file names no base scene";
     public const string LegacyReason = "Presets play only in the Liascape player";
-    public static string NotSceneReason(string kind) => $"Its base is a {kind.ToLowerInvariant()} wallpaper, not a scene";
+    public static string NotSceneReason(string kind)
+    {
+        var k = kind.ToLowerInvariant();
+        return $"Its base is {(k.Length > 0 && "aeiou".Contains(k[0]) ? "an" : "a")} {k} wallpaper, not a scene";
+    }
 
     // project.json path → the file state it was read at (mtime ticks, size) and what it said (null = not a preset)
     private static readonly ConcurrentDictionary<string, (long Ticks, long Size, PresetFile? File)> _cache = new();

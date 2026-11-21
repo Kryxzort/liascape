@@ -73,8 +73,9 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - A `scenetexture` value is `"files/<name>"`, relative to the preset folder (its `files/`), or `""`; resolve it
   against the preset folder, never the base's. `files/` holds only what those values name; it overlays no base file.
   PNG, JPEG or GIF. `WithPreset` takes it only as a relative path with no `..` to an image file whose real path is
-  inside the preset's real folder, and `PlayerMap` sends that absolute path (the core loads it into the slot); anything
-  else sends nothing (the base's texture). Guards: player-selftest `PresetImageAssertions`, `scripts/test-presets.sh`
+  inside the preset's real folder, and `PlayerMap` sends that absolute path (the core loads it into the slot) and no
+  other file path (`SceneProp.PresetImage`: a scene's own default naming a file is never sent); anything else sends
+  nothing (the base's texture). Guards: player-selftest `PresetImageAssertions`, `scripts/test-presets.sh`
   § 2 preset images.
 - `preset` also carries WE's own per-wallpaper settings that are not scene properties: `_d0` (`null`), `alignment*`,
   `rate`, `wec_*` (colour correction), and when the base supports them `audioprocessing`, `cameraparallax`, `volume`,
@@ -88,7 +89,7 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
   `imported/` entry whose `WorkshopId` is the id); never keep its path or a link target: the base's form changes at the
   same path (`KeepOwnCopy`, `RelinkOwnCopies`).
 - Reasons (`presetReason`, exact text), first match wins (`Presets.StatusFor`): no base id or its own id → "Its preset
-  file names no base scene"; `LibMeta.BaseKind` (the download's) not `scene` → "Its base is a {kind} wallpaper, not a
+  file names no base scene"; `LibMeta.BaseKind` (the download's) not `scene` → "Its base is a(n) {kind} wallpaper, not a
   scene"; no base folder (or one with no kind yet) → "Needs its base scene"; the base folder a preset or a video → the
   same "Its base is a …" (never resolved through another preset); the legacy engine → "Presets play only in the
   Liascape player". `baseTitle` = the base's own title, else `LibMeta.BaseTitle`. Guard: `scripts/test-presets.sh` § 1.
