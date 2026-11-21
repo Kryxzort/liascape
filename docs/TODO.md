@@ -61,6 +61,16 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        folder, size-capped like images) play that video, looped and muted unless the scene's own audio says otherwise;
        guard it in `host_api_test` and `scripts/test-presets.sh`.
 
+114. [ ] Favourites as a filter: Browse's "Favourites" pill becomes a three-way row beside "In my library" in a group
+       named Yours (✓ shows that set directly, ✕ hides it), the favourites list cached and diffed by IDs so search and
+       the sorts work on it and a change shows within about a minute; "In my library ✓" shows the library's set
+       directly instead of scanning Workshop pages; the Library tab gets the Favourites row too. Design:
+       `docs/superpowers/specs/2026-11-21-favourites-filter-design.md`.
+115. [ ] Favourite and comment through Steam where Liascape has no Steam login: the sidebar's star and comment box
+       become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and #114's cache
+       watches that item's favourite state for a few minutes after. Depends on how the download modes end up (the
+       owner is considering folding "Open in the Steam app" into a fallback).
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
