@@ -214,7 +214,7 @@ public static class SteamWorkshopScraper
     public static List<WallpaperResult> MapToResults(
         IReadOnlyList<string> orderedIds,
         Dictionary<string, PublishedFileDetail> details,
-        bool allowScenes, bool allowPresets = false)
+        bool allowScenes, bool allowPresets = false, Func<string, string?>? authorName = null)
     {
         var results = new List<WallpaperResult>();
 
@@ -255,6 +255,9 @@ public static class SteamWorkshopScraper
                 AddedAt = d.TimeUpdated != DateTime.MinValue ? d.TimeUpdated : null,
                 Description = d.Description,
                 AuthorId = d.CreatorId,
+                // a name the caller already knows (a favourites list: SteamCommunity.KnownName), never asked of Steam here
+                // Guard: scripts/test-workshop-social.sh § 7 "authorName: a creator this run read by name, …"
+                AuthorName = authorName?.Invoke(d.CreatorId),
                 FileSizeBytes = d.FileSizeBytes > 0 ? d.FileSizeBytes : null,
                 Subscriptions = d.Subscriptions,
                 Favorites = d.Favorites,

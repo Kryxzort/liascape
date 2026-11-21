@@ -835,6 +835,8 @@ public static class ServerHost
         app.MapGet("/workshop/base", (string? id, HttpContext ctx) => WorkshopSocialOps.BaseAsync(id, ctx.RequestAborted));
         // many Workshop items' details at once, from the on-disk details cache (Helpers/WorkshopDetailsCache.cs)
         app.MapPost("/workshop/details", (IdsReq r, HttpContext ctx) => WorkshopSocialOps.DetailsBatchAsync(r.Ids, ctx.RequestAborted));
+        // the signed-in account's favourites from its per-account cache (Helpers/WorkshopFavorites.cs); sync=open|check loads them
+        app.MapGet("/workshop/my-favorites", (string? sync, HttpContext ctx) => WorkshopSocialOps.MyFavoritesAsync(sync, ctx.RequestAborted));
         app.MapPost("/workshop/unsubscribe-keep", async (WorkshopIdReq r) =>
             !WorkshopSubOps.ValidId(r.WorkshopId) ? Results.BadRequest(new { error = "workshopId must be digits" })
                 : NoUnsubscribe() ?? Results.Json(await WorkshopSubOps.UnsubscribeKeepAsync(r.WorkshopId!, r.Title)));
