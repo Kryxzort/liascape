@@ -1,6 +1,6 @@
 <p align="center"><img src="app/icon/liascape-night.svg" alt="" width="128"></p>
 
-# Liascape
+<h1 align="center">Liascape</h1>
 
 Liascape puts live wallpapers on your Wayland desktop. It plays videos, GIFs, pictures and Wallpaper Engine
 wallpapers, including Wallpaper Engine's interactive scenes, and gives you one place to find them, keep them and
