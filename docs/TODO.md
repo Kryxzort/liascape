@@ -68,8 +68,20 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `docs/superpowers/specs/2026-11-21-favourites-filter-design.md`.
 115. [ ] Favourite and comment through Steam where Liascape has no Steam login: the sidebar's star and comment box
        become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and #114's cache
-       watches that item's favourite state for a few minutes after. Depends on how the download modes end up (the
-       owner is considering folding "Open in the Steam app" into a fallback).
+       watches that item's favourite state for a few minutes after. The Steam page is #116's last resort, so this is
+       that rule applied to the social controls.
+116. [ ] Two Workshop download modes, the Steam page the last resort. Owner: the page needs no login and gives Liascape
+       nothing, so falling back to it never exceeds the trust chosen. No other route stands in for a chosen mode.
+       Rewrite `docs/decisions.md` § "Offer three Workshop download modes" to this in the same commit.
+       - Settings → Getting Workshop wallpapers drops the "Open in the Steam app" radio. A saved `steampage` reads as
+         the default mode; no migration, since nothing has shipped.
+       - Signed out under "Subscribe with Steam login", or when the chosen route can't reach Steam (Steam not
+         running, Wallpaper Engine not owned, the client or the sign-in refused), Download / Subscribe open the item's
+         Steam page. A short note says "Opened in Steam: subscribe there and it downloads here".
+       - A one-off download stays disabled with why.
+       - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
+         (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
+         mode cells.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
