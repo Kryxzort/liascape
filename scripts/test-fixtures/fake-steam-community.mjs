@@ -17,6 +17,9 @@
 //        account's, three ids); hold = a page number whose next request waits for POST /__release (a test acts in between)
 //        Guard: the default list, test-workshop-social.sh "favourites of a private profile: the community page …"; a set
 //        list and the hold: § 7 (the favourites cache)
+//   GET  /__oddpage?p=N&kind=login|blank  the next request for page N of a favourites list answers 200 with something
+//        else: Steam's login page (what an expired sign-in gets) or an empty page (a glitch). Guard: § 7 (the favourites
+//        cache) "private profile: a 200 login page …", "private profile: a blank 200 page 2 …"
 // Usage: node fake-steam-community.mjs <port file> <signed-in steamid> <cookie token>
 import http from "node:http";
 import fs from "node:fs";
@@ -29,6 +32,7 @@ const favs = new Set();                   // `${steamid}:${id}`
 let rateLimitNext = false;
 const favLists = { [ME]: ["3100000001", "3100000002", "3100000003"] };
 let holdPage = 0, release = () => { };
+const oddPages = {};                      // page number → "login" | "blank", served once
 let n = 0;
 
 // Steam's own markup for a comment (the parts the backend reads, as the item page serves them), user text already escaped by
@@ -105,6 +109,7 @@ const server = http.createServer(async (req, res) => {
     return send(200, {});
   }
   if (u.pathname === "/__release") { release(); return send(200, {}); }
+  if (u.pathname === "/__oddpage") { oddPages[+u.searchParams.get("p") || 1] = u.searchParams.get("kind") || "blank"; return send(200, {}); }
   if (rateLimitNext) { rateLimitNext = false; res.writeHead(429, { "Content-Type": "text/html", "Retry-After": "120" }); return res.end("Too Many Requests"); }
 
   let m;
@@ -150,6 +155,12 @@ const server = http.createServer(async (req, res) => {
     if (accountOf(ck) !== m[1] || !myFavs || u.searchParams.get("browsefilter") !== "myfavorites") return send(200, "<html>nothing</html>", "text/html");
     const p = Math.max(1, +u.searchParams.get("p") || 1), ids = myFavs.slice((p - 1) * 30, p * 30);
     if (holdPage && p === holdPage) { holdPage = 0; await new Promise((r) => { release = r; }); }
+    if (oddPages[p]) {
+      const kind = oddPages[p]; delete oddPages[p];
+      return send(200, kind === "login" ? `<!DOCTYPE html><html><head><title>Sign In</title></head><body><div class="login_area">
+<form name="logon" action="https://steamcommunity.com/login/home/"><input type="text" name="username"></form></div></body></html>`
+        : "<html><body></body></html>", "text/html");
+    }
     const paging = ids.length ? `<div class="workshopBrowsePagingInfo">Showing ${(p - 1) * 30 + 1}-${(p - 1) * 30 + ids.length} of ${myFavs.length.toLocaleString("en-US")} entries</div>` : "";
     return send(200, `<html><body>${paging}${ids.map((id) => `<div class="workshopItem"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${id}&searchtext=">x</a></div>`).join("")}</body></html>`, "text/html");
   }

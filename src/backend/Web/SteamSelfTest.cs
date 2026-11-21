@@ -270,6 +270,17 @@ public static class SteamSelfTest
             Check(SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 1)) is { Ids.Count: 30, Total: null },
                 "favourites page: ids parsed, the signed-out total left unread");
             Check(SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 3)) is { Ids.Count: 5, Total: null }, "favourites page: the last, short page");
+            Check(SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 1)) is { Listing: true, Last: false },
+                "favourites page: a listing, not its last page (Showing 1-30 of 65)");
+            Check(SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 3)) is { Listing: true, Last: true }
+                && SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(60, 2)) is { Ids.Count: 30, Last: true },
+                "favourites page: the last page says so, a full one too (Showing 61-65 of 65, 31-60 of 60)");
+            Check(SteamCommunity.ParseFavoritesPage(System.Text.RegularExpressions.Regex.Replace(SampleFavoritesPage(1662, 56), "Showing [^<]*", "Zeige 1.651-1.662 von 1.662 Einträgen")) is { Listing: true, Last: true }
+                && SteamCommunity.ParseFavoritesPage(System.Text.RegularExpressions.Regex.Replace(SampleFavoritesPage(1662, 55), "Showing [^<]*", "Zeige 1.621-1.650 von 1.662 Einträgen")) is { Listing: true, Last: false },
+                "favourites page: the paging numbers read in another language and digit grouping");
+            Check(SteamCommunity.ParseFavoritesPage("<html><head><title>Sign In</title></head><body><form name=\"logon\"></form></body></html>") is { Listing: false, Last: null, Ids.Count: 0 }
+                && SteamCommunity.ParseFavoritesPage("<html><body></body></html>") is { Listing: false },
+                "favourites page: a login page or a blank one isn't a favourites listing");
         }
         finally { Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", was); }
     }

@@ -351,7 +351,9 @@ public static class WorkshopFavorites
     // as the other account, none of its favourites in this account's list, nothing written"
     static async Task PrivateAsync(ulong steamId, Account a, List<string> ids, long started)
     {
-        await CommunityIdsAsync(steamId, SteamGate.Kind.Interactive, ids, null, () => Show(a, ids, new Progress(ids.Count, null), started)).ConfigureAwait(false);
+        // no list kept yet, so a page 1 with no paging line may be an empty favourites list (a login page instead self-heals:
+        // the next count check finds page 1 changed)
+        await CommunityIdsAsync(steamId, SteamGate.Kind.Interactive, ids, null, emptyOk: true, () => Show(a, ids, new Progress(ids.Count, null), started)).ConfigureAwait(false);
         int done = 0;
         for (int i = 0; i < ids.Count; i += DetailsChunk)
         {
@@ -362,23 +364,33 @@ public static class WorkshopFavorites
         }
     }
 
-    // The signed-in account's community favourites pages into `ids`, from page 1 (`page1`: its ids already read) until a
-    // page adds no new id or is short (the last one); `onPage` after each page that added some. Each page is asked for
-    // this account only (`account:`): a sign-in switched to another account throws before anything is sent as it.
+    // The signed-in account's community favourites pages into `ids`, from page 1 (`page1`: already read) until the paging
+    // line says the last page, a page is short or adds no new id; `onPage` after each page that added some. A page that
+    // isn't a favourites listing (SteamCommunity.FavoritesPage.Listing: a login page, a blank one) throws — no answer,
+    // never the list's end — except an empty page 1 when `emptyOk` (no list kept yet: an empty favourites list shows no
+    // paging line). Each page is asked for this account only (`account:`): a sign-in switched to another account throws
+    // before anything is sent as it.
     // Guard: scripts/test-workshop-social.sh § 7 "private profile: 3 community pages with the cookie, …", "private
-    // profile: a grown page 1 → the community pages again (page 1 not asked twice), …"
-    static async Task CommunityIdsAsync(ulong steamId, SteamGate.Kind kind, List<string> ids, List<string>? page1, Action? onPage)
+    // profile: a grown page 1 → the community pages again (page 1 not asked twice), …", "private profile: a 200 login page
+    // as a diff's page 1 → the list kept, nothing written", "private profile: a blank 200 page 2 in a diff → not the list's
+    // end: …", "private profile: the pages answering again → the next diff reads all three and keeps the same 66"
+    static async Task CommunityIdsAsync(ulong steamId, SteamGate.Kind kind, List<string> ids, SteamCommunity.FavoritesPage? page1, bool emptyOk, Action? onPage)
     {
         var seen = new HashSet<string>(ids);
         for (int page = 1; ; page++)
         {
             var got = page == 1 && page1 != null ? page1
-                : (await SteamCommunity.MyFavoritesPageAsync(page, kind, account: steamId).ConfigureAwait(false)).Ids;
+                : await SteamCommunity.MyFavoritesPageAsync(page, kind, account: steamId).ConfigureAwait(false);
+            if (!got.Listing)
+            {
+                if (page == 1 && emptyOk && got.Ids.Count == 0) break;
+                throw new InvalidOperationException("Steam answered with a page that isn't the favourites list");
+            }
             int added = 0;
-            foreach (var id in got) if (seen.Add(id)) { ids.Add(id); added++; }
+            foreach (var id in got.Ids) if (seen.Add(id)) { ids.Add(id); added++; }
             if (added == 0) break;
             onPage?.Invoke();
-            if (got.Count < CommunityPageSize) break;
+            if (got.Last == true || got.Ids.Count < CommunityPageSize) break;
         }
     }
 
@@ -393,7 +405,7 @@ public static class WorkshopFavorites
             int? known;
             List<string> first;
             lock (_lock) { viaPage = a.ViaPage; known = a.Total; first = a.Steam.Take(CommunityPageSize).ToList(); }
-            List<string>? page1 = null;
+            SteamCommunity.FavoritesPage? page1 = null;
             bool changed;
             if (!viaPage)
             {
@@ -404,8 +416,13 @@ public static class WorkshopFavorites
             else
             {
                 // Background: a check the user didn't ask for waits its turn behind their own Steam requests
-                page1 = (await SteamCommunity.MyFavoritesPageAsync(1, SteamGate.Kind.Background, account: steamId).ConfigureAwait(false)).Ids;
-                changed = !page1.SequenceEqual(first);
+                page1 = await SteamCommunity.MyFavoritesPageAsync(1, SteamGate.Kind.Background, account: steamId).ConfigureAwait(false);
+                // a login page (an expired sign-in) or a blank one lists nothing: no answer, not an emptied list
+                // Guard: scripts/test-workshop-social.sh § 7 "private profile: a 200 login page as page 1 → the count check
+                // keeps the list (no diff, nothing written)"
+                if (!page1.Listing && !(page1.Ids.Count == 0 && first.Count == 0))
+                { Console.WriteLine("workshop-favorites: count check: not the favourites page, the list kept"); return; }
+                changed = !page1.Ids.SequenceEqual(first);
             }
             Console.WriteLine($"workshop-favorites: count check: {(changed ? "changed, the ids follow" : "no change")}");
             if (changed) await DiffCoreAsync(steamId, a, started, page1).ConfigureAwait(false);
@@ -424,16 +441,17 @@ public static class WorkshopFavorites
 
     // The id diff: Steam's whole list again as ids — a public list in one `ids_only` ask (bare ids, in the first load's
     // `lastupdated` order), a private profile's through its community pages (Background: the user didn't click for this)
-    // — then the details of every id to show that the details cache lacks (Heal), then Merge with the edits. A public list that comes back empty takes
-    // the first load's rule: the community page (the profile turned private, or holds none). Steam unreachable or a
-    // sign-in switched → nothing changes.
+    // — then the details of every id to show that the details cache lacks (Heal), then Merge with the edits. A public
+    // list that comes back empty takes the first load's rule: the community page (the profile turned private, or holds
+    // none). Steam unreachable, a page that isn't the favourites list, or a sign-in switched → nothing changes.
     // Guard: scripts/test-workshop-social.sh § 7 "sync=open with a cached list: …", "private profile: a grown page 1 → …",
     // "private profile: the diff asks the details of every listed id still missing them (the new one and pfav-5, one
-    // GetDetails of 2)"
-    static async Task DiffCoreAsync(ulong steamId, Account a, long started, List<string>? page1)
+    // GetDetails of 2)", "private profile: a 200 login page as a diff's page 1 → …", "private profile: a blank 200 page 2
+    // in a diff → …"
+    static async Task DiffCoreAsync(ulong steamId, Account a, long started, SteamCommunity.FavoritesPage? page1)
     {
-        bool wasViaPage;
-        lock (_lock) wasViaPage = a.ViaPage;
+        bool wasViaPage, emptyOk;
+        lock (_lock) { wasViaPage = a.ViaPage; emptyOk = a.Steam.Count == 0; }
         var fromSteam = new List<string>();
         bool viaPage = wasViaPage;
         if (!wasViaPage)
@@ -443,7 +461,8 @@ public static class WorkshopFavorites
             if (ids.Count > 0) fromSteam = ids.Select((id) => id.ToString()).ToList();
             else viaPage = true;
         }
-        if (viaPage) await CommunityIdsAsync(steamId, SteamGate.Kind.Background, fromSteam, page1, null).ConfigureAwait(false);
+        // a kept list never empties on a page that lists nothing (emptyOk only while there's nothing to lose)
+        if (viaPage) await CommunityIdsAsync(steamId, SteamGate.Kind.Background, fromSteam, page1, emptyOk, null).ConfigureAwait(false);
         bool detailsMissing = await HealAsync(a, fromSteam, started).ConfigureAwait(false);
         int added = 0, removed = 0;
         Commit(steamId, a, () =>

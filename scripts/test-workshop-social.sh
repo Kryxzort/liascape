@@ -42,7 +42,8 @@
 #     asks the total alone and diffs only on a change; sync=open diffs the ids (one ids-only ask, the details of the new id
 #     alone); a star / unstar set in Liascape changes the list at once (an event, no Steam call to read it, the new item's
 #     details in the background) and holds against a later diff whose Steam answer lacks it; a private profile's check
-#     reads page 1 only, and a grown page 1 → the pages again, with any listed id still missing its details asked again.
+#     reads page 1 only, and a grown page 1 → the pages again, with any listed id still missing its details asked again;
+#     a 200 page that isn't the favourites page (a login page as page 1, a blank page 2) is no answer: the list is kept.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -485,6 +486,44 @@ if (process.argv[2]?.startsWith("fav")) {
       "private profile diff: no Steam ID or item ID in the log", J(logNow().split("\n").filter((l) => l.includes(ME)).slice(0, 3)));
     process.exit(0);
   }
+
+  if (MODE === "fav-private-odd") {
+    // Steam answering 200 with a page that isn't the favourites page: its login page (an expired sign-in) or an empty
+    // page (a glitch) has no item links, and must read as no answer, never as favourites removed
+    const want = ["pfav-new", ...PRIV.map((_, i) => `pfav-${i}`)];
+    const before = fs.readFileSync(FF(ME), "utf8");
+    const ownPages = async (n) => (await since(n)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`).map((x) => x.query.p);
+    const same = async () => J(titles(await favs())) === J(want) && fs.readFileSync(FF(ME), "utf8") === before;
+    // the count check meets a login page as page 1
+    await fetch(`${FAKE}/__oddpage?p=1&kind=login`);
+    let n0 = (await fakeLog()).length, L = blog().length;
+    await favs("check");
+    await waitFor(() => /count check/.test(blog().slice(L)), 15000);
+    await sleep(300);
+    out(J(await ownPages(n0)) === J(["1"]) && /count check: not the favourites page/.test(blog().slice(L)) && !/id diff/.test(blog().slice(L)) && await same(),
+      "private profile: a 200 login page as page 1 → the count check keeps the list (no diff, nothing written)", J({ pages: await ownPages(n0), log: blog().slice(L), n: titles(await favs()).length }));
+    // a diff meets the login page as page 1
+    await fetch(`${FAKE}/__oddpage?p=1&kind=login`);
+    n0 = (await fakeLog()).length; L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 15000);
+    out(J(await ownPages(n0)) === J(["1"]) && /id diff stopped/.test(blog().slice(L)) && await same(),
+      "private profile: a 200 login page as a diff's page 1 → the list kept, nothing written", J({ pages: await ownPages(n0), log: blog().slice(L), n: titles(await favs()).length }));
+    // a diff meets a blank page 2: not the list's end
+    await fetch(`${FAKE}/__oddpage?p=2&kind=blank`);
+    n0 = (await fakeLog()).length; L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 20000);
+    out(J(await ownPages(n0)) === J(["1", "2"]) && /id diff stopped/.test(blog().slice(L)) && await same(),
+      "private profile: a blank 200 page 2 in a diff → not the list's end: the list kept, nothing written", J({ pages: await ownPages(n0), log: blog().slice(L), n: titles(await favs()).length }));
+    // the pages answer again: the next diff reads them to the last page (its paging text says so) and keeps the same list
+    n0 = (await fakeLog()).length; L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 20000);
+    out(J(await ownPages(n0)) === J(["1", "2", "3"]) && /id diff done — 66 item\(s\), 0 added, 0 removed/.test(blog().slice(L)) && J(titles(await favs())) === J(want),
+      "private profile: the pages answering again → the next diff reads all three and keeps the same 66", J({ pages: await ownPages(n0), log: blog().slice(L) }));
+    process.exit(0);
+  }
 }
 
 // ---- 1. signed out ----
@@ -714,7 +753,7 @@ stop_backend; start_backend
 (cd "$T" && timeout 60 node drive.mjs after-restart) >> "$T/drive.log" 2>&1 || rc=$?
 # § 7 on a backend without § 4's cooldown (a private profile's community pages must go out), restarted before each phase
 stop_backend; rm -f "$XDG_CACHE_HOME/liascape/steam-cooldown.json"; start_backend
-for phase in fav fav-restart fav-private fav-private-grow; do
+for phase in fav fav-restart fav-private fav-private-grow fav-private-odd; do
   [ $phase = fav ] || { stop_backend; start_backend; }
   (cd "$T" && timeout 60 node drive.mjs $phase) >> "$T/drive.log" 2>&1 || rc=$?
 done
