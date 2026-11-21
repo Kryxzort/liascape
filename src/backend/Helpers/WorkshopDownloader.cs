@@ -278,7 +278,7 @@ public static class WorkshopDownloader
     private static async Task<string> WaitForSteamCopyAsync(string workshopId, AppSettings settings, IProgress<(double, string)>? progress,
         CancellationToken ct, SteamTodo.Entry? todo, string waitingFor, string? why)
     {
-        const int maxWaitMs = 600_000;
+        int maxWaitMs = MaxWaitMs;
         int pollMs = PollMs;
         int waited = 0;
         // the last size seen PER media path: the roots can name one folder twice (Steam's
@@ -367,6 +367,17 @@ public static class WorkshopDownloader
     // The poll interval (3 s); LIASCAPE_WORKSHOP_POLL_MS shortens it for the hermetic test.
     internal static int PollMs =>
         int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_POLL_MS"), out var ms) && ms is >= 100 and <= 3000 ? ms : 3000;
+
+    // The longest wait for Steam's copy once it's an item's turn (10 min); LIASCAPE_WORKSHOP_WAIT_MS shortens it for the
+    // hermetic test (a preset's base that never arrives).
+    internal static int MaxWaitMs =>
+        int.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_WAIT_MS"), out var ms) && ms is >= 1000 and <= 600_000 ? ms : 600_000;
+
+    /// Waits for Steam's folder of an item that something else already asked Steam for (a preset's base: Steam's own
+    /// required-items prompt on the preset's page), with no page and no Steam to-do entry, up to MaxWaitMs; then that folder.
+    /// A timeout throws TimeoutException.
+    public static Task<string> WaitForSteamDeliveryAsync(string workshopId, AppSettings settings, IProgress<(double, string)>? progress,
+        string waiting, CancellationToken ct) => WaitForSteamCopyAsync(workshopId, settings, progress, ct, null, waiting, null);
 
     /// Opens a steam:// URL in the Steam app (`xdg-open`, which starts Steam when it isn't running), detached in its own
     /// session so the app's process group (a dev unit restart, Ctrl+C) never takes Steam down with it. False = couldn't start it.
@@ -873,7 +884,8 @@ public static class WorkshopDownloader
     private static bool IsWorkshopDirReady(string dir)
         => TryGetMediaPath(dir) is { } m && SafeLen(m) > 0;
 
-    // The actual playable file in a workshop dir: scene.pkg for scenes, else the video named in
+    // The actual playable file in a workshop dir: scene.pkg for scenes, a preset's project.json (all a preset is: its values
+    // and its base's id, .claude/rules/backend/library.md § Presets; ready once it parses as one), else the video named in
     // project.json's "file". Returns null until that file actually exists — Steam writes project.json
     // BEFORE the media finishes downloading, so checking project.json alone imports a partial file.
     private static string? TryGetMediaPath(string dir)
@@ -883,6 +895,7 @@ public static class WorkshopDownloader
         if (File.Exists(scene)) return scene;
         string pj = Path.Combine(dir, "project.json");
         if (!File.Exists(pj)) return null;
+        if (Presets.Read(dir) != null) return pj;
         try
         {
             using var s = File.OpenRead(pj);

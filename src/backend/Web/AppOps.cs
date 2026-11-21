@@ -292,6 +292,8 @@ public static class AppOps
             LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
             PreviewBackfill.Kick("download"); // its card's previews
             EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
+            // a preset brings its base scene, by this download's own mode and action (in the background, never throws)
+            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) _ = PresetDownloads.FetchBaseAsync(item, oneOff);
             return item;
         }
         finally { if (letGo != null) WorkshopDownloader.LetGoOfOneOff(letGo); }

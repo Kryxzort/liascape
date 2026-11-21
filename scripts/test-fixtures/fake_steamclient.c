@@ -5,6 +5,7 @@
 // GetItemInstallInfo 73, GetItemDownloadInfo 74, DownloadItem 75. SubscribeItem → "subscribed" at once, "downloading" with
 // bytes climbing over ~1.2 s, then installed in $FAKE_UGC_DIR/<id> (project.json + v.mp4 copied from $FAKE_UGC_CLIP).
 // DownloadItem → the same download without subscribing (the subscribed bit stays as it was). Never talks to Steam.
+//   $FAKE_UGC_DIR/template-<id>/ exists → that item installs as a copy of it instead (a preset, a scene) of the video
 //   $FAKE_UGC_DIR/refuse-download exists → DownloadItem returns false for an item that isn't subscribed
 //   $FAKE_UGC_DIR/downloads ← a line "<id>" per DownloadItem Steam took
 //   $FAKE_UGC_DIR/fail-init exists → ConnectToGlobalUser returns 0 (Steam not running / WE not owned)
@@ -26,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -48,6 +50,14 @@ static Obj client = { client_vt }, ugc = { ugc_vt };
 static void install(uint64_t id) {
   char d[4096], p[4200]; snprintf(d, sizeof d, "%s/%llu", dir(), (unsigned long long)id);
   struct stat st; if (stat(d, &st) == 0) return;
+  char t[4096]; snprintf(t, sizeof t, "%s/template-%llu", dir(), (unsigned long long)id);
+  if (stat(t, &st) == 0 && S_ISDIR(st.st_mode)) {
+    // cp -R <template> <d>: d doesn't exist yet, so it becomes the copy (files/ and all)
+    pid_t c = fork();
+    if (c == 0) { execlp("cp", "cp", "-R", t, d, (char *)NULL); _exit(127); }
+    if (c > 0) { int rc; waitpid(c, &rc, 0); }
+    return;
+  }
   mkdir(d, 0755);
   snprintf(p, sizeof p, "%s/project.json", d); FILE *f = fopen(p, "w");
   if (f) { fprintf(f, "{\"type\":\"video\",\"file\":\"v.mp4\",\"title\":\"ws-%llu\"}", (unsigned long long)id); fclose(f); }

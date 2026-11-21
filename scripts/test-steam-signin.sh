@@ -25,7 +25,12 @@
 #     community, scripts/test-fixtures/fake-steam-community.mjs) → subscribe, the test drops Steam's files, the library's own
 #     copy, unsubscribed at once (no unsub-progress for the UI), the lingering folder blocked; an item already subscribed is copied, its subscription untouched. Without a usable sign-in the unsubscribe endpoints refuse (400
 #     + "Sign in to Steam to unsubscribe") under "Subscribe with Steam login": nothing queued, trashed or opened. A stored
-#     "steamcmd" mode (dropped) reads as "subscribe".
+#     "steamcmd" mode (dropped) reads as "subscribe". Presets (Web/PresetDownloads.cs; real Workshop ids from
+#     scripts/test-fixtures/presets/, Steam's details from a CM fixture): a preset's download brings its base scene by the same
+#     mode and action — the page mode opens only the preset's page and imports the base once Steam delivers it (a base that
+#     never comes: given up, "Needs its base scene"); signed in the base is subscribed after the preset, a one-off's base is a
+#     one-off too; a base in the library is reused; a web base is never asked for; a Subscribe of a preset subscribes its
+#     base; unsubscribing the preset leaves the base alone.
 #  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
@@ -46,7 +51,9 @@
 #     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing; GET /library's
 #     `subscribed` true before, false after). Then (j.) "Download without subscribing" through the client: DownloadItem, no
 #     subscription, the library's own copy, the lingering folder blocked; a client that refuses DownloadItem → subscribe, copy,
-#     unsubscribe through the client; an item already subscribed stays so; Steam unreachable → the reason.
+#     unsubscribe through the client; an item already subscribed stays so; Steam unreachable → the reason. Then (k.) presets
+#     through the client (the fake installs $FAKE_UGC_DIR/template-<id>/): the preset then its base subscribed, a one-off's
+#     both DownloadItem'd, a Subscribe of a preset subscribes its base, a Delete from source of the preset keeps the base.
 #  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
 #     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), sign-out, and the
 #     keyring path against a STUB secret-tool (the value on stdin, never argv; a refused lookup → signed out, not asked
@@ -125,6 +132,23 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"PlayerEngine":"legacy","WorkshopDownloadMode":"subscribe","WorkshopFolder":"$T/ws/431960","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}
 EOF
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -t 1 -c:v libx264 -pix_fmt yuv420p "$T/clip.mp4"
+# Steam's item details for every backend here (LIASCAPE_STEAM_CM_FIXTURE: no CM session, no network): the presets and their
+# bases (Web/PresetDownloads.cs asks for a preset's base and its kind). Real Workshop ids for the fixtures' pairs
+# (scripts/test-fixtures/presets/); 910000101 and 910000103 are made up, each a fixture with its base id rewritten (a base
+# that never arrives, a web base). An id not listed = no such public item.
+cat > "$T/cm.json" <<'EOF'
+{"3583880694": {"tags": ["Preset", "Scene"], "title": "Preset fixture 4", "children": ["3354740764"]},
+ "3520333138": {"tags": ["Preset", "Scene"], "title": "Preset fixture 3", "children": ["3354740764"]},
+ "3420428971": {"tags": ["Preset", "Scene"], "title": "Preset fixture 2", "children": ["3419466417"]},
+ "3009121253": {"tags": ["Preset", "Scene"], "title": "Preset fixture 1", "children": ["2932157836"]},
+ "3354740764": {"tags": ["Scene"], "title": "Base scene A"},
+ "3419466417": {"tags": ["Scene"], "title": "Base scene B"},
+ "2932157836": {"tags": ["Scene"], "title": "Base scene C"},
+ "910000101": {"tags": ["Preset", "Scene"], "title": "Preset, base never arrives", "children": ["900000001"]},
+ "900000001": {"tags": ["Scene"], "title": "Base scene D"},
+ "910000103": {"tags": ["Preset", "Web"], "title": "Preset of a web wallpaper", "children": ["900000005"]},
+ "900000005": {"tags": ["Web"], "title": "A web wallpaper"}}
+EOF
 # "Download without subscribing" signed in (§ 2, one-off): the sign-in's subscribe / unsubscribe go to a fake community
 # (scripts/test-fixtures/fake-steam-community.mjs, LIASCAPE_STEAM_COMMUNITY); a made-up account and cookie token
 FAKE_ME=76561190000000042; FAKE_TOKEN=probe-cookie-token-not-real
@@ -132,7 +156,8 @@ node "$ROOT/scripts/test-fixtures/fake-steam-community.mjs" "$T/fake.port" "$FAK
 for _ in $(seq 1 50); do [ -s "$T/fake.port" ] && break; sleep 0.1; done
 [ -s "$T/fake.port" ] || { bad "the fake community server didn't start"; cat "$T/fake.log"; exit 1; }
 FAKE=http://127.0.0.1:$(cat "$T/fake.port")
-(cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_COMMUNITY=$FAKE exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
+# LIASCAPE_WORKSHOP_WAIT_MS: a preset's base that never arrives is given up after 10 s, not 10 min
+(cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_WORKSHOP_WAIT_MS=10000 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_COMMUNITY=$FAKE exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { wait $BP; echo "backend rc=$?"; BP=""; bad "backend didn't start"; tail -15 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
@@ -153,7 +178,9 @@ const status = {}; // workshop id → the statuses seen
 const ws = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN));
 const todo = []; // WS steam-todo payloads
 const unsubEv = []; // WS unsub-progress payloads (the held message at its end)
+const dlErr = {}; // workshop page URL → the download-progress error it ended with
 ws.onmessage = (m) => { const e = JSON.parse(m.data); if (e.type === "download-progress" && e.payload.status) (status[e.payload.id] ??= []).push(e.payload.status);
+  if (e.type === "download-progress" && e.payload.error) dlErr[e.payload.id] = e.payload.error;
   if (e.type === "steam-todo") todo.push(e.payload);
   if (e.type === "unsub-progress") unsubEv.push(e.payload); };
 await new Promise((r) => { ws.onopen = r; });
@@ -390,9 +417,132 @@ out(urls().length === n0 + 1 && !(await inLib("700000004")), "cancelled: its pag
 const std = `${process.env.HOME}/.local/share/Steam/steamapps/workshop/content`;
 fs.mkdirSync(std, { recursive: true }); fs.symlinkSync(`${T}/ws/431960`, `${std}/431960`);
 await viaSteam("700000005", "Workshop folder reached through a symlink");
+
+// A preset brings its base scene (Web/PresetDownloads.cs), by the preset's own mode and action, never another route: "Open in
+// the Steam app" opens only the preset's page (Steam's required-items prompt fetches the base) and waits for the base with no
+// page; the sign-in subscribes the base after the preset; a one-off gets a one-off base; a base in the library is reused; a
+// base that isn't a scene is never asked for. The test plays Steam's part: it drops each folder into the Workshop folder.
+{
+  const json = { "Content-Type": "application/json" };
+  const setS = (patch) => fetch(U + "/settings", { method: "POST", headers: json, body: JSON.stringify(patch) });
+  const FIX = `${process.env.ROOT}/scripts/test-fixtures/presets`;
+  const wsDir = (id) => `${T}/ws/431960/${id}`;
+  // a preset as Steam delivers it: a Task 1 fixture (its own id, or `fixture` with the base id rewritten to `dep`)
+  const dropPreset = (id, fixture = id, dep = null) => {
+    const stage = `${T}/stage-${id}`; fs.cpSync(`${FIX}/${fixture}`, stage, { recursive: true });
+    if (dep) { const pj = JSON.parse(fs.readFileSync(`${stage}/project.json`, "utf8")); pj.dependency = dep; fs.writeFileSync(`${stage}/project.json`, JSON.stringify(pj)); }
+    fs.renameSync(stage, wsDir(id));
+  };
+  const dropBase = (id) => { const stage = `${T}/stage-${id}`; fs.mkdirSync(stage, { recursive: true });
+    fs.writeFileSync(`${stage}/project.json`, JSON.stringify({ type: "scene", title: `base-${id}`, file: "scene.json" }));
+    fs.writeFileSync(`${stage}/scene.pkg`, Buffer.alloc(16)); fs.renameSync(stage, wsDir(id)); };
+  const presetResult = (id) => ({ ...result(id), isScene: true, isPreset: true });
+  const dl = (id, oneOff = false) => fetch(U + "/download", { method: "POST", headers: json, body: JSON.stringify({ source: src, result: presetResult(id), apply: false, oneOff }) });
+  const item = async (id) => (await lib()).find((i) => i.workshopId === id);
+  const until = async (pred, ms) => { for (let i = 0; i < ms / 100; i++) { if (await pred()) return true; await sleep(100); } return !!(await pred()); };
+  const settle = (p, ms = 30000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), sleep(ms).then(() => null)]);
+  const fakeLog = async () => (await realFetch(process.env.FAKE + "/__log")).json();
+  const subCalls = async (id) => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path) && e.form.id === id).map((e) => e.path.slice(13));
+  const order = async () => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path)).map((e) => `${e.path.slice(13)} ${e.form.id}`);
+  const beLog = () => fs.readFileSync(`${T}/backend.log`, "utf8");
+  const LEGACY = "Presets play only in the Liascape player"; // this backend runs the legacy engine: the base was found, a scene
+  const libDir = (src, id) => `${process.env.XDG_DATA_HOME}/liascape/library/${src}/${id}`;
+  const own = (id) => fs.existsSync(libDir("workshop", id)) && !fs.lstatSync(libDir("workshop", id)).isSymbolicLink();
+
+  // "Open in the Steam app": the preset's page only; the base arrives by Steam's prompt (the test drops it) → both imported
+  await setS({ workshopDownloadMode: "steampage" });
+  let n0 = urls().length;
+  const pA = settle(dl("3583880694"));
+  await until(() => urls().slice(n0).includes("steam://url/CommunityFilePage/3583880694"), 10000);
+  dropPreset("3583880694");
+  const rA = await pA;
+  const waitingA = await until(() => (status[pageUrl("3354740764")] ?? []).includes("Waiting for Steam to download its base scene…"), 10000);
+  dropBase("3354740764");
+  await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === LEGACY, 15000);
+  const pa = await item("3583880694"), ba = await item("3354740764");
+  out(rA?.status === 200 && pa?.isPreset === true && !!ba && pa.presetReason === LEGACY,
+    "preset (Open in the Steam app): the preset, then its base scene once Steam delivers it — both in the library, the preset no longer needs its base",
+    `${rA?.status} | preset ${JSON.stringify(pa && { r: pa.presetReason, b: pa.baseWorkshopId })} base ${!!ba}`);
+  out(waitingA && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/3583880694",
+    "…only the preset's page opened (Steam's required-items prompt brings the base); the base waited with no page", `${waitingA} | ${urls().slice(n0).join(" ")}`);
+  // a base that never arrives: given up after LIASCAPE_WORKSHOP_WAIT_MS, the preset "Needs its base scene", no page for it
+  n0 = urls().length;
+  const pB = settle(dl("910000101"));
+  await until(() => urls().slice(n0).includes("steam://url/CommunityFilePage/910000101"), 10000);
+  dropPreset("910000101", "3009121253", "900000001");
+  const rB = await pB;
+  const gaveUp = await until(() => !!dlErr[pageUrl("900000001")], 30000);
+  const pb = await item("910000101");
+  out(rB?.status === 200 && gaveUp && pb?.presetReason === "Needs its base scene" && !(await item("900000001"))
+    && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000101",
+    "…a base Steam never delivers: given up (the wait's limit), the preset reads \"Needs its base scene\", no page for the base",
+    `${rB?.status} | ${dlErr[pageUrl("900000001")] ?? "no error"} | ${pb?.presetReason} | ${urls().slice(n0).join(" ")}`);
+
+  // "Subscribe with Steam login", signed in (the fake community): the preset subscribed, then its base
+  const authBefore = fs.readFileSync(af, "utf8");
+  fs.writeFileSync(af, JSON.stringify({ "steam-login-secure": `${process.env.FAKE_ME}||${process.env.FAKE_TOKEN}` }), { mode: 0o600 });
+  await setS({ workshopDownloadMode: "subscribe" });
+  n0 = urls().length;
+  const pC = settle(dl("3420428971"));
+  await until(async () => (await subCalls("3420428971")).includes("subscribe"), 10000);
+  dropPreset("3420428971");
+  const rC = await pC;
+  const subB = await until(async () => (await subCalls("3419466417")).includes("subscribe"), 10000);
+  dropBase("3419466417");
+  await until(async () => (await item("3419466417")) && (await item("3420428971"))?.presetReason === LEGACY, 15000);
+  const ord = await order();
+  const iP = ord.indexOf("subscribe 3420428971"), iB = ord.indexOf("subscribe 3419466417");
+  out(rC?.status === 200 && subB && iP >= 0 && iB > iP && !!(await item("3419466417")) && (await item("3420428971"))?.presetReason === LEGACY && urls().length === n0,
+    "preset (Subscribe with Steam login): Steam is asked to subscribe the preset, then its base; both imported, nothing opened", `${rC?.status} | ${ord.join(", ")}`);
+  // its base already in the library (3354740764, above): reused — never subscribed, downloaded or duplicated
+  const pE = settle(dl("3520333138"));
+  await until(async () => (await subCalls("3520333138")).includes("subscribe"), 10000);
+  dropPreset("3520333138");
+  const rE = await pE;
+  const reused = await until(() => /3520333138: its base 3354740764 is in the library/.test(beLog()), 10000);
+  await sleep(500);
+  out(rE?.status === 200 && reused && (await subCalls("3354740764")).length === 0 && (await lib()).filter((i) => i.workshopId === "3354740764").length === 1
+    && (await item("3520333138"))?.presetReason === LEGACY,
+    "…a base already in the library: reused, never subscribed again or duplicated", `${rE?.status} | reused ${reused} | ${(await subCalls("3354740764")).join(" ")}`);
+  // a base that isn't a scene: never asked for; the preset reads why
+  const pF = settle(dl("910000103"));
+  await until(async () => (await subCalls("910000103")).includes("subscribe"), 10000);
+  dropPreset("910000103", "3583880694", "900000005");
+  const rF = await pF;
+  await until(async () => (await item("910000103"))?.presetReason === "Its base is a web wallpaper, not a scene", 10000);
+  await sleep(500);
+  out(rF?.status === 200 && (await item("910000103"))?.presetReason === "Its base is a web wallpaper, not a scene" && (await subCalls("900000005")).length === 0
+    && !(await item("900000005")),
+    "…a web base: never asked for, the preset reads \"Its base is a web wallpaper, not a scene\"", `${rF?.status} | ${(await item("910000103"))?.presetReason} | ${(await subCalls("900000005")).join(" ")}`);
+  // "Download without subscribing": a one-off preset gets a one-off base — both the library's own copies, both let go
+  const pD = settle(dl("3009121253", true));
+  await until(async () => (await subCalls("3009121253")).includes("subscribe"), 10000);
+  dropPreset("3009121253");
+  const rD = await pD;
+  const subD = await until(async () => (await subCalls("2932157836")).includes("subscribe"), 10000);
+  dropBase("2932157836");
+  await until(async () => (await item("2932157836")) && (await subCalls("2932157836")).includes("unsubscribe") && (await subCalls("3009121253")).includes("unsubscribe"), 15000);
+  out(rD?.status === 200 && subD && own("3009121253") && own("2932157836") && !fs.existsSync(libDir("local", "2932157836"))
+    && (await subCalls("3009121253")).join(" ") === "subscribe unsubscribe" && (await subCalls("2932157836")).join(" ") === "subscribe unsubscribe"
+    && (await item("3009121253"))?.presetReason === LEGACY,
+    "…one-off: the preset and its base each the library's own workshop/<id> copy, each unsubscribed once copied",
+    `${rD?.status} | own ${own("3009121253")} ${own("2932157836")} | ${(await subCalls("3009121253")).join(" ")} / ${(await subCalls("2932157836")).join(" ")}`);
+  // Subscribe (the sidebar's, nothing imported) of a preset whose base is neither subscribed nor in the library: its base too
+  const rS = await fetch(U + "/workshop/subscribe", { method: "POST", headers: json, body: JSON.stringify({ workshopId: "910000101", title: "p" }) });
+  const subS = await until(async () => (await subCalls("900000001")).includes("subscribe"), 10000);
+  out(rS.status === 200 && (await subCalls("910000101")).includes("subscribe") && subS,
+    "Subscribe of a preset (Subscribe with Steam login): its base scene is subscribed too", `${rS.status} | ${(await subCalls("900000001")).join(" ")}`);
+  // unsubscribing the preset (Delete from source) never unsubscribes its base
+  const rU = await fetch(U + "/workshop/unsubscribe", { method: "POST", headers: json, body: JSON.stringify({ workshopId: "3420428971", title: "p" }) });
+  const unsubP = await until(async () => (await subCalls("3420428971")).includes("unsubscribe"), 15000);
+  await sleep(1000);
+  out(rU.status === 200 && unsubP && !(await subCalls("3419466417")).includes("unsubscribe") && !!(await item("3419466417")),
+    "unsubscribing a preset (Delete from source): its base stays subscribed and in the library", `${(await subCalls("3420428971")).join(" ")} / base ${(await subCalls("3419466417")).join(" ")}`);
+  fs.writeFileSync(af, authBefore, { mode: 0o600 });
+}
 ws.close();
 EOF
-(cd "$T" && U=$U T=$T FAKE=$FAKE FAKE_ME=$FAKE_ME FAKE_TOKEN=$FAKE_TOKEN XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 120 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
+(cd "$T" && U=$U T=$T ROOT=$ROOT FAKE=$FAKE FAKE_ME=$FAKE_ME FAKE_TOKEN=$FAKE_TOKEN XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout 240 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
 cat "$T/drive.log" | sed 's/^/      /'
 p=$(grep -c '^PASS' "$T/drive.log"); f=$(grep -c '^FAIL' "$T/drive.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))
@@ -410,13 +560,13 @@ mkdir -p "$T/ws3/431960" "$T/steamlib"
 : > "$T/xdg-open.urls"
 printf '{"PlayerEngine":"legacy","WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws3/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
-(cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
+(cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1) & BP3=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP3 2>/dev/null || break; sleep 0.1; done
 U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
 for _ in $(seq 1 50); do curl -sf -m 2 "$U3/health" >/dev/null && break; sleep 0.1; done
 cp "$ROOT/scripts/test-fixtures/drive-steam-client.mjs" "$T/drive3.mjs"
-(cd "$T" && U=$U3 T=$T XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout $((300 + 50 * ${FAKE_UGC_OPEN_DELAY_MS:-0} / 1000)) node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
+(cd "$T" && U=$U3 T=$T ROOT=$ROOT XDG_CONFIG_HOME=$XDG_CONFIG_HOME timeout $((360+ 50 * ${FAKE_UGC_OPEN_DELAY_MS:-0} / 1000)) node drive3.mjs) > "$T/drive3.log" 2>&1; rc=$?
 sed 's/^/      /' "$T/drive3.log"
 p=$(grep -c '^PASS' "$T/drive3.log"); f=$(grep -c '^FAIL' "$T/drive3.log")
 PASS=$((PASS + p)); FAIL=$((FAIL + f))

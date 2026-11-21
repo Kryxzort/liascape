@@ -612,4 +612,51 @@ let ro4 = await settle(oneOff("770000004"), 60000);
 fs.rmSync(`${T}/steamlib/fail-init`);
 out(ro4 && ro4.status >= 400 && /Couldn't use the Steam app/.test(ro4.body?.error ?? "") && !(await item("770000004")) && !blockedIds().includes("770000004") && urls().length === n0,
   "one-off, Steam unreachable (Use the Steam app): fails with the reason, nothing imported, opened or blocked", JSON.stringify(ro4)?.slice(0, 200));
+
+// k. a preset brings its base scene through the Steam client too (Web/PresetDownloads.cs): a download subscribes the preset,
+// then its base; a one-off DownloadItems both; a Subscribe of a preset subscribes its base; unsubscribing the preset never
+// unsubscribes the base. The fake installs each from $FAKE_UGC_DIR/template-<id>/: the fixtures' presets
+// (scripts/test-fixtures/presets/, real Workshop ids with their real bases) and a minimal scene for each base.
+await setMode("steamapp");
+{
+  const FIX = `${process.env.ROOT}/scripts/test-fixtures/presets`;
+  for (const id of ["3583880694", "3420428971", "3009121253"]) fs.cpSync(`${FIX}/${id}`, `${T}/steamlib/template-${id}`, { recursive: true });
+  for (const id of ["3354740764", "3419466417", "2932157836"]) {
+    const d = `${T}/steamlib/template-${id}`; fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(`${d}/project.json`, JSON.stringify({ type: "scene", title: `base-${id}`, file: "scene.json" }));
+    fs.writeFileSync(`${d}/scene.pkg`, Buffer.alloc(16));
+  }
+  const presetResult = (id) => ({ ...result(id), isScene: true, isPreset: true });
+  const dl = (id, oneOff = false) => post("/download", { source: src, result: presetResult(id), apply: false, oneOff });
+  const LEGACY = "Presets play only in the Liascape player"; // the legacy engine here: the base was found, a scene
+  const calls = () => fakeLines("calls");
+  n0 = urls().length;
+  const rk = await settle(dl("3583880694"), 60000);
+  await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === LEGACY, 60000);
+  const c1 = calls();
+  out(rk?.status === 200 && c1.includes("subscribe 3583880694") && c1.indexOf("subscribe 3354740764") > c1.indexOf("subscribe 3583880694")
+    && !!(await item("3354740764")) && (await item("3583880694"))?.presetReason === LEGACY && urls().length === n0,
+    "preset (Use the Steam app): the client subscribes the preset, then its base; both imported, nothing opened", `${rk?.status} | ${c1.filter((l) => /33547|35838/.test(l)).join(", ")}`);
+  const rk2 = await settle(dl("3420428971", true), 60000);
+  await until(async () => (await item("3419466417")) && fakeLines("downloads").includes("3419466417"), 60000);
+  await helpersDone();
+  const dls = fakeLines("downloads");
+  // a scene's item path is its folder: the library's own workshop/<id> copy, not a link into Steam's folder
+  const ownDir = (id, p) => p === `${process.env.XDG_DATA_HOME ?? `${process.env.HOME}/.local/share`}/liascape/library/workshop/${id}` && fs.existsSync(p) && !fs.lstatSync(p).isSymbolicLink();
+  const pk2 = (await item("3420428971"))?.videoPath, bk2 = (await item("3419466417"))?.videoPath;
+  out(rk2?.status === 200 && dls.includes("3420428971") && dls.includes("3419466417") && !fs.existsSync(`${T}/steamlib/sub-3420428971`)
+    && !fs.existsSync(`${T}/steamlib/sub-3419466417`) && ownDir("3420428971", pk2) && ownDir("3419466417", bk2),
+    "…one-off: the client's DownloadItem fetches the preset and its base, each the library's own copy, neither subscribed", `${rk2?.status} | downloads [${dls}] | ${pk2} ${bk2}`);
+  const rk3 = await post("/workshop/subscribe", { workshopId: "3009121253", title: "preset" });
+  await until(() => calls().includes("subscribe 2932157836"), 60000);
+  await helpersDone();
+  out(rk3.status === 200 && calls().includes("subscribe 3009121253") && calls().includes("subscribe 2932157836"),
+    "Subscribe of a preset (Use the Steam app): its base is subscribed through the client too", calls().filter((l) => /3009121253|2932157836/.test(l)).join(", "));
+  unsub.length = 0;
+  await post("/workshop/delete-from-source", { items: [await item("3583880694")] });
+  await until(() => calls().includes("unsubscribe 3583880694"), 60000);
+  await unsubDone(); await helpersDone();
+  out(calls().includes("unsubscribe 3583880694") && !calls().includes("unsubscribe 3354740764") && fs.existsSync(`${T}/steamlib/sub-3354740764`) && !!(await item("3354740764")),
+    "Delete from source of a preset (Use the Steam app): its base stays subscribed and in the library", calls().filter((l) => /33547|35838/.test(l)).join(", "));
+}
 ws.close();

@@ -118,6 +118,7 @@ public static class WorkshopSubOps
         {
             _subscribedHere[id] = 1;
             _ = AfterSubscribeAsync(id);
+            _ = PresetDownloads.SubscribeBaseAsync(id); // a preset: its base scene too
             Progress(id, 1, r.Message, done: true);
             return new { subscribed = true, inSteamTodo = false, message = r.Message };
         }
@@ -138,7 +139,7 @@ public static class WorkshopSubOps
                 await wake;
             }
             bool ok = e.Outcome is SteamTodo.Outcome.Done or SteamTodo.Outcome.UseSteamApp;
-            if (ok) { _subscribedHere[id] = 1; _ = AfterSubscribeAsync(id); }
+            if (ok) { _subscribedHere[id] = 1; _ = AfterSubscribeAsync(id); _ = PresetDownloads.SubscribeBaseAsync(id); }
             Progress(id, ok ? 1 : 0, ok ? "Subscribed" : "Not subscribed", done: true, skipped: !ok);
         }
         catch (Exception ex) { Console.WriteLine($"workshop: {id}: watching its Steam to-do entry failed: {ex.Message}"); }

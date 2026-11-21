@@ -38,6 +38,8 @@ public static class ServerHost
         new MotionBgsService(), new MoewallsService(), new DesktophutService(),
         new WallpaperEngineService(), new SteamWorkshopService(),
     };
+    // the Workshop source: a preset's base scene takes the same details a /download of it would (Web/PresetDownloads.cs)
+    internal static SteamWorkshopService Workshop => (SteamWorkshopService)Providers[^1];
 
     // remote thumbnails / gifs the page names (/img, /anim, /still): public addresses only (ApiSecurity.PublicOnlyHttp)
     private static readonly HttpClient Http = ApiSecurity.PublicOnlyHttp(TimeSpan.FromSeconds(30));
