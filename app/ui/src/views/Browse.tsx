@@ -233,7 +233,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
               after the real ones (they flow inline, filling the last partial row — no gap). They are the
               load trigger: one coming toward view fires loadMore, which inserts the next page before the
               block and pushes a fresh batch down. */}
-          {hasMore && Array.from({ length: 72 }).map((_, i) => (
+          {/* a local set shows whole: no placeholders even over a hasMore the set's own reload hasn't cleared yet */}
+          {hasMore && !setOn && Array.from({ length: 72 }).map((_, i) => (
             <div className="card lib skel-card" key={`ph${i}`}>
               <div className="thumb-wrap skel" />
             </div>
