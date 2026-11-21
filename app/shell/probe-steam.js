@@ -198,7 +198,10 @@
 //                        motion off + bg-live
 //   yours:signOut        signed out: the favourites leave at once, the row dims; another account never sees them
 //   lib:yours:fav        the Library's Favourites row: ✓ the starred items, ✕ the rest (non-Workshop too), – all; signed out dimmed and no effect; the
-//                        Library's sort and search apply on top; a second star arriving updates ✓ live
+//                        Library's sort and search apply on top; a second star arriving updates ✓ live; a star leaving a selected card empties
+//                        the selection and keeps the scroll
+//   lib:yours:load       Library ✓ with the first read on its way: the whole Library under the load line (counts as it comes), never a no-op
+//   lib:yours:error      Library ✓ with an error and nothing read: the whole Library, the error + Retry in the flow, Retry → the set
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
@@ -4089,19 +4092,37 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // The Library's Favourites row (lib:yours:*): three Workshop items (Ember starred, Glacier and Zephyr not) and one non-Workshop item
+    const LIB_ALL = T("Ember", "Glacier", "Plain", "Zephyr");
+    const LIB_Y = [{ title: "Ember", workshopId: "950005" }, { title: "Glacier", workshopId: "950007" }, { title: "Zephyr", workshopId: "950008" },
+      { title: "Plain", workshopId: null }];
+    const libCards = () => js(`[...document.querySelectorAll(".lib-scroll .card.lib [data-title]")].map((e) => e.dataset.title)`);
+    const libCardsAs = async (want, ordered = false, ms = 3000) => {
+      const norm = (xs) => J(ordered ? xs : sorted(xs));
+      return (await waitFor(async () => { const t = await libCards(); return norm(t) === norm(want) ? t : null; }, ms)) ?? await libCards();
+    };
+    // the Library signed in with the library above and a clean filter and sort; false = it didn't show the four items
+    const libYoursOn = async () => {
+      await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await js(`localStorage.setItem("__probe_yours", ${J(J({ ...yData(), lib: LIB_Y }))}); for (const k of ["libFilter", "libSort", "wsLocalSort"]) localStorage.removeItem("liascape." + k);
+        localStorage.setItem("liascape.libFilterHidden", "false"); true`);
+      await load(SIGNED_IN); await tab("Library");
+      return J(sorted(await libCardsAs(LIB_ALL))) === J(LIB_ALL);
+    };
+    const libYoursDone = async () => {
+      await js(`window.__favs = null; localStorage.removeItem("__probe_yours"); for (const k of ["libFilter", "libFilterHidden", "libSort"]) localStorage.removeItem("liascape." + k); true`).catch(() => {});
+      await load(SIGNED_OUT);
+    };
+    // the Library's load line / error: the cards' y moves under it, the line's box over a card
+    const libCardY = () => js(`(() => { const c = document.querySelector(".lib-scroll .card.lib"); return c ? +c.getBoundingClientRect().y.toFixed(1) : null; })()`);
+
     // lib:yours:fav — the Library's Favourites row: ✓ keeps the library's items starred on the Workshop, ✕ the rest (a non-Workshop
     // item included), – all; signed out the row is dimmed and means nothing; the Library's own sort and search still apply on top;
-    // a workshop-favorites event that adds a second star updates ✓ live. Shots steam-libyours-*.png
+    // a workshop-favorites event that adds a second star updates ✓ live; one that removes a selected card's star empties the
+    // selection and leaves the scroll where it was. Shots steam-libyours-*.png
     await cell("lib:yours:fav", async () => {
       const v = [];
-      const ALL = T("Ember", "Glacier", "Plain", "Zephyr");
-      const LIB = [{ title: "Ember", workshopId: "950005" }, { title: "Glacier", workshopId: "950007" }, { title: "Zephyr", workshopId: "950008" },
-        { title: "Plain", workshopId: null }];
-      const cards = () => js(`[...document.querySelectorAll(".lib-scroll .card.lib [data-title]")].map((e) => e.dataset.title)`);
-      const cardsAs = async (want, ordered = false, ms = 3000) => {
-        const norm = (xs) => J(ordered ? xs : sorted(xs));
-        return (await waitFor(async () => { const t = await cards(); return norm(t) === norm(want) ? t : null; }, ms)) ?? await cards();
-      };
+      const cards = libCards, cardsAs = libCardsAs, ALL = LIB_ALL;
       const rowOf = () => js(`(() => { const r = document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"]'); if (!r) return null; const w = r.querySelector("[data-wf-why]");
         return { off: r.hasAttribute("data-wf-off"), why: w && w.checkVisibility() ? w.textContent.trim() : null, st: r.dataset.state }; })()`);
       const libSort = async (label) => {
@@ -4112,12 +4133,7 @@ app.whenReady().then(async () => {
         return ok;
       };
       try {
-        await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
-        await js(`localStorage.setItem("__probe_yours", ${J(J({ ...yData(), lib: LIB }))}); for (const k of ["libFilter", "wsLocalSort"]) localStorage.removeItem("liascape." + k);
-          localStorage.setItem("liascape.libFilterHidden", "false"); true`);
-        await load(SIGNED_IN); await tab("Library");
-        const g0 = await cardsAs(ALL);
-        if (J(sorted(g0)) !== J(ALL)) return [`the Library shows ${J(g0)} before any row — proved nothing`];
+        if (!(await libYoursOn())) return [`the Library shows ${J(await cards())} before any row — proved nothing`];
         await setRow("@favorites", "inc");
         const g1 = await cardsAs(T("Ember"));
         console.log(`        Favourites ✓: ${J(g1)}`);
@@ -4152,6 +4168,35 @@ app.whenReady().then(async () => {
         const g7 = await cardsAs(T("Ember", "Glacier"));
         console.log(`        a second star: ${J(g7)}`);
         if (J(sorted(g7)) !== J(T("Ember", "Glacier"))) v.push(`a second star: ${J(g7)} (want Ember and Glacier)`);
+        // a star leaves while its card is selected and the grid is scrolled: the selection empties, the scroll stays
+        const eb = await cardBox("Ember");
+        if (!eb) v.push("no Ember card to select — proved nothing");
+        else {
+          send({ type: "mouseDown", x: Math.round(eb.x), y: Math.round(eb.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(40);
+          send({ type: "mouseUp", x: Math.round(eb.x), y: Math.round(eb.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(250);
+          const sel0 = await js(`+(/(\\d+) selected/.exec(document.querySelector(".status")?.textContent ?? "")?.[1] ?? 0)`);
+          const top0 = await js(`(() => { const g = document.querySelector(".lib-scroll .grid"), sc = g.parentElement; g.style.minHeight = "3000px"; sc.scrollTop = 200; return sc.scrollTop; })()`);
+          if (sel0 !== 1 || top0 < 100) v.push(`the setup: ${sel0} selected, scrolled to ${top0} — proved nothing`);
+          else {
+            await js(`window.__favs = { answer: ${J(fv(6, [GLACIER]))} }; true`);
+            await ev("workshop-favorites", { version: 6, loading: null });
+            const g7b = await cardsAs(T("Glacier"));
+            // the selection's own size: a card that left the grid shows no class, but the status line still counts it (its old line
+            // fades out for a moment: waited on)
+            const selN = () => js(`+(/(\\d+) selected/.exec(document.querySelector(".status")?.textContent ?? "")?.[1] ?? 0)`);
+            await waitFor(async () => (await selN()) === 0, 2000);
+            const sel1 = await selN();
+            const top1 = await js(`document.querySelector(".lib-scroll").scrollTop`);
+            console.log(`        Ember's star removed: ${J(g7b)}, selected ${sel0} → ${sel1}, scroll ${top0} → ${top1}`);
+            if (J(g7b) !== J(T("Glacier"))) v.push(`Ember unstarred: ${J(g7b)} (want Glacier)`);
+            if (sel1 !== 0) v.push(`Ember unstarred while selected: ${sel1} card(s) still selected (want the selection emptied)`);
+            if (Math.abs(top1 - top0) > 1) v.push(`Ember unstarred: the grid scrolled ${top0} → ${top1} (want it kept)`);
+          }
+          await js(`document.querySelector(".lib-scroll .grid").style.minHeight = ""; true`);
+        }
+        await js(`window.__favs = { answer: ${J(fv(7, [...yFavs(), GLACIER]))} }; true`);
+        await ev("workshop-favorites", { version: 7, loading: null });
+        await cardsAs(T("Ember", "Glacier"));
         // – shows all
         await setRow("@favorites", "off");
         const g8 = await cardsAs(ALL);
@@ -4171,10 +4216,93 @@ app.whenReady().then(async () => {
         await ev("steam-status", SIGNED_IN);
         const g10 = await cardsAs(T("Ember", "Glacier"), false, 4000);
         if (J(sorted(g10)) !== J(T("Ember", "Glacier"))) v.push(`signed in again: ${J(g10)} (want the ✓ back: Ember, Glacier)`);
-      } finally {
-        await js(`window.__favs = null; localStorage.removeItem("__probe_yours"); for (const k of ["libFilter", "libFilterHidden"]) localStorage.removeItem("liascape." + k); true`).catch(() => {});
-        await load(SIGNED_OUT);
-      }
+      } finally { await libYoursDone(); }
+      return v;
+    });
+
+    // lib:yours:load — Library ✓ with the first read still on its way: the whole Library shows under the load line ("Loading your
+    // favourites…", then its counts as the list comes in, the grid narrowing to what's in), never a silent no-op; the read done, the
+    // line leaves and the set shows. Shots steam-libyours-load*.png
+    await cell("lib:yours:load", async () => {
+      const v = [];
+      try {
+        if (!(await libYoursOn())) return [`the Library shows ${J(await libCards())} before any row — proved nothing`];
+        const favs = yFavs();
+        await js(`window.__favs = { hold: true }; true`);
+        if (await lineNow()) return ["the load line shows before any Favourites row — proved nothing"];
+        const fr = await lineFrames(FAV_INC, 500);
+        const i0 = fr.findIndex((f) => f[1] != null);
+        if (i0 < 0) return ["Library Favourites ✓ with the answer held: no load line"];
+        if (i0 > 1) v.push(`the line first showed ${i0} frames after the click (want within one)`);
+        if (fr[i0][3] !== "Loading your favourites…") v.push(`held: it reads ${J(fr[i0][3])} (want "Loading your favourites…")`);
+        const g0 = await libCardsAs(LIB_ALL);
+        console.log(`        held: ${J(g0)}, line ${J(fr[i0][3])}`);
+        if (J(sorted(g0)) !== J(LIB_ALL)) v.push(`held: the Library shows ${J(g0)} (want all four until the list is in)`);
+        if (await js(`!!document.querySelector(".lib-scroll [data-wf-none]")`)) v.push("held: an empty message shows");
+        await sleep(400); await shot("libyours-load-held");
+        // the chip floats over the grid's top and takes no click: what lies under its words is a card (or nothing), never the chip
+        const at = await js(`(() => { const t = document.querySelector(${J(LINE + " .wsl-text")}); if (!t) return null; const r = t.getBoundingClientRect();
+          const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { chip: !!e?.closest(${J(LINE)}), card: !!e?.closest(".card") }; })()`);
+        if (at?.chip) v.push("held: the load line takes the click meant for what lies under it");
+        // the first answer: nothing in yet, then the first two (Ember is one) with a count
+        await js(`window.__favsLet(${J(fv(2, [], { loading: { done: 0, total: null } }))})`);
+        await sleep(300);
+        const g1 = await libCards();
+        if (J(sorted(g1)) !== J(LIB_ALL)) v.push(`loading, none in: the Library shows ${J(g1)} (want all four)`);
+        await js(`window.__favs.answer = ${J(fv(3, favs.slice(4, 6), { loading: { done: 2, total: 6 } }))}; true`);
+        await ev("workshop-favorites", { version: 3, loading: { done: 2, total: 6 } });
+        const g2 = await libCardsAs(T("Ember"));
+        const l2 = (await waitFor(async () => { const l = await lineNow(); return l?.text === "Loading your favourites — 2 of 6" ? l : null; }, 2000)) ?? await lineNow();
+        console.log(`        2 of 6: ${J(g2)}, line ${J(l2?.text)}`);
+        if (l2?.text !== "Loading your favourites — 2 of 6") v.push(`2 of 6: the line reads ${J(l2?.text)}`);
+        if (J(g2) !== J(T("Ember"))) v.push(`2 of 6: the Library shows ${J(g2)} (want what's in so far: Ember)`);
+        await js(`window.__favs.answer = ${J(fv(4, favs))}; true`);
+        await ev("workshop-favorites", { version: 4, loading: null });
+        const g3 = await libCardsAs(T("Ember"));
+        if (J(g3) !== J(T("Ember"))) v.push(`loaded: the Library shows ${J(g3)} (want Ember)`);
+        if (!(await waitFor(async () => !(await lineNow()), 2500))) v.push("loaded: the line stayed");
+      } finally { await libYoursDone(); }
+      return v;
+    });
+
+    // lib:yours:error — Library ✓ with Steam unreachable and nothing read: the whole Library shows (never an empty grid), the error
+    // and Retry take their own room above it (the cards glide down, none covered); Retry reads again and the set shows.
+    // Shot steam-libyours-error.png
+    await cell("lib:yours:error", async () => {
+      const v = [];
+      try {
+        if (!(await libYoursOn())) return [`the Library shows ${J(await libCards())} before any row — proved nothing`];
+        const favs = yFavs();
+        await js(`window.__favs = { hold: true }; true`);
+        await page(FAV_INC); await sleep(300);
+        const y0 = await libCardY();
+        await js(`window.__favs.answer = ${J(fv(2, [], { error: LOAD_ERR }))}; true`);
+        await js(`window.__favsLet()`);
+        const l = (await waitFor(async () => { const x = await lineNow(); return x?.kind === "error" ? x : null; }, 2000)) ?? await lineNow();
+        await sleep(500);
+        const y1 = await libCardY();
+        const g0 = await libCards();
+        console.log(`        error: ${J(l?.text)}, retry ${l?.retry}, cards ${J(g0)}, first card y ${y0} → ${y1}`);
+        if (l?.kind !== "error" || l.text !== LOAD_ERR) v.push(`the line on an error: ${J(l)} (want kind error, ${J(LOAD_ERR)})`);
+        if (!l?.retry) v.push("the error line has no Retry");
+        if (J(sorted(g0)) !== J(LIB_ALL)) v.push(`the error: the Library shows ${J(g0)} (want all four, not an empty grid)`);
+        if (await js(`!!document.querySelector(".lib-scroll [data-wf-none]")`)) v.push("the error: \"Nothing here matches\" shows");
+        if (!(y1 > y0 + 5)) v.push(`the error took no room above the grid (the first card ${y0} → ${y1})`);
+        const cov = await js(`(() => { const e = document.querySelector(${J(LINE)}); if (!e) return null; const c = e.getBoundingClientRect();
+          return [...document.querySelectorAll(".lib-scroll .card.lib")].filter((k) => { const r = k.getBoundingClientRect();
+            return Math.min(c.right, r.right) - Math.max(c.left, r.left) > 0.5 && Math.min(c.bottom, r.bottom) - Math.max(c.top, r.top) > 0.5; }).map((k) => k.querySelector("[data-title]")?.dataset.title); })()`);
+        if (cov?.length) v.push(`the error covers ${J(cov)}`);
+        await shot("libyours-error");
+        const n0 = (await favAsks()).length;
+        await js(`window.__favs.answer = ${J(fv(4, favs))}; true`);
+        await page(`document.querySelector(${J(LINE + " [data-wsl-retry]")})?.click();`);
+        await sleep(400);
+        const asks = (await favAsks()).slice(n0);
+        if (J(asks) !== J(["open"])) v.push(`Retry asked ${J(asks)} (want one sync=open)`);
+        const g1 = await libCardsAs(T("Ember"));
+        if (J(g1) !== J(T("Ember"))) v.push(`after Retry: ${J(g1)} (want the starred Ember)`);
+        if (!(await waitFor(async () => !(await lineNow()), 2500))) v.push("after Retry: the line stayed");
+      } finally { await libYoursDone(); }
       return v;
     });
 

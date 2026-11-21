@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { favoritesUsable, unplayableReasonOf, useStore } from "../store";
+import { WsSetLoad } from "../components/WsSetLoad";
 import { LibraryCard } from "../components/LibraryCard";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
 import { facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
@@ -85,11 +86,15 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const match = useMemo(() => localMatcher(libFilter), [libFilter]);
   const known = useMemo(() => knownTags(items, (i) => i.videoPath), [items]);
   // The Favourites row: ✓ keeps the items starred on the Workshop, ✕ the rest (a non-Workshop item is never starred). Signed
-  // out (or Steam turning the account down) it means nothing, and so does a list not read yet: the Library never goes blank
-  // for a sign-in or a load. The same rule as Browse's (views/localSet.ts byFavorites); the Library's own sort and search apply
-  // on top, and no Steam paging. Guard: probe-steam lib:yours:fav
+  // out (or Steam turning the account down) it means nothing. While the list isn't read yet (unread, loading with none in, or a
+  // failed read with none in) the whole Library shows under the load line / error with Retry (WsSetLoad, as in Browse): never an
+  // empty grid for an error, never a silent no-op. The same rule as Browse's (views/localSet.ts byFavorites); the Library's own
+  // sort and search apply on top, and no Steam paging. Guard: probe-steam lib:yours:fav, lib:yours:load, lib:yours:error
   const favMode = useStore((s) => setModesOf(s.libFilter, favoritesUsable(s.steam)).fav);
-  const favIds = useStore((s) => (s.wsFavs?.signedIn ? s.wsFavs.ids : null));
+  const favIds = useStore((s) => {
+    const f = s.wsFavs;
+    return f?.signedIn && !((f.error || f.loading) && !f.items.length) ? f.ids : null;
+  });
   const loadFavorites = useStore((s) => s.loadFavorites);
   useEffect(() => { if (favMode !== null) loadFavorites("open"); }, [favMode, loadFavorites]);
   const favSet = favMode !== null ? favIds : null;
@@ -114,7 +119,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // never reach a card the user can't see). Keyed on the filter's value: <Activity> re-runs this on every return to the
   // page, which keeps its view. Guard: probe-filters lib:interplay
   const filterKey = JSON.stringify([libFilter.include, libFilter.exclude, libFilter.featureMatch, libFilter.genreMatch]);
-  // a star that comes or goes while the Favourites row is on narrows the selection the same way, the grid keeping its place
+  // a star that comes or goes while the Favourites row is on narrows the selection the same way, the grid keeping its place.
+  // Guard: probe-steam lib:yours:fav
   const shownFilter = useRef(filterKey), shownFavs = useRef(favSet);
   useLayoutEffect(() => {
     const filterChanged = shownFilter.current !== filterKey;
@@ -266,6 +272,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   return (
     <>
     <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+      <WsSetLoad scope="library" />
       {(match || favSet) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
       <div className="grid">
         {filtered.map((it) => (

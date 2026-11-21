@@ -1,17 +1,17 @@
 import { useEffect, useRef } from "react";
-import { useStore } from "../store";
+import { favoritesRowOn, useStore, type FavScope } from "../store";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
 
-// The favourites' load line at the top of Browse's grid, while a Favourites row is ✓ / ✕ on the Workshop and the list isn't all
-// in: "Loading your favourites…" before anything has come, "Loading your favourites — 120 so far" while Steam hasn't said how
+// The favourites' load line at the top of Browse's grid (and of the Library's, which shows its whole list meanwhile: Library.tsx),
+// while a Favourites row is ✓ / ✕ there and the list isn't all in: "Loading your favourites…" before anything has come, "Loading your favourites — 120 so far" while Steam hasn't said how
 // many there are, "Loading your favourites — 120 of 450" once it has, with a thin bar under the words easing to the count (the
 // library line's look: index.css .libops). A first Favourites ✓ on a big or private list never sits blank: the line shows from
 // the click. While loading it floats over the grid's top, passing every click to the card under it (index.css
 // .ws-set-load-dock: no room of its own), so its coming and going move no card. Steam unreachable is no passing state: its
 // words and Retry (the load again, sync=open) take their own room above the grid and the cards glide down under them, so
 // nothing covers a card while the error stays; what loaded stays in the grid.
-// Guard: probe-steam yours:loadLine, yours:loadLineOff, yours:loadError
+// Guard: probe-steam yours:loadLine, yours:loadLineOff, yours:loadError, lib:yours:load, lib:yours:error
 
 // the leave: the bar fills out to its end, then the line fades (index.css .ws-set-load.closing)
 const LEAVE_MS = 450;
@@ -24,11 +24,11 @@ const words = (l: Line) => (l.kind === "error" ? l.text
   : !l.done ? "Loading your favourites…"
   : l.total != null ? `Loading your favourites — ${l.done} of ${l.total}` : `Loading your favourites — ${l.done} so far`);
 
-export function WsSetLoad() {
-  const used = useStore((s) => s.isWorkshop() && s.setModes().fav !== null);
+export function WsSetLoad({ scope = "workshop" }: { scope?: FavScope }) {
+  const used = useStore((s) => favoritesRowOn(s, scope));
   // a string, not an object: useLinger follows identity, and every read of the favourites is a new object
   const key = useStore((s) => {
-    if (!s.isWorkshop() || s.setModes().fav === null) return null;
+    if (!favoritesRowOn(s, scope)) return null;
     const f = s.wsFavs;
     const l: Line | null = !f ? { kind: "load", done: 0, total: null } : !f.signedIn ? null : f.error ? { kind: "error", text: f.error }
       : f.loading ? { kind: "load", done: f.loading.done, total: f.loading.total } : null;

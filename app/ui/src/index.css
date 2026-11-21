@@ -396,9 +396,13 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    COOL: it rises 6 px and fades in; at the end the bar runs out to the edge (.3 s), then it fades and lifts away; turned off
    (.away) it only fades. Transitions, not keyframes: a line that leaves while still coming in turns back from where it is
    (a quick answer never flashes it to full first). Guard: probe-steam yours:loadLine, yours:loadLineOff, yours:loadError */
-/* align-items: flex-start: the chip keeps its own height (stretched to the dock's 0, its fill would miss its words) */
+/* align-items: flex-start: the chip keeps its own height (stretched to the dock's 0, its fill would miss its words).
+   overflow-anchor: none: a sticky box in view would be the scroll anchor. Guard: probe-filters lib:interplay */
 .ws-set-load-dock { position: sticky; top: 0; height: 0; z-index: 30; display: flex; justify-content: center; align-items: flex-start;
-  pointer-events: none; }
+  pointer-events: none; overflow-anchor: none; }
+/* with no line the dock is no box at all: an empty sticky box in the scroller, even of no height, throws off the docked panel's
+   re-fit holding the row the eye is on */
+.ws-set-load-dock:empty { display: none; }
 /* the error's room: in the flow, the chip where it floated (6 px down), the grid's own gap under it */
 .ws-set-load-dock.flow { position: relative; height: auto; padding: 6px 0 var(--gap); }
 .ws-set-load { position: relative; top: 6px; display: grid; justify-items: center; gap: 8px; min-width: min(300px, 100%); max-width: 100%;
