@@ -3734,6 +3734,50 @@ static bool usertexture_loads_an_image_file () {
     return true;
 }
 
+// an image file past the caps (64 MiB on disk, 16384 px a side decoded) is refused before it is read whole or decoded:
+// logged, the slot keeps its texture; one at the side cap still loads. A scene's own files name textures too, so an
+// image path is no promise of a sane size (unpatched: any file was read whole into memory and any size decoded)
+static bool usertexture_caps_an_image_file () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    const auto draw = [] (const std::string& png, off_t padTo, std::array<unsigned char, 4>& px, std::string& dir) {
+        dir = camera_scene ("\"zoom\":1", b9_object (1, 16),
+            "\"picked\":{\"type\":\"scenetexture\",\"value\":\"\",\"text\":\"t\"}");
+        b9_layer (dir, "uniform sampler2D g_Texture0;\n", "gl_FragColor = vec4(texSample2D(g_Texture0, vec2(0.5, 0.5)).rgb, 1.0);");
+        write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                "\"depthwrite\":\"disabled\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                "\"usertextures\":[\"picked\"]}]}\n");
+        mkdir ((dir + "/files").c_str (), 0755);
+        const std::string path = dir + "/files/image.png";
+        write_file (path, png);
+        // grown sparse past the size cap: a whole PNG followed by zeros the decoder never reads, no disk used
+        if (padTo > 0 && truncate (path.c_str (), padTo) != 0) {
+            return false;
+        }
+        ScriptRig rig;
+        rig.loaded = [path] (wp_project* p) { wp_project_property_set_value_by_name (p, "picked", path.c_str ()); };
+        if (!rig.open (dir)) {
+            return false;
+        }
+        rig.step ();
+        px = b9_pixel (rig);
+        return true;
+    };
+    std::array<unsigned char, 4> big {}, wide {}, edge {};
+    std::string dir;
+    CHECK (draw (solid_png (6, 4, 200, 40, 10), (off_t (64) << 20) + 1, big, dir), "load/build of %s with a 64 MiB + 1 file failed", dir.c_str ());
+    CHECK (draw (solid_png (16385, 1, 200, 40, 10), 0, wide, dir), "load/build of %s with a 16385 px wide image failed", dir.c_str ());
+    CHECK (draw (solid_png (16384, 1, 200, 40, 10), 0, edge, dir), "load/build of %s with a 16384 px wide image failed", dir.c_str ());
+    printf ("    g_Texture0: 64 MiB + 1 on disk %d %d %d; 16385 px wide %d %d %d; 16384 px wide %d %d %d\n", big[0], big[1], big[2],
+            wide[0], wide[1], wide[2], edge[0], edge[1], edge[2]);
+    CHECK (big[0] > 250 && big[1] > 250 && big[2] > 250, "a file over 64 MiB took the slot (%d %d %d)", big[0], big[1], big[2]);
+    CHECK (wide[0] > 250 && wide[1] > 250 && wide[2] > 250, "an image over 16384 px a side took the slot (%d %d %d)", wide[0], wide[1], wide[2]);
+    CHECK (near (edge[0], 200) && near (edge[1], 40) && near (edge[2], 10), "an image 16384 px wide isn't the file's 200 40 10 (%d %d %d)",
+           edge[0], edge[1], edge[2]);
+    return true;
+}
+
 // a slot WE leaves to the pass is no missing asset (Leftovers; the health report's 25 in 3516106265 and 3042865984):
 // a sampler annotated "default":"" names no file, and a usertexture naming a `usershortcut` property (an app
 // shortcut's icon, GH 0x140184980) with none picked keeps the slot's texture. Unpatched: "materials/.tex" and
@@ -8601,6 +8645,7 @@ int main (int argc, char** argv) {
     run ("usertexture_reads_its_property", usertexture_reads_its_property);
     run ("string_values_set_by_name", string_values_set_by_name);
     run ("usertexture_loads_an_image_file", usertexture_loads_an_image_file);
+    run ("usertexture_caps_an_image_file", usertexture_caps_an_image_file);
     run ("unset_slots_are_not_missing", unset_slots_are_not_missing);
     run ("effect_visible_is_live", effect_visible_is_live);
     run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);

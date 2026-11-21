@@ -1,7 +1,7 @@
 From 11b1d1bbdc0a7af69bfb40c645cecc9fcae917ec Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 05:16:16 +0530
-Subject: [PATCH 139/139] render: a scenetexture set to an image file's path
+Subject: [PATCH 139/140] render: a scenetexture set to an image file's path
  loads that image
 
 A Wallpaper Engine preset ships the images its scenetexture slots use in its own folder (`files/<name>.png`,

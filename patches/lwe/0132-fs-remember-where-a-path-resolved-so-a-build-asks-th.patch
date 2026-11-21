@@ -1,7 +1,7 @@
 From 139976220df0c7553ea3529c18be03900f451c71 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sun, 15 Nov 2026 23:26:47 +0530
-Subject: [PATCH 132/139] fs: remember where a path resolved, so a build asks
+Subject: [PATCH 132/140] fs: remember where a path resolved, so a build asks
  the filesystem once per path
 
 Container::resolve looked every path up again on each read: an exact check in every mountpoint, then, for a
