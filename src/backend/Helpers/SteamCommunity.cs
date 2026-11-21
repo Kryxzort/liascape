@@ -347,17 +347,37 @@ public static class SteamCommunity
     // ---- the signed-in account's favourites page (a private profile's: Steam's client protocol only sees public ones) ----
     static readonly Regex _idRe = new(@"filedetails/\?id=(\d+)", RegexOptions.Compiled);
 
+    // the paging line ("Showing 31-60 of 1,662 entries", in the account's language): its class, then its three numbers
+    static readonly Regex _pagingRe = new(@"class=""[^""]*\bworkshopBrowsePagingInfo\b[^""]*""[^>]*>([^<]*)<", RegexOptions.Compiled);
+    static readonly Regex _numberRe = new(@"\d[\d.,\u00a0\u202f ]*\d|\d", RegexOptions.Compiled);
+
     // Ids = the page's Workshop ids in Steam's order. Total stays null: the page's "of N entries" isn't the list's size
     // (measured signed out, N leaves mature items out: 39 of a 41-item list, 1,662 of 10,559), so a caller compares a page's
     // ids, never a count. Page 1's order matches neither `lastupdated` nor `score`.
+    // Listing = the page carries the favourites list's paging line (measured on every page that lists items). Steam also
+    // answers 200 with pages that list nothing — its login page for a sign-in it no longer takes, an empty page — and a
+    // caller keeping a list must read those as no answer, not as favourites removed.
+    // Last = the paging line's "a-b of N" says b ≥ N: no page after this one (the line counts what the pages list, so it
+    // ends where they end); null = no paging numbers read.
     // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: ids parsed, the signed-out total left
-    // unread", "favourites page: the last, short page".
-    public sealed record FavoritesPage(List<string> Ids, int? Total);
+    // unread", "favourites page: the last, short page", "favourites page: a listing, not its last page …", "favourites
+    // page: the last page says so, …", "favourites page: the paging numbers read in another language and digit grouping",
+    // "favourites page: a login page or a blank one isn't a favourites listing".
+    public sealed record FavoritesPage(List<string> Ids, int? Total, bool Listing = false, bool? Last = null);
 
     public static FavoritesPage ParseFavoritesPage(string html)
     {
         var seen = new HashSet<string>();
-        return new FavoritesPage(_idRe.Matches(html).Select((m) => m.Groups[1].Value).Where(seen.Add).ToList(), null);
+        var ids = _idRe.Matches(html).Select((m) => m.Groups[1].Value).Where(seen.Add).ToList();
+        var paging = _pagingRe.Match(html);
+        bool? last = null;
+        if (paging.Success)
+        {
+            var n = _numberRe.Matches(paging.Groups[1].Value)
+                .Select((m) => long.TryParse(new string(m.Value.Where(char.IsAsciiDigit).ToArray()), out var v) ? v : -1).ToList();
+            if (n.Count == 3 && n.All((v) => v >= 0)) last = n[1] >= n[2];
+        }
+        return new FavoritesPage(ids, null, paging.Success, last);
     }
 
     /// One page (30) of the signed-in account's Workshop favourites for Wallpaper Engine, paced as `kind` (the user's own
