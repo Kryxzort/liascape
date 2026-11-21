@@ -9,7 +9,7 @@ import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../component
 // what the item sidebar's picture shows (SideMedia's preview switch): the gif / webp, a video, the YouTube trailer, or the still
 export type PreviewKind = "gif" | "video" | "youtube" | "image";
 
-// what the backend gets: the filter without the UI-only "@" pseudo-tags (workshopFilter.ts LIBRARY_TAG)
+// what the backend gets: the filter without the UI-only "@" pseudo-tags (workshopFilter.ts LIBRARY_TAG, FAVORITES_TAG)
 const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
   ({ ...f, include: f.include.filter((t) => !t.startsWith("@")), exclude: f.exclude.filter((t) => !t.startsWith("@")) });
 // the filter panel docks beside the grid from this width; below it, it floats over the grid. The item sidebar's own breakpoint
@@ -25,6 +25,12 @@ const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boo
 // row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
 export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine === "liascape-player";
 export const PRESET_TAG = "Preset";
+// the filter column's "Favourites" row (workshopFilter.ts, which re-exports it): a UI-only pseudo-tag for the signed-in
+// account's Workshop favourites. It lives here because setTagState guards it and workshopFilter.ts imports the store.
+export const FAVORITES_TAG = "@favorites";
+// the favourites can be read only for a signed-in account Steam hasn't rejected: otherwise the row is dimmed, a saved ✓ / ✕
+// stays (it comes back with the sign-in) but means nothing, and it can only be cleared
+export const favoritesUsable = (steam: State["steam"]) => !!steam?.signedIn && !steam.rejected;
 // API: Helpers/Presets.cs LegacyReason, word for word
 export const PRESET_LEGACY = "Presets play only in the Liascape player";
 // Why a library item can't play now, or null: a preset's own reason (GET /library), and under the legacy engine every preset
@@ -383,6 +389,8 @@ export const useStore = create<State>((set, get) => ({
   setBrowseSort(i) { set({ browseSort: i }); LS.set("browseSort", i); }, // client-side (WE-local; single page)
   // a tag is in include XOR exclude; the same debounced reload as every filter change
   setTagState(tag, st, scope = "workshop") {
+    // Guard: probe-filters wf:yours:*
+    if (tag === FAVORITES_TAG && st !== null && !favoritesUsable(get().steam)) return;
     const { include, exclude } = filterOf(get(), scope);
     const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
     if (st === "inc") inc.push(tag); else if (st === "exc") exc.push(tag);

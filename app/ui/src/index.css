@@ -1425,8 +1425,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .wf-col, :root.no-motion .wf-none, :root.no-motion .wf-col *, :root.no-motion .wf-scrim,
 :root.no-motion :is(.ss-filter, .ss-n) { animation: none !important; transition: none !important; }
 :root.no-motion .wf-col.entering, :root.no-motion .wf-col[data-mode="drawer"], :root.no-motion .wf-scrim, :root.no-motion .wf-none,
-:root.no-motion .wf-col .wf-body, :root.no-motion .ss-filter .ss-n.pop { animation: nm-in var(--fade-dur) linear !important; }
-:root.no-motion .wf-col.closing, :root.no-motion .ss-filter .ss-n.out { animation: nm-out var(--fade-dur) linear forwards !important; }
+:root.no-motion .wf-col .wf-body, :root.no-motion .wf-col .wf-why, :root.no-motion .ss-filter .ss-n.pop { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .wf-col.closing, :root.no-motion .wf-col .wf-why.closing, :root.no-motion .ss-filter .ss-n.out { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .wf-scrim.closing { transition: opacity var(--fade-dur) linear !important; }
 /* the item sidebar and its scrim fade in and out; a switch cross-fades the old content (the exit layer) into the new; the
    body's rows fade in when they arrive; the picture's layers cross-fade; the volume pill fades in place; nothing in it
@@ -2094,6 +2094,20 @@ button.side-pill.copy { overflow: hidden; }
 .wf-seg.o[aria-checked="true"] { color: var(--subtext); }
 .wf-seg.i[aria-checked="true"] { background: var(--accent); color: var(--accent-fg); box-shadow: var(--glow-sm); } /* COOL */
 .wf-seg.e[aria-checked="true"] { background: var(--danger); color: var(--accent-fg); box-shadow: 0 0 10px -3px var(--danger); }
+/* a row that can't take effect now (TagRow `why`: Favourites signed out): its name and switch dimmed, the reason in small
+   type under the name (fading in and out), ✓ and ✕ without pointer feedback, a kept ✓ / ✕ a tint without glow like the
+   match switch's idle pick (it means nothing until the sign-in); – stays live. Guard: probe-filters wf:yours:signedOut */
+.wf-txt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.wf-row .wf-name { transition: opacity .15s; }
+.wf-row[data-wf-off] .wf-name { opacity: .55; }
+.wf-why { font-size: 10.5px; line-height: 13px; color: var(--muted); white-space: nowrap; animation: nm-in .18s ease-out; }
+.wf-why.closing { animation: nm-out .16s ease-in forwards; }
+.wf-row[data-wf-off] .wf-sw { opacity: .5; }
+.wf-row[data-wf-off]:hover .wf-sw, .wf-row[data-wf-off] .wf-sw:focus-within { opacity: .8; }
+.wf-row[data-wf-off] .wf-seg[aria-disabled="true"] { cursor: default; color: var(--muted); }
+.wf-row[data-wf-off] .wf-seg.i[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); box-shadow: none; }
+.wf-row[data-wf-off] .wf-seg.e[aria-checked="true"] { background: color-mix(in srgb, var(--danger) 35%, transparent); color: var(--text); box-shadow: none; }
+:root.bg-live .wf-why { filter: drop-shadow(0 0 3.5px #000); }
 /* Features: All / Any (only meaningful with ≥ 2 included features — muted until then) */
 .wf-fm { flex: none; display: inline-flex; gap: 1px; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--bg-crust) 40%, transparent);
   transition: opacity .15s; }

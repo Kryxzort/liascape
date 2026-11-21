@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { PRESET_TAG, WF_DOCK_QUERY, filterOf, presetsOn, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
+import { FAVORITES_TAG, PRESET_TAG, WF_DOCK_QUERY, filterOf, presetsOn, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
 import type { WorkshopFilter } from "../api/client";
 import { useMotion } from "./motion";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
@@ -18,12 +18,17 @@ const t = (tag: string, label = tag): Tag => ({ tag, label });
 const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "Standard Definition"), ...rest.map((r) => t(`${p} ${r}`, r))];
 // Steam's "Miscellaneous" group (the wallpaper-relevant features). Left out: "Verified" + "Multi-monitor optimized" (Steam's
 // Hidden group — no-ops), "No Animation" (a Script Type tag), "User Shortcut" / "Asset Pack" (not playable wallpapers).
-// "In my library": a UI-only pseudo-tag in the same include / exclude sets — ✓ = only what the library has, ✕ = hide it. Never sent
-// to Steam (`wireFilter` strips it; the backend ignores "@" tags too) and filtered in Browse's render against the library
-// (`inLibrary`), so toggling it needs no request and leaves the prefetched page valid.
+// Yours: the user's own relation to an item, as UI-only pseudo-tags in the same include / exclude sets. Never sent to Steam
+// (`wireFilter` strips every "@" tag; the backend's WorkshopFilter.Effective ignores them too).
+// "In my library": ✓ = only what the library has, ✕ = hide it; filtered in Browse's render against the library (`inLibrary`),
+// so toggling it needs no request and leaves the prefetched page valid. Not on the Library (everything in it is).
+// "Favourites": the signed-in account's Workshop favourites; signed out it's dimmed and can only be cleared (store
+// favoritesUsable). Not on the local WE folder.
 export const LIBRARY_TAG = "@library";
+export { FAVORITES_TAG };
+const YOURS = { id: "yours", name: "Yours" };
 export const WF_GROUPS: Group[] = [
-  { id: "library", name: "Library", subs: [{ tags: [t(LIBRARY_TAG, "In my library")] }] },
+  { ...YOURS, subs: [{ tags: [t(LIBRARY_TAG, "In my library"), t(FAVORITES_TAG, "Favourites")] }] },
   { id: "age", name: "Age", subs: [{ tags: ["Everyone", "Questionable", "Mature"].map((x) => t(x)) }] },
   // Scene stays even with scene support off: Browse doesn't know it (it's a player-side setting) and Workshop lists scenes anyway
   { id: "type", name: "Type", subs: [{ tags: ["Video", "Scene"].map((x) => t(x)) }] },
@@ -76,12 +81,19 @@ export const useActiveTagCount = (scope: FilterScope = "workshop") =>
 // Guard: probe-filters filter:preset:*
 const TYPE_PRESET: Group = { ...WF_GROUPS.find((g) => g.id === "type")!, subs: [{ tags: ["Video", "Scene", PRESET_TAG].map((x) => t(x)) }] };
 const withPreset = (gs: Group[]) => gs.map((g) => (g.id === "type" ? TYPE_PRESET : g));
-const LIB_GROUPS = WF_GROUPS.filter((g) => g.id !== "library");
-const GROUPS = { all: WF_GROUPS, allP: withPreset(WF_GROUPS), lib: LIB_GROUPS, libP: withPreset(LIB_GROUPS) };
-// the groups a scope offers (stable arrays): the Library has no "In my library" row (everything in it is); Type has Preset
-// only while presets can play
+// Yours with only the rows a scope can match
+const yoursOnly = (tag: string): Group[] => WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: g.subs[0].tags.filter((x) => x.tag === tag) }] } : g));
+const WE_GROUPS = yoursOnly(LIBRARY_TAG);
+const LIB_GROUPS = yoursOnly(FAVORITES_TAG);
+const GROUPS = {
+  all: WF_GROUPS, allP: withPreset(WF_GROUPS), we: WE_GROUPS, weP: withPreset(WE_GROUPS), lib: LIB_GROUPS, libP: withPreset(LIB_GROUPS),
+};
+// the groups a scope offers (stable arrays): Yours holds both rows on the Workshop, "In my library" alone on the local WE
+// folder, "Favourites" alone on the Library; Type has Preset only while presets can play. Guard: probe-filters wf:yours:rows,
+// local:weFolder, lib:column
 export const groupsFor = (scope: FilterScope, presets: boolean) =>
-  scope === "library" ? (presets ? GROUPS.libP : GROUPS.lib) : presets ? GROUPS.allP : GROUPS.all;
+  scope === "library" ? (presets ? GROUPS.libP : GROUPS.lib) : scope === "weLocal" ? (presets ? GROUPS.weP : GROUPS.we)
+    : presets ? GROUPS.allP : GROUPS.all;
 export const usePresetsOn = () => useStore((s) => presetsOn(s.settings));
 
 // what a local item knows, as lower-cased tag names: its tags (Steam's, saved at download, else its project.json's genres +
