@@ -37,6 +37,10 @@ export const favoritesUsable = (steam: State["steam"]) => !!steam?.signedIn && !
 // steam null) "Sign in to Steam" would be a guess, so the row isn't dimmed, though ✓ / ✕ still can't be set until it's usable.
 // Guard: probe-steam yours:steamUnknown
 export const favoritesSignedOut = (steam: State["steam"]) => steam !== null && !favoritesUsable(steam);
+// a usable Favourites row is on in the page's filter: Browse showing the Workshop, or the Library (the favourites' load line follows it)
+export type FavScope = "workshop" | "library";
+export const favoritesRowOn = (s: State, scope: FavScope) =>
+  scope === "library" ? setModesOf(s.libFilter, favoritesUsable(s.steam)).fav !== null : s.isWorkshop() && s.setModes().fav !== null;
 // a usable Favourites row is on in the Workshop's filter or the Library's: the favourites copy is wanted, and kept current
 const favoritesWanted = (s: Pick<State, "steam" | "browseFilter" | "libFilter">) =>
   favoritesUsable(s.steam) && (setModesOf(s.browseFilter, true).fav !== null || setModesOf(s.libFilter, true).fav !== null);
