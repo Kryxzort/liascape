@@ -180,6 +180,37 @@ public static class SteamSelfTest
             return (FakeJwt(76561190000000001), 76561190000000001UL, user + "-acct");
         };
 
+    // The favourites cache's rule for a star or unstar set in Liascape against a diff's answer from Steam (which may be a
+    // cached, older answer): the edit holds while it is newer than the diff or younger than 10 min; the caller drops it
+    // once a diff that started after it agrees, or once it is 10 min old.
+    private static void FavouritesMerge()
+    {
+        var now = DateTime.UtcNow;
+        static Dictionary<string, WorkshopFavorites.Edit> E(params (string Id, WorkshopFavorites.Edit E)[] es) => es.ToDictionary((x) => x.Id, (x) => x.E);
+        Check(WorkshopFavorites.Merge(["a", "b"], new Dictionary<string, WorkshopFavorites.Edit> { ["c"] = new(true, 5, now) }, diffStarted: 4, now).SequenceEqual(["c", "a", "b"]),
+            "favourites merge: a star newer than the diff stays");
+        Check(WorkshopFavorites.Merge(["a", "b"], new Dictionary<string, WorkshopFavorites.Edit> { ["c"] = new(true, 3, now.AddMinutes(-2)) }, 4, now).Contains("c"),
+            "favourites merge: a later diff without the star keeps it for 10 min");
+        Check(!WorkshopFavorites.Merge(["a", "b"], new Dictionary<string, WorkshopFavorites.Edit> { ["c"] = new(true, 3, now.AddMinutes(-11)) }, 4, now).Contains("c"),
+            "favourites merge: after 10 min Steam wins");
+        Check(!WorkshopFavorites.Merge(["a", "b"], new Dictionary<string, WorkshopFavorites.Edit> { ["a"] = new(false, 5, now) }, 4, now).Contains("a"),
+            "favourites merge: an unstar newer than the diff stays");
+        Check(WorkshopFavorites.Merge(["a", "b"], E(("b", new(true, 5, now))), 4, now).SequenceEqual(["a", "b"]),
+            "favourites merge: a star Steam already lists keeps Steam's place");
+        Check(WorkshopFavorites.Merge(["a"], E(("c", new(true, 5, now)), ("d", new(true, 6, now))), 4, now).SequenceEqual(["d", "c", "a"]),
+            "favourites merge: two new stars, the newest first");
+        Check(WorkshopFavorites.Merge(["a", "b"], E(("a", new(false, 3, now.AddMinutes(-11)))), 4, now).SequenceEqual(["a", "b"]),
+            "favourites merge: an unstar after 10 min, Steam still listing it, wins back");
+        Check(WorkshopFavorites.Settled(new(true, 3, now), onSteam: true, diffStarted: 4, now),
+            "favourites merge: a star dropped once a diff that started after it agrees");
+        Check(!WorkshopFavorites.Settled(new(true, 5, now), onSteam: true, diffStarted: 4, now),
+            "favourites merge: a star newer than the diff kept, even when it agrees");
+        Check(!WorkshopFavorites.Settled(new(true, 3, now.AddMinutes(-2)), onSteam: false, diffStarted: 4, now),
+            "favourites merge: a star a later diff lacks kept inside 10 min");
+        Check(WorkshopFavorites.Settled(new(false, 3, now.AddMinutes(-11)), onSteam: true, diffStarted: 4, now),
+            "favourites merge: an edit dropped after 10 min");
+    }
+
     // The Browse warm-up (SteamAnonymous.Warm) never reaches Steam from a test: while a fixture answers for Steam, or the
     // Workshop fallback is forced, it does nothing at all. This self-test isn't network-isolated, so only those gates run here.
     private static void WarmUp()
@@ -396,6 +427,7 @@ public static class SteamSelfTest
         ReconcileSkipsBlocked();
         WarmUp();
         await HoldTickWhileTurnHeld();
+        FavouritesMerge();
         await NoNetwork();
         SteamOps.SignOut();
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000009));

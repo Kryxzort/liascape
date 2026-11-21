@@ -109,8 +109,9 @@ public static class WorkshopSocialOps
     /// GET /workshop/my-favorites?sync=none|open|check → {signedIn: false} without a usable sign-in (nothing sent), else
     /// {signedIn: true, version, loading: {done, total} | null, error, items}: the signed-in account's own cached favourites
     /// (Helpers/WorkshopFavorites.cs) that have details in the details cache, in the list's order, web / application left
-    /// out, each with its creator's name only when this run already knows it. `open` and `check` start a sync in the
-    /// background; the page follows it through the `workshop-favorites` event and re-reads with `none`.
+    /// out, each with its creator's name only when this run already knows it. `open` (the page shows the list) starts the
+    /// first load or the id diff, `check` (about once a minute while it stays shown) the count check, both in the
+    /// background; the page follows them through the `workshop-favorites` event and re-reads with `none`.
     // Guard: scripts/test-workshop-social.sh § 7
     public static Task<IResult> MyFavoritesAsync(string? sync, CancellationToken ct)
     {
@@ -118,7 +119,8 @@ public static class WorkshopSocialOps
         if (sync is not ("none" or "open" or "check")) return Task.FromResult(Results.BadRequest(new { error = "sync must be none, open or check" }));
         var account = SteamCommunity.SignedInAccount();
         if (account == 0) return Task.FromResult(Results.Json(new { signedIn = false }));
-        if (sync != "none") WorkshopFavorites.Sync(account);
+        if (sync == "open") WorkshopFavorites.Sync(account);
+        else if (sync == "check") WorkshopFavorites.Check(account);
         var v = WorkshopFavorites.Get(account);
         var details = new Dictionary<string, Scrapers.SteamWorkshopScraper.PublishedFileDetail>();
         foreach (var id in v.Ids)
@@ -188,11 +190,20 @@ public static class WorkshopSocialOps
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
     }
 
-    /// POST /workshop/favorite {workshopId, favorite} → {favorited}
+    /// POST /workshop/favorite {workshopId, favorite} → {favorited}; the signed-in account's favourites cache follows at once.
+    // Guard: scripts/test-workshop-social.sh § 7 "a star set in Liascape: first in the list at once …", "an unstar set in
+    // Liascape: gone at once …"
     public static async Task<IResult> SetFavoriteAsync(string? id, bool favorite, CancellationToken ct)
     {
         if (!WorkshopSubOps.ValidId(id)) return Results.BadRequest(new { error = "workshopId must be digits" });
-        try { return Results.Json(new { favorited = await SteamCommunity.SetFavoriteAsync(id!, favorite, ct).ConfigureAwait(false) }); }
+        try
+        {
+            var account = SteamCommunity.SignedInAccount();
+            var favorited = await SteamCommunity.SetFavoriteAsync(id!, favorite, ct).ConfigureAwait(false);
+            // only into the list of the account it was sent as: a sign-in switched meanwhile gets nothing
+            if (account != 0 && SteamCommunity.SignedInAccount() == account) WorkshopFavorites.Apply(account, id!, favorited);
+            return Results.Json(new { favorited });
+        }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
     }
 
