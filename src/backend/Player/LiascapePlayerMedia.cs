@@ -38,6 +38,7 @@ public static class LiascapePlayerMedia
                     c.Recovered += OnRecovered;
                     c.Subscribed += () => InvalidateSources(); // events in the reconnect gap are lost (bar the outbox's)
                     c.OutboxEvent += OnOutboxEvent;
+                    c.RendererMissingChanged += OnRendererMissing;
                     _hooked = c;
                 }
             }
@@ -434,15 +435,14 @@ public static class LiascapePlayerMedia
             StoreLive(e, "OnSceneVramStopped", () => { if (stopped.Length > 0) PlayerHelper.OnSceneVramStopped(stopped, used, limit); });
             return;
         }
-        if (kind == "scene.renderer_missing")
+        if (kind is "scene.renderer_missing" or "scene.renderer_found")
         {
-            // the worker couldn't load the scene renderer (LWE's core gone): no scene plays until Liascape is rebuilt,
-            // and none of them is to blame — the UI says why, nothing is marked crashed. A switch to it fails on its
-            // own (`transition.failed`, below). Guard: adapter IT § "a scene worker that can't load the scene renderer"
-            var missing = Str(e, "path");
-            var why = Str(e, "reason");
-            LiascapePlayerClient.Log($"scene {Path.GetFileName(missing)} can't play: {why} ({Str(e, "detail")})");
-            if (missing.Length > 0 && why.Length > 0) _ = Task.Run(() => PlayerHelper.OnSceneUnplayable(missing, why));
+            // a worker couldn't load the scene renderer (LWE's core gone: no scene plays, none of them is to blame, nothing
+            // is marked crashed; a switch to it fails on its own, `transition.failed`), or one loads it again: the
+            // player's `hello` now says so → RendererMissing (OnRendererMissing). Guard: adapter IT § "a scene worker
+            // that can't load the scene renderer"
+            LogRendererFact(kind, e, live: true);
+            StoreLive(e, "OnRendererFact", C.RefreshHello);
             return;
         }
         TrackIntent(kind, e);
@@ -540,8 +540,35 @@ public static class LiascapePlayerMedia
                 double Num(string k) => f.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : 0;
                 LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} was stopped by the VRAM guard while the backend was away ({Num("used_mib"):0} MiB > {Num("limit_mib"):0} MiB)");
                 return;
+            case "scene.renderer_missing" or "scene.renderer_found":
+                // a fact of the past (maybe of an earlier player process): what holds now is the running player's word
+                LogRendererFact(kind, f, live: false);
+                C.RefreshHello();
+                return;
         }
     }
+
+    private static void LogRendererFact(string kind, JsonElement f, bool live)
+    {
+        var away = live ? "" : " while the backend was away";
+        var p = Str(f, "path");
+        LiascapePlayerClient.Log(kind == "scene.renderer_found"
+            ? $"a scene worker loads the scene renderer again ({Str(f, "via")}){away}"
+            : $"{(p.Length > 0 ? $"scene {Path.GetFileName(p)}" : "a scene")} couldn't play{away}: {Str(f, "reason")} ({Str(f, "detail")})");
+    }
+
+    // The latch moved (LiascapePlayerClient.RendererMissing: the player's hello, or scene-check with no player): every scene
+    // greys or comes back at once (WS `scenes-blocked {reason}`; `/current` carries it for a page that loads later), and
+    // the program's items take the scene capability's skip with it (ScenesPlayable follows the capability). Never a crash mark.
+    private static void OnRendererMissing(string? reason) => _ = Task.Run(() =>
+    {
+        try
+        {
+            LiascapePlayerClient.Log(reason == null ? "scenes can play again: a worker loads the scene renderer" : $"scenes can't play: {reason}");
+            PlayerHelper.OnScenesBlocked(reason);
+        }
+        catch (Exception ex) { LiascapePlayerClient.Log($"OnRendererMissing threw: {ex.Message}"); }
+    });
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —
     // MergeSceneLoudness) — the value the scene's NEXT play starts with. A play in progress keeps its normalization

@@ -1215,19 +1215,51 @@ open(dst, "wb").write(b); os.chmod(dst, 0o755)
 PY
 "$BW" --features >/dev/null 2>&1; bwc=$?
 [ $bwc = 127 ] && ok "a worker copy the loader can't start (exit 127)" || bad "the broken worker copy exited $bwc, not 127 — the section below proves nothing"
-restart_player 7m "LIASCAPE_SCENE_WORKER_BIN=$BW"
+# the player looks for the renderer again every 500 ms while it is missing (worker::renderer's probe)
+RM_ENV=("LIASCAPE_SCENE_WORKER_BIN=$BW" LIASCAPE_SCENE_RENDERER_RECHECK_MS=500)
+restart_player 7m "${RM_ENV[@]}"
 ws_listen "$T/ws-unplayable.log"
 waitfor $WAIT eval 'grep -q " 101 " "$T/ws-unplayable.log"' || bad "WebSocket: $(head -c 300 "$T/ws-unplayable.log")"
 ns=$(nsch); post /apply "{\"path\":\"$S2\"}" >/dev/null
 s2_failed() { sc=$(corr_to "$S2" "$ns" now); [ -n "$sc" ] && [ "$(corr_has "$sc" failed)" -ge 1 ]; }
 waitfor $WAIT s2_failed && ok "a scene whose worker can't load the renderer → transition.failed ($sc)" || bad "renderer missing: corr ${sc:-none}, cur $(basename "$(cur path)")"
-unplayable() { grep "scene-unplayable" "$T/ws-unplayable.log" | grep -F "900000002" | grep -q "scene renderer is missing"; }
-waitfor $WAIT unplayable && ok "WS scene-unplayable says why: $(grep -o '"message":"[^"]*"' "$T/ws-unplayable.log" | tail -1)" \
-  || bad "no WS scene-unplayable naming the missing renderer: $(grep -c . "$T/ws-unplayable.log") lines"
+blocked_ws() { grep "scenes-blocked" "$T/ws-unplayable.log" | tail -1 | grep -q "scene renderer is missing"; }
+waitfor $WAIT blocked_ws && ok "WS scenes-blocked says why: $(grep "scenes-blocked" "$T/ws-unplayable.log" | tail -1 | grep -o '"reason":"[^"]*"')" \
+  || bad "no WS scenes-blocked naming the missing renderer: $(grep -c . "$T/ws-unplayable.log") lines"
+# the latch every card greys with (/current, read at a page's load) and the gates (no scene playable)
+cur_blocked() { curl -sf -m 5 "$U/current" | jq -r '.scenesBlocked // empty'; }
+[ "$(cur_blocked)" = "The scene renderer is missing — rebuild or reinstall Liascape" ] && ok "/current.scenesBlocked: the reason" || bad "/current.scenesBlocked: $(cur_blocked)"
+curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false' >/dev/null && ok "/player-engine.scenes: unavailable while it's missing" || bad "/player-engine.scenes: $(pe_scenes)"
 sleep 1   # a crash mark would come from source.broken off the event thread: give one the time to land
 jq -e '."900000002".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S2" '.events[] | select(.path==$p) | .id')" ] \
   && ! grep -q "scene-crashed" "$T/ws-unplayable.log" \
   && ok "…not marked crashed (no source.broken, no WS scene-crashed)" || bad "a missing renderer marked the scene crashed: $(jq -c '."900000002"' "$IDX")"
+kill "$WSP" 2>/dev/null; WSP=""
+stop_now
+# the backend away when it happens (the player's own restore at login, a rotation with the app closed): a fresh player,
+# no backend, a scene → the outbox fact; the next backend latches it from the player's word at once
+backend_down
+restart_player 7o "${RM_ENV[@]}"
+ctl transition "{\"outputs\":\"out:*\",\"to\":{\"kind\":\"scene\",\"path\":\"$S2\"}}" >/dev/null
+rm_fact() { ctl outbox.read '{"limit":2000}' 2>/dev/null | jq -e '[.events[]? | select(.kind == "scene.renderer_missing")] | length > 0' >/dev/null; }
+waitfor $WAIT rm_fact && ok "backend away: scene.renderer_missing kept in the player's outbox" || bad "backend away: no scene.renderer_missing in the outbox: $(ctl outbox.read '{"limit":50}' | head -c 300)"
+# appending to backend.log: the sections below read the backend's log there
+"$DOTNET" "$DLL" serve >> "$T/backend.log" 2>&1 & BP=$!
+waitfor 60000 port_moved 0 || bad "the new backend never wrote its port"
+U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); waitfor 30000 healthy || bad "the new backend never answered /health"
+ws_listen "$T/ws-renderer2.log"
+waitfor $WAIT eval 'grep -q " 101 " "$T/ws-renderer2.log"' || bad "WebSocket: $(head -c 300 "$T/ws-renderer2.log")"
+waitfor $WAIT eval '[ -n "$(cur_blocked)" ]' && ok "a backend that missed the live event latches it: /current.scenesBlocked $(cur_blocked)" || bad "the new backend's /current.scenesBlocked: $(curl -sf -m 5 "$U/current")"
+rm_acked() { ! rm_fact; }
+waitfor $WAIT rm_acked && ok "…and acked the drained fact" || bad "scene.renderer_missing still in the outbox after the drain"
+# the core comes back (the devShell realised it again — no rebuild, no restart): the probe's worker starts, the latch clears
+cp "$LIASCAPE_SCENE_WORKER_BIN" "$BW.new" && mv -f "$BW.new" "$BW"
+cleared_ws() { grep "scenes-blocked" "$T/ws-renderer2.log" | tail -1 | grep -q '"reason":null'; }
+waitfor 15000 eval '[ -z "$(cur_blocked)" ]' && waitfor $WAIT cleared_ws \
+  && ok "a worker loads it again (the player's probe): /current.scenesBlocked null, WS scenes-blocked {reason: null}" \
+  || bad "after the repair: /current $(curl -sf -m 5 "$U/current" | jq -c '{scenesBlocked}'), WS $(grep "scenes-blocked" "$T/ws-renderer2.log" | tail -1)"
+ns=$(nsch); post /apply "{\"path\":\"$S2\"}" >/dev/null
+waitfor $WAIT scene_ready "$S2" && ok "…and the scene plays again" || bad "after the repair: cur $(basename "$(cur path)") ready $(cur ready)"
 kill "$WSP" 2>/dev/null; WSP=""
 stop_now
 restart_player 7n

@@ -45,10 +45,19 @@ every time. A source error marks the snapshot dirty (a break is no graph change)
 A worker that exits 127 before its `Hello` never ran: the dynamic loader couldn't open a library it links, in
 practice LWE's core (a dev build's core is a Nix store path, which a garbage collection removes unless the build
 rooted it; a half-removed install). Every restart would fail the same way and every scene would end up marked
-crashed, so the host spends no budget and writes no record: it logs `scene.renderer_missing {id, path, scene_id,
-reason, detail}` (the loader's line in `detail`) and hands the source a fatal error, which stops it like any load
-failure. The backend shows the reason with the item and marks nothing. A spare that dies this way is only a spare's
-failure (backoff). `liascape-player scene-check` gives the same reason when the worker can't start.
+crashed, so the host spends no budget and writes no record: it hands the source a fatal error, which stops it like
+any load failure, and marks the renderer missing (`worker/renderer.rs`, one state for the process: every worker runs
+the same binary and core). That logs the outbox fact `scene.renderer_missing {id, path, scene_id, reason, detail}`
+(the loader's line in `detail`; the backend hears of it even when it was away at the time), drops the `scene`
+capability and puts `{reason, detail}` in `hello.scene_renderer_missing`, so the backend greys every scene up front
+and marks nothing. A spare that dies this way is only a spare's failure (backoff).
+
+The next worker `Hello` (a spare's too) clears it. While nothing asks for a scene, a `lia-renderer-probe` thread
+starts the worker binary with `--features` every `LIASCAPE_SCENE_RENDERER_RECHECK_MS` (15 s) until one loads: the
+core comes back without a rebuild once the devShell realises its store path again. Either way the outbox fact
+`scene.renderer_found {via}` follows. A new player process starts with no mark, so a restart on a build whose worker
+loads is clean; one whose worker doesn't is marked again at its first scene. `liascape-player scene-check` gives the
+same reason (and `renderer_missing`) when the worker can't start.
 
 ## `loading`
 

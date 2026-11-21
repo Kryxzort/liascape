@@ -6,8 +6,8 @@ export type LiascapeEvent =
   | { type: "settings-changed"; payload: Record<string, unknown> }
   | { type: "scene-crashed"; payload: { path: string } }
   | { type: "scene-vram-stopped"; payload: { path: string; usedMib: number; limitMib: number; message: string } }
-  // a scene can't play, not by its own fault (the scene renderer is missing): never a crash mark
-  | { type: "scene-unplayable"; payload: { path: string; message: string } }
+  // why no scene can play here (the scene renderer is missing), or null once they can again: never a crash mark
+  | { type: "scenes-blocked"; payload: { reason: string | null } }
   | { type: "timed-stopped"; payload: null }
   // `liascape toggle-loop-current` toggled "keep playing this one" (the rotation holds what plays)
   // `toggle-pause` ran (AppOps): the wallpaper's own pause, for the in-app background (components/WallpaperBg.tsx)

@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { presetReasonOf, useStore } from "../store";
+import { unplayableReasonOf, useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
 import { facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
@@ -63,12 +63,14 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
   // why Unsubscribe can't happen now (signed out), else null: every Unsubscribe here shows it disabled
   const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
-  // under the legacy engine every preset is greyed at once (store presetReasonOf): one flag here, a reason per card
+  // under the legacy engine every preset is greyed at once, and every scene and preset while the scene renderer is missing
+  // (store unplayableReasonOf): one flag each here, a reason per card
   const engine = useStore((s) => (s.settings ? String(s.settings.playerEngine) : null));
+  const scenesBlocked = useStore((s) => s.scenesBlocked);
   const reasonOf = useMemo(() => {
     const st = engine == null ? null : { playerEngine: engine };
-    return (i: LibraryItem) => presetReasonOf(i, st);
-  }, [engine]);
+    return (i: LibraryItem) => unplayableReasonOf(i, st, scenesBlocked);
+  }, [engine, scenesBlocked]);
 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);

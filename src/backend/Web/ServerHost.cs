@@ -915,6 +915,9 @@ public static class ServerHost
                 // the user's pause (`player.paused` / mpv `pause`; never "pause behind windows", a per-output clock): the in-app
                 // background (WallpaperBg) holds still with the wallpaper
                 paused = playing && PlayerHelper.IsPausedNow(),
+                // API: why no scene can play here (the scene renderer is missing), else null — every scene card greys with it
+                // (store unplayableReasonOf); WS `scenes-blocked` moves it live
+                scenesBlocked = PlayerHelper.ScenesBlockedReason,
             });
         });
 

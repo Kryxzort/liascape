@@ -117,6 +117,25 @@ public sealed class LiascapePlayerClient
             assets ?? chk.AssetsDir);
     }
 
+    // Why no scene can play here, latched: a scene worker couldn't load the scene renderer (LWE's core gone; the
+    // player's `hello.scene_renderer_missing`, else `scene-check`'s `renderer_missing`), null once a worker loads it
+    // again (the player's next hello says null). Kept while no player answers. The UI greys every scene with it.
+    public string? RendererMissing { get; private set; }
+    // raised (on the thread that read the change) when RendererMissing changes: the handler must not block
+    public event Action<string?>? RendererMissingChanged;
+    private void SetRendererMissing(string? reason)
+    {
+        if (reason == RendererMissing) return;
+        RendererMissing = reason;
+        try { RendererMissingChanged?.Invoke(reason); } catch (Exception ex) { Log($"renderer handler threw: {ex.Message}"); }
+    }
+    // greets the player again (its capabilities and renderer word): a `scene.renderer_*` fact says they changed
+    public void RefreshHello()
+    {
+        if (!SocketExists || IsStalled) return;
+        try { Call("hello", null, QuickMs); } catch (LiascapePlayerException) { }
+    }
+
     private (long At, bool Available, string? Reason, string? AssetsDir)? _sceneCheck;
     private readonly object _sceneCheckLock = new();
 
@@ -145,6 +164,9 @@ public sealed class LiascapePlayerClient
                         var root = doc.RootElement;
                         bool ok = root.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.True;
                         r = (ok, ok ? null : Prop(root, "reason") ?? $"`liascape-player scene-check` exited {p.ExitCode}", Prop(root, "assets_dir"));
+                        // no player answers: the worker a player started now would run, in this backend's environment
+                        SetRendererMissing(root.TryGetProperty("renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object
+                            ? Prop(rm, "reason") : null);
                     }
                 }
                 catch (Exception e) { r = (false, $"`liascape-player scene-check` failed: {e.Message}", null); }
@@ -394,6 +416,9 @@ public sealed class LiascapePlayerClient
                             {
                                 Capabilities = capEl.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToHashSet();
                                 _capsKnown = _capsEver = true;
+                                // the running player's word on the scene renderer (a worker couldn't load it), with its capabilities
+                                SetRendererMissing(result.TryGetProperty("scene_renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object
+                                    ? Prop(rm, "reason") : null);
                             }
                             if (PlayerPid != p)
                             {
@@ -914,9 +939,10 @@ public sealed class LiascapePlayerClient
     // without it, TODO "A rejected `af` silences the video") → logged here, so the backend's log says why.
     // `scene.fonts` — at each scene load, the system fonts its text shows with another family (→ LiascapePlayerMedia
     // .OnSceneFonts: kept in the index for the item sidebar).
-    // `scene.renderer_missing` — a scene's worker couldn't load the scene renderer (the install is broken, not the
-    // scene: → PlayerHelper.OnSceneUnplayable, never marked crashed).
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.renderer_missing", "scene.loudness", "scene.fonts", "program.", "source.rejected"];
+    // `scene.renderer_` — a scene's worker couldn't load the scene renderer (`_missing`: the install is broken, not the
+    // scene, never marked crashed) or one loads it again (`_found`) → LiascapePlayerMedia re-reads the player's word
+    // (RendererMissing).
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.renderer_", "scene.loudness", "scene.fonts", "program.", "source.rejected"];
     public event Action<string, JsonElement>? Event;
     // An entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
     // while no backend listened), drained on every subscription: (kind, its fields). Raised on the drain's thread, in

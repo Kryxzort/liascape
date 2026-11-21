@@ -253,6 +253,9 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         // `pid` is this compositor (the supervisor's child when supervised).
         "supervisor_pid": rt.supervised.as_ref().map(|s| s.pid),
         "restart": rt.restart_event,
+        // `{reason, detail}` while a worker couldn't load the scene renderer (`worker::renderer`; no
+        // `scene` capability then), else null: the backend greys every scene with the reason
+        "scene_renderer_missing": crate::worker::renderer::missing_json(),
         // which optional pieces work here, and why not (crate::health) — the backend's warning icons
         "health": {
             "effects": crate::health::effects_json(rt.cat.dir(), rt.cat.ids().len()),

@@ -86,6 +86,8 @@
 //                        base back → the notice leaves, the cards come back; no-glow, bg-live. Shots side-needsbase-*.png
 //   lib:preset:legacy    the legacy engine (page-only settings-changed): every preset greyed with "Presets play only in the
 //                        Liascape player", the library read again, a click plays nothing; back → playable, no reload
+//   lib:scenesBlocked    the scene renderer missing (page-only scenes-blocked): every scene and preset greyed with the reason
+//                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why; cleared → back
 //   lib:baseDelete[Off]  Delete of a base two presets play (card button, Delete key, sidebar; Delete and unsubscribe too) asks,
 //                        naming 2; Keep it / Escape delete nothing; Delete trashes it and both presets grey out; a scene no
 //                        preset plays and a preset itself delete unasked; the dialog zooms in (Off: fades), no-glow, bg-live.
@@ -2433,6 +2435,8 @@ app.whenReady().then(async () => {
     // under no-glow); under bg-live the notice keeps its fill. Shots side-needsbase-*.png
     for (const mode of ["on", "off"]) await cell(`lib:preset:needsBase${mode === "off" ? "Off" : ""}`, async () => withPresets(async () => {
       const v = [], J = JSON.stringify, S = (sel) => `.side-panel:not(.closing) ${sel}`;
+      // pp1's own status icon: every scene card carries one too (hidden while it plays)
+      const PP1_ICON = `.card.lib:has([data-title="pp1"]) [data-card-reason]`;
       const cur0 = await current();
       try {
         if (mode === "off") { await setMotion(false); }
@@ -2443,7 +2447,7 @@ app.whenReady().then(async () => {
         if (await page(`return !!m.side().querySelector("[data-preset-note]");`) || before?.off) return [`pp1 can't play before its base went (${J(before)}) — proved nothing`];
         // the base goes: trashed in the backend, the page re-reads the library (library-synced)
         const baseItem = await libItem(preDir(PRE.base));
-        const samp = js(MO.SAMPLE({ note: S("[data-preset-note]"), icon: `[data-card-reason]` }, 1400));
+        const samp = js(MO.SAMPLE({ note: S("[data-preset-note]"), icon: PP1_ICON }, 1400));
         await sleep(40);
         const tr = await post("/library/trash", { items: [baseItem] });
         if (tr.status !== 200) return [`trashing pb answered ${tr.status}`];
@@ -2530,7 +2534,7 @@ app.whenReady().then(async () => {
         if (busy.text !== "Downloading…" || busy.off !== "true") v.push(`while it downloads the button reads ${J(busy)}`);
         // the base lands: the notice leaves, the cards come back
         await mv(5, 5);
-        const out = js(MO.SAMPLE({ note: S("[data-preset-note]"), icon: `[data-card-reason]` }, 1400));
+        const out = js(MO.SAMPLE({ note: S("[data-preset-note]"), icon: PP1_ICON }, 1400));
         await sleep(40);
         await post("/library/undo");
         await js(`window.__dlGo?.()`);
@@ -2582,6 +2586,41 @@ app.whenReady().then(async () => {
       console.log(`        back: ${J(back)}`);
       for (const t of ["pp1", "pp2"]) if (back[t]?.off || back[t]?.op > 0.01) v.push(`${t} still greyed back on liascape-player: ${J(back[t])}`);
       if (await libReads(n0) < 1) v.push("the switch back didn't re-read the library");
+      return v;
+    }));
+
+    // lib:scenesBlocked — the scene renderer is missing (a WS scenes-blocked only the page sees; the backend's latch, read
+    // at load from /current): every scene (pb, s2) and preset (pp1) greys with the reason through the preset's own path
+    // (the same status icon, its tooltip the reason), a video doesn't; a click plays nothing and the status bar says why;
+    // the sidebar's notice has the reason. Cleared → all playable again.
+    await cell("lib:scenesBlocked", async () => withPresets(async () => {
+      const v = [], J = JSON.stringify, WHY = "The scene renderer is missing — rebuild or reinstall Liascape";
+      const video = await page(`const c = [...document.querySelectorAll(".card.lib")].find((c) => !c.querySelector(".badge") && !c.querySelector("[data-card-reason]"));
+        return c?.querySelector("[data-title]")?.dataset.title ?? null;`);
+      if (!video) return ["no video card in the library — proved nothing"];
+      const vidOff = () => page(`return m.card(${J(video)})?.classList.contains("unplayable") ?? null;`);
+      const c0 = { pb: await cardState("pb"), pp1: await cardState("pp1") };
+      if (c0.pb?.off || c0.pp1?.off) return [`greyed before the latch (${J(c0)}) — proved nothing`];
+      await js(`window.__fakeWs("scenes-blocked", { reason: ${J(WHY)} })`); await sleep(800);
+      const st = { pb: await cardState("pb"), s2: await cardState("s2"), pp1: await cardState("pp1") };
+      console.log(`        blocked: ${J(st)}`);
+      for (const t of ["pb", "s2", "pp1"]) if (!st[t]?.off || st[t].reason !== WHY || st[t].title !== WHY || !(st[t].op > 0.5)) v.push(`${t} blocked: ${J(st[t])}`);
+      if (await vidOff()) v.push(`the video ${video} greyed too`);
+      await shot("scenes-blocked");
+      const th = await page(`const t = m.thumb("pb"); t.scrollIntoView({ block: "center" }); await m.sleep(300); return m.rect(t);`);
+      const n0 = await reqMark();
+      await clickAt(th.x + th.w / 2, th.y + th.h / 2); await sleep(500);
+      if ((await reqsSince(n0)).some(([mt, p]) => mt === "POST" && p === "/apply")) v.push("a click on pb posted /apply");
+      const sb = await statusText();
+      if (sb !== "Can't play pb: the scene renderer is missing — rebuild or reinstall Liascape") v.push(`the status bar says ${J(sb)}`);
+      await page(`await m.openSide("pb"); await m.sleep(500);`);
+      const note = await page(`const n = m.side().querySelector("[data-preset-note]"); return n ? n.querySelector(".side-crash-text").textContent.trim() : null;`);
+      if (note !== WHY) v.push(`pb's notice: ${J(note)}`);
+      await page(`await m.closeAll();`);
+      await js(`window.__fakeWs("scenes-blocked", { reason: null })`); await sleep(800);
+      const back = { pb: await cardState("pb"), s2: await cardState("s2"), pp1: await cardState("pp1") };
+      console.log(`        back: ${J(back)}`);
+      for (const t of ["pb", "s2", "pp1"]) if (back[t]?.off || back[t]?.op > 0.01) v.push(`${t} still greyed once cleared: ${J(back[t])}`);
       return v;
     }));
 

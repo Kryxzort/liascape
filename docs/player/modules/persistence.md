@@ -44,8 +44,9 @@ What the player shows, so a restarted player comes back with the same wallpaper 
 ## Outbox (`<state>/outbox.jsonl`)
 
 Facts the backend must store even when it isn't listening (app closed while the player rotates by itself, a
-reconnect gap): `source.broken` (the item is marked crashed), `scene.loudness` (the index) and
-`scene.vram_exceeded` (UI text). They are appended where they are logged (`outbox::with_seq`), and the live event
+reconnect gap): `source.broken` (the item is marked crashed), `scene.loudness` (the index),
+`scene.vram_exceeded` (UI text) and `scene.renderer_missing` / `scene.renderer_found` (the backend re-reads the
+player's word on the scene renderer). They are appended where they are logged (`outbox::with_seq`), and the live event
 carries `outbox_seq` so the backend acks what it handled live. The backend drains it on every (re)subscription.
 
 - Lines are `{"seq":N,"t_wall":…,"kind":…,"fields":{…}}` with `seq` written first by hand (serde_json sorts keys)

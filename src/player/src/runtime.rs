@@ -2936,7 +2936,8 @@ impl Runtime {
     }
 
     /// Whether `kind: scene` sources can play here: the worker binary resolves, and WE's
-    /// assets dir does (unless synthetic test scenes are allowed). `Err` = why not.
+    /// assets dir does (unless synthetic test scenes are allowed), and no worker failed to load the
+    /// scene renderer since the last one did (`worker::renderer`). `Err` = why not.
     pub fn scenes_available(&self) -> Result<(), String> {
         if crate::paths::scene_worker_bin().is_none() {
             return Err(
@@ -2944,6 +2945,9 @@ impl Runtime {
                         PATH)"
                     .into(),
             );
+        }
+        if let Some((reason, detail)) = crate::worker::renderer::missing() {
+            return Err(format!("{reason} ({detail})"));
         }
         if self.host.base_opt("allow_synthetic").is_some()
             || self.host.base_opt("scene_assets").is_some()

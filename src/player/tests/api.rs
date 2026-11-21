@@ -6968,6 +6968,7 @@ fn worker_without_its_core(root: &Path) -> Option<PathBuf> {
     // The same length, one letter of the core dir's name changed: a dir that doesn't exist.
     // An `$ORIGIN` RUNPATH (LIASCAPE_LWE_RPATH) needs no change: the copy has no core beside it.
     if let Some(core) = std::env::var("LIASCAPE_LWE_CORE_DIR").ok().filter(|d| !d.is_empty()) {
+        let core = core.trim_end_matches('/');
         let rpath = format!("{core}/lib").into_bytes();
         let at = core.rfind('/').unwrap() + 1;
         let mut gone = rpath.clone();
@@ -6999,9 +7000,34 @@ fn worker_without_its_core(root: &Path) -> Option<PathBuf> {
     Some(worker)
 }
 
+/// Puts the real worker where [`worker_without_its_core`] put the broken copy (a rename: a probe
+/// may be running the old file): the core loads again, as after the devShell realised it.
+fn repair_worker(worker: &Path) {
+    let tmp = worker.with_extension("new");
+    std::fs::copy(env!("CARGO_BIN_EXE_liascape-scene-worker"), &tmp).unwrap();
+    std::fs::rename(&tmp, worker).unwrap();
+}
+
+/// `hello`'s word on the renderer: (`scene_renderer_missing`, the `scene` capability, `health.scenes.reason`).
+fn renderer_word(c: &mut Client) -> (Value, bool, Value) {
+    let h = c.ok("hello", json!({}));
+    let scene = h["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x == "scene");
+    (
+        h["scene_renderer_missing"].clone(),
+        scene,
+        h["health"]["scenes"]["reason"].clone(),
+    )
+}
+
 /// A worker that can't load LWE's core (exit 127 before `Hello`) can't play any scene, and that
-/// is no crash of the scene: one fatal `source.error` and `scene.renderer_missing` naming the
-/// reason, no restart, no `source.broken`, no crash record — so the backend marks nothing crashed.
+/// is no crash of the scene: one fatal `source.error` and `scene.renderer_missing` (an outbox fact)
+/// naming the reason, no restart, no `source.broken`, no crash record — so the backend marks nothing
+/// crashed. Until a worker loads again the player says so in `hello` (no `scene` capability,
+/// `scene_renderer_missing`); the next worker's `Hello` clears it (`scene.renderer_found`).
 #[test]
 fn worker_without_its_core_fails_without_crash_record() {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -7018,10 +7044,15 @@ fn worker_without_its_core_fails_without_crash_record() {
         &[
             ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
             ("LIASCAPE_SCENE_WORKER_BIN", worker.as_path()),
+            // the probe stays out of it: here the scene's own worker finds the renderer again
+            ("LIASCAPE_SCENE_RENDERER_RECHECK_MS", Path::new("600000")),
         ],
         Some(serial),
     );
     let mut c = srv.client();
+    c.ok("set", json!({"path": "player.scene_spare", "value": false}));
+    let (m0, scene0, _) = renderer_word(&mut c);
+    assert!(m0.is_null() && scene0, "before any worker: {m0}, scene {scene0}");
     let dir = common::synthetic_scene("api-nocore-900000021", &synth(Pattern::Solid));
     let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
     show_all(&mut c, &id);
@@ -7054,6 +7085,19 @@ fn worker_without_its_core_fails_without_crash_record() {
             .is_some_and(|d| d.contains("error while loading shared libraries")),
         "{ev}"
     );
+    assert!(ev["outbox_seq"].is_u64(), "not an outbox fact: {ev}");
+    let (m, scene, why) = renderer_word(&mut c);
+    assert_eq!(
+        m["reason"],
+        json!(liascape_player::worker::RENDERER_MISSING),
+        "{m}"
+    );
+    assert!(!scene, "the scene capability stays while the renderer is missing");
+    assert!(
+        why.as_str()
+            .is_some_and(|w| w.starts_with(liascape_player::worker::RENDERER_MISSING)),
+        "{why}"
+    );
     for _ in 0..5 {
         let _ = c.call("step", json!({"ms": 100}));
     }
@@ -7080,6 +7124,76 @@ fn worker_without_its_core_fails_without_crash_record() {
                 && r.contains("liblinux-wallpaperengine-core")),
         "{j}"
     );
+    assert_eq!(
+        j["renderer_missing"]["reason"],
+        json!(liascape_player::worker::RENDERER_MISSING),
+        "{j}"
+    );
+    // The core is back (no rebuild: the same path realised again): the next scene's worker says
+    // `Hello`, which clears it — the scene plays, the capability returns.
+    repair_worker(&worker);
+    let dir2 = common::synthetic_scene("api-nocore-900000022", &synth(Pattern::Solid));
+    let id2 = create_src(&mut c, json!({"kind": "scene", "path": s(&dir2)}));
+    show_all(&mut c, &id2);
+    let found = wait_for(Duration::from_secs(10), "scene.renderer_found", || {
+        let _ = c.call("step", json!({"ms": 16}));
+        logs_of(&mut c, "scene.renderer_found").into_iter().next()
+    });
+    assert_eq!(found["via"], json!("worker"), "{found}");
+    assert!(found["outbox_seq"].is_u64(), "not an outbox fact: {found}");
+    wait_for(Duration::from_secs(10), "source.ready", || {
+        let _ = c.call("step", json!({"ms": 16}));
+        logs_of(&mut c, "source.ready")
+            .into_iter()
+            .find(|e| e["id"] == json!(id2))
+    });
+    let (m, scene, _) = renderer_word(&mut c);
+    assert!(m.is_null() && scene, "after a worker loaded: {m}, scene {scene}");
+}
+
+/// While the renderer is missing nothing may start a worker (the backend greys every scene), so the
+/// player looks for it itself (`worker::renderer`'s probe, every `LIASCAPE_SCENE_RENDERER_RECHECK_MS`):
+/// once the worker binary starts again, `scene.renderer_found {via: "probe"}` and the capability returns.
+#[test]
+fn missing_renderer_is_found_again_by_the_probe() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let Some(worker) = worker_without_its_core(&root) else {
+        return;
+    };
+    let srv = Serve::spawn_env(
+        root.clone(),
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_SCENE_WORKER_BIN", worker.as_path()),
+            ("LIASCAPE_SCENE_RENDERER_RECHECK_MS", Path::new("200")),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    c.ok("set", json!({"path": "player.scene_spare", "value": false}));
+    let dir = common::synthetic_scene("api-nocore-900000023", &synth(Pattern::Solid));
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(&mut c, &id);
+    wait_for(Duration::from_secs(10), "scene.renderer_missing", || {
+        let _ = c.call("step", json!({"ms": 16}));
+        logs_of(&mut c, "scene.renderer_missing").into_iter().next()
+    });
+    // still broken: the probe's tries change nothing
+    std::thread::sleep(Duration::from_millis(700));
+    assert!(logs_of(&mut c, "scene.renderer_found").is_empty());
+    assert!(!renderer_word(&mut c).1, "the scene capability while still missing");
+    repair_worker(&worker);
+    let found = wait_for(Duration::from_secs(10), "scene.renderer_found", || {
+        logs_of(&mut c, "scene.renderer_found").into_iter().next()
+    });
+    assert_eq!(found["via"], json!("probe"), "{found}");
+    let (m, scene, _) = renderer_word(&mut c);
+    assert!(m.is_null() && scene, "after the probe: {m}, scene {scene}");
 }
 
 /// A scene whose worker crashes past its

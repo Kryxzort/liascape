@@ -32,6 +32,11 @@ export const PRESET_LEGACY = "Presets play only in the Liascape player";
 // Guard: probe-sidebar lib:preset:legacy
 export const presetReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason">, settings: Record<string, unknown> | null) =>
   i.presetReason ?? (i.isPreset && settings && settings.playerEngine !== "liascape-player" ? PRESET_LEGACY : null);
+// Why a library item can't play now, or null: a preset's own reason (presetReasonOf), else, for a scene or a preset, why no
+// scene can play here (the store's scenesBlocked: the scene renderer is missing — GET /current, WS scenes-blocked). The card
+// greys with it, the sidebar says it, a click plays nothing. Guard: probe-sidebar lib:scenesBlocked
+export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene">, settings: Record<string, unknown> | null,
+  scenesBlocked: string | null) => presetReasonOf(i, settings) ?? ((i.isScene || i.isPreset) && scenesBlocked ? scenesBlocked : null);
 // the status bar's "Can't play X: it needs its base scene" (a reason starts with a capital: it is also the card's tooltip)
 export const cantPlay = (title: string, why: string) =>
   `Can't play ${title}: ${/^Needs /.test(why) ? "it n" + why.slice(1) : why[0].toLowerCase() + why.slice(1)}`;
@@ -156,6 +161,8 @@ interface State {
   settingsSaves: number;
   // `liascape toggle-loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS toggle-loop-current)
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
+  // API: why no scene can play here (/current scenesBlocked, WS scenes-blocked), else null: every scene card greys with it
+  scenesBlocked: string | null; setScenesBlocked: (r: string | null) => void;
   // the wallpaper is paused by the user (/current.paused, WS pause-changed): the in-app background holds still with it
   wallpaperPaused: boolean; setWallpaperPaused: (p: boolean) => void;
   // statusPlaying: `status` is the persistent now-playing line (refreshPlayingStatus), not a message (setStatus) — the top
@@ -317,7 +324,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
-  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
+  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, scenesBlocked: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -526,10 +533,11 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({ libraryItems: s.libraryItems.map(p) }));
   },
   async applyItem(path) {
-    // a preset that can't play (its base scene gone, the legacy engine…) plays nothing: the status bar says why (the card,
-    // Enter and the sidebar's picture alike). Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy
+    // an item that can't play (a preset: its base scene gone, the legacy engine…; any scene while the scene renderer is
+    // missing) plays nothing: the status bar says why (the card, Enter and the sidebar's picture alike). Guard: probe-sidebar
+    // lib:preset:needsBase, lib:preset:legacy, lib:scenesBlocked
     const it = get().libraryItems.find((i) => i.videoPath === path);
-    const why = it ? presetReasonOf(it, get().settings) : null;
+    const why = it ? unplayableReasonOf(it, get().settings, get().scenesBlocked) : null;
     if (it && why) { get().setStatus(cantPlay(it.title, why), true, true); return; }
     await api.apply(path); set({ playingPath: path });
     const t = get().libraryItems.find((i) => i.videoPath === path)?.title ?? (path.split("/").pop() ?? "").replace(/\.[^.]+$/, "");
@@ -742,6 +750,7 @@ export const useStore = create<State>((set, get) => ({
     set({ settings: s }); api.saveSettings(s).catch(() => {});
   },
   setKeepCurrent(k) { set({ keepCurrent: k }); get().refreshPlayingStatus(); },
+  setScenesBlocked(r) { set({ scenesBlocked: r }); },
   setWallpaperPaused(p) { if (get().wallpaperPaused !== p) set({ wallpaperPaused: p }); },
   setPlaying(p) { playingEvents++; set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
@@ -875,7 +884,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
-  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; }
+  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
   // this listing answers these settings: no second read for them (libraryFollowsEngine)
   if (lib && settings) libKey = libKeyOf(settings.v);
@@ -901,6 +910,6 @@ async function rereadPlaying(set: Setter, get: () => State) {
   const cur = await q.reply.catch(() => null);
   if (!cur || !q.fresh()) return;
   const playingLine = get().status === "" || get().status === buildPlayingStatus(get);
-  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep });
+  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep, scenesBlocked: cur.scenesBlocked ?? null });
   if (playingLine) get().refreshPlayingStatus();
 }

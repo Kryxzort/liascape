@@ -698,8 +698,8 @@ public static class PlayerHelper
     public static Action<string>? OnSceneCrashed;
     // liascape-player: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
     public static Action<string, double, double, string>? OnSceneVramStoppedCb;
-    // liascape-player: a scene can't play, not by its own fault (path, the UI's text)
-    public static Action<string, string>? OnSceneUnplayableCb;
+    // liascape-player: why no scene can play here (ScenesBlockedReason), or null once they can again
+    public static Action<string?>? OnScenesBlockedCb;
     public static Action<string?>? OnWallpaperChanged;
 
     private record TimedState(
@@ -3974,13 +3974,26 @@ public static class PlayerHelper
         AdvanceIfPlaying(path, $"scene over the VRAM limit ({usedMib:0} > {limitMib:0} MiB)");
     }
 
-    // liascape-player: a scene can't play for a reason that isn't the scene's (`scene.renderer_missing`: the worker
-    // couldn't load the scene renderer) → the UI is told why (WS `scene-unplayable {path, message}`); it is never
-    // marked crashed, or one broken install would mark every scene the rotation reached.
-    public static void OnSceneUnplayable(string path, string message)
+    // liascape-player: why no scene can play here, for reasons that aren't any scene's (a worker couldn't load the scene
+    // renderer: LiascapePlayerClient.RendererMissing), else null. The UI greys every scene and preset card with it (store
+    // unplayableReasonOf) and plays none; pickers and rotations already skip them (the player drops its `scene`
+    // capability meanwhile: ScenesPlayable). Never a crash mark, or one broken install would mark every scene it reached.
+    public static string? ScenesBlockedReason
     {
-        if (string.IsNullOrEmpty(path) || !IsScenePath(path)) return;
-        OnSceneUnplayableCb?.Invoke(path, message);
+        get
+        {
+            if (!PlayerEngine.IsLiascapePlayer) return null;
+            var c = LiascapePlayerClient.Shared;
+            _ = c.ScenesAvailable; // a backend that hasn't greeted the player (or run scene-check) yet asks once
+            return c.RendererMissing;
+        }
+    }
+
+    // the latch moved → the UI (WS `scenes-blocked {reason}`) and the program's items (their skip follows ScenesPlayable)
+    public static void OnScenesBlocked(string? reason)
+    {
+        OnScenesBlockedCb?.Invoke(reason);
+        LiascapePlayerProgram.PushItems();
     }
 
     // the playing item of a running timed playlist is `path` → advance now (the tick's own advance: its owner,

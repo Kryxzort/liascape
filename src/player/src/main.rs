@@ -339,16 +339,19 @@ fn scene_check(args: &[String]) -> ExitCode {
     });
     // A worker the loader can't start (its LWE core gone) answers nothing: say that, not "built
     // without LWE".
-    let cant_load = asked
+    let missing = liascape_player::worker::RENDERER_MISSING;
+    let cant_load_detail = asked
         .as_ref()
         .filter(|o| o.status.code() == Some(liascape_player::worker::LOADER_FAILED))
         .map(|o| {
             let err = String::from_utf8_lossy(&o.stderr);
-            match err.lines().find(|l| !l.trim().is_empty()) {
-                Some(l) => format!("{} ({})", liascape_player::worker::RENDERER_MISSING, l.trim()),
-                None => liascape_player::worker::RENDERER_MISSING.to_string(),
-            }
+            err.lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("the loader couldn't start it")
+                .trim()
+                .to_string()
         });
+    let cant_load = cant_load_detail.as_ref().map(|d| format!("{missing} ({d})"));
     let features: Vec<String> = asked
         .and_then(|o| serde_json::from_slice(&o.stdout).ok())
         .unwrap_or_default();
@@ -374,6 +377,8 @@ fn scene_check(args: &[String]) -> ExitCode {
         "assets_dir": assets.as_ref().ok(),
         "ok": reason.is_none(),
         "reason": reason,
+        // as `hello.scene_renderer_missing`: the backend greys every scene with it
+        "renderer_missing": cant_load_detail.map(|d| serde_json::json!({"reason": missing, "detail": d})),
     });
     println!("{out}");
     if reason.is_none() {

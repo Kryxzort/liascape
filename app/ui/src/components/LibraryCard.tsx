@@ -19,7 +19,8 @@ export const LibraryCard = memo(function LibraryCard({
   // unsubscribe now (signed out): the button shows disabled, its name says why, and a click only puts that in the status bar
   // (no tooltips on cards). Guard: probe-steam side:unsub:signedOut
   item: LibraryItem; playing: boolean; selected: boolean; focused: boolean; inPlaylist: boolean; unsub?: boolean; unsubOff?: string | null;
-  // why it can't play now (a preset: its base scene gone, the legacy engine… store presetReasonOf), else null: the card greys
+  // why it can't play now (a preset: its base scene gone, the legacy engine…; a scene or preset: the scene renderer missing —
+  // store unplayableReasonOf), else null: the card greys
   // out with a status icon whose tooltip is the reason, and a click plays nothing (store applyItem says why in the status bar)
   reason?: string | null;
   // PERF: each takes the item, so the list passes the same function to every card (Library.tsx useStableFn) and a
@@ -34,7 +35,7 @@ export const LibraryCard = memo(function LibraryCard({
   const autoVideo = useAutoplayVideo(wrapRef, idleKind === "video");
   // on screen: its previews are made first if the backend still lacks them (components/previewQueue.ts)
   useSeenCard(wrapRef, item.videoPath);
-  // COOL: a preset greys out and its status icon fades in when it stops being playable, and back (CSS transitions on a state
+  // COOL: a preset or scene greys out and its status icon fades in when it stops being playable, and back (CSS transitions on a state
   // class, never a mount animation: the page is hidden and shown again by <Activity>, which would replay one)
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed && !reason ? " crashed" : ""}${reason ? " unplayable" : ""}`;
   return (
@@ -48,8 +49,8 @@ export const LibraryCard = memo(function LibraryCard({
        >
         <MotionThumb item={item} hover={hover} hoverKind={hoverKind} idleKind={idleKind} autoVideo={autoVideo} />
         {item.isScene && <span className="badge">SCENE</span>}
-        {/* Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy */}
-        {item.isPreset && <span className={`warn preset${reason ? " on" : ""}`} data-card-reason={reason ?? ""} title={reason ?? undefined}
+        {/* Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy, lib:scenesBlocked (a scene's too) */}
+        {(item.isPreset || item.isScene) && <span className={`warn preset${reason ? " on" : ""}`} data-card-reason={reason ?? ""} title={reason ?? undefined}
           aria-hidden={reason ? undefined : true}><Unplug size={15} /></span>}
         {item.hasCrashed && !reason && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}

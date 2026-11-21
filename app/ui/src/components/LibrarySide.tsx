@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat, Unplug, Download } from "lucide-react";
 import { api, media, still, anim as animUrl, steamPageUrl, workshopStub, CARD_STILL_W, type LibraryItem, type OneOffRoute } from "../api/client";
-import { presetReasonOf, useStore } from "../store";
+import { unplayableReasonOf, useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
 import { SideMedia, SideSection } from "./SidePanel";
 import { FolderFlap } from "./icons";
@@ -183,9 +183,9 @@ export function LibrarySide({
     if (crash.value != null || !flipFrom.current) return;
     glideFlip(flipFrom.current, bodyRef.current, CRASH_FLIP); flipFrom.current = null;
   }, [crash.value]);
-  // a preset that can't play: its notice (the crash notice's block), fading out once it can (its base back, the engine
-  // switched), what follows gliding into its room as for the crash notice. Guard: probe-sidebar lib:preset:needsBase*
-  const reason = useStore((s) => presetReasonOf(item, s.settings));
+  // an item that can't play (a preset; any scene while the scene renderer is missing): its notice (the crash notice's
+  // block), fading out once it can (its base back, the engine switched, the renderer found), what follows gliding into its room as for the crash notice. Guard: probe-sidebar lib:preset:needsBase*
+  const reason = useStore((s) => unplayableReasonOf(item, s.settings, s.scenesBlocked));
   const presetNote = useLinger(reason, CRASH_OUT_MS, motion);
   // one that turns up while the sidebar is open fades in (the body's own entrance plays for one there at the open)
   const [noteAtOpen] = useState(() => reason != null);

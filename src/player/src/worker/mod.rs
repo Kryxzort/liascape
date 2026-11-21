@@ -20,6 +20,7 @@
 
 pub mod dmabuf;
 pub mod proto;
+pub mod renderer;
 pub mod spare;
 
 use std::collections::VecDeque;
@@ -1014,6 +1015,7 @@ impl WorkerHost {
                 sync,
             } => {
                 p.hello_at = Some(now);
+                renderer::note_loads("worker");
                 let (protocol, features, sync) = (*protocol, features.clone(), sync.clone());
                 log::event(
                     "worker",
@@ -1341,7 +1343,8 @@ impl WorkerHost {
             // The dynamic loader gave up before the worker ran a line: every restart would too, and
             // the scene did nothing wrong — the install did. No restart, no crash record (that
             // would mark every scene crashed): a fatal error with the reason, which the caller
-            // stops the host on, and `scene.renderer_missing` for the backend to say so.
+            // stops the host on, and the renderer marked missing ([`renderer`]: the outbox fact
+            // `scene.renderer_missing`, scenes off until a worker loads again).
             // Guards: `tests/api.rs::worker_without_its_core_fails_without_crash_record`, adapter IT
             // § "a scene worker that can't load the scene renderer".
             let detail = self
@@ -1353,13 +1356,10 @@ impl WorkerHost {
                 .unwrap_or_else(|| format!("exited with code {LOADER_FAILED} before it started"));
             self.state = WorkerState::Stopped;
             let path = self.scene_path();
-            log::event(
-                "worker",
-                Level::Error,
-                "scene.renderer_missing",
-                Some(self.corr.clone()),
-                json!({"id": self.spec.id, "path": path, "scene_id": scene_id_of(&path, &self.spec.id),
-                       "reason": RENDERER_MISSING, "detail": detail}),
+            renderer::note_missing(
+                &self.spec.bin,
+                &detail,
+                json!({"id": self.spec.id, "path": path, "scene_id": scene_id_of(&path, &self.spec.id)}),
             );
             out.push(WorkerEvent::Msg(
                 FromWorker::Error {
