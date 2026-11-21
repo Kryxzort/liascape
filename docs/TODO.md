@@ -124,8 +124,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 
 - [ ] **The logo in the app** (owner): the icon (`app/ui/public/favicon.svg`, Night) shown inside the UI where a logo
       belongs (the top bar or sidebar header, an About panel, the first-run / empty-library screen). Two variants exist:
-      Night (the installed icon) and Lavender (the same art on a light lavender ground, made by the generator kept with
-      the icon's sources); the in-app logo follows the theme once light themes exist (Lavender on light, Night on
+      Night (the installed icon) and Lavender (the same art on a light lavender ground, `app/icon/liascape-lavender.svg`,
+      both from `app/icon/generate.py`); the in-app logo follows the theme once light themes exist (Lavender on light, Night on
       dark). The installed icon stays Night: launchers cache it and Wayland takes it from the desktop entry, so it
       never switches.
 - [ ] **A tray icon** (owner): a StatusNotifierItem with the controls on right-click (play / pause, next, previous,
