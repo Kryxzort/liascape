@@ -65,6 +65,11 @@
 //   wf:cardSize:<w>x<h> 1920×1080 / 1100×700: the docked panel — and the item sidebar in its place — changes the column
 //                     count, not the card size (within 5 % of the no-panel one, or the closest column count's where none
 //                     is), no edge gap wider than the grid's gap
+// Browse's Preset option, against the stack's own backend (its fake Steam servers: three items + two presets of the scene):
+//   filter:preset:offered  Type offers Preset only with scene support on (unticked); the default list holds no preset
+//   filter:preset:on  ticking Preset POSTs include ["Preset"] and lists exactly the two presets
+//   filter:preset:cleared  Preset ticked, then Settings → Play scenes off: the row and the saved tag go, the list is asked
+//                     again without it and holds no preset. Screenshots wf-preset-*.png
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
@@ -186,7 +191,10 @@ async function loadUi(lsInit) {
       ? { ...w, workshopId: "900000001" } /* = the stack's scene s1's Workshop id: "in library" (wf:library) */ : w))}.map((w) => ({ ...w, thumbnailUrl: ${J(THUMBS)}[+w.thumbnailUrl.slice(3)] }));
     const f = window.fetch; window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0];
       const ok = (b) => Promise.resolve(new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } }));
-      if (p === "/browse" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (b.filter) { (b.page > 1 ? window.__more : window.__browse).push(b); return ok(b.page > 1 ? [] : items); } }
+      // __probe_ws_real: the stack's own backend answers the Workshop (its fake Steam servers' "@query": filter:preset:*), still
+      // recorded
+      if (p === "/browse" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (b.filter) { (b.page > 1 ? window.__more : window.__browse).push(b);
+        return localStorage.getItem("__probe_ws_real") === "1" ? f(u, o) : ok(b.page > 1 ? [] : items); } }
       if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
       return f(u, o); }; })(); true`;
   if (lsInit) { await js(lsInit); await win.loadURL(withToken(U + "/")); }
@@ -1446,6 +1454,95 @@ app.whenReady().then(async () => {
       });
     }
     await resize(1400, 900);
+
+    // ---- Browse's Preset option (workshopFilter.ts groupsFor / usePresetsOn): the stack's own backend answers the Workshop
+    // from its fake Steam servers ("@query": three items + two presets of the scene 910000003, scripts/test-ui-matrix.sh) ----
+    const s0Scenes = (await http("GET", "/settings")).json?.allowScenes ?? false;
+    const wsTitles = () => page(`return m.qa(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]").map((e) => e.dataset.title).sort();`);
+    const waitTitles = async (ok) => { let t = []; for (let i = 0; i < 50; i++) { t = await wsTitles(); if (ok(t)) break; await sleep(100); } return t; };
+    const typeRows = () => page(`await m.ensure(); return [...(m.grp("type")?.querySelectorAll(".wf-row") ?? [])].map((r) => r.dataset.wfTag + ":" + r.dataset.state);`);
+    const realWs = async (scenes) => {
+      await setSettings({ allowScenes: scenes });
+      await loadUi(`localStorage.setItem("__probe_ws_real", "1"); localStorage.removeItem("liascape.browseFilter"); true`);
+      await toWorkshop();
+    };
+    const realDone = async () => {
+      await setSettings({ allowScenes: s0Scenes });
+      await loadUi(`localStorage.removeItem("__probe_ws_real"); localStorage.removeItem("liascape.browseFilter"); true`);
+    };
+    const DEFAULT_SCENES = ["Fixture Workshop One", "Fixture Workshop Three", "Fixture Workshop Two"], PRESETS = ["Fixture Preset One", "Fixture Preset Two"];
+
+    // filter:preset:offered — Preset is a Type row only while presets can play (scene support on; the engine half: probe-steam
+    // ws:presetsHidden), unticked; the default list holds no preset (Steam lists them only when asked)
+    await cell("filter:preset:offered", async () => {
+      const v = [];
+      try {
+        await realWs(false);
+        const off = await typeRows();
+        if (J(off) !== J(["Video:off", "Scene:off"])) v.push(`scenes off: the Type rows ${J(off)} (want Video, Scene — no Preset)`);
+        await realWs(true);
+        const on = await typeRows();
+        console.log(`        Type rows: scenes off ${J(off)}, on ${J(on)}`);
+        if (J(on) !== J(["Video:off", "Scene:off", "Preset:off"])) v.push(`scenes on: the Type rows ${J(on)} (want Video, Scene, Preset — unticked)`);
+        const t = await waitTitles((x) => x.length >= 3);
+        console.log(`        the default list: ${J(t)}`);
+        if (!t.length) return [...v, "the Workshop listed nothing — proved nothing"];
+        if (J(t) !== J(DEFAULT_SCENES)) v.push(`the default list ${J(t)} (want the fixture's ${J(DEFAULT_SCENES)}, no preset)`);
+        const b = await page(`return m.last();`);
+        if (b?.filter.include.includes("Preset") || b?.filter.exclude.includes("Preset")) v.push(`the default list sent Preset: ${J(b.filter)}`);
+        await shot("preset-offered");
+      } finally { await realDone(); }
+      return v;
+    });
+
+    // filter:preset:on — ticking Preset lists the Workshop's presets (scene-based only: the backend's rule) — the fixture's two
+    await cell("filter:preset:on", async () => {
+      const v = [];
+      try {
+        await realWs(true);
+        const t0 = await waitTitles((x) => x.length >= 3);
+        if (J(t0) !== J(DEFAULT_SCENES)) return [`the default list ${J(t0)} before ticking Preset — proved nothing`];
+        const n0 = await page(`return window.__browse.length;`);
+        if (!(await page(`const s = m.seg("Preset", "inc"); if (!s) return false; s.click(); return true;`))) return ["no Preset row to tick"];
+        const b = await page(`return await m.settle(${n0});`);
+        if (!b || J(b.filter.include) !== J(["Preset"])) v.push(`ticking Preset POSTed ${J(b?.filter)} (want include ["Preset"])`);
+        const t = await waitTitles((x) => J(x) === J(PRESETS));
+        console.log(`        Preset ticked: ${J(t)}`);
+        if (J(t) !== J(PRESETS)) v.push(`Preset ticked lists ${J(t)} (want exactly ${J(PRESETS)})`);
+        await shot("preset-on");
+      } finally { await realDone(); }
+      return v;
+    });
+
+    // filter:preset:cleared — Preset ticked, then scene support turned off (Settings → Play scenes): the tag leaves the filter
+    // (its row goes; a tag left ticked behind a gone row would list nothing), the Workshop asks for the list without it
+    await cell("filter:preset:cleared", async () => {
+      const v = [];
+      try {
+        await realWs(true);
+        await waitTitles((x) => x.length >= 3);
+        await page(`m.seg("Preset", "inc")?.click();`);
+        const t0 = await waitTitles((x) => J(x) === J(PRESETS));
+        if (J(t0) !== J(PRESETS)) return [`Preset ticked lists ${J(t0)} — proved nothing`];
+        const n0 = await page(`return window.__browse.length;`);
+        await tab("Settings");
+        const ok = await page(`const rows = [...document.querySelectorAll(".srow")], row = rows.find((r) => r.querySelector(".slabel")?.textContent.includes("Play scenes"));
+          const cb = row?.querySelector("input[type=checkbox]"); if (!cb?.checked) return { rows: rows.length, row: !!row, cb: !!cb, checked: cb?.checked ?? null };
+          cb.click(); await m.sleep(700); return true;`);
+        if (ok !== true) return [...v, `no ticked Play scenes row in Settings (${J(ok)}) — proved nothing`];
+        await tab("Browse"); await page(`await m.ensure();`);
+        const st = await page(`let f = null; try { f = JSON.parse(localStorage.getItem("liascape.browseFilter")); } catch {}
+          return { saved: f && [...f.include, ...f.exclude], row: !!m.row("Preset"), posts: window.__browse.slice(${n0}).map((b) => b.filter.include) };`);
+        const t = await waitTitles((x) => x.length > 0 && !x.some((y) => PRESETS.includes(y)));
+        console.log(`        after Play scenes off: ${J(st)} list ${J(t)}`);
+        if (st.row) v.push("the Preset row still shows with scene support off");
+        if (!st.saved || st.saved.includes("Preset")) v.push(`the saved filter still holds Preset: ${J(st.saved)}`);
+        if (!st.posts.length || st.posts.at(-1).includes("Preset")) v.push(`no list asked without Preset (POSTed includes ${J(st.posts)})`);
+        if (!t.length || t.some((y) => PRESETS.includes(y))) v.push(`the list ${J(t)} (want the default one, no preset)`);
+        await shot("preset-cleared");
+      } finally { await realDone(); }
+      return v;
+    });
 
     // ---- the local filters ----
     // the stack's scenes get Wallpaper Engine metadata in their project.json (what an auto-imported item knows): s1 Everyone,

@@ -16,9 +16,15 @@ const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
 // (index.css `.side-panel`): the two take turns on the right, so a swap between them never changes the grid.
 export const WF_DOCK_QUERY = "(min-width: 900px)";
 export type FilterPage = "browse" | "library";
-// what the backend gets for the Workshop's list: only on the Workshop source, never the pill's name / avatar
+// what the backend gets for the Workshop's list: only on the Workshop source, never the pill's name / avatar / scene
+const listId = (l: WsList) => (l && l.kind !== "favorites" ? l.id : undefined);
 const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boolean }) =>
-  s.wsList && s.isWorkshop() ? { kind: s.wsList.kind, id: s.wsList.kind === "creator" ? s.wsList.id : undefined, sort: s.wsListSort } : undefined;
+  s.wsList && s.isWorkshop() ? { kind: s.wsList.kind, id: listId(s.wsList), sort: s.wsListSort } : undefined;
+// Workshop presets can be listed and played: scene support on and the Liascape player (the backend's
+// SteamWorkshopService.AllowPresets; presets are liascape-player only). Browse offers its Preset option and a scene's Presets
+// row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
+export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine === "liascape-player";
+export const PRESET_TAG = "Preset";
 const DEFAULT_FILTER: WorkshopFilter = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
 
 // persist browse view-state (source / filter / sort) across restarts — pure UI prefs, so localStorage
@@ -102,9 +108,12 @@ interface State {
   // what the shown list was read for (its source, search and filter; "" while a switched-to source loads): Browse starts
   // a list read for anything else at its top, and brings a kept scroll offset back only onto the list it was left on
   browseFor: string;
-  // the Workshop source's list (api/client.ts WsList): the whole Workshop (null), the signed-in account's favourites or one
-  // creator's items, its sort, and why a list couldn't be read (a sign-in it needs, Steam unreachable) — shown in the grid
+  // the Workshop source's list (api/client.ts WsList): the whole Workshop (null), the signed-in account's favourites, one
+  // creator's items or a scene's presets, its sort, and why a list couldn't be read (a sign-in it needs, Steam unreachable) —
+  // shown in the grid
   wsList: WsList; wsListSort: WsListSort; wsListNote: { text: string; signIn: boolean } | null;
+  // a Workshop item the Browse sidebar shows though the list doesn't hold it (a preset's base scene: showBrowseItem)
+  browseExtra: Wallpaper | null;
   // library
   libraryItems: LibraryItem[]; libQuery: string; libSort: number; undoDepth: number;
   // playlist
@@ -209,7 +218,7 @@ interface State {
   cancelPwLogin(): Promise<void>; onPwCode(p: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean }): void;
   onPwError(message: string): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
-  focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void;
+  focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void; showBrowseItem(w: Wallpaper): void;
   setPreviewPref(side: "library" | "browse", k: PreviewKind): void;
   // shared
   applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
@@ -288,7 +297,7 @@ function closeFiltersFor(page: FilterPage) {
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
-  wsList: null, wsListSort: LS.get<WsListSort>("wsListSort", "lastupdated") === "toprated" ? "toprated" : "lastupdated", wsListNote: null,
+  wsList: null, wsListSort: LS.get<WsListSort>("wsListSort", "lastupdated") === "toprated" ? "toprated" : "lastupdated", wsListNote: null, browseExtra: null,
   weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library),
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   scenePropsFolded: LS.get<boolean>("scenePropsFolded", false) === true,
@@ -339,8 +348,9 @@ export const useStore = create<State>((set, get) => ({
     const ws = get().sources.find((x) => x.supportsTagFilter && x.available);
     if (!ws) return;
     const cur = get().wsList;
-    const same = get().activeSource === ws.index && JSON.stringify(cur && { ...cur, name: null, avatar: null }) === JSON.stringify(l && { ...l, name: null, avatar: null });
-    if (same) { if (l?.kind === "creator") set({ wsList: l }); return; }
+    // the same list again (kind + id: the pill's words and the scene aren't the list) only takes the newer pill words
+    const same = get().activeSource === ws.index && (cur?.kind ?? null) === (l?.kind ?? null) && listId(cur) === listId(l);
+    if (same) { if (l && l.kind !== "favorites") set({ wsList: l }); return; }
     set({ activeSource: ws.index, wsList: l, wsListNote: null, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
     LS.set("activeSource", ws.index); get().reload();
   },
@@ -696,6 +706,13 @@ export const useStore = create<State>((set, get) => ({
     if (was && !path) get().loadLibrary().catch(() => {});
   },
   focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); if (pageUrl && get().browseScope()) closeFiltersFor("browse"); },
+  // the Browse sidebar on `w`: the list's own card when it holds the item, else `w` itself (views/Browse.tsx shows browseExtra
+  // while it is the focus). Guard: probe-steam ws:presetBase
+  showBrowseItem(w) {
+    const own = get().wallpapers.find((x) => x.pageUrl === w.pageUrl || (!!w.workshopId && x.workshopId === w.workshopId));
+    if (!own) set({ browseExtra: w });
+    get().focusBrowse((own ?? w).pageUrl);
+  },
   setPreviewPref(side, k) { set((s) => ({ previewPref: { ...s.previewPref, [side]: k } })); },
 
   // ---- shared ----
@@ -720,6 +737,26 @@ export const useStore = create<State>((set, get) => ({
   // Persistent "now playing" line (no auto-clear) — after a held notice's time is up (its own timer then shows it)
   refreshPlayingStatus() { if (Date.now() < statusHeldUntil) return; clearTimeout(statusTimer); set({ status: buildPlayingStatus(get), statusPlaying: true }); },
 }));
+
+// Preset is offered only while presets can play (presetsOn). When they stop (scene support off, the legacy engine) a Preset
+// left ticked or hidden leaves every filter — behind a row that's gone it would keep the Workshop listing nothing (the backend
+// sends no request for it) — and a scene's presets list goes back to the whole Workshop. Settings not read yet decide
+// nothing. Guard: probe-filters filter:preset:cleared
+let presetsWere: boolean | null = null;
+useStore.subscribe((s) => {
+  if (!s.settings) return;
+  const on = presetsOn(s.settings);
+  if (on === presetsWere) return;
+  presetsWere = on;
+  if (on) return;
+  const st = useStore.getState();
+  for (const scope of ["workshop", "weLocal", "library"] as const) {
+    const f = filterOf(st, scope);
+    if (f.include.includes(PRESET_TAG) || f.exclude.includes(PRESET_TAG))
+      st.setFilterIn(scope, { include: f.include.filter((t) => t !== PRESET_TAG), exclude: f.exclude.filter((t) => t !== PRESET_TAG) });
+  }
+  if (useStore.getState().wsList?.kind === "presets") st.setSource(useStore.getState().activeSource);
+});
 
 // Format an interval (e.g. "1h 30m", "45s").
 function fmtInterval(total: number): string {

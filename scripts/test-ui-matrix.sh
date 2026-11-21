@@ -260,13 +260,17 @@ export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cach
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
 # Steam's servers for the library's tag / trailer look-ups and Browse's Workshop pages (Helpers/SteamWorkshopDetails.cs):
 # this file, never Steam — no id keys = no Workshop item has a public listing (probe-filters lib:steamTags adds one);
-# "@query" = the Workshop Browse lists to a page that doesn't stub /browse itself (no preview: /img would go out)
+# "@query" = the Workshop Browse lists to a page that doesn't stub /browse itself (no preview: /img would go out); its two
+# presets name the scene 910000003 as their base ("children": Browse's Preset option and a scene's Presets list, probe-filters
+# filter:preset:*, probe-steam ws:presets*)
 export LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
 cat > "$LIASCAPE_STEAM_CM_FIXTURE" <<'EOF'
 {"@query": [
   {"publishedfileid": "910000001", "title": "Fixture Workshop One", "tags": ["Video", "Everyone", "1920 x 1080", "Nature"], "subscriptions": 30},
   {"publishedfileid": "910000002", "title": "Fixture Workshop Two", "tags": ["Video", "Everyone", "3840 x 2160", "Abstract"], "subscriptions": 20},
-  {"publishedfileid": "910000003", "title": "Fixture Workshop Three", "tags": ["Scene", "Everyone", "1920 x 1080", "Anime"], "subscriptions": 10}]}
+  {"publishedfileid": "910000003", "title": "Fixture Workshop Three", "tags": ["Scene", "Everyone", "1920 x 1080", "Anime"], "subscriptions": 10},
+  {"publishedfileid": "910000011", "title": "Fixture Preset One", "tags": ["Preset", "Scene", "Everyone", "1920 x 1080", "Anime"], "subscriptions": 8, "children": ["910000003"]},
+  {"publishedfileid": "910000012", "title": "Fixture Preset Two", "tags": ["Preset", "Scene", "Everyone", "Anime"], "subscriptions": 6, "children": ["910000003"]}]}
 EOF
 # Browse's web sources (Services/WebSourcesFixture.cs): {} = each lists nothing — the page reads the first source at
 # every load, which would otherwise scrape a real site

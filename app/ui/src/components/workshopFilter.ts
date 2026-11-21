@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
-import { WF_DOCK_QUERY, filterOf, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
+import { PRESET_TAG, WF_DOCK_QUERY, filterOf, presetsOn, useStore, type FilterPage, type FilterScope, type TagState } from "../store";
 import type { WorkshopFilter } from "../api/client";
 import { useMotion } from "./motion";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
@@ -71,12 +71,22 @@ export const useActiveTagCount = (scope: FilterScope = "workshop") =>
 // matched here against what each item knows instead of by Steam (docs/decisions.md § "Filter the Library and the local
 // Wallpaper Engine folder in the page").
 
-// the groups a scope offers: the Library has no "In my library" row (everything in it is)
-export const groupsFor = (scope: FilterScope) => (scope === "library" ? WF_GROUPS.filter((g) => g.id !== "library") : WF_GROUPS);
+// Type's Preset row: Steam's own type tag for a preset (also tagged with its base's type), offered only while presets can play
+// (store presetsOn — off, a ticked one leaves the filter: the store's presetsOn subscription). Unticked, the Workshop lists none.
+// Guard: probe-filters filter:preset:*
+const TYPE_PRESET: Group = { ...WF_GROUPS.find((g) => g.id === "type")!, subs: [{ tags: ["Video", "Scene", PRESET_TAG].map((x) => t(x)) }] };
+const withPreset = (gs: Group[]) => gs.map((g) => (g.id === "type" ? TYPE_PRESET : g));
+const LIB_GROUPS = WF_GROUPS.filter((g) => g.id !== "library");
+const GROUPS = { all: WF_GROUPS, allP: withPreset(WF_GROUPS), lib: LIB_GROUPS, libP: withPreset(LIB_GROUPS) };
+// the groups a scope offers (stable arrays): the Library has no "In my library" row (everything in it is); Type has Preset
+// only while presets can play
+export const groupsFor = (scope: FilterScope, presets: boolean) =>
+  scope === "library" ? (presets ? GROUPS.libP : GROUPS.lib) : presets ? GROUPS.allP : GROUPS.all;
+export const usePresetsOn = () => useStore((s) => presetsOn(s.settings));
 
 // what a local item knows, as lower-cased tag names: its tags (Steam's, saved at download, else its project.json's genres +
 // the features the file declares — the backend's WorkshopTags.FromProject), its age rating, its type and its resolution
-type Facetable = { tags: string[] | null; isScene: boolean; ageRating?: string | null; resolution: string | null };
+type Facetable = { tags: string[] | null; isScene: boolean; isPreset?: boolean; ageRating?: string | null; resolution: string | null };
 const IMAGE = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const RES = /^\s*(\d{3,5})\s*[x×]\s*(\d{3,5})\s*$/i;
 // PERF: per item object, computed once — a library re-read keeps the objects whose content didn't change (store keepSame)
@@ -87,8 +97,9 @@ export function facetsOf(x: Facetable, path: string): Set<string> {
   f = new Set<string>();
   for (const t of x.tags ?? []) f.add(t.toLowerCase());
   if (x.ageRating) f.add(x.ageRating.toLowerCase());
-  // an image (an imported still) is neither a Video nor a Scene
+  // an image (an imported still) is neither a Video nor a Scene; a preset is both a Preset and a Scene (it plays as one)
   if (x.isScene) f.add("scene"); else if (!IMAGE.test(path)) f.add("video");
+  if (x.isPreset) f.add("preset");
   const r = x.resolution ? RES.exec(x.resolution) : null;
   if (r) f.add(`${r[1]} x ${r[2]}`);
   facetCache.set(x, f);
@@ -96,7 +107,7 @@ export function facetsOf(x: Facetable, path: string): Set<string> {
 }
 
 const AGE = WF_GROUPS.find((g) => g.id === "age")!.subs[0].tags.map((t) => t.tag.toLowerCase());
-const GROUP_OF = new Map(WF_GROUPS.flatMap((g) => g.subs.flatMap((s) => s.tags.map((t) => [t.tag.toLowerCase(), g.id] as const))));
+const GROUP_OF = new Map(GROUPS.allP.flatMap((g) => g.subs.flatMap((s) => s.tags.map((t) => [t.tag.toLowerCase(), g.id] as const))));
 // The filter as a test of one item's facets, with the Workshop's rules (the backend's WorkshopTags.Build): OR within a
 // group, Genre / Features by their All / Any switch, AND across groups, an excluded tag hides, and any age include or
 // exclude drops an item with no age rating (docs/decisions.md § "Drop untagged items under any age filter"). The "@"

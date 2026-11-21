@@ -154,9 +154,12 @@ export interface WorkshopFilter {
   featureMatch: "all" | "any"; genreMatch: "all" | "any";
 }
 // API: POST /browse `list` (Models/WorkshopList.cs): which Workshop items Browse shows — the whole Workshop (null), the signed-in
-// account's favourites, or one creator's items (`name` / `avatar` only for the pill). A list sorts by "lastupdated" or
-// "toprated" only and has no search (Steam's client protocol can't search a user's files).
-export type WsList = { kind: "favorites" } | { kind: "creator"; id: string; name: string | null; avatar: string | null } | null;
+// account's favourites, one creator's items, or the presets made for one scene (`name` / `avatar` only for the pill; `scene`,
+// the scene's own Browse result when the list was opened from it, only for its presets' "Uses" row: the backend gets the kind
+// and id alone). A list sorts by "lastupdated" or "toprated" only and has no search (Steam's client protocol can't search a
+// user's files or an item's children).
+export type WsList = { kind: "favorites" } | { kind: "creator"; id: string; name: string | null; avatar: string | null }
+  | { kind: "presets"; id: string; name: string | null; scene?: Wallpaper | null } | null;
 export type WsListSort = "lastupdated" | "toprated";
 // API: the Browse sidebar's Workshop community pieces (Web/WorkshopSocialOps.cs). A comment's text is plain text — the backend
 // takes it out of Steam's HTML — and is only ever rendered as text.
@@ -181,6 +184,8 @@ export interface Wallpaper {
   youtubeUrl?: string | null; trailerKnown?: boolean;
   // the local Wallpaper Engine folder's items: project.json's age rating (a Workshop result's is in its tags)
   ageRating?: string | null;
+  // API: a Workshop preset (also isScene: it plays its base scene) — listed only while presets can play (WorkshopTags.Build)
+  isPreset?: boolean;
 }
 export interface Detail {
   title: string; previewUrl: string; downloadUrl: string; needsReferrer: boolean;
@@ -390,6 +395,10 @@ export const api = {
     jpost<WsComments>("/workshop/comment", { workshopId, owner, text, count }),
   // API: Steam's current counts of one item (the Library sidebar; a Browse result carries its own)
   workshopCounts: (id: string) => jget<WsCounts>(`/workshop/counts?id=${encodeURIComponent(id)}`),
+  // API: a preset's base (WorkshopSocialOps.BaseAsync): title / kind null when Steam has no such public item, libraryPath its
+  // library folder (null = not in the library); 404 = not a preset
+  workshopBase: (id: string) =>
+    jget<{ baseId: string; title: string | null; kind: string | null; libraryPath: string | null }>(`/workshop/base?id=${encodeURIComponent(id)}`),
   // "Unsubscribe without deleting": its own route; the library copy is kept (kept = links turned into the library's own copy)
   workshopUnsubscribeKeep: (workshopId: string, title: string) =>
     jpost<{ inLibrary: boolean; kept: number }>("/workshop/unsubscribe-keep", { workshopId, title }),

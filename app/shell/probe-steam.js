@@ -157,7 +157,16 @@
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
 //   ws:pills              the Favourites pill: signed out the grid's "Sign in …" note, signed in the list; the Workshop pill back
 //                         Shots steam-ws-*.png
-//   browse:fixture        a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
+//   ws:presets[Off]       a scene's sidebar: a "Presets" row (the creator row's control, 12 px under it); a click lists exactly
+//                         its two presets (the stack's backend + fake Steam servers): "Presets · <scene>" pill slides in (Off:
+//                         fades), lit, the sidebar closes, the library's one marked in library, the list's sorts and second
+//                         page; × back (the pill leaves); no-glow + bg-live
+//   ws:presetsHidden      no Presets row on a video's or a preset's sidebar, nor (live) under the legacy engine or with scene
+//                         support off; the filter's Type group offers Preset only alongside it
+//   ws:presetsEmpty       a scene with no presets: the list says so in the grid
+//   ws:presetBase         a preset's sidebar: "Uses" + its base's title (asked once); a click shows the base's Library card, else
+//                         its Browse card (the list's own, else one of its own), never a Steam page
+//   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
 //                         (Steam's session connects ahead of the page), at most one per 20 s; none from the tab while another
@@ -245,6 +254,8 @@ const STUB = `(() => {
     // the Browse sidebar's Workshop community pieces (ws:*): the state a cell puts in window.__ws, every call recorded
     const W = (window.__ws ??= {});
     if (p === "/workshop/creator") { st.calls.push({ p, q: String(u) }); return res(W.creator ?? { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null }); }
+    // a preset's base (ws:presetBase): W.base, else Steam's "not a preset"
+    if (p === "/workshop/base") { st.calls.push({ p, q: String(u) }); return W.base ? res(W.base) : res({ error: "Steam lists no base for this item: it isn't a preset" }, 404); }
     if (p === "/workshop/favorite" && m === "GET") { st.calls.push({ p, m }); return res(W.fav ?? { signedIn: false, favorited: null }); }
     if (p === "/workshop/favorite" && m === "POST") {
       const b = JSON.parse(o.body); st.calls.push({ p, m, body: b });
@@ -302,11 +313,19 @@ const STUB = `(() => {
       const b = JSON.parse(o.body);
       (st.browses ??= []).push(b); // every list read (ws:*), apart from the cells' own calls
       // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
-      if (b.list) { if (b.list.kind === "favorites" && !(window.__ws ??= {}).signedIn) return res({ error: "Sign in to Steam to see your Workshop favourites", signIn: true }, 403);
+      // a scene's presets (ws:presets*): the stack's own backend answers, from its fake Steam servers (scripts/test-ui-matrix.sh)
+      if (b.list) { if (b.list.kind === "presets") return f(u, o);
+        if (b.list.kind === "favorites" && !(window.__ws ??= {}).signedIn) return res({ error: "Sign in to Steam to see your Workshop favourites", signIn: true }, 403);
         return res(b.page > 1 ? [] : items.slice(0, 3)); }
       // a long first title (side:browseTitle, look:browseTitles), a long first description (side:aboutTall)
       const long = localStorage.getItem("__probe_long_title"), longDesc = localStorage.getItem("__probe_long_desc");
-      if (b.filter) return res(b.page > 1 ? [] : items.map((x, i) => (i === 0 ? { ...x, ...(long ? { title: long } : {}), ...(longDesc ? { description: longDesc } : {}) } : x)));
+      // __probe_presets (ws:preset*): the first item is the fixture's scene with two presets, the second a preset, the fourth a
+      // scene with none (the third stays a video)
+      const pre = localStorage.getItem("__probe_presets") === "1";
+      const shape = (x, i) => !pre ? x : i === 0 ? { ...x, title: "Fixture Workshop Three", workshopId: "910000003", pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=910000003", isScene: true, tags: ["Scene", "Anime"] }
+        : i === 1 ? { ...x, title: "ws-preset", isScene: true, isPreset: true, tags: ["Preset", "Scene", "Anime"] }
+        : i === 3 ? { ...x, title: "ws-lone-scene", isScene: true, tags: ["Scene"] } : x;
+      if (b.filter) return res(b.page > 1 ? [] : items.map(shape).map((x, i) => (i === 0 ? { ...x, ...(long ? { title: long } : {}), ...(longDesc ? { description: longDesc } : {}) } : x)));
       // a fake Wallpaper Engine (Local) folder (steam:subToggle): local page paths + Workshop ids
       if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
         pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
@@ -2414,16 +2433,16 @@ app.whenReady().then(async () => {
         if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
         const c = await wsCalls("/workshop/creator");
         if (c.length !== 1 || !/owner=76561190000000007/.test(c[0].q)) v.push(`creator asked ${c.length}× (${J(c)}), want once with the item's owner`);
-        const name = await js(`document.querySelector("${ROW} [data-ws-creator-name]")?.textContent`);
+        const name = await js(`document.querySelector("${ROW} [data-ws-row-name]")?.textContent`);
         if (name !== "Probe Creator") v.push(`the row says ${J(name)}`);
         // "All their wallpapers" is an icon chip at the row's end (lucide images), said by its tooltip and the row's name
-        const go = await js(`(() => { const r = document.querySelector(${J(ROW)}), g = r?.querySelector("[data-ws-creator-go]"); if (!g) return null;
+        const go = await js(`(() => { const r = document.querySelector(${J(ROW)}), g = r?.querySelector("[data-ws-go]"); if (!g) return null;
           const sv = g.querySelector("svg"), gr = g.getBoundingClientRect(), rr = r.getBoundingClientRect();
           return { text: g.textContent.trim(), icon: [...(sv?.classList ?? [])].find((c) => c.startsWith("lucide-") && c !== "lucide") ?? null, title: g.getAttribute("title"),
             label: r.getAttribute("aria-label"), words: r.textContent.includes("All their wallpapers"), w: gr.width, h: gr.height, endGap: +(rr.right - gr.right).toFixed(1),
             m: sv ? (() => { const b = sv.getBoundingClientRect(); return [b.left - gr.left, gr.right - b.right, b.top - gr.top, gr.bottom - b.bottom, b.width, b.height].map((x) => +x.toFixed(2)); })() : null }; })()`);
         console.log(`        the row's end: ${J(go)}`);
-        if (!go) v.push("the row's end has no icon chip ([data-ws-creator-go])");
+        if (!go) v.push("the row's end has no icon chip ([data-ws-go])");
         else {
           if (go.text || go.words) v.push(`"All their wallpapers" is still words in the row (${J(go)})`);
           if (go.icon !== "lucide-images") v.push(`the chip's icon is ${go.icon} (want lucide-images)`);
@@ -2439,7 +2458,7 @@ app.whenReady().then(async () => {
         // its icon: the object tilt while the row is hovered (motion on: on the spring, per frame; off: stays still)
         await mvTo(3, 3, 300);
         const rb = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-        const tilt = frames("", `(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector("${ROW} [data-ws-creator-go] svg")).transform); return +(Math.atan2(m.b, m.a) * 180 / Math.PI).toFixed(2); })()`, 600);
+        const tilt = frames("", `(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector("${ROW} [data-ws-go] svg")).transform); return +(Math.atan2(m.b, m.a) * 180 / Math.PI).toFixed(2); })()`, 600);
         await sleep(30); await mvTo(rb.x, rb.y);
         if (motion) { await sleep(90); await shot("ws-creator-go"); }
         const ang = (await tilt).filter((x) => x != null);
@@ -2458,7 +2477,7 @@ app.whenReady().then(async () => {
           await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000); await sleep(300);
           const rr = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
           await mvTo(rr.x, rr.y, 400);
-          const lk = await looks(ROW), chip = await looks(`${ROW} [data-ws-creator-go]`);
+          const lk = await looks(ROW), chip = await looks(`${ROW} [data-ws-go]`);
           console.log(`        no-glow + bg-live: ${J(lk)} chip ${J(chip)}`);
           if (!chip || /rgba\(0, 0, 0, 0\)|transparent/.test(chip.bg)) v.push(`bg-live: the chip has no fill of its own (${chip?.bg})`);
           if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
@@ -2521,7 +2540,7 @@ app.whenReady().then(async () => {
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       const NM = "Probe Creator With A Rather Long Steam Name";
       await browseWs(); await W({ avatar: libThumb, creator: { steamId: "76561190000000007", name: NM, avatar: libThumb } }); await mvTo(3, 3); await openSide(0);
-      const ROW = `${SIDE} [data-ws-creator]`, NAME = `${ROW} [data-ws-creator-name]`;
+      const ROW = `${SIDE} [data-ws-creator]`, NAME = `${ROW} [data-ws-row-name]`;
       if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
       await sleep(300);
       const copies = () => js(`document.querySelector(${J(ROW)}).parentElement.querySelectorAll(".side-copy, [data-copy], .copy-btn").length`);
@@ -2853,6 +2872,227 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // ---- a scene's presets and a preset's base (WorkshopSocial.tsx PresetsRow / BaseRow). The presets list is the stack's own
+    // backend's, from its fake Steam servers (the scene 910000003 has two presets); __probe_lib_ws makes "Fixture Preset One"
+    // the library's k1 ----
+    const PRESETS = ["Fixture Preset One", "Fixture Preset Two"];
+    const PROW = `${SIDE} [data-ws-presets]`, CROW = `${SIDE} [data-ws-creator]`, BROW = `${SIDE} [data-ws-base]`;
+    const CARDS = ".scroll:not(.lib-scroll) .card:not(.skel-card)";
+    const brTitles = () => js(`[...document.querySelectorAll(${J(CARDS + " [data-title]")})].map((e) => e.dataset.title)`);
+    const presetsOn = async ({ motion = true, glows = true, live = false } = {}) => {
+      await setSettings({ allowScenes: true, morphs: motion, glows, liveWallpaperBehindAllTabs: live });
+      await js(`localStorage.setItem("__probe_presets", "1"); localStorage.setItem("__probe_lib_ws", ${J(J({ k1: "910000011" }))}); true`);
+      await browseWs();
+    };
+    const presetsDone = async () => {
+      await js(`localStorage.removeItem("__probe_presets"); localStorage.removeItem("__probe_lib_ws"); localStorage.setItem("liascape.wsListSort", '"lastupdated"'); true`);
+      await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await mvTo(3, 3);
+    };
+    const sideTitle = () => js(`document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null`);
+    // a row's material and words, held against the creator row's (the same control, WsListRow)
+    const rowLook = (sel) => js(`(() => { const e = document.querySelector(${J(sel)}); if (!e) return null; const cs = getComputedStyle(e), r = e.getBoundingClientRect(), c = e.querySelector("[data-ws-go]");
+      const cb = c?.getBoundingClientRect();
+      return { cls: e.classList.contains("ws-creator"), bg: cs.backgroundColor, border: cs.borderTopWidth + " " + cs.borderTopColor, radius: cs.borderRadius, pad: cs.padding,
+        h: Math.round(r.height), w: Math.round(r.width), font: cs.fontSize, chip: c ? [Math.round(cb.width), Math.round(cb.height), getComputedStyle(c).backgroundColor] : null,
+        by: e.querySelector(".ws-creator-by")?.textContent ?? null, name: e.querySelector("[data-ws-row-name]")?.textContent ?? null, label: e.getAttribute("aria-label") }; })()`);
+    const sameLook = (v, what, a, b) => {
+      if (!a || !b) { v.push(`${what}: no row to compare (${J(a)} / ${J(b)})`); return; }
+      if (!a.cls) v.push(`${what} isn't the creator row's control (.ws-creator)`);
+      for (const k of ["bg", "border", "radius", "pad", "h", "w", "font"]) if (a[k] !== b[k]) v.push(`${what}'s ${k} ${J(a[k])} ≠ the creator row's ${J(b[k])}`);
+      if (J(a.chip) !== J(b.chip)) v.push(`${what}'s end chip ${J(a.chip)} ≠ the creator row's ${J(b.chip)}`);
+    };
+    const clickRow = (sel) => page(`const e = document.querySelector(${J(sel)}); if (!e) return false; e.click(); return true;`);
+
+    // ws:presets[Off] — a scene's sidebar has a "Presets" row (the creator row's control, 12 px under it); a click lists exactly
+    // its presets: a "Presets · <scene>" pill comes in beside the Workshop's (per frame; Off: fades in place), lit, the sidebar
+    // closes, the one in the library carries Browse's in-library mark, the list's two sorts (Top Rated asks again) and its
+    // second page; × goes back to the whole Workshop (the pill leaves). On: no-glow + bg-live keep the row's own fill, no glow.
+    // Shots steam-ws-presets-*.png
+    for (const motion of [true, false]) {
+      await cell(`ws:presets${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        try {
+          await presetsOn({ motion });
+          await openSide(0);
+          if (await sideTitle() !== "Fixture Workshop Three") return [`the first card's sidebar shows ${J(await sideTitle())} — proved nothing`];
+          if (!(await waitFor(() => js(`!!document.querySelector(${J(PROW)})`), 2000))) return ["the scene's sidebar has no Presets row"];
+          await waitFor(() => js(`document.querySelector(${J(CROW)})?.dataset.wsCreator === "known"`), 3000);
+          const p = await rowLook(PROW), c = await rowLook(CROW);
+          console.log(`        Presets ${J(p)}\n        creator ${J(c)}`);
+          sameLook(v, "the Presets row", p, c);
+          if (p?.by !== "Presets") v.push(`the row's small heading reads ${J(p?.by)} (want "Presets")`);
+          const gap = await js(`(() => { const a = document.querySelector(${J(CROW)}).getBoundingClientRect(), b = document.querySelector(${J(PROW)}).getBoundingClientRect(); return +(b.top - a.bottom).toFixed(1); })()`);
+          if (Math.abs(gap - 12) > 0.6) v.push(`the Presets row sits ${gap} px under the creator's (want the sidebar's 12)`);
+          if (motion) await shot("ws-presets-row");
+          const PAIR = '[data-ws-pill="presets"]';
+          const smp = motion ? null : js(MO.SAMPLE({ pair: PAIR }, 600));
+          if (!motion) await sleep(40);
+          const fr = motion ? frames(`document.querySelector(${J(PROW)}).click();`, `(() => { const e = document.querySelector('${PAIR}'); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m41]; })()`, 500) : null;
+          if (!motion) await clickRow(PROW);
+          if (motion) { await sleep(90); await shot("ws-presets-pill-in"); }
+          const fin = motion ? await fr : null;
+          const t = (await waitFor(async () => { const x = await brTitles(); return J([...x].sort()) === J(PRESETS) ? x : null; }, 4000)) ?? await brTitles();
+          const b = (await browses()).filter((x) => x.list).at(-1);
+          if (b?.list?.kind !== "presets" || b.list.id !== "910000003") v.push(`the click asked /browse ${J(b?.list)} (want the presets of 910000003)`);
+          if (J([...t].sort()) !== J(PRESETS)) v.push(`the list holds ${J(t)} (want exactly ${J(PRESETS)})`);
+          const st = await page(`const pair = document.querySelector('${PAIR}');
+            const sr = document.querySelector(".pill-strip").getBoundingClientRect(), pr = pair?.getBoundingClientRect();
+            return { pill: pair?.textContent.trim() ?? null, active: !!pair?.querySelector(".pill.active"), side: !!document.querySelector("${SIDE}"),
+              shown: !!pr && pr.left >= sr.left - 1 && pr.right <= sr.right + 1, box: pr ? [Math.round(pr.left), Math.round(pr.right), Math.round(sr.left), Math.round(sr.right)] : null,
+              lit: [...document.querySelectorAll(".pill-strip > .pill.active")].map((e) => e.textContent.trim()),
+              sort: document.querySelector("[data-sortsplit=browse] .ss-sort")?.textContent.trim() ?? null,
+              owned: [...document.querySelectorAll(${J(CARDS)})].filter((c) => c.querySelector("[data-in-library]")).map((c) => c.querySelector("[data-title]")?.dataset.title) };`);
+          console.log(`        the list ${J(t)}; ${J(st)}`);
+          if (st.pill !== "Presets · Fixture Workshop Three" || !st.active) v.push(`the list's pill: ${J(st.pill)}, lit ${st.active} (want "Presets · Fixture Workshop Three", lit)`);
+          if (st.lit.length) v.push(`another pill is still lit: ${J(st.lit)}`);
+          if (!st.shown) v.push(`the list's pill came in out of the source strip's view (pill, strip edges ${J(st.box)})`);
+          if (st.side) v.push("the sidebar stayed open");
+          if (st.sort !== "Recently Updated") v.push(`the sort reads ${J(st.sort)} (want the list's "Recently Updated")`);
+          if (J(st.owned) !== J(["Fixture Preset One"])) v.push(`cards marked in the library: ${J(st.owned)} (want "Fixture Preset One")`);
+          if (motion) {
+            const ops = fin.filter((x) => x).map((x) => x[0]), xs = fin.filter((x) => x).map((x) => x[1]);
+            console.log(`        pill in: opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} x ${J(xs.slice(0, 8).map((o) => +o.toFixed(1)))}`);
+            if (between(ops, 0.05) < 3 || between(xs, 0.5) < 3) v.push("the list's pill popped in (no in-between frames)");
+          } else {
+            const s1 = await smp; console.log(`        motion off: pill in ${MO.brief(s1.pair)}`);
+            v.push(...MO.judge("motion off: the presets pill appearing", s1.pair, { appear: true, size: false }));
+          }
+          // it pages (its placeholders ask for page 2) and sorts by a list's two sorts
+          const paged = () => browses().then((xs) => xs.some((x) => x.list?.kind === "presets" && x.page === 2));
+          if (!(await waitFor(paged, 3000))) v.push("the presets list never asked for its second page");
+          const nb = (await browses()).length;
+          const opts = await page(`document.querySelector("[data-sortsplit=browse] .ss-sort").click(); await new Promise((r) => setTimeout(r, 200));
+            const o = [...document.querySelectorAll(".sel-pop .sel-opt")], labels = o.map((x) => x.textContent.trim());
+            o.find((x) => x.textContent.trim() === "Top Rated")?.click(); return labels;`);
+          if (J(opts) !== J(["Recently Updated", "Top Rated"])) v.push(`the sorts offered: ${J(opts)} (want the list's two)`);
+          await sleep(700);
+          const sb = (await browses()).slice(nb).find((x) => x.list);
+          if (sb?.list?.kind !== "presets" || sb.list.sort !== "toprated") v.push(`Top Rated asked ${J(sb?.list)}`);
+          const t2 = await brTitles();
+          if (J([...t2].sort()) !== J(PRESETS)) v.push(`Top Rated lists ${J(t2)}`);
+          // × → the whole Workshop; the pill leaves
+          const smp2 = js(MO.SAMPLE({ pair: PAIR }, 500)); await sleep(40);
+          await page(`document.querySelector('${PAIR} .ws-pill-x')?.click();`);
+          if (motion) { await sleep(70); await shot("ws-presets-pill-out"); }
+          const s2 = await smp2; await sleep(400);
+          if (await js(`!!document.querySelector('${PAIR}')`)) v.push("the list's pill stayed after ×");
+          const back = (await browses()).at(-1);
+          if (back?.list) v.push(`× still asked a list (${J(back.list)})`);
+          if (!motion) v.push(...MO.judge("motion off: the presets pill leaving", s2.pair, { leave: true, size: false }));
+          else if (!s2.pair.some((f) => f[1] != null && f[1] > 0.05 && f[1] < 0.95)) v.push("the list's pill vanished at once (no exit)");
+          if (motion) {
+            await presetsOn({ glows: false, live: true }); await openSide(0);
+            await waitFor(() => js(`!!document.querySelector(${J(PROW)})`), 2000); await sleep(300);
+            const rr = await js(`(() => { const r = document.querySelector(${J(PROW)})?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+            if (!rr) v.push("no-glow + bg-live: no Presets row");
+            else {
+              await mvTo(rr.x, rr.y, 400);
+              const lk = await looks(PROW), chip = await looks(`${PROW} [data-ws-go]`);
+              console.log(`        no-glow + bg-live: ${J(lk)} chip ${J(chip)}`);
+              if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+              if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the Presets row has no fill of its own (${lk.bg})`);
+              if (!chip || /rgba\(0, 0, 0, 0\)|transparent/.test(chip.bg)) v.push(`bg-live: its chip has no fill of its own (${chip?.bg})`);
+              if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the hovered row glows (${lk.shadow})`);
+              await shot("ws-presets-live");
+            }
+          }
+        } finally { await presetsDone(); }
+        return v;
+      });
+    }
+
+    // ws:presetsHidden — no Presets row where there's nothing to list (a video's sidebar, a preset's own) nor while presets can't
+    // play: the legacy engine, scene support off (a WS settings-changed: the page's own settings, the backend's untouched) —
+    // live, under an open sidebar; the filter's Type group offers Preset only alongside it
+    await cell("ws:presetsHidden", async () => {
+      const v = [];
+      try {
+        await presetsOn();
+        const at = async (n) => { await openSide(n); await sleep(500); return { title: await sideTitle(), row: await js(`!!document.querySelector(${J(PROW)})`) }; };
+        const scene = await at(0);
+        if (!scene.row) return [`the scene's sidebar (${scene.title}) has no Presets row — proved nothing`];
+        const preset = await at(1), video = await at(2);
+        console.log(`        ${J({ scene, preset, video })}`);
+        if (preset.title !== "ws-preset" || preset.row) v.push(`the preset's sidebar: ${J(preset)} (want no Presets row)`);
+        if (video.title !== "ws-3" || video.row) v.push(`the video's sidebar: ${J(video)} (want no Presets row)`);
+        const typeRows = () => page(`const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") { t?.click(); await new Promise((r) => setTimeout(r, 450)); }
+          return [...(document.querySelector('.wf-col:not(.closing) [data-wf-group="type"]')?.querySelectorAll(".wf-row") ?? [])].map((r) => r.dataset.wfTag);`);
+        if (!(await typeRows()).includes("Preset")) v.push(`presets on: the filter's Type rows ${J(await typeRows())} (want Preset)`);
+        for (const [what, patch] of [["the legacy engine", { playerEngine: "legacy" }], ["scene support off", { playerEngine: "liascape-player", allowScenes: false }]]) {
+          await ev("settings-changed", { playerEngine: "liascape-player", allowScenes: true });
+          await at(0);
+          if (!(await js(`!!document.querySelector(${J(PROW)})`))) { v.push(`${what}: no Presets row before the change — proved nothing`); continue; }
+          await ev("settings-changed", patch); await sleep(500);
+          if (await js(`!!document.querySelector(${J(PROW)})`)) v.push(`${what}: the open scene sidebar still offers Presets`);
+          const rows = await typeRows();
+          if (rows.includes("Preset") || !rows.includes("Scene")) v.push(`${what}: the filter's Type rows ${J(rows)} (want no Preset)`);
+        }
+      } finally { await presetsDone(); }
+      return v;
+    });
+
+    // ws:presetsEmpty — a scene with no Workshop presets: its list says so in the grid, no cards
+    await cell("ws:presetsEmpty", async () => {
+      const v = [];
+      try {
+        await presetsOn(); await openSide(3);
+        if (await sideTitle() !== "ws-lone-scene") return [`the fourth card's sidebar shows ${J(await sideTitle())} — proved nothing`];
+        if (!(await waitFor(() => js(`!!document.querySelector(${J(PROW)})`), 2000))) return ["the scene's sidebar has no Presets row"];
+        await clickRow(PROW);
+        const n = await waitFor(() => page(`const e = document.querySelector("[data-ws-list-note]"); return e ? { kind: e.dataset.wsListNote, text: e.textContent.trim() } : null;`), 4000);
+        const b = (await browses()).filter((x) => x.list).at(-1);
+        console.log(`        ${J(n)} asked ${J(b?.list)}`);
+        if (b?.list?.kind !== "presets" || b.list.id !== "930003") v.push(`the click asked ${J(b?.list)} (want the presets of 930003)`);
+        if (!n || n.kind !== "empty" || !/no presets/i.test(n.text)) v.push(`the empty list says ${J(n)} (want that the scene has no presets)`);
+        if ((await brTitles()).length) v.push(`cards in an empty list: ${J(await brTitles())}`);
+        await shot("ws-presets-empty");
+      } finally { await presetsDone(); }
+      return v;
+    });
+
+    // ws:presetBase — a preset's sidebar says what it uses: "Uses" + its base's title (GET /workshop/base asked once, the creator
+    // row's control); a click shows the base's card: its Library card when the library has it, else its Browse card (the list's
+    // own when the list holds it, else one of its own) — never a Steam page. Shots steam-ws-preset-base*.png
+    await cell("ws:presetBase", async () => {
+      const v = [];
+      try {
+        const s1 = ((await http("GET", "/library")).json ?? []).find((x) => x.title === "s1" && x.workshopId);
+        if (!s1) return ["no Workshop scene s1 in the stack's library — proved nothing"];
+        const dir = /\.[a-z0-9]{2,5}$/i.test(s1.videoPath) ? path.dirname(s1.videoPath) : s1.videoPath;
+        const cases = [
+          { what: "in the library", base: { baseId: s1.workshopId, title: "s1", kind: "scene", libraryPath: dir }, tab: "Library", side: "s1" },
+          { what: "in the list", base: { baseId: "910000003", title: "Fixture Workshop Three", kind: "scene", libraryPath: null }, tab: "Browse", side: "Fixture Workshop Three", focused: true },
+          { what: "nowhere here", base: { baseId: "930099", title: "Elsewhere Scene", kind: "scene", libraryPath: null }, tab: "Browse", side: "Elsewhere Scene" },
+        ];
+        for (const k of cases) {
+          await presetsOn(); await W({ base: k.base }); await openSide(1);
+          if (await sideTitle() !== "ws-preset") { v.push(`${k.what}: the second card's sidebar shows ${J(await sideTitle())} — proved nothing`); continue; }
+          if (!(await waitFor(() => js(`document.querySelector(${J(BROW)})?.dataset.wsBase === "known"`), 3000))) { v.push(`${k.what}: the preset's sidebar never showed its base`); continue; }
+          const r = await rowLook(BROW);
+          if (r.by !== "Uses" || r.name !== k.base.title) v.push(`${k.what}: the row reads ${J([r.by, r.name])} (want "Uses", ${J(k.base.title)})`);
+          if (k.what === "in the library") {
+            await waitFor(() => js(`document.querySelector(${J(CROW)})?.dataset.wsCreator === "known"`), 3000);
+            sameLook(v, "the Uses row", r, await rowLook(CROW));
+            if (await js(`!!document.querySelector(${J(PROW)})`)) v.push("the preset's sidebar offers Presets");
+            await shot("ws-preset-base");
+          }
+          const q = await wsCalls("/workshop/base");
+          if (q.length !== 1 || !/[?&]id=930001\b/.test(q[0].q)) v.push(`${k.what}: the base asked ${q.length}× (${J(q.map((x) => x.q))}), want once for the preset`);
+          await clickRow(BROW); await sleep(900);
+          const got = await page(`return { tab: document.querySelector(".tab.active")?.textContent.trim() ?? null, side: document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null,
+            focused: document.querySelector(".scroll:not(.lib-scroll) .card.focused [data-title]")?.dataset.title ?? null };`);
+          console.log(`        ${k.what}: ${J(r)} → ${J(got)}`);
+          if (got.tab !== k.tab || got.side !== k.side) v.push(`${k.what}: the click shows ${J(got)} (want ${k.side}'s ${k.tab} card)`);
+          if (k.focused && got.focused !== k.side) v.push(`${k.what}: the list's own card isn't the focused one (${J(got.focused)})`);
+          if (k.what === "nowhere here") await shot("ws-preset-base-own");
+          const pages = (await calls()).filter((c) => c.p === "/steam/open-page");
+          if (pages.length) v.push(`${k.what}: the click opened a Steam page (${J(pages)})`);
+        }
+      } finally { await presetsDone(); }
+      return v;
+    });
+
     // the Browse warm-up (api.steamWarm → POST /steam/warm, SteamAnonymous.Warm): a hover or focus on the Browse tab while it
     // shows the Workshop, or on a Workshop pill, asks the backend to connect Steam's session ahead of the page; at most one
     // ask per 20 s; nothing from the tab while another source shows, nothing from the other sources' pills
@@ -3163,7 +3403,7 @@ app.whenReady().then(async () => {
         if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
         const c = await wsCalls("/workshop/creator");
         if (c.length !== 1 || !/[?&]id=900000001/.test(c[0].q) || /owner=/.test(c[0].q)) v.push(`creator asked ${J(c)}, want once for 900000001 without an owner`);
-        const name = await js(`document.querySelector("${ROW} [data-ws-creator-name]")?.textContent`);
+        const name = await js(`document.querySelector("${ROW} [data-ws-row-name]")?.textContent`);
         if (name !== "Probe Creator") v.push(`the row says ${J(name)}`);
         const nb = (await browses()).length;
         await page(`document.querySelector(${J(ROW)}).click();`); await sleep(900);

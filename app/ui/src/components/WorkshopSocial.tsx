@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
-import { Images, LoaderCircle, MessageSquare, RotateCcw, Send, Star, User } from "lucide-react";
-import { api, thumb, ApiError, type WsComment, type WsCounts, type WsCreator } from "../api/client";
-import { useStore } from "../store";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
+import { Images, Layers, Library as LibraryIcon, LoaderCircle, MessageSquare, PanelRightOpen, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
+import { api, steamPageUrl, thumb, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator } from "../api/client";
+import { presetsOn, useStore } from "../store";
 import { StatPills } from "./sidePills";
 import { useMotion } from "./motion";
 import { glideFlip, snapFlip, type FlipSnap } from "./flipGlide";
+import { revealCard } from "../hooks/gridKeys";
 
 // The item sidebars' Workshop community pieces (BrowseSide.tsx, and LibrarySide.tsx for a Workshop item): the creator, the
 // favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in and say
@@ -41,11 +42,40 @@ export function Avatar({ src, size }: { src: string | null | undefined; size: nu
   );
 }
 
+// A sidebar row that takes the user to other wallpapers (the creator's, a scene's presets, a preset's base): a picture or
+// glyph, a small heading over a name, and where a click goes as an icon chip at its end (its tooltip `goTitle`; the row's
+// aria-label says it in words: an icon alone doesn't). The name is selectable text, the way to copy it: a drag that selected
+// some of it isn't a click. One control for all of them (index.css .ws-creator). Guard: probe-steam ws:creator, ws:presets,
+// ws:presetBase
+export function WsListRow({ lead, by, name, go, goTitle, label, loading, disabled, rowClass = "ws-list-row", data, onGo }: {
+  lead: ReactNode; by: string; name: string | null; go: ReactNode; goTitle: string; label: string; loading?: boolean; disabled?: boolean;
+  rowClass?: string; data: Record<`data-${string}`, string>; onGo: () => void;
+}) {
+  const click = (e: MouseEvent<HTMLButtonElement>) => {
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) return;
+    onGo();
+  };
+  return (
+    <div className={rowClass}>
+      <button type="button" className={`ws-creator${loading ? " loading" : ""}`} aria-label={label} disabled={disabled} onClick={click} {...data}>
+        {lead}
+        <span className="ws-creator-text">
+          <span className="ws-creator-by">{by}</span>
+          <span className="ws-creator-name" data-ws-row-name>{name ?? "…"}</span>
+        </span>
+        <span className="ws-creator-ico" data-ws-go title={goTitle}>{go}</span>
+      </button>
+    </div>
+  );
+}
+
+// a glyph in an avatar's place (a list that isn't a person's)
+const LeadGlyph = ({ icon }: { icon: ReactNode }) => <span className="ws-avatar" style={{ width: 30, height: 30 }}>{icon}</span>;
+
 // The creator: their avatar and name; a click lists every Wallpaper Engine item they made in Browse (store setWsList —
 // a source pill of its own, components/SourcePills.tsx), and `onListed` takes the user there from another tab (the Library
-// sidebar). The row's end says so with an icon chip (lucide Images, "All their wallpapers" as its tooltip and in the row's
-// name: an icon alone doesn't say it). The name is selectable text, the way to copy it: a drag that selected some of it
-// isn't a click. Guard: probe-steam ws:creator, ws:creatorSelect, lib:ws:creator
+// sidebar). Guard: probe-steam ws:creator, ws:creatorSelect, lib:ws:creator
 export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: string; authorId: string | null | undefined; onListed?: () => void }) {
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCreator | null>(() => creators.get(workshopId) ?? null);
@@ -62,25 +92,77 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
   // nothing to say who made it (the creator unknown and unreadable): no row
   if (failed && !id) return null;
   const name = c?.name ?? (c || failed ? "Steam creator" : null);
-  const go = (e: MouseEvent<HTMLButtonElement>) => {
-    const sel = getSelection();
-    if (sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) return;
+  const go = () => {
     if (!id) return;
     setWsList({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null });
     onListed?.();
   };
   return (
-    <div className="ws-creator-row">
-      <button type="button" className={`ws-creator${name ? "" : " loading"}`} data-ws-creator={c ? "known" : failed ? "unknown" : "loading"}
-        aria-label={`All their wallpapers, made by ${name ?? "…"}`} disabled={!id} onClick={go}>
-        <Avatar src={c?.avatar} size={30} />
-        <span className="ws-creator-text">
-          <span className="ws-creator-by">Made by</span>
-          <span className="ws-creator-name" data-ws-creator-name>{name ?? "…"}</span>
-        </span>
-        <span className="ws-creator-ico" data-ws-creator-go title="All their wallpapers"><Images size={16} aria-hidden="true" /></span>
-      </button>
-    </div>
+    <WsListRow rowClass="ws-creator-row" lead={<Avatar src={c?.avatar} size={30} />} by="Made by" name={name} loading={!name}
+      go={<Images size={16} aria-hidden="true" />} goTitle="All their wallpapers" label={`All their wallpapers, made by ${name ?? "…"}`}
+      disabled={!id} data={{ "data-ws-creator": c ? "known" : failed ? "unknown" : "loading" }} onGo={go} />
+  );
+}
+
+// A scene's presets (other people's saved settings of it, each its own Workshop item): a click lists every one made for this
+// scene in Browse (store setWsList, a "Presets · <scene>" pill of its own, components/SourcePills.tsx), with the usual card
+// actions, sorts and paging; `onListed` takes the user there from another tab. `scene` (its Browse result) lets its presets'
+// "Uses" row bring its whole card back. Shown only while presets can play (store presetsOn); the caller shows it only for a
+// scene that isn't itself a preset. Guard: probe-steam ws:presets, ws:presetsHidden, ws:presetsEmpty
+export function PresetsRow({ workshopId, title, onListed, scene }: { workshopId: string; title: string | null; onListed?: () => void; scene?: Wallpaper }) {
+  const on = useStore((s) => presetsOn(s.settings));
+  const setWsList = useStore((s) => s.setWsList);
+  if (!on) return null;
+  return (
+    <WsListRow lead={<LeadGlyph icon={<SlidersHorizontal size={16} aria-hidden="true" />} />} by="Presets" name="Made for this scene"
+      go={<Images size={16} aria-hidden="true" />} goTitle="All its presets" label="All the presets made for this scene"
+      data={{ "data-ws-presets": workshopId }}
+      onGo={() => { setWsList({ kind: "presets", id: workshopId, name: title, scene: scene ?? null }); onListed?.(); }} />
+  );
+}
+
+const bases = new Map<string, Base>(); // per preset, for the session
+type Base = Awaited<ReturnType<typeof api.workshopBase>>;
+// the library's copy of a base: its Workshop id, else the folder the backend found it in
+const libraryBase = (items: LibraryItem[], b: Base) => items.find((x) => x.workshopId === b.baseId && !(x as { isPreset?: boolean }).isPreset)
+  ?? (b.libraryPath ? items.find((x) => x.videoPath === b.libraryPath || x.videoPath.startsWith(b.libraryPath + "/")) : undefined);
+
+// A preset's base: "Uses" + the scene it plays (GET /workshop/base, asked once the sidebar settles and kept for the session). A
+// click shows the base's card, never a Steam page: its Library card when the library has it (`onShowInLibrary`), else its
+// Browse card — the shown list's own, the scene its presets list was opened from, or one made from what Steam said
+// (store showBrowseItem; `onShowInBrowse` takes the user there from another tab). Nothing to say (not a preset, Steam
+// unreachable): no row. Guard: probe-steam ws:presetBase
+export function BaseRow({ presetId, onShowInLibrary, onShowInBrowse }: { presetId: string; onShowInLibrary?: (path: string) => void; onShowInBrowse?: () => void }) {
+  const settled = useSettled(presetId);
+  const [b, setB] = useState<Base | null>(() => bases.get(presetId) ?? null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!settled || bases.has(presetId)) return;
+    let alive = true;
+    api.workshopBase(presetId).then((r) => { bases.set(presetId, r); if (alive) setB(r); }).catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; };
+  }, [settled, presetId]);
+  const lib = useStore((s) => (b ? libraryBase(s.libraryItems, b) ?? null : null));
+  if (failed) return null;
+  const name = b ? b.title ?? "Its base scene" : null;
+  const go = () => {
+    if (!b) return;
+    if (lib && onShowInLibrary) { onShowInLibrary(lib.videoPath); return; }
+    const st = useStore.getState();
+    const list = st.wsList?.kind === "presets" && st.wsList.id === b.baseId ? st.wsList.scene : null;
+    const url = steamPageUrl(b.baseId);
+    st.showBrowseItem(list ?? {
+      title: name ?? "", thumbnailUrl: "", animatedThumbnailUrl: null, pageUrl: url, resolution: null, isScene: b.kind === "scene",
+      workshopId: b.baseId, addedAt: null, description: null, authorName: null, fileSizeBytes: null, subscriptions: null, favorites: null, tags: null,
+    });
+    revealCard(`br-${st.wallpapers.find((x) => x.workshopId === b.baseId)?.pageUrl ?? url}`);
+    onShowInBrowse?.();
+  };
+  return (
+    <WsListRow lead={<LeadGlyph icon={<Layers size={16} aria-hidden="true" />} />} by="Uses" name={name} loading={!b}
+      go={lib ? <LibraryIcon size={16} aria-hidden="true" /> : <PanelRightOpen size={16} aria-hidden="true" />}
+      goTitle={lib ? "Show it in your library" : "Show its card"} label={`Uses ${name ?? "…"}. ${lib ? "Show it in your library" : "Show its card"}`}
+      disabled={!b} data={{ "data-ws-base": b ? "known" : "loading" }} onGo={go} />
   );
 }
 
@@ -279,13 +361,14 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
 }
 
 // A Workshop list that couldn't be read (store wsListNote), or one that's empty, says so where the grid would be: "Sign in to
-// …" for the favourites without a sign-in, Steam's own words otherwise. Guard: probe-steam ws:pills
+// …" for the favourites without a sign-in, Steam's own words otherwise. Guard: probe-steam ws:pills, ws:presetsEmpty
 export function WsListNote() {
   const note = useStore((s) => s.wsListNote);
   const empty = useStore((s) => !!s.wsList && !s.loading && !s.hasMore && s.wallpapers.length === 0 && s.browseFor !== "");
   const kind = useStore((s) => s.wsList?.kind);
   if (!note && !empty) return null;
   const text = note ? (note.signIn ? "Sign in to Steam to see your Workshop favourites — Settings → Getting Workshop wallpapers." : note.text)
-    : kind === "favorites" ? "No Wallpaper Engine favourites on Steam yet — or none that match these filters." : "No wallpapers here match these filters.";
+    : kind === "favorites" ? "No Wallpaper Engine favourites on Steam yet — or none that match these filters."
+    : kind === "presets" ? "This scene has no presets yet — or none that match these filters." : "No wallpapers here match these filters.";
   return <div className="wf-none ws-list-note" data-ws-list-note={note ? (note.signIn ? "sign-in" : "error") : "empty"}><span>{text}</span></div>;
 }

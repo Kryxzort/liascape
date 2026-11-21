@@ -11,7 +11,7 @@ import { FolderFlap } from "./icons";
 import { magnetRef } from "./magnet";
 import { sideTags } from "./sideTags";
 import { WorkshopIdPill } from "./WorkshopIdPill";
-import { CommentsSection, CreatorRow, FavoriteTile } from "./WorkshopSocial";
+import { BaseRow, CommentsSection, CreatorRow, FavoriteTile, PresetsRow } from "./WorkshopSocial";
 import { SizePill, StatPills } from "./sidePills";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { menuAt, oneOffMenuItem } from "./menuItems";
@@ -43,7 +43,8 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
 
   const yt = detail?.yt ?? null;
   // the same static the card shows (a /still frame for remote animated items — frame 0 is often black)
-  const baseSrc = w.animatedThumbnailUrl && /^https?:/i.test(w.animatedThumbnailUrl) ? still(w.animatedThumbnailUrl, CARD_STILL_W) : thumb(w.thumbnailUrl);
+  // (none for a card made from what Steam said alone: a preset's base, store showBrowseItem — no broken picture)
+  const baseSrc = w.animatedThumbnailUrl && /^https?:/i.test(w.animatedThumbnailUrl) ? still(w.animatedThumbnailUrl, CARD_STILL_W) : w.thumbnailUrl ? thumb(w.thumbnailUrl) : "";
   // the detail's preview: a full-res image — or a preview VIDEO (the preview switch's "Video"), never put in an <img>
   const previewVid = detail?.full && VIDEO_RE.test(detail.full.split("?")[0]) ? thumb(detail.full, w.pageUrl) : null;
   const fullSrc = detail?.full && !previewVid ? thumb(detail.full, w.pageUrl) : null;
@@ -140,6 +141,9 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
         </div>
         {/* who made it — a click lists all of their wallpapers in Browse */}
         {w.workshopId && <CreatorRow workshopId={w.workshopId} authorId={w.authorId} />}
+        {/* a scene: the presets made for it (only while presets can play); a preset: the scene it uses */}
+        {w.workshopId && w.isScene && !w.isPreset && <PresetsRow workshopId={w.workshopId} title={w.title} scene={w} />}
+        {w.workshopId && w.isPreset && <BaseRow presetId={w.workshopId} onShowInLibrary={onShowInLibrary} />}
         {/* the download buttons: the only way to download from here — the arrow drops into its tray on hover (components/iconMotion.ts) */}
         <div className="side-cta">
           {downloading ? (

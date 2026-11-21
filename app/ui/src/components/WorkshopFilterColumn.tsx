@@ -2,7 +2,7 @@ import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } 
 import { Check, ChevronDown, Dot, Layers, Library, Monitor, Palette, Shield, Sparkles, Tags, X, type LucideIcon } from "lucide-react";
 import { filterOf, useStore, type FilterScope, type TagState } from "../store";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
-import { groupsFor, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
+import { groupsFor, usePresetsOn, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
 
 // COOL: the filter column — Wallpaper Engine's filter column (docs/decisions.md § "Filter the Workshop in a column of
 // three-way switches"), on the Workshop, on Browse's local Wallpaper Engine folder and on the Library, the same control
@@ -132,6 +132,7 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
   mode: "dock" | "drawer"; scope?: FilterScope; known?: Set<string> | null; closing?: boolean; entering?: boolean; onClose: () => void;
 }) {
   const f = useStore((s) => filterOf(s, scope));
+  const presets = usePresetsOn();
   const clearIn = useStore((s) => s.clearTags);
   const page = scope === "library" ? "library" : "browse";
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -166,7 +167,7 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
           <button type="button" className="mini wf-close" data-wf-close aria-label="Close filters" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="wf-scroll" ref={smoothRef}>
-          {visibleGroups(groupsFor(scope), known, states).map((g) => <GroupBox key={g.id} g={g} states={states} scope={scope} />)}
+          {visibleGroups(groupsFor(scope, presets), known, states).map((g) => <GroupBox key={g.id} g={g} states={states} scope={scope} />)}
         </div>
       </aside>
     </>

@@ -1764,7 +1764,8 @@ button.side-pill.copy { overflow: hidden; }
   color: var(--subtext); background: color-mix(in srgb, var(--surface0) 80%, transparent); box-shadow: inset 0 0 0 1px var(--surface1); }
 .ws-avatar > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .22s ease-out; }
 .ws-avatar > img.on { opacity: 1; }
-/* the creator: a row in the tiles' material — avatar, "Made by" + the name, and where a click goes. Guard: probe-steam ws:creator */
+/* a sidebar row to other wallpapers (WorkshopSocial.tsx WsListRow: the creator, a scene's presets, a preset's base): a row in the
+   tiles' material — avatar or glyph, a small heading + the name, and where a click goes. Guard: probe-steam ws:creator, ws:presets */
 .ws-creator { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 7px 10px; border-radius: 11px; text-align: left;
   font: inherit; color: var(--text); background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1);
   transition: border-color .15s, background .15s, box-shadow .2s, transform .15s; }
@@ -1778,7 +1779,7 @@ button.side-pill.copy { overflow: hidden; }
 .ws-creator-by { font-size: 10.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--subtext); }
 .ws-creator-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
 .ws-creator.loading .ws-creator-name { opacity: .4; }
-/* where a click goes, as an icon chip (lucide Images, its tooltip "All their wallpapers"): the accent's tint, fuller while the
+/* where a click goes, as an icon chip (lucide Images for a list, its tooltip "All their wallpapers"): the accent's tint, fuller while the
    row is hovered; the glyph whole-pixel centred (16 in 28). Guard: probe-steam ws:creator, probe-icons icon:centre:* */
 .ws-creator-ico { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 13%, transparent); transition: background .15s; }

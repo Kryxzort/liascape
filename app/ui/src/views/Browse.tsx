@@ -101,13 +101,15 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   }, [loadMore, hasMore, wallpapers.length]);
 
   // the focused item (a search / sort / filter reload may drop it for a moment: the sidebar keeps the last copy it had)
-  const found = browseFocus ? sorted.find((w) => w.pageUrl === browseFocus) ?? null : null;
+  // (or an item the list doesn't hold, shown on purpose: a preset's base scene, store showBrowseItem)
+  const extra = useStore((s) => s.browseExtra);
+  const found = browseFocus ? sorted.find((w) => w.pageUrl === browseFocus) ?? (extra?.pageUrl === browseFocus ? extra : null) : null;
   const [kept, setKept] = useState<Wallpaper | null>(null);
   if (found && found !== kept) setKept(found); // follow during render
   const focusedW = found ?? (kept && kept.pageUrl === browseFocus ? kept : null);
   // the top bar's locate button (components/LocateButton.tsx BrowseLocate) goes to the focused card only while the list
   // shows it; before paint, so the button never shows a frame in the old state
-  const focusShown = found ? found.pageUrl : null;
+  const focusShown = found && found !== extra ? found.pageUrl : null;
   useLayoutEffect(() => setBrowseFocusShown(focusShown), [focusShown]);
   const dlApply = (w: Wallpaper) => { const lib = libraryCopy(libItems, w); if (lib) applyItem(lib.videoPath); else download(activeSource, w, true); };
 
