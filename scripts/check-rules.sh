@@ -136,12 +136,18 @@ for f in sorted(glob.glob(".claude/skills/*/SKILL.md")):
     print(f"{f}: {t.count(chr(10))} lines")
 
 # Dead citations: every `.claude/rules/….md` / `docs/….md` path named in a tracked (or new, not ignored) text file —
-# code comments, docs, rules — must exist. One problem per missing path, with its count and where it is cited.
+# code comments, docs, rules — must exist, unless git ignores the path. One problem per missing path, with its count and where it is cited.
 listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                         capture_output=True, text=True, check=True).stdout.split("\0")
 CITE = re.compile(r"(?<![\w./-])((?:\.claude/rules|docs)/[\w./-]*[\w-]\.md)\b")
 SKIP_DIRS = ("node_modules/", "target/", "bin/", "obj/", "dist/", ".git/")
 dead = {}
+# a gitignored path (a checkout's own notes, like docs/NIGHT-NOTES.md) exists only in some checkouts: citing it is fine,
+# and a fresh clone or a worktree without it is no dead citation
+_ign = {}
+def ignored(p):
+    if p not in _ign: _ign[p] = subprocess.run(["git", "check-ignore", "-q", p]).returncode == 0
+    return _ign[p]
 for f in sorted(set(listed)):
     if not f or any(("/" + f).find("/" + d) >= 0 for d in SKIP_DIRS) or not os.path.isfile(f): continue
     try:
@@ -149,7 +155,7 @@ for f in sorted(set(listed)):
     except OSError: continue
     if b"\0" in raw[:8192]: continue
     for p in CITE.findall(raw.decode("utf-8", "replace")):
-        if not os.path.exists(p): dead.setdefault(p, []).append(f)
+        if not os.path.exists(p) and not ignored(p): dead.setdefault(p, []).append(f)
 for p, where in sorted(dead.items(), key=lambda kv: (-len(kv[1]), kv[0])):
     files = sorted(set(where))
     bad(p, f"dead citation: {len(where)}× in {len(files)} file(s): {', '.join(files[:6])}{' …' if len(files) > 6 else ''}")
