@@ -25,6 +25,13 @@
 //   wf:clearAll       Clear all → nothing on, include / exclude [] POSTed, the button disabled
 //   wf:library       the "In my library" row: ✓ = only the owned card, ✕ = all but it, no /browse request for it, never POSTed;
 //                    no download button on the owned card
+//   wf:yours:rows    the Workshop column's first group is "yours", named "Yours", with the rows @library, @favorites in that
+//                    order (the WE folder's: local:weFolder, @library only; the Library's: lib:column, @favorites only)
+//   wf:yours:signedOut  the stack is signed out: the Favourites row is dimmed (data-wf-off) with "Sign in to Steam" under its
+//                    name (no tooltip), ✓ / ✕ aria-disabled; a click on ✓ / ✕, the name and a right-click leave it off; a saved
+//                    @favorites ✓ (localStorage browseFilter, reload) shows a dimmed ✓ that – clears; Glow effects off: no
+//                    glow on its segments; bg-live: the reason has the drop-shadow; motion off: clearing it only fades
+//                    (motion-off.js). Screenshots wf-yours-signedout*.png
 //   panel:head        the panel's head: a plain "Filters" title (no button, no pill), Clear all, a close ×; no ghost copy
 //                     anywhere (the old fold morph is gone); × closes it
 //   panel:right       docked at 1400 px on the right, under the top bar and its button; opened it slides in from the right
@@ -75,7 +82,7 @@
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
-//                     what the items know: Age / Type / Resolution / Genre / Features (no "In my library"), Everyone + Mature,
+//                     what the items know: Yours (Favourites only, no "In my library") / Age / Type / Resolution / Genre / Features, Everyone + Mature,
 //                     Standard Definition (k1-k4's 320×180 files, read by the backend), Anime + Nature; no row above the grid
 //   lib:filter        include / exclude / age (untagged out under any age filter) / genre any → all / features all, from the
 //                     page: the cards follow, no /browse request; nothing left → "No wallpapers match" + Clear filters
@@ -87,13 +94,13 @@
 //                     motion off → it fades in place (opacity only)
 //   lib:drawer        below 900 px the Library's toggle opens its drawer; a switch works in it; Escape closes; a tab visit closes it
 //   local:weFolder    Browse's "Wallpaper Engine (Local)": the column with what the folder's items know, filtered in the page
-//                     (no filter POSTed), "In my library" too, its own saved filter; its client sort in the split, no Workshop sort
+//                     (no filter POSTed), "In my library" too (Yours holds only it), its own saved filter; its client sort in the split, no Workshop sort
 //   local:wePreset    a preset in the WE folder (scene support on, the Liascape player) is its own card there: Type offers Preset,
 //                     which lists exactly it; Scene lists it with the scene; one naming no Workshop base isn't listed
 //   lib:steamTags     an item auto-imported from a Wallpaper Engine folder (its project.json: a genre, no resolution, no age)
 //                     gets Steam's tags from the backend's one look-up (the stack's fake Steam servers, LIASCAPE_STEAM_CM_FIXTURE —
 //                     asked for its id alone): the Library's column grows its rows (3840 x 2160, Questionable) and they filter it
-//   wf:emblem         each group's head carries one emblem chip (.wf-gico) with its own glyph (Library / Shield / Layers / Monitor
+//   wf:emblem         each group's head carries one emblem chip (.wf-gico) with its own glyph (UserRound / Shield / Layers / Monitor
 //                     / Palette / Sparkles), no tag row any icon but its switch's; Fit: the head's height, the column's width and
 //                     the button's rhythm unchanged by it (same with the chips hidden; chevron → chip → name gaps equal, all on
 //                     one centre line); its glow on; hovering the group tilts the chip on the spring (per frame: in-between
@@ -297,7 +304,7 @@ app.whenReady().then(async () => {
       if (Math.abs(r.c.r - r.W) > 0.5 || Math.abs(r.c.w - sideW) > 1) v.push(`the column spans ${r.c.x}–${r.c.r}, ${r.c.w} px wide (want the item sidebar's ${sideW} at the right edge of ${r.W})`);
       if (r.s.r > r.c.x + 1) v.push(`the grid ends at ${r.s.r}, under the column (its left edge ${r.c.x})`);
       if (r.under) v.push(`${r.under} cards under the column`);
-      if (J(r.groups) !== J(["library", "age", "type", "resolution", "genre", "features"])) v.push(`groups ${J(r.groups)}`);
+      if (J(r.groups) !== J(["yours", "age", "type", "resolution", "genre", "features"])) v.push(`groups ${J(r.groups)}`);
       if (r.featRows !== 0) v.push(`Features isn't collapsed by default (${r.featRows} rows)`);
       if (r.genreRows < 20) v.push(`${r.genreRows} genre rows`);
       if (J(r.subs) !== J(["Standard", "Ultrawide", "Dual", "Triple", "Portrait", "Other"])) v.push(`resolution sub-headings ${J(r.subs)}`);
@@ -395,7 +402,7 @@ app.whenReady().then(async () => {
       for (const k of ["type", "ageRating", "resolution", "genres", "features"]) if (k in f) v.push(`the POST still carries "${k}"`);
       if (typeof f.sort !== "string" || typeof f.trendDays !== "number") v.push(`sort / trendDays ${f.sort} / ${f.trendDays}`);
       const counts = await page(`return Object.fromEntries([...m.qa(".wf-col [data-wf-group]")].map((g) => [g.dataset.wfGroup, g.querySelector("[data-wf-count]")?.textContent ?? "0"]));`);
-      if (J(counts) !== J({ library: "0", age: "2", type: "1", resolution: "1", genre: "1", features: "1" })) v.push(`group counts ${J(counts)}`);
+      if (J(counts) !== J({ yours: "0", age: "2", type: "1", resolution: "1", genre: "1", features: "1" })) v.push(`group counts ${J(counts)}`);
       // include → exclude on the same tag moves it (XOR)
       const n1 = await page(`return window.__browse.length;`);
       await page(`m.seg("Video", "exc").click();`);
@@ -512,6 +519,111 @@ app.whenReady().then(async () => {
       else if ([...b.filter.include, ...b.filter.exclude].some((t) => t.startsWith("@"))) v.push(`the pseudo-tag went to the backend: ${J(b.filter)}`);
       await page(`m.q("[data-wf-clear]").click(); await m.sleep(500);`);
       if (await page(`return m.cards();`) !== r0.cards) v.push("Clear all didn't bring the owned card back");
+      return v;
+    });
+
+    // ---- the Yours group: "In my library" and "Favourites" (the signed-in account's Workshop favourites) ----
+    await cell("wf:yours:rows", async () => {
+      const v = [];
+      await resize(1400, 900); await toWorkshop();
+      const r = await page(`const c = m.col(); if (!c) return null; const g = c.querySelector("[data-wf-group]"), y = m.grp("yours");
+        return { first: g?.dataset.wfGroup ?? null, name: g?.querySelector(".wf-head-btn")?.textContent.trim() ?? null,
+          rows: [...(y?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag),
+          labels: [...(y?.querySelectorAll(".wf-name") ?? [])].map((x) => x.textContent.trim()) };`);
+      if (!r) return ["no filter column on the Workshop source"];
+      console.log(`        ${J(r)}`);
+      if (r.first !== "yours" || r.name !== "Yours") v.push(`the first group is ${J(r.first)} named ${J(r.name)} (want "yours", "Yours")`);
+      if (J(r.rows) !== J(["@library", "@favorites"])) v.push(`Yours' rows ${J(r.rows)} (want ["@library", "@favorites"])`);
+      if (J(r.labels) !== J(["In my library", "Favourites"])) v.push(`Yours' labels ${J(r.labels)} (want "In my library", "Favourites")`);
+      return v;
+    });
+
+    await cell("wf:yours:signedOut", async () => {
+      const v = [];
+      const ss = (await http("GET", "/steam/status")).json;
+      if (ss?.signedIn && !ss.rejected) return [`the stack is signed in to Steam (${J(ss)}) — proved nothing`];
+      const FAV = "#wf-panel-browse [data-wf-tag=\"@favorites\"]";
+      // the saved Workshop filter with or without a @favorites ✓ (as a signed-in session leaves it), for the next load
+      const saveFav = (on) => `{ const k = "liascape.browseFilter"; let f = {}; try { f = JSON.parse(localStorage.getItem(k)) ?? {}; } catch { /* the default */ }
+        const inc = (f.include ?? []).filter((t) => t !== "@favorites"); localStorage.setItem(k, JSON.stringify({ ...f, include: ${on} ? [...inc, "@favorites"] : inc })); } true`;
+      const look = () => page(`const r = m.row("@favorites"); if (!r) return null; const w = r.querySelector("[data-wf-why]"), i = r.querySelector('[data-seg="inc"]');
+        let op = 1; for (let x = r.querySelector(".wf-name"); x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
+        return { off: r.hasAttribute("data-wf-off"), st: r.dataset.state, why: w?.textContent.trim() ?? null, whyCls: !!w?.classList.contains("wf-why"),
+          whyVis: !!w?.checkVisibility(), titled: r.querySelectorAll("[title]").length + (r.hasAttribute("title") ? 1 : 0),
+          dis: Object.fromEntries([...r.querySelectorAll("[data-seg]")].map((s) => [s.dataset.seg, s.getAttribute("aria-disabled")])),
+          incOn: i.getAttribute("aria-checked"), incBg: getComputedStyle(i).backgroundColor, accent: m.accent(), nameOp: +op.toFixed(2),
+          lib: m.row("@library")?.hasAttribute("data-wf-off") ?? null, saved: localStorage.getItem("liascape.browseFilter") ?? "" };`);
+      const grpShot = async (name) => { const b = await page(`const g = m.grp("yours"); g.scrollIntoView({ block: "nearest" }); await m.sleep(60); const r = g.getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height };`);
+        const img = await win.webContents.capturePage({ x: Math.max(0, Math.floor(b.x) - 4), y: Math.max(0, Math.floor(b.y) - 4), width: Math.ceil(b.w) + 8, height: Math.ceil(b.h) + 8 });
+        fs.writeFileSync(path.join(OUT, `wf-${name}.png`), img.resize({ width: img.getSize().width * 2 }).toPNG()); };
+      const glowless = (x) => x === "none" || x.split(/,(?![^(]*\))/).every((p) => /inset/.test(p) || /rgba\(0, 0, 0, 0\)/.test(p) || /0px 0px 0px 0px/.test(p));
+      try {
+        await resize(1400, 900); await toWorkshop(); await page(`m.q("[data-wf-clear]")?.click(); await m.sleep(300);`);
+        const r0 = await look();
+        if (!r0) return ["no Favourites row on the Workshop's column"];
+        console.log(`        signed out: ${J({ ...r0, saved: undefined })}`);
+        if (!r0.off) v.push("signed out: the Favourites row isn't dimmed (no data-wf-off)");
+        if (r0.why !== "Sign in to Steam" || !r0.whyCls || !r0.whyVis) v.push(`its reason ${J(r0.why)} (want "Sign in to Steam" shown in .wf-why)`);
+        if (r0.titled) v.push(`${r0.titled} tooltip(s) on the row (the reason is shown, never a title)`);
+        if (r0.dis.inc !== "true" || r0.dis.exc !== "true") v.push(`✓ / ✕ aria-disabled ${r0.dis.inc} / ${r0.dis.exc} (want true)`);
+        if (r0.dis.off === "true") v.push("– is aria-disabled too (it must clear)");
+        if (r0.lib !== false) v.push(`In my library is dimmed too (${r0.lib}: it needs no sign-in)`);
+        await grpShot("yours-signedout");
+        for (const [what, code] of [["its ✓", `m.seg("@favorites", "inc").click();`], ["its ✕", `m.seg("@favorites", "exc").click();`],
+          ["its name", `m.row("@favorites").querySelector(".wf-name").click();`]]) {
+          await page(`${code} await m.sleep(200);`);
+          const s = await page(`return m.st("@favorites");`);
+          if (s !== "off") { v.push(`signed out: a click on ${what} turned it ${s}`); await page(`m.seg("@favorites", "off").click(); await m.sleep(100);`); }
+        }
+        const at = await page(`const b = m.row("@favorites").querySelector(".wf-name").getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 };`);
+        await rightAt(at.x, at.y); await sleep(250);
+        const rc = await page(`return m.st("@favorites");`);
+        if (rc !== "off") v.push(`signed out: a right-click turned it ${rc}`);
+        if ((await look()).saved.includes("@favorites")) v.push("signed out: a click saved @favorites in the filter");
+
+        // a ✓ saved while signed in: kept, shown dimmed, no effect; – clears it (motion on: shots through the change)
+        await loadUi(saveFav(true)); await toWorkshop();
+        const r1 = await look();
+        console.log(`        saved ✓: ${J({ st: r1?.st, off: r1?.off, incBg: r1?.incBg, accent: r1?.accent, nameOp: r1?.nameOp })}`);
+        if (r1?.st !== "inc" || r1.incOn !== "true") v.push(`the saved ✓ shows as ${r1?.st} (want a ✓ kept)`);
+        else {
+          if (!r1.off) v.push("the saved ✓'s row isn't dimmed");
+          if (r1.incBg === r1.accent) v.push(`the saved ✓ has the full accent fill (${r1.incBg}): it should read as dimmed`);
+        }
+        if (!(r1?.nameOp < 0.9)) v.push(`the dimmed row's name is at opacity ${r1?.nameOp}`);
+        const glowOn = await page(`return [...m.row("@favorites").querySelectorAll(".wf-seg")].map((s) => getComputedStyle(s).boxShadow);`);
+        if (!glowOn.every(glowless)) v.push(`the dimmed switch glows (${J(glowOn)}): it has no effect`);
+        await grpShot("yours-signedout-saved");
+        await page(`m.seg("@favorites", "off").click(); true`);
+        for (let i = 0; i < 3; i++) { await sleep(40); await grpShot(`yours-signedout-clear-${i}`); }
+        const r2 = await look();
+        if (r2.st !== "off" || r2.saved.includes("@favorites")) v.push(`– left it ${r2.st} (saved ${r2.saved})`);
+
+        // Glow effects off: nothing round its segments
+        await setSettings({ glows: false }); await loadUi(saveFav(true)); await toWorkshop();
+        const ng = await page(`return [...m.row("@favorites").querySelectorAll(".wf-seg")].map((s) => getComputedStyle(s).boxShadow);`);
+        if (!ng.every(glowless)) v.push(`Glow effects off: its segments glow (${J(ng)})`);
+        await grpShot("yours-signedout-noglow");
+        // bg-live: its reason over the wallpaper carries the text's drop-shadow
+        await setSettings({ glows: true, liveWallpaperBehindAllTabs: true }); await loadUi(); await toWorkshop(); await sleep(800);
+        const bl = await page(`return { live: document.documentElement.classList.contains("bg-live"), f: getComputedStyle(m.row("@favorites").querySelector("[data-wf-why]")).filter };`);
+        if (!bl.live) v.push("bg-live: no :root.bg-live with the setting on");
+        if (!/drop-shadow/.test(bl.f)) v.push(`bg-live: the reason has no drop-shadow (${bl.f})`);
+        await grpShot("yours-signedout-bglive");
+        await setSettings({ liveWallpaperBehindAllTabs: false }); await loadUi(); await toWorkshop();
+        // motion off: clearing the saved ✓ moves nothing, only fades
+        await setMotion(false);
+        const mo = await page(`let s = ${MO.SAMPLE({ row: FAV, why: FAV + " [data-wf-why]", sw: FAV + " .wf-sw" }, 400)}; ${NF}
+          m.seg("@favorites", "off").click(); await m.sleep(30); const props = ${MO.OPACITY_ONLY}(m.row("@favorites")); const fr = await s;
+          return { fr, props, st: m.st("@favorites") };`);
+        console.log(`        motion off: row ${MO.brief(mo.fr.row)}, reason ${MO.brief(mo.fr.why)}, switch ${MO.brief(mo.fr.sw)}`);
+        if (mo.st !== "off") v.push(`motion off: – left it ${mo.st} — proved nothing`);
+        if (mo.props.length) v.push(`motion off: the row animates ${mo.props.join(", ")} (opacity only)`);
+        v.push(...MO.judge("motion off: the Favourites row", mo.fr.row), ...MO.judge("motion off: its reason", mo.fr.why), ...MO.judge("motion off: its switch", mo.fr.sw));
+      } finally {
+        await setSettings({ glows: true, liveWallpaperBehindAllTabs: false }); await setMotion(true); await loadUi(saveFav(false)); await resize(1400, 900); await toWorkshop();
+      }
       return v;
     });
 
@@ -1265,7 +1377,7 @@ app.whenReady().then(async () => {
     });
 
     // ---- the groups' emblems: one per group, in its head (never one per tag) ----
-    const GICO = { library: "lucide-library", age: "lucide-shield", type: "lucide-layers", resolution: "lucide-monitor", genre: "lucide-palette", features: "lucide-sparkles" };
+    const GICO = { yours: "lucide-user-round", age: "lucide-shield", type: "lucide-layers", resolution: "lucide-monitor", genre: "lucide-palette", features: "lucide-sparkles" };
     const chipSel = (id) => `#wf-panel-browse [data-wf-gico="${id}"]`;
     const expandAll = () => page(`const ids = []; for (const g of m.col().querySelectorAll("[data-wf-group]")) if (g.dataset.wfCollapsed) { ids.push(g.dataset.wfGroup); m.head(g.dataset.wfGroup).click(); }
       await m.sleep(350); return ids;`);
@@ -1298,7 +1410,7 @@ app.whenReady().then(async () => {
           else if (!GICO[g.id]) v.push(`${g.id}: a group the probe doesn't know — give it a glyph here (${g.cls.join(" ")})`);
           else if (!g.cls.includes(GICO[g.id])) v.push(`${g.id}: the emblem is ${g.cls.join(" ")}, want ${GICO[g.id]}`);
         }
-        if (r.groups.length < 6) v.push(`only ${r.groups.length} groups on the Workshop's column (want Library, Age, Type, Resolution, Genre, Features)`);
+        if (r.groups.length < 6) v.push(`only ${r.groups.length} groups on the Workshop's column (want Yours, Age, Type, Resolution, Genre, Features)`);
         // Fit: the chip takes the head's rhythm — the head as tall as a head without one (its name's line, 6 px above and
         // below), the same column width, the button's own gap on both sides, one centre line
         const fit = await page(`const c = m.col(), g = m.grp("genre"), head = g.querySelector(".wf-head"), btn = g.querySelector(".wf-head-btn"), chip = btn.querySelector(".wf-gico"), chev = btn.querySelector(".wf-chev");
@@ -1644,7 +1756,7 @@ app.whenReady().then(async () => {
         const rows = (g) => [...(c.querySelector('[data-wf-group="' + g + '"]')?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);
         return { mode: c.dataset.mode, scope: c.dataset.wfScope, c: m.rect(c), grid: m.rect(grid), bar: bar ? m.rect(bar) : null,
           groups: [...c.querySelectorAll("[data-wf-group]")].map((g) => g.dataset.wfGroup), age: rows("age"), type: rows("type"), genre: rows("genre"),
-          res: rows("resolution"), row: !!sc.querySelector(".wfilter"), W: innerWidth, label: c.getAttribute("aria-label"),
+          res: rows("resolution"), yours: rows("yours"), row: !!sc.querySelector(".wfilter"), W: innerWidth, label: c.getAttribute("aria-label"),
           cards: m.qa(".lib-scroll .card").length };`);
       if (!r) return ["no filter column on the Library"];
       console.log(`        ${J(r)}`);
@@ -1656,7 +1768,8 @@ app.whenReady().then(async () => {
         if (r.c.b > r.bar.y + 1) v.push(`the column runs into the playlist bar (column bottom ${r.c.b}, bar top ${r.bar.y})`);
         if (r.bar.x > 0.5) v.push(`the playlist bar starts at x ${r.bar.x} (want its full width)`);
       }
-      if (J(r.groups) !== J(["age", "type", "resolution", "genre", "features"])) v.push(`groups ${J(r.groups)} (want age, type, resolution, genre, features)`);
+      if (J(r.groups) !== J(["yours", "age", "type", "resolution", "genre", "features"])) v.push(`groups ${J(r.groups)} (want yours, age, type, resolution, genre, features)`);
+      if (J(r.yours) !== J(["@favorites"])) v.push(`the Library's Yours rows ${J(r.yours)} (want ["@favorites"]: everything in it is in the library)`);
       if (J(r.age) !== J(["Everyone", "Mature"])) v.push(`age rows ${J(r.age)} (want what the items know: Everyone, Mature)`);
       if (J(r.res) !== J(["Standard Definition"])) v.push(`resolution rows ${J(r.res)} (want k1-k4's: Standard Definition)`);
       if (J(r.type) !== J(["Video", "Scene"])) v.push(`type rows ${J(r.type)}`);
@@ -1812,7 +1925,9 @@ app.whenReady().then(async () => {
         if (!r) return [`no filter column on ${src.name}`];
         console.log(`        ${J(r)}`);
         if (r.scope !== "weLocal" || r.mode !== "dock") v.push(`column ${r.scope} / ${r.mode}`);
-        if (J(r.groups) !== J(["library", "age", "type", "genre", "features"])) v.push(`groups ${J(r.groups)}`);
+        if (J(r.groups) !== J(["yours", "age", "type", "genre", "features"])) v.push(`groups ${J(r.groups)}`);
+        const yours = await page(`return [...(m.grp("yours")?.querySelectorAll(".wf-row") ?? [])].map((x) => x.dataset.wfTag);`);
+        if (J(yours) !== J(["@library"])) v.push(`the WE folder's Yours rows ${J(yours)} (want ["@library"])`);
         if (J(r.age) !== J(["Everyone", "Questionable"]) || J(r.type) !== J(["Video"]) || J(r.genre) !== J(["Anime", "Game", "Music", "Nature"]))
           v.push(`rows age ${J(r.age)}, type ${J(r.type)}, genre ${J(r.genre)}`);
         if (r.row) v.push("a sort / filter row above the WE folder's grid");

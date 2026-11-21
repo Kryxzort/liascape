@@ -1,8 +1,10 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
-import { Check, ChevronDown, Dot, Layers, Library, Monitor, Palette, Shield, Sparkles, Tags, X, type LucideIcon } from "lucide-react";
-import { filterOf, useStore, type FilterScope, type TagState } from "../store";
+import { Check, ChevronDown, Dot, Layers, Monitor, Palette, Shield, Sparkles, Tags, UserRound, X, type LucideIcon } from "lucide-react";
+import { favoritesUsable, filterOf, useStore, type FilterScope, type TagState } from "../store";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
-import { groupsFor, usePresetsOn, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
+import { useLinger } from "../hooks/useLinger";
+import { useMotion } from "./motion";
+import { FAVORITES_TAG, groupsFor, usePresetsOn, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
 
 // COOL: the filter column — Wallpaper Engine's filter column (docs/decisions.md § "Filter the Workshop in a column of
 // three-way switches"), on the Workshop, on Browse's local Wallpaper Engine folder and on the Library, the same control
@@ -37,20 +39,30 @@ function radioKeys(e: RKeyboardEvent<HTMLDivElement>, n: number, cur: number, pi
   (e.currentTarget.children[j] as HTMLElement | undefined)?.focus();
 }
 
-const TagRow = memo(function TagRow({ tag, label, st, scope }: Tag & { st: TagState; scope: FilterScope }) {
+// why: a row that can't take effect now (Favourites signed out: "Sign in to Steam") — dimmed, the reason shown under its
+// name (it's what the user can't see otherwise, so text, never a tooltip), ✓ and ✕ aria-disabled; its saved state stays
+// and – clears it, as do a name click and a right-click. The reason fades in, and out through its exit (useLinger).
+// Guard: probe-filters wf:yours:signedOut
+const TagRow = memo(function TagRow({ tag, label, st, scope, why = null }: Tag & { st: TagState; scope: FilterScope; why?: string | null }) {
   const setTagIn = useStore((s) => s.setTagState);
-  const setTag = (t: string, v: TagState) => setTagIn(t, v, scope);
+  const setTag = (t: string, v: TagState) => { if (!why || v === null) setTagIn(t, v, scope); };
   const id = useId();
   const key = st ?? "off";
+  const reason = useLinger(why, 160, useMotion());
   return (
-    <div className={`wf-row ${key}`} data-wf-tag={tag} data-state={key}
-      onContextMenu={(e) => { e.preventDefault(); setTag(tag, st === "exc" ? null : "exc"); }}>
-      <span className="wf-name" id={id} onClick={() => setTag(tag, NEXT[key])}>{label}</span>
+    <div className={`wf-row ${key}`} data-wf-tag={tag} data-state={key} data-wf-off={why ? "" : undefined}
+      onContextMenu={(e) => { e.preventDefault(); setTag(tag, st === "exc" || why ? null : "exc"); }}>
+      {reason.value ? (
+        <span className="wf-txt">
+          <span className="wf-name" id={id} onClick={() => setTag(tag, NEXT[key])}>{label}</span>
+          <span className={`wf-why${reason.closing ? " closing" : ""}`} data-wf-why>{reason.value}</span>
+        </span>
+      ) : <span className="wf-name" id={id} onClick={() => setTag(tag, NEXT[key])}>{label}</span>}
       <div className="wf-sw" role="radiogroup" aria-labelledby={id}
         onKeyDown={(e) => radioKeys(e, 3, SEGS.findIndex((s) => s.st === st), (i) => setTag(tag, SEGS[i].st))}>
         {SEGS.map((s) => (
           <button key={s.cls} type="button" role="radio" className={`wf-seg ${s.cls}`} data-seg={s.st ?? "off"}
-            aria-checked={s.st === st} tabIndex={s.st === st ? 0 : -1}
+            aria-checked={s.st === st} tabIndex={s.st === st ? 0 : -1} aria-disabled={why && s.st ? true : undefined}
             aria-label={s.st === "inc" ? `Include ${tag.startsWith("@") ? label : tag}` : s.st === "exc" ? `Hide ${tag.startsWith("@") ? label : tag}` : "Off"}
             onClick={() => setTag(tag, s.st)}>
             {s.st === "inc" ? <Check size={12} strokeWidth={3} /> : s.st === "exc" ? <X size={12} strokeWidth={3} /> : <Dot size={14} strokeWidth={3} />}
@@ -83,7 +95,7 @@ function MatchSwitch({ m, on, scope }: { m: GroupMatch; on: boolean; scope: Filt
 // each group's emblem, in the head like a Settings section's (index.css .wf-gico): one per group, never one per tag — a
 // glyph on some rows and not others reads as a difference between the tags. Resolution and Age take the sidebar's pills'
 // glyphs (LibrarySide.tsx), so a fact wears one icon everywhere.
-const GROUP_ICON: Record<string, LucideIcon> = { library: Library, age: Shield, type: Layers, resolution: Monitor, genre: Palette, features: Sparkles };
+const GROUP_ICON: Record<string, LucideIcon> = { yours: UserRound, age: Shield, type: Layers, resolution: Monitor, genre: Palette, features: Sparkles };
 // PERF: memo'd — a group re-renders on every tag change, its emblem never needs to. Guard: probe-filters lib:interplay
 const GroupEmblem = memo(function GroupEmblem({ id }: { id: string }) {
   const Icon = GROUP_ICON[id] ?? Tags;
@@ -98,6 +110,7 @@ function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState
   const included = tags.filter((x) => states.get(x.tag) === "inc").length;
   const bodyId = useId();
   const match = useStore((s) => (g.match ? filterOf(s, scope)[g.match.key] : "any"));
+  const favOff = useStore((s) => !favoritesUsable(s.steam));
   return (
     <section className={`wf-grp${n ? " has-active" : ""}`} data-wf-group={g.id} data-wf-collapsed={collapsed || undefined}
       role="group" aria-label={`${g.name} (${match === "all" ? "all of" : "any of"})`}>
@@ -114,7 +127,8 @@ function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState
           {g.subs.map((s, i) => (
             <div key={s.name ?? i} className="wf-subgrp">
               {s.name && <div className="wf-sub">{s.name}</div>}
-              {s.tags.map((x) => <TagRow key={x.tag} {...x} st={states.get(x.tag) ?? null} scope={scope} />)}
+              {s.tags.map((x) => <TagRow key={x.tag} {...x} st={states.get(x.tag) ?? null} scope={scope}
+                why={x.tag === FAVORITES_TAG && favOff ? "Sign in to Steam" : null} />)}
             </div>
           ))}
         </div>
