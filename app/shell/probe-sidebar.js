@@ -87,7 +87,8 @@
 //   lib:preset:legacy    the legacy engine (page-only settings-changed): every preset greyed with "Presets play only in the
 //                        Liascape player", the library read again, a click plays nothing; back → playable, no reload
 //   lib:scenesBlocked    the scene renderer missing (page-only scenes-blocked): every scene and preset greyed with the reason
-//                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why; cleared → back
+//                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why; under
+//                        the legacy engine no scene greyed, back on liascape-player greyed again; cleared → back
 //   lib:baseDelete[Off]  Delete of a base two presets play (card button, Delete key, sidebar; Delete and unsubscribe too) asks,
 //                        naming 2; Keep it / Escape delete nothing; Delete trashes it and both presets grey out; a scene no
 //                        preset plays and a preset itself delete unasked; the dialog zooms in (Off: fades), no-glow, bg-live.
@@ -2592,7 +2593,8 @@ app.whenReady().then(async () => {
     // lib:scenesBlocked — the scene renderer is missing (a WS scenes-blocked only the page sees; the backend's latch, read
     // at load from /current): every scene (pb, s2) and preset (pp1) greys with the reason through the preset's own path
     // (the same status icon, its tooltip the reason), a video doesn't; a click plays nothing and the status bar says why;
-    // the sidebar's notice has the reason. Cleared → all playable again.
+    // the sidebar's notice has the reason. Under the legacy engine (page-only settings-changed) no scene greys; back on
+    // liascape-player they do again. Cleared → all playable again.
     await cell("lib:scenesBlocked", async () => withPresets(async () => {
       const v = [], J = JSON.stringify, WHY = "The scene renderer is missing — rebuild or reinstall Liascape";
       const video = await page(`const c = [...document.querySelectorAll(".card.lib")].find((c) => !c.querySelector(".badge") && !c.querySelector("[data-card-reason]"));
@@ -2617,6 +2619,16 @@ app.whenReady().then(async () => {
       const note = await page(`const n = m.side().querySelector("[data-preset-note]"); return n ? n.querySelector(".side-crash-text").textContent.trim() : null;`);
       if (note !== WHY) v.push(`pb's notice: ${J(note)}`);
       await page(`await m.closeAll();`);
+      // the legacy engine plays scenes without the player's renderer: the latch doesn't apply there (a preset keeps its
+      // own legacy reason); back on liascape-player it does again
+      await js(`window.__fakeWs("settings-changed", { playerEngine: "legacy" })`); await sleep(800);
+      const leg = { pb: await cardState("pb"), s2: await cardState("s2"), pp1: await cardState("pp1") };
+      console.log(`        legacy: ${J(leg)}`);
+      for (const t of ["pb", "s2"]) if (leg[t]?.off || leg[t]?.op > 0.01) v.push(`${t} greyed under legacy: ${J(leg[t])}`);
+      if (!leg.pp1?.off || leg.pp1.reason === WHY) v.push(`pp1 under legacy: ${J(leg.pp1)}`);
+      await js(`window.__fakeWs("settings-changed", { playerEngine: "liascape-player" })`); await sleep(800);
+      const lp = { pb: await cardState("pb"), s2: await cardState("s2") };
+      for (const t of ["pb", "s2"]) if (!lp[t]?.off || lp[t].reason !== WHY) v.push(`${t} back on liascape-player: ${J(lp[t])}`);
       await js(`window.__fakeWs("scenes-blocked", { reason: null })`); await sleep(800);
       const back = { pb: await cardState("pb"), s2: await cardState("s2"), pp1: await cardState("pp1") };
       console.log(`        back: ${J(back)}`);

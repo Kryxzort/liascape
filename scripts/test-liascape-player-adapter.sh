@@ -1230,6 +1230,13 @@ waitfor $WAIT blocked_ws && ok "WS scenes-blocked says why: $(grep "scenes-block
 cur_blocked() { curl -sf -m 5 "$U/current" | jq -r '.scenesBlocked // empty'; }
 [ "$(cur_blocked)" = "The scene renderer is missing — rebuild or reinstall Liascape" ] && ok "/current.scenesBlocked: the reason" || bad "/current.scenesBlocked: $(cur_blocked)"
 curl -sf -m 5 "$U/player-engine" | jq -e '.scenes.available == false' >/dev/null && ok "/player-engine.scenes: unavailable while it's missing" || bad "/player-engine.scenes: $(pe_scenes)"
+# the backend's own scene-check runs in ITS environment (here a worker that loads) and never overrides the running
+# player's word: past its 30 s cache, /player-engine runs it afresh; the latch stays, no WS scenes-blocked null
+sleep 31
+curl -sf -m 10 "$U/player-engine" >/dev/null; sleep 1
+[ "$(cur_blocked)" = "The scene renderer is missing — rebuild or reinstall Liascape" ] && ! grep "scenes-blocked" "$T/ws-unplayable.log" | grep -q '"reason":null' \
+  && ok "…a fresh scene-check of the backend's own (its worker loads) leaves the player's word latched" \
+  || bad "the backend's scene-check flipped the latch: /current.scenesBlocked $(cur_blocked), WS $(grep "scenes-blocked" "$T/ws-unplayable.log" | tail -2 | tr '\n' ' ')"
 sleep 1   # a crash mark would come from source.broken off the event thread: give one the time to land
 jq -e '."900000002".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S2" '.events[] | select(.path==$p) | .id')" ] \
   && ! grep -q "scene-crashed" "$T/ws-unplayable.log" \

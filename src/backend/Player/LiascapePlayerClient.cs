@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using Liascape.Helpers;
 
 namespace Liascape.Player;
@@ -79,7 +80,7 @@ public sealed class LiascapePlayerClient
     // capability) when one answers; else `liascape-player scene-check` (the same rule, run with this backend's
     // environment), cached 30 s. Hot path (every next/prev/random's skip check, sometimes under
     // PlayerHelper's lock): at most one quick `hello` per connection; a stalled player → its last word.
-    public bool ScenesAvailable => FromPlayer() ?? SceneCheck().Available;
+    public bool ScenesAvailable => FromPlayer() ?? NoPlayerCheck().Available;
 
     private bool? FromPlayer()
     {
@@ -105,13 +106,15 @@ public sealed class LiascapePlayerClient
     // player's resolved assets dir too (one more quick `get`; the status endpoint only).
     public (bool Available, string? Reason, string? AssetsDir) SceneStatus(bool withAssets)
     {
-        if (FromPlayer() is not bool can) return SceneCheck();
+        if (FromPlayer() is not bool can) { var n = NoPlayerCheck(); return (n.Available, n.Reason, n.AssetsDir); }
         string? assets = null;
         if (withAssets)
             try { assets = Call("get", new Dictionary<string, object?> { ["path"] = "player.scene_assets_resolved" }, QuickMs).GetProperty("value").GetString() is { Length: > 0 } a ? a : null; }
             catch (LiascapePlayerException) { }
         if (can) return (true, null, assets);
-        var chk = SceneCheck(); // the same rule in this backend's environment — usually the same reason
+        // the same rule in this backend's environment — usually the same reason. Its renderer word is not the player's:
+        // never the latch while a player answers (its hello and facts are)
+        var chk = SceneCheck();
         return (false, "the running liascape-player can't play scenes" + (chk.Reason != null ? $": {chk.Reason}"
             : " (its liascape-scene-worker or WE's assets dir didn't resolve in its environment — `liascape-player ctl get '{\"path\":\"player.scene_assets_resolved\"}'`)"),
             assets ?? chk.AssetsDir);
@@ -119,7 +122,9 @@ public sealed class LiascapePlayerClient
 
     // Why no scene can play here, latched: a scene worker couldn't load the scene renderer (LWE's core gone; the
     // player's `hello.scene_renderer_missing`, else `scene-check`'s `renderer_missing`), null once a worker loads it
-    // again (the player's next hello says null). Kept while no player answers. The UI greys every scene with it.
+    // again (the player's next hello says null). Kept while no player answers. scene-check's word counts only while no
+    // player answers (NoPlayerCheck): the backend's environment may not be the player's. The UI greys every scene with
+    // it under liascape-player. Guard: adapter IT § "a scene worker that can't load the scene renderer"
     public string? RendererMissing { get; private set; }
     // raised (on the thread that read the change) when RendererMissing changes: the handler must not block
     public event Action<string?>? RendererMissingChanged;
@@ -129,6 +134,14 @@ public sealed class LiascapePlayerClient
         RendererMissing = reason;
         try { RendererMissingChanged?.Invoke(reason); } catch (Exception ex) { Log($"renderer handler threw: {ex.Message}"); }
     }
+    // the scene word (ScenesAvailable: a hello, else scene-check) refreshed off the caller's thread, one at a time: a
+    // reader that must not wait (`/current`) gets the latch as it stands, a change follows as RendererMissingChanged
+    private int _wordKick;
+    public void KickSceneWord()
+    {
+        if (Interlocked.Exchange(ref _wordKick, 1) == 1) return;
+        _ = Task.Run(() => { try { _ = ScenesAvailable; } catch (Exception ex) { Log($"scene word: {ex.Message}"); } finally { Volatile.Write(ref _wordKick, 0); } });
+    }
     // greets the player again (its capabilities and renderer word): a `scene.renderer_*` fact says they changed
     public void RefreshHello()
     {
@@ -136,16 +149,25 @@ public sealed class LiascapePlayerClient
         try { Call("hello", null, QuickMs); } catch (LiascapePlayerException) { }
     }
 
-    private (long At, bool Available, string? Reason, string? AssetsDir)? _sceneCheck;
+    private (long At, bool Available, string? Reason, string? AssetsDir, string? Renderer)? _sceneCheck;
+
+    // No player answers: scene-check is the word, its renderer reason included (what a player started now would run).
+    private (bool Available, string? Reason, string? AssetsDir) NoPlayerCheck()
+    {
+        var r = SceneCheck();
+        SetRendererMissing(r.Renderer);
+        return (r.Available, r.Reason, r.AssetsDir);
+    }
     private readonly object _sceneCheckLock = new();
 
-    // `liascape-player scene-check` → `{worker, features, assets_dir, ok, reason}`, exit 0/1; cached 30 s.
-    private (bool Available, string? Reason, string? AssetsDir) SceneCheck()
+    // `liascape-player scene-check` → `{worker, features, assets_dir, ok, reason, renderer_missing}`, exit 0/1; cached 30 s.
+    private (bool Available, string? Reason, string? AssetsDir, string? Renderer) SceneCheck()
     {
         lock (_sceneCheckLock)
         {
-            if (_sceneCheck is { } c && Environment.TickCount64 - c.At < 30_000) return (c.Available, c.Reason, c.AssetsDir);
+            if (_sceneCheck is { } c && Environment.TickCount64 - c.At < 30_000) return (c.Available, c.Reason, c.AssetsDir, c.Renderer);
             (bool, string?, string?) r;
+            string? renderer = null;
             var bin = PlayerEngine.ResolveBinary();
             if (bin == null) r = (false, PlayerEngine.UnavailableReason, null);
             else
@@ -164,15 +186,13 @@ public sealed class LiascapePlayerClient
                         var root = doc.RootElement;
                         bool ok = root.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.True;
                         r = (ok, ok ? null : Prop(root, "reason") ?? $"`liascape-player scene-check` exited {p.ExitCode}", Prop(root, "assets_dir"));
-                        // no player answers: the worker a player started now would run, in this backend's environment
-                        SetRendererMissing(root.TryGetProperty("renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object
-                            ? Prop(rm, "reason") : null);
+                        renderer = root.TryGetProperty("renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object ? Prop(rm, "reason") : null;
                     }
                 }
                 catch (Exception e) { r = (false, $"`liascape-player scene-check` failed: {e.Message}", null); }
             }
-            _sceneCheck = (Environment.TickCount64, r.Item1, r.Item2, r.Item3);
-            return r;
+            _sceneCheck = (Environment.TickCount64, r.Item1, r.Item2, r.Item3, renderer);
+            return (r.Item1, r.Item2, r.Item3, renderer);
         }
     }
 

@@ -67,16 +67,20 @@ pub fn missing_json() -> Value {
 }
 
 /// A worker of `bin` couldn't be started by the loader (`detail`: its line). `scene` = the event fields naming the
-/// scene it was for (id, path, scene_id), if any. Logs the outbox fact `scene.renderer_missing` every time (each one
-/// is a scene that didn't play) and starts the probe.
+/// scene it was for (id, path, scene_id), if any. Logs `scene.renderer_missing` every time (each one is a scene that
+/// didn't play), an outbox fact only when it marks the renderer missing (a rotation with the app closed retries scenes
+/// for hours: one fact per failure would push older facts out of the bounded outbox), and starts the probe.
 pub fn note_missing(bin: &Path, detail: &str, scene: Value) {
-    let start_probe = {
+    let (newly, start_probe) = {
         let mut st = state();
-        st.missing = Some(Missing {
-            detail: detail.to_string(),
-            bin: bin.to_path_buf(),
-        });
-        !std::mem::replace(&mut st.probing, true)
+        let newly = st
+            .missing
+            .replace(Missing {
+                detail: detail.to_string(),
+                bin: bin.to_path_buf(),
+            })
+            .is_none();
+        (newly, !std::mem::replace(&mut st.probing, true))
     };
     let mut ev = scene;
     if !ev.is_object() {
@@ -84,7 +88,9 @@ pub fn note_missing(bin: &Path, detail: &str, scene: Value) {
     }
     ev["reason"] = json!(super::RENDERER_MISSING);
     ev["detail"] = json!(detail);
-    crate::outbox::with_seq("scene.renderer_missing", &mut ev);
+    if newly {
+        crate::outbox::with_seq("scene.renderer_missing", &mut ev);
+    }
     log::event("worker", Level::Error, "scene.renderer_missing", None, ev);
     if start_probe {
         let spawned = std::thread::Builder::new()

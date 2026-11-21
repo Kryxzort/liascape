@@ -32,11 +32,13 @@ export const PRESET_LEGACY = "Presets play only in the Liascape player";
 // Guard: probe-sidebar lib:preset:legacy
 export const presetReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason">, settings: Record<string, unknown> | null) =>
   i.presetReason ?? (i.isPreset && settings && settings.playerEngine !== "liascape-player" ? PRESET_LEGACY : null);
-// Why a library item can't play now, or null: a preset's own reason (presetReasonOf), else, for a scene or a preset, why no
-// scene can play here (the store's scenesBlocked: the scene renderer is missing — GET /current, WS scenes-blocked). The card
-// greys with it, the sidebar says it, a click plays nothing. Guard: probe-sidebar lib:scenesBlocked
+// Why a library item can't play now, or null: a preset's own reason (presetReasonOf), else, for a scene or a preset under
+// liascape-player, why it can't play a scene here (the store's scenesBlocked: the scene renderer is missing — GET /current,
+// WS scenes-blocked; the legacy engine plays scenes without it, and a switch back shows it again). The card greys with
+// it, the sidebar says it, a click plays nothing. Guard: probe-sidebar lib:scenesBlocked
 export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene">, settings: Record<string, unknown> | null,
-  scenesBlocked: string | null) => presetReasonOf(i, settings) ?? ((i.isScene || i.isPreset) && scenesBlocked ? scenesBlocked : null);
+  scenesBlocked: string | null) => presetReasonOf(i, settings)
+  ?? ((i.isScene || i.isPreset) && scenesBlocked && settings?.playerEngine === "liascape-player" ? scenesBlocked : null);
 // the status bar's "Can't play X: it needs its base scene" (a reason starts with a capital: it is also the card's tooltip)
 export const cantPlay = (title: string, why: string) =>
   `Can't play ${title}: ${/^Needs /.test(why) ? "it n" + why.slice(1) : why[0].toLowerCase() + why.slice(1)}`;

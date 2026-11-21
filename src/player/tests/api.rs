@@ -7105,7 +7105,17 @@ fn worker_without_its_core_fails_without_crash_record() {
     assert!(logs_of(&mut c, "worker.broken").is_empty());
     assert!(logs_of(&mut c, "source.broken").is_empty());
     assert_eq!(crash_files(&srv), 0, "no crash record");
-    // `liascape-player scene-check` (the backend's word while no player runs) gives the same reason.
+    // Another scene while it is still missing: its event again, but no second outbox fact (only the change is one).
+    let dir1 = common::synthetic_scene("api-nocore-900000024", &synth(Pattern::Solid));
+    let id1 = create_src(&mut c, json!({"kind": "scene", "path": s(&dir1)}));
+    show_all(&mut c, &id1);
+    let again = wait_for(Duration::from_secs(10), "a second scene.renderer_missing", || {
+        let _ = c.call("step", json!({"ms": 16}));
+        logs_of(&mut c, "scene.renderer_missing")
+            .into_iter()
+            .find(|e| e["id"] == json!(id1))
+    });
+    assert!(again.get("outbox_seq").is_none(), "an outbox fact per failure: {again}");
     let out = Command::new(BIN)
         .arg("scene-check")
         .env("HOME", &root)

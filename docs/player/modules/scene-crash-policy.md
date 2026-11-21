@@ -47,8 +47,9 @@ practice LWE's core (a dev build's core is a Nix store path, which a garbage col
 rooted it; a half-removed install). Every restart would fail the same way and every scene would end up marked
 crashed, so the host spends no budget and writes no record: it hands the source a fatal error, which stops it like
 any load failure, and marks the renderer missing (`worker/renderer.rs`, one state for the process: every worker runs
-the same binary and core). That logs the outbox fact `scene.renderer_missing {id, path, scene_id, reason, detail}`
-(the loader's line in `detail`; the backend hears of it even when it was away at the time), drops the `scene`
+the same binary and core). Each failure logs `scene.renderer_missing {id, path, scene_id, reason, detail}` (the
+loader's line in `detail`); the one that sets the mark is an outbox fact too (the backend hears of it even when it was
+away; one per failure would crowd older facts out of the bounded outbox while a rotation retries scenes), drops the `scene`
 capability and puts `{reason, detail}` in `hello.scene_renderer_missing`, so the backend greys every scene up front
 and marks nothing. A spare that dies this way is only a spare's failure (backoff).
 

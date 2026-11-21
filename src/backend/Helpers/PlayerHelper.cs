@@ -3974,17 +3974,18 @@ public static class PlayerHelper
         AdvanceIfPlaying(path, $"scene over the VRAM limit ({usedMib:0} > {limitMib:0} MiB)");
     }
 
-    // liascape-player: why no scene can play here, for reasons that aren't any scene's (a worker couldn't load the scene
-    // renderer: LiascapePlayerClient.RendererMissing), else null. The UI greys every scene and preset card with it (store
-    // unplayableReasonOf) and plays none; pickers and rotations already skip them (the player drops its `scene`
-    // capability meanwhile: ScenesPlayable). Never a crash mark, or one broken install would mark every scene it reached.
+    // why liascape-player can't play a scene here, for reasons that aren't any scene's (a worker couldn't load the scene
+    // renderer: LiascapePlayerClient.RendererMissing), else null — whatever the engine: the UI applies it only while
+    // the engine is liascape-player (store unplayableReasonOf, live across an engine switch), greying every scene and
+    // preset card and playing none; pickers and rotations already skip them (the player drops its `scene` capability
+    // meanwhile: ScenesPlayable; legacy's gates never read it). Never a crash mark, or one broken install would mark every
+    // scene it reached. Never waits: the latch as it stands, a fresh word asked off-thread (a change → WS scenes-blocked).
     public static string? ScenesBlockedReason
     {
         get
         {
-            if (!PlayerEngine.IsLiascapePlayer) return null;
             var c = LiascapePlayerClient.Shared;
-            _ = c.ScenesAvailable; // a backend that hasn't greeted the player (or run scene-check) yet asks once
+            if (PlayerEngine.IsLiascapePlayer) c.KickSceneWord();
             return c.RendererMissing;
         }
     }
