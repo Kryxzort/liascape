@@ -801,6 +801,12 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   border-radius: 9px; border-top: 1px solid color-mix(in srgb, var(--surface1) 50%, transparent);
   transition: background .15s, box-shadow .15s; }
 .srow:first-of-type { border-top: 0; }
+/* a watched folder's row leaving (AnimatePresence popLayout, views/Settings.tsx) is placed by its border box: its side
+   margins would move it sideways as it fades. Guard: probe-import import:settings */
+.watched-row[data-motion-pop-id] { margin: 0; }
+/* "Add folder" glides as a framer layout node, which writes its transform every frame: .btn's transform transition would
+   chase each write a step behind (it sank before rising). Guard: probe-import import:settings */
+.watched-add { transition-property: box-shadow, background; }
 .srow:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
 /* a checkbox / radio row is one big target (Settings Row → <label>): the pointer says so; a disabled one doesn't */
 .srow.toggle { cursor: pointer; user-select: none; }

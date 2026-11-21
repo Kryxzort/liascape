@@ -175,6 +175,7 @@ function CachePicker() {
 // Workshop folder's wording; it applies to what the folder imports from then on) and a remove that stops the watching (what it
 // brought in stays). "Add folder" picks one and opens the import dialog with "Keep watching" ticked: the folder's wallpapers
 // are shown before anything lands. Rows glide in and out (motion off: they fade). Guard: --probe probe-import.js import:settings*
+const ROW_GLIDE = { duration: 0.2 };
 function WatchedFolders() {
   const folders = useStore((s) => (s.settings?.watchedFolders as WatchedFolder[] | undefined) ?? []);
   const items = useStore((s) => s.libraryItems);
@@ -210,20 +211,29 @@ function WatchedFolders() {
   }, []);
   const layoutOn = motionOn && seen;
   const dep = folders.map((w) => w.path).join("\n");
+  // COOL: a removed row leaves the flow as it starts to fade (AnimatePresence popLayout), so the rows below and "Add folder"
+  // glide up into its place meanwhile: framer glides nothing once an exiting row unmounts (it isn't layout-dirty itself),
+  // they would jump. All of them move on the rows' own timing. The card keeps its height until the row has gone: it would
+  // shrink at the click and its overflow: hidden clip "Add folder" for most of the glide. Motion off (or off screen) the
+  // row fades in place and the rest then takes its place at once. Guard: probe-import import:settings
+  const hold = () => { const el = boxRef.current; if (layoutOn && el) el.style.minHeight = `${el.offsetHeight}px`; };
+  const release = useCallback(() => { boxRef.current?.style.removeProperty("min-height"); }, []);
+  useEffect(() => release, [layoutOn, release]); // a remount (the flag flipped) ends the exit without its callback
   // API: the backend broadcasts settings-changed {watchedFolders}; the page shows the edit at once
   const edit = (path: string, change: { copy?: boolean; remove?: boolean }) => {
+    if (change.remove) hold();
     mergeSettings({ watchedFolders: change.remove ? folders.filter((w) => w.path !== path) : folders.map((w) => w.path === path ? { ...w, ...change } : w) });
     api.editWatched({ path, ...change }).catch(() => {});
   };
   return (
     <Section title="Watched folders" icon={<FolderSync size={15} />} bare boxRef={boxRef}>
       <Help>New or changed files in these folders come into your library by themselves, and removed ones leave it.</Help>
-      <AnimatePresence key={`rows|${layoutOn}`} initial={false}>
+      <AnimatePresence key={`rows|${layoutOn}`} initial={false} mode={layoutOn ? "popLayout" : "sync"} onExitComplete={release}>
         {folders.map((w) => {
           const c = counts.get(w.path) ?? 0;
           return (
             <motion.div key={w.path} className="srow watched-row" data-watched={w.path} layout={layoutOn ? "position" : false} layoutDependency={dep}
-              {...fadeOff({ initial: { opacity: 0, y: -6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.2 } })}>
+              {...fadeOff({ initial: { opacity: 0, y: -6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: ROW_GLIDE })}>
               <div className="slabel">
                 <span className="slabel-row watched-path" title={w.path}>{w.path}</span>
                 <span className="shint">{c === 1 ? "1 wallpaper" : `${c} wallpapers`}{w.skip.length ? `, ${w.skip.length} left out` : ""}</span>
@@ -238,7 +248,7 @@ function WatchedFolders() {
           );
         })}
       </AnimatePresence>
-      <motion.button key={`add|${layoutOn}`} className="btn ghost ico watched-add" layout={layoutOn ? "position" : false} layoutDependency={dep} data-watched-add
+      <motion.button key={`add|${layoutOn}`} className="btn ghost ico watched-add" layout={layoutOn ? "position" : false} layoutDependency={dep} transition={ROW_GLIDE} data-watched-add
         onClick={() => { void importFolder(true); }}><FolderFlap size={14} /> Add folder</motion.button>
     </Section>
   );

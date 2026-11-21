@@ -20,8 +20,10 @@
 //   import:settings     Settings → "Add folder" opens the dialog as "Watch a folder" with "Keep watching this folder" ticked;
 //                       importing lists the folder in Watched folders with its wallpaper count (all six); its "Copy files instead of
 //                       linking" saves the folder's copy choice; a file written into the folder shows up in the Library
-//                       without a click; the remove button stops the watching (the row glides out, the section on screen)
-//                       and keeps the wallpapers
+//                       without a click; the remove button stops the watching (the section on screen: motion on, the row
+//                       fades in place, never sideways, while "Add folder" glides up through in-between frames, never back
+//                       down, never clipped by the card; off, the row fades and "Add folder" then jumps, no in-between
+//                       frame) and keeps the wallpapers
 //   import:steam        a folder holding a Steam library's Workshop folder (a fake libraryfolders.vdf in the stack's HOME):
 //                       its items listed apart, last, as "From your Steam subscriptions" (the summary says how many), the
 //                       group's tick and every item unticked and disabled, its line naming "Import new Workshop wallpapers"
@@ -378,11 +380,52 @@ app.whenReady().then(async () => {
       // the section in view, as a hand reaching for the remove button has it: the rows are framer layout nodes only on screen
       // (views/Settings.tsx), so the row leaves through that path
       await js(`document.querySelector("[data-watched-add]").scrollIntoView({ block: "center" }); return true`); await sleep(600);
-      const fr = (await js(`const s = ${SAMPLE({ row: `[data-watched="${d}"]` }, 700)}; document.querySelector('[data-watched="${d}"] [data-watched-remove]').click(); return await s`)).row;
-      const fades = fr.filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length;
-      if (!fades) v.push(`the row popped out (${brief(fr)})`);
+      // "Add folder"'s y before the click, then a sample per frame once the page has handled it (a task later: React commits
+      // and framer asks for its frame in microtasks, so the sampler's frame callback runs after framer's and reads the glide's
+      // transform as painted), and a picture mid-way (the row half faded, "Add folder" on its way up): import-settings-remove-<m>.png
+      const remove = async (dir, m) => {
+        const s = js(`const y0 = +document.querySelector("[data-watched-add]").getBoundingClientRect().y.toFixed(1);
+          document.querySelector('[data-watched="${dir}"] [data-watched-remove]').click();
+          await new Promise((r) => setTimeout(r));
+          return { y0, ...(await ${SAMPLE({ row: `[data-watched="${dir}"]`, add: "[data-watched-add]", card: ".ssection:has([data-watched-add])" }, 700)}) }`);
+        await sleep(80);
+        fs.writeFileSync(path.join(OUT, `import-settings-remove-${m}.png`), (await win.webContents.capturePage()).toPNG());
+        return s;
+      };
+      // "Add folder"'s way up: where it started and ended, the frames it spent in between (more than a pixel from both) and
+      // whether it ever went back down
+      const travel = (fr) => { const ys = fr.add.filter((f) => f[1] != null).map((f) => f[3]);
+        const y0 = fr.y0, y1 = ys[ys.length - 1];
+        return { y0, y1, mid: ys.filter((y) => y < y0 - 1 && y > y1 + 1).length, back: ys.some((y, i) => y > (i ? ys[i - 1] : y0) + 1),
+          ys: ys.filter((y, i) => !i || y !== ys[i - 1]).slice(0, 16).join(" ") }; };
+      const fr = await remove(d, "on");
+      const fades = fr.row.filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length;
+      if (!fades) v.push(`the row popped out (${brief(fr.row)})`);
+      const xs = fr.row.filter((f) => f[1] != null).map((f) => f[2]);
+      if (xs.length && Math.max(...xs) - Math.min(...xs) > 1) v.push(`motion on: the leaving row moved sideways (x ${Math.min(...xs)}..${Math.max(...xs)})`);
+      const on = travel(fr);
+      if (!(on.y1 < on.y0 - 10)) v.push(`motion on: "Add folder" didn't move up (y ${on.y0} → ${on.y1}) — proved nothing`);
+      else if (on.mid < 3) v.push(`motion on: "Add folder" jumped up instead of gliding (${on.mid} in-between frames, y ${on.y0} → ${on.ys})`);
+      else if (on.back) v.push(`motion on: "Add folder" went back down on its way up (y ${on.y0} → ${on.ys})`);
+      const clipped = fr.add.map((f, i) => [f, fr.card[i]]).filter(([a, c]) => a[1] != null && c?.[1] != null && a[3] + a[5] > c[3] + c[5] - 1);
+      if (clipped.length) v.push(`motion on: "Add folder" ran past the card's bottom edge (clipped) in ${clipped.length} frames (${J(clipped[0])})`);
       if (!(await waitFor(async () => !((await http("GET", "/settings")).json?.watchedFolders ?? []).some((w) => w.path === d), 8000))) v.push("remove didn't stop the watching");
       if (!(await titles()).includes("wa")) v.push("removing the folder took its wallpapers away");
+      // motion off: the row fades in place, then "Add folder" takes its place at once
+      const d2 = tree("wo");
+      await setSettings({ Morphs: false });
+      if ((await http("POST", "/library/watched", { path: d2 })).status !== 200) return [...v, "couldn't watch a second folder"];
+      await load();
+      await js(`[...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Settings").click(); return true`);
+      if (!(await waitFor(() => js(`return !!document.querySelector('[data-watched="${d2}"]')`), 8000))) return [...v, "motion off: the second folder isn't listed"];
+      await sleep(1000);
+      await js(`document.querySelector("[data-watched-add]").scrollIntoView({ block: "center" }); return true`); await sleep(600);
+      const fo = await remove(d2, "off");
+      v.push(...judge("motion off: the leaving row", fo.row, { leave: true }));
+      const off = travel(fo);
+      if (!(off.y1 < off.y0 - 10)) v.push(`motion off: "Add folder" didn't move up (y ${off.y0} → ${off.y1}) — proved nothing`);
+      else if (off.mid) v.push(`motion off: "Add folder" moved through ${off.mid} in-between frames (y ${off.y0} → ${off.ys}), want a jump`);
+      await setSettings({ Morphs: true });
       return v;
     });
 

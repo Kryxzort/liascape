@@ -171,12 +171,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       "Making previews" to "Making Low previews" (ClipStore's phase leaves `make` for a quality) and an operation is still
       listed at the end. Likely a quality sweep left by an earlier cell (libops:motion / hold / toggle change the quality);
       the cause is unread.
-- [ ] Settings → Watched folders: removing a folder, its row fades out and then "Add folder" (and any row below) jumps up
-      into its place instead of gliding. Framer runs the layout group's glide after an unmount only when the unmounting
-      node was itself layout-dirty, and an exiting row isn't. AnimatePresence `mode="popLayout"` with motion on (as
-      `components/ScenePropsEditor.tsx` does) takes the row out of the flow as it starts fading, so the rest glides up
-      while it fades. Guard to add: probe-import `import:settings` sampling "Add folder"'s y per frame on the remove
-      (in-between frames with motion on, a jump with it off).
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in
