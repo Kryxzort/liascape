@@ -161,11 +161,14 @@ public static class SteamCommunity
         bool ok = status is >= 200 and < 300 && (t.Length == 0 || t == "1" || JsonSuccess(t) == true);
         if (!ok)
         {
-            Console.WriteLine($"community: {workshopId}: Steam turned the {(favorite ? "favourite" : "unfavourite")} down ({status})");
+            // never the item's id: the log names no favourite
+            // Guard: scripts/test-workshop-social.sh § 7 "a star set in Liascape: no Steam ID or item ID in the log"
+            Console.WriteLine($"community: Steam turned a {(favorite ? "favourite" : "unfavourite")} down ({status})");
             throw new InvalidOperationException("Steam turned that down — your sign-in may have expired. Sign in again under Settings → Getting Workshop wallpapers.");
         }
         _favorites[$"{who.SteamId}:{workshopId}"] = favorite;
-        Console.WriteLine($"community: {workshopId}: {(favorite ? "added to" : "removed from")} the Workshop favourites");
+        // Guard: scripts/test-workshop-social.sh § 7 "a star set in Liascape: no Steam ID or item ID in the log"
+        Console.WriteLine($"community: an item {(favorite ? "added to" : "removed from")} the Workshop favourites");
         return favorite;
     }
 

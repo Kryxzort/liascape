@@ -38,6 +38,11 @@
 #     nothing; another account sees none of these, signed out again → {signedIn:false}; a private profile → the community
 #     pages with the cookie (3 of them for 65 ids), then the items' details in one GetDetails; a sign-in switched to
 #     another account between two of those pages → no page asked as it, none of its favourites kept, nothing written.
+#     Keeping it current: sync=check with no whole list asks nothing; the count check (sync=check, at most once per 50 s)
+#     asks the total alone and diffs only on a change; sync=open diffs the ids (one ids-only ask, the details of the new id
+#     alone); a star / unstar set in Liascape changes the list at once (an event, no Steam call to read it, the new item's
+#     details in the background) and holds against a later diff whose Steam answer lacks it; a private profile's check
+#     reads page 1 only, and a grown page 1 → the pages again, with any listed id still missing its details asked again.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -168,6 +173,7 @@ const browse = (list, page = 1, f = filter()) => post("/browse", { source: WS, p
 const wids = (x) => (Array.isArray(x.json) ? x.json.map((w) => w.workshopId) : []);
 const blog = () => fs.readFileSync(`${T}/backend.log`, "utf8");
 const count = (re) => (blog().match(new RegExp(re.source, "g")) ?? []).length;
+const countIn = (s, re) => (s.match(new RegExp(re.source, "g")) ?? []).length;
 const DF = `${process.env.XDG_CACHE_HOME}/liascape/workshop/details.json`;
 const onDisk = () => { try { return JSON.parse(fs.readFileSync(DF, "utf8")); } catch { return null; } };
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -244,6 +250,13 @@ if (process.argv[2]?.startsWith("fav")) {
     out(r.status === 200 && fed && cut && r.json?.error === "Couldn't load your favourites from Steam. Try again in a moment." && r.json.loading === null
       && titles(r).length === 100 && titles(r)[0] === "fav-0" && !fs.existsSync(FF(ME)),
       "first load cut off by Steam mid-load: the error line, page 1's items kept, no favorites-<id>.json written", J({ fed, cut, r: { ...r.json, items: titles(r).length } }));
+    // the count check with no whole list: nothing (the first load is sync=open's, the user's own Browse)
+    let Lc = blog().length;
+    n0 = (await fakeLog()).length;
+    r = await favs("check");
+    await sleep(500);
+    out(r.json?.signedIn === true && r.json.loading === null && !/GetUserFiles/.test(blog().slice(Lc)) && (await since(n0)).length === 0 && (await favs()).json?.loading === null,
+      "sync=check with no whole list: nothing asked, no load started", J({ loading: r.json?.loading, log: blog().slice(Lc) }));
     // b. the first load again, streamed
     evs.length = 0;
     const L1 = blog().length;
@@ -276,6 +289,14 @@ if (process.argv[2]?.startsWith("fav")) {
     await sleep(300);
     out(J(titles(r)) === J(shown) && (await since(n0)).length === 0 && !/GetUserFiles|GetDetails/.test(blog().slice(L2)),
       "sync=none: the cached list, no Steam call", J({ n: titles(r).length, log: blog().slice(L2) }));
+    // f (no change). the count check, Steam's count unchanged: the total alone, no diff
+    Lc = blog().length;
+    r = await favs("check");
+    await waitFor(() => /count check/.test(blog().slice(Lc)), 4000);
+    await sleep(300);
+    out(countIn(blog().slice(Lc), /GetUserFiles myfavorites total-only/) === 1 && /count check: no change/.test(blog().slice(Lc)) && !/ids-only|GetUserFiles myfavorites sort=/.test(blog().slice(Lc))
+      && J(titles(await favs())) === J(shown),
+      "sync=check, Steam's count unchanged: one total-only ask, no diff", J({ log: blog().slice(Lc) }));
     process.exit(0);
   }
 
@@ -286,6 +307,85 @@ if (process.argv[2]?.startsWith("fav")) {
     await sleep(300);
     out(r.json?.signedIn === true && J(titles(r)) === J(shown) && r.json.items.every((w) => w.createdAt) && (await since(n0)).length === 0 && !/GetUserFiles|GetDetails/.test(logNow()),
       "after a backend restart: the same items, no Steam call", J({ n: titles(r).length, log: logNow().split("\n").filter((l) => /steam-cm/.test(l)) }));
+    // e. Steam's list changed at the same count (an old favourite back at the end, fav-10 gone): sync=open diffs the ids
+    const OLD = "3200000900", STAR = "3200000901";
+    let fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    let list = fx["@userfiles"][`${ME}:myfavorites`];
+    list.splice(10, 1);
+    list.push({ publishedfileid: OLD, title: "fav-old", time_created: 1600000000, time_updated: 1600000000, tags: ["Video"], creator: OWNER });
+    fx[OLD] = { tags: ["Video"], title: "fav-old", time_created: 1600000000, creator: OWNER };
+    fx[STAR] = { tags: ["Video"], title: "fav-new", time_created: 1600000001, creator: OWNER };
+    fs.writeFileSync(FX, J(fx));
+    let want = shown.filter((t) => t !== "fav-10").concat("fav-old");
+    let L = blog().length;
+    evs.length = 0;
+    r = await favs("open");
+    await waitAsync(async () => J(titles(await favs())) === J(want));
+    await sleep(300);
+    r = await favs();
+    let le = blog().slice(L), saved = readJson(FF(ME));
+    out(J(titles(r)) === J(want) && countIn(le, /GetUserFiles myfavorites ids-only page 1 /) === 1 && !/GetUserFiles myfavorites sort=/.test(le)
+      && countIn(le, /GetDetails of/) === 1 && countIn(le, /GetDetails of 1 id\(s\)/) === 1 && evs.length >= 1
+      && saved?.ids?.at(-1) === OLD && !saved.ids.includes(FAVS[10]) && saved.ids.length === 250,
+      "sync=open with a cached list: one ids-only ask, only the new id's details (one GetDetails of 1 id), the list in Steam's new order, kept on disk",
+      J({ n: titles(r).length, last: titles(r).slice(-2), log: le.split("\n").filter((l) => /steam-cm/.test(l)), saved: saved && saved.ids?.length }));
+    // f. Steam's count changed (fav-20 gone too): the count check (twice in a row) asks the total once, then diffs
+    fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    list = fx["@userfiles"][`${ME}:myfavorites`];
+    list.splice(list.findIndex((x) => x.publishedfileid === FAVS[20]), 1);
+    fs.writeFileSync(FX, J(fx));
+    want = want.filter((t) => t !== "fav-20");
+    L = blog().length;
+    await favs("check");
+    await favs("check");
+    await waitAsync(async () => J(titles(await favs())) === J(want));
+    await favs("check");
+    await sleep(300);
+    r = await favs();
+    le = blog().slice(L);
+    out(J(titles(r)) === J(want) && countIn(le, /GetUserFiles myfavorites total-only/) === 1 && countIn(le, /GetUserFiles myfavorites ids-only page 1 /) === 1
+      && /count check: changed/.test(le) && readJson(FF(ME))?.total === 249,
+      "sync=check twice in a row (and once after): one total-only ask; the count changed → one ids diff, the item gone",
+      J({ n: titles(r).length, log: le.split("\n").filter((l) => /steam-cm|count check/.test(l)) }));
+    // g. a star set in Liascape: in the list at once (written, an event), first; its details fetched in the background
+    // (another event); read with sync=none, no Steam call
+    L = blog().length;
+    evs.length = 0;
+    const n1 = (await fakeLog()).length;
+    r = await post("/workshop/favorite", { workshopId: STAR, favorite: true });
+    const atOnce = readJson(FF(ME))?.ids?.[0] === STAR;
+    const ev1 = evs.length;
+    await waitFor(() => evs.length >= 2, 4000);
+    await waitFor(() => /GetDetails of 1 id/.test(blog().slice(L)), 4000);
+    const L4 = blog().length, n2 = (await fakeLog()).length;
+    let rs = await favs("none");
+    await sleep(300);
+    out(r.status === 200 && r.json?.favorited === true && atOnce && titles(rs)[0] === "fav-new" && titles(rs).length === want.length + 1
+      && J((await since(n1)).map((x) => x.path)) === J(["/sharedfiles/favorite"]) && (await since(n2)).length === 0 && !/GetUserFiles|GetDetails/.test(blog().slice(L4))
+      && countIn(blog().slice(L), /GetDetails of 1 id/) === 1 && evs.length >= 2,
+      "a star set in Liascape: first in the list at once (on disk, a workshop-favorites event), its details in the background (another event), read with no Steam call",
+      J({ status: r.status, atOnce, ev1, evs: evs.length, first: titles(rs).slice(0, 2), fake: (await since(n1)).map((x) => x.path) }));
+    out(!blog().slice(L).split("\n").filter((l) => !/\(fixture/.test(l)).some((l) => l.includes(STAR) || l.includes(ME)),
+      "a star set in Liascape: no Steam ID or item ID in the log", J(blog().slice(L).split("\n").filter((l) => l.includes(STAR)).slice(0, 3)));
+    // Review Focus: a diff that starts after the star, Steam's (cached) answer still without it → the star stays
+    L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff done/.test(blog().slice(L)), 4000);
+    rs = await favs();
+    out(/ids-only page 1 /.test(blog().slice(L)) && titles(rs)[0] === "fav-new" && readJson(FF(ME))?.ids?.[0] === STAR,
+      "a star set in Liascape: a later diff whose Steam answer lacks it keeps it", J({ first: titles(rs).slice(0, 2), log: blog().slice(L) }));
+    // h. an unstar set in Liascape: gone at once, and a later diff whose Steam answer still lists it keeps it gone
+    evs.length = 0;
+    r = await post("/workshop/favorite", { workshopId: FAVS[1], favorite: false });
+    rs = await favs("none");
+    const goneAtOnce = r.json?.favorited === false && !titles(rs).includes("fav-1") && titles(rs).length === want.length && evs.length >= 1;
+    L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff done/.test(blog().slice(L)), 4000);
+    rs = await favs();
+    out(goneAtOnce && /ids-only page 1 /.test(blog().slice(L)) && !titles(rs).includes("fav-1") && !readJson(FF(ME))?.ids?.includes(FAVS[1]),
+      "an unstar set in Liascape: gone at once (an event), and a later diff whose Steam answer still lists it keeps it gone",
+      J({ goneAtOnce, evs: evs.length, has: titles(rs).includes("fav-1") }));
     // j. another account: none of these; signed out again: nothing
     signIn(ME2);
     r = await favs("none");
@@ -301,7 +401,7 @@ if (process.argv[2]?.startsWith("fav")) {
     out(r.json?.signedIn === false && !("items" in r.json), "signed out again: {signedIn:false}, no list", J(r.json));
     // set up the private profile: the account's list gone from the client protocol, 65 on its community page; no cached list
     signIn(ME);
-    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    fx = JSON.parse(fs.readFileSync(FX, "utf8"));
     delete fx["@userfiles"][`${ME}:myfavorites`];
     PRIV.forEach((id, i) => { fx[id] = { tags: ["Video"], title: `pfav-${i}`, time_created: 1700000000 + i, creator: OWNER }; });
     OTHER.forEach((id, i) => { fx[id] = { tags: ["Video"], title: `other-${i}`, time_created: 1700000000 + i, creator: OWNER }; });
@@ -344,6 +444,45 @@ if (process.argv[2]?.startsWith("fav")) {
     const saved = readJson(FF(ME));
     out(J(saved?.ids) === J(PRIV) && saved.viaPage === true, "private profile: the list kept on disk as viaPage", J(saved && { n: saved.ids?.length, v: saved.viaPage }));
     out(pages.length > 0 && !logNow().includes(ME), "private profile: no Steam ID in the log", J(logNow().split("\n").filter((l) => l.includes(ME)).slice(0, 3)));
+    // the count check of a private profile: page 1 alone (Background: after the gate's quiet time), compared with the list
+    n0 = (await fakeLog()).length;
+    const Lc = blog().length;
+    await favs("check");
+    await waitFor(() => /count check/.test(blog().slice(Lc)), 25000);
+    const asked1 = (await since(n0)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`);
+    out(asked1.length === 1 && asked1[0].query.p === "1" && asked1[0].signedIn && /count check: no change/.test(blog().slice(Lc)) && J(titles(await favs())) === J(PRIV.map((_, i) => `pfav-${i}`)),
+      "private profile: sync=check reads page 1 only (one myworkshopfiles request), no change", J({ asked: asked1.map((x) => x.query.p), log: blog().slice(Lc) }));
+    // the next phase (a restarted backend, so its count check isn't held off): a favourite new on page 1
+    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    fx["3300000999"] = { tags: ["Video"], title: "pfav-new", time_created: 1700000999, creator: OWNER };
+    fs.writeFileSync(FX, J(fx));
+    await fetch(`${FAKE}/__myfavs`, { method: "POST", body: J({ ids: ["3300000999", ...PRIV] }) });
+    process.exit(0);
+  }
+
+  if (MODE === "fav-private-grow") {
+    // an id listed without details (a details fetch that failed during a load): pfav-5 taken out of the details cache
+    // before this run reads it (the cache file is read on first use)
+    const dc = readJson(DF);
+    delete dc[PRIV[5]];
+    fs.writeFileSync(DF, J(dc));
+    let r = await favs("none");
+    const hidden = r.json?.items?.length === 64 && !titles(r).includes("pfav-5");
+    const n0 = (await fakeLog()).length;
+    await favs("check");
+    await waitAsync(async () => { const t = titles(await favs()); return t[0] === "pfav-new" && t.includes("pfav-5"); }, 30000);
+    r = await favs();
+    const pages = (await since(n0)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`);
+    const saved = readJson(FF(ME));
+    out(hidden && /count check: changed/.test(logNow()) && J(pages.map((x) => x.query.p)) === J(["1", "2", "3"]) && pages.every((x) => x.signedIn)
+      && J(titles(r)) === J(["pfav-new", ...PRIV.map((_, i) => `pfav-${i}`)]) && J(saved?.ids) === J(["3300000999", ...PRIV]) && saved.viaPage === true,
+      "private profile: a grown page 1 → the community pages again (page 1 not asked twice), the new favourite first, kept on disk",
+      J({ hidden, pages: pages.map((x) => x.query.p), n: titles(r).length, first: titles(r).slice(0, 2) }));
+    out(hidden && countIn(logNow(), /GetDetails of 2 id\(s\)/) === 1 && countIn(logNow(), /GetDetails of/) === 1 && titles(r).includes("pfav-5"),
+      "private profile: the diff asks the details of every listed id still missing them (the new one and pfav-5, one GetDetails of 2)",
+      J({ hidden, log: logNow().split("\n").filter((l) => /GetDetails/.test(l)) }));
+    out(!logNow().split("\n").filter((l) => !/\(fixture/.test(l)).some((l) => l.includes(ME) || l.includes("3300000999")),
+      "private profile diff: no Steam ID or item ID in the log", J(logNow().split("\n").filter((l) => l.includes(ME)).slice(0, 3)));
     process.exit(0);
   }
 }
@@ -575,7 +714,7 @@ stop_backend; start_backend
 (cd "$T" && timeout 60 node drive.mjs after-restart) >> "$T/drive.log" 2>&1 || rc=$?
 # § 7 on a backend without § 4's cooldown (a private profile's community pages must go out), restarted before each phase
 stop_backend; rm -f "$XDG_CACHE_HOME/liascape/steam-cooldown.json"; start_backend
-for phase in fav fav-restart fav-private; do
+for phase in fav fav-restart fav-private fav-private-grow; do
   [ $phase = fav ] || { stop_backend; start_backend; }
   (cd "$T" && timeout 60 node drive.mjs $phase) >> "$T/drive.log" 2>&1 || rc=$?
 done
