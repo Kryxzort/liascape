@@ -9,9 +9,10 @@
 //   POST /comment/PublishedFile_Public/render/O/N/  start, count → {success, start, total_count, comments_html}, newest first
 //   POST /comment/PublishedFile_Public/post/O/N/    comment, count, sessionid + the sign-in → the first page, the new one on top
 //   GET  /profiles/S/?xml=1                         a profile's XML (steamID, avatarMedium)
-//   GET  /profiles/S/myworkshopfiles/?…myfavorites  a favourites page (filedetails links), 30 a page
+//   GET  /profiles/S/myworkshopfiles/?…myfavorites  a favourites page (filedetails links + Steam's "Showing a-b of N entries"), 30 a page
 //   POST /ISteamRemoteStorage/GetPublishedFileDetails/v1/  the keyless details, current AND lifetime counts
 //   GET  /__log  the requests so far     POST /__ratelimit  the next request answers 429     /__fav?id=N  favourited on "Steam"
+//   POST /__myfavs {ids: string[]}  the signed-in account's favourites page list, in its order (default: three ids)
 // Usage: node fake-steam-community.mjs <port file> <signed-in steamid> <cookie token>
 import http from "node:http";
 import fs from "node:fs";
@@ -22,6 +23,7 @@ const ITEM = "3000000001";
 const log = [];
 const favs = new Set();                   // `${steamid}:${id}`
 let rateLimitNext = false;
+let myFavs = ["3100000001", "3100000002", "3100000003"];
 let n = 0;
 
 // Steam's own markup for a comment (the parts the backend reads, as the item page serves them), user text already escaped by
@@ -90,6 +92,10 @@ const server = http.createServer(async (req, res) => {
   if (u.pathname === "/__log") return send(200, log);
   if (u.pathname === "/__ratelimit") { rateLimitNext = true; return send(200, {}); }
   if (u.pathname === "/__fav") { favs.add(`${ME}:${u.searchParams.get("id")}`); return send(200, {}); }
+  if (u.pathname === "/__myfavs" && req.method === "POST") {
+    try { myFavs = (JSON.parse(raw).ids ?? []).map(String); } catch { return send(400, { error: "body: {ids: string[]}" }); }
+    return send(200, {});
+  }
   if (rateLimitNext) { rateLimitNext = false; res.writeHead(429, { "Content-Type": "text/html", "Retry-After": "120" }); return res.end("Too Many Requests"); }
 
   let m;
@@ -132,8 +138,9 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === "GET" && (m = u.pathname.match(/^\/profiles\/(\d+)\/myworkshopfiles\/$/))) {
     if (!signedIn(ck) || m[1] !== ME || u.searchParams.get("browsefilter") !== "myfavorites") return send(200, "<html>nothing</html>", "text/html");
-    const ids = u.searchParams.get("p") === "1" || !u.searchParams.get("p") ? ["3100000001", "3100000002", "3100000003"] : [];
-    return send(200, `<html><body>${ids.map((id) => `<div class="workshopItem"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${id}&searchtext=">x</a></div>`).join("")}</body></html>`, "text/html");
+    const p = Math.max(1, +u.searchParams.get("p") || 1), ids = myFavs.slice((p - 1) * 30, p * 30);
+    const paging = ids.length ? `<div class="workshopBrowsePagingInfo">Showing ${(p - 1) * 30 + 1}-${(p - 1) * 30 + ids.length} of ${myFavs.length.toLocaleString("en-US")} entries</div>` : "";
+    return send(200, `<html><body>${paging}${ids.map((id) => `<div class="workshopItem"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${id}&searchtext=">x</a></div>`).join("")}</body></html>`, "text/html");
   }
   if (req.method === "POST" && u.pathname === "/ISteamRemoteStorage/GetPublishedFileDetails/v1/") {
     const ids = Object.entries(form).filter(([k]) => k.startsWith("publishedfileids[")).map(([, v]) => v);

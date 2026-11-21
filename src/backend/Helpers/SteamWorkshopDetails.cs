@@ -27,10 +27,10 @@ namespace Liascape.Helpers;
 //   - QueryChildrenAsync: the items that name a given item as theirs ("Required items": a preset names its base scene) —
 //     QueryFiles with `child_publishedfileid`, checked again against each result's own children.
 // LIASCAPE_STEAM_CM_FIXTURE=<file.json> (tests): GetDetailsAsync answers from that file instead of Steam — `{"<id>": {"tags":
-// [...], "youtube": "<id>"|null, "creator", "subscriptions", "favorited", "title", "children": ["<id>"]}}` (all but tags
-// optional), an id not in it = no
+// [...], "youtube": "<id>"|null, "creator", "subscriptions", "favorited", "title", "children": ["<id>"], "time_created",
+// "time_updated", "preview_url", "score"}}` (all but tags optional), an id not in it = no
 // such public item, no file = Steam unreachable; each request is logged with its ids. QueryAsync (Browse's Workshop
-// pages) answers from its "@query" list and UserFilesAsync from "@userfiles" the same way, so a test's Browse never
+// pages) answers from its "@query" list and the user files calls from "@userfiles" the same way, so a test's Browse never
 // opens a session to Steam.
 public static class SteamWorkshopDetails
 {
@@ -43,9 +43,9 @@ public static class SteamWorkshopDetails
     // per item: Found = Steam answered for it (result 1); Youtube = its first YouTube preview id (null = none); Tags = its
     // Workshop tags, Steam's names; Creator = its creator's Steam ID (0 = unknown); Subscriptions / Favorites = Steam's
     // CURRENT counts (`subscriptions` / `favorited`, never the lifetime ones, which also count everyone who has left);
-    // Children = the items it requires (a preset: its base). An item Steam couldn't answer for (removed, private: result ≠ 1)
-    // is Found=false, no tags.
-    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0, long Subscriptions = 0, long Favorites = 0, string? Title = null, ulong[]? Children = null);
+    // Children = the items it requires (a preset: its base); File = the whole answer as the browse mapping takes it (its
+    // created time, score, preview). An item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false, no tags.
+    public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0, long Subscriptions = 0, long Favorites = 0, string? Title = null, ulong[]? Children = null, PublishedFileDetail? File = null);
 
     private static string? Fixture => Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE") is { Length: > 0 } f ? f : null;
 
@@ -63,13 +63,13 @@ public static class SteamWorkshopDetails
             var got = Fixture is { } fx ? FromFixture(fx, batch) : await SteamAnonymous.UseAsync(async (pub) =>
             {
                 var req = new CPublishedFile_GetDetails_Request
-                    { includetags = true, includeadditionalpreviews = true, includechildren = true, short_description = true, appid = AppId };
+                    { includetags = true, includeadditionalpreviews = true, includechildren = true, includevotes = true, short_description = true, appid = AppId };
                 req.publishedfileids.AddRange(batch);
                 var resp = await pub.GetDetails(req); // an AsyncJob (no ConfigureAwait)
                 if (resp.Result != EResult.OK) return null;
                 return resp.Body.publishedfiledetails.ToDictionary((d) => d.publishedfileid, (d) => d.result == (int)EResult.OK
                     ? new Details(true, YoutubeOf(d), d.tags.Select((t) => t.tag).Where((t) => !string.IsNullOrEmpty(t)).Distinct().ToArray(), d.creator,
-                        d.subscriptions, d.favorited, d.title, ChildrenOf(d))
+                        d.subscriptions, d.favorited, d.title, ChildrenOf(d), ToDetail(d))
                     : new Details(false, null, []));
             }, TimeSpan.FromSeconds(RequestTimeoutSeconds), ct).ConfigureAwait(false);
             Console.WriteLine(got == null ? $"steam-cm: GetDetails of {batch.Count} id(s) — no answer"
@@ -96,7 +96,7 @@ public static class SteamWorkshopDetails
                         e.TryGetProperty("subscriptions", out var su) && su.TryGetInt64(out var suN) ? suN : 0,
                         e.TryGetProperty("favorited", out var fa) && fa.TryGetInt64(out var faN) ? faN : 0,
                         e.TryGetProperty("title", out var ti) && ti.ValueKind == System.Text.Json.JsonValueKind.String ? ti.GetString() : null,
-                        FixtureChildren(e))
+                        FixtureChildren(e), ToDetail(FixtureDetails(e)) with { Id = id.ToString() })
                     : new Details(false, null, []));
         }
         catch { return null; } // no fixture file = Steam unreachable
@@ -186,7 +186,10 @@ public static class SteamWorkshopDetails
     // when their profile shows them) — one page (1-based) of up to 100, in Steam's order for `sort`: "lastupdated" (newest
     // first) or "score" (top rated). Measured on an anonymous session: both types answer for a public profile, another
     // account's favourites can come back empty (a private profile), every other sort name tried gave the default order, and
-    // the request has no text search; its tag fields aren't relied on (the caller matches tags itself).
+    // the request has no text search; its tag fields aren't relied on (the caller matches tags itself). Each item carries its
+    // created time, score (`return_vote_data`) and children (`return_children`). Also measured on an anonymous session:
+    // `ids_only` answers the whole list as bare ids in the `lastupdated` order, up to IdsPageSize a page (asked for 2000, it
+    // returns 1000; without `ids_only` the cap stays 100); `totalonly` answers `total` with no items.
     // null = Steam's servers unreachable / refused / timed out.
     public sealed record UserFilesPage(List<PublishedFileDetail> Items, uint Total);
 
@@ -196,11 +199,11 @@ public static class SteamWorkshopDetails
         {
             steamid = steamId, appid = AppId, type = type, sortmethod = sort, page = (uint)Math.Max(1, page),
             numperpage = (uint)Math.Clamp(perPage, 1, 100), return_tags = true, return_previews = true, return_metadata = true,
-            return_short_description = false,
+            return_short_description = false, return_vote_data = true, return_children = true,
         };
         if (Fixture is { } fx)
         {
-            var r = UserFilesFromFixture(fx, req);
+            var r = UserFilesFromFixture(fx, req) is { } f ? new UserFilesPage(f.Items.Select(ToDetail).ToList(), f.Total) : null;
             Console.WriteLine($"steam-cm: GetUserFiles {type} sort={sort} page {req.page} — " + (r == null ? "no answer" : $"{r.Items.Count} of {r.Total} (fixture)"));
             return r;
         }
@@ -212,20 +215,73 @@ public static class SteamWorkshopDetails
         }, timeout, ct).ConfigureAwait(false);
     }
 
+    private const int IdsPageSize = 1000;
+
+    // The whole list's ids in Steam's `lastupdated` order, a page of IdsPageSize a request (the favourites cache's cheap
+    // check of membership and order). null = Steam unreachable, or a page failed partway (a partial list would read as
+    // items removed).
+    public static async Task<List<ulong>?> UserFileIdsAsync(ulong steamId, string type, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var all = new List<ulong>();
+        for (uint page = 1; ; page++)
+        {
+            var req = new CPublishedFile_GetUserFiles_Request
+                { steamid = steamId, appid = AppId, type = type, sortmethod = "lastupdated", page = page, numperpage = IdsPageSize, ids_only = true };
+            var got = await SendUserFiles(req, timeout, ct).ConfigureAwait(false);
+            Console.WriteLine($"steam-cm: GetUserFiles {type} ids-only page {page} — " + (got == null ? "no answer" : $"{got.Ids.Count} of {got.Total}")
+                + (Fixture != null ? " (fixture)" : ""));
+            if (got == null) return null;
+            all.AddRange(got.Ids);
+            if (got.Ids.Count == 0 || all.Count >= got.Total) return all;
+        }
+    }
+
+    // The list's size alone (`totalonly`: no items). null = Steam unreachable.
+    public static async Task<uint?> UserFilesTotalAsync(ulong steamId, string type, TimeSpan timeout, CancellationToken ct = default)
+    {
+        var req = new CPublishedFile_GetUserFiles_Request
+            { steamid = steamId, appid = AppId, type = type, sortmethod = "lastupdated", page = 1, numperpage = 1, totalonly = true };
+        var got = await SendUserFiles(req, timeout, ct).ConfigureAwait(false);
+        Console.WriteLine($"steam-cm: GetUserFiles {type} total-only — " + (got == null ? "no answer" : $"{got.Total}") + (Fixture != null ? " (fixture)" : ""));
+        return got?.Total;
+    }
+
+    // An ids-only / total-only request's answer: the ids in Steam's order and the list's total
+    private sealed record IdsAnswer(List<ulong> Ids, uint Total);
+
+    private static async Task<IdsAnswer?> SendUserFiles(CPublishedFile_GetUserFiles_Request req, TimeSpan timeout, CancellationToken ct)
+    {
+        if (Fixture is { } fx)
+        {
+            var r = UserFilesFromFixture(fx, req);
+            return r is { } f ? new IdsAnswer(f.Items.Select((d) => d.publishedfileid).ToList(), f.Total) : null;
+        }
+        return await SteamAnonymous.UseAsync(async (pub) =>
+        {
+            var resp = await pub.GetUserFiles(req); // an AsyncJob (no ConfigureAwait)
+            if (resp.Result != EResult.OK) return null;
+            return new IdsAnswer(resp.Body.publishedfiledetails.Select((d) => d.publishedfileid).Where((id) => id > 0).ToList(), resp.Body.total);
+        }, timeout, ct).ConfigureAwait(false);
+    }
+
     // the fixture's `"@userfiles": {"<steamid>:<type>": [ {publishedfileid, title, tags, subscriptions, lifetime_subscriptions, …} ]}`
-    // (the client protocol's own field names): built into Steam's own reply objects, so the mapping below is the one tested
-    private static UserFilesPage? UserFilesFromFixture(string file, CPublishedFile_GetUserFiles_Request req)
+    // (the client protocol's own field names): built into Steam's own reply objects, so the mapping below is the one tested.
+    // As Steam answers: `ids_only` items carry only their id (pages up to IdsPageSize, else 100), `totalonly` no items.
+    private static (List<PublishedFileDetails> Items, uint Total)? UserFilesFromFixture(string file, CPublishedFile_GetUserFiles_Request req)
     {
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(file));
-            if (!doc.RootElement.TryGetProperty("@userfiles", out var all)) return new UserFilesPage([], 0);
+            if (!doc.RootElement.TryGetProperty("@userfiles", out var all)) return ([], 0);
             if (!all.TryGetProperty($"{req.steamid}:{req.type}", out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
-                return new UserFilesPage([], 0);
+                return ([], 0);
             var items = arr.EnumerateArray().Select(FixtureDetails).ToList();
+            if (req.totalonly) return ([], (uint)items.Count);
             if (req.sortmethod == "score") items = items.OrderByDescending((d) => d.vote_data?.score ?? 0).ToList();
-            var page = items.Skip((int)((req.page - 1) * req.numperpage)).Take((int)req.numperpage).Select(ToDetail).ToList();
-            return new UserFilesPage(page, (uint)items.Count);
+            int perPage = (int)Math.Min(req.numperpage, req.ids_only ? IdsPageSize : 100);
+            var page = items.Skip((int)(req.page - 1) * perPage).Take(perPage);
+            if (req.ids_only) page = page.Select((d) => new PublishedFileDetails { publishedfileid = d.publishedfileid });
+            return (page.ToList(), (uint)items.Count);
         }
         catch { return null; } // no fixture file = Steam unreachable
     }
@@ -257,7 +313,7 @@ public static class SteamWorkshopDetails
         var d = new PublishedFileDetails
         {
             result = 1, publishedfileid = U("publishedfileid"), title = S("title"), preview_url = S("preview_url"), creator = U("creator"),
-            file_size = U("file_size"), file_description = S("file_description"), time_updated = (uint)U("time_updated"),
+            file_size = U("file_size"), file_description = S("file_description"), time_updated = (uint)U("time_updated"), time_created = (uint)U("time_created"),
             subscriptions = (uint)U("subscriptions"), lifetime_subscriptions = (uint)U("lifetime_subscriptions"),
             favorited = (uint)U("favorited"), lifetime_favorited = (uint)U("lifetime_favorited"),
         };
@@ -277,6 +333,8 @@ public static class SteamWorkshopDetails
         FileSizeBytes = (long)d.file_size,
         CreatorId = d.creator.ToString(),
         TimeUpdated = d.time_updated > 0 ? DateTimeOffset.FromUnixTimeSeconds(d.time_updated).UtcDateTime : DateTime.MinValue,
+        TimeCreated = d.time_created > 0 ? DateTimeOffset.FromUnixTimeSeconds(d.time_created).UtcDateTime : DateTime.MinValue,
+        VoteScore = d.vote_data is { } v ? v.score : null,
         // the current counts (Steam's own page shows these): the lifetime ones also count everyone who has since left
         Subscriptions = (long)d.subscriptions,
         Favorites = (long)d.favorited,
