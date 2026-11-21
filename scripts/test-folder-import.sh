@@ -23,9 +23,11 @@
 #          path lands only the user's file, and watching the parent never imports a subscription, old or new: nothing in
 #          the library links into Steam's folder and Steam's files are unchanged.
 #  presets: Wallpaper Engine's own preset files (scripts/test-fixtures/presets) in a tree scan as one scene item each,
-#          `preset` with their base's id; a preset imported (copied or linked) is its own preset item and brings its base
-#          scene from the same tree the same way, ticked or not; a base the library has is reused, a web base is never
-#          imported (the preset says why), a base not there leaves "Needs its base scene"; in a watched folder a preset waits
+#          `preset` with their base's id; a preset imported (copied or linked) is its own preset item over its base from the
+#          same tree, the same way; a base the user unticked never comes (watched or not: "Needs its base scene"), nor one
+#          while "Play scenes" is off; a base the library has is reused, a web base is never imported (the preset says why,
+#          only when the folder's own project.json names the id) and a scene base of that id landing later makes the preset
+#          play; a base not there leaves "Needs its base scene"; in a watched folder a preset waits
 #          for "Play scenes", joins the playlist, plays once its base turns up there (the presets' base pass runs), and
 #          leaves when its folder goes; under the legacy engine its reason; nothing in the tree or the fixtures changes.
 #  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
@@ -358,9 +360,10 @@ stopbe
 
 echo "== presets: a preset folder is its own preset item and brings its base scene from the same tree"
 # Wallpaper Engine's own preset files (scripts/test-fixtures/presets: real Workshop ids), each with a synthetic preview.
-# Their bases: 2932157836 a synthetic scene in another folder of the tree (never ticked), 3419466417 a web wallpaper there,
-# 3354740764 nowhere yet (it turns up later in a watched folder). The engine is liascape-player through a stub binary that
-# never plays (presets play only there); the legacy engine's reason at the end.
+# Their bases are synthetic: 2932157836 a scene in another folder of the tree, 3419466417 a web wallpaper there (its
+# project.json names its id), 3354740764 a scene there too (the user unticks it) and, later, in a watched folder. The
+# engine is liascape-player through a stub binary that never plays (presets play only there); the legacy engine's reason
+# at the end.
 FX=$ROOT/scripts/test-fixtures/presets
 PT=$T/presets-tree
 fxcopy() {   # $1 = fixture id, $2 = destination folder: the fixture with a preview of its own type
@@ -370,11 +373,16 @@ fxcopy() {   # $1 = fixture id, $2 = destination folder: the fixture with a prev
     *) pic "$2/preview.jpg" ;;
   esac
 }
+pjset() { jq "$2" "$1/project.json" > "$T/pj" && mv "$T/pj" "$1/project.json"; }   # $1 = folder, $2 = jq edit
 fxcopy 3009121253 "$PT/presets/3009121253"; fxcopy 3420428971 "$PT/presets/3420428971"; fxcopy 3520333138 "$PT/presets/3520333138"
-# the first fixture again under a folder that is no Workshop id (a user's own copy of the preset), retitled
-fxcopy 3009121253 "$PT/more/my-copy"; jq '.title = "Preset fixture 1, my copy"' "$PT/more/my-copy/project.json" > "$T/pj" && mv "$T/pj" "$PT/more/my-copy/project.json"
-scene "$PT/scenes/2932157836" "Base One"
-mkdir -p "$PT/web/3419466417"; printf '{"type":"web","file":"index.html","title":"Web Base"}' > "$PT/web/3419466417/project.json"; echo '<html>' > "$PT/web/3419466417/index.html"
+# fixtures again under folders that are no Workshop id (a user's own copies), retitled: the first one's; the second's over
+# a base 900000077 whose folder only its name ties to that id; the third's, imported while "Play scenes" is off
+fxcopy 3009121253 "$PT/more/my-copy"; pjset "$PT/more/my-copy" '.title = "Preset fixture 1, my copy"'
+fxcopy 3420428971 "$PT/more/named-web"; pjset "$PT/more/named-web" '.title = "Preset fixture 2, named base" | .dependency = "900000077"'
+fxcopy 3520333138 "$PT/more/scenes-off"; pjset "$PT/more/scenes-off" '.title = "Preset fixture 3, scenes off"'
+scene "$PT/scenes/2932157836" "Base One"; scene "$PT/scenes/3354740764" "Base Three (tree)"
+webdir() { mkdir -p "$1"; printf '{"type":"web","file":"index.html","title":"%s"%s}' "$2" "${3:+,\"workshopid\":\"$3\"}" > "$1/project.json"; echo '<html>' > "$1/index.html"; }
+webdir "$PT/web/3419466417" "Web Base" 3419466417; webdir "$PT/web2/900000077" "Web By Name"
 treesum() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum); }
 PT_SUM=$(treesum "$PT"); FX_SUM=$(treesum "$FX")
 printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
@@ -382,28 +390,56 @@ jq '.PlayerEngine = "liascape-player"' "$XDG_CONFIG_HOME/liascape/settings.json"
 startbe LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=800 LIASCAPE_WATCH_RESCAN_MS=60000
 check "the engine is liascape-player (the stub binary)" "$(api "$U/player-engine" | jq -r .active)" liascape-player
 pr() { item "$1" | jq -c '[.isPreset, .isScene, .presetReason, .basePath]'; }
+found() { jq -nc --argjson p "$(P "${@:3}")" --argjson s "$2" --argjson r "$(P "$PT")" --argjson c "$1" '{paths: $p, copy: $c, skip: $s, roots: $r}'; }   # $1 copy, $2 skip (JSON), paths…
 SP=$(post /library/scan "$(jq -nc --arg p "$PT" '{paths: [$p]}')")
-check "scan: each preset folder is one scene item, a preset naming its base; the base scene beside; the web one unsupported" \
+check "scan: each preset folder is one scene item, a preset naming its base; the base scenes beside; the web ones unsupported" \
   "$(echo "$SP" | jq -c --arg s "$PT/" '[.items[] | [(.path | ltrimstr($s)), .kind, .preset, .baseWorkshopId, .workshopId, .title]] | sort') $(echo "$SP" | jq .unsupported)" \
-  '[["more/my-copy","scene",true,"2932157836",null,"Preset fixture 1, my copy"],["presets/3009121253","scene",true,"2932157836","3009121253","Preset fixture 1"],["presets/3420428971","scene",true,"3419466417","3420428971","Preset fixture 2"],["presets/3520333138","scene",true,"3354740764","3520333138","Preset fixture 3"],["scenes/2932157836","scene",false,null,"2932157836","Base One"]] 1'
-# copied: only the preset ticked; its base comes from the tree, copied too
-post /library/import-found "$(jq -nc --argjson p "$(P "$PT/presets/3009121253")" --argjson r "$(P "$PT")" '{paths: $p, copy: true, roots: $r}')" > /dev/null
+  '[["more/my-copy","scene",true,"2932157836",null,"Preset fixture 1, my copy"],["more/named-web","scene",true,"900000077",null,"Preset fixture 2, named base"],["more/scenes-off","scene",true,"3354740764",null,"Preset fixture 3, scenes off"],["presets/3009121253","scene",true,"2932157836","3009121253","Preset fixture 1"],["presets/3420428971","scene",true,"3419466417","3420428971","Preset fixture 2"],["presets/3520333138","scene",true,"3354740764","3520333138","Preset fixture 3"],["scenes/2932157836","scene",false,null,"2932157836","Base One"],["scenes/3354740764","scene",false,null,"3354740764","Base Three (tree)"]] 2'
+# copied: the preset and its base both ticked (the dialog's default)
+post /library/import-found "$(found true '[]' "$PT/presets/3009121253" "$PT/scenes/2932157836")" > /dev/null
 wait_for 30 idle; wait_for 10 has "Preset fixture 1"
-check "a copied preset: its own preset item, playing over its base from the tree" "$(pr "Preset fixture 1")" "[true,true,null,\"$IMP/Base One\"]"
+check "a copied preset: its own preset item, playing over its ticked base" "$(pr "Preset fixture 1")" "[true,true,null,\"$IMP/Base One\"]"
 check "…its own path and Workshop id, its own preview" "$(item "Preset fixture 1" | jq -c '[.videoPath, .workshopId, .baseWorkshopId, .thumbnailPath]')" \
   "[\"$IMP/Preset fixture 1\",\"3009121253\",\"2932157836\",\"$IMP/Preset fixture 1/preview.jpg\"]"
 check "…the preset and its base are copies (the same files, no link)" \
   "$([ -L "$IMP/Preset fixture 1" ] || [ -L "$IMP/Base One" ] && echo link || { diff -r "$PT/presets/3009121253" "$IMP/Preset fixture 1" >/dev/null && diff -r "$PT/scenes/2932157836" "$IMP/Base One" >/dev/null && echo same; })" same
 check "…the base a plain scene item with its Workshop id" "$(item "Base One" | jq -c '[.isScene, (.isPreset // false), .workshopId]')" '[true,false,"2932157836"]'
-# linked: a base that is a web wallpaper, a base that isn't in the tree, a base the library has
-post /library/import-found "$(jq -nc --argjson p "$(P "$PT/presets/3420428971" "$PT/presets/3520333138" "$PT/more/my-copy")" --argjson r "$(P "$PT")" '{paths: $p, copy: false, roots: $r}')" > /dev/null
-wait_for 30 idle; wait_for 10 has "Preset fixture 1, my copy"
+# linked, no watch: a base that is a web wallpaper, a base the user unticked, a base the library has, a non-scene folder
+# that only its name ties to the base's id
+post /library/import-found "$(found false "$(P "$PT/scenes/3354740764")" "$PT/presets/3420428971" "$PT/presets/3520333138" "$PT/more/my-copy" "$PT/more/named-web")" > /dev/null
+wait_for 30 idle; wait_for 10 has "Preset fixture 2, named base"
 check "a linked preset is a link to its folder" "$(readlink "$IMP/Preset fixture 2") $(readlink "$IMP/Preset fixture 3")" "$PT/presets/3420428971 $PT/presets/3520333138"
 check "a base that is a web wallpaper: not imported, the preset greyed with why" \
   "$(pr "Preset fixture 2") $(lib | jq -c '[.[] | select(.workshopId == "3419466417")] | length')" '[true,true,"Its base is a web wallpaper, not a scene",null] 0'
-check "a base that isn't in the tree: needs its base scene" "$(pr "Preset fixture 3")" '[true,true,"Needs its base scene",null]'
+check "a base the user unticked (no watch): not imported, the preset needs its base scene" \
+  "$(pr "Preset fixture 3") $(item "Base Three (tree)")" '[true,true,"Needs its base scene",null] null'
 check "a base the library has is reused (one item of it, from the copy)" \
   "$(pr "Preset fixture 1, my copy") $(lib | jq -c '[.[] | select(.workshopId == "2932157836") | .videoPath]')" "[true,true,null,\"$IMP/Base One\"] [\"$IMP/Base One\"]"
+check "a non-scene folder named by the base's id only: no kind saved, the preset needs its base scene" \
+  "$(pr "Preset fixture 2, named base") $(meta "Preset fixture 2, named base" | jq -c '.baseKind // null')" '[true,true,"Needs its base scene",null] null'
+# "Play scenes" off: a preset sent anyway (the dialog can't tick one then) never brings a base scene the user can't play
+post /settings '{"allowScenes":false}' > /dev/null
+post /library/import-found "$(found false '[]' "$PT/more/scenes-off")" > /dev/null
+wait_for 30 idle
+if [ "$(meta "Preset fixture 3, scenes off")" = null ]; then bad "Play scenes off: its base scene stays out (the preset never landed: proved nothing)"
+else check "Play scenes off: a preset's base scene stays out of the library" "$(item "Base Three (tree)") $(meta "Base Three (tree)")" "null null"; fi
+post /settings '{"allowScenes":true}' > /dev/null
+# a watched folder: an unticked base stays out the same way
+W4=$T/watched-untick; fxcopy 3420428971 "$W4/p/preset"; pjset "$W4/p/preset" '.title = "Preset fixture 2, watched"'
+scene "$W4/b/3419466417" "Base Two (unticked)"
+post /library/import-found "$(jq -nc --arg w "$W4" --argjson p "$(P "$W4/p/preset")" --argjson s "$(P "$W4/b/3419466417")" --argjson r "$(P "$W4")" \
+  '{paths: $p, copy: false, watch: $w, skip: $s, roots: $r}')" > /dev/null
+wait_for 30 idle; wait_for 10 has "Preset fixture 2, watched"; sleep 1.5
+check "a base the user unticked (watched): not imported, by the import or the watch; the preset needs its base scene" \
+  "$(pr "Preset fixture 2, watched") $(item "Base Two (unticked)")" '[true,true,"Needs its base scene",null] null'
+post /library/watched "$(jq -nc --arg w "$W4" '{path: $w, remove: true}')" > /dev/null
+# a kind saved for a base (the web folder above) never outlives a scene base of that id landing in the library
+scene "$T/late/3419466417" "Base Two"
+post /library/import-found "$(jq -nc --argjson p "$(P "$T/late/3419466417")" '{paths: $p, copy: false}')" > /dev/null
+wait_for 30 idle; wait_for 10 has "Base Two"
+check "a preset saved with a web base: a scene base of its id lands → it plays (so does the other preset of it)" \
+  "$(meta "Preset fixture 2" | jq -r .baseKind) $(pr "Preset fixture 2") $(pr "Preset fixture 2, watched")" \
+  "web [true,true,null,\"$IMP/Base Two\"] [true,true,null,\"$IMP/Base Two\"]"
 # a watched folder: a preset waits for "Play scenes", joins the playlist, needs its base until the base turns up there
 W3=$T/watched-presets; mkdir -p "$W3"
 post /settings '{"allowScenes":false,"autoAddLibraryToPlaylist":true}' > /dev/null
@@ -434,8 +470,8 @@ jq '.PlayerEngine = "legacy"' "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/s"
 startbe
 check "legacy engine: an imported preset with its base says it plays only in the Liascape player" \
   "$(pr "Preset fixture 1")" "[true,true,\"Presets play only in the Liascape player\",\"$IMP/Base One\"]"
-check "…a missing or non-scene base still says so first" "$(item "Preset fixture 2" | jq -c .presetReason)" '"Its base is a web wallpaper, not a scene"'
-for t in "Preset fixture 1" "Preset fixture 2" "Preset fixture 1, my copy" "Base One"; do post /library/delete "$(item "$t")" > /dev/null; done
+check "…a missing base still says so first" "$(item "Preset fixture 2, named base" | jq -c .presetReason)" '"Needs its base scene"'
+for t in "Preset fixture 1" "Preset fixture 2" "Preset fixture 1, my copy" "Preset fixture 2, named base" "Base One"; do post /library/delete "$(item "$t")" > /dev/null; done
 check "deleted (copies and links): every source file and fixture unchanged" "$(treesum "$PT") $(treesum "$FX")" "$PT_SUM $FX_SUM"
 stopbe
 

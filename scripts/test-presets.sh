@@ -7,7 +7,8 @@
 #     its reason when it can't play (no base, a malformed preset file, a base that is a preset / a video / a web
 #     wallpaper, the legacy engine); the WE auto-import brings presets in only with scene support on; a preset added from
 #     Browse's "Wallpaper Engine (Local)" brings its base from that folder the same way (a link), one whose base isn't
-#     there needs it, one whose base there is a web wallpaper says so (never added); trashing a preset leaves its base alone.
+#     there needs it, one whose base there is a web wallpaper says so when that folder's project.json names the id (never
+#     added); a scene base landing beats a saved non-scene kind; trashing a preset leaves its base alone.
 #  2. layered properties (SceneProperties): a preset's sidebar lists its base's properties with the preset's values as
 #     their defaults (conditions read them too); the card's own tweaks go to the preset's index entry only (a tweak equal
 #     to the preset's value drops, Reset returns to it); the base's tweaks never reach the preset or the other way round;
@@ -239,6 +240,13 @@ check "a base that is itself a preset → its reason" "$(pf "$LIB/workshop/91000
 check "a base that is a video → its reason" "$(pf "$LIB/workshop/910000204" '.presetReason')" '"Its base is a video wallpaper, not a scene"'
 check "a base the download found to be a web wallpaper (LibMeta.baseKind), not here → that reason, not 'needs'" \
   "$(pf "$LIB/workshop/910000205" '.presetReason')" '"Its base is a web wallpaper, not a scene"'
+# what is here beats what was said: a scene base of that id lands → the preset plays, the saved kind notwithstanding
+mk_base "$LIB/workshop/900000003" "Base scene (a scene base lands)"
+idx workshop '.["900000003"] = {title: "Base scene (a scene base lands)", workshopId: "900000003", isScene: true}'
+check "a scene base lands for a preset saved with a web base → it plays over it" \
+  "$(jq -r '.["910000205"].baseKind' "$LIB/workshop/index.json") $(pf "$LIB/workshop/910000205" '[.presetReason, .basePath]')" \
+  "web [null,\"$LIB/workshop/900000003\"]"
+rm -r "$LIB/workshop/900000003"; idx workshop 'del(.["900000003"])'
 
 echo "== 1. auto-import: presets in the Wallpaper Engine folder come in only with scene support on"
 mk_preset "$WE/910000301" '"900000001"' "Subscribed preset" '{"color":"0 0 1"}' preview.jpg
@@ -271,12 +279,18 @@ check "…its base comes from the same folder the same way (local/900000031, a l
 check "a preset whose base isn't in the folder → 200, it needs its base scene, nothing else added" \
   "$(weadd 910000332) $(sleep 1; pf "$LIB/local/910000332" '.presetReason') $([ -e "$LIB/local/900000032" ] && echo added || echo none)" \
   '200 "Needs its base scene" none'
-mkdir -p "$WE/900000033"; printf '{"type":"web","file":"index.html","title":"Web base"}' > "$WE/900000033/project.json"
+mkdir -p "$WE/900000033"; printf '{"type":"web","file":"index.html","title":"Web base","workshopid":"900000033"}' > "$WE/900000033/project.json"
 mk_preset "$WE/910000333" '"900000033"' "Local preset, web base" '{"color":"0 0 1"}' preview.jpg
 st=$(weadd 910000333)
 for _ in $(seq 1 30); do r=$(pf "$LIB/local/910000333" '.presetReason'); [ "$r" != '"Needs its base scene"' ] && break; sleep 0.1; done
 check "a preset whose base in the folder is a web wallpaper → 200, greyed with why, the base not added" \
   "$st $r $([ -e "$LIB/local/900000033" ] && echo added || echo none)" '200 "Its base is a web wallpaper, not a scene" none'
+# a folder only its name ties to the id (its project.json names none): no kind is saved from it
+mkdir -p "$WE/900000034"; printf '{"type":"web","file":"index.html","title":"Web base by name"}' > "$WE/900000034/project.json"
+mk_preset "$WE/910000334" '"900000034"' "Local preset, web base by name" '{"color":"0 0 1"}' preview.jpg
+check "a preset whose base folder there is a web wallpaper named only by its folder → needs its base scene, no kind saved" \
+  "$(weadd 910000334) $(sleep 1; pf "$LIB/local/910000334" '.presetReason') $(jq -c '.["910000334"].baseKind // null' "$LIB/local/index.json")" \
+  '200 "Needs its base scene" null'
 
 echo "== 1. trash: a preset goes, its base stays"
 # the base's own fields (the background facts pass may add its frame size or size on disk meanwhile)

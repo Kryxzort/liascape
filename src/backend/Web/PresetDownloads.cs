@@ -132,8 +132,8 @@ public static class PresetDownloads
     /// scene from that same place, the way the preset came (`add`: that route's own link or copy), unless the library has it
     /// (reused). `baseIn` = the base's folder there by Workshop id, null = not there. Nothing is asked of Steam and no download
     /// mode is involved. A base that isn't there leaves the preset "Needs its base scene" (its button fetches it by the
-    /// download mode); one that is there but isn't a scene (a video, a web wallpaper, another preset) is never added and the
-    /// preset says what it is (LibMeta.BaseKind). Never throws.
+    /// download mode); one that is there but isn't a scene (a video, a web wallpaper, another preset) is never added, and the
+    /// preset says what it is (LibMeta.BaseKind) when that folder's own project.json names the id. Never throws.
     /// Guards: test-presets.sh § 1 Wallpaper Engine (Local), test-folder-import.sh § presets
     public static async Task AddBaseFromAsync(LibraryItem preset, string where, Func<string, string?> baseIn, Func<string, Task> add)
     {
@@ -150,8 +150,13 @@ public static class PresetDownloads
             if (kind != "scene")
             {
                 Console.WriteLine($"library: {who}: its base {baseId} in {where} is a {kind} wallpaper — not added");
-                LibraryStore.SetMeta(dir, m => { m.BaseKind = kind; m.BaseTitle ??= TitleOf(baseDir); });
-                EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir, PlayerEngine.IsLiascapePlayer).Reason });
+                // saved only when the folder's own project.json says it is that Workshop item: a folder merely named by the
+                // id is a guess, and a saved kind is the preset's reason until a scene base of that id is in the library
+                if (ProjectString(baseDir, "workshopid") == baseId)
+                {
+                    LibraryStore.SetMeta(dir, m => { m.BaseKind = kind; m.BaseTitle ??= ProjectString(baseDir, "title"); });
+                    EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir, PlayerEngine.IsLiascapePlayer).Reason });
+                }
                 return;
             }
             Console.WriteLine($"library: {who}: adding its base {baseId} from {where} too");
@@ -162,12 +167,18 @@ public static class PresetDownloads
         catch (Exception e) { Console.WriteLine($"library: {who}: adding its base scene from {where} failed: {e.Message}"); }
     }
 
-    static string? TitleOf(string dir)
+    static string? TitleOf(string dir) => ProjectString(dir, "title");
+
+    // a project.json value as a string (a number's digits too: WE writes `workshopid` either way); null = none or unreadable
+    static string? ProjectString(string dir, string key)
     {
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "project.json")));
-            return doc.RootElement.TryGetProperty("title", out var t) && t.GetString() is { Length: > 0 } s ? s : null;
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object || !doc.RootElement.TryGetProperty(key, out var v)) return null;
+            var s = v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString()
+                : v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetRawText() : null;
+            return s is { Length: > 0 } ? s : null;
         }
         catch { return null; }
     }

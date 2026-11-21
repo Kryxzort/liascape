@@ -64,8 +64,9 @@ public static class FolderImportOps
     // identified again: the dialog's list may be minutes old). `watch` = the scanned folder, from now on watched (link or copy:
     // `copy`), `skip` = what the user left unticked there, which the watch never imports. The folder joins the list once the
     // ticked items are in (its first pass then finds them there: nothing is imported twice). `roots` = the folders the dialog
-    // scanned: a ticked preset's base scene is looked for there (only a root holding a ticked path), ticked or not, never one
-    // in `skip`. Returns how many it queued.
+    // scanned: a ticked preset's base scene is looked for there (only a root holding a ticked path). The dialog sends what
+    // the user left unticked as `skip` whether or not it watches, and a preset never brings one of those as its base: the
+    // user's untick wins, the preset then needs its base scene. Returns how many it queued.
     public static object ImportFound(ImportFoundReq r)
     {
         var paths = (r.Paths ?? []).Select(Norm).OfType<string>().Distinct().ToList();
@@ -73,7 +74,7 @@ public static class FolderImportOps
         if (watch != null && !Directory.Exists(watch)) watch = null;
         var skip = watch == null ? [] : (r.Skip ?? []).Select(Norm).OfType<string>().Where(x => x.StartsWith(watch + "/", StringComparison.Ordinal)).Distinct().ToList();
         var roots = (r.Roots ?? []).Select(Norm).OfType<string>()
-            .Where(x => paths.Any(p => p == x || p.StartsWith(x + "/", StringComparison.Ordinal))).Distinct().ToList();
+            .Where(x => paths.Any(p => p == x || p.StartsWith(x.TrimEnd('/') + "/", StringComparison.Ordinal))).Distinct().ToList();
         if (paths.Count == 0) { if (watch != null) SetWatched(watch, r.Copy, skip); return new { queued = 0 }; }
         Interlocked.Add(ref _queued, paths.Count);
         LibraryOps.Set("import", "import", _done, _queued);
@@ -90,7 +91,7 @@ public static class FolderImportOps
                 if (found.Count > take.Count) Step(found.Count - take.Count);
                 // the scanned folders' Wallpaper Engine items by Workshop id, scanned only once a preset asks for its base
                 Dictionary<string, string>? tree = null;
-                var skipped = skip.ToHashSet(StringComparer.Ordinal);
+                var skipped = (r.Skip ?? []).Select(Norm).OfType<string>().ToHashSet(StringComparer.Ordinal);
                 string? BaseIn(string id)
                 {
                     tree ??= TreeOf(roots, known);
@@ -142,16 +143,19 @@ public static class FolderImportOps
 
     // A preset can't play without its base scene, so each preset this import added brings its base from the same folder tree
     // (`baseIn`: its folder there by Workshop id) the way this import brings items: linked or copied, a watched folder's mark,
-    // never a Steam subscription, never a file a watch still sees being written (`settledBefore`: its next pass brings it).
-    // The one helper every local way a preset arrives shares (PresetDownloads.AddBaseFromAsync) reuses a base the library has
-    // and never adds one that isn't a scene (the preset says what it is). Runs after the whole batch, so a base ticked or
-    // found beside its preset is imported once. Guard: scripts/test-folder-import.sh § presets
+    // never a Steam subscription, never a file a watch still sees being written (`settledBefore`: its next pass brings it),
+    // never while "Play scenes" is off (a scene the user can't play doesn't land only because a preset named it; the dialog
+    // can't tick a preset then, a watch waits). The one helper every local way a preset arrives shares
+    // (PresetDownloads.AddBaseFromAsync) reuses a base the library has and never adds one that isn't a scene (the preset
+    // says what it is). Runs after the whole batch, so a base ticked or found beside its preset is imported once.
+    // Guard: scripts/test-folder-import.sh § presets
     private static async Task BringBasesAsync(List<LibraryItem> added, bool link, Func<FolderScanner.Found, string?> watchedFrom,
         Func<string, string?> baseIn, DateTime? settledBefore)
     {
         foreach (var preset in added.Where(i => i.IsScene && Presets.Read(i.VideoPath) != null).ToList())
             await PresetDownloads.AddBaseFromAsync(preset, "its imported folder", baseIn, async dir =>
             {
+                if (!SettingsService.Load().AllowScenes) { Console.WriteLine($"import: {dir}: a preset's base scene, not imported while Play scenes is off"); return; }
                 if (FolderScanner.Identify(dir, FolderScanner.Known.Load()) is not { Subscription: false } f) return;
                 if (settledBefore is { } c && f.Mtime > c) return;
                 if (await ImportOneAsync(f, link, watchedFrom(f)) is { } b) added.Add(b);

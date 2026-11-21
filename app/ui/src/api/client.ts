@@ -302,8 +302,8 @@ export const api = {
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
   lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
   // API: a folder's (or dropped files') wallpapers listed before anything lands (Web/FolderImportOps.cs Scan), then the ticked
-  // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked there; `roots`: the
-  // folders scanned, where a ticked preset's base scene is looked for)
+  // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked, which a watch never
+  // imports and a preset never brings as its base; `roots`: the folders scanned, where a ticked preset's base is looked for)
   scanImport: (paths: string[]) => jpost<ImportScan>("/library/scan", { paths }),
   importFound: (body: { paths: string[]; copy: boolean; watch?: string | null; skip?: string[]; roots?: string[] }) =>
     jpost<{ queued: number }>("/library/import-found", body),

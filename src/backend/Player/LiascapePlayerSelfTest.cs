@@ -1038,13 +1038,15 @@ public static class LiascapePlayerSelfTest
         Row("base found, a scene", F("123"), "910", null, baseDir, "scene", true, PresetProblem.None, baseDir, null);
         Row("no base id", F(null), "910", null, baseDir, "scene", true, PresetProblem.NoBase, null, "Its preset file names no base scene");
         Row("its own id", F("910"), "910", null, "/lib/workshop/910", "preset", true, PresetProblem.NoBase, null, "Its preset file names no base scene");
-        Row("the download said web", F("123"), "910", "web", baseDir, "scene", true, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
+        Row("the download said web, no base here", F("123"), "910", "web", null, null, true, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
+        Row("the download said web, a video base here", F("123"), "910", "web", baseDir, "video", true, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
+        Row("the download said web, a scene base here now", F("123"), "910", "web", baseDir, "scene", true, PresetProblem.None, baseDir, null);
         Row("the download said scene", F("123"), "910", "scene", baseDir, "scene", true, PresetProblem.None, baseDir, null);
         Row("no base folder", F("123"), "910", null, null, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
         Row("a base folder of no kind (not whole yet)", F("123"), "910", null, baseDir, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
         Row("the base is a preset", F("123"), "910", null, baseDir, "preset", true, PresetProblem.BaseNotScene, baseDir, "Its base is a preset wallpaper, not a scene");
         Row("the base is a video", F("123"), "910", null, baseDir, "video", true, PresetProblem.BaseNotScene, baseDir, "Its base is a video wallpaper, not a scene");
-        Row("the download said application", F("123"), "910", "application", baseDir, "scene", true, PresetProblem.BaseNotScene, null, "Its base is an application wallpaper, not a scene");
+        Row("the download said application", F("123"), "910", "application", null, null, true, PresetProblem.BaseNotScene, null, "Its base is an application wallpaper, not a scene");
         Row("all fine, legacy engine", F("123"), "910", null, baseDir, "scene", false, PresetProblem.Legacy, baseDir, "Presets play only in the Liascape player");
         Row("no base folder, legacy engine", F("123"), "910", null, null, null, false, PresetProblem.NeedsBase, null, "Needs its base scene");
 

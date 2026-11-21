@@ -90,7 +90,8 @@ export function ImportDialog() {
     if (!scan || busy) return;
     setBusy(true);
     const w = watch && canWatch ? root : null;
-    const skip = w ? scan.items.filter((i) => tickable(i, scan) && !ticked.has(i.path)).map((i) => i.path) : [];
+    // what the user unticked, watched or not: a ticked preset never brings an unticked base scene along
+    const skip = scan.items.filter((i) => tickable(i, scan) && !ticked.has(i.path)).map((i) => i.path);
     try {
       await api.importFound({ paths: picked.map((i) => i.path), copy, watch: w, skip, roots: scan.folders });
       setStatus(picked.length ? `Importing ${n(picked.length, "wallpaper", "wallpapers")}` : `Watching ${root} for new wallpapers`);

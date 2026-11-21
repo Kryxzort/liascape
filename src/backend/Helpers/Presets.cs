@@ -128,16 +128,18 @@ public static class Presets
     }
 
     // The rule (pure; the self-test's table). The first problem wins: no base named (no id, or its own id: never resolved
-    // through itself) → a base the download found isn't a scene (LibMeta.BaseKind) → the base isn't in the library (or
-    // isn't whole) → the base folder isn't a scene (a preset: never resolved recursively; a video) → the legacy engine.
+    // through itself) → a base the download found isn't a scene (LibMeta.BaseKind), unless a scene base of that id is in
+    // the library now (what is here beats what was said: a saved kind never keeps a playable preset greyed) → the base
+    // isn't in the library (or isn't whole) → the base folder isn't a scene (a preset: never resolved recursively; a
+    // video) → the legacy engine. Guard: player-selftest PresetAssertions, test-presets.sh § 1 "a scene base lands"
     internal static PresetStatus StatusFor(PresetFile f, string? selfId, string? baseKind, Func<string, string?> baseDirOf,
         Func<string, string?> kindOfDir, bool liascapePlayer)
     {
         if (f.BaseId is not { } id || id == selfId) return new(PresetProblem.NoBase, null, NoBaseReason);
-        if (baseKind is { Length: > 0 } bk && !bk.Equals("scene", StringComparison.OrdinalIgnoreCase))
-            return new(PresetProblem.BaseNotScene, null, NotSceneReason(bk));
         var dir = baseDirOf(id);
         var kind = dir == null ? null : kindOfDir(dir);
+        if (kind != "scene" && baseKind is { Length: > 0 } bk && !bk.Equals("scene", StringComparison.OrdinalIgnoreCase))
+            return new(PresetProblem.BaseNotScene, null, NotSceneReason(bk));
         if (dir == null || kind == null) return new(PresetProblem.NeedsBase, null, NeedsBaseReason);
         if (kind != "scene") return new(PresetProblem.BaseNotScene, dir, NotSceneReason(kind));
         if (!liascapePlayer) return new(PresetProblem.Legacy, dir, LegacyReason);
