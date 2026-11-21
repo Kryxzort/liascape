@@ -563,7 +563,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       when the adapter integration test happens to exercise it. Derive a JSON Schema from the Rust types (`schemars`),
       commit it, and add a test that checks it is current and that every C# DTO field exists in it with a matching
       type (or generate the C# types from it). Same idea later for the UI's `api/client.ts` vs the backend's web API.
-Two bug classes kept recurring; fix the class, not the instance:
 
 ## Older backlog
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
