@@ -184,6 +184,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] UI matrix fuzz: `playlistBarDrag:lastToSecond` fails "a switch was requested" (a playlist-bar drag of the last item
+      to second asks the player to switch), on lp-player as well as with the #67 change. Replay: `scripts/test-ui-matrix.sh --fuzz-replay 'pending:seq:itemSpdDrag+next:shown,itemVolReset:other,seq:plTrEffect+next,itemVolDrag:other,seq3:playlistBarRemove+trashUndo+next,playlistBarVol:off,seq5:playlistBarDrag+next+pause+resume+next,playlistBarDrag:lastToSecond'`.
+      Find whether the drag really switches (a product bug) or the cell misreads a switch an earlier step queued.
 - [ ] Settings → "Video memory cap (MiB)" accepts up to 1048576 (1 TiB: `views/Settings.tsx` NumInput `max`). Bound it by the
       card's real VRAM: the player already reads the total (`src/player/src/vram.rs` Probe: NVML, else AMD's
       `mem_info_vram_total`); surface it to the UI, make it the field's `max`, and clamp a saved value above it with a
