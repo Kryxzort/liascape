@@ -184,6 +184,15 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] After #114 lands: make Knip (`npx knip@5` in `app/ui`) a check — 23 unused exports today (14 values, 9 types:
+      e.g. `SIDE_SLIDE_MS`, `useFilterDocked`, `presetsUsing`, `locateFx`). Per export: drop `export` when only its own
+      file uses it, delete it when nothing does (a probe reading it through the page counts as a use). Then add Knip as
+      a devDependency with a `knip.json` and a `scripts/check-*` hook so new dead exports fail.
+- [ ] A failure recorder for the UI matrix: when a cell fails, `app/shell/cdp.js` saves the last ~20 actions (what was
+      clicked / typed / waited for, with timings), the console and failed network requests since the cell began, a
+      screenshot and the DOM at the failure, next to the cell's log. Today an agent re-runs a red cell with added
+      logging to learn this. Cheaper than porting the probes to Playwright (27k lines, 24 files, ~850 cells) for the
+      part of its trace viewer that matters; new probes may still use Playwright over CDP if it proves itself.
 - [ ] UI matrix fuzz: `playlistBarDrag:lastToSecond` fails "a switch was requested" (a playlist-bar drag of the last item
       to second asks the player to switch), on lp-player as well as with the #67 change. Replay: `scripts/test-ui-matrix.sh --fuzz-replay 'pending:seq:itemSpdDrag+next:shown,itemVolReset:other,seq:plTrEffect+next,itemVolDrag:other,seq3:playlistBarRemove+trashUndo+next,playlistBarVol:off,seq5:playlistBarDrag+next+pause+resume+next,playlistBarDrag:lastToSecond'`.
       Find whether the drag really switches (a product bug) or the cell misreads a switch an earlier step queued.
