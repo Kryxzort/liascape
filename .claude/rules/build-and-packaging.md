@@ -41,6 +41,7 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 
 ## LWE core (scenes)
 - Built from the owner's fork at the commit in `third_party/lwe/PIN`, with `patches/lwe/` on top, by `scripts/lwe.sh fetch prepare build check`. Patch and upstream policy: `UPSTREAM.md`.
+- A cargo build that bakes a Nix store core into the worker's RUNPATH (the devShell's `LIASCAPE_LWE_CORE_DIR`, no `LIASCAPE_LWE_RPATH`) roots it: `build.rs` `root_core` points the indirect GC root `<target>/<profile>/lwe-core-gcroot` at it and re-points it when the core changes (a new pin), so a garbage collection never takes a built worker's core (every worker would exit 127) and an old core goes once no build dir names it. Guard: `src/player/tests/lwe_build.rs::worker_build_roots_its_core`.
 
 ## Dev stack
 - `bash scripts/dev.sh` installs and starts the systemd user units `liascape-vite` (HMR :5173) and `liascape-watch` (`dotnet watch … serve`, :5174, media :5175) from `scripts/dev/`; `bash scripts/dev-stop.sh` stops them. Launch the app normally; `app/shell/main.js` detects Liascape's Vite by its marker header (`app/shell/vite-detect.js`).

@@ -6956,6 +6956,132 @@ fn missing_scene_folder_fails_without_crash_record() {
     );
 }
 
+/// A copy of the scene worker that the dynamic loader can't start: its RUNPATH names a core dir
+/// that doesn't exist, as after a Nix garbage collection took the devShell's `lwe-core`. `None`
+/// (skip) without the `lwe` feature (the worker then links no core).
+fn worker_without_its_core(root: &Path) -> Option<PathBuf> {
+    if !cfg!(feature = "lwe") {
+        println!("SKIP: built without the `lwe` feature");
+        return None;
+    }
+    let mut bin = std::fs::read(env!("CARGO_BIN_EXE_liascape-scene-worker")).unwrap();
+    // The same length, one letter of the core dir's name changed: a dir that doesn't exist.
+    // An `$ORIGIN` RUNPATH (LIASCAPE_LWE_RPATH) needs no change: the copy has no core beside it.
+    if let Some(core) = std::env::var("LIASCAPE_LWE_CORE_DIR").ok().filter(|d| !d.is_empty()) {
+        let rpath = format!("{core}/lib").into_bytes();
+        let at = core.rfind('/').unwrap() + 1;
+        let mut gone = rpath.clone();
+        gone[at] = if gone[at] == b'_' { b'-' } else { b'_' };
+        let mut i = 0;
+        while let Some(off) = bin[i..].windows(rpath.len()).position(|w| w == rpath) {
+            let off = i + off;
+            bin[off..off + rpath.len()].copy_from_slice(&gone);
+            i = off + rpath.len();
+        }
+    }
+    let dir = root.join("broken-install");
+    std::fs::create_dir_all(&dir).unwrap();
+    let worker = dir.join("liascape-scene-worker");
+    std::fs::write(&worker, &bin).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = Command::new(&worker)
+        .arg("--features")
+        .env_remove("LD_LIBRARY_PATH")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(liascape_player::worker::LOADER_FAILED),
+        "the broken copy still starts — this test would prove nothing: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Some(worker)
+}
+
+/// A worker that can't load LWE's core (exit 127 before `Hello`) can't play any scene, and that
+/// is no crash of the scene: one fatal `source.error` and `scene.renderer_missing` naming the
+/// reason, no restart, no `source.broken`, no crash record — so the backend marks nothing crashed.
+#[test]
+fn worker_without_its_core_fails_without_crash_record() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let Some(worker) = worker_without_its_core(&root) else {
+        return;
+    };
+    let srv = Serve::spawn_env(
+        root.clone(),
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
+            ("LIASCAPE_SCENE_WORKER_BIN", worker.as_path()),
+        ],
+        Some(serial),
+    );
+    let mut c = srv.client();
+    let dir = common::synthetic_scene("api-nocore-900000021", &synth(Pattern::Solid));
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(&mut c, &id);
+    let reason = wait_for(Duration::from_secs(10), "source.error", || {
+        let _ = c.call("step", json!({"ms": 16}));
+        logs_of(&mut c, "source.error")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+            .and_then(|e| e["reason"].as_str().map(str::to_string))
+    });
+    assert!(
+        reason.contains(liascape_player::worker::RENDERER_MISSING)
+            && reason.contains("liblinux-wallpaperengine-core"),
+        "{reason}"
+    );
+    let ev = logs_of(&mut c, "scene.renderer_missing")
+        .into_iter()
+        .find(|e| e["id"] == json!(id))
+        .unwrap_or_else(|| panic!("no scene.renderer_missing for {id}"));
+    assert_eq!(ev["path"], json!(s(&dir)), "{ev}");
+    assert_eq!(ev["scene_id"], json!("api-nocore-900000021"), "{ev}");
+    assert_eq!(
+        ev["reason"],
+        json!(liascape_player::worker::RENDERER_MISSING),
+        "{ev}"
+    );
+    assert!(
+        ev["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("error while loading shared libraries")),
+        "{ev}"
+    );
+    for _ in 0..5 {
+        let _ = c.call("step", json!({"ms": 100}));
+    }
+    assert!(logs_of(&mut c, "worker.restart").is_empty());
+    assert!(logs_of(&mut c, "worker.broken").is_empty());
+    assert!(logs_of(&mut c, "source.broken").is_empty());
+    assert_eq!(crash_files(&srv), 0, "no crash record");
+    // `liascape-player scene-check` (the backend's word while no player runs) gives the same reason.
+    let out = Command::new(BIN)
+        .arg("scene-check")
+        .env("HOME", &root)
+        .env_remove("LIASCAPE_WE_ASSETS_DIR")
+        .env("LIASCAPE_SCENE_WORKER_BIN", &worker)
+        .env("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1")
+        .env_remove("LD_LIBRARY_PATH")
+        .output()
+        .unwrap();
+    let j: Value = serde_json::from_slice(&out.stdout).expect("one JSON line");
+    assert_eq!(out.status.code(), Some(1), "{j}");
+    assert!(
+        j["reason"]
+            .as_str()
+            .is_some_and(|r| r.starts_with(liascape_player::worker::RENDERER_MISSING)
+                && r.contains("liblinux-wallpaperengine-core")),
+        "{j}"
+    );
+}
+
 /// A scene whose worker crashes past its
 /// restart budget logs ONE `source.broken {id, path, scene_id, reason, restarts, record, signal}`
 /// — the backend adapter marks the item crashed from it and advances a rotation.

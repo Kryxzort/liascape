@@ -5,7 +5,8 @@
 //! `rustPlatform.bindgenHook` (libclang) for this.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -46,6 +47,7 @@ fn main() {
 /// `scripts/lwe.sh build` (`build/lwe-core`). The worker's RUNPATH is that dir, or
 /// `$LIASCAPE_LWE_RPATH` when set (`install.sh`: `$ORIGIN/../../lib/liascape`, the core installed in lib/liascape/ beside
 /// libexec/liascape/; `$ORIGIN` when the executables sit in lib/liascape/ too, as in the Arch package).
+/// A RUNPATH into the Nix store is rooted ([`root_core`]).
 fn lwe_link() {
     println!("cargo::rerun-if-env-changed=LIASCAPE_LWE_CORE_DIR");
     println!("cargo::rerun-if-env-changed=LIASCAPE_LWE_RPATH");
@@ -78,4 +80,57 @@ fn lwe_link() {
     println!("cargo::rustc-link-arg-bin={bin}=-L{dir}/lib");
     println!("cargo::rustc-link-arg-bin={bin}=-llinux-wallpaperengine-core");
     println!("cargo::rustc-link-arg-bin={bin}=-Wl,-rpath,{rpath}");
+    if rpath == format!("{dir}/lib") {
+        root_core(&dir);
+    }
+}
+
+/// The link [`root_core`] keeps beside the binaries (`<target>/<profile>/`).
+const CORE_ROOT: &str = "lwe-core-gcroot";
+
+/// A worker whose RUNPATH names a Nix store path works only while that path lives, and nothing
+/// else roots the devShell's `lwe-core`: a garbage collection takes it and every worker of the
+/// build exits 127 (the loader can't open the core). So the build that bakes the path in roots it,
+/// as an indirect root `<target>/<profile>/lwe-core-gcroot` → the core: it lives as long as that
+/// build dir, and the next build against another core (a new pin) re-points it, so an old core is
+/// freed once no build dir names it. A Nix sandbox build has no `nix-store` on PATH and needs none
+/// (the package's closure holds the core). Guard: `tests/lwe_build.rs::worker_build_roots_its_core`.
+fn root_core(dir: &str) {
+    let Some(store_path) = store_path_of(dir) else {
+        return; // `scripts/lwe.sh build`'s dir: nothing collects it
+    };
+    let Some(out) = env::var_os("OUT_DIR") else {
+        return;
+    };
+    // OUT_DIR = <target>/<profile>/build/<package>-<hash>/out
+    let Some(profile) = Path::new(&out).ancestors().nth(3) else {
+        return;
+    };
+    let link = profile.join(CORE_ROOT);
+    match Command::new("nix-store")
+        .arg("--add-root")
+        .arg(&link)
+        .arg("--realise")
+        .arg(&store_path)
+        .output()
+    {
+        // No `rerun-if-changed` on the link: cargo reads its own mtime, which this run just moved, so
+        // every build would run this script and relink the crate again.
+        Ok(o) if o.status.success() => {}
+        Ok(o) => println!(
+            "cargo::warning=could not root the LWE core {store_path} at {} (a Nix garbage collection \
+             would leave liascape-scene-worker unable to start): {}",
+            link.display(),
+            String::from_utf8_lossy(&o.stderr).trim()
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => println!("cargo::warning=could not run nix-store to root the LWE core: {e}"),
+    }
+}
+
+/// `/nix/store/<hash>-<name>` of a path inside the store, else `None`.
+fn store_path_of(dir: &str) -> Option<String> {
+    let rest = dir.strip_prefix("/nix/store/")?;
+    let name = rest.split('/').next().filter(|n| !n.is_empty())?;
+    Some(format!("/nix/store/{name}"))
 }

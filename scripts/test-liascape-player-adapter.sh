@@ -10,7 +10,8 @@
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
 #   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
 #   engine liascape-player → legacy with nothing playing · scenes (synthetic scene items: apply, every live
-#   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, no worker) ·
+#   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, a worker
+#   that can't load the scene renderer → told why, never marked, no worker) ·
 #   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse) ·
 #   the app closed (the program rotates alone, no timer/restart daemon, none of legacy's daemon files
 #   ever written), keybinds as one-shot CLI processes with no backend (a 10× `next` storm, every action), `liascape
@@ -1196,6 +1197,40 @@ waitfor $WAIT s4_failed && ok "a missing scene folder → transition.failed ($sc
 jq -e '."900000004".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S4" '.events[] | select(.path==$p) | .id')" ] \
   && ok "…not marked crashed (no source.broken)" || bad "a missing folder was marked crashed: $(jq -c '."900000004"' "$IDX")"
 stop_now
+
+# a scene worker that can't load the scene renderer (its RUNPATH names a core dir that's gone, as after a Nix garbage
+# collection took the dev build's core): the switch fails, the UI is told why, and the scene is NOT marked crashed
+BW=$T/broken-install/liascape-scene-worker; mkdir -p "${BW%/*}"
+python3 - "$LIASCAPE_SCENE_WORKER_BIN" "$BW" <<'PY'
+import os, re, subprocess, sys
+src, dst = sys.argv[1:3]
+b = open(src, "rb").read()
+# the RUNPATH entry holding the core, its second byte changed (same length: /nix/store/… → /_ix/store/…, a dir that
+# isn't); an $ORIGIN one needs nothing (the copy has no core beside it)
+m = re.search(r"\((?:RUN|R)PATH\).*\[(.*)\]", subprocess.run(["readelf", "-d", src], capture_output=True, text=True).stdout)
+for e in (m.group(1).split(":") if m else []):
+    if e.startswith("/") and os.path.exists(os.path.join(e, "liblinux-wallpaperengine-core.so.0")):
+        b = b.replace(e.encode(), (e[0] + ("_" if e[1] != "_" else "-") + e[2:]).encode())
+open(dst, "wb").write(b); os.chmod(dst, 0o755)
+PY
+"$BW" --features >/dev/null 2>&1; bwc=$?
+[ $bwc = 127 ] && ok "a worker copy the loader can't start (exit 127)" || bad "the broken worker copy exited $bwc, not 127 — the section below proves nothing"
+restart_player 7m "LIASCAPE_SCENE_WORKER_BIN=$BW"
+ws_listen "$T/ws-unplayable.log"
+waitfor $WAIT eval 'grep -q " 101 " "$T/ws-unplayable.log"' || bad "WebSocket: $(head -c 300 "$T/ws-unplayable.log")"
+ns=$(nsch); post /apply "{\"path\":\"$S2\"}" >/dev/null
+s2_failed() { sc=$(corr_to "$S2" "$ns" now); [ -n "$sc" ] && [ "$(corr_has "$sc" failed)" -ge 1 ]; }
+waitfor $WAIT s2_failed && ok "a scene whose worker can't load the renderer → transition.failed ($sc)" || bad "renderer missing: corr ${sc:-none}, cur $(basename "$(cur path)")"
+unplayable() { grep "scene-unplayable" "$T/ws-unplayable.log" | grep -F "900000002" | grep -q "scene renderer is missing"; }
+waitfor $WAIT unplayable && ok "WS scene-unplayable says why: $(grep -o '"message":"[^"]*"' "$T/ws-unplayable.log" | tail -1)" \
+  || bad "no WS scene-unplayable naming the missing renderer: $(grep -c . "$T/ws-unplayable.log") lines"
+sleep 1   # a crash mark would come from source.broken off the event thread: give one the time to land
+jq -e '."900000002".crashed // false | not' "$IDX" >/dev/null && [ -z "$(ctl logs '{"kind_prefix":"source.broken","limit":1000}' | jq -r --arg p "$S2" '.events[] | select(.path==$p) | .id')" ] \
+  && ! grep -q "scene-crashed" "$T/ws-unplayable.log" \
+  && ok "…not marked crashed (no source.broken, no WS scene-crashed)" || bad "a missing renderer marked the scene crashed: $(jq -c '."900000002"' "$IDX")"
+kill "$WSP" 2>/dev/null; WSP=""
+stop_now
+restart_player 7n
 
 lib_steps_no_scene() {   # $1 = label: /apply a video, then 8 × /next through a library of videos + scenes
   local hit=0 i

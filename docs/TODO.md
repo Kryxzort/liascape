@@ -42,12 +42,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-109. [ ] A dev build's scene worker links the LWE core by its Nix store path (`LIASCAPE_LWE_CORE_DIR` from `nix develop`),
-       which nothing roots: a Nix garbage collection removed it and every scene worker of the owner's release build
-       exited 127 ("cannot open liblinux-wallpaperengine-core.so.0"), so every scene got a crash mark. Root the core
-       whenever the dev shell builds against it (e.g. `nix build .#lwe-core -o src/player/target/lwe-core-gcroot` in
-       the devShell hook or `scripts/dev.sh`), and make a worker that can't load its core report that reason (not
-       "crashed") so the card says what's wrong.
 110. [ ] Three layout checks fail, on the build before preset wallpapers too (`LIASCAPE_MATRIX_SCREEN=2560x1440
        scripts/test-ui-matrix.sh --probe probe-layout.js`): switching to Settings forces 4–6 layouts from script
        (framer's `measureScroll`) and switching to Library runs a stray animation frame (`perf:tabs`); the text-shadow

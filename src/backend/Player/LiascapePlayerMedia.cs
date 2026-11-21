@@ -434,6 +434,17 @@ public static class LiascapePlayerMedia
             StoreLive(e, "OnSceneVramStopped", () => { if (stopped.Length > 0) PlayerHelper.OnSceneVramStopped(stopped, used, limit); });
             return;
         }
+        if (kind == "scene.renderer_missing")
+        {
+            // the worker couldn't load the scene renderer (LWE's core gone): no scene plays until Liascape is rebuilt,
+            // and none of them is to blame — the UI says why, nothing is marked crashed. A switch to it fails on its
+            // own (`transition.failed`, below). Guard: adapter IT § "a scene worker that can't load the scene renderer"
+            var missing = Str(e, "path");
+            var why = Str(e, "reason");
+            LiascapePlayerClient.Log($"scene {Path.GetFileName(missing)} can't play: {why} ({Str(e, "detail")})");
+            if (missing.Length > 0 && why.Length > 0) _ = Task.Run(() => PlayerHelper.OnSceneUnplayable(missing, why));
+            return;
+        }
         TrackIntent(kind, e);
         var outcome = OutcomeOf(kind, e);
         if ((outcome == null && kind != "transition.started") || !e.TryGetProperty("corr", out var c) || c.ValueKind != JsonValueKind.String) return;

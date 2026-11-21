@@ -698,6 +698,8 @@ public static class PlayerHelper
     public static Action<string>? OnSceneCrashed;
     // liascape-player: the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
     public static Action<string, double, double, string>? OnSceneVramStoppedCb;
+    // liascape-player: a scene can't play, not by its own fault (path, the UI's text)
+    public static Action<string, string>? OnSceneUnplayableCb;
     public static Action<string?>? OnWallpaperChanged;
 
     private record TimedState(
@@ -3970,6 +3972,15 @@ public static class PlayerHelper
         if (string.IsNullOrEmpty(path) || !IsScenePath(path)) return;
         OnSceneVramStoppedCb?.Invoke(path, usedMib, limitMib, VramStoppedMessage(usedMib, limitMib));
         AdvanceIfPlaying(path, $"scene over the VRAM limit ({usedMib:0} > {limitMib:0} MiB)");
+    }
+
+    // liascape-player: a scene can't play for a reason that isn't the scene's (`scene.renderer_missing`: the worker
+    // couldn't load the scene renderer) → the UI is told why (WS `scene-unplayable {path, message}`); it is never
+    // marked crashed, or one broken install would mark every scene the rotation reached.
+    public static void OnSceneUnplayable(string path, string message)
+    {
+        if (string.IsNullOrEmpty(path) || !IsScenePath(path)) return;
+        OnSceneUnplayableCb?.Invoke(path, message);
     }
 
     // the playing item of a running timed playlist is `path` → advance now (the tick's own advance: its owner,

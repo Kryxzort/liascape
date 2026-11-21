@@ -914,7 +914,9 @@ public sealed class LiascapePlayerClient
     // without it, TODO "A rejected `af` silences the video") → logged here, so the backend's log says why.
     // `scene.fonts` — at each scene load, the system fonts its text shows with another family (→ LiascapePlayerMedia
     // .OnSceneFonts: kept in the index for the item sidebar).
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.loudness", "scene.fonts", "program.", "source.rejected"];
+    // `scene.renderer_missing` — a scene's worker couldn't load the scene renderer (the install is broken, not the
+    // scene: → PlayerHelper.OnSceneUnplayable, never marked crashed).
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.renderer_missing", "scene.loudness", "scene.fonts", "program.", "source.rejected"];
     public event Action<string, JsonElement>? Event;
     // An entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
     // while no backend listened), drained on every subscription: (kind, its fields). Raised on the drain's thread, in

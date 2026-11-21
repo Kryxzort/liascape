@@ -62,7 +62,7 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `stuck_start_is_hung`, `endless_start_is_hung_at_the_cap`.
 - Fold `Start`/`Paused`/`Resize`/`Route`/`SetProperty`/`Gain`/`NoAudio`/`Speed`/`LoudnessMeter` into the
   restart's `Start` so a restart never resumes stale. Guard: `restart_start_folds_live_changes`.
-- A fatal `error` (can't play) is not a crash: no restart, no crash record; the caller stops the worker.
+- A fatal `error` (can't play) is not a crash: no restart, no crash record; the caller stops the worker. Nor is an exit 127 (`worker::LOADER_FAILED`) before `Hello`: the loader couldn't open LWE's core, so the host sends a fatal `RENDERER_MISSING` error and logs `scene.renderer_missing` (the backend says why and marks nothing). Guard: `tests/api.rs::worker_without_its_core_fails_without_crash_record`.
 - `stop()`/`Drop` never block: send `quit`, hand the pid to `worker::reap`; drain the pipe first (a fatal error's
   stderr line stays in the tail). Guards: `tests/worker.rs::stop_never_blocks`, `tests/api.rs::missing_scene_folder_fails_without_crash_record`.
 - End the worker with `_exit` once a scene may be live (`exit` runs driver exit handlers under LWE's video threads), log
@@ -75,7 +75,7 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 ## Build (`build.rs`, LWE core)
 - Only `liascape-scene-worker` links LWE (`cargo::rustc-link-arg-bin`); the compositor binary never does.
   Guard: `tests/lwe_build.rs::worker_links_the_core`.
-- Feature `lwe` is default; without `LIASCAPE_LWE_CORE_DIR` the build fails by design (`--no-default-features`: stub + synthetic).
+- Feature `lwe` is default; without `LIASCAPE_LWE_CORE_DIR` the build fails by design (`--no-default-features`: stub + synthetic). A RUNPATH into the Nix store is rooted by the build (`.claude/rules/build-and-packaging.md` § LWE core).
 - The pin lives in `third_party/lwe/PIN`; `UPSTREAM.md` § linux-wallpaperengine owns the patch series and
   resync recipe. Guards: `tests/lwe_build.rs::core_is_the_pinned_one`, `pin_matches_flake`.
 - Patch work: `LWE_DEV_SRC=<fork> bash scripts/lwe.sh build test`. Inside the devShell override

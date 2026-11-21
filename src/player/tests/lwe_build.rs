@@ -154,6 +154,44 @@ fn worker_links_the_core() {
     );
 }
 
+/// A worker linked against a core in the Nix store (the devShell's `lwe-core`) roots it beside
+/// itself (`build.rs` `root_core`): unrooted, a garbage collection leaves every scene worker of
+/// the build unable to start (exit 127).
+#[test]
+fn worker_build_roots_its_core() {
+    if !cfg!(feature = "lwe") {
+        println!("SKIP: built without the `lwe` feature");
+        return;
+    }
+    let Some(dir) = core_dir() else { return };
+    let Ok(rest) = dir.strip_prefix("/nix/store") else {
+        println!("SKIP: {} is not in the Nix store", dir.display());
+        return;
+    };
+    if std::env::var_os("IN_NIX_SHELL").is_none() && std::env::var_os("NIX_BUILD_TOP").is_some() {
+        println!("SKIP: a Nix sandbox build (the package's closure holds the core)");
+        return;
+    }
+    let core = Path::new("/nix/store").join(rest.components().next().expect("a store path"));
+    let worker = Path::new(env!("CARGO_BIN_EXE_liascape-scene-worker"));
+    let link = worker.parent().unwrap().join("lwe-core-gcroot");
+    let to = std::fs::read_link(&link)
+        .unwrap_or_else(|e| panic!("no root beside the worker ({}): {e}", link.display()));
+    assert_eq!(to, core, "{} roots another core", link.display());
+    let out = Command::new("nix-store")
+        .args(["--query", "--roots"])
+        .arg(&core)
+        .output()
+        .expect("run nix-store");
+    let roots = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        roots.lines().any(|l| l.starts_with(&format!("{} -> ", link.display()))),
+        "{} is not a GC root of {}:\n{roots}",
+        link.display(),
+        core.display()
+    );
+}
+
 #[test]
 fn patch_headers_are_complete() {
     let Some(repo) = repo() else { return };

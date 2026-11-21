@@ -330,16 +330,26 @@ fn scene_check(args: &[String]) -> ExitCode {
         }
     }
     let worker = liascape_player::paths::scene_worker_bin();
-    let features: Vec<String> = worker
+    let asked = worker.as_ref().and_then(|w| {
+        std::process::Command::new(w)
+            .arg("--features")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()
+    });
+    // A worker the loader can't start (its LWE core gone) answers nothing: say that, not "built
+    // without LWE".
+    let cant_load = asked
         .as_ref()
-        .and_then(|w| {
-            std::process::Command::new(w)
-                .arg("--features")
-                .stdin(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .output()
-                .ok()
-        })
+        .filter(|o| o.status.code() == Some(liascape_player::worker::LOADER_FAILED))
+        .map(|o| {
+            let err = String::from_utf8_lossy(&o.stderr);
+            match err.lines().find(|l| !l.trim().is_empty()) {
+                Some(l) => format!("{} ({})", liascape_player::worker::RENDERER_MISSING, l.trim()),
+                None => liascape_player::worker::RENDERER_MISSING.to_string(),
+            }
+        });
+    let features: Vec<String> = asked
         .and_then(|o| serde_json::from_slice(&o.stdout).ok())
         .unwrap_or_default();
     let home = std::env::var_os("HOME")
@@ -349,6 +359,8 @@ fn scene_check(args: &[String]) -> ExitCode {
     let synthetic = std::env::var("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES").as_deref() == Ok("1");
     let reason = if worker.is_none() {
         Some("liascape-scene-worker not found (LIASCAPE_SCENE_WORKER_BIN, next to liascape-player, PATH)".into())
+    } else if cant_load.is_some() {
+        cant_load
     } else if synthetic {
         None
     } else if !features.iter().any(|f| f == "lwe") {

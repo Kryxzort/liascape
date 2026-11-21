@@ -115,6 +115,13 @@ fn parse_start_activity(stat: &str) -> Option<StartActivity> {
     })
 }
 
+/// The dynamic loader's exit code when it can't load a library the worker needs (`ld.so`): the
+/// worker never exits with it itself.
+pub const LOADER_FAILED: i32 = 127;
+/// Why a worker that can't load LWE's core can't play (the binary or its core is gone: a Nix
+/// garbage collection, a half-removed install). User-facing: the backend shows it with the item.
+pub const RENDERER_MISSING: &str = "The scene renderer is missing — rebuild or reinstall Liascape";
+
 /// The child's socket end.
 pub const CHILD_FD: RawFd = 3;
 /// After socket EOF, a process that still hasn't exited by then is killed.
@@ -1330,6 +1337,39 @@ impl WorkerHost {
             self.state = WorkerState::Stopped;
             return;
         }
+        if code == Some(LOADER_FAILED) && p.hello_at.is_none() {
+            // The dynamic loader gave up before the worker ran a line: every restart would too, and
+            // the scene did nothing wrong — the install did. No restart, no crash record (that
+            // would mark every scene crashed): a fatal error with the reason, which the caller
+            // stops the host on, and `scene.renderer_missing` for the backend to say so.
+            // Guards: `tests/api.rs::worker_without_its_core_fails_without_crash_record`, adapter IT
+            // § "a scene worker that can't load the scene renderer".
+            let detail = self
+                .tail
+                .iter()
+                .rev()
+                .find(|l| l.contains("error while loading shared libraries"))
+                .cloned()
+                .unwrap_or_else(|| format!("exited with code {LOADER_FAILED} before it started"));
+            self.state = WorkerState::Stopped;
+            let path = self.scene_path();
+            log::event(
+                "worker",
+                Level::Error,
+                "scene.renderer_missing",
+                Some(self.corr.clone()),
+                json!({"id": self.spec.id, "path": path, "scene_id": scene_id_of(&path, &self.spec.id),
+                       "reason": RENDERER_MISSING, "detail": detail}),
+            );
+            out.push(WorkerEvent::Msg(
+                FromWorker::Error {
+                    reason: format!("{RENDERER_MISSING} ({detail})"),
+                    fatal: true,
+                },
+                Vec::new(),
+            ));
+            return;
+        }
 
         let how = match (signal, code) {
             (Some(s), _) => format!("killed by signal {s}"),
@@ -1379,6 +1419,15 @@ impl WorkerHost {
         }
     }
 
+    /// The scene's identity (`path`, not the folder a preset loads): what events and records name.
+    fn scene_path(&self) -> String {
+        match (&self.spec.record_path, &self.spec.start) {
+            (Some(p), _) => p.clone(),
+            (None, ToWorker::Start { path, .. }) => path.clone(),
+            _ => String::new(),
+        }
+    }
+
     fn broken(
         &mut self,
         reason: String,
@@ -1387,11 +1436,7 @@ impl WorkerHost {
         uptime: Duration,
         out: &mut Vec<WorkerEvent>,
     ) {
-        let path = match (&self.spec.record_path, &self.spec.start) {
-            (Some(p), _) => p.clone(),
-            (None, ToWorker::Start { path, .. }) => path.clone(),
-            _ => String::new(),
-        };
+        let path = self.scene_path();
         let scene_id = scene_id_of(&path, &self.spec.id);
         let mut rec = json!({
             "scene_id": scene_id,

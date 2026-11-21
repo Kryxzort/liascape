@@ -4,7 +4,7 @@ import { LayoutGroup } from "framer-motion";
 import { Square, Undo2 } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
 import { useStableFn } from "./hooks/useStableFn";
-import { useStore } from "./store";
+import { cantPlay, useStore } from "./store";
 import { useShallow } from "zustand/react/shallow";
 import { useEvents, type LiascapeEvent } from "./api/events";
 import { Browse } from "./views/Browse";
@@ -139,6 +139,12 @@ export default function App() {
     else if (e.type === "scene-vram-stopped") {
       const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop();
       s.setStatus(`Stopped ${t}: ${e.payload.message}`, true, true); // held: the rotation's switch off it lands right after
+    }
+    // liascape-player couldn't start a scene for a reason that isn't the scene's (the scene renderer is missing): say why,
+    // held; the card gets no crash mark (the backend marks nothing)
+    else if (e.type === "scene-unplayable") {
+      const t = useStore.getState().libraryItems.find((i) => i.videoPath === e.payload.path)?.title ?? e.payload.path.split("/").pop() ?? "";
+      s.setStatus(cantPlay(t, e.payload.message), true, true);
     }
     // a scene broke for good (liascape-player: past its restart budget) — the backend marked it crashed in its index:
     // its card shows it at once, not at the next library reload

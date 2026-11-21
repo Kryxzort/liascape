@@ -40,6 +40,16 @@ A broken scene is saved `broken: true` in the snapshot and restored as its previ
 second `source.broken` and no restore fade — without it a player restart gave a crash-looping scene a fresh budget
 every time. A source error marks the snapshot dirty (a break is no graph change).
 
+## Not a crash: a worker the loader can't start
+
+A worker that exits 127 before its `Hello` never ran: the dynamic loader couldn't open a library it links, in
+practice LWE's core (a dev build's core is a Nix store path, which a garbage collection removes unless the build
+rooted it; a half-removed install). Every restart would fail the same way and every scene would end up marked
+crashed, so the host spends no budget and writes no record: it logs `scene.renderer_missing {id, path, scene_id,
+reason, detail}` (the loader's line in `detail`) and hands the source a fatal error, which stops it like any load
+failure. The backend shows the reason with the item and marks nothing. A spare that dies this way is only a spare's
+failure (backoff). `liascape-player scene-check` gives the same reason when the worker can't start.
+
 ## `loading`
 
 Observed, read-only, false on every other kind: no first frame latched, no error, not broken, and a live worker
