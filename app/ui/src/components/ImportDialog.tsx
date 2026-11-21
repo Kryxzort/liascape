@@ -92,7 +92,7 @@ export function ImportDialog() {
     const w = watch && canWatch ? root : null;
     const skip = w ? scan.items.filter((i) => tickable(i, scan) && !ticked.has(i.path)).map((i) => i.path) : [];
     try {
-      await api.importFound({ paths: picked.map((i) => i.path), copy, watch: w, skip });
+      await api.importFound({ paths: picked.map((i) => i.path), copy, watch: w, skip, roots: scan.folders });
       setStatus(picked.length ? `Importing ${n(picked.length, "wallpaper", "wallpapers")}` : `Watching ${root} for new wallpapers`);
       close();
     } catch (e) { setBusy(false); setFailed((e as Error).message); }

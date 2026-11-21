@@ -22,6 +22,12 @@
 #          into it lists its items as subscriptions (the user's own file beside them as usual); /library/import-found of every
 #          path lands only the user's file, and watching the parent never imports a subscription, old or new: nothing in
 #          the library links into Steam's folder and Steam's files are unchanged.
+#  presets: Wallpaper Engine's own preset files (scripts/test-fixtures/presets) in a tree scan as one scene item each,
+#          `preset` with their base's id; a preset imported (copied or linked) is its own preset item and brings its base
+#          scene from the same tree the same way, ticked or not; a base the library has is reused, a web base is never
+#          imported (the preset says why), a base not there leaves "Needs its base scene"; in a watched folder a preset waits
+#          for "Play scenes", joins the playlist, plays once its base turns up there (the presets' base pass runs), and
+#          leaves when its folder goes; under the legacy engine its reason; nothing in the tree or the fixtures changes.
 #  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
 #          every root nor a watched folder's file by its own path, and no longer once the folder is unwatched.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
@@ -348,6 +354,89 @@ echo "== watch without events (a mount that sends none): the periodic pass"
 startbe LIASCAPE_WATCH_NO_EVENTS=1 LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=500 LIASCAPE_WATCH_RESCAN_MS=1500
 vid "$W2/k.mp4"
 if wait_for 10 has k; then ok "a new file comes in by the periodic pass"; else bad "a new file comes in by the periodic pass"; fi
+stopbe
+
+echo "== presets: a preset folder is its own preset item and brings its base scene from the same tree"
+# Wallpaper Engine's own preset files (scripts/test-fixtures/presets: real Workshop ids), each with a synthetic preview.
+# Their bases: 2932157836 a synthetic scene in another folder of the tree (never ticked), 3419466417 a web wallpaper there,
+# 3354740764 nowhere yet (it turns up later in a watched folder). The engine is liascape-player through a stub binary that
+# never plays (presets play only there); the legacy engine's reason at the end.
+FX=$ROOT/scripts/test-fixtures/presets
+PT=$T/presets-tree
+fxcopy() {   # $1 = fixture id, $2 = destination folder: the fixture with a preview of its own type
+  mkdir -p "$(dirname "$2")"; cp -r "$FX/$1" "$2"
+  case "$(jq -r .preview "$2/project.json")" in
+    preview.gif) ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=32x18:rate=4:duration=0.5" "$2/preview.gif" ;;
+    *) pic "$2/preview.jpg" ;;
+  esac
+}
+fxcopy 3009121253 "$PT/presets/3009121253"; fxcopy 3420428971 "$PT/presets/3420428971"; fxcopy 3520333138 "$PT/presets/3520333138"
+# the first fixture again under a folder that is no Workshop id (a user's own copy of the preset), retitled
+fxcopy 3009121253 "$PT/more/my-copy"; jq '.title = "Preset fixture 1, my copy"' "$PT/more/my-copy/project.json" > "$T/pj" && mv "$T/pj" "$PT/more/my-copy/project.json"
+scene "$PT/scenes/2932157836" "Base One"
+mkdir -p "$PT/web/3419466417"; printf '{"type":"web","file":"index.html","title":"Web Base"}' > "$PT/web/3419466417/project.json"; echo '<html>' > "$PT/web/3419466417/index.html"
+treesum() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum); }
+PT_SUM=$(treesum "$PT"); FX_SUM=$(treesum "$FX")
+printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+jq '.PlayerEngine = "liascape-player"' "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/s" && mv "$T/s" "$XDG_CONFIG_HOME/liascape/settings.json"
+startbe LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=800 LIASCAPE_WATCH_RESCAN_MS=60000
+check "the engine is liascape-player (the stub binary)" "$(api "$U/player-engine" | jq -r .active)" liascape-player
+pr() { item "$1" | jq -c '[.isPreset, .isScene, .presetReason, .basePath]'; }
+SP=$(post /library/scan "$(jq -nc --arg p "$PT" '{paths: [$p]}')")
+check "scan: each preset folder is one scene item, a preset naming its base; the base scene beside; the web one unsupported" \
+  "$(echo "$SP" | jq -c --arg s "$PT/" '[.items[] | [(.path | ltrimstr($s)), .kind, .preset, .baseWorkshopId, .workshopId, .title]] | sort') $(echo "$SP" | jq .unsupported)" \
+  '[["more/my-copy","scene",true,"2932157836",null,"Preset fixture 1, my copy"],["presets/3009121253","scene",true,"2932157836","3009121253","Preset fixture 1"],["presets/3420428971","scene",true,"3419466417","3420428971","Preset fixture 2"],["presets/3520333138","scene",true,"3354740764","3520333138","Preset fixture 3"],["scenes/2932157836","scene",false,null,"2932157836","Base One"]] 1'
+# copied: only the preset ticked; its base comes from the tree, copied too
+post /library/import-found "$(jq -nc --argjson p "$(P "$PT/presets/3009121253")" --argjson r "$(P "$PT")" '{paths: $p, copy: true, roots: $r}')" > /dev/null
+wait_for 30 idle; wait_for 10 has "Preset fixture 1"
+check "a copied preset: its own preset item, playing over its base from the tree" "$(pr "Preset fixture 1")" "[true,true,null,\"$IMP/Base One\"]"
+check "…its own path and Workshop id, its own preview" "$(item "Preset fixture 1" | jq -c '[.videoPath, .workshopId, .baseWorkshopId, .thumbnailPath]')" \
+  "[\"$IMP/Preset fixture 1\",\"3009121253\",\"2932157836\",\"$IMP/Preset fixture 1/preview.jpg\"]"
+check "…the preset and its base are copies (the same files, no link)" \
+  "$([ -L "$IMP/Preset fixture 1" ] || [ -L "$IMP/Base One" ] && echo link || { diff -r "$PT/presets/3009121253" "$IMP/Preset fixture 1" >/dev/null && diff -r "$PT/scenes/2932157836" "$IMP/Base One" >/dev/null && echo same; })" same
+check "…the base a plain scene item with its Workshop id" "$(item "Base One" | jq -c '[.isScene, (.isPreset // false), .workshopId]')" '[true,false,"2932157836"]'
+# linked: a base that is a web wallpaper, a base that isn't in the tree, a base the library has
+post /library/import-found "$(jq -nc --argjson p "$(P "$PT/presets/3420428971" "$PT/presets/3520333138" "$PT/more/my-copy")" --argjson r "$(P "$PT")" '{paths: $p, copy: false, roots: $r}')" > /dev/null
+wait_for 30 idle; wait_for 10 has "Preset fixture 1, my copy"
+check "a linked preset is a link to its folder" "$(readlink "$IMP/Preset fixture 2") $(readlink "$IMP/Preset fixture 3")" "$PT/presets/3420428971 $PT/presets/3520333138"
+check "a base that is a web wallpaper: not imported, the preset greyed with why" \
+  "$(pr "Preset fixture 2") $(lib | jq -c '[.[] | select(.workshopId == "3419466417")] | length')" '[true,true,"Its base is a web wallpaper, not a scene",null] 0'
+check "a base that isn't in the tree: needs its base scene" "$(pr "Preset fixture 3")" '[true,true,"Needs its base scene",null]'
+check "a base the library has is reused (one item of it, from the copy)" \
+  "$(pr "Preset fixture 1, my copy") $(lib | jq -c '[.[] | select(.workshopId == "2932157836") | .videoPath]')" "[true,true,null,\"$IMP/Base One\"] [\"$IMP/Base One\"]"
+# a watched folder: a preset waits for "Play scenes", joins the playlist, needs its base until the base turns up there
+W3=$T/watched-presets; mkdir -p "$W3"
+post /settings '{"allowScenes":false,"autoAddLibraryToPlaylist":true}' > /dev/null
+post /library/import-found "$(jq -nc --arg w "$W3" '{paths: [], copy: false, watch: $w}')" > /dev/null
+fxcopy 3583880694 "$W3/3583880694"; sleep 2
+check "a watched folder's preset waits while Play scenes is off" "$(item "Preset fixture 4")" null
+post /settings '{"allowScenes":true}' > /dev/null
+if wait_for 8 has "Preset fixture 4"; then ok "…and comes in once it's on"; else bad "…and comes in once it's on"; fi
+check "…a link, needing its base scene" "$(readlink "$IMP/Preset fixture 4") $(pr "Preset fixture 4")" "$W3/3583880694 [true,true,\"Needs its base scene\",null]"
+if wait_for 5 inbar "$IMP/Preset fixture 4"; then ok "…and it joins the playlist"; else bad "…and it joins the playlist"; fi
+MOVED=$(grep -c "a preset's base scene came, went or moved" "$LOG")
+scene "$W3/bases/3354740764" "Base Three"
+if wait_for 8 has "Base Three"; then ok "its base turns up in the watched folder: it comes in"; else bad "its base turns up in the watched folder: it comes in"; fi
+for _ in $(seq 1 30); do [ "$(item "Preset fixture 4" | jq -c .presetReason)" = null ] && break; sleep 0.1; done
+check "…and the preset plays over it, so does the imported preset of the same base" \
+  "$(pr "Preset fixture 4") $(pr "Preset fixture 3")" "[true,true,null,\"$IMP/Base Three\"] [true,true,null,\"$IMP/Base Three\"]"
+if wait_for 5 bash -c "[ \$(grep -c \"a preset's base scene came, went or moved\" '$LOG') -gt $MOVED ]"; then
+  ok "…a running rotation's items follow (the presets' base pass)"; else bad "…a running rotation's items follow (the presets' base pass)"; fi
+post /settings '{"autoAddLibraryToPlaylist":false}' > /dev/null
+HAD4=$(meta "Preset fixture 4" | jq -r '.watchedFrom // empty')
+rm -rf "$W3/3583880694"
+if [ "$HAD4" != "$W3" ]; then bad "a removed preset folder's link leaves the library (it never came in: proved nothing)"
+elif wait_for 8 bash -c "[ \"\$(jq -c '.[\"Preset fixture 4\"] // null' '$IMP/index.json')\" = null ]"; then ok "a removed preset folder's link leaves the library"; else bad "a removed preset folder's link leaves the library"; fi
+check "…and the playlist; its base stays" "$(api "$U/playlist/state" | jq -c --arg p "$IMP/Preset fixture 4" '[.videoPaths[] | select(. == $p)]') $(item "Base Three" | jq -r .videoPath)" "[] $IMP/Base Three"
+post /library/watched "$(jq -nc --arg w "$W3" '{path: $w, remove: true}')" > /dev/null
+stopbe
+jq '.PlayerEngine = "legacy"' "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/s" && mv "$T/s" "$XDG_CONFIG_HOME/liascape/settings.json"
+startbe
+check "legacy engine: an imported preset with its base says it plays only in the Liascape player" \
+  "$(pr "Preset fixture 1")" "[true,true,\"Presets play only in the Liascape player\",\"$IMP/Base One\"]"
+check "…a missing or non-scene base still says so first" "$(item "Preset fixture 2" | jq -c .presetReason)" '"Its base is a web wallpaper, not a scene"'
+for t in "Preset fixture 1" "Preset fixture 2" "Preset fixture 1, my copy" "Base One"; do post /library/delete "$(item "$t")" > /dev/null; done
+check "deleted (copies and links): every source file and fixture unchanged" "$(treesum "$PT") $(treesum "$FX")" "$PT_SUM $FX_SUM"
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

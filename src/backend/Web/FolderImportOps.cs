@@ -20,7 +20,7 @@ public static class FolderImportOps
     private static int _queued, _done;
 
     public sealed record ScanReq(List<string>? Paths);
-    public sealed record ImportFoundReq(List<string>? Paths, bool Copy, string? Watch, List<string>? Skip);
+    public sealed record ImportFoundReq(List<string>? Paths, bool Copy, string? Watch, List<string>? Skip, List<string>? Roots);
     public sealed record WatchedReq(string? Path, bool? Copy, bool Remove = false);
 
     public static string? Norm(string? p)
@@ -51,7 +51,7 @@ public static class FolderImportOps
                 if (!seen.Add(f.Path)) continue;
                 var rel = Path.GetRelativePath(baseDir, Path.GetDirectoryName(f.Path) ?? baseDir);
                 items.Add(new { path = f.Path, kind = f.Kind, title = f.Title, folder = f.Folder, workshopId = f.WorkshopId,
-                    inLibrary = f.InLibrary, subscription = f.Subscription, dir = rel == "." ? "" : rel });
+                    inLibrary = f.InLibrary, subscription = f.Subscription, preset = f.Preset, baseWorkshopId = f.BaseId, dir = rel == "." ? "" : rel });
             }
         }
         // a folder already watched: the dialog offers no second watch of it
@@ -60,16 +60,20 @@ public static class FolderImportOps
             autoImport = s.AutoAddWeWallpapersToLibrary, watched = roots.Where(watched.Contains).ToList(), copy = s.CopyFilesInsteadOfSymlinking };
     }
 
-    // POST /library/import-found {paths, copy, watch?, skip?}: imports the ticked paths in the background (each identified
-    // again: the dialog's list may be minutes old). `watch` = the scanned folder, from now on watched (link or copy: `copy`),
-    // `skip` = what the user left unticked there, which the watch never imports. The folder joins the list once the ticked
-    // items are in (its first pass then finds them there: nothing is imported twice). Returns how many it queued.
+    // POST /library/import-found {paths, copy, watch?, skip?, roots?}: imports the ticked paths in the background (each
+    // identified again: the dialog's list may be minutes old). `watch` = the scanned folder, from now on watched (link or copy:
+    // `copy`), `skip` = what the user left unticked there, which the watch never imports. The folder joins the list once the
+    // ticked items are in (its first pass then finds them there: nothing is imported twice). `roots` = the folders the dialog
+    // scanned: a ticked preset's base scene is looked for there (only a root holding a ticked path), ticked or not, never one
+    // in `skip`. Returns how many it queued.
     public static object ImportFound(ImportFoundReq r)
     {
         var paths = (r.Paths ?? []).Select(Norm).OfType<string>().Distinct().ToList();
         string? watch = Norm(r.Watch);
         if (watch != null && !Directory.Exists(watch)) watch = null;
         var skip = watch == null ? [] : (r.Skip ?? []).Select(Norm).OfType<string>().Where(x => x.StartsWith(watch + "/", StringComparison.Ordinal)).Distinct().ToList();
+        var roots = (r.Roots ?? []).Select(Norm).OfType<string>()
+            .Where(x => paths.Any(p => p == x || p.StartsWith(x + "/", StringComparison.Ordinal))).Distinct().ToList();
         if (paths.Count == 0) { if (watch != null) SetWatched(watch, r.Copy, skip); return new { queued = 0 }; }
         Interlocked.Add(ref _queued, paths.Count);
         LibraryOps.Set("import", "import", _done, _queued);
@@ -84,8 +88,16 @@ public static class FolderImportOps
                 var found = paths.Select(p => FolderScanner.Identify(p, known)).ToList();
                 var take = found.Where(f => f is { InLibrary: false, Subscription: false }).Cast<FolderScanner.Found>().ToList();
                 if (found.Count > take.Count) Step(found.Count - take.Count);
+                // the scanned folders' Wallpaper Engine items by Workshop id, scanned only once a preset asks for its base
+                Dictionary<string, string>? tree = null;
+                var skipped = skip.ToHashSet(StringComparer.Ordinal);
+                string? BaseIn(string id)
+                {
+                    tree ??= TreeOf(roots, known);
+                    return tree.TryGetValue(id, out var d) && !skipped.Contains(d) ? d : null;
+                }
                 await ImportAsync(take, link: !r.Copy,
-                    f => watch != null && f.Path.StartsWith(watch + "/", StringComparison.Ordinal) ? watch : null, "import");
+                    f => watch != null && f.Path.StartsWith(watch + "/", StringComparison.Ordinal) ? watch : null, "import", BaseIn);
             }
             catch (Exception e) { Console.WriteLine($"import: failed: {e.Message}"); }
             finally
@@ -105,9 +117,11 @@ public static class FolderImportOps
         LibraryOps.End("import");
     }
 
-    // Imports each found item (call under the gate); `watchedFrom` marks an item a watch brought in. The library page hears
-    // `library-synced` as items land (at most once a second) and once at the end; then every background pass an import kicks.
-    private static async Task<List<LibraryItem>> ImportAsync(List<FolderScanner.Found> found, bool link, Func<FolderScanner.Found, string?> watchedFrom, string why)
+    // Imports each found item (call under the gate); `watchedFrom` marks an item a watch brought in, `baseIn` finds a preset's
+    // base in the folder tree it came from (BringBasesAsync). The library page hears `library-synced` as items land (at most
+    // once a second) and once at the end; then every background pass an import kicks.
+    private static async Task<List<LibraryItem>> ImportAsync(List<FolderScanner.Found> found, bool link, Func<FolderScanner.Found, string?> watchedFrom,
+        string why, Func<string, string?> baseIn, DateTime? settledBefore = null)
     {
         var added = new List<LibraryItem>();
         var shown = DateTime.UtcNow;
@@ -121,8 +135,37 @@ public static class FolderImportOps
             Step(1);
             if (DateTime.UtcNow - shown > TimeSpan.FromSeconds(1)) { shown = DateTime.UtcNow; EventBus.Broadcast("library-synced", new { count = added.Count }); }
         }
+        await BringBasesAsync(added, link, watchedFrom, baseIn, settledBefore);
         AfterImport(added, why);
         return added;
+    }
+
+    // A preset can't play without its base scene, so each preset this import added brings its base from the same folder tree
+    // (`baseIn`: its folder there by Workshop id) the way this import brings items: linked or copied, a watched folder's mark,
+    // never a Steam subscription, never a file a watch still sees being written (`settledBefore`: its next pass brings it).
+    // The one helper every local way a preset arrives shares (PresetDownloads.AddBaseFromAsync) reuses a base the library has
+    // and never adds one that isn't a scene (the preset says what it is). Runs after the whole batch, so a base ticked or
+    // found beside its preset is imported once. Guard: scripts/test-folder-import.sh § presets
+    private static async Task BringBasesAsync(List<LibraryItem> added, bool link, Func<FolderScanner.Found, string?> watchedFrom,
+        Func<string, string?> baseIn, DateTime? settledBefore)
+    {
+        foreach (var preset in added.Where(i => i.IsScene && Presets.Read(i.VideoPath) != null).ToList())
+            await PresetDownloads.AddBaseFromAsync(preset, "its imported folder", baseIn, async dir =>
+            {
+                if (FolderScanner.Identify(dir, FolderScanner.Known.Load()) is not { Subscription: false } f) return;
+                if (settledBefore is { } c && f.Mtime > c) return;
+                if (await ImportOneAsync(f, link, watchedFrom(f)) is { } b) added.Add(b);
+            });
+    }
+
+    // every Wallpaper Engine item folder under these folders by Workshop id (the first seen), Steam's own folders left out
+    private static Dictionary<string, string> TreeOf(List<string> roots, FolderScanner.Known known)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var root in roots)
+            foreach (var (id, dir) in FolderScanner.Scan(root, known).WeFolders)
+                if (!known.InSteam(dir)) map.TryAdd(id, dir);
+        return map;
     }
 
     private static Task<LibraryItem?> ImportOneAsync(FolderScanner.Found f, bool link, string? watchedFrom)
@@ -257,7 +300,9 @@ public static class FolderImportOps
         {
             Console.WriteLine($"watch: {root}: {fresh.Count} new");
             Interlocked.Add(ref _queued, fresh.Count);
-            try { await ImportAsync(fresh, link: !w.Copy, _ => root, "watch"); }
+            // a preset's base from this folder, unless the user deleted it here (its Skip)
+            string? BaseIn(string id) => scan.WeFolders.TryGetValue(id, out var d) && !skip.Contains(d) && !known.InSteam(d) ? d : null;
+            try { await ImportAsync(fresh, link: !w.Copy, _ => root, "watch", BaseIn, cutoff); }
             finally { EndIfIdle(); }
         }
         foreach (var (f, key) in again)

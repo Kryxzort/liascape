@@ -237,9 +237,10 @@ export interface LibraryItem {
 export interface LibraryOp { id: string; phase: string; done: number; total: number }
 // API: POST /library/scan (Helpers/FolderScanner.cs): kind video | gif | image | scene; folder = a Wallpaper Engine item
 // folder; dir = its folder under the scanned one ("" at its top); inLibrary = the library has it (the same source, or the
-// same Workshop id). roots = the paths scanned, folders = those that are folders, watched = those already watched.
+// same Workshop id); preset = a Wallpaper Engine preset (kind scene; its base scene comes with it from the scanned folders).
+// roots = the paths scanned, folders = those that are folders, watched = those already watched.
 export interface FoundItem { path: string; kind: "video" | "gif" | "image" | "scene"; title: string; folder: boolean;
-  workshopId: string | null; inLibrary: boolean; dir: string;
+  workshopId: string | null; inLibrary: boolean; dir: string; preset: boolean; baseWorkshopId: string | null;
   // in Steam's own Workshop folder: a subscription, never imported (the WE auto-import's; Helpers/FolderScanner.cs)
   subscription: boolean }
 export interface ImportScan { roots: string[]; folders: string[]; items: FoundItem[]; unreadable: string[]; unsupported: number; duplicates: number;
@@ -301,9 +302,10 @@ export const api = {
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
   lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
   // API: a folder's (or dropped files') wallpapers listed before anything lands (Web/FolderImportOps.cs Scan), then the ticked
-  // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked there)
+  // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked there; `roots`: the
+  // folders scanned, where a ticked preset's base scene is looked for)
   scanImport: (paths: string[]) => jpost<ImportScan>("/library/scan", { paths }),
-  importFound: (body: { paths: string[]; copy: boolean; watch?: string | null; skip?: string[] }) =>
+  importFound: (body: { paths: string[]; copy: boolean; watch?: string | null; skip?: string[]; roots?: string[] }) =>
     jpost<{ queued: number }>("/library/import-found", body),
   // API: a watched folder added, its link / copy choice changed, or no longer watched (settings-changed {watchedFolders})
   editWatched: (body: { path: string; copy?: boolean; remove?: boolean }) => jpost("/library/watched", body),

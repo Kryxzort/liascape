@@ -9,8 +9,10 @@ namespace Liascape.Helpers;
 
 // What a folder holds that the library can take, for both a one-off import (Web/FolderImportOps.cs: the preview dialog) and a
 // watched folder (Web/FolderWatch.cs): ONE scanner, so both find the same items.
-//   - a folder with a project.json is one Wallpaper Engine item (a scene, or a video whose file is there); nothing inside it
-//     is looked at again. Other WE types (web, application) are counted as unsupported.
+//   - a folder with a project.json is one Wallpaper Engine item (a scene, a preset, or a video whose file is there); nothing
+//     inside it is looked at again. Other WE types (web, application) are counted as unsupported. A preset (Presets.Read) is
+//     a scene item of its own that plays its base scene; the import looks for the base in the same tree by Workshop id, so
+//     every WE item folder's id is kept (Result.WeFolders), an unsupported one's too: a base that isn't a scene is named.
 //   - a loose video / gif / picture is one wallpaper.
 //   - every other folder is scanned the same way, so a backed-up Workshop folder (one folder per item) gives every item.
 // Never written to: the scan only lists and reads project.json. Folder links are followed, each real folder once (a link loop or
@@ -34,9 +36,9 @@ public static class FolderScanner
     // Kind: video | gif | image | scene. Folder = a Wallpaper Engine item folder (Path is the folder). Sig = what a change of
     // its files changes (size + newest write time), Mtime its newest write (a watched folder waits until it settles).
     // InLibrary: the library has it already (the same source imported before, or the same Workshop id). Subscription: it is in
-    // Steam's own Workshop folder (never imported).
+    // Steam's own Workshop folder (never imported). Preset: a Wallpaper Engine preset (Kind scene), BaseId its base's id.
     public sealed record Found(string Path, string Kind, string Title, bool Folder, string? WorkshopId, string Sig, DateTime Mtime, bool InLibrary,
-        bool Subscription = false);
+        bool Subscription = false, bool Preset = false, string? BaseId = null);
 
     public sealed class Result
     {
@@ -46,6 +48,8 @@ public static class FolderScanner
         public int Unsupported { get; set; }   // WE items the app can't play (web, application)
         public int Duplicates { get; set; }    // the same Workshop id twice in the folder: one is listed
         public bool Truncated { get; set; }
+        // every Wallpaper Engine item folder with a Workshop id → its path (the first seen), unsupported ones too
+        public Dictionary<string, string> WeFolders { get; } = new(StringComparer.Ordinal);
     }
 
     // What the library already has: Workshop ids (local/, workshop/, any entry's workshopId) and the sources imported before.
@@ -114,6 +118,7 @@ public static class FolderScanner
             if (list.Any(x => x.Name == "project.json" && x is FileInfo))
             {
                 var we = IdentifyFolder(dir, known);
+                if ((we != null ? we.WorkshopId : IdOf(dir, ReadProject(dir).Wid)) is { } wid) r.WeFolders.TryAdd(wid, dir);
                 if (we == null) r.Unsupported++;
                 else if (we.WorkshopId != null && !seenIds.Add(we.WorkshopId)) r.Duplicates++;
                 else r.Items.Add(we);
@@ -163,29 +168,20 @@ public static class FolderScanner
         catch { return null; }
     }
 
-    // A Wallpaper Engine item folder: a scene (project.json type "scene", or none with a scene.pkg), or a video whose file is
-    // in the folder. null = a type the app can't play (web, application), or a video whose file is missing.
+    // A Wallpaper Engine item folder: a scene (project.json type "scene", or none with a scene.pkg), a preset (Presets.Read: no
+    // type and a `preset` object; a scene item that plays its base), or a video whose file is in the folder. null = a type the
+    // app can't play (web, application), or a video whose file is missing.
     private static Found? IdentifyFolder(string dir, Known known)
     {
-        string? type = null, file = null, title = null, wid = null;
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(System.IO.Path.Combine(dir, "project.json")));
-            var root = doc.RootElement;
-            if (root.ValueKind == JsonValueKind.Object)
-            {
-                type = Str(root, "type"); file = Str(root, "file"); title = Str(root, "title"); wid = Str(root, "workshopid");
-            }
-        }
-        catch { }
+        var (type, file, title, wid) = ReadProject(dir);
+        var preset = Presets.Read(dir);
         bool pkg = File.Exists(System.IO.Path.Combine(dir, "scene.pkg"));
-        bool scene = string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase) || (type == null && pkg);
+        bool scene = preset != null || string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase) || (type == null && pkg);
         bool video = string.Equals(type, "video", StringComparison.OrdinalIgnoreCase) && file is { Length: > 0 }
             && !file.Contains("..") && File.Exists(System.IO.Path.Combine(dir, file));
         if (!scene && !video) return null;
         var name = System.IO.Path.GetFileName(Liascape.Web.ApiSecurity.RealPath(dir) ?? dir);
-        // a Workshop item's id: project.json's, else the (real) folder's name when it is one (Steam names each item's folder so)
-        if (wid is not { Length: > 0 } || !wid.All(char.IsAsciiDigit)) wid = name.Length >= 6 && name.All(char.IsAsciiDigit) ? name : null;
+        wid = IdOf(dir, wid);
         long size = 0; DateTime newest = DateTime.MinValue;
         try
         {
@@ -197,7 +193,29 @@ public static class FolderScanner
         }
         catch { }
         var t = LibraryService.SanitizeName(title ?? "") is { Length: > 0 } st ? st : name;
-        return new Found(dir, scene ? "scene" : "video", t, true, wid, $"{size}:{newest.Ticks}", newest, known.Has(dir, wid), known.InSteam(dir));
+        return new Found(dir, scene ? "scene" : "video", t, true, wid, $"{size}:{newest.Ticks}", newest, known.Has(dir, wid), known.InSteam(dir),
+            preset != null, preset?.BaseId);
+    }
+
+    // project.json's type, file, title and workshopid (each null when missing or unreadable)
+    private static (string? Type, string? File, string? Title, string? Wid) ReadProject(string dir)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(System.IO.Path.Combine(dir, "project.json")));
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object) return (Str(root, "type"), Str(root, "file"), Str(root, "title"), Str(root, "workshopid"));
+        }
+        catch { }
+        return (null, null, null, null);
+    }
+
+    // a Workshop item's id: project.json's, else the (real) folder's name when it is one (Steam names each item's folder so)
+    private static string? IdOf(string dir, string? wid)
+    {
+        if (wid is { Length: > 0 } && wid.All(char.IsAsciiDigit)) return wid;
+        var name = System.IO.Path.GetFileName(Liascape.Web.ApiSecurity.RealPath(dir) ?? dir);
+        return name.Length >= 6 && name.All(char.IsAsciiDigit) ? name : null;
     }
 
     private static string? Str(JsonElement o, string k) => o.TryGetProperty(k, out var v)

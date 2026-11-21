@@ -54,10 +54,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        check finds no "Text shadow" row (an Advanced-level row: likely the cell never raises the level;
        `look:textShadow`); Browse's grid has nothing to scroll in the wheel-glide check (`scroll:glide:browse`). Find
        each cause; fix the tab switch's forced layouts, and make the other two cells set up what they need.
-111. [ ] "Import a folder" and watched folders recognise Wallpaper Engine presets: a preset folder imports as its own
-       preset item (as from the Workshop or "Wallpaper Engine (Local)"), linked or copied like any imported item, and
-       brings its base scene from the same folder tree when it's there; otherwise it shows "needs its base scene".
-       Sources are never touched; covered in `scripts/test-folder-import.sh`.
 112. [ ] A preset's video in a scene's texture slot plays: Workshop presets can put a video file (`files/<name>.mp4`)
        where their base scene has an image slot, and Wallpaper Engine plays it there. Today the slot keeps the base's
        texture and the adapter logs "is not an image" (seen on Workshop preset 2843309472). The scene renderer

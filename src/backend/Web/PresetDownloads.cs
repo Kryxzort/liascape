@@ -114,31 +114,52 @@ public static class PresetDownloads
     }
 
     /// After a preset is added from the Wallpaper Engine folder (Browse's "Wallpaper Engine (Local)", `presetDir` = its folder
-    /// there): its base scene from the same folder, added the way the preset was (the same source's detail through
-    /// AppOps.DownloadAsync: a link, or the library's own copy), unless the library has it. Nothing is asked of Steam and no
-    /// download mode is involved; a base that isn't there (or isn't a scene) leaves the preset "Needs its base scene", whose
-    /// button fetches it by the download mode. Never throws. Guard: test-presets.sh § 1 Wallpaper Engine (Local)
-    public static async Task AddLocalBaseAsync(LibraryItem preset, string presetDir, bool oneOff)
+    /// there): its base scene from beside it in the same folder, added the way the preset was (the same source's detail through
+    /// AppOps.DownloadAsync: a link, or the library's own copy). Guard: test-presets.sh § 1 Wallpaper Engine (Local)
+    public static Task AddLocalBaseAsync(LibraryItem preset, string presetDir, bool oneOff) =>
+        AddBaseFromAsync(preset, "the Wallpaper Engine folder",
+            baseId => System.IO.Path.GetDirectoryName(System.IO.Path.TrimEndingDirectorySeparator(presetDir)) is { } weDir
+                ? System.IO.Path.Combine(weDir, baseId) : null,
+            async baseDir =>
+            {
+                var detail = await new Liascape.Services.WallpaperEngineService().GetDetailAsync(new WallpaperResult
+                { Title = TitleOf(baseDir) ?? System.IO.Path.GetFileName(baseDir), ThumbnailUrl = "", PageUrl = baseDir,
+                  WorkshopId = System.IO.Path.GetFileName(baseDir), IsScene = true }).ConfigureAwait(false);
+                await AppOps.DownloadAsync(detail, "", baseDir, CancellationToken.None, null, oneOff).ConfigureAwait(false);
+            });
+
+    /// A preset added from a place on this PC (the Wallpaper Engine folder, a folder import, a watched folder) brings its base
+    /// scene from that same place, the way the preset came (`add`: that route's own link or copy), unless the library has it
+    /// (reused). `baseIn` = the base's folder there by Workshop id, null = not there. Nothing is asked of Steam and no download
+    /// mode is involved. A base that isn't there leaves the preset "Needs its base scene" (its button fetches it by the
+    /// download mode); one that is there but isn't a scene (a video, a web wallpaper, another preset) is never added and the
+    /// preset says what it is (LibMeta.BaseKind). Never throws.
+    /// Guards: test-presets.sh § 1 Wallpaper Engine (Local), test-folder-import.sh § presets
+    public static async Task AddBaseFromAsync(LibraryItem preset, string where, Func<string, string?> baseIn, Func<string, Task> add)
     {
-        string who = preset.WorkshopId ?? System.IO.Path.GetFileName(presetDir);
+        string dir = preset.VideoPath, who = preset.WorkshopId ?? System.IO.Path.GetFileName(dir);
         try
         {
-            if (Presets.Read(presetDir) is not { BaseId: { } baseId } || baseId == preset.WorkshopId) return;
+            if (Presets.Read(dir) is not { BaseId: { } baseId } || baseId == preset.WorkshopId) return;
             if (Presets.BaseDirOf(baseId) != null) { Done(preset); return; }
-            if (System.IO.Path.GetDirectoryName(System.IO.Path.TrimEndingDirectorySeparator(presetDir)) is not { } weDir) return;
-            string baseDir = System.IO.Path.Combine(weDir, baseId);
-            if (Presets.KindOf(baseDir) != "scene")
+            if (baseIn(baseId) is not { } baseDir || Presets.KindOf(baseDir) is not { } kind)
             {
-                Console.WriteLine($"workshop: {who}: its base {baseId} isn't a scene in the Wallpaper Engine folder — not added");
+                Console.WriteLine($"library: {who}: its base {baseId} isn't in {where} — it needs its base scene");
                 return;
             }
-            Console.WriteLine($"workshop: {who}: adding its base {baseId} from the Wallpaper Engine folder too");
-            var detail = await new Liascape.Services.WallpaperEngineService().GetDetailAsync(new WallpaperResult
-            { Title = TitleOf(baseDir) ?? baseId, ThumbnailUrl = "", PageUrl = baseDir, WorkshopId = baseId, IsScene = true }).ConfigureAwait(false);
-            await AppOps.DownloadAsync(detail, "", baseDir, CancellationToken.None, null, oneOff).ConfigureAwait(false);
+            if (kind != "scene")
+            {
+                Console.WriteLine($"library: {who}: its base {baseId} in {where} is a {kind} wallpaper — not added");
+                LibraryStore.SetMeta(dir, m => { m.BaseKind = kind; m.BaseTitle ??= TitleOf(baseDir); });
+                EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir, PlayerEngine.IsLiascapePlayer).Reason });
+                return;
+            }
+            Console.WriteLine($"library: {who}: adding its base {baseId} from {where} too");
+            await add(baseDir).ConfigureAwait(false);
             if (Presets.BaseDirOf(baseId) != null) Done(preset);
+            else Console.WriteLine($"library: {who}: its base {baseId} from {where} wasn't added — it needs its base scene");
         }
-        catch (Exception e) { Console.WriteLine($"workshop: {who}: adding its base scene from the Wallpaper Engine folder failed: {e.Message}"); }
+        catch (Exception e) { Console.WriteLine($"library: {who}: adding its base scene from {where} failed: {e.Message}"); }
     }
 
     static string? TitleOf(string dir)

@@ -7,7 +7,7 @@
 #     its reason when it can't play (no base, a malformed preset file, a base that is a preset / a video / a web
 #     wallpaper, the legacy engine); the WE auto-import brings presets in only with scene support on; a preset added from
 #     Browse's "Wallpaper Engine (Local)" brings its base from that folder the same way (a link), one whose base isn't
-#     there needs it; trashing a preset leaves its base alone.
+#     there needs it, one whose base there is a web wallpaper says so (never added); trashing a preset leaves its base alone.
 #  2. layered properties (SceneProperties): a preset's sidebar lists its base's properties with the preset's values as
 #     their defaults (conditions read them too); the card's own tweaks go to the preset's index entry only (a tweak equal
 #     to the preset's value drops, Reset returns to it); the base's tweaks never reach the preset or the other way round;
@@ -271,6 +271,12 @@ check "…its base comes from the same folder the same way (local/900000031, a l
 check "a preset whose base isn't in the folder → 200, it needs its base scene, nothing else added" \
   "$(weadd 910000332) $(sleep 1; pf "$LIB/local/910000332" '.presetReason') $([ -e "$LIB/local/900000032" ] && echo added || echo none)" \
   '200 "Needs its base scene" none'
+mkdir -p "$WE/900000033"; printf '{"type":"web","file":"index.html","title":"Web base"}' > "$WE/900000033/project.json"
+mk_preset "$WE/910000333" '"900000033"' "Local preset, web base" '{"color":"0 0 1"}' preview.jpg
+st=$(weadd 910000333)
+for _ in $(seq 1 30); do r=$(pf "$LIB/local/910000333" '.presetReason'); [ "$r" != '"Needs its base scene"' ] && break; sleep 0.1; done
+check "a preset whose base in the folder is a web wallpaper → 200, greyed with why, the base not added" \
+  "$st $r $([ -e "$LIB/local/900000033" ] && echo added || echo none)" '200 "Its base is a web wallpaper, not a scene" none'
 
 echo "== 1. trash: a preset goes, its base stays"
 # the base's own fields (the background facts pass may add its frame size or size on disk meanwhile)
