@@ -37,6 +37,9 @@ export const favoritesUsable = (steam: State["steam"]) => !!steam?.signedIn && !
 // steam null) "Sign in to Steam" would be a guess, so the row isn't dimmed, though ✓ / ✕ still can't be set until it's usable.
 // Guard: probe-steam yours:steamUnknown
 export const favoritesSignedOut = (steam: State["steam"]) => steam !== null && !favoritesUsable(steam);
+// a usable Favourites row is on in the Workshop's filter or the Library's: the favourites copy is wanted, and kept current
+const favoritesWanted = (s: Pick<State, "steam" | "browseFilter" | "libFilter">) =>
+  favoritesUsable(s.steam) && (setModesOf(s.browseFilter, true).fav !== null || setModesOf(s.libFilter, true).fav !== null);
 // API: Helpers/Presets.cs LegacyReason, word for word
 export const PRESET_LEGACY = "Presets play only in the Liascape player";
 // Why a library item can't play now, or null: a preset's own reason (GET /library), and under the legacy engine every preset
@@ -450,7 +453,7 @@ export const useStore = create<State>((set, get) => ({
   // Guard: probe-steam yours:loadLine, yours:starLive
   favoritesChanged(version) {
     const f = get().wsFavs;
-    if (get().setModes().fav !== null && (!f || version > f.version)) get().loadFavorites("none");
+    if (favoritesWanted(get()) && (!f || version > f.version)) get().loadFavorites("none");
   },
   // API: POST /workshop/details, at most 2000 ids an ask
   async loadLibDetails() {
@@ -927,7 +930,7 @@ useStore.subscribe((s) => {
   if (first) return;
   favEpoch++;
   if (s.wsFavs) useStore.setState({ wsFavs: null });
-  if (acct !== null && useStore.getState().setModes().fav !== null) useStore.getState().loadFavorites("open");
+  if (favoritesWanted(useStore.getState())) useStore.getState().loadFavorites("open");
 });
 
 // A library listing depends on the engine and scene support (a preset's legacy reason, the presets the WE auto-import brings):

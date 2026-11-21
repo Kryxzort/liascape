@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { unplayableReasonOf, useStore } from "../store";
+import { favoritesUsable, unplayableReasonOf, useStore } from "../store";
 import { LibraryCard } from "../components/LibraryCard";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
 import { facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
@@ -20,6 +20,7 @@ import type { LibraryItem } from "../api/client";
 import { unsubBlocked } from "../components/subscribeMode";
 import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
 import { confirmBaseRemoval } from "../components/baseConfirm";
+import { byFavorites, setModesOf } from "./localSet";
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -83,6 +84,15 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const clearTags = useStore((s) => s.clearTags);
   const match = useMemo(() => localMatcher(libFilter), [libFilter]);
   const known = useMemo(() => knownTags(items, (i) => i.videoPath), [items]);
+  // The Favourites row: ✓ keeps the items starred on the Workshop, ✕ the rest (a non-Workshop item is never starred). Signed
+  // out (or Steam turning the account down) it means nothing, and so does a list not read yet: the Library never goes blank
+  // for a sign-in or a load. The same rule as Browse's (views/localSet.ts byFavorites); the Library's own sort and search apply
+  // on top, and no Steam paging. Guard: probe-steam lib:yours:fav
+  const favMode = useStore((s) => setModesOf(s.libFilter, favoritesUsable(s.steam)).fav);
+  const favIds = useStore((s) => (s.wsFavs?.signedIn ? s.wsFavs.ids : null));
+  const loadFavorites = useStore((s) => s.loadFavorites);
+  useEffect(() => { if (favMode !== null) loadFavorites("open"); }, [favMode, loadFavorites]);
+  const favSet = favMode !== null ? favIds : null;
   // the filter panel (its toggle is the top bar's split button, App.tsx)
   const col = useFilterPanel("library", items.length > 0);
   // the page stays mounted across tab switches (App.tsx): leaving it clears the selection (and a drawer: useFilterPanel),
@@ -94,8 +104,9 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     const q = libQuery.trim().toLowerCase();
     let f = q ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q)) : items;
     if (match) f = f.filter((i) => match(facetsOf(i, i.videoPath)));
+    if (favSet) f = byFavorites(f, favMode, favSet, (i) => i.workshopId);
     return sortItems(f, libSort);
-  }, [items, libQuery, libSort, match]);
+  }, [items, libQuery, libSort, match, favSet, favMode]);
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   const showsPlaying = useMemo(() => !!playingPath && filtered.some((i) => i.videoPath === playingPath), [filtered, playingPath]);
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, showsPlaying);
@@ -103,15 +114,17 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // never reach a card the user can't see). Keyed on the filter's value: <Activity> re-runs this on every return to the
   // page, which keeps its view. Guard: probe-filters lib:interplay
   const filterKey = JSON.stringify([libFilter.include, libFilter.exclude, libFilter.featureMatch, libFilter.genreMatch]);
-  const shownFilter = useRef(filterKey);
+  // a star that comes or goes while the Favourites row is on narrows the selection the same way, the grid keeping its place
+  const shownFilter = useRef(filterKey), shownFavs = useRef(favSet);
   useLayoutEffect(() => {
-    if (shownFilter.current === filterKey) return;
-    shownFilter.current = filterKey;
-    if (scrollRef.current && scrollRef.current.scrollTop > 0) scrollRef.current.scrollTop = 0;
+    const filterChanged = shownFilter.current !== filterKey;
+    if (!filterChanged && shownFavs.current === favSet) return;
+    shownFilter.current = filterKey; shownFavs.current = favSet;
+    if (filterChanged && scrollRef.current && scrollRef.current.scrollTop > 0) scrollRef.current.scrollTop = 0;
     const vis = new Set(filtered.map((i) => i.videoPath));
     setSel((x) => { const n = new Set([...x].filter((p) => vis.has(p))); return n.size === x.size ? x : n; });
     if (anchor.current && !vis.has(anchor.current)) anchor.current = null;
-  }, [filterKey, filtered]);
+  }, [filterKey, favSet, filtered]);
 
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
   // the order the backend makes the cards' missing previews in: the sidebar's item, the cards on screen, then this
@@ -253,7 +266,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   return (
     <>
     <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
-      {match && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
+      {(match || favSet) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
       <div className="grid">
         {filtered.map((it) => (
           <LibraryCard key={it.videoPath} item={it}

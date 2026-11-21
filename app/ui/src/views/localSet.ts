@@ -107,8 +107,16 @@ export function buildLocalSet(a: {
     x.k == null && y.k == null ? byTitle(x.w, y.w) : x.k == null ? 1 : y.k == null ? -1 : y.k - x.k || byTitle(x.w, y.w)).map((x) => x.w);
 }
 
+// A Favourites row against a list of items (a Workshop page, the Library): ✓ keeps the favourites, ✕ the rest; an item with no
+// Workshop id is never a favourite. Guard: probe-steam yours:combos, lib:yours:fav
+export function byFavorites<T>(list: T[], mode: SetMode, favIds: Set<string>, idOf: (x: T) => string | null | undefined): T[] {
+  if (mode === null) return list;
+  return list.filter((x) => { const id = idOf(x); return (!!id && favIds.has(id)) === (mode === "inc"); });
+}
+
 // ✕ with no ✓: the Workshop's own pages (or a list's), the sets' items taken out. Guard: probe-steam yours:combos, yours:inList
 export function hideSets(list: Wallpaper[], modes: SetModes, favIds: Set<string>, libKeys: Set<string>): Wallpaper[] {
   if (modes.fav !== "exc" && modes.lib !== "exc") return list;
-  return list.filter((w) => !(modes.fav === "exc" && !!w.workshopId && favIds.has(w.workshopId)) && !(modes.lib === "exc" && inLibrary(libKeys, w)));
+  const rest = modes.fav === "exc" ? byFavorites(list, "exc", favIds, (w) => w.workshopId) : list;
+  return modes.lib === "exc" ? rest.filter((w) => !inLibrary(libKeys, w)) : rest;
 }
