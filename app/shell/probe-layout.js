@@ -1007,7 +1007,7 @@ app.whenReady().then(async () => {
         if (back.cls || back.body !== "none" || back.label !== "none") v.push(`turned off: text still shadowed (${J({ cls: back.cls, body: back.body, label: back.label })})`);
         if (!(await saved(false))) v.push("turning Text shadow off wasn't saved");
       } finally {
-        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true, settingsLevel: level0 ?? "standard" });
+        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true, ...(level0 ? { settingsLevel: level0 } : {}) });
         await win.loadURL(withToken(U + "/")); await js(PAGE); await sleep(400);
       }
       return v;

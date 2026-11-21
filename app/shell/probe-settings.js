@@ -56,6 +56,9 @@
 //                     prefers-reduced-motion: it only swaps; nothing pops on load; pictures settings-mute-motion-*.png
 //   mute:look         the chip's accent fill while sound plays (--accent / --accent-fg), see-through and --text while muted, hover
 //                     glow (none under no-glow), bg-live; pictures settings-mute-look-*.png
+//   watched:focus     Watched folders off screen, the focus just above it: Tab lands on its row's "Copy files" box (scrolled
+//                     into view) and keeps the focus and its ring, Space ticks it (saved); scrolled out of view, the same
+//                     element still has the focus
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow, clipboard, session } = require("electron");
 const fs = require("fs");
@@ -1139,6 +1142,57 @@ app.whenReady().then(async () => {
       await mv(5, 5);
       await setSettings({ NoAudio: false });
       return v;
+    });
+
+    // Watched folders' rows are framer layout nodes only while the section is on screen (views/Settings.tsx), which
+    // remounts them when that changes: a control holding the keyboard focus must keep it. Tab from the control just above
+    // the off-screen section lands on the first row's "Copy files" box and scrolls it into view; it keeps the focus (and the
+    // ring), Space ticks it; scrolled out of view while focused, it still has the focus.
+    await cell("watched:focus — Tab into the off-screen Watched folders keeps the focus on its control; Space ticks it; scrolled away it keeps it", async () => {
+      const v = [];
+      const dir = path.join(E.HOME, "watch-focus"); fs.mkdirSync(dir, { recursive: true });
+      const copyOf = async () => ((await field("watchedFolders")) ?? []).find((w) => w.path === dir)?.copy;
+      try {
+        await setSettings({ SettingsLevel: "standard", Morphs: true });
+        if ((await http("POST", "/library/watched", { path: dir, copy: false })).status !== 200) return ["couldn't add a watched folder — proved nothing"];
+        await load();
+        const SEC = `document.querySelector("[data-watched-add]")?.closest(".ssection")`;
+        const IN_VIEW = `(() => { const s = ${SEC}, sc = document.querySelector(".scroll.settings"); if (!s || !sc) return null;
+          const b = s.getBoundingClientRect(), c = sc.getBoundingClientRect(); return b.bottom > c.top && b.top < c.bottom; })()`;
+        // the focus on the control right before the section in tab order, without scrolling to it
+        const pre = await js(`if (!document.querySelector('[data-watched="${dir}"] [data-watched-copy]')) return { row: false };
+          const sc = document.querySelector(".scroll.settings"); sc.scrollTop = 0; await window.__x.sleep(600);
+          const all = [...sc.querySelectorAll("a[href], button, input, select, textarea, [tabindex]")]
+            .filter((e) => !e.disabled && e.tabIndex >= 0 && e.getClientRects().length && !e.closest("[inert]"));
+          const k = all.findIndex((e) => ${SEC}.contains(e)); if (k < 1) return { row: true, k };
+          all[k - 1].focus({ preventScroll: true }); await window.__x.sleep(300);
+          return { row: true, k, inView: ${IN_VIEW}, first: all[k].matches("[data-watched-copy]"), at: document.activeElement === all[k - 1] }`);
+        if (!pre.row) return ["the watched folder's row isn't on Settings — proved nothing"];
+        if (!pre.first) return [`the section's first tab stop isn't the row's "Copy files" box (${J(pre)}) — proved nothing`];
+        if (pre.inView !== false || !pre.at) return [`the section wasn't off screen with the focus just above it (${J(pre)}) — proved nothing`];
+        send({ type: "keyDown", keyCode: "Tab" }); send({ type: "keyUp", keyCode: "Tab" });
+        await sleep(900);
+        const FOCUS = `(() => { const a = document.activeElement; return { copy: !!a?.matches?.("[data-watched-copy]") && a.closest("[data-watched]")?.dataset.watched === ${J(dir)},
+          tag: a?.tagName ?? null, ring: document.documentElement.classList.contains("kbd-nav") && !!a?.matches?.(":focus-visible"),
+          inView: ${IN_VIEW} }; })()`;
+        const a = await js(`return ${FOCUS}`);
+        console.log(`        after Tab: ${J(a)}`);
+        if (!a.inView) return [...v, `Tab didn't bring the section into view (${J(a)}) — proved nothing`];
+        if (!a.copy) v.push(`after Tab the focus is on ${a.tag}, not the row's "Copy files" box: it was dropped when the section came into view`);
+        else if (!a.ring) v.push("after Tab the focused box shows no focus ring (:root.kbd-nav + :focus-visible)");
+        send({ type: "keyDown", keyCode: "Space" }); send({ type: "char", keyCode: " " }); send({ type: "keyUp", keyCode: "Space" });
+        if (!(await waitFor(async () => (await copyOf()) === true, SAVE_MS))) v.push(`Space on the focused control didn't tick "Copy files" (copy ${await copyOf()})`);
+        // scrolled out of view (a wheel would do the same) while it holds the focus
+        await js(`document.activeElement.__kept = 1; document.querySelector(".scroll.settings").scrollTop = 0; return true`); await sleep(900);
+        const b = await js(`return { ...${FOCUS}, same: document.activeElement?.__kept === 1 }`);
+        console.log(`        scrolled away: ${J(b)}`);
+        if (b.inView !== false) v.push(`scrolling to the top left the section in view (${J(b)}) — the scroll-away case proved nothing`);
+        else if (!b.copy || !b.same) v.push(`scrolled out of view, the focus left the "Copy files" box (now ${b.tag}${b.copy ? ", a new element" : ""})`);
+        return v;
+      } finally {
+        await js(`document.activeElement?.blur?.(); return true`).catch(() => {});
+        await http("POST", "/library/watched", { path: dir, remove: true });
+      }
     });
 
     await setSettings({ Morphs: true });

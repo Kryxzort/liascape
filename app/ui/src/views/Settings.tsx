@@ -191,15 +191,22 @@ function WatchedFolders() {
   // re-renders as its reads land, right after the tab click), and unmounting one asks for an animation frame (the switch
   // away). Off screen there is no glide to see. The layout flag is read when framer makes a node, so the list and the
   // button remount when it flips (AnimatePresence initial={false}: nothing replays). `dep` is what moves them: a re-render
-  // that keeps the same folders measures nothing. Guard: probe-layout perf:tabs, probe-import import:settings.
+  // that keeps the same folders measures nothing. A remount would drop the keyboard focus (Tab into the section scrolls it
+  // into view), so while the focus is inside the flag holds and catches up once it leaves. Guard: probe-layout perf:tabs,
+  // probe-import import:settings, probe-settings watched:focus.
   const boxRef = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const io = new IntersectionObserver((es) => setSeen(es[es.length - 1].isIntersecting));
+    let onScreen = false, t = 0;
+    const apply = () => { if (!el.contains(document.activeElement)) setSeen(onScreen); };
+    const io = new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; apply(); });
+    // the focus is still on the leaving element during focusout: look once it has moved
+    const out = () => { clearTimeout(t); t = window.setTimeout(apply); };
     io.observe(el);
-    return () => io.disconnect();
+    el.addEventListener("focusout", out);
+    return () => { io.disconnect(); el.removeEventListener("focusout", out); clearTimeout(t); };
   }, []);
   const layoutOn = motionOn && seen;
   const dep = folders.map((w) => w.path).join("\n");
