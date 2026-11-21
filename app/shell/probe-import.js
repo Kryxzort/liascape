@@ -20,7 +20,8 @@
 //   import:settings     Settings → "Add folder" opens the dialog as "Watch a folder" with "Keep watching this folder" ticked;
 //                       importing lists the folder in Watched folders with its wallpaper count (all six); its "Copy files instead of
 //                       linking" saves the folder's copy choice; a file written into the folder shows up in the Library
-//                       without a click; the remove button stops the watching (the row glides out) and keeps the wallpapers
+//                       without a click; the remove button stops the watching (the row glides out, the section on screen)
+//                       and keeps the wallpapers
 //   import:steam        a folder holding a Steam library's Workshop folder (a fake libraryfolders.vdf in the stack's HOME):
 //                       its items listed apart, last, as "From your Steam subscriptions" (the summary says how many), the
 //                       group's tick and every item unticked and disabled, its line naming "Import new Workshop wallpapers"
@@ -374,6 +375,9 @@ app.whenReady().then(async () => {
       await js(`[...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Settings").click(); return true`);
       await waitFor(() => js(`return !!document.querySelector('[data-watched="${d}"]')`), 5000);
       await sleep(1000); // the page's own fade-in after the tab switch
+      // the section in view, as a hand reaching for the remove button has it: the rows are framer layout nodes only on screen
+      // (views/Settings.tsx), so the row leaves through that path
+      await js(`document.querySelector("[data-watched-add]").scrollIntoView({ block: "center" }); return true`); await sleep(600);
       const fr = (await js(`const s = ${SAMPLE({ row: `[data-watched="${d}"]` }, 700)}; document.querySelector('[data-watched="${d}"] [data-watched-remove]').click(); return await s`)).row;
       const fades = fr.filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length;
       if (!fades) v.push(`the row popped out (${brief(fr)})`);

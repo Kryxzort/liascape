@@ -186,19 +186,36 @@ function WatchedFolders() {
     for (const i of items) if (i.watchedFrom) m.set(i.watchedFrom, (m.get(i.watchedFrom) ?? 0) + 1);
     return m;
   }, [items]);
+  // PERF: the rows and "Add folder" are framer layout nodes (they glide when the list changes) only while the section is on
+  // screen. A layout node measures the page's scroll from script whenever it re-renders (forced layouts: Settings
+  // re-renders as its reads land, right after the tab click), and unmounting one asks for an animation frame (the switch
+  // away). Off screen there is no glide to see. The layout flag is read when framer makes a node, so the list and the
+  // button remount when it flips (AnimatePresence initial={false}: nothing replays). `dep` is what moves them: a re-render
+  // that keeps the same folders measures nothing. Guard: probe-layout perf:tabs, probe-import import:settings.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((es) => setSeen(es[es.length - 1].isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  const layoutOn = motionOn && seen;
+  const dep = folders.map((w) => w.path).join("\n");
   // API: the backend broadcasts settings-changed {watchedFolders}; the page shows the edit at once
   const edit = (path: string, change: { copy?: boolean; remove?: boolean }) => {
     mergeSettings({ watchedFolders: change.remove ? folders.filter((w) => w.path !== path) : folders.map((w) => w.path === path ? { ...w, ...change } : w) });
     api.editWatched({ path, ...change }).catch(() => {});
   };
   return (
-    <Section title="Watched folders" icon={<FolderSync size={15} />} bare>
+    <Section title="Watched folders" icon={<FolderSync size={15} />} bare boxRef={boxRef}>
       <Help>New or changed files in these folders come into your library by themselves, and removed ones leave it.</Help>
-      <AnimatePresence initial={false}>
+      <AnimatePresence key={`rows|${layoutOn}`} initial={false}>
         {folders.map((w) => {
           const c = counts.get(w.path) ?? 0;
           return (
-            <motion.div key={w.path} className="srow watched-row" data-watched={w.path} layout={motionOn ? "position" : false}
+            <motion.div key={w.path} className="srow watched-row" data-watched={w.path} layout={layoutOn ? "position" : false} layoutDependency={dep}
               {...fadeOff({ initial: { opacity: 0, y: -6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.2 } })}>
               <div className="slabel">
                 <span className="slabel-row watched-path" title={w.path}>{w.path}</span>
@@ -214,7 +231,7 @@ function WatchedFolders() {
           );
         })}
       </AnimatePresence>
-      <motion.button className="btn ghost ico watched-add" layout={motionOn ? "position" : false} data-watched-add
+      <motion.button key={`add|${layoutOn}`} className="btn ghost ico watched-add" layout={layoutOn ? "position" : false} layoutDependency={dep} data-watched-add
         onClick={() => { void importFolder(true); }}><FolderFlap size={14} /> Add folder</motion.button>
     </Section>
   );
@@ -266,11 +283,13 @@ function Row({ label, hint, disabled, liveChip, rk, wk, def, deviated, deviatedT
 // rows the level (or the engine) shows hides with them (index.css `.ssection[data-rows]`), so no heading ever stands
 // alone. `bare` = a section whose content isn't rows (a command block, the monitor list's add button): it always shows.
 // Guard: probe-settings levels:noEmptySection.
-function Section({ title, icon, lv, bare, children }: { title: string; icon?: React.ReactNode; lv?: Level; bare?: boolean; children: React.ReactNode }) {
+function Section({ title, icon, lv, bare, boxRef, children }: {
+  title: string; icon?: React.ReactNode; lv?: Level; bare?: boolean; boxRef?: React.Ref<HTMLDivElement>; children: React.ReactNode;
+}) {
   const level = useStore((s) => levelOf(s.settings?.settingsLevel));
   if (lv && rank(lv) > rank(level)) return null;
   return (
-    <div className="ssection" data-rows={bare ? undefined : ""}>
+    <div ref={boxRef} className="ssection" data-rows={bare ? undefined : ""}>
       <h3>{icon && <span className="ssection-ico">{icon}</span>}{title}</h3>
       {children}
     </div>

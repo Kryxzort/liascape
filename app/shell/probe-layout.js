@@ -43,7 +43,8 @@
 //   scroll:bound          booted straight into the Library (its items arrive after mount): .lib-scroll carries the smooth
 //                         scroll's wheel listener
 //   scroll:glide[:browse|:settings] a notched wheel tick (whole-pixel delta, not precise) glides: the page cancels it and
-//                         scrollTop keeps moving well after the event, ending ~1.5× the tick's native step
+//                         scrollTop keeps moving well after the event, ending ~1.5× the tick's native step (Browse: on the
+//                         stubbed paged Workshop source, the matrix's web sources list nothing)
 //   scroll:touchpad       a touchpad stream (precise, fractional deltas — one whole 120 mid-gesture) scrolls natively: never
 //                         cancelled, lands on the summed deltas within a few frames of the last event, no coast
 //   scroll:off[:reduced]  "Smooth window animations" off / prefers-reduced-motion: a notch scrolls natively (not cancelled,
@@ -858,7 +859,8 @@ app.whenReady().then(async () => {
     // off, it's gone. Screenshots look-textShadow-*.png
     await cell("look:textShadow", async () => {
       const v = [], J = JSON.stringify, SHADOW = /^(rgb\(0, 0, 0\)|oklch\(0 0 0\)) 2px 1\.9px 2px$/; // black: the theme's crust rounded (index.css --ts-c)
-      const ROW = `[...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel-row")?.textContent.trim() === "Text shadow")`;
+      // the row's name is the label's first text node: an Advanced row's label also holds its "Advanced" tag (Settings.tsx Row)
+      const ROW = `[...document.querySelectorAll(".srow")].find((r) => r.querySelector(".slabel-row")?.firstChild?.textContent?.trim() === "Text shadow")`;
       // the computed text-shadow of: body, a Settings label, a top-bar tab (a button: Chromium resets its text-shadow), every
       // element showing its own text in --accent-fg (on an accent fill), the root class
       const READ = `const root = document.documentElement, ts = (e) => e ? getComputedStyle(e).textShadow : null;
@@ -907,8 +909,12 @@ app.whenReady().then(async () => {
       const lum = async (x, y, w, h) => { const bm = (await win.webContents.capturePage({ x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) })).toBitmap();
         let s = 0; for (let i = 0; i < bm.length; i += 4) s += (bm[i] + bm[i + 1] + bm[i + 2]) / 3; return s / (bm.length / 4); };
       const pixels = async (r) => (await win.webContents.capturePage({ x: Math.round(r.x - 10), y: Math.round(r.y - 6), width: Math.round(r.w + 20), height: Math.round(r.h + 12) })).toBitmap();
+      // "Text shadow" is an Advanced row (src/settingsLevel.ts): below that level Settings doesn't show it. Raised to Advanced
+      // (Expert shows it too) and put back after
+      const level0 = (await http("GET", "/settings")).json?.settingsLevel;
+      const level = level0 === "expert" ? "expert" : "advanced";
       try {
-        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true });
+        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true, settingsLevel: level });
         await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Settings"); await sleep(600);
         // off (the default)
         const off = await page(READ);
@@ -1001,7 +1007,7 @@ app.whenReady().then(async () => {
         if (back.cls || back.body !== "none" || back.label !== "none") v.push(`turned off: text still shadowed (${J({ cls: back.cls, body: back.body, label: back.label })})`);
         if (!(await saved(false))) v.push("turning Text shadow off wasn't saved");
       } finally {
-        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true });
+        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true, settingsLevel: level0 ?? "standard" });
         await win.loadURL(withToken(U + "/")); await js(PAGE); await sleep(400);
       }
       return v;
@@ -1490,8 +1496,33 @@ app.whenReady().then(async () => {
     });
     const NOTCH = { deltaX: 0, deltaY: -120, wheelTicksX: 0, wheelTicksY: -1, hasPreciseScrollingDeltas: false };
     const notchRun = (sel) => wheelRun(sel, [NOTCH]);
+    // Browse's grid needs a list to scroll: the matrix's web sources list nothing (an empty fixture), so the Browse cell lists
+    // the stubbed paged Workshop source (BR_STUB, as tabs:browse does), its first page loaded, and puts the page back after
+    const browseStub = async (fn) => {
+      makeBrowseThumbs();
+      const ws = ((await http("GET", "/sources")).json ?? []).find((s) => s.supportsTagFilter && s.available);
+      if (!ws) return ["no available Workshop source (supportsTagFilter) in /sources — proved nothing"];
+      const ls0 = await js(`({ src: localStorage.getItem("liascape.activeSource"), bf: localStorage.getItem("liascape.browseFilter") })`);
+      const d = dbg(); await d.sendCommand("Page.enable");
+      const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: BR_STUB() });
+      const boot = async () => { await win.loadURL(withToken(U + "/"));
+        for (let i = 0; i < 100; i++) { if (await js(`document.querySelectorAll('.tab').length`) >= 3) break; await sleep(100); }
+        await js(PAGE); };
+      try {
+        await boot(); await tab("Browse");
+        await page(`m.byText(".pill", ${JSON.stringify(ws.name)}).click();`);
+        for (let i = 0; i < 60 && !((await page(BR_AT))?.n >= BR_PER_PAGE); i++) await sleep(100);
+        win.webContents.sendInputEvent({ type: "mouseMove", x: 2, y: 2 });
+        return await fn();
+      } finally {
+        await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+        await js(`(() => { const r = (k, x) => x == null ? localStorage.removeItem(k) : localStorage.setItem(k, x);
+          r("liascape.activeSource", ${JSON.stringify(ls0.src)}); r("liascape.browseFilter", ${JSON.stringify(ls0.bf)}); })()`);
+        await boot(); await sleep(800);
+      }
+    };
     for (const [name, t, sel] of [["scroll:glide", "Library", ".lib-scroll"], ["scroll:glide:browse", "Browse", ".scroll:not(.lib-scroll):not(.settings)"], ["scroll:glide:settings", "Settings", ".scroll.settings"]]) {
-      await cell(name, async () => {
+      await cell(name, () => (t === "Browse" ? browseStub : (fn) => fn())(async () => {
         await tab(t);
         // Settings is a lazy chunk: its first visit mounts seconds later on the matrix's software GL
         for (let w = 0; w < 8000 && !(await js(`!!document.querySelector(${JSON.stringify(sel)})`)); w += 100) await sleep(100);
@@ -1506,7 +1537,7 @@ app.whenReady().then(async () => {
         if (r.lastMove < 700) v.push(`scrollTop stopped ${r.lastMove.toFixed(0)} ms after the tick (a glide coasts ≥ 700 ms)`);
         if (r.moves < 15) v.push(`only ${r.moves} frames moved`);
         return v;
-      });
+      }));
     }
     await cell("scroll:touchpad", async () => {
       await tab("Library"); await sleep(400);

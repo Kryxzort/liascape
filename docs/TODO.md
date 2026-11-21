@@ -46,12 +46,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton.
-110. [ ] Three layout checks fail, on the build before preset wallpapers too (`LIASCAPE_MATRIX_SCREEN=2560x1440
-       scripts/test-ui-matrix.sh --probe probe-layout.js`): switching to Settings forces 4–6 layouts from script
-       (framer's `measureScroll`) and switching to Library runs a stray animation frame (`perf:tabs`); the text-shadow
-       check finds no "Text shadow" row (an Advanced-level row: likely the cell never raises the level;
-       `look:textShadow`); Browse's grid has nothing to scroll in the wheel-glide check (`scroll:glide:browse`). Find
-       each cause; fix the tab switch's forced layouts, and make the other two cells set up what they need.
 112. [ ] A preset's video in a scene's texture slot plays: Workshop presets can put a video file (`files/<name>.mp4`)
        where their base scene has an image slot, and Wallpaper Engine plays it there. Today the slot keeps the base's
        texture and the adapter logs "is not an image" (seen on Workshop preset 2843309472). The scene renderer
@@ -169,6 +163,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       "Making previews" to "Making Low previews" (ClipStore's phase leaves `make` for a quality) and an operation is still
       listed at the end. Likely a quality sweep left by an earlier cell (libops:motion / hold / toggle change the quality);
       the cause is unread.
+- [ ] Settings → Watched folders: removing a folder, its row fades out and then "Add folder" (and any row below) jumps up
+      into its place instead of gliding. Framer runs the layout group's glide after an unmount only when the unmounting
+      node was itself layout-dirty, and an exiting row isn't. AnimatePresence `mode="popLayout"` with motion on (as
+      `components/ScenePropsEditor.tsx` does) takes the row out of the flow as it starts fading, so the rest glides up
+      while it fades. Guard to add: probe-import `import:settings` sampling "Add folder"'s y per frame on the remove
+      (in-between frames with motion on, a jump with it off).
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in
