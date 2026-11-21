@@ -2,6 +2,8 @@
 gone. It replaces README.md in the switch-over commit; until then, a change that updates README.md updates this file too
 wherever it still applies here. Links and paths are written for the repo root, where it will live. -->
 
+<p align="center"><img src="app/icon/liascape-night.svg" alt="" width="128"></p>
+
 # Liascape
 
 Liascape puts live wallpapers on your Wayland desktop. It plays videos, GIFs, pictures and Wallpaper Engine
