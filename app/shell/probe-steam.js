@@ -197,6 +197,8 @@
 //   yours:empty          "Nothing here matches" on an empty set (in a creator's and a scene's presets list too); its clear keeps the Yours rows;
 //                        motion off + bg-live
 //   yours:signOut        signed out: the favourites leave at once, the row dims; another account never sees them
+//   lib:yours:fav        the Library's Favourites row: ✓ the starred items, ✕ the rest (non-Workshop too), – all; signed out dimmed and no effect; the
+//                        Library's sort and search apply on top; a second star arriving updates ✓ live
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
@@ -4102,6 +4104,95 @@ app.whenReady().then(async () => {
         if (J(g2) !== J(T("Glacier"))) v.push(`another account's favourites: ${J(g2)} (want its own, Glacier)`);
         await shot("yours-signout-other");
       } finally { await js(`window.__favs = null; true`).catch(() => {}); await yoursDone(); }
+      return v;
+    });
+
+    // lib:yours:fav — the Library's Favourites row: ✓ keeps the library's items starred on the Workshop, ✕ the rest (a non-Workshop
+    // item included), – all; signed out the row is dimmed and means nothing; the Library's own sort and search still apply on top;
+    // a workshop-favorites event that adds a second star updates ✓ live. Shots steam-libyours-*.png
+    await cell("lib:yours:fav", async () => {
+      const v = [];
+      const ALL = T("Ember", "Glacier", "Plain", "Zephyr");
+      const LIB = [{ title: "Ember", workshopId: "950005" }, { title: "Glacier", workshopId: "950007" }, { title: "Zephyr", workshopId: "950008" },
+        { title: "Plain", workshopId: null }];
+      const cards = () => js(`[...document.querySelectorAll(".lib-scroll .card.lib [data-title]")].map((e) => e.dataset.title)`);
+      const cardsAs = async (want, ordered = false, ms = 3000) => {
+        const norm = (xs) => J(ordered ? xs : sorted(xs));
+        return (await waitFor(async () => { const t = await cards(); return norm(t) === norm(want) ? t : null; }, ms)) ?? await cards();
+      };
+      const rowOf = () => js(`(() => { const r = document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"]'); if (!r) return null; const w = r.querySelector("[data-wf-why]");
+        return { off: r.hasAttribute("data-wf-off"), why: w && w.checkVisibility() ? w.textContent.trim() : null, st: r.dataset.state }; })()`);
+      const libSort = async (label) => {
+        const ok = await page(`document.querySelector("[data-sortsplit=library] .ss-sort").click(); await new Promise((r) => setTimeout(r, 200));
+          const o = [...document.querySelectorAll(".sel-pop .sel-opt")].find((x) => x.textContent.trim() === ${J(label)}); if (!o) { document.querySelector(".sel-backdrop")?.click(); return false; }
+          o.click(); return true;`);
+        await sleep(300);
+        return ok;
+      };
+      try {
+        await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        await js(`localStorage.setItem("__probe_yours", ${J(J({ ...yData(), lib: LIB }))}); for (const k of ["libFilter", "wsLocalSort"]) localStorage.removeItem("liascape." + k);
+          localStorage.setItem("liascape.libFilterHidden", "false"); true`);
+        await load(SIGNED_IN); await tab("Library");
+        const g0 = await cardsAs(ALL);
+        if (J(sorted(g0)) !== J(ALL)) return [`the Library shows ${J(g0)} before any row — proved nothing`];
+        await setRow("@favorites", "inc");
+        const g1 = await cardsAs(T("Ember"));
+        console.log(`        Favourites ✓: ${J(g1)}`);
+        if (J(g1) !== J(T("Ember"))) v.push(`Favourites ✓: ${J(g1)} (want only the starred Ember)`);
+        if ((await favAsks()).filter((x) => x === "open").length < 1) v.push("Favourites ✓: the favourites were never read (sync=open)");
+        // a capture straight after a card leaves still holds the old frame (the Library's video cards repaint late under Xvfb)
+        await sleep(1500); await shot("libyours-inc");
+        await setRow("@favorites", "exc");
+        const g2 = await cardsAs(T("Glacier", "Plain", "Zephyr"));
+        console.log(`        Favourites ✕: ${J(g2)}`);
+        if (J(sorted(g2)) !== J(T("Glacier", "Plain", "Zephyr"))) v.push(`Favourites ✕: ${J(g2)} (want the three others, the non-Workshop Plain included)`);
+        await sleep(1500); await shot("libyours-exc");
+        // the Library's own sort and search apply on top
+        await libSort("Name Z–A");
+        const g3 = await cardsAs(T("Zephyr", "Plain", "Glacier"), true);
+        if (J(g3) !== J(T("Zephyr", "Plain", "Glacier"))) v.push(`✕ with Name Z–A: ${J(g3)} (want Zephyr, Plain, Glacier)`);
+        await search("e");
+        const g4 = await cardsAs(T("Zephyr", "Glacier"), true);
+        if (J(g4) !== J(T("Zephyr", "Glacier"))) v.push(`✕ with Name Z–A and the search "e": ${J(g4)} (want Zephyr, Glacier)`);
+        await setRow("@favorites", "inc");
+        const g5 = await cardsAs(T("Ember"));
+        if (J(g5) !== J(T("Ember"))) v.push(`✓ with the search "e": ${J(g5)} (want Ember)`);
+        await search("zephyr");
+        const g6 = await cardsAs([]);
+        if (g6.length) v.push(`✓ with the search "zephyr": ${J(g6)} (want none)`);
+        if (!(await js(`!!document.querySelector(".lib-scroll [data-wf-none]")`))) v.push("✓ with nothing left: no empty message");
+        await search(""); await libSort("Name A–Z");
+        // a second star arrives
+        await cardsAs(T("Ember"));
+        await js(`window.__favs = { answer: ${J(fv(5, [...yFavs(), GLACIER]))} }; true`);
+        await ev("workshop-favorites", { version: 5, loading: null });
+        const g7 = await cardsAs(T("Ember", "Glacier"));
+        console.log(`        a second star: ${J(g7)}`);
+        if (J(sorted(g7)) !== J(T("Ember", "Glacier"))) v.push(`a second star: ${J(g7)} (want Ember and Glacier)`);
+        // – shows all
+        await setRow("@favorites", "off");
+        const g8 = await cardsAs(ALL);
+        if (J(sorted(g8)) !== J(ALL)) v.push(`Favourites –: ${J(g8)} (want all four)`);
+        // signed out: the row is dimmed with its reason, a saved ✓ means nothing
+        await setRow("@favorites", "inc");
+        await cardsAs(T("Ember", "Glacier"));
+        await js(`window.__st.status = ${J(SIGNED_OUT)}; true`);
+        await ev("steam-status", SIGNED_OUT);
+        const g9 = await cardsAs(ALL);
+        const r9 = await rowOf();
+        console.log(`        signed out: ${J(g9)} ${J(r9)}`);
+        if (J(sorted(g9)) !== J(ALL)) v.push(`signed out, a saved ✓: ${J(g9)} (want all four)`);
+        if (!r9?.off || r9.why !== "Sign in to Steam") v.push(`signed out: the row ${J(r9)} (want dimmed, "Sign in to Steam")`);
+        await sleep(400); await shot("libyours-signedout");
+        await js(`window.__st.status = ${J(SIGNED_IN)}; true`);
+        await ev("steam-status", SIGNED_IN);
+        const g10 = await cardsAs(T("Ember", "Glacier"), false, 4000);
+        if (J(sorted(g10)) !== J(T("Ember", "Glacier"))) v.push(`signed in again: ${J(g10)} (want the ✓ back: Ember, Glacier)`);
+      } finally {
+        await js(`window.__favs = null; localStorage.removeItem("__probe_yours"); for (const k of ["libFilter", "libFilterHidden"]) localStorage.removeItem("liascape." + k); true`).catch(() => {});
+        await load(SIGNED_OUT);
+      }
       return v;
     });
 
