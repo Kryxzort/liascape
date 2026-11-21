@@ -13,6 +13,8 @@
 //   POST /ISteamRemoteStorage/GetPublishedFileDetails/v1/  the keyless details, current AND lifetime counts
 //   GET  /__log  the requests so far     POST /__ratelimit  the next request answers 429     /__fav?id=N  favourited on "Steam"
 //   POST /__myfavs {ids: string[]}  the signed-in account's favourites page list, in its order (default: three ids)
+//        Guard: the default list, test-workshop-social.sh "favourites of a private profile: the community page …"; a set
+//        list is for the favourites cache's tests, which call this route
 // Usage: node fake-steam-community.mjs <port file> <signed-in steamid> <cookie token>
 import http from "node:http";
 import fs from "node:fs";

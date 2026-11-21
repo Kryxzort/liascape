@@ -44,7 +44,8 @@ public static class SteamWorkshopDetails
     // Workshop tags, Steam's names; Creator = its creator's Steam ID (0 = unknown); Subscriptions / Favorites = Steam's
     // CURRENT counts (`subscriptions` / `favorited`, never the lifetime ones, which also count everyone who has left);
     // Children = the items it requires (a preset: its base); File = the whole answer as the browse mapping takes it (its
-    // created time, score, preview). An item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false, no tags.
+    // created time, score, preview; Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "details: File carries
+    // created / preview"). An item Steam couldn't answer for (removed, private: result ≠ 1) is Found=false, no tags.
     public readonly record struct Details(bool Found, string? Youtube, string[] Tags, ulong Creator = 0, long Subscriptions = 0, long Favorites = 0, string? Title = null, ulong[]? Children = null, PublishedFileDetail? File = null);
 
     private static string? Fixture => Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE") is { Length: > 0 } f ? f : null;
@@ -190,7 +191,8 @@ public static class SteamWorkshopDetails
     // created time, score (`return_vote_data`) and children (`return_children`). Also measured on an anonymous session:
     // `ids_only` answers the whole list as bare ids in the `lastupdated` order, up to IdsPageSize a page (asked for 2000, it
     // returns 1000; without `ids_only` the cap stays 100); `totalonly` answers `total` with no items.
-    // null = Steam's servers unreachable / refused / timed out.
+    // null = Steam's servers unreachable / refused / timed out. Guard (created / score / children): steam-selftest
+    // (scripts/test-steam-signin.sh § 1) "user files: created / score / children".
     public sealed record UserFilesPage(List<PublishedFileDetail> Items, uint Total);
 
     public static async Task<UserFilesPage?> UserFilesAsync(ulong steamId, string type, string sort, int page, int perPage, TimeSpan timeout, CancellationToken ct = default)
@@ -219,7 +221,8 @@ public static class SteamWorkshopDetails
 
     // The whole list's ids in Steam's `lastupdated` order, a page of IdsPageSize a request (the favourites cache's cheap
     // check of membership and order). null = Steam unreachable, or a page failed partway (a partial list would read as
-    // items removed).
+    // items removed). Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: ids only = the whole list in
+    // Steam's order".
     public static async Task<List<ulong>?> UserFileIdsAsync(ulong steamId, string type, TimeSpan timeout, CancellationToken ct = default)
     {
         var all = new List<ulong>();
@@ -237,6 +240,7 @@ public static class SteamWorkshopDetails
     }
 
     // The list's size alone (`totalonly`: no items). null = Steam unreachable.
+    // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: total only".
     public static async Task<uint?> UserFilesTotalAsync(ulong steamId, string type, TimeSpan timeout, CancellationToken ct = default)
     {
         var req = new CPublishedFile_GetUserFiles_Request
@@ -267,6 +271,8 @@ public static class SteamWorkshopDetails
     // the fixture's `"@userfiles": {"<steamid>:<type>": [ {publishedfileid, title, tags, subscriptions, lifetime_subscriptions, …} ]}`
     // (the client protocol's own field names): built into Steam's own reply objects, so the mapping below is the one tested.
     // As Steam answers: `ids_only` items carry only their id (pages up to IdsPageSize, else 100), `totalonly` no items.
+    // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: ids only = the whole list in Steam's order",
+    // "user files: total only".
     private static (List<PublishedFileDetails> Items, uint Total)? UserFilesFromFixture(string file, CPublishedFile_GetUserFiles_Request req)
     {
         try
