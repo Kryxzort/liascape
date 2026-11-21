@@ -1,4 +1,4 @@
-import { isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
@@ -176,6 +176,8 @@ function CachePicker() {
 // brought in stays). "Add folder" picks one and opens the import dialog with "Keep watching" ticked: the folder's wallpapers
 // are shown before anything lands. Rows glide in and out (motion off: they fade). Guard: --probe probe-import.js import:settings*
 const ROW_GLIDE = { duration: 0.2 };
+// the card's height on the rows' own clock: framer's default tween curve (easeInOut) at ROW_GLIDE's duration
+const CARD_GLIDE: KeyframeAnimationOptions = { duration: ROW_GLIDE.duration * 1000, easing: "cubic-bezier(0.42, 0, 0.58, 1)" };
 function WatchedFolders() {
   const folders = useStore((s) => (s.settings?.watchedFolders as WatchedFolder[] | undefined) ?? []);
   const items = useStore((s) => s.libraryItems);
@@ -213,22 +215,41 @@ function WatchedFolders() {
   const dep = folders.map((w) => w.path).join("\n");
   // COOL: a removed row leaves the flow as it starts to fade (AnimatePresence popLayout), so the rows below and "Add folder"
   // glide up into its place meanwhile: framer glides nothing once an exiting row unmounts (it isn't layout-dirty itself),
-  // they would jump. All of them move on the rows' own timing. The card keeps its height until the row has gone: it would
-  // shrink at the click and its overflow: hidden clip "Add folder" for most of the glide. Motion off (or off screen) the
-  // row fades in place and the rest then takes its place at once. Guard: probe-import import:settings
-  const hold = () => { const el = boxRef.current; if (layoutOn && el) el.style.minHeight = `${el.offsetHeight}px`; };
-  const release = useCallback(() => { boxRef.current?.style.removeProperty("min-height"); }, []);
-  useEffect(() => release, [layoutOn, release]); // a remount (the flag flipped) ends the exit without its callback
+  // they would jump. All of them move on the rows' own timing. Motion off (or off screen) the row fades in place and the
+  // rest then takes its place at once.
+  // The card's own height glides from what was last drawn to its new height on the same clock, so its bottom edge keeps
+  // pace with "Add folder" (never clipping it) and every section below slides with it instead of jumping. It is a Web
+  // Animation on `height`, not a framer layout node: one would own the card's `transform` and fight `.ssection`'s hover
+  // lift, and every other section would have to be one too to glide. The last drawn height comes from a ResizeObserver (no
+  // layout read while nothing changes); the new one is read once, after the commit that changed the list.
+  // PERF: a height animation lays the page out each frame, for 200 ms, only on a change to this list while it is on screen.
+  // Guard: probe-import import:settings
+  const drawnH = useRef(0), glide = useRef<Animation | null>(null), lastDep = useRef<string | null>(null);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((es) => { const b = es[es.length - 1].borderBoxSize?.[0]; if (b) drawnH.current = b.blockSize; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const was = lastDep.current;
+    lastDep.current = dep;
+    const el = boxRef.current, from = drawnH.current;
+    if (was === null || was === dep || !layoutOn || !el || !from) return;
+    glide.current?.cancel(); // its frame would be read as the new height
+    const to = el.offsetHeight;
+    if (Math.abs(to - from) > 0.5) glide.current = el.animate([{ height: `${from}px` }, { height: `${to}px` }], CARD_GLIDE);
+  }, [dep, layoutOn]);
   // API: the backend broadcasts settings-changed {watchedFolders}; the page shows the edit at once
   const edit = (path: string, change: { copy?: boolean; remove?: boolean }) => {
-    if (change.remove) hold();
     mergeSettings({ watchedFolders: change.remove ? folders.filter((w) => w.path !== path) : folders.map((w) => w.path === path ? { ...w, ...change } : w) });
     api.editWatched({ path, ...change }).catch(() => {});
   };
   return (
     <Section title="Watched folders" icon={<FolderSync size={15} />} bare boxRef={boxRef}>
       <Help>New or changed files in these folders come into your library by themselves, and removed ones leave it.</Help>
-      <AnimatePresence key={`rows|${layoutOn}`} initial={false} mode={layoutOn ? "popLayout" : "sync"} onExitComplete={release}>
+      <AnimatePresence key={`rows|${layoutOn}`} initial={false} mode={layoutOn ? "popLayout" : "sync"}>
         {folders.map((w) => {
           const c = counts.get(w.path) ?? 0;
           return (

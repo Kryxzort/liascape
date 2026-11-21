@@ -23,7 +23,8 @@
 //                       without a click; the remove button stops the watching (the section on screen: motion on, the row
 //                       fades in place, never sideways, while "Add folder" glides up through in-between frames, never back
 //                       down, never clipped by the card; off, the row fades and "Add folder" then jumps, no in-between
-//                       frame) and keeps the wallpapers
+//                       frame) and keeps the wallpapers; the section below glides up with the card's bottom edge (motion
+//                       off: it jumps), and on an add glides down while the card grows (picture import-settings-add-on.png)
 //   import:steam        a folder holding a Steam library's Workshop folder (a fake libraryfolders.vdf in the stack's HOME):
 //                       its items listed apart, last, as "From your Steam subscriptions" (the summary says how many), the
 //                       group's tick and every item unticked and disabled, its line naming "Import new Workshop wallpapers"
@@ -383,11 +384,14 @@ app.whenReady().then(async () => {
       // "Add folder"'s y before the click, then a sample per frame once the page has handled it (a task later: React commits
       // and framer asks for its frame in microtasks, so the sampler's frame callback runs after framer's and reads the glide's
       // transform as painted), and a picture mid-way (the row half faded, "Add folder" on its way up): import-settings-remove-<m>.png
+      // `next` = the section below the card: every section under it moves with the card's bottom edge
+      const NEXT = ".ssection:has([data-watched-add]) ~ *";
       const remove = async (dir, m) => {
         const s = js(`const y0 = +document.querySelector("[data-watched-add]").getBoundingClientRect().y.toFixed(1);
+          const ny0 = +document.querySelector(${J(NEXT)}).getBoundingClientRect().y.toFixed(1);
           document.querySelector('[data-watched="${dir}"] [data-watched-remove]').click();
           await new Promise((r) => setTimeout(r));
-          return { y0, ...(await ${SAMPLE({ row: `[data-watched="${dir}"]`, add: "[data-watched-add]", card: ".ssection:has([data-watched-add])" }, 700)}) }`);
+          return { y0, ny0, ...(await ${SAMPLE({ row: `[data-watched="${dir}"]`, add: "[data-watched-add]", card: ".ssection:has([data-watched-add])", next: NEXT }, 700)}) }`);
         await sleep(80);
         fs.writeFileSync(path.join(OUT, `import-settings-remove-${m}.png`), (await win.webContents.capturePage()).toPNG());
         return s;
@@ -398,6 +402,12 @@ app.whenReady().then(async () => {
         const y0 = fr.y0, y1 = ys[ys.length - 1];
         return { y0, y1, mid: ys.filter((y) => y < y0 - 1 && y > y1 + 1).length, back: ys.some((y, i) => y > (i ? ys[i - 1] : y0) + 1),
           ys: ys.filter((y, i) => !i || y !== ys[i - 1]).slice(0, 16).join(" ") }; };
+      // the next section's way (up on a remove, down on an add): the frames it spent more than a pixel from both ends, and
+      // whether it ever turned back
+      const slide = (fr, y0) => { const ys = fr.next.filter((f) => f[1] != null).map((f) => f[3]);
+        const y1 = ys[ys.length - 1], dn = y1 > y0;
+        return { y0, y1, moved: Math.abs(y1 - y0) > 10, mid: ys.filter((y) => y > Math.min(y0, y1) + 1 && y < Math.max(y0, y1) - 1).length,
+          back: ys.some((y, i) => (dn ? -1 : 1) * (y - (i ? ys[i - 1] : y0)) > 1), ys: ys.filter((y, i) => !i || y !== ys[i - 1]).slice(0, 16).join(" ") }; };
       const fr = await remove(d, "on");
       const fades = fr.row.filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length;
       if (!fades) v.push(`the row popped out (${brief(fr.row)})`);
@@ -409,7 +419,28 @@ app.whenReady().then(async () => {
       else if (on.back) v.push(`motion on: "Add folder" went back down on its way up (y ${on.y0} → ${on.ys})`);
       const clipped = fr.add.map((f, i) => [f, fr.card[i]]).filter(([a, c]) => a[1] != null && c?.[1] != null && a[3] + a[5] > c[3] + c[5] - 1);
       if (clipped.length) v.push(`motion on: "Add folder" ran past the card's bottom edge (clipped) in ${clipped.length} frames (${J(clipped[0])})`);
+      const nx = slide(fr, fr.ny0);
+      if (!nx.moved) v.push(`motion on: the section below didn't move up (y ${nx.y0} → ${nx.y1}) — proved nothing`);
+      else if (nx.mid < 3) v.push(`motion on: the section below jumped up instead of gliding (${nx.mid} in-between frames, y ${nx.y0} → ${nx.ys})`);
+      else if (nx.back) v.push(`motion on: the section below went back down on its way up (y ${nx.y0} → ${nx.ys})`);
       if (!(await waitFor(async () => !((await http("GET", "/settings")).json?.watchedFolders ?? []).some((w) => w.path === d), 8000))) v.push("remove didn't stop the watching");
+      // an add (the backend's settings-changed, as the import dialog's Import brings it): the card grows through in-between
+      // frames, the section below glides down with it, "Add folder" never clipped by the card on its way down
+      const d3 = tree("wn");
+      const ny0 = await js(`return +document.querySelector(${J(NEXT)}).getBoundingClientRect().y.toFixed(1)`);
+      const sampling = js(`return await ${SAMPLE({ add: "[data-watched-add]", card: ".ssection:has([data-watched-add])", next: NEXT }, 1500)}`);
+      await sleep(100);
+      if ((await http("POST", "/library/watched", { path: d3 })).status !== 200) v.push("couldn't watch a folder through the API");
+      await sleep(150);
+      fs.writeFileSync(path.join(OUT, "import-settings-add-on.png"), (await win.webContents.capturePage()).toPNG());
+      const fa = await sampling;
+      const na = slide(fa, ny0);
+      if (!na.moved) v.push(`motion on, add: the section below didn't move down (y ${na.y0} → ${na.y1}) — proved nothing`);
+      else if (na.mid < 3) v.push(`motion on, add: the section below jumped down instead of gliding (${na.mid} in-between frames, y ${na.y0} → ${na.ys})`);
+      else if (na.back) v.push(`motion on, add: the section below went back up on its way down (y ${na.y0} → ${na.ys})`);
+      const clippedA = fa.add.map((f, i) => [f, fa.card[i]]).filter(([a, c]) => a[1] != null && c?.[1] != null && a[3] + a[5] > c[3] + c[5] - 1);
+      if (clippedA.length) v.push(`motion on, add: "Add folder" ran past the card's bottom edge (clipped) in ${clippedA.length} frames (${J(clippedA[0])})`);
+      await http("POST", "/library/watched", { path: d3, remove: true });
       if (!(await titles()).includes("wa")) v.push("removing the folder took its wallpapers away");
       // motion off: the row fades in place, then "Add folder" takes its place at once
       const d2 = tree("wo");
@@ -425,6 +456,9 @@ app.whenReady().then(async () => {
       const off = travel(fo);
       if (!(off.y1 < off.y0 - 10)) v.push(`motion off: "Add folder" didn't move up (y ${off.y0} → ${off.y1}) — proved nothing`);
       else if (off.mid) v.push(`motion off: "Add folder" moved through ${off.mid} in-between frames (y ${off.y0} → ${off.ys}), want a jump`);
+      const noff = slide(fo, fo.ny0);
+      if (!noff.moved) v.push(`motion off: the section below didn't move up (y ${noff.y0} → ${noff.y1}) — proved nothing`);
+      else if (noff.mid) v.push(`motion off: the section below moved through ${noff.mid} in-between frames (y ${noff.y0} → ${noff.ys}), want a jump`);
       await setSettings({ Morphs: true });
       return v;
     });

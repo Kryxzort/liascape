@@ -208,12 +208,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
-- [ ] Settings → Watched folders: the card's height snaps (and every section below jumps) when a removed row's exit
-      ends, and it grows at once when a folder is added; the rows and "Add folder" already glide (`ROW_GLIDE`, the
-      held `min-height` in `views/Settings.tsx`). Gliding the section's own height means making the shared `Section` a
-      framer layout node, which fights `.ssection`'s hover `transform`; animate the height another way (a measured
-      height transition) or move the hover lift onto an inner element. Guard: probe-import `import:settings` sampling
-      the next section's y per frame on the remove.
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in
