@@ -58,7 +58,7 @@ body {
 /* padding: 0 — Chromium's own button padding (1px 6px) stayed on every button that didn't restate it, squeezing a small fixed-size
    icon button's content box below its icon, which then overflowed to the right: centring silently failed (the filter switches
    2 px off, the playlist bar's ✕ 2.5 px). A button pads only as its own
-   rule says. Guard: probe-layout `look:iconsCentred`. */
+   rule says. Guard: probe-icons `icon:centre:*`. */
 button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; padding: 0; }
 
 /* Custom scrollbar — 10px track, transparent; thumb 6px Surface1,

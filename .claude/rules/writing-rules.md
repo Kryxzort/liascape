@@ -73,7 +73,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 
 ## Code comments
 - Say why the code is the way it is when the code can't: the contract, the trap a "simplification" would fall into,
-  the measured limit. Name the guard test (`Guard: probe-steam look:dlCentre`) so a reader can check it.
+  the measured limit. Name the guard test (`Guard: probe-steam look:dlCentre`) so a reader can check it;
+  `check-rules.sh` fails a guard whose probe cell or script doesn't exist.
 - No history in comments: no dates, no owner quotes, no R/Phase/Task numbers, no "used to …" stories — those live in
   the commit (`git blame` finds it). A choice the owner made → link its `docs/decisions.md` § heading instead.
 - Never describe what the next line plainly does; delete a comment the code made untrue in the same commit.

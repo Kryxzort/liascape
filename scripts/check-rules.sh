@@ -6,6 +6,7 @@
 #  - every backticked repo path in CLAUDE.md, the rules and the skills exists (exact, a tracked directory, a glob, or
 #    a suffix of a tracked path such as `hooks/useLinger.ts`; runtime and build-output paths are skipped);
 #  - no "see memory X" pointers (auto memory is invisible to subagents); no emails / real IPs in rules and docs (public repo);
+#  - guards resolve: every `Guard: probe-<area> <cell>` names a cell in that probe, every `Guard: scripts/….sh` exists.
 #  - no dead citations: every `.claude/rules/….md` or `docs/….md` path named in any tracked or new text file (code
 #    comments included) exists — one problem per missing path, with its count and the files citing it.
 # Uses PyYAML when installed; otherwise a strict parser for the one allowed shape (any file it accepts is valid YAML).
@@ -160,6 +161,39 @@ for p, where in sorted(dead.items(), key=lambda kv: (-len(kv[1]), kv[0])):
     files = sorted(set(where))
     bad(p, f"dead citation: {len(where)}× in {len(files)} file(s): {', '.join(files[:6])}{' …' if len(files) > 6 else ''}")
 print(f"dead citations: {len(dead)} missing path(s), {sum(len(w) for w in dead.values())} citation(s)")
+
+# Guards: a `Guard: probe-<area> <cell>` comment names a cell that exists in app/shell/probe-<area>.js (a templated cell
+# like `icon:centre:<scene>` counts when its fixed parts are there), and a `Guard: scripts/<suite>.sh …` names a script
+# that exists. A guard that names nothing pins nothing, and a reader trusting it skips the check it thinks exists.
+GUARD = re.compile(r"Guard:[^\n]*")
+G_PROBE = re.compile(r"\b(probe-[a-z]+)(?:\.js)?\s+`?([\w:*.\-|]+)`?")
+G_SCRIPT = re.compile(r"\b(scripts/[\w.-]+\.sh)\b")
+_probe = {}
+def cell_found(body, cell):
+    c = cell.rstrip('.').split('*')[0].rstrip(':')
+    if not c or c in body: return True
+    segs = c.split(':')
+    if len(segs) > 1 and (':'.join(segs[:-1]) + ':') in body and segs[-1] in body: return True
+    return len(segs[-1]) >= 6 and segs[-1] in body
+nguards = 0
+for f in sorted(set(listed)):
+    if not f or f.startswith('docs/') or any(('/' + f).find('/' + d) >= 0 for d in SKIP_DIRS) or not os.path.isfile(f): continue
+    try:
+        with open(f, 'rb') as fh: raw = fh.read()
+    except OSError: continue
+    if b'\0' in raw[:8192] or b'Guard:' not in raw: continue
+    for g in GUARD.findall(raw.decode('utf-8', 'replace')):
+        for sp in G_SCRIPT.findall(g):
+            nguards += 1
+            if not os.path.exists(sp): bad(f, f'guard names a missing script: {sp}')
+        for pr, cell in G_PROBE.findall(g):
+            nguards += 1
+            pf = f'app/shell/{pr}.js'
+            if not os.path.exists(pf): bad(f, f'guard names a missing probe: {pr}'); continue
+            if pf not in _probe:
+                with open(pf, encoding='utf-8', errors='replace') as fh: _probe[pf] = fh.read()
+            if not cell_found(_probe[pf], cell): bad(f, f'guard names a cell {pr} lacks: {cell}')
+print(f'guards: {nguards} checked')
 
 if not yaml: print("(PyYAML not installed: frontmatter checked with the strict built-in parser)")
 for p in problems: print("PROBLEM " + p)
