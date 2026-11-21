@@ -9,12 +9,14 @@
 //   POST /comment/PublishedFile_Public/render/O/N/  start, count → {success, start, total_count, comments_html}, newest first
 //   POST /comment/PublishedFile_Public/post/O/N/    comment, count, sessionid + the sign-in → the first page, the new one on top
 //   GET  /profiles/S/?xml=1                         a profile's XML (steamID, avatarMedium)
-//   GET  /profiles/S/myworkshopfiles/?…myfavorites  a favourites page (filedetails links + Steam's "Showing a-b of N entries"), 30 a page
+//   GET  /profiles/S/myworkshopfiles/?…myfavorites  S's favourites page (filedetails links + Steam's "Showing a-b of N entries"), 30 a
+//                                                   page, to S's own sign-in cookie only (any account's "<S>||<token>")
 //   POST /ISteamRemoteStorage/GetPublishedFileDetails/v1/  the keyless details, current AND lifetime counts
 //   GET  /__log  the requests so far     POST /__ratelimit  the next request answers 429     /__fav?id=N  favourited on "Steam"
-//   POST /__myfavs {ids: string[]}  the signed-in account's favourites page list, in its order (default: three ids)
+//   POST /__myfavs {ids: string[], steamid?, hold?}  an account's favourites page list, in its order (default: the signed-in
+//        account's, three ids); hold = a page number whose next request waits for POST /__release (a test acts in between)
 //        Guard: the default list, test-workshop-social.sh "favourites of a private profile: the community page …"; a set
-//        list is for the favourites cache's tests, which call this route
+//        list and the hold: § 7 (the favourites cache)
 // Usage: node fake-steam-community.mjs <port file> <signed-in steamid> <cookie token>
 import http from "node:http";
 import fs from "node:fs";
@@ -25,7 +27,8 @@ const ITEM = "3000000001";
 const log = [];
 const favs = new Set();                   // `${steamid}:${id}`
 let rateLimitNext = false;
-let myFavs = ["3100000001", "3100000002", "3100000003"];
+const favLists = { [ME]: ["3100000001", "3100000002", "3100000003"] };
+let holdPage = 0, release = () => { };
 let n = 0;
 
 // Steam's own markup for a comment (the parts the backend reads, as the item page serves them), user text already escaped by
@@ -69,6 +72,8 @@ const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, 
 const cookies = (req) => Object.fromEntries((req.headers.cookie || "").split(/;\s*/).filter(Boolean).map((kv) => { const i = kv.indexOf("="); return [kv.slice(0, i), kv.slice(i + 1)]; }));
 // the sign-in Steam would take: "<steamid>||<token>", URL-encoded once (as the browser sends it)
 const signedIn = (ck) => ck.steamLoginSecure === encodeURIComponent(`${ME}||${TOKEN}`);
+// any account's sign-in with the test's token: its Steam ID
+const accountOf = (ck) => { try { const [sid, tok] = decodeURIComponent(ck.steamLoginSecure ?? "").split("||"); return tok === TOKEN && sid ? sid : null; } catch { return null; } };
 const body = (req) => new Promise((r) => { let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => r(b)); });
 const thread = (id, start, count) => {
   const all = comments[id] ?? [];
@@ -95,9 +100,11 @@ const server = http.createServer(async (req, res) => {
   if (u.pathname === "/__ratelimit") { rateLimitNext = true; return send(200, {}); }
   if (u.pathname === "/__fav") { favs.add(`${ME}:${u.searchParams.get("id")}`); return send(200, {}); }
   if (u.pathname === "/__myfavs" && req.method === "POST") {
-    try { myFavs = (JSON.parse(raw).ids ?? []).map(String); } catch { return send(400, { error: "body: {ids: string[]}" }); }
+    try { const b = JSON.parse(raw); favLists[b.steamid ?? ME] = (b.ids ?? []).map(String); holdPage = +b.hold || 0; }
+    catch { return send(400, { error: "body: {ids: string[], steamid?, hold?}" }); }
     return send(200, {});
   }
+  if (u.pathname === "/__release") { release(); return send(200, {}); }
   if (rateLimitNext) { rateLimitNext = false; res.writeHead(429, { "Content-Type": "text/html", "Retry-After": "120" }); return res.end("Too Many Requests"); }
 
   let m;
@@ -139,8 +146,10 @@ const server = http.createServer(async (req, res) => {
 <avatarMedium><![CDATA[https://avatars.example.invalid/${m[1]}_medium.jpg]]></avatarMedium></profile>`, "text/xml");
   }
   if (req.method === "GET" && (m = u.pathname.match(/^\/profiles\/(\d+)\/myworkshopfiles\/$/))) {
-    if (!signedIn(ck) || m[1] !== ME || u.searchParams.get("browsefilter") !== "myfavorites") return send(200, "<html>nothing</html>", "text/html");
+    const myFavs = favLists[m[1]];
+    if (accountOf(ck) !== m[1] || !myFavs || u.searchParams.get("browsefilter") !== "myfavorites") return send(200, "<html>nothing</html>", "text/html");
     const p = Math.max(1, +u.searchParams.get("p") || 1), ids = myFavs.slice((p - 1) * 30, p * 30);
+    if (holdPage && p === holdPage) { holdPage = 0; await new Promise((r) => { release = r; }); }
     const paging = ids.length ? `<div class="workshopBrowsePagingInfo">Showing ${(p - 1) * 30 + 1}-${(p - 1) * 30 + ids.length} of ${myFavs.length.toLocaleString("en-US")} entries</div>` : "";
     return send(200, `<html><body>${paging}${ids.map((id) => `<div class="workshopItem"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${id}&searchtext=">x</a></div>`).join("")}</body></html>`, "text/html");
   }
