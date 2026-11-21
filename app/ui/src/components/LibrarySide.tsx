@@ -276,7 +276,8 @@ export function LibrarySide({
       <div ref={bodyRef} className={`side-body${ready ? "" : " wait"}`}>
         {/* the hero line: what it is (chips) and its numbers (pills) */}
         <div className="side-hero">
-          {item.isScene && <span className="side-chip accent">SCENE</span>}
+          {/* says what its card's badge says (LibraryCard.tsx). Guard: probe-sidebar lib:preset:badge */}
+          {item.isScene &&<span className="side-chip accent">{item.isPreset ? "PRESET" : "SCENE"}</span>}
           {/* "keep playing this one" is on — the only thing the old "Playing now" pill said that nothing else does */}
           {playing && keepCurrent && <span className="side-chip accent" data-side-looping><Repeat size={12} /> Looping this one</span>}
           {/* reserved before the duration loads: the rows below don't move when it lands */}

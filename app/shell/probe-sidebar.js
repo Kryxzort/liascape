@@ -79,8 +79,8 @@
 //   lib:preset:uses      "Uses <base>" (WsListRow) from the preset's own file, no Steam ask; a click focuses the base's card
 //   lib:presets:scene    a Library scene with a Workshop id: "Presets" lists its presets on the Browse tab (the CM fixture's
 //                        two, marked In library); none on a preset; the Library's Preset filter keeps exactly the presets
-//   lib:preset:badge     a preset's card says PRESET, its base and a plain scene SCENE: the same badge, corner and look, two
-//                        themes × glow on / off. Shot side-preset-badge.png
+//   lib:preset:badge     a preset's card and its sidebar's chip say PRESET, its base's and a plain scene's SCENE: the same
+//                        badge, corner and look, two themes × glow on / off. Shot side-preset-badge.png
 //   lib:preset:needsBase[Off]  the base goes with the preset's sidebar open: the cards grey out (status icon fading in, the
 //                        reason as its tooltip), the notice (the crash notice's block, --warn) rises in (Off: fades); a click
 //                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
@@ -2449,6 +2449,16 @@ app.whenReady().then(async () => {
           for (const x of [pre, base]) if (x.text) for (const k of ["cls", "dx", "dy", "h", "look"]) if (x[k] !== plain[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ s1's ${J(plain[k])}`);
           const sh = plain.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
           if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${plain.look})`);
+          // the sidebar's hero chip says the same as the card (LibrarySide.tsx)
+          const chips = [];
+          for (const t of ["pp1", "pb", "s1"]) chips.push(await page(`await m.closeAll(); await m.openSide(${J(t)});
+            const c = m.side().querySelector(".side-hero > .side-chip.accent:not([data-side-looping])"); if (!c) return { t: ${J(t)}, text: null };
+            const s = getComputedStyle(c); return { t: ${J(t)}, text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | ") };`));
+          await page(`await m.closeAll();`);
+          console.log(`        ${tag} sidebar: ${J(chips.map((c) => c.text))}`);
+          const want = { pp1: "PRESET", pb: "SCENE", s1: "SCENE" };
+          for (const c of chips) if (c.text !== want[c.t]) v.push(`${tag}: ${c.t}'s sidebar chip says ${J(c.text)}, want ${want[c.t]}`);
+          for (const c of chips.slice(0, 2)) if (c.text) for (const k of ["cls", "look"]) if (c[k] !== chips[2][k]) v.push(`${tag}: ${c.t}'s sidebar chip ${k} ${J(c[k])} ≠ s1's ${J(chips[2][k])}`);
           if (theme === t1 && glows) await shot("preset-badge");
         }, { theme, glows });
       } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); }

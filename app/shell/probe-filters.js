@@ -70,8 +70,8 @@
 //   filter:preset:on  ticking Preset POSTs include ["Preset"] and lists exactly the two presets
 //   filter:preset:cleared  Preset ticked, then Settings → Play scenes off: the row and the saved tag go, the list is asked
 //                     again without it and holds no preset. Screenshots wf-preset-*.png
-//   filter:preset:badge  the presets' cards say PRESET, the base scene's SCENE: the same badge, corner and look, two themes ×
-//                     glow on / off
+//   filter:preset:badge  the presets' cards and sidebar chips say PRESET, the base scene's SCENE: the same badge, corner and
+//                     look, two themes × glow on / off
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
@@ -1583,7 +1583,29 @@ app.whenReady().then(async () => {
           }
           const sh = base.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
           if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${base.look})`);
+          // the Browse sidebar's hero chip says the same as the card (BrowseSide.tsx): a right-click on the card opens it
+          const chip = async (t) => {
+            const r = await page(`const c = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === ${J(t)});
+              const w = c?.querySelector(".thumb-wrap"); if (!w) return null; w.scrollIntoView({ block: "nearest" }); await m.sleep(150); const b = w.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };`);
+            if (!r) return { t, text: null };
+            await rightAt(r.x + r.w / 2, r.y + r.h / 2);
+            for (let i = 0; i < 40 && !(await page(`return !!document.querySelector(".side-panel:not(.closing) .side-hero");`)); i++) await sleep(50);
+            await sleep(250);
+            const c = await page(`const c = document.querySelector(".side-panel:not(.closing) .side-hero > .side-chip.accent"); if (!c) return null;
+              const s = getComputedStyle(c); return { text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | ") };`);
+            await page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await m.sleep(300);`);
+            return { t, text: null, ...c };
+          };
+          const cp = await chip(PRESETS[0]);
+          if (cp.text !== "PRESET") v.push(`${tag}: ${cp.t}'s sidebar chip says ${J(cp.text)}, want PRESET`);
           if (theme === t1 && glows) await shot("preset-badge");
+          await page(`await m.ensure(); m.seg("Preset", "off")?.click();`);
+          const d2 = await waitTitles((x) => J(x) === J(DEFAULT_SCENES)); await sleep(300);
+          if (J(d2) !== J(DEFAULT_SCENES)) return [...v, `${tag}: Preset off lists ${J(d2)} — proved nothing`];
+          const cb = await chip("Fixture Workshop Three");
+          console.log(`        ${tag} sidebar: ${J([cp.text, cb.text])}`);
+          if (cb.text !== "SCENE") v.push(`${tag}: the base scene's sidebar chip says ${J(cb.text)}, want SCENE`);
+          else if (cp.text) for (const k of ["cls", "look"]) if (cp[k] !== cb[k]) v.push(`${tag}: the preset's sidebar chip ${k} ${J(cp[k])} ≠ the scene's ${J(cb[k])}`);
           await realDone();
         }
       } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); await realDone(); }
