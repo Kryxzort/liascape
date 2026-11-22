@@ -2961,7 +2961,7 @@ C["autoMute:unmuteDelay"] = { states: ["single"], async run(c) {
     return v;
   } };
 
-// --- the order a shuffle plays. Contract (.claude/rules/backend/legacy-engine.md § Timed playlist, PlayerHelper.AdvanceToNext): each CYCLE plays
+// --- the order a shuffle plays. Contract (the player's program, docs/player/modules/programs.md): each CYCLE plays
 // every item of the playlist once, in a fresh random order; a new cycle never starts with the item the last one ended
 // on (no immediate repeat); turning Shuffle on mid-session keeps what plays and plays the REST once (in random order)
 // before the first full cycle; previous walks back through what actually played. Sequential = the playlist bar's order.
@@ -3165,19 +3165,15 @@ C["seq:random+prev"] = { states: ["playlist", "pending"], switch: true, async ru
     await randomTo(c); c.landed = (await http("GET", "/current")).json?.path ?? null;
     await cliStep(c, "previous");
   }, check: (c) => [...randomLanded(c), ...expectShownN(c, c.from, c.tries + 1), ...armedCheck(c, c.landed)] }; // history: next after previous = the pick again
-// a playlist that only advances at each video's end (interval 0 — no countdown) played, then next: it's taken. The tick
-// (which takes every queued next / previous / random) only started with an interval, so the keybind and the UI's
-// next queued pending_action.txt for nobody
+// a playlist that only advances at each video's end (interval 0 — no countdown) played, then next: it's taken
 C["seq:plPlayAdvanceOnly+next"] = { states: ["pending"], switch: true, async run(c) {
     await post("/playlist/play", { ...PENDING_PL(), settings: PS({ switchWhenVideoEnds: true, transitionDurationMs: 600, intervalSeconds: 0 }) });
     await sleep(500); await waitSettled(8000);
     c.mid = (await http("GET", "/current")).json?.path ?? null; c.want = succ(c.before.ps?.videoPaths, c.mid);
     await cliStep(c, "next");
   }, check: (c) => [...expectShownN(c, c.want, 2), ...armedCheck(c)] };
-// a timed playlist of ONE item (600 s), then next / random: the tick takes it (a switch to that item — the playlist bar's next
-// and the only pick), and nothing rotates by itself. The tick that takes every queued next / previous / random started
-// only for > 1 item: the keybind queued pending_action.txt for nobody, and a tick started later (the list grew) threw
-// it away
+// a timed playlist of ONE item (600 s), then next / random: the rotation takes it (a switch to that item — the playlist
+// bar's next and the only pick), and nothing rotates by itself
 for (const a of ["next", "random"]) C[`seq:plPlayOne+${a === "random" ? "random" : "next"}`] = { states: ["single"], switch: true, async run(c) {
     await playFast(c, [K[1]], PS()); c.exp.paused = false; // (+ /playlist/state: the playlist bar follows it)
     await sleep(600);
@@ -3192,9 +3188,8 @@ for (const a of ["next", "random"]) C[`seq:plPlayOne+${a === "random" ? "random"
     return v;
   } };
 // remove the other item from the playlist bar (the session plays on with two), trash what plays (it plays on from the one
-// survivor: a one-item session) → Undo (both back) → next: the rotation still takes it. A one-item session started no
-// tick and putting items back never started one — the queued next (pending_action.txt) was never taken while
-// /current said timed (fuzz: playlist → playlistBarRemove:other → trashUndo:shown → cli:next)
+// survivor: a one-item session) → Undo (both back) → next: the rotation still takes it while /current says timed
+// (fuzz: playlist → playlistBarRemove:other → trashUndo:shown → cli:next)
 C["seq3:playlistBarRemove+trashUndo+next"] = { states: ["playlist", "pending"], switch: true, async run(c) {
     c.removed = c.other; if (!c.removed || !(await playlistBarHas(c, c.removed))) return c.skip = "not in playlist bar";
     await ui(`m.click(m.playlistBar(${JSON.stringify(TITLE(c.removed))}).querySelector(".pl-remove"), "remove");`); await sleep(900);
@@ -4726,8 +4721,7 @@ function progCheck(c) {
 }
 async function afterControl(c, K_, ctlName, { t0, h0, lap, logAt, fuzz = false }) {
   // fuzz: what the page sent is answered, and a keybind's switch the program hasn't taken yet (no `program.current` since the
-  // step began and prog:main.path unmoved — never the timer daemon's pending_action.txt, which
-  // liascape-player never writes) is taken, before the step settles and before it looks — a cell's fixed waits assume an
+  // step began and prog:main.path unmoved) is taken, before the step settles and before it looks — a cell's fixed waits assume an
   // unloaded box; a chain runs long enough to meet a loaded one (a debounced persist still in flight, a next that "stayed")
   const pageQuiet = () => (fuzz ? waitFor(async () => (await keybindTaken(c, ctlName, t0)) && (await js("window.__mxInflight || 0")) === 0, 4000, 50) : null);
   await pageQuiet();
@@ -4906,7 +4900,7 @@ function fuzzContext(snap, fz) {
   const playlist = live && !!snap.cur?.timed;
   const ts = playlist ? readTimed() : null;
   const pending = playlist && !!ts?.SwitchWhenVideoEnds;
-  const hi = ts ? (ts.WaitingForVideoEnd && ts.HistoryIndex > 0 ? ts.HistoryIndex - 1 : ts.HistoryIndex) : -1; // PlayerHelper.PlayingHistoryIndex
+  const hi = ts ? (ts.WaitingForVideoEnd && ts.HistoryIndex > 0 ? ts.HistoryIndex - 1 : ts.HistoryIndex) : -1; // the playing item's (a pre-fetched next is one ahead)
   const cur = snap.cur?.path ?? (live ? (playlist ? ts?.History?.[hi] : snap.s.lastSession?.paths?.[0]) ?? null : null);
   const playlistBar = snap.ps?.videoPaths || [], ps = snap.ps?.settings || {}, own = ps.overrideGlobalSettings !== false;
   let shown = cur, other = null;

@@ -2188,7 +2188,7 @@ fn reordering_under_the_armed_b_rearms_to_the_new_next() {
     verb(&mut c, "play", json!({}));
     let armed = wait_armed(&mut c, 1);
     assert_eq!(armed["next"], json!(items[1]));
-    // c moved right after a: b is no longer next (`ReorderPlaylist` re-armed the bar's next)
+    // c moved right after a: b is no longer next (the reorder re-arms the bar's next)
     c.ok(
         "set",
         json!({"path": "prog:main.items",

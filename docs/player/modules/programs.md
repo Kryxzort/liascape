@@ -1,10 +1,8 @@
 # Programs (player-side rotation)
 
 Covers `src/player/src/recipes/program/` (`mod.rs` engine, `rule.rs`, `order.rs`, `pick.rs`, `store.rs`,
-`resume.rs`). Rules: `.claude/rules/player/runtime-api.md` § Programs. The contract it reproduces is the C#
-rotation in `.claude/rules/backend/player-adapter.md`; each pure Rust function names the C# it ports
-(`item_rule` = `ItemPlayRule`, `retime_remaining` = `UpdateTimedSettings`, `Order::reorder` = `ReorderPlaylist`,
-`pick` = `PickEffect` + `PickDuration`).
+`resume.rs`). Rules: `.claude/rules/player/runtime-api.md` § Programs. The contract it runs is the rotation in
+`.claude/rules/backend/player-adapter.md` § Rotation (`pick` = the backend's `PickEffect` + `PickDuration`).
 
 A program is a graph node `prog:<name>` whose settings are live props; the recipe turns them into `transition`
 requests on the player clock. `create`/`set` → `Programs::configure`; `destroy` stops the rotation and leaves the

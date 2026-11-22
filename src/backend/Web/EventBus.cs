@@ -58,7 +58,7 @@ public static class EventBus
         catch { }
     }
 
-    // Wires PlayerHelper's wallpaper-changed / scene-crashed / timed-stopped callbacks to fan out
+    // Wires PlayerHelper's wallpaper-changed / scene-crashed / … callbacks to fan out
     // to the UI over WS.
     public static void WirePlayer()
     {
@@ -67,6 +67,5 @@ public static class EventBus
         PlayerHelper.OnSceneVramStoppedCb = (p, used, limit, msg) => Broadcast("scene-vram-stopped", new { path = p, usedMib = used, limitMib = limit, message = msg });
         PlayerHelper.OnScenesBlockedCb = r => Broadcast("scenes-blocked", new { reason = r });
         PlayerHelper.OnVramHoldCb = m => Broadcast("vram-hold", new { message = m });
-        PlayerHelper.OnTimedPlaylistStopped = () => Broadcast("timed-stopped");
     }
 }

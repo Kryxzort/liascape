@@ -49,7 +49,7 @@
 #   what they leave, the later controls' expectations can't follow), or gated on the starting value their drive/check
 #   assumes. Expectations (paused / muted) carry across steps through every control's exp / flipPause / flipMute.
 #   A step also waits for the page's requests and a keybind switch the program must take (a `program.current` since the step
-#   began, or prog:main.path moved; pending_action.txt is gone under liascape-player) — one never taken FAILs — and
+#   began, or prog:main.path moved) — one never taken FAILs — and
 #   lets an advance-on-end switch that fired on its own land (its control's own check is then skipped: "rotated").
 #   --seed: the PRNG seed (default: random, printed); a run's picks depend only on (seed, run index), not on --jobs.
 #   A failure prints the seed, the run index, the exact sequence (`state → c1 → c2 …`) and a --fuzz-replay command that
@@ -312,10 +312,9 @@ cleanup() {
       kill "$b2" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$b2" 2>/dev/null || break; sleep 0.1; done; kill -9 "$b2" 2>/dev/null
     fi
   fi
-  # a stopping backend hands a running timed playlist / restart timer / auto-mute to detached daemons (setsid: out of
-  # this stack's process group) — one outlived its stack for 35 min, its HOME gone, writing timed_state.json relative
-  # to the cwd. Stop them by their pid files, and only a pid whose HOME is this stack's.
-  for f in timer restart monitor; do
+  # a stopping backend may hand auto-mute to a detached monitor-daemon (setsid: out of this stack's process group),
+  # which would outlive its stack with its HOME gone. Stop it by its pid file, and only a pid whose HOME is this stack's.
+  for f in monitor; do
     pf=$XDG_CONFIG_HOME/liascape/$f.pid; [ -s "$pf" ] || continue
     for dp in $(tr -c '0-9\n' ' ' < "$pf"); do
       tr '\0' '\n' < "/proc/$dp/environ" 2>/dev/null | grep -qx "HOME=$T/home" && kill "$dp" 2>/dev/null

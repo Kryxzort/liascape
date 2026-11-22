@@ -19,7 +19,7 @@ public static class PlaylistService
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
-    // Atomic save + a retried load (AtomicFile): written in place, a read mid-save (the UI's init, the tick's
+    // Atomic save + a retried load (AtomicFile): written in place, a read mid-save (the UI's init, a switch's
     // transition config, /settings) got null — the UI showed an empty playlist bar with the DEFAULT playlist settings.
     public static CustomPlaylist? LoadCurrentState()
     {

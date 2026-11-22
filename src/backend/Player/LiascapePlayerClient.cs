@@ -957,7 +957,7 @@ public sealed class LiascapePlayerClient
             // first start: the defaults
             var args = StartArgs(_serveArgs, SocketPath, SocketPath == DefaultSocketPath(), restore, sessionStart);
             int waitMs = _serveArgs == null && restore ? StartWaitMs : 3000;
-            // requests made meanwhile (another thread: the tick, the monitor) wait for this player's socket and first
+            // requests made meanwhile (another thread: the auto-mute monitor) wait for this player's socket and first
             // answer instead of failing — or tripping the stall breaker on a player that is only starting
             BeginStarting(waitMs);
             try

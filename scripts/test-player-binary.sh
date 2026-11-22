@@ -5,7 +5,8 @@
 #  a legacy settings file: `"PlayerEngine":"legacy"` and legacy keys are ignored — /player-engine has no engine / active;
 #          a legacy wallpaper this session left running (a fake mpvpaper and linux-wallpaperengine with this run's HOME)
 #          is stopped at `serve` start and LastSession plays on the player instead, while one of another HOME is left
-#          alone; an /apply plays on exactly one player (`serve` on this run's socket); the next save drops PlayerEngine.
+#          alone; an /apply plays on exactly one player (`serve` on this run's socket); the next save drops PlayerEngine and
+#          RestartMpvpaperEverySeconds.
 #  missing: no binary resolves → /player-engine says why, /apply answers non-2xx with that reason, /health/features
 #          marks liascape-player missing.
 #  appears later: the binary appears (a rebuild, a store path after boot) → the next /apply plays, no backend restart.
@@ -166,8 +167,8 @@ got=$(players | sort | tr '\n' ' ' | sed 's/ $//')
   && ok "exactly one player: its supervisor + compositor ($got) on this run's socket" || bad "player processes: [$got], the socket's player: [$want]"
 [ -z "$(named_with_home mpvpaper "$HOME")" ] && ok "no mpvpaper with this run's HOME" || bad "mpvpaper with this run's HOME: $(named_with_home mpvpaper "$HOME")"
 api -o /dev/null -X POST "$U/settings" -d '{"Volume":70}'
-[ "$(jq -c '[has("PlayerEngine"), .Volume]' "$SJ")" = '[false,70]' ] && ok "one /settings save → no PlayerEngine key in settings.json" \
-  || bad "after a save: PlayerEngine key $(jq -c 'has("PlayerEngine")' "$SJ"), Volume $(jq -c .Volume "$SJ")"
+[ "$(jq -c '[has("PlayerEngine"), has("RestartMpvpaperEverySeconds"), .Volume]' "$SJ")" = '[false,false,70]' ] && ok "one /settings save → no PlayerEngine / RestartMpvpaperEverySeconds key in settings.json" \
+  || bad "after a save: PlayerEngine key $(jq -c 'has("PlayerEngine")' "$SJ"), RestartMpvpaperEverySeconds key $(jq -c 'has("RestartMpvpaperEverySeconds")' "$SJ"), Volume $(jq -c .Volume "$SJ")"
 stopbe
 kill "$MP_OTHER" 2>/dev/null
 

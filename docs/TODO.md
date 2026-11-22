@@ -268,7 +268,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 
 ## Legacy player (current app) — small fixes
 - [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
-      - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (`DoVideoEndWait` leads by
+      - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (the legacy video-end wait leads by
         `duration + coverMs` for every method; `--align-a-end` only exists for full-live). So A freezes several
         seconds early instead of on its **last** frame. They should fire at A's end.
       - **Reveal** hard-cuts A's audio at the freeze (possible click) and starts B's audio at full. It should get a
@@ -312,8 +312,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `player-adapter.md` § Rotation (was § Play-time limits; the minimum merged into the interval field since), UI `PlayTimeInput`. Guards: IT §
       "advance-on-end play-time limits" (RED on the base backend), self-test `PlayLimitAssertions`, settings-merge,
       matrix `playlist|global:minPlay|maxPlay`, `global:maxPlay:own`.
-  - [ ] Legacy engine: the maximum works (shared tick); the minimum hold is liascape-player-only (legacy's video-end
-        polling path untouched — owner: liascape-player only).
 - [x] **Rotation redesign** (owner-approved, 2026-10-28): "Switch when video ends" off → "Switch every" (a plain
       timer, unchanged); on → the SAME interval field is "Minimum play time" (play at least this long, then switch at
       the next video end; a shorter clip loops to a loop's end; an image / a scene shows this long) with "Maximum play
@@ -563,9 +561,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       playlist_state.json and the library's index.json were written in place: a read mid-save got a null
       playlist (the UI's init then held the DEFAULT playlist settings — the full run's pending × plAdvanceOff
       failed that way) or an empty index (every override read "follows the global") — RED 3–12 of 240 / 7–13
-      of 360 reads per run; now atomic (`AtomicFile`, temp + rename) with a retried parse. Still in place:
-      `SaveTimedState`'s timed_state.json (its other two writers already rename) and legacy's
-      playlist_observer_paths.json — no cell reaches them (read by the daemons / the next process).
+      of 360 reads per run; now atomic (`AtomicFile`, temp + rename) with a retried parse.
       Then the LOST update (the likely cause of the merged run's `paused × itemVol|playlistBarVol:other` — "k3
       volumeOverride null" under load, both passed alone 3/3; inferred, not reproduced in those cells): trash,
       undo, the WE sync and the direct-download reconcile loaded index.json, worked, and saved their copy back
@@ -577,7 +573,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
       private dbus-daemon + a fake player would make it hermetic; not built), Settings → Player engine (to
       legacy) / Clear settings / Autostart / Resume from last / Debug mode, a shuffle with advance-on-end (the
-      same `AdvanceToNext`; 12 plays of ≥ 10 s clips is too slow for a cell), deleting a saved playlist (no
+      program's own next; 12 plays of ≥ 10 s clips is too slow for a cell), deleting a saved playlist (no
       UI for it).
 - [ ] **Speed storm leftovers** (`src/player/tests/onmachine/speedstorm.py` — live, bus muted; fixed in the same
       round: the adapter's aligned-switch backstop, the 1× tempo-filter rebuild holes, the align:end estimate):
@@ -617,7 +613,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 ## Backend structure
 - [ ] After #114 lands: prune `docs/decisions.md` (at its 30,000-char budget) against its own bar, "write it when
       someone would otherwise fix it back": move the legacy-engine entries (audio settle, parec auto-mute, LWE volume,
-      mpvpaper restart, `DoVideoEndWait`, the libpulse crossfade, legacy transitions, …) into
+      mpvpaper restart, the video-end wait, the libpulse crossfade, legacy transitions, …) into
       `.claude/rules/backend/legacy-engine.md`, which goes away with the engine; delete entries nobody would reverse
       (Electron + React, "a work of art", focus rings only while tabbing, …); cut entries that restate a rule to their
       why plus a link. Target ~18–20k chars. Rules citing a removed entry's heading get updated (check-rules).

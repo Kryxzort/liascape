@@ -44,7 +44,7 @@ paths:
 
 ## Session and playlist operations (`AppOps`)
 - `PlayFrom` persists the playlist bar in its own order, not the play order.
-- Removing the playing item from the bar keeps it playing; the rotation goes on from its place (`ReorderPlaylist(…, previousPaths)`).
+- Removing the playing item from the bar keeps it playing; the rotation goes on from its place (the program's items, `LiascapePlayerProgram.SetItems` → the player's `Order::reorder`).
 - Trash removes the items from the playlist too; Undo puts each back at its index. If one was on screen or incoming (`LiascapePlayerMedia.ShownOrIncomingPaths`) a playlist plays on from the next surviving item, a single wallpaper stops.
 - A playlist's transition change re-arms an already-armed aligned switch (`PlayerHelper.RearmAlignedSwitch`).
 

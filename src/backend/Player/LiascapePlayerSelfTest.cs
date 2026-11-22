@@ -137,7 +137,7 @@ public static class LiascapePlayerSelfTest
         }
     }
 
-    // ---- the rotation: advance-on-end's minimum (= the interval field) / maximum (PlayerHelper § Rotation) ---------------
+    // ---- the rotation: advance-on-end's minimum (= the interval field) / maximum (player-adapter.md § Rotation) ---------
     private static void PlayLimitAssertions(List<string> fails)
     {
         // effective: the playlist's own rotation only when it overrides the global one
@@ -154,11 +154,6 @@ public static class LiascapePlayerSelfTest
         }
         Eff(own, (5, false, 0, false, 12), "override"); Eff(follows, (30, true, 600, true, 90), "follows the globals");
         Eff(null, (30, true, 600, true, 90), "no playlist state");
-        // the limits a rotation acts on: under advance-on-end the interval IS the minimum; off, the interval is the
-        // timer and neither limit applies
-        foreach (var (iv, adv, max, want) in new[] { (30, true, 600, (30, 600)), (0, true, 0, (0, 0)), (30, false, 600, (0, 0)),
-                                                     (20, true, 2, (20, 2)), (-4, true, 400000, (0, 359999)) })
-            if (PlayerHelper.PlayLimits(iv, adv, max) != want) fails.Add($"PlayLimits(interval {iv}, advance {adv}, max {max}) = {PlayerHelper.PlayLimits(iv, adv, max)}, want {want}");
         // the defaults ("0 = off unless set"): a video plays to its end however long — no minimum, no
         // maximum —, a scene / still image (they never end) switches after its own 30 min; globally and per playlist
         var d = new AppSettings(); var dp = new PlaylistSettings();
@@ -200,71 +195,15 @@ public static class LiascapePlayerSelfTest
         if (PlayerHelper.EffectiveRotation(gUnder, null).Max != 40) fails.Add($"EffectiveRotation of a global maximum 10 under the minimum 40 = {PlayerHelper.EffectiveRotation(gUnder, null).Max}, want 40");
         under.NormalizeRotation(); gUnder.NormalizeRotation();
         if ((under.MaxPlaySeconds, gUnder.GlobalMaxPlaySeconds) != (50, 40)) fails.Add($"NormalizeRotation left the maximums {(under.MaxPlaySeconds, gUnder.GlobalMaxPlaySeconds)}, want (50, 40)");
-        // what each kind of item plays under advance-on-end: (minimum — for an item that never ends, reaching it IS its
-        // end; NeverMs = it stays —, maximum — 0 = none). The minimum / maximum 0 = off. A video: always the minimum / maximum (0/0 →
-        // its end, however short or long). Separate timing for scenes OFF: a scene's end = the minimum (none → only the
-        // maximum moves it, else it stays), a still image shows for the minimum (0 → it flashes by) — the old rules.
-        // ON: a scene AND a still image switch after "Switch scenes after" (never 0: AppSettings.SceneTime), the minimum /
-        // maximum don't apply to them.
-        const long N = PlayerHelper.NeverMs;
-        foreach (var (kind, min, max, sep, after, want) in new (PlayerHelper.PlayKind, long, long, bool, long, (long, long))[] {
-                 (PlayerHelper.PlayKind.Video, 0, 0, false, 0, (0, 0)),          // 0/0: a video switches at its end, whatever its length
-                 (PlayerHelper.PlayKind.Video, 5000, 9000, false, 3000, (5000, 9000)),
-                 (PlayerHelper.PlayKind.Video, 5000, 9000, true, 3000, (5000, 9000)),  // the scene timing never touches a video
-                 (PlayerHelper.PlayKind.Video, 0, 0, true, 3000, (0, 0)),
-                 (PlayerHelper.PlayKind.Image, 0, 0, false, 3000, (0, 0)),       // toggle off: the minimum (0 → it flashes by)
-                 (PlayerHelper.PlayKind.Image, 4000, 9000, false, 3000, (4000, 9000)),
-                 (PlayerHelper.PlayKind.Image, 4000, 9000, true, 3000, (3000, 0)),  // toggle on: its own time, no maximum
-                 (PlayerHelper.PlayKind.Image, 0, 0, true, 1000, (1000, 0)),     // …the 1 s floor: it moves on
-                 (PlayerHelper.PlayKind.Scene, 4000, 9000, false, 3000, (4000, 0)),  // both set → the minimum (docs/decisions.md § "A scene's minimum play time beats its maximum")
-                 (PlayerHelper.PlayKind.Scene, 9000, 4000, false, 3000, (9000, 0)),  // …even when the maximum is shorter
-                 (PlayerHelper.PlayKind.Scene, 0, 9000, false, 3000, (N, 9000)), // no minimum → the maximum moves it
-                 (PlayerHelper.PlayKind.Scene, 0, 0, false, 3000, (N, 0)),       // neither → it stays
-                 (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 3000, (3000, 0)),
-                 (PlayerHelper.PlayKind.Scene, 4000, 2000, true, 1000, (1000, 0)) })
-        {
-            var got = PlayerHelper.ItemPlayRule(kind, min, max, sep, after);
-            if (got != want) fails.Add($"ItemPlayRule({kind}, min {min}, max {max}, separate {sep}, scenes after {after}) = {got}, want {want}");
-        }
-        foreach (var (path, want) in new[] { ("/x/a.mp4", PlayerHelper.PlayKind.Video), ("/x/a.PNG", PlayerHelper.PlayKind.Image),
-                                             ("/x/b.webp", PlayerHelper.PlayKind.Image), ("/lib/workshop/900000001", PlayerHelper.PlayKind.Scene),
-                                             // an import keeps its source's extension (Helpers/ImportService.cs): a gif plays
-                                             // as a video (mpv loops it), so do the other containers
-                                             ("/lib/imported/g/g.gif", PlayerHelper.PlayKind.Video), ("/lib/imported/w/w.webm", PlayerHelper.PlayKind.Video),
-                                             ("/lib/imported/m/m.mkv", PlayerHelper.PlayKind.Video) })
-            if (PlayerHelper.PlayKindOf(path) != want) fails.Add($"PlayKindOf({path}) = {PlayerHelper.PlayKindOf(path)}, want {want}");
-        // NeverMs never reached, never overflows the hold's arithmetic
-        if (PlayerHelper.SceneMinReached(true, true, true, 359999_000L, N) || PlayerHelper.MinPlayReached(359999_000L, 12_000, N))
-            fails.Add("NeverMs was reached");
-        // a scene (it never ends) moves on at the minimum under advance-on-end; no minimum → never by it
-        foreach (var (adv, rot, scene, played, min, want) in new[] {
-                 (true, true, true, 3000L, 3000L, true), (true, true, true, 2999L, 3000L, false), (true, true, true, 9000L, 0L, false),
-                 (false, true, true, 9000L, 3000L, false), (true, false, true, 9000L, 3000L, false), (true, true, false, 9000L, 3000L, false) })
-            if (PlayerHelper.SceneMinReached(adv, rot, scene, played, min) != want) fails.Add($"SceneMinReached(advance {adv}, rotates {rot}, scene {scene}, played {played}, min {min}) != {want}");
-        // the minimum is reached by the loop playing now: played + its remaining (+150 ms tolerance)
-        foreach (var (played, rem, min, want) in new (long, long?, long, bool)[] {
-                 (0, 2000, 0, true),          // off
-                 (0, 2000, 5000, false),      // a 2 s clip's 1st loop ends at 2 s
-                 (2000, 2000, 5000, false),   // 2nd loop: ends at 4 s
-                 (4000, 2000, 5000, true),    // 3rd loop: ends at 6 s ≥ 5 s → arm now, for its end
-                 (1900, 3000, 5000, true),    // within the tolerance (4.9 + 0.15)
-                 (1800, 3000, 5000, false),
-                 (0, 12000, 5000, true),      // a long clip: its 1st loop already reaches it (no hold)
-                 (2900, null, 3000, true),    // no end known (an image): the play time alone, + tolerance
-                 (2000, null, 3000, false),
-                 (100, -50, 200, true) })      // a negative remainder counts as 0
-            if (PlayerHelper.MinPlayReached(played, rem, min) != want) fails.Add($"MinPlayReached(played {played}, loop left {rem?.ToString() ?? "null"}, min {min}) != {want}");
-        // the maximum: only under advance-on-end, never for a one-item session, 0 = off
-        foreach (var (adv, rot, played, max, want) in new[] {
-                 (true, true, 3000L, 3000L, true), (true, true, 2999L, 3000L, false), (false, true, 9000L, 3000L, false),
-                 (true, false, 9000L, 3000L, false), (true, true, 9000L, 0L, false) })
-            if (PlayerHelper.MaxPlayReached(adv, rot, played, max) != want) fails.Add($"MaxPlayReached(advance {adv}, rotates {rot}, played {played}, max {max}) != {want}");
-        // the play time loaded from timed_state: + the time since its save (the player played on), unless paused
-        foreach (var (saved, at, paused, now, want) in new[] {
-                 (2000L, 10_000L, false, 13_000L, 5000L), (2000L, 10_000L, true, 13_000L, 2000L),
-                 (2000L, 14_000L, false, 13_000L, 2000L), // a clock step back: never negative
-                 (-7L, 10_000L, false, 10_000L, 0L) })
-            if (PlayerHelper.PlayedAfterLoad(saved, at, paused, now) != want) fails.Add($"PlayedAfterLoad({saved}, saved at {at}, paused {paused}, now {now}) = {PlayerHelper.PlayedAfterLoad(saved, at, paused, now)}, want {want}");
+        // the kind a source is created with (`kind: image` | scene | video), which picks the item's rule in the player
+        foreach (var (path, image, scene) in new[] { ("/x/a.mp4", false, false), ("/x/a.PNG", true, false), ("/x/b.webp", true, false),
+                                                     ("/lib/workshop/900000001", false, true),
+                                                     // an import keeps its source's extension (Helpers/ImportService.cs): a gif plays
+                                                     // as a video (mpv loops it), so do the other containers
+                                                     ("/lib/imported/g/g.gif", false, false), ("/lib/imported/w/w.webm", false, false),
+                                                     ("/lib/imported/m/m.mkv", false, false) })
+            if ((LiascapePlayerMedia.IsImagePath(path), PlayerHelper.IsScenePath(path)) != (image, scene))
+                fails.Add($"{path}: image {LiascapePlayerMedia.IsImagePath(path)}, scene {PlayerHelper.IsScenePath(path)}, want image {image}, scene {scene}");
     }
 
     // ---- /health/features (FeatureHealth.Build): every missing piece → its feature not ok, with a reason ----------
@@ -970,7 +909,7 @@ public static class LiascapePlayerSelfTest
     }
 
     // ---- next/prev/random's scene-skip decision point -----------------------------------------
-    // TryStepLibrary/ApplyRandom/AdvanceToNext (PlayerHelper) skip a path exactly when
+    // TryStepLibrary/ApplyRandom (PlayerHelper) skip a path exactly when
     // `IsScenePath(path) && !PlayerEngine.ScenesPlayable(settings)` — the same formula the
     // private IsSkippedPath uses, reused here rather than invented (.claude/rules/backend/legacy-engine.md /
     // player-adapter.md: "skipped exactly like AllowScenes=false"). Needs no player, no
@@ -1296,17 +1235,15 @@ public static class LiascapePlayerSelfTest
                     double eff = Math.Clamp(LibraryService.ReadSpeedOverride(a) ?? SettingsService.Load().Speed, 0.1, 4.0);
                     double transient = Math.Abs(eff - 2.0) > 0.1 ? 2.0 : 3.0;
                     LiascapePlayerMedia.Preview(null, transient, [a]); LiascapePlayerMedia.Drain().Wait(2000);
-                    double? cbSpeed = null;
                     _ = LiascapePlayerMedia.Queue(() => { Thread.Sleep(600); return 0; });
                     for (int i = 0; i < LiascapePlayerMedia.MaxQueueDepth + 60; i++)
-                        LiascapePlayerMedia.ApplyOverride(Path.Combine(tmp, $"not-playing-{i}.mp4"), v => cbSpeed = v);
-                    LiascapePlayerMedia.ApplyOverride(a, v => cbSpeed = v);
+                        LiascapePlayerMedia.ApplyOverride(Path.Combine(tmp, $"not-playing-{i}.mp4"));
+                    LiascapePlayerMedia.ApplyOverride(a);
                     int depthOv = LiascapePlayerMedia.QueueDepth;
                     LiascapePlayerMedia.Drain().Wait(20000);
                     var spOv = client.Call("get", new Dictionary<string, object?> { ["path"] = "cur:*.speed" }).GetProperty("value").GetDouble();
                     if (depthOv > 3) fails.Add($"queue cap: {LiascapePlayerMedia.MaxQueueDepth + 61} per-item overrides (/library/speed of every item) queued {depthOv} commands (want them coalesced: the slow one + 1)");
                     if (Math.Abs(spOv - eff) > 1e-3) fails.Add($"queue cap: the playing item's override pass didn't land after a per-item burst — speed {spOv:0.###}, want {eff:0.###} (depth at the burst {depthOv})");
-                    if (cbSpeed is not double cs || Math.Abs(cs - eff) > 1e-3) fails.Add($"per-item burst: the playing item's speed callback got {cbSpeed?.ToString() ?? "nothing"}, want {eff:0.###}");
                     Phase($"per-item override burst: depth {depthOv}, playing speed {spOv:0.##} (want {eff:0.##})");
                 }
 

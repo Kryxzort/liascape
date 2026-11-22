@@ -209,14 +209,13 @@ public static class LiascapePlayerProgram
         }
     }
 
-    // `serve` start under liascape-player: the mirror, then a legacy rotation still described by timed_state.json
-    // (an older backend, or the legacy engine) becomes the player's program at the item it was on. A program already
-    // in the player (an app restart: it never stopped) is left alone.
+    // `serve` start: the mirror, seeded from the player's program (an app restart: it never stopped). A legacy
+    // timed_state.json left in the config dir is never read. Guard: scripts/test-liascape-player-adapter.sh § a legacy
+    // rotation's files
     public static void Startup()
     {
         Sync();
-        if (IsActive) { LiascapePlayerClient.Log($"program: the player's rotation plays on ({Path.GetFileName(CurrentPath ?? "")})"); return; }
-        if (PlayerHelper.LoadFromTimedState()) LiascapePlayerClient.Log("program: took over the legacy timed playlist (timed_state.json) as the player's program");
+        if (IsActive) LiascapePlayerClient.Log($"program: the player's rotation plays on ({Path.GetFileName(CurrentPath ?? "")})");
     }
 
     private static JsonElement? Get(LiascapePlayerClient client, string prop)

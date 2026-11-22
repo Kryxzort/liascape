@@ -99,7 +99,7 @@ cat > "$SJ" <<EOF
  "SceneTransitionDelayMs":1500,"Theme":"Catppuccin Latte","CardSize":"Large","ThumbnailAspect":"16:9","LibrarySortIndex":2,
  "GlobalIntervalSeconds":600,"GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":true,"PlaylistWaitForVideoEnd":true,"GlobalMinPlaySeconds":45,"GlobalMaxPlaySeconds":0,
  "GlobalTransitionEnabled":false,"GlobalTransitionEffectIds":["fade","wipeLeft"],"GlobalTransitionDurationMs":900,
- "TransitionMethod":"full-live","AdvancedSettings":true,"ResumeFromLast":false,"StayPausedWhenSwitching":true,"RestartMpvpaperEverySeconds":0,"AutoMute":false,
+ "TransitionMethod":"full-live","AdvancedSettings":true,"ResumeFromLast":false,"StayPausedWhenSwitching":true,"AutoMute":false,
  "AllowScenes":true,"WorkshopDownloadMode":"steamcmd","AutoPlayGifs":true,"AutoPlayVideoThumbs":true,"PreferVideoThumbs":true,
  "SteamAccountName":"test-account","SteamId":76561190000000000,"SteamUsername":"test-user","SteamCmdPath":"/nonexistent/steamcmd",
  "SteamClientLibPath":"/nonexistent/steamclient.so"}

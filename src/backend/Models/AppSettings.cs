@@ -93,11 +93,10 @@ public class AppSettings
     public bool LiveWallpaperBehindAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
     public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
-    public bool RestartOnlyAtPlaylistChangeover { get; set; } = false;   // defer the mpvpaper leak-restart to the next playlist changeover
     public bool StayPausedWhenSwitching { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (liascape-player: the transition plays on the still frames; legacy: a cut)
     public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
-    // The global rotation (PlayerHelper § Rotation): GlobalSwitchWhenVideoEnds ("Switch when video ends") off →
+    // The global rotation (player-adapter.md § Rotation): GlobalSwitchWhenVideoEnds ("Switch when video ends") off →
     // GlobalIntervalSeconds is a plain timer ("Switch every"); on → it is the minimum play time and
     // GlobalMaxPlaySeconds the maximum (below), and GlobalSeparateSceneTiming gives scenes + still images (they never
     // end) their own GlobalSwitchScenesAfterSeconds instead. The minimum and maximum are 0 = off; the maximum is never
@@ -106,12 +105,6 @@ public class AppSettings
     public int GlobalIntervalSeconds { get; set; } = 0;
     public bool GlobalSwitchWhenVideoEnds { get; set; } = true;
     public string Theme { get; set; } = "Catppuccin Mocha";
-    private int _restartMpvpaperEverySeconds = 600;
-    public int RestartMpvpaperEverySeconds
-    {
-        get => _restartMpvpaperEverySeconds;
-        set => _restartMpvpaperEverySeconds = Math.Clamp(value, 0, 3600);
-    }
     // The maximum play time under advance-on-end (wall-clock seconds, 0 = off): the playing item — a video mid-clip,
     // a scene / still image unless they have their own timing — advances once it played that long. Never under the
     // minimum (RotationMax, applied on every save). Default off: a video plays to its end, even a 10 h one.

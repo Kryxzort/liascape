@@ -19,31 +19,11 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` �
 ## Processes and IPC
 - `PlayerHelper` is the single entry point for mpvpaper; it kills existing mpvpaper processes before starting one.
 - mpvpaper and LWE start in their own systemd user scope when one is available (`UserScope.Prefix`, as liascape-player): a stopped unit the backend runs in must not take the wallpaper along.
-- Drain stdout/stderr (`BeginOutputReadLine`/`BeginErrorReadLine`) for mpvpaper, `timer-daemon` and `restart-daemon` — an undrained pipe deadlocks. Do NOT redirect LWE's (`SpawnLweProcesses`).
+- Drain stdout/stderr (`BeginOutputReadLine`/`BeginErrorReadLine`) for mpvpaper — an undrained pipe deadlocks. Do NOT redirect LWE's (`SpawnLweProcesses`).
 - mpv may send several JSON replies in one read: split on `\n` (`TryQueryTimeRemaining`).
-- Pre-shuffle playlists in `ApplyPlaylist`; never use mpv's `--shuffle`, `--playlist=file` or `--loop-playlist` — the timed machinery owns rotation.
 - A video→video IPC switch carries the effective volume/speed/mute as `loadfile` per-file options, `mute=yes|no` explicitly both ways (file-local options restore the pre-file value at the next load).
 - Read `_isMuted` fresh inside the task; never capture it into a local before `Task.Run`.
 - A cold `Launch` re-announces `wallpaper-changed` with mpv's own `path` once its IPC first answers, only while `_shownGen` is unchanged (`AnnounceWhenIpcAnswers`): a page loaded during the launch can't stay on "nothing playing", and a superseded or stopped launch never announces.
-
-## Timed playlist (legacy only)
-- At most one process owns the timer: `timer.pid` (daemon) / `gui_timer.pid` (GUI). A stopping backend `ReleaseTimer()`s FIRST, deletes only its OWN pid, then hands off to `timer-daemon`.
-- Every timed session has a tick, whatever its interval and length: start it only through `EnsureTimedTick` (`takeBack: false` for live edits).
-- User switches go through `pending_action.txt` (atomic write + rename), consumed only by the tick owner. `restart` relaunches without advancing or resetting the countdown.
-- Start an end-of-video wait only through `ArmVideoEndWait`; call `PostSwitch` after every timed switch; use `PlayingHistoryIndex` (the pre-fetch makes `_historyIndex` one ahead).
-- `DoVideoEndWait` first waits until mpv's `path` equals `_lastSwitchTarget` (≤ 8 s) — without it a bailed transition re-fires every ~85 ms.
-- `DoVideoEndWait` gives up on an empty time-remaining only after 30 polls (3 s), never sooner: mpv reports no time remaining
-  around a load, and breaking after 500 ms switched scenes early.
-- `RandomAndLaunch` re-seats both cursors (`_timedIndex` = the pick, forward history dropped). Guard: matrix `seq:random+next` / `seq:random+prev`.
-- `UpdateTimedSettings` keeps the elapsed time proportionally; it never restarts the current wallpaper.
-- A superseded aligned switch re-arms for A's end (backoff), it never switches now.
-- A timed session starts at its first item that isn't a preset (`ApplyTimedPlaylist`: Play, play-from, shuffle and every replay), and a resumed one moves past a preset (`RestoreTimedPlaylist`): LWE on a preset's folder dies behind a screen the old wallpaper left, with no crash advance.
-
-## Restart daemon (mpvpaper frame-buffer leak)
-- Why it exists: mpvpaper leaks ~1.3 MB/s, so `RestartMpvpaperEverySeconds` (default 600, 0 = off) relaunches it;
-  liascape-player never runs this machinery.
-- `RestartMpvpaperEverySeconds <= 0` → every restart path is a no-op. Under a timed playlist write `restart` to `pending_action.txt` instead of restarting directly; skip it while paused.
-- `RestartCurrent` re-checks `IsPlaying` inside `_lock` before `DoColdRestart`.
 
 ## Mute and auto-mute (`AudioMonitor`)
 - `SetMute` (auto) never unmutes while the user muted (`_userMuted` or `user_mute.state`); `toggle-mute` uses `SetUserMute`.

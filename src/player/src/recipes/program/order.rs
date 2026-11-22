@@ -72,7 +72,7 @@ pub struct Order {
 }
 
 impl Order {
-    /// `PlayerHelper.ApplyTimedPlaylist`'s order: `paths` as given (the caller is
+    /// A session's order: `paths` as given (the caller is
     /// responsible for the initial order; `shuffle` only reshuffles at a cycle's end), the
     /// cursor at `first` (clamped), the history `[paths[first]]`.
     pub fn new(paths: Vec<String>, first: usize, shuffle: bool) -> Order {
@@ -163,7 +163,7 @@ impl Order {
         }
     }
 
-    /// `PlayerHelper.AdvanceToNext`: forward through the history first (a next after a
+    /// Next: forward through the history first (a next after a
     /// previous, past entries skipped since they played), then the order's next item —
     /// a cycle's end reshuffles (when shuffled; its first ≠ the old cycle's last) and wraps.
     /// Skipped items are passed over; `None` = nothing playable.
@@ -218,8 +218,7 @@ impl Order {
         Some(self.step(path, StepWhy::Back, st))
     }
 
-    /// `PlayerHelper.RandomAndLaunch`: uniform over the playable items except the current
-    /// one (`PickRandomExcluding`); the pick replaces the forward history and re-seats the
+    /// Random: uniform over the playable items except the current one; the pick replaces the forward history and re-seats the
     /// cursor at its place. `None` = nothing playable.
     pub fn plan_random(&self, skip: &dyn Fn(&str) -> bool, rng: &mut Rng) -> Option<Step> {
         let pool: Vec<&String> = self.items.iter().filter(|p| !skip(p)).collect();
@@ -249,8 +248,7 @@ impl Order {
         Some(self.step(pick, StepWhy::Random, st))
     }
 
-    /// An explicit play of `items[index]` (`PlayerHelper.ApplyTimedPlaylist`: the session
-    /// starts there, its history `[item]`). `None` for an empty order; the index is clamped.
+    /// An explicit play of `items[index]` (the session starts there, its history `[item]`). `None` for an empty order; the index is clamped.
     pub fn plan_play(&self, index: usize) -> Option<Step> {
         let idx = index.min(self.items.len().checked_sub(1)?);
         let path = self.items[idx].clone();
@@ -314,7 +312,7 @@ impl Order {
         Some(step)
     }
 
-    /// `PlayerHelper.ReorderPlaylist`, timed branch: a new item list (`new`, the bar's
+    /// A reorder: a new item list (`new`, the bar's
     /// order) keeps the current item — it goes first, the rest follow from its place
     /// (wrapping; shuffled when `shuffle`), the cursor on it. A current item that was
     /// removed finishes without a replay: the rest starts with the first item after its
