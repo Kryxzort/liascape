@@ -566,6 +566,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] Desktop pointer on Sway/other compositors: no global cursor source (Sway's IPC has none) → surface pointer.
 
 ## Backend structure
+- [ ] After #114 lands: prune `docs/decisions.md` (at its 30,000-char budget) against its own bar, "write it when
+      someone would otherwise fix it back": move the legacy-engine entries (audio settle, parec auto-mute, LWE volume,
+      mpvpaper restart, `DoVideoEndWait`, the libpulse crossfade, legacy transitions, …) into
+      `.claude/rules/backend/legacy-engine.md`, which goes away with the engine; delete entries nobody would reverse
+      (Electron + React, "a work of art", focus rings only while tabbing, …); cut entries that restate a rule to their
+      why plus a link. Target ~18–20k chars. Rules citing a removed entry's heading get updated (check-rules).
 - [ ] One source of truth for the player's command API: the C# adapter's request/result/event types
       (`src/backend/Player/`) are hand-written copies of `src/player/src/api/` shapes; a renamed field only shows up
       when the adapter integration test happens to exercise it. Derive a JSON Schema from the Rust types (`schemars`),
