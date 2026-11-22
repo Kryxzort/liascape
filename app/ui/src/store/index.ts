@@ -615,7 +615,7 @@ export const useStore = create<State>((set, get) => ({
     // spread defaults over current → preserves daemon-owned fields (lastSession, steam tokens) the
     // backend also guards; re-applies the default theme's CSS vars (settings.theme alone won't).
     const s = { ...(get().settings ?? {}), ...SETTINGS_DEFAULTS };
-    set({ settings: s }); api.saveSettings(s).then(() => libraryFollowsScenes(get)).catch(() => {});
+    set({ settings: s }); api.saveSettings(s).catch(() => {});
     get().applyTheme(SETTINGS_DEFAULTS.theme as string);
     get().setStatus("Settings are back to their defaults");
   },
@@ -730,7 +730,6 @@ export const useStore = create<State>((set, get) => ({
   // save posts the whole object, so the store must hold the new values or the next save reverts them.
   mergeSettings(p) {
     set({ settings: { ...(get().settings ?? {}), ...p } });
-    libraryFollowsScenes(get);
     if (get().playingPath) get().refreshPlayingStatus();
   },
   setSetting(key, value) {
@@ -741,7 +740,7 @@ export const useStore = create<State>((set, get) => ({
     set({ settings: s });
     clearTimeout(settingsTimer); settingsSavePending = true;
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
-    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).then(() => libraryFollowsScenes(get)).catch(() => {}); }, 250);
+    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
     if (get().playingPath && ["volume", "noAudio", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
@@ -936,19 +935,6 @@ useStore.subscribe((s) => {
   if (favoritesWanted(useStore.getState())) useStore.getState().loadFavorites("open");
 });
 
-// A library listing depends on scene support (the presets the WE auto-import brings): when it changes, read the library again
-// once the backend has the change (after the page's own save lands, or at once for a change the backend made:
-// settings-changed), without a reload. libKey = the setting the shown listing answers.
-const libKeyOf = (s: Record<string, unknown> | null | undefined) => (s ? String(!!s.allowScenes) : null);
-let libKey: string | null = null;
-function libraryFollowsScenes(get: () => State) {
-  const k = libKeyOf(get().settings);
-  if (k === null || k === libKey) return;
-  const first = libKey === null;
-  libKey = k;
-  if (!first) get().loadLibrary().catch(() => {});
-}
-
 // Format an interval (e.g. "1h 30m", "45s").
 function fmtInterval(total: number): string {
   const p: string[] = []; const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
@@ -1041,8 +1027,6 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   }
   if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; if (curQ.holdFresh()) p.vramHold = cur.v?.vramHold ?? null; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
-  // this listing answers these settings: no second read for them (libraryFollowsScenes)
-  if (lib && settings) libKey = libKeyOf(settings.v);
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
   }

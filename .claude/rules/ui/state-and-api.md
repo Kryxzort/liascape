@@ -31,9 +31,7 @@ and § Settings & state.
 - The UI never guesses which item plays: the mark comes from `wallpaper-changed` (and `/current` for a Play that switches nothing; drop it if an event landed meanwhile). Guard: matrix `playlistMark:shufflePlay`.
 - Ask `/current` only through `askCurrent()`: an answer applies while it is the newest asked and no `wallpaper-changed` landed since. The page asks once more when its first socket opens (`rereadPlaying`): the store's first reads race it. Guards: matrix `load:afterApply:*`.
 - A Browse list reply belongs to its generation (`browseGen`): drop replies from an older `reload()`.
-- A library listing depends on scene support (the presets the WE auto-import brings): a change of it reads the library
-  again once the backend has it (`libraryFollowsScenes`: after the page's own save, at once for a `settings-changed`), never
-  a reload. An item that can't play (`unplayableReasonOf`: a preset's `presetReason`, and every scene and preset while
+- An item that can't play (`unplayableReasonOf`: a preset's `presetReason`, and every scene and preset while
   `scenesBlocked`) is greyed with the reason, and `applyItem` plays nothing and says why. Guard: probe-sidebar
   `lib:preset:needsBase`, `lib:scenesBlocked`.
 - Removing a scene that library presets play (Delete, the Delete key, Delete and unsubscribe, the Browse sidebar's
