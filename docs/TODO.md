@@ -75,6 +75,22 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
+117. [ ] (owner) A multi-selection's crash-mark Clear clears every selected item, not only the one clicked: the
+       sidebar's Clear on a selection posts `/library/clear-crash` for each crashed item in it (or one batch endpoint),
+       the same way the selection's other actions apply to all of it. Guard: probe-sidebar `lib:clearCrash:*` with a
+       multi-selection.
+118. [ ] (owner) Find and clear crashed scenes in bulk: a "Crashed" filter in the Library's filter column (items whose
+       `hasCrashed` is set), and a Housekeeping action "Clear crash marks" that lifts every mark (count shown, the same
+       `LibraryService.ClearCrashed` path, so a rotation's skip flags follow).
+119. [ ] (owner) Animate cards leaving and joining: a playlist item removed from the bar, a Library item deleted,
+       trashed or unsubscribed, and cards filtered in or out all move instead of jumping. Neighbours glide into the
+       gap, the leaving card fades and shrinks out, a joining one fades in, and Undo plays it in reverse. Reuse the
+       grid's existing layout motion and the sidebar's motion E timings; follow `no-motion`.
+120. [ ] (owner) The Undo button's glow keeps a floor: its pulse never dims so far that it reads as a bare outline.
+       Clamp the pulse's lowest intensity in its keyframes; `no-glow` still removes it.
+121. [ ] (owner) Starting a playlist, and applying a wallpaper, take too long before the wallpaper shows. Measure
+       click → first frame per step (UI post, backend `PlayFrom` / apply, player command, source `Ready`, transition),
+       video and scene, on a private player. Then cut the largest step.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
