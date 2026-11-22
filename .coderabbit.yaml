@@ -10,6 +10,9 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # work lands on lp-player first (main is fast-forwarded when it's releasable), so review PRs into it too
+    base_branches:
+      - "lp-player"
   path_filters:
     - "!**/node_modules/**"
     - "!**/package-lock.json"
