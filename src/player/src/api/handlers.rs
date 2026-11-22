@@ -256,6 +256,10 @@ fn hello(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         // `{reason, detail}` while a worker couldn't load the scene renderer (`worker::renderer`; no
         // `scene` capability then), else null: the backend greys every scene with the reason
         "scene_renderer_missing": crate::worker::renderer::missing_json(),
+        // `{reason, mode, phase, sources, free_mib, needed_mib, since_ms}` while the low-VRAM hold
+        // keeps wallpapers from playing (`Runtime::vram_hold_json`), else null: the backend says why
+        // (`vram.held` / `vram.released` follow it live)
+        "vram_hold": rt.vram_hold_json(),
         // which optional pieces work here, and why not (crate::health) — the backend's warning icons
         "health": {
             "effects": crate::health::effects_json(rt.cat.dir(), rt.cat.ids().len()),
@@ -297,6 +301,8 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         "workers": rt.host.workers_info(),
         // The covered Signal's source, each output's cover, the hold.
         "cover": rt.cover_state(),
+        // The low-VRAM hold (`hello.vram_hold`), else null.
+        "vram_hold": rt.vram_hold_json(),
     }))
 }
 

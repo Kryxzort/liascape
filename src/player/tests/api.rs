@@ -10032,6 +10032,159 @@ fn low_vram_pause_mode_pauses_without_freeing() {
     wait_moving(&mut c, &v, t1);
 }
 
+/// A video and a scene held by the low-VRAM `stop` hold with a big reserve: the scene's worker
+/// used 3600 MiB and the compositor 100 when it engaged; after the stop the compositor uses 60,
+/// so the reserve settles at 3640 (the scene's 3600 + the 40 the compositor freed; another
+/// process's VRAM in the sample is never ours) and 3940 free − 3640 stays low. The hold is
+/// announced (`vram.held`, `hello.vram_hold`, `state.vram_hold`). Returns (video, scene).
+fn held_with_big_reserve(
+    c: &mut Client,
+    file: &Path,
+    name: &str,
+    seen: &mut Vec<Value>,
+) -> (String, String) {
+    let me = c.ok("hello", json!({}))["pid"].as_u64().unwrap();
+    let (v, sc) = video_and_scene(c, name);
+    c.ok("subscribe", json!({"topics": ["vram.", "transition."]}));
+    let scene_pid = worker_of(c, &sc)["pid"].as_u64().unwrap();
+    let other = u64::from(std::process::id()); // this test binary: not the player's
+    write_vram(file, 300.0, &[(me, 100.0), (scene_pid, 3600.0), (other, 3000.0)]);
+    wait_event(c, seen, "vram.stopped", Duration::from_secs(5));
+    let vp = vram_probe(c);
+    assert_eq!(vp["rule"]["reserve_mib"], json!(3700.0), "ours only, at the engage: {vp}");
+    write_vram(file, 3940.0, &[(me, 60.0), (other, 3000.0)]);
+    wait_for(Duration::from_secs(3), "the reserve to settle at the held sources' share", || {
+        let vp = vram_probe(c);
+        let r = vp["rule"]["reserve_mib"].as_f64();
+        r.is_some_and(|r| (r - 3640.0).abs() < 0.01).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(900)); // > the 600 ms resume hold
+    seen.extend(c.drain_events());
+    assert!(
+        events_named(seen, "vram.recovered").is_empty(),
+        "3940 − 3640 is still low: {seen:?}"
+    );
+    let held = events_named(seen, "vram.held");
+    let last = held.last().unwrap_or_else(|| panic!("no vram.held: {seen:?}"));
+    assert_eq!(last["reason"], json!("low_vram"), "{last}");
+    assert_eq!(last["free_mib"], json!(3940.0), "{last}");
+    assert_eq!(last["needed_mib"], json!(768.0 + 3640.0), "{last}");
+    let srcs = last["sources"].as_array().unwrap();
+    assert!(srcs.contains(&json!(v)) && srcs.contains(&json!(sc)), "{last}");
+    for verb in ["hello", "state"] {
+        let r = c.ok(verb, json!({}));
+        let h = &r["vram_hold"];
+        assert_eq!(h["needed_mib"], json!(768.0 + 3640.0), "{verb}.vram_hold: {r}");
+        assert_eq!(h["free_mib"], json!(3940.0), "{verb}.vram_hold");
+        assert_eq!(h["reason"], json!("low_vram"), "{verb}.vram_hold");
+    }
+    (v, sc)
+}
+
+/// A switch while the low-VRAM hold has a big reserve: it replaces both held sources, so their
+/// reserve goes at once (`vram.held` again, needing only the resume bar), the rule recovers on
+/// the free VRAM there is and B plays; the replaced sources never reopen.
+#[test]
+fn low_vram_apply_while_held_plays_once_memory_allows() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    let mut seen = Vec::new();
+    let (v, sc) = held_with_big_reserve(&mut c, &file, "api-t8-low-apply", &mut seen);
+    seen.clear();
+    let clip = ensure_clip("frame_index_90", ClipSpec::FrameIndex { frames: 90 });
+    let r = c.ok(
+        "transition",
+        json!({"outputs": "out:*", "to": {"path": s(&clip), "loop": true},
+               "effect_id": "fade", "duration_ms": 200}),
+    );
+    let b = r["to"].as_str().unwrap().to_string();
+    let corr = r["corr"].as_str().unwrap().to_string();
+    let held = wait_for(Duration::from_secs(2), "the hold to drop the replaced sources", || {
+        seen.extend(c.drain_events());
+        events_named(&seen, "vram.held")
+            .into_iter()
+            .find(|e| e["needed_mib"] == json!(768.0))
+    });
+    assert_eq!(held["sources"], json!([b]), "only B is held now: {held}");
+    assert_eq!(vram_probe(&mut c)["rule"]["reserve_mib"], json!(0.0));
+    wait_event(&mut c, &mut seen, "vram.recovered", Duration::from_secs(5));
+    let released = wait_event(&mut c, &mut seen, "vram.released", Duration::from_secs(8));
+    assert_eq!(released["reason"], json!("free"), "{released}");
+    wait_for(Duration::from_secs(8), "the switch to land", || {
+        seen.extend(c.drain_events());
+        seen.iter()
+            .any(|e| e["event"] == "transition.done" && e["corr"] == json!(corr))
+            .then_some(())
+    });
+    for e in events_named(&seen, "vram.resuming") {
+        let ids = e["sources"].as_array().unwrap();
+        assert!(
+            !ids.contains(&json!(v)) && !ids.contains(&json!(sc)),
+            "a replaced source reopened: {e}"
+        );
+    }
+    let t = f64_of(&mut c, &format!("{b}.time_pos")).unwrap();
+    wait_moving(&mut c, &b, t);
+    assert!(!exists(&mut c, &v) && !exists(&mut c, &sc), "the replaced sources went");
+    let vp = vram_probe(&mut c);
+    assert_eq!(vp["hold"], Value::Null, "{vp}");
+    assert_eq!(vp["suspended"], json!([]), "{vp}");
+    assert_eq!(c.ok("hello", json!({}))["vram_hold"], Value::Null);
+}
+
+/// Stop while the low-VRAM hold has a big reserve: the hold clears at once (`vram.released`
+/// `stopped`, nothing suspended, the rule back to normal), and the next wallpaper plays.
+#[test]
+fn low_vram_stop_clears_the_hold() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    let mut seen = Vec::new();
+    held_with_big_reserve(&mut c, &file, "api-t8-low-stopped", &mut seen);
+    c.ok("stop", json!({}));
+    let released = wait_event(&mut c, &mut seen, "vram.released", Duration::from_secs(2));
+    assert_eq!(released["reason"], json!("stopped"), "{released}");
+    let vp = vram_probe(&mut c);
+    assert_eq!(vp["hold"], Value::Null, "{vp}");
+    assert_eq!(vp["suspended"], json!([]), "{vp}");
+    assert_eq!(vp["rule"]["state"], json!("normal"), "{vp}");
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"]["player"]["vram_low_active"], json!(false));
+    assert_eq!(st["vram_hold"], Value::Null);
+    let clip = ensure_clip("frame_index_90", ClipSpec::FrameIndex { frames: 90 });
+    let n = create_src(&mut c, json!({"path": s(&clip), "loop": true}));
+    show_all(&mut c, &n);
+    wait_playing(&mut c, &n, 0.3);
+}
+
+/// A held source replaced on its layer and destroyed takes its reserve with it at once: only the
+/// video's 40 MiB stays reserved, the rule recovers, and only the video reopens.
+#[test]
+fn low_vram_replaced_source_drops_its_reserve() {
+    let Some((srv, file)) = vram_serve() else {
+        return;
+    };
+    let mut c = srv.client();
+    let mut seen = Vec::new();
+    let (v, sc) = held_with_big_reserve(&mut c, &file, "api-t8-low-replaced", &mut seen);
+    let col = color(&mut c, [0, 0, 255]);
+    c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": col}));
+    c.ok("destroy", json!({"id": sc}));
+    wait_for(Duration::from_secs(2), "the scene's reserve to go", || {
+        let vp = vram_probe(&mut c);
+        let r = vp["rule"]["reserve_mib"].as_f64();
+        r.is_some_and(|r| (r - 40.0).abs() < 0.01).then_some(())
+    });
+    let resuming = wait_event(&mut c, &mut seen, "vram.resuming", Duration::from_secs(5));
+    assert_eq!(resuming["sources"], json!([v]), "{resuming}");
+    wait_event(&mut c, &mut seen, "vram.released", Duration::from_secs(8));
+    let t = f64_of(&mut c, &format!("{v}.time_pos")).unwrap();
+    wait_moving(&mut c, &v, t);
+}
+
 // ---------------------------------------------------------------- transitions × scenes
 
 const T9_METHODS: [&str; 3] = ["full-live", "reveal", "frozen"];

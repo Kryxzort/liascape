@@ -5,18 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-0. [ ] **(owner-hit bug, first)** The low-VRAM guard (`probe vram`, mode "stop") jammed for hours: the sources it
-       suspended (src213 / src214) kept their reserve (`reserve_mib` 4161 of 4506 free → "low" forever), so every later
-       apply was suspended too (`transitions[].phase` `waiting_ready`, no worker spawned, black screens) — and the Stop
-       button didn't release it either. Fix: a suspended source the user replaced, stopped or that its program left
-       drops its reservation and its suspension at once; Stop clears the hold; a new apply never waits on reserve held
-       for sources that can't come back; the guard re-evaluates on each apply. A held state must be visible in the UI
-       (what's held and why) instead of a silent black screen. Guard: a player test that fills VRAM (stub sampler),
-       suspends A, applies B / stops / applies C, and asserts B and C play once VRAM allows and Stop empties `suspended`.
-       Also: the reserve counts only this player's own processes (check whether hermetic test players running the same
-       binary were counted — 4161 MiB for two wallpapers is suspect), and the resume bar drops from low + max(1024 MiB,
-       10 %) to low + 256 MiB (anti-flap's doubling hold is the loop guard): on 8 GB the old bar meant a 3.6 GB scene
-       that plays fine on a quiet desktop could never resume after a dip.
 0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, now** — the
        owner waived the rest of the bar (`docs/player/reports/switch-over.md`). Right after #114 lands, in order:
        a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,

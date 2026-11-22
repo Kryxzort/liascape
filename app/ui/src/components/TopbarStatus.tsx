@@ -14,7 +14,7 @@ import { isSingle, opLabel, opsWords, useShownOps } from "./libraryOps";
 // what it says cross-fades in place (opacity only), a count steps in place. Guard: probe-libops libops:status,
 // libops:toggle, libops:combined, libops:single; probe-layout resize:*.
 type Line =
-  | { kind: "status" | "playing" | "hint"; key: string; text: string }
+  | { kind: "status" | "playing" | "hint"; key: string; text: string; title?: string }
   | { kind: "op"; key: string; id: string; label: string; n: string; more: number; words: string; spoken: boolean };
 
 // how long a replaced line stays to fade out (index.css .st-layer.out: .2 s)
@@ -22,7 +22,7 @@ const OUT_MS = 220;
 
 function LineView({ l, narrow, out }: { l: Line; narrow: boolean; out?: boolean }) {
   const cls = `st-layer${out ? " out" : ""}`;
-  if (l.kind !== "op") return <span className={`${cls}${l.kind === "hint" ? " muted-status" : ""}`} data-st={l.kind}>{l.text}</span>;
+  if (l.kind !== "op") return <span className={`${cls}${l.kind === "hint" ? " muted-status" : ""}`} data-st={l.kind} title={l.title}>{l.text}</span>;
   // the words are the line's (LibraryOpsLine's progressbar names every operation): the slot shows, a reader needn't hear twice.
   // Only one item's work running has no line, so then the slot speaks. A tooltip gives what the short form hides
   return (
@@ -42,7 +42,10 @@ export function TopbarStatus({ tab }: { tab: "browse" | "library" | "settings" }
   const motion = useMotion();
   const op = tab !== "browse" ? ops[0] : undefined;
   const message: Line | null = status && !isPlayingLine ? { kind: "status", key: `s:${status}`, text: status } : null;
-  const playing: Line | null = status && isPlayingLine ? { kind: "playing", key: "playing", text: status } : null;
+  // the low-VRAM hold's notice leads the now-playing line; the numbers it ends on can fall past a narrow slot's ellipsis, so
+  // the tooltip carries them
+  const vramHold = useStore((s) => s.vramHold);
+  const playing: Line | null = status && isPlayingLine ? { kind: "playing", key: "playing", text: status, title: vramHold ?? undefined } : null;
   const work: Line | null = op ? { kind: "op", key: `op:${op.id}`, id: op.id, label: isSingle(op) ? `${opLabel(op)}…` : opLabel(op), n: isSingle(op) ? "" : `${op.done} / ${op.total}`, more: ops.length - 1, words: opsWords(ops), spoken: ops.every(isSingle) } : null;
   // the user's pick between the work and the now-playing line, kept while the work runs
   const [showPlaying, setShowPlaying] = useState(false);

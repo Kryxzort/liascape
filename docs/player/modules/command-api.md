@@ -22,7 +22,8 @@ object (exit 1, also for no player, bad JSON args or no reply within the timeout
 ## Contracts worth knowing before reading `handlers.rs`
 
 - `hello` = `{version, pid (the compositor child), supervisor_pid, restart, protocol, capabilities, clock,
-  backend, verbs, health}`. `capabilities` gate optional features (`scene` only when the worker and WE's assets
+  backend, verbs, scene_renderer_missing, vram_hold, health}` (`vram_hold`: the low-VRAM hold, also in `state`:
+  [scene-gpu-budget.md](scene-gpu-budget.md)). `capabilities` gate optional features (`scene` only when the worker and WE's assets
   dir resolve, `outbox`, `program`, …). `health` entries are `{ok, reason, …}` with `ok: null` = not known yet;
   `crate::health` documents each, and `liascape-player health` prints them without a running player.
 - `create {kind: source|layer|effect|program}`; `destroy` returns `{ramp_ms}` (30 for an audible source ramped

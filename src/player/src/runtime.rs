@@ -885,8 +885,33 @@ pub(crate) struct VramHold {
     pub(crate) mode: &'static str,
     pub(crate) phase: HoldPhase,
     pub(crate) since: Instant,
-    /// What `stop` suspended.
+    /// What the hold keeps from playing now: `stop`'s suspended sources that can still come back
+    /// (not those being replaced or retired, `Runtime::vram_gone`); `pause`'s media sources.
     pub(crate) suspended: Vec<String>,
+    /// Our processes' VRAM in the sample that engaged it.
+    engaged: EngagedUse,
+    /// What `stop` suspended, and when (each one's share of the reserve is measured `settle`
+    /// later).
+    stopped: Option<(Instant, Vec<String>)>,
+    /// Each stopped source's part of the reserve (MiB), once measured.
+    shares: Option<BTreeMap<String, f64>>,
+    /// The reserve last handed to the rule (`LowVram::set_reserve`).
+    reserve: Option<f64>,
+    /// What `vram.held` last said ((sources, needed MiB), free MiB): said again when that changes.
+    announced: Option<((Vec<String>, i64), f64)>,
+    /// Why it lets go (`vram.released`), once released.
+    released: Option<String>,
+}
+
+/// Our own processes' VRAM when the low-VRAM hold engaged (matched by pid: nothing but this
+/// compositor, its scene workers and its spare).
+#[derive(Default)]
+struct EngagedUse {
+    /// The sample's per-process numbers (`None` = the probe has none).
+    procs: Option<BTreeMap<u32, f64>>,
+    /// Scene source id → its worker's pid.
+    scenes: Vec<(String, u32)>,
+    spare: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -900,9 +925,22 @@ pub(crate) enum HoldPhase {
     Resuming { at: Instant },
 }
 
+impl HoldPhase {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            HoldPhase::Pausing { .. } => "pausing",
+            HoldPhase::Held => "held",
+            HoldPhase::Resuming { .. } => "resuming",
+        }
+    }
+}
+
 /// How long a resume waits for the reopened sources' first frames before un-pausing
 /// anyway.
 const VRAM_RESUME_WAIT: Duration = Duration::from_secs(5);
+
+/// `vram.held` is said again once free VRAM moved this far (MiB) from what it last said.
+const VRAM_HELD_FREE_STEP: f64 = 32.0;
 
 /// See `pause_gates`' doc and `docs/player/modules/runtime.md` § Three clocks for gains. The gate ramps its **own**
 /// slot, `gain.pause` — never `gain.anticlick`, which the recipe, retire and park ramp on
@@ -1185,6 +1223,7 @@ impl Runtime {
         if self.stepped() {
             return;
         }
+        self.vram_reopen_kept();
         let mode = match self.str_prop("player", "vram_low_mode").as_str() {
             "pause" => "pause",
             "off" => "off",
@@ -1228,7 +1267,8 @@ impl Runtime {
             }
         }
         // the spare worker's context is ours too (freed with the rest by a `stop` hold)
-        pids.extend(self.host.spare_pid());
+        let spare = self.host.spare_pid();
+        pids.extend(spare);
         if pids != self.vram.pids {
             monitor.set_pids(pids.clone());
             self.vram.pids = pids.clone();
@@ -1258,7 +1298,14 @@ impl Runtime {
             };
             if let Ok(s) = &r {
                 match action {
-                    Some(crate::vram::Action::Engage) => self.vram_engage(mode, s),
+                    Some(crate::vram::Action::Engage) => {
+                        let engaged = EngagedUse {
+                            procs: s.procs.clone(),
+                            scenes: scene_pids.clone(),
+                            spare,
+                        };
+                        self.vram_engage(mode, s, engaged)
+                    }
                     Some(crate::vram::Action::Release) => self.vram_release("free", Some(s)),
                     None => {}
                 }
@@ -1272,6 +1319,226 @@ impl Runtime {
             self.vram_release("off", None);
         }
         self.drive_vram_hold(mode);
+        self.vram_follow_hold();
+    }
+
+    /// What the low-VRAM hold never reopens nor reserves memory for: the sources on their way
+    /// out — replaced by a live transition (`Transitions::replaced_sources`), in its graveyard,
+    /// retired (`pending_destroy`, a `stop` among them) — and suspended ids whose node went.
+    fn vram_gone(&self) -> BTreeSet<String> {
+        let mut gone = self.tr.replaced_sources(&self.graph);
+        gone.extend(self.tr.held_sources().1);
+        gone.extend(self.pending_destroy.iter().map(|(_, id, _)| id.clone()));
+        gone.extend(
+            self.host
+                .suspended_ids()
+                .into_iter()
+                .filter(|id| self.graph.kind_of(id) != Some(NodeKind::Source)),
+        );
+        gone
+    }
+
+    /// No hold, yet a source the last one kept as a still because it was being replaced is
+    /// wanted again (its switch failed or was cancelled): it reopens now.
+    fn vram_reopen_kept(&mut self) {
+        if self.vram.hold.is_some() || self.host.suspended_ids().is_empty() {
+            return;
+        }
+        let gone = self.vram_gone();
+        if self.host.suspended_ids().iter().all(|id| gone.contains(id)) {
+            return;
+        }
+        let reopened = self.host.resume_media(&gone);
+        log::event(
+            "vram",
+            Level::Info,
+            "vram.resuming",
+            None,
+            json!({ "sources": reopened, "reason": "wanted_again" }),
+        );
+    }
+
+    /// While the hold is `Held`: keep its reserve to the sources that can still come back
+    /// (re-judged on every tick, so a switch, a destroy or a replace counts at once, never
+    /// waiting for a timer), and say what it holds and why (`vram.held`) whenever that
+    /// changes. Guards: `tests/api.rs::low_vram_apply_while_held_plays_once_memory_allows`,
+    /// `low_vram_replaced_source_drops_its_reserve`.
+    fn vram_follow_hold(&mut self) {
+        if !self
+            .vram
+            .hold
+            .as_ref()
+            .is_some_and(|h| matches!(h.phase, HoldPhase::Held))
+        {
+            return;
+        }
+        let gone = self.vram_gone();
+        let sample = match &self.vram.last {
+            Some((at, Ok(s))) => Some((*at, s.clone())),
+            _ => None,
+        };
+        let settle = self.vram.timing.settle;
+        let h = self.vram.hold.as_ref().expect("held");
+        let held: Vec<String> = if h.mode == "stop" {
+            self.host
+                .suspended_ids()
+                .into_iter()
+                .filter(|id| !gone.contains(id))
+                .collect()
+        } else {
+            self.host.media_ids()
+        };
+        let shares = match (&h.shares, &h.stopped, &sample) {
+            (None, Some((at, ids)), Some((t, s))) if *t >= *at + settle => {
+                self.vram_shares(&h.engaged, ids, s)
+            }
+            _ => None,
+        };
+        let h = self.vram.hold.as_mut().expect("held");
+        if shares.is_some() {
+            h.shares = shares;
+        }
+        h.suspended = held.clone();
+        let Some((_, s)) = sample else {
+            return;
+        };
+        if let Some(sh) = &h.shares {
+            let r: f64 = held.iter().filter_map(|id| sh.get(id)).sum();
+            if h.reserve != Some(r) {
+                h.reserve = Some(r);
+                let now = Instant::now().saturating_duration_since(self.started);
+                self.vram.low.set_reserve(now, s.total_mib, s.free_mib, r);
+            }
+        }
+        let needed = crate::vram::resume_mib(s.total_mib) + self.vram.low.reserve().unwrap_or(0.0);
+        let h = self.vram.hold.as_mut().expect("held");
+        let key = (held.clone(), needed.round() as i64);
+        // free VRAM drifts every sample: said again only once it moved by `VRAM_HELD_FREE_STEP`
+        let same = h.announced.as_ref().is_some_and(|(k, free)| {
+            *k == key && (free - s.free_mib).abs() < VRAM_HELD_FREE_STEP
+        });
+        if !same {
+            h.announced = Some((key, s.free_mib));
+            log::event(
+                "vram",
+                Level::Warn,
+                "vram.held",
+                None,
+                json!({
+                    "sources": held,
+                    "reason": "low_vram",
+                    "mode": h.mode,
+                    "free_mib": s.free_mib,
+                    "needed_mib": needed,
+                    "total_mib": s.total_mib,
+                }),
+            );
+        }
+    }
+
+    /// Each stopped source's part of the reserve, from a sample taken `settle` after the stop:
+    /// with per-process numbers a scene gets its worker's VRAM at the engage, and what the
+    /// compositor freed (its use then − now) plus the spare's is split over the rest (the
+    /// videos and images it decoded; over the scenes when there are none); without them the
+    /// rule's measured reserve is split evenly. `None` = not measurable yet.
+    fn vram_shares(
+        &self,
+        engaged: &EngagedUse,
+        stopped: &[String],
+        s: &crate::vram::Sample,
+    ) -> Option<BTreeMap<String, f64>> {
+        let mut shares = BTreeMap::new();
+        if stopped.is_empty() {
+            return Some(shares);
+        }
+        match (&engaged.procs, &s.procs) {
+            (Some(then), Some(now)) => {
+                let use_of = |m: &BTreeMap<u32, f64>, p: u32| m.get(&p).copied().unwrap_or(0.0);
+                for (id, pid) in &engaged.scenes {
+                    if stopped.contains(id) {
+                        shares.insert(id.clone(), use_of(then, *pid));
+                    }
+                }
+                let me = std::process::id();
+                let pool = (use_of(then, me) - use_of(now, me)).max(0.0)
+                    + engaged.spare.map_or(0.0, |p| use_of(then, p));
+                let rest: Vec<String> = stopped
+                    .iter()
+                    .filter(|id| !shares.contains_key(*id))
+                    .cloned()
+                    .collect();
+                let over = if rest.is_empty() {
+                    shares.keys().cloned().collect()
+                } else {
+                    rest
+                };
+                let each = pool / over.len().max(1) as f64;
+                for id in over {
+                    *shares.entry(id).or_insert(0.0) += each;
+                }
+            }
+            _ => {
+                let total = self.vram.low.reserve()?;
+                let each = total / stopped.len() as f64;
+                for id in stopped {
+                    shares.insert(id.clone(), each);
+                }
+            }
+        }
+        Some(shares)
+    }
+
+    /// The hold for `hello` / `state` (`vram_hold`): what it keeps from playing, why, and how much
+    /// free VRAM it waits for (`needed_mib` = the resume bar + the reserve); null when none.
+    pub(crate) fn vram_hold_json(&self) -> Value {
+        let Some(h) = &self.vram.hold else {
+            return Value::Null;
+        };
+        let s = match &self.vram.last {
+            Some((_, Ok(s))) => Some(s),
+            _ => None,
+        };
+        json!({
+            "reason": "low_vram",
+            "mode": h.mode,
+            "phase": h.phase.name(),
+            "sources": h.suspended,
+            "free_mib": s.map(|s| s.free_mib),
+            "needed_mib": s.map(|s| crate::vram::resume_mib(s.total_mib)
+                + self.vram.low.reserve().unwrap_or(0.0)),
+            "since_ms": h.since.elapsed().as_secs_f64() * 1e3,
+        })
+    }
+
+    /// `stop` ended the session: the hold goes at once (nothing it suspended can come back) and
+    /// the rule starts over, so the next wallpaper is judged on its own. Guard:
+    /// `tests/api.rs::low_vram_stop_clears_the_hold`.
+    fn vram_clear(&mut self, reason: &str) {
+        let Some(h) = self.vram.hold.take() else {
+            return;
+        };
+        self.vram
+            .low
+            .release(Instant::now().saturating_duration_since(self.started));
+        let gone = self.vram_gone();
+        let reopened = self.host.resume_media(&gone);
+        log::event(
+            "vram",
+            Level::Info,
+            "vram.released",
+            None,
+            json!({
+                "reason": reason,
+                "sources": h.suspended,
+                "reopened": reopened,
+                "held_ms": h.since.elapsed().as_secs_f64() * 1e3,
+                "mode": h.mode,
+            }),
+        );
+        let _ = self
+            .graph
+            .set_observed(&p("player.vram_low_active"), PropValue::Bool(false));
+        self.update_player_paused();
     }
 
     /// The per-scene limit on one sample: a worker over it for `scene_hold` is stopped.
@@ -1309,7 +1576,7 @@ impl Runtime {
             .retain(|id, _| scene_pids.iter().any(|(i, _)| i == id));
     }
 
-    fn vram_engage(&mut self, mode: &'static str, s: &crate::vram::Sample) {
+    fn vram_engage(&mut self, mode: &'static str, s: &crate::vram::Sample, engaged: EngagedUse) {
         log::event(
             "vram",
             Level::Warn,
@@ -1332,6 +1599,11 @@ impl Runtime {
                 if !matches!(h.phase, HoldPhase::Held) || !h.suspended.is_empty() {
                     h.phase = HoldPhase::Pausing { at: now };
                 }
+                h.engaged = engaged;
+                h.stopped = None;
+                h.shares = None;
+                h.reserve = None;
+                h.released = None;
             }
             None => {
                 self.vram.hold = Some(VramHold {
@@ -1339,6 +1611,12 @@ impl Runtime {
                     phase: HoldPhase::Pausing { at: now },
                     since: now,
                     suspended: Vec::new(),
+                    engaged,
+                    stopped: None,
+                    shares: None,
+                    reserve: None,
+                    announced: None,
+                    released: None,
                 });
             }
         }
@@ -1366,7 +1644,17 @@ impl Runtime {
             }),
         );
         h.phase = HoldPhase::Resuming { at: Instant::now() };
-        let reopened = self.host.resume_media();
+        h.released = Some(reason.to_string());
+        // A source being replaced stays the still it is (it never reopens to be dropped): to an
+        // `align: end` switch off it, it has ended.
+        let gone = self.vram_gone();
+        let now = self.now();
+        for id in self.host.suspended_ids() {
+            if gone.contains(&id) {
+                self.tr.note_ended(&self.graph, &id, now);
+            }
+        }
+        let reopened = self.host.resume_media(&gone);
         if !reopened.is_empty() {
             log::event(
                 "vram",
@@ -1382,15 +1670,25 @@ impl Runtime {
     /// suspended) `Held`; `Resuming` → done once the reopened sources showed a frame (or
     /// `VRAM_RESUME_WAIT`), the pause let go. A mode change while held applies at once.
     fn drive_vram_hold(&mut self, mode: &'static str) {
+        let switch = self.vram.hold.as_ref().is_some_and(|h| {
+            matches!(h.phase, HoldPhase::Held) && h.mode != mode && mode != "off"
+        });
+        let gone = if switch && mode == "pause" {
+            self.vram_gone()
+        } else {
+            BTreeSet::new()
+        };
         let Some(h) = &mut self.vram.hold else {
             return;
         };
-        if matches!(h.phase, HoldPhase::Held) && h.mode != mode && mode != "off" {
+        if switch {
             // stop → pause: give the sources back, stay paused; pause → stop: free now.
             h.mode = mode;
             if mode == "pause" {
                 h.suspended.clear();
-                self.host.resume_media();
+                h.stopped = None;
+                h.shares = None;
+                self.host.resume_media(&gone);
             } else {
                 h.phase = HoldPhase::Pausing { at: Instant::now() };
             }
@@ -1413,7 +1711,8 @@ impl Runtime {
                         json!({ "sources": ids, "ms": at.elapsed().as_secs_f64() * 1e3 }),
                     );
                     let h = self.vram.hold.as_mut().expect("held");
-                    h.suspended.extend(ids);
+                    h.suspended.extend(ids.iter().cloned());
+                    h.stopped = Some((Instant::now(), ids));
                     h.phase = HoldPhase::Held;
                 }
             }
@@ -1423,6 +1722,8 @@ impl Runtime {
                 if pending == 0 || at.elapsed() >= VRAM_RESUME_WAIT {
                     let since = h.since;
                     let resumed = std::mem::take(&mut h.suspended);
+                    let reason = h.released.take().unwrap_or_else(|| "free".into());
+                    let held_mode = h.mode;
                     self.vram.hold = None;
                     log::event(
                         "vram",
@@ -1434,6 +1735,18 @@ impl Runtime {
                             "pending": pending,
                             "resume_ms": at.elapsed().as_secs_f64() * 1e3,
                             "held_ms": since.elapsed().as_secs_f64() * 1e3,
+                        }),
+                    );
+                    log::event(
+                        "vram",
+                        Level::Info,
+                        "vram.released",
+                        None,
+                        json!({
+                            "reason": reason,
+                            "sources": resumed,
+                            "held_ms": since.elapsed().as_secs_f64() * 1e3,
+                            "mode": held_mode,
                         }),
                     );
                     let _ = self
@@ -3703,6 +4016,8 @@ impl Runtime {
                 self.retire(id);
             }
         }
+        // Nothing the low-VRAM hold kept can come back now: it goes with the session.
+        self.vram_clear("stopped");
         // The session ends here — whatever comes next plays (the stop ramps above
         // run on the unpaused clock, so they complete either way).
         let _ = self.graph.set(&p("player.paused"), PropValue::Bool(false));

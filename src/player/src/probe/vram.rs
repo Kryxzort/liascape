@@ -2,14 +2,16 @@
 //! nvidia-smi | fake | none, or null while no rule needs it), the newest sample (`total_mib`,
 //! `free_mib`, `used_mib`, our `procs`), the low-VRAM rule (`mode`, `state` normal | pending |
 //! low | recovering, `low_mib`, `resume_mib`, `reserve_mib`, the holds), the hold (`phase`,
-//! `suspended`, `since_ms`), and per scene its worker's VRAM against `scene_limit_mib`.
+//! `suspended` = what it holds back, `needed_mib`, `since_ms`), every suspended source (top-level
+//! `suspended`, a still kept for a source being replaced too), and per scene its worker's VRAM
+//! against `scene_limit_mib`.
 
 use std::time::Instant;
 
 use serde_json::{Value, json};
 
 use crate::graph::{ApiError, PropValue};
-use crate::runtime::{HoldPhase, Runtime};
+use crate::runtime::Runtime;
 
 pub fn vram(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
     let now = Instant::now();
@@ -38,13 +40,10 @@ pub fn vram(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
     let hold = rt.vram.hold.as_ref().map(|h| {
         json!({
             "mode": h.mode,
-            "phase": match h.phase {
-                HoldPhase::Pausing { .. } => "pausing",
-                HoldPhase::Held => "held",
-                HoldPhase::Resuming { .. } => "resuming",
-            },
+            "phase": h.phase.name(),
             "since_ms": now.saturating_duration_since(h.since).as_secs_f64() * 1e3,
             "suspended": h.suspended,
+            "needed_mib": rt.vram_hold_json()["needed_mib"],
         })
     });
     let scenes: Vec<Value> = rt
