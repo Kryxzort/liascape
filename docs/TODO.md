@@ -78,6 +78,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 118. [ ] (owner) Find and clear crashed scenes in bulk: a "Crashed" filter in the Library's filter column (items whose
        `hasCrashed` is set), and a Housekeeping action "Clear crash marks" that lifts every mark (count shown, the same
        `LibraryService.ClearCrashed` path, so a rotation's skip flags follow).
+       The sidebar's crash notice shows whenever any selected item is crashed (today only the open item's mark shows it)
+       and names the count when Clear will lift several ("3 selected scenes crashed the player").
 119. [ ] (owner) Animate cards leaving and joining: a playlist item removed from the bar, a Library item deleted,
        trashed or unsubscribed, and cards filtered in or out all move instead of jumping. Neighbours glide into the
        gap, the leaving card fades and shrinks out, a joining one fades in, and Undo plays it in reverse. Reuse the
