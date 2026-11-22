@@ -2,9 +2,11 @@
 // matrix's hermetic stack). docs/decisions.md § "Offer a password sign-in beside the QR": a password sign-in
 // (SteamPasswordModal) next to the QR one, and Workshop downloads through the Steam app's page ("Open in the Steam app"). NOTHING here reaches
 // Steam: a script injected before the page's own (CDP Page.addScriptToEvaluateOnNewDocument) answers /steam/status (the state
-// a cell wants), /steam/login* and /steam/qr/* itself (recording each body), stubs POST /browse (Workshop items) and /download
+// a cell wants), /steam/login* and /steam/qr/* itself (recording each body), stubs POST /browse (Workshop items), the
+// favourites and the library set's details (GET /workshop/my-favorites, POST /workshop/details: yours:*) and /download
 // (held until the cell lets go / cancels), wraps WebSocket so a cell can push fake WS events (steam-login-code, steam-signed-in,
-// steam-login-error, download-progress) through the page's own socket, and records every request body + console line.
+// steam-login-error, download-progress, workshop-favorites) through the page's own socket, and records every request body +
+// console line. browse:fixture and yours:stack open a page without the stub on the stack's own backend and its fake Steam.
 //   steam:row:signedOut   Settings → Getting Workshop wallpapers → Steam: "Not signed in." (no Steam-app fallback offered),
 //                         Sign in with QR + Sign in with password; no tooltips
 //   steam:row:rejected    a sign-in Steam turned down: the warning (in the warn colour), both sign-in buttons, no Sign out
@@ -155,8 +157,8 @@
 //   ws:commentSelect      a comment's text and its commenter's name select with a drag; an old comment's date shows its year
 //                         (never 1970), one with no time shows none
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
-//   ws:pills              the Favourites pill: signed out the grid's "Sign in …" note, signed in the list; the Workshop pill back
-//                         Shots steam-ws-*.png
+//   ws:pills              the strip: the source pills by their plain names (no Favourites pill), the Workshop's lit; a
+//                         creator's pair joins it, lit; × back. Shot steam-ws-pills-creator.png
 //   ws:presets[Off]       a scene's sidebar: a "Presets" row (the creator row's control, 12 px under it); a click lists exactly
 //                         its two presets (the stack's backend + fake Steam servers): "Presets · <scene>" pill slides in (Off:
 //                         fades), lit, the sidebar closes, the library's one marked in library, the list's sorts and second
@@ -202,6 +204,9 @@
 //                        the selection and keeps the scroll
 //   lib:yours:load       Library ✓ with the first read on its way: the whole Library under the load line (counts as it comes), never a no-op
 //   lib:yours:error      Library ✓ with an error and nothing read: the whole Library, the error + Retry in the flow, Retry → the set
+//   yours:errorFirst     an error already read as the first line a page shows (Browse ✕, the Library ✓): its room glides the cards down
+//   yours:stack          Favourites ✓ on the stack's own backend (a fake sign-in, "@userfiles" in its Steam fixture): the account's
+//                        favourites, no /browse, no session to Steam, no refused network call
 //   browse:fixture       a page without this probe's stub on Browse → the Workshop lists the stack's own Steam fixture
 //                         ("@query"); the backend opened no session to Steam and refused no real-network call
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
@@ -403,10 +408,9 @@ const STUB = `(() => {
       if (y?.endless && !b.list && b.page > 1) return res(Array.from({ length: 6 }, (_, i) => ({ ...y.page[0], title: "ws-p" + b.page + "-" + i,
         workshopId: String(931000 + b.page * 10 + i), pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + (931000 + b.page * 10 + i) })));
       if (y) return res(b.page > 1 ? [] : b.list?.kind === "creator" ? y.creatorPage ?? [] : b.list?.kind === "presets" ? y.presetsPage ?? [] : y.page ?? []);
-      // a Workshop list (ws:*): the favourites without a sign-in say so; else a few items
-      // a scene's presets (ws:presets*): the stack's own backend answers, from its fake Steam servers (scripts/test-ui-matrix.sh)
+      // a Workshop list (ws:*): a creator's, a few items; a scene's presets (ws:presets*): the stack's own backend answers,
+      // from its fake Steam servers (scripts/test-ui-matrix.sh)
       if (b.list) { if (b.list.kind === "presets") return f(u, o);
-        if (b.list.kind === "favorites" && !(window.__ws ??= {}).signedIn) return res({ error: "Sign in to Steam to see your Workshop favourites", signIn: true }, 403);
         return res(b.page > 1 ? [] : items.slice(0, 3)); }
       // a long first title (side:browseTitle, look:browseTitles), a long first description (side:aboutTall)
       const long = localStorage.getItem("__probe_long_title"), longDesc = localStorage.getItem("__probe_long_desc");
@@ -2936,30 +2940,39 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the Workshop's Favourites pill: signed out the grid says "Sign in …" (no crash); signed in it lists them; the Workshop's
-    // own pill goes back to the whole Workshop
+    // the strip holds the source pills, each its plain name, and a list's pill only while that list is open: no Favourites pill
+    // (the favourites are a filter row, docs/decisions.md § "Show Favourites and In my library as sets in the filter column");
+    // the Workshop's pill is lit on the whole Workshop, a creator's pair joins the strip, × goes back
     await cell("ws:pills", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       await browseWs();
-      await page(`document.querySelector('[data-ws-pill="favorites"]').click();`); await sleep(700);
-      const b = (await browses()).at(-1);
-      if (b?.list?.kind !== "favorites") v.push(`the pill asked ${J(b?.list)}`);
-      const n1 = await page(`return { note: document.querySelector("[data-ws-list-note]")?.dataset.wsListNote ?? null, text: document.querySelector("[data-ws-list-note]")?.textContent ?? "",
-        active: document.querySelector('[data-ws-pill="favorites"]').classList.contains("active"), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
-      console.log(`        signed out: ${J(n1)}`);
-      if (n1.note !== "sign-in" || !/Sign in/.test(n1.text) || !n1.active || n1.cards) v.push(`signed out: ${J(n1)}`);
-      await shot("ws-favs-signin");
-      await W({ signedIn: true });
-      await page(`document.querySelector(".pills .mini[aria-label=Refresh]").click();`); await sleep(800);
-      const n2 = await page(`return { note: !!document.querySelector("[data-ws-list-note]"), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
-      if (n2.note || n2.cards !== 3) v.push(`signed in: ${J(n2)} (want 3 cards, no note)`);
-      const srcs = (await http("GET", "/sources")).json, wsName = srcs.find((s) => s.supportsTagFilter)?.name;
-      await page(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)}).click();`); await sleep(700);
-      const b3 = (await browses()).at(-1);
-      const n3 = await page(`return { active: [...document.querySelectorAll(".pill-strip .pill.active")].map((e) => e.textContent.trim()), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length };`);
-      if (J(n3.active) !== J([wsName]) || n3.cards !== 6) v.push(`back on the whole Workshop: ${J(n3)}`);
-      if (b3?.list) v.push("the whole Workshop still sent a list");
+      const srcs = (await http("GET", "/sources")).json, names = srcs.filter((s) => s.available).map((s) => s.name), wsName = srcs.find((s) => s.supportsTagFilter)?.name;
+      if (!wsName) return ["no Workshop source in /sources — proved nothing"];
+      const strip = () => page(`const s = document.querySelector(".pill-strip");
+        return { kids: [...s.children].map((e) => e.matches(".pill") ? "pill:" + e.textContent.trim() : (e.dataset.wsPill ?? e.className)),
+          icons: [...s.querySelectorAll(":scope > .pill svg")].length, fav: !!document.querySelector('[data-ws-pill="favorites"]'),
+          lit: [...s.querySelectorAll(".pill.active")].map((e) => e.textContent.trim()) };`);
+      const s1 = await strip();
+      console.log(`        the whole Workshop: ${J(s1)}`);
+      if (s1.fav) v.push("a Favourites pill is still in the strip");
+      if (J(s1.kids) !== J(names.map((n) => "pill:" + n))) v.push(`the strip holds ${J(s1.kids)} (want the source pills ${J(names)} alone)`);
+      if (s1.icons) v.push(`a source pill carries an icon (${s1.icons})`);
+      if (J(s1.lit) !== J([wsName])) v.push(`lit: ${J(s1.lit)} (want the Workshop's ${J(wsName)})`);
+      // a creator's list: their pair joins the strip after the source pills and is the one lit
+      await openSide(0);
+      const ROW = `${SIDE} [data-ws-creator]`;
+      if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return [...v, "the creator row never showed the creator"];
+      await page(`document.querySelector(${J(ROW)}).click();`); await sleep(700);
+      const s2 = await strip();
+      console.log(`        a creator's list: ${J(s2)}`);
+      if (J(s2.kids) !== J([...names.map((n) => "pill:" + n), "creator"])) v.push(`a creator's list: the strip holds ${J(s2.kids)} (want the source pills, then the creator's)`);
+      if (J(s2.lit) !== J(["Probe Creator"])) v.push(`a creator's list: lit ${J(s2.lit)} (want the creator's pill alone)`);
+      await shot("ws-pills-creator");
+      await page(`document.querySelector('[data-ws-pill="creator"] .ws-pill-x').click();`); await sleep(700);
+      const b3 = (await browses()).at(-1), s3 = await strip();
+      if (J(s3.kids) !== J(names.map((n) => "pill:" + n)) || J(s3.lit) !== J([wsName])) v.push(`× back on the whole Workshop: ${J(s3)}`);
+      if (b3?.list) v.push(`× still asked a list (${J(b3.list)})`);
       return v;
     });
 
@@ -4324,6 +4337,62 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    // yours:errorFirst — the error as the first line a page's load line shows: an error already read (Browse's Favourites ✕,
+    // then –), then the row turned on in a page whose line never showed (the Library's ✓; Browse rebuilt by a tab switch, ✕):
+    // the error's room glides the cards down in both, per frame, never a jump. The dock is no box while it holds no line
+    // (index.css .ws-set-load-dock:empty), so it has no first size of its own to glide from
+    await cell("yours:errorFirst", async () => {
+      const v = [];
+      const firstY = (sel) => `(() => { const c = document.querySelector(${J(sel)}); return c ? +c.getBoundingClientRect().y.toFixed(1) : null; })()`;
+      const glideOf = async (sel, act, what) => {
+        const y0 = await js(firstY(sel));
+        const fr = await page(`const out = [], t0 = performance.now();
+          const rec = new Promise((res) => { const f = () => { const t = Math.round(performance.now() - t0); out.push([t, ${firstY(sel)}]); if (t < 700) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); });
+          ${act}
+          return await rec;`);
+        const l = await lineNow();
+        const y1 = fr.at(-1)[1], mid = fr.filter(([, y]) => y != null && y > y0 + 0.75 && y < y1 - 0.75).length;
+        console.log(`        ${what}: the line ${J(l?.kind)}, the first card ${y0} → ${y1}, ${mid} in-between frame(s), y [${fr.map(([, y]) => y).filter((y, i, a) => i === 0 || y !== a[i - 1]).slice(0, 12)}]`);
+        if (l?.kind !== "error") v.push(`${what}: the line reads ${J(l)} (want the error)`);
+        if (!(y1 > y0 + 5)) v.push(`${what}: the error took no room above the grid (the first card ${y0} → ${y1})`);
+        else if (mid < 2) v.push(`${what}: the cards jumped down for the error (${mid} in-between frame(s); want a glide)`);
+      };
+      const segOf = (s) => `document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"] [data-seg="${s}"]').click();`;
+      try {
+        await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        await js(`localStorage.setItem("__probe_yours", ${J(J({ ...yData(), lib: LIB_Y }))}); for (const k of ["libFilter", "libSort", "wsLocalSort"]) localStorage.removeItem("liascape." + k);
+          localStorage.setItem("liascape.libFilterHidden", "false"); localStorage.setItem("liascape.browseFilter", ${J(J(BF0))}); localStorage.setItem("liascape.browseFilterHidden", "false"); true`);
+        await browseWs(SIGNED_IN);
+        const page0 = yData().page.map((w) => w.title);
+        if (J(sorted(await shownAs(page0))) !== J(sorted(page0))) return [`Browse shows ${J(await shown())} — proved nothing`];
+        // the error read first, on Browse: Steam unreachable
+        // nothing read: the Library's ✓ then shows the whole Library under the error (lib:yours:error)
+        await js(`window.__favs = { answer: ${J(fv(3, [], { error: LOAD_ERR }))} }; true`);
+        await setRow("@favorites", "exc", 900);
+        if ((await lineNow())?.kind !== "error") return [`Favourites ✕ with Steam unreachable shows the line ${J(await lineNow())} — proved nothing`];
+        await setRow("@favorites", "off", 900);
+        if (!(await waitFor(async () => !(await lineNow()), 2500))) return ["the error line stayed with the row off — proved nothing"];
+        // the Library, its line never shown: ✓ (the whole Library under the error: nothing read)
+        await tab("Library");
+        if (J(sorted(await libCardsAs(LIB_ALL))) !== J(LIB_ALL)) return [`the Library shows ${J(await libCards())} — proved nothing`];
+        await glideOf(".lib-scroll .card.lib", segOf("inc"), "the Library");
+        await shot("yours-errorfirst-lib");
+        await page(segOf("off")); await sleep(900);
+        // Browse built again (a tab switch), its line never shown: ✕
+        await tab("Browse");
+        if (J(sorted(await shownAs(page0))) !== J(sorted(page0))) return [...v, `Browse shows ${J(await shown())} after the tab switch — proved nothing`];
+        await page(`const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") { t?.click(); await new Promise((r) => setTimeout(r, 450)); }`);
+        await glideOf(YCARDS, segOf("exc"), "Browse");
+        await shot("yours-errorfirst-browse");
+      } finally {
+        await js(`window.__favs = null; localStorage.removeItem("__probe_yours"); localStorage.setItem("liascape.browseFilter", ${J(J(BF0))});
+          for (const k of ["libFilter", "libFilterHidden", "libSort", "wsLocalSort"]) localStorage.removeItem("liascape." + k); true`).catch(() => {});
+        await setSettings({ allowScenes: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        await load(SIGNED_OUT);
+      }
+      return v;
+    });
+
     // the Browse warm-up (api.steamWarm → POST /steam/warm, SteamAnonymous.Warm): a hover or focus on the Browse tab while it
     // shows the Workshop, or on a Workshop pill, asks the backend to connect Steam's session ahead of the page; at most one
     // ask per 20 s; nothing from the tab while another source shows, nothing from the other sources' pills
@@ -4452,6 +4521,69 @@ app.whenReady().then(async () => {
       const log = since();
       if (!log.some(asked)) v.push(`no fixture QueryFiles in the backend log since the cell began: ${J(log.slice(-8))}`);
       for (const l of log.filter((l) => /steam-cm: connected|test-network: REFUSED|browse: Workshop via Workshop page/.test(l))) v.push(`backend: ${l}`);
+      return v;
+    });
+
+    // yours:stack — Favourites ✓ end to end on the stack's own backend (a page without this probe's stub): a fake sign-in (a
+    // pasted cookie, beside a refresh token that is no token, so /steam/status reads signed in and nothing is minted) and the
+    // account's favourites in the stack's Steam fixture ("@userfiles"), both undone at the end; the ✓ lists exactly them from
+    // GET /workshop/my-favorites, sends no /browse, and the backend opened no session to Steam and refused no real-network call
+    await cell("yours:stack", async () => {
+      const v = [], LOG = E.LIASCAPE_BACKEND_LOG, FX = E.LIASCAPE_STEAM_CM_FIXTURE, AUTH = `${E.XDG_CONFIG_HOME}/liascape/steam-auth.json`;
+      if (!LOG || !fs.existsSync(LOG) || !FX || !fs.existsSync(FX)) return [`no backend log (${LOG}) or Steam fixture (${FX}) — proved nothing`];
+      if (fs.existsSync(AUTH)) return ["the stack already holds a sign-in — proved nothing"];
+      const wsName = (await http("GET", "/sources")).json.find((s) => s.supportsTagFilter && s.available)?.name;
+      if (!wsName) return ["no Workshop source in /sources — proved nothing"];
+      const ME = "76561198000000077", FAVS = ["Stack Fav One", "Stack Fav Two", "Stack Fav Three"];
+      const fx0 = fs.readFileSync(FX, "utf8"), fx = JSON.parse(fx0);
+      // no preview_url: /img would go out to fetch it
+      (fx["@userfiles"] ??= {})[`${ME}:myfavorites`] = FAVS.map((title, i) => ({ publishedfileid: String(912000001 + i), title, creator: "76561190000000007",
+        time_created: 1700000000 + i, time_updated: 1790000000 - i, subscriptions: 30 - i * 10, favorited: 5, score: 0.5, tags: ["Video", "Everyone", "Nature"] }));
+      const ls0 = await js(`JSON.stringify(Object.entries(localStorage))`);
+      const from = fs.statSync(LOG).size;
+      let w2 = null;
+      try {
+        fs.writeFileSync(FX, J(fx));
+        fs.writeFileSync(AUTH, J({ "steam-refresh-token": "probe-not-a-token", "steam-login-secure": `${ME}||probe` }), { mode: 0o600 });
+        w2 = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
+        const p2 = (code) => w2.webContents.executeJavaScript(`(async () => { ${code} })()`);
+        const wait2 = async (code, ms = 6000) => { for (let t = 0; t < ms; t += 100) { const r = await p2(code); if (r) return r; await sleep(100); } return p2(code); };
+        const titles2 = () => p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title);`);
+        await w2.loadURL(withToken(U + "/"));
+        await wait2(`return document.querySelectorAll(".tab").length >= 3`);
+        await p2(`[...document.querySelectorAll(".tab")].find((e) => e.textContent.trim() === "Browse")?.click();`); await sleep(500);
+        await p2(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
+        const ws0 = await wait2(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0`);
+        if (!ws0) return [`the Workshop showed no cards ${J(await titles2())} — proved nothing`];
+        // every request from here on (the page's own fetch, looked up at each call), once the pill's own reload is in
+        await sleep(1200);
+        await p2(`const f = window.fetch; window.__asked = []; window.fetch = (u, o) => { window.__asked.push(String(u?.url ?? u)); return f(u, o); }; return true;`);
+        const row = await wait2(`const r = document.querySelector(".wf-row[data-wf-tag='@favorites']"); if (r) return { off: r.hasAttribute("data-wf-off") };
+          const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") t?.click(); return null;`, 3000);
+        if (!row || row.off) return [`the Favourites row ${row ? "reads signed out" : "never showed"} with the stack signed in — proved nothing`];
+        await sleep(450);
+        await p2(`document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"] [data-seg="inc"]').click(); return true;`);
+        const want = J([...FAVS].sort());
+        await wait2(`const t = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title).sort(); return JSON.stringify(t) === ${J(want)};`, 8000);
+        await sleep(400);
+        const got = await titles2(), asked = await p2(`return window.__asked;`);
+        console.log(`        Favourites ✓: ${J(got)}; asked ${J(asked.map((u) => u.replace(/^https?:\/\/[^/]+/, "").replace(/[?&]token=[^&]*/, "")))}`);
+        if (J([...got].sort()) !== want) v.push(`Favourites ✓ shows ${J(got)} (want the account's favourites ${J(FAVS)})`);
+        if (!asked.some((u) => /\/workshop\/my-favorites\?sync=open/.test(u))) v.push("the ✓ never asked GET /workshop/my-favorites?sync=open");
+        const br = asked.filter((u) => /\/browse(\?|$)/.test(u));
+        if (br.length) v.push(`the ✓ sent /browse ${br.length}×`);
+        if (await p2(`return document.querySelectorAll(".scroll:not(.lib-scroll) .skel-card").length`)) v.push("the ✓ shows placeholder cards");
+      } finally {
+        w2?.destroy();
+        fs.rmSync(AUTH, { force: true });
+        fs.writeFileSync(FX, fx0);
+        fs.rmSync(`${E.XDG_CACHE_HOME}/liascape/workshop/favorites-${ME}.json`, { force: true });
+        await js(`localStorage.clear(); for (const [k, x] of JSON.parse(${J(ls0)})) localStorage.setItem(k, x); true`);
+      }
+      const log = fs.readFileSync(LOG).subarray(from).toString("utf8").split("\n");
+      if (!log.some((l) => /steam-cm: GetUserFiles myfavorites .*\(fixture\)/.test(l))) v.push(`the backend never read the favourites from the fixture: ${J(log.slice(-8))}`);
+      for (const l of log.filter((l) => /steam-cm: connected|test-network: REFUSED/.test(l))) v.push(`backend: ${l}`);
+      if (log.some((l) => l.includes(ME))) v.push("the backend log names the account's Steam ID");
       return v;
     });
 

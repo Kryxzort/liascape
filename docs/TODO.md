@@ -61,15 +61,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        folder, size-capped like images) play that video, looped and muted unless the scene's own audio says otherwise;
        guard it in `host_api_test` and `scripts/test-presets.sh`.
 
-114. [ ] Favourites as a filter: Browse's "Favourites" pill becomes a three-way row beside "In my library" in a group
-       named Yours (✓ shows that set directly, ✕ hides it), the favourites list cached and diffed by IDs so search and
-       the sorts work on it and a change shows within about a minute; "In my library ✓" shows the library's set
-       directly instead of scanning Workshop pages; the Library tab gets the Favourites row too. Design:
-       `docs/superpowers/specs/2026-11-21-favourites-filter-design.md`.
 115. [ ] Favourite and comment through Steam where Liascape has no Steam login: the sidebar's star and comment box
-       become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and #114's cache
-       watches that item's favourite state for a few minutes after. The Steam page is #116's last resort, so this is
-       that rule applied to the social controls.
+       become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and Liascape
+       watches that item's favourite state every few seconds for a few minutes after, updating the favourites cache
+       (`Helpers/WorkshopFavorites.cs`, whose count check is held to once per 50 s) when it flips. The Steam page is
+       #116's last resort, so this is that rule applied to the social controls.
 116. [ ] Two Workshop download modes, the Steam page the last resort. Owner: the page needs no login and gives Liascape
        nothing, so falling back to it never exceeds the trust chosen; the Steam sign-in backs up the Steam app because
        the user signed in themselves. Nothing else stands in for a chosen mode.

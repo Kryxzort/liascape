@@ -74,7 +74,7 @@ const byTitle = (a: Wallpaper, b: Wallpaper) => a.title.localeCompare(b.title, u
 // presets: a preset naming it as its base), scenes and presets as the Workshop lists them (a scene only with scene support;
 // a preset only while presets can play and, outside a presets list, with Type's Preset ticked), the filter's tags, the
 // search (every word in the title, the author's name or a tag, any case), then the sort: highest first, an item without the
-// field after the rest, ties by title. A favourites list counts as no list: the Favourites row is that set.
+// field after the rest, ties by title.
 // Guard: probe-steam yours:*
 export function buildLocalSet(a: {
   modes: SetModes; favs: Wallpaper[]; lib: Wallpaper[]; libAdded: Map<string, number>; list: WsList; query: string;
@@ -85,12 +85,11 @@ export function buildLocalSet(a: {
   const favIds = ids(a.favs), libIds = ids(a.lib);
   const other = (set: Set<string | null>, m: SetMode) => (w: Wallpaper) => (m === "inc" ? set.has(w.workshopId) : m === "exc" ? !set.has(w.workshopId) : true);
   let out = modes.fav === "inc" ? a.favs.filter(other(libIds, modes.lib)) : modes.lib === "inc" ? a.lib.filter(other(favIds, modes.fav)) : [];
-  const list = a.list && a.list.kind !== "favorites" ? a.list : null;
   const terms = a.query.toLowerCase().split(/\s+/).filter(Boolean);
   out = out.filter((w) => {
-    if (list?.kind === "creator" && w.authorId !== list.id) return false;
-    if (list?.kind === "presets" && !w.children?.includes(list.id)) return false;
-    if (w.isPreset ? !(a.presetsOn && (list?.kind === "presets" || a.presetTicked)) : w.isScene && !a.scenesOn) return false;
+    if (a.list?.kind === "creator" && w.authorId !== a.list.id) return false;
+    if (a.list?.kind === "presets" && !w.children?.includes(a.list.id)) return false;
+    if (w.isPreset ? !(a.presetsOn && (a.list?.kind === "presets" || a.presetTicked)) : w.isScene && !a.scenesOn) return false;
     if (a.match && !a.match(facetsOf(w, w.pageUrl))) return false;
     if (terms.length) {
       const hay = [w.title, w.authorName ?? "", ...(w.tags ?? [])].map((s) => s.toLowerCase());

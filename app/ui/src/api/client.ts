@@ -158,12 +158,12 @@ export interface WorkshopFilter {
   // default is "any" (docs/decisions.md § "AND Workshop features, OR genres, each switchable") — only these two groups have the choice
   featureMatch: "all" | "any"; genreMatch: "all" | "any";
 }
-// API: POST /browse `list` (Models/WorkshopList.cs): which Workshop items Browse shows — the whole Workshop (null), the signed-in
-// account's favourites, one creator's items, or the presets made for one scene (`name` / `avatar` only for the pill; `scene`,
-// the scene's own Browse result when the list was opened from it, only for its presets' "Uses" row: the backend gets the kind
-// and id alone). A list sorts by "lastupdated" or "toprated" only and has no search (Steam's client protocol can't search a
-// user's files or an item's children).
-export type WsList = { kind: "favorites" } | { kind: "creator"; id: string; name: string | null; avatar: string | null }
+// API: POST /browse `list` (Models/WorkshopList.cs): which Workshop items Browse shows — the whole Workshop (null), one
+// creator's items, or the presets made for one scene (`name` / `avatar` only for the pill; `scene`, the scene's own Browse
+// result when the list was opened from it, only for its presets' "Uses" row: the backend gets the kind and id alone). A list
+// sorts by "lastupdated" or "toprated" only and has no search (Steam's client protocol can't search a user's files or an
+// item's children). The signed-in account's favourites are no list: GET /workshop/my-favorites, a filter row's set.
+export type WsList = { kind: "creator"; id: string; name: string | null; avatar: string | null }
   | { kind: "presets"; id: string; name: string | null; scene?: Wallpaper | null } | null;
 export type WsListSort = "lastupdated" | "toprated";
 // API: the Browse sidebar's Workshop community pieces (Web/WorkshopSocialOps.cs). A comment's text is plain text — the backend

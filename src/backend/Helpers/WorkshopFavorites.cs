@@ -215,7 +215,9 @@ public static class WorkshopFavorites
     }
 
     // An edit a diff has settled, so the caller drops it: the diff started after it and Steam agrees, or it is EditHold old
-    // (Steam's word from then on). An edit newer than the diff always stays.
+    // (Steam's word from then on). An edit newer than the diff always stays. A known limit: once an edit is dropped, a later
+    // diff that gets an older cached answer from Steam takes it as Steam's word, so a settled unstar can come back (a
+    // settled star go) until Steam's answers catch up; keeping edits longer would hide a change made on Steam itself.
     // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites merge: a star dropped once a diff that started
     // after it agrees", "…: a star newer than the diff kept, even when it agrees", "…: a star a later diff lacks kept inside
     // 10 min", "…: an edit dropped after 10 min"

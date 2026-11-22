@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
-  type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState, ApiError,
+  type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState,
 } from "../api/client";
 import {
   DEFAULT_LOCAL_SORT, FAVORITES_TAG, LIBRARY_TAG, isLocalSet, isLocalSort, setModesOf, type LocalSort, type SetModes,
@@ -20,16 +20,13 @@ const wireFilter = (f: WorkshopFilter): WorkshopFilter =>
 export const WF_DOCK_QUERY = "(min-width: 900px)";
 export type FilterPage = "browse" | "library";
 // what the backend gets for the Workshop's list: only on the Workshop source, never the pill's name / avatar / scene
-const listId = (l: WsList) => (l && l.kind !== "favorites" ? l.id : undefined);
 const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boolean }) =>
-  s.wsList && s.isWorkshop() ? { kind: s.wsList.kind, id: listId(s.wsList), sort: s.wsListSort } : undefined;
+  s.wsList && s.isWorkshop() ? { kind: s.wsList.kind, id: s.wsList.id, sort: s.wsListSort } : undefined;
 // Workshop presets can be listed and played: scene support on and the Liascape player (the backend's
 // SteamWorkshopService.AllowPresets; presets are liascape-player only). Browse offers its Preset option and a scene's Presets
 // row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
 export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine === "liascape-player";
 export const PRESET_TAG = "Preset";
-// the filter column's "Favourites" row: a UI-only pseudo-tag for the signed-in account's Workshop favourites (views/localSet.ts)
-export { FAVORITES_TAG };
 // the favourites can be read only for a signed-in account Steam hasn't rejected: otherwise the row is dimmed, a saved ✓ / ✕
 // stays (it comes back with the sign-in) but means nothing, and it can only be cleared
 export const favoritesUsable = (steam: State["steam"]) => !!steam?.signedIn && !steam.rejected;
@@ -147,7 +144,7 @@ interface State {
   // the Workshop source's list (api/client.ts WsList): the whole Workshop (null), the signed-in account's favourites, one
   // creator's items or a scene's presets, its sort, and why a list couldn't be read (a sign-in it needs, Steam unreachable) —
   // shown in the grid
-  wsList: WsList; wsListSort: WsListSort; wsListNote: { text: string; signIn: boolean } | null;
+  wsList: WsList; wsListSort: WsListSort; wsListNote: { text: string } | null;
   // a Workshop item the Browse sidebar shows though the list doesn't hold it (a preset's base scene: showBrowseItem)
   browseExtra: Wallpaper | null;
   // the Yours rows' sets on the Workshop (views/localSet.ts): the favourites cache as last read (null = not read yet; `ids` =
@@ -400,7 +397,7 @@ export const useStore = create<State>((set, get) => ({
   // browser's 6 connections to the backend, and the new source's /browse queues behind them for seconds — the old list
   // under the new pill all that time. Guard: matrix browse:switchSource.
   setSource(i) {
-    // a source pill shows the whole source: the Workshop's own pill leaves a list (favourites, a creator) for the whole Workshop
+    // a source pill shows the whole source: the Workshop's own pill leaves a list (a creator's, a scene's presets) for the whole Workshop
     const same = i === get().activeSource && !get().wsList;
     set(same ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "", wsList: null, wsListNote: null });
     if (!get().browseScope() && get().filterDrawer === "browse") set({ filterDrawer: null }); // a source without filters
@@ -411,8 +408,8 @@ export const useStore = create<State>((set, get) => ({
     if (!ws) return;
     const cur = get().wsList;
     // the same list again (kind + id: the pill's words and the scene aren't the list) only takes the newer pill words
-    const same = get().activeSource === ws.index && (cur?.kind ?? null) === (l?.kind ?? null) && listId(cur) === listId(l);
-    if (same) { if (l && l.kind !== "favorites") set({ wsList: l }); return; }
+    const same = get().activeSource === ws.index && (cur?.kind ?? null) === (l?.kind ?? null) && cur?.id === l?.id;
+    if (same) { if (l) set({ wsList: l }); return; }
     set({ activeSource: ws.index, wsList: l, wsListNote: null, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
     LS.set("activeSource", ws.index); get().reload();
   },
@@ -482,9 +479,10 @@ export const useStore = create<State>((set, get) => ({
   // would otherwise fire a full refetch + grid re-render each → laggy.
   setBrowseFilter(p) { const bf = { ...get().browseFilter, ...p }; set({ browseFilter: bf }); LS.set("browseFilter", bf); clearTimeout(filterTimer); filterTimer = setTimeout(() => get().reload(), 280); },
   setBrowseSort(i) { set({ browseSort: i }); LS.set("browseSort", i); }, // client-side (WE-local; single page)
-  // a tag is in include XOR exclude; the same debounced reload as every filter change
+  // a tag is in include XOR exclude; the same debounced reload as every filter change, but for the Yours rows ("In my
+  // library", "Favourites": below)
   setTagState(tag, st, scope = "workshop") {
-    // Guard: probe-filters wf:yours:*
+    // the Favourites row can only be cleared while the favourites can't be read. Guard: probe-filters wf:yours:*
     if (tag === FAVORITES_TAG && st !== null && !favoritesUsable(get().steam)) return;
     const { include, exclude } = filterOf(get(), scope);
     const inc = include.filter((t) => t !== tag), exc = exclude.filter((t) => t !== tag);
@@ -550,9 +548,9 @@ export const useStore = create<State>((set, get) => ({
       // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
       if (gen === browseGen) {
         const text = e instanceof Error ? e.message : String(e);
-        // a list says why in the grid (its own words; "Sign in to …" with the way there); the rest in the status
+        // a list says why in the grid, in its own words; the rest in the status
         if (list) set({ wallpapers: [], hasMore: false, browseFor: JSON.stringify([activeSource, query, filter ?? null, list]),
-          wsListNote: { text, signIn: e instanceof ApiError && e.signIn } });
+          wsListNote: { text } });
         else get().setStatus(text, true);
         if (!get().wallpapers.length) set({ hasMore: false }); // a switched-to source that failed: no placeholders asking for page 2
       }

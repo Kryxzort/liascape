@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Hermetic test of the Browse sidebar's Workshop community pieces (Web/WorkshopSocialOps.cs over Helpers/SteamCommunity.cs)
-# and Browse's Workshop lists (Services/SteamWorkshopService.cs ListAsync): a private backend whose steamcommunity.com and
-# api.steampowered.com are a fake server (scripts/test-fixtures/fake-steam-community.mjs; LIASCAPE_STEAM_COMMUNITY /
-# LIASCAPE_STEAM_API) and whose Steam client-protocol answers are a fixture file (LIASCAPE_STEAM_CM_FIXTURE), all in its own
-# network namespace (`unshare -rn`: loopback only — nothing can reach Steam; no real favourite, no real comment).
+# and Browse's Workshop lists (Services/SteamWorkshopService.cs ListAsync: a creator's, a scene's presets), the details cache
+# and the signed-in account's favourites cache (Helpers/WorkshopDetailsCache.cs, WorkshopFavorites.cs): a private backend
+# whose steamcommunity.com and api.steampowered.com are a fake server (scripts/test-fixtures/fake-steam-community.mjs;
+# LIASCAPE_STEAM_COMMUNITY / LIASCAPE_STEAM_API) and whose Steam client-protocol answers are a fixture file
+# (LIASCAPE_STEAM_CM_FIXTURE), all in its own network namespace (`unshare -rn`: loopback only — nothing can reach Steam;
+# no real favourite, no real comment).
 #  1. signed out: the creator's name + avatar (profile XML, markup stripped, read once per run; the creator of an item
 #     without one asked of the client protocol); the favourite state "signed out" with no request; favourite and post → 403
 #     {signIn} with nothing sent; the comment thread (newest first, paged, total) as plain text — no script, no handler, an
-#     entity decoded once, a line break kept, an emoticon by name — sent without any cookie; the favourites list → 403 {signIn}.
+#     entity decoded once, a line break kept, an emoticon by name — sent without any cookie; /workshop/my-favorites →
+#     {signedIn:false} with nothing sent.
 #  1b. an item's counts (/workshop/counts, the Library sidebar's stat pills): Steam's CURRENT subscriber / favourite counts
 #     from the client protocol (not the lifetime ones); one GetDetails per item however many asks (the counts and the creator
 #     at once, again later); no such item → 404, a bad id → 400, Steam unreachable → 502 and asked again once it answers.
@@ -16,9 +19,10 @@
 #     the filter's tags matched.
 #  3. signed in (a pasted cookie, file secret store): the favourite state read from the item page with the cookie (toggled →
 #     true), favourite / unfavourite (the cookie + a matching sessionid pair, id + appid), a comment posted (the new one on top,
-#     its text back as typed), an empty / too-long comment refused without a request, the favourites list (client protocol),
-#     a private profile's favourites from the community page + the keyless details (current counts again); the cookie's token
-#     in no log line and not in settings.json; every request with the Firefox User-Agent.
+#     its text back as typed), an empty / too-long comment refused without a request, /workshop/my-favorites (the client
+#     protocol's list; a /browse list of kind "favorites" is the whole Workshop), a private profile's favourites from the
+#     community page + the items' details (current counts again);
+#     the cookie's token in no log line and not in settings.json; every request with the Firefox User-Agent.
 #  4. Steam's 429: the comments answer 429 "try again in N min", the cooldown file is written and the next read sends nothing.
 #  5. a scene's presets (/browse `list` kind "presets", QueryFiles' child lookup; the engine is liascape-player through a
 #     stub binary that never runs): exactly the presets naming it (a web-based one left out), paged 100 at a time, sorted
@@ -579,8 +583,9 @@ out(r.status === 200 && r.json.start === 20 && r.json.comments.length === 3 && r
 n0 = (await fakeLog()).length;
 r = await post("/workshop/comment", { workshopId: ITEM, owner: OWNER, text: "hi" });
 out(r.status === 403 && r.json?.signIn === true && (await since(n0)).length === 0, "post signed out: 403 {signIn}, nothing sent", J(r));
-r = await browse({ kind: "favorites" });
-out(r.status === 403 && r.json?.signIn === true, "favourites list signed out: 403 {signIn}", J(r));
+n0 = (await fakeLog()).length;
+r = await get("/workshop/my-favorites?sync=open");
+out(r.status === 200 && r.json?.signedIn === false && !("items" in r.json) && (await since(n0)).length === 0, "my-favorites signed out: {signedIn:false}, nothing sent", J(r));
 
 // ---- 2. a creator's items ----
 r = await browse({ kind: "creator", id: OWNER });
@@ -636,18 +641,39 @@ n0 = (await fakeLog()).length;
 r = await post("/workshop/comment", { workshopId: ITEM, owner: OWNER, text: "x".repeat(1001) });
 const r2 = await post("/workshop/comment", { workshopId: ITEM, owner: OWNER, text: "   " });
 out(r.status === 400 && r2.status === 400 && (await since(n0)).length === 0, "post: too long / empty → 400, nothing sent", J([r, r2]));
+// the account's favourites (GET /workshop/my-favorites, Helpers/WorkshopFavorites.cs; § 7 in depth): the first load runs in
+// the background, the page reads again until it's in
+const myFavs = async (want) => {
+  let r = await get("/workshop/my-favorites?sync=open");
+  for (let t = 0; t < 15000 && !(r.json?.loading == null && J((r.json?.items ?? []).map((w) => w.title)) === J(want)); t += 100) {
+    await sleep(100); r = await get("/workshop/my-favorites?sync=none"); }
+  return r;
+};
+r = await myFavs(["fav-a", "fav-b"]);
+out(r.status === 200 && r.json?.signedIn === true && J(r.json.items.map((w) => w.title)) === J(["fav-a", "fav-b"]) && r.json.error == null,
+  "my-favorites signed in: the account's favourites (client protocol)", J(r));
+// the favourites are no /browse list any more: that kind answers the whole Workshop, asking Steam for no user files
+const uf0 = count(/GetUserFiles myfavorites/);
 r = await browse({ kind: "favorites" });
-out(r.status === 200 && J(r.json.map((w) => w.title)) === J(["fav-a", "fav-b"]), "favourites list signed in: the account's favourites (client protocol)", J(r));
-// a private profile: the client protocol sees no favourites → the community's favourites page with the cookie
+const wholeWs = await browse(undefined);
+out(r.status === 200 && wids(wholeWs).length > 0 && J(wids(r)) === J(wids(wholeWs)) && count(/GetUserFiles myfavorites/) === uf0,
+  "/browse list kind favorites: the whole Workshop (no list), no user files asked", J({ r: wids(r), whole: wids(wholeWs) }));
+// a private profile: the client protocol sees no favourites → the community's favourites page with the cookie, then the
+// items' details (GetDetails on the client protocol: the fixture's entries below)
 const fx = JSON.parse(fs.readFileSync(`${T}/steam-cm.json`, "utf8")); delete fx["@userfiles"][`${ME}:myfavorites`];
+for (const id of ["3100000001", "3100000002", "3100000003"])
+  fx[id] = { title: `fav-${id}`, tags: ["Video"], creator: OWNER, subscriptions: 692, lifetime_subscriptions: 876, favorited: 34, lifetime_favorited: 35 };
 fs.writeFileSync(`${T}/steam-cm.json`, J(fx));
 n0 = (await fakeLog()).length;
-r = await browse({ kind: "favorites", sort: "toprated" });
+const gd0 = count(/GetDetails of 3 id/);
+r = await myFavs(["fav-3100000001", "fav-3100000002", "fav-3100000003"]);
 reqs = await since(n0);
-out(r.status === 200 && J(r.json.map((w) => w.title)) === J(["fav-3100000001", "fav-3100000002", "fav-3100000003"])
-  && reqs.some((x) => x.path === `/profiles/${ME}/myworkshopfiles/` && x.signedIn) && reqs.some((x) => x.path === "/ISteamRemoteStorage/GetPublishedFileDetails/v1/"),
-  "favourites of a private profile: the community page (with the cookie) + the keyless details", J({ r: r.json?.map?.((w) => w.title) ?? r, reqs: reqs.map((x) => x.path) }));
-out(r.json.every((w) => w.subscriptions === 692 && w.favorites === 34), "keyless details: the CURRENT counts (692 / 34), never the lifetime ones", J(r.json.map((w) => [w.subscriptions, w.favorites])));
+out(r.status === 200 && J(r.json.items.map((w) => w.title)) === J(["fav-3100000001", "fav-3100000002", "fav-3100000003"])
+  && reqs.some((x) => x.path === `/profiles/${ME}/myworkshopfiles/` && x.signedIn) && count(/GetDetails of 3 id/) > gd0,
+  "favourites of a private profile: the community page (with the cookie) + the items' details", J({ r: r.json?.items?.map?.((w) => w.title) ?? r, reqs: reqs.map((x) => x.path) }));
+out(r.json.items.every((w) => w.subscriptions === 692 && w.favorites === 34), "the private favourites' details: the CURRENT counts (692 / 34), never the lifetime ones", J(r.json.items.map((w) => [w.subscriptions, w.favorites])));
+// § 7 starts this account's cache afresh
+fs.rmSync(`${process.env.XDG_CACHE_HOME}/liascape/workshop/favorites-${ME}.json`, { force: true });
 const all = await fakeLog();
 out(all.every((x) => /Firefox/.test(x.ua)), "every request carries the Firefox User-Agent", J(all.filter((x) => !/Firefox/.test(x.ua)).map((x) => x.path)));
 const bl = fs.readFileSync(`${T}/backend.log`, "utf8"), st = fs.readFileSync(`${process.env.XDG_CONFIG_HOME}/liascape/settings.json`, "utf8");
@@ -706,10 +732,11 @@ out(r.status === 200 && rl.status === 200 && rl.json?.length === 0, "the legacy 
 
 // ---- 6. the shared Workshop details cache (POST /workshop/details) ----
 let before = count(/GetDetails of/);
+const before3 = count(/GetDetails of 3 id/); // § 3's private favourites asked theirs too
 r = await post("/workshop/details", { ids: ["5001", "5002", "9999"] });
 out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5001", "5002"]) && r.json.items[0].createdAt && r.json.items[0].score === 0.75,
   "details: the found items in order, with created / score", J(r));
-out(count(/GetDetails of 3 id/) === 1 && count(/GetDetails of/) === before + 1, "details: one GetDetails for the missing ids", J(count(/GetDetails of/) - before));
+out(count(/GetDetails of 3 id/) === before3 + 1 && count(/GetDetails of/) === before + 1, "details: one GetDetails for the missing ids", J(count(/GetDetails of/) - before));
 before = count(/GetDetails of/);
 r = await post("/workshop/details", { ids: ["5002", "5001", "9999"] });
 out(r.status === 200 && J(wids({ json: r.json?.items })) === J(["5002", "5001"]) && count(/GetDetails of/) === before,
