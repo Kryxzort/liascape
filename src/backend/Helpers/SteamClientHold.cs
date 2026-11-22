@@ -18,7 +18,8 @@ namespace Liascape.Helpers;
 // the Steam app connection while the Workshop shows on Browse".
 // - Every start, use and release of the child happens under SteamClientUgc.Turn, so there is never a second one, not even
 //   one still releasing while the next starts; the timer's release skips when an operation holds the turn (its end re-checks).
-// - A dead child is never connected: its exit clears it at once, and the next operation starts a fresh one.
+// - A dead child is never connected: its exit clears it at once, and the next operation starts a fresh one. A held child
+//   answers a ping before it is reused; one that doesn't (a hung library) is replaced first, never after Steam's answer.
 // - The backend's stop releases it at once (ServerHost's ApplicationStopping); a backend that dies closes the child's stdin,
 //   which the child takes as release.
 // Guard: scripts/test-steam-app-hold.sh
@@ -26,9 +27,11 @@ public static class SteamClientHold
 {
     static TimeSpan Ms(string env, int dflt) =>
         TimeSpan.FromMilliseconds(int.TryParse(Environment.GetEnvironmentVariable(env), out var v) && v >= 0 ? v : dflt);
-    // the tests shorten both (LIASCAPE_STEAM_APP_LINGER_MS 0 = released after every operation)
-    public static readonly TimeSpan Linger = Ms("LIASCAPE_STEAM_APP_LINGER_MS", 60_000);
-    public static readonly TimeSpan HeartbeatTimeout = Ms("LIASCAPE_STEAM_APP_HEARTBEAT_MS", 90_000);
+    // the tests shorten both (LIASCAPE_STEAM_APP_LINGER_MS 0 = released after every operation; steam-selftest sets them)
+    public static TimeSpan Linger { get; internal set; } = Ms("LIASCAPE_STEAM_APP_LINGER_MS", 60_000);
+    public static TimeSpan HeartbeatTimeout { get; internal set; } = Ms("LIASCAPE_STEAM_APP_HEARTBEAT_MS", 90_000);
+    // a reused child must answer a ping this fast, else it is replaced before the operation (a hung library, a Steam gone)
+    const int PingMs = 3000;
 
     static readonly object Gate = new();
     static Child? child;
@@ -51,26 +54,58 @@ public static class SteamClientHold
         Tick.Change(0, Timeout.Infinite);
     }
 
-    /// The child for one operation, started if there is none (the caller holds SteamClientUgc.Turn). Reused = it served an
-    /// earlier operation (a Steam restarted since may have left it talking to nothing). Null + why when it can't connect.
-    internal static async Task<(Child? Child, bool Reused, string? Why)> AcquireAsync(AppSettings s, CancellationToken ct)
+    /// The child for one operation (the caller holds SteamClientUgc.Turn): the held one when it answers a ping, else a fresh
+    /// one. Null + why when Steam can't be reached. Guard: scripts/test-steam-app-hold.sh h.
+    internal static async Task<(Child? Child, string? Why)> AcquireAsync(AppSettings s, CancellationToken ct)
     {
+        Child? held;
         lock (Gate)
         {
-            if (stopping) return (null, false, "Liascape is closing");
-            if (child is { Alive: true }) { busy = true; return (child, true, null); }
-            child?.Dispose(); child = null;
+            if (stopping) return (null, "Liascape is closing");
+            held = child is { Alive: true } ? child : null;
+            if (held == null) { child?.Dispose(); child = null; } else busy = true;
+        }
+        if (held != null)
+        {
+            if (await held.PingAsync(PingMs)) return (held, null);
+            Console.WriteLine("steam-app: the held helper didn't answer; starting a fresh one");
+            lock (Gate) { busy = false; if (child == held) child = null; }
+            held.Release(500);
         }
         var (c, why) = await Child.StartAsync(s, ct);
-        if (c == null) return (null, false, why);
+        if (c == null) return (null, why);
         lock (Gate)
         {
-            if (stopping) { c.Release(); return (null, false, "Liascape is closing"); }
+            if (stopping) { c.Release(); return (null, "Liascape is closing"); }
             child = c; busy = true;
         }
         c.Exited += () => { lock (Gate) if (child == c) { child = null; Console.WriteLine("steam-app: the helper exited"); } };
         Console.WriteLine("steam-app: connected to Steam (shown as playing Wallpaper Engine)");
-        return (c, false, null);
+        return (c, null);
+    }
+
+    /// Does the held child answer right now? Only when the turn is free (an operation on it would read the reply); null =
+    /// no held child, or the turn is busy. A child that doesn't answer is dropped.
+    internal static async Task<bool?> PingHeldAsync()
+    {
+        if (!SteamClientUgc.Turn.Wait(0)) return null;
+        try
+        {
+            Child? c;
+            lock (Gate) { c = child is { Alive: true } ? child : null; if (c != null) busy = true; }
+            if (c == null) return null;
+            bool ok = await c.PingAsync(PingMs);
+            Done(c, drop: !ok);
+            return ok;
+        }
+        finally { SteamClientUgc.Turn.Release(); }
+    }
+
+    /// steam-selftest: an idle held child that just finished an operation (any process that exits when its stdin closes).
+    internal static void AdoptForTest(Process p)
+    {
+        var c = new Child(p);
+        lock (Gate) { child = c; busy = false; opEnd = Now; }
     }
 
     /// An operation ended (the caller still holds the turn): the linger counts from here unless the Workshop shows; with
@@ -84,7 +119,9 @@ public static class SteamClientHold
 
     static void OnTick()
     {
-        if (!SteamClientUgc.Turn.Wait(0)) return; // an operation runs or waits: its Done re-checks
+        // the turn is busy: an operation's Done re-checks, but not every taker of the turn ends with one (an unsubscribe
+        // whose claim came back empty), so look again shortly. Guard: steam-selftest "steam-app hold: a tick while the turn is held"
+        if (!SteamClientUgc.Turn.Wait(0)) { Tick.Change(250, Timeout.Infinite); return; }
         try { Evaluate(); } finally { SteamClientUgc.Turn.Release(); }
     }
 
@@ -123,7 +160,7 @@ public static class SteamClientHold
         readonly object writeGate = new();
         bool released;
         public event Action? Exited;
-        Child(Process p) { proc = p; p.Exited += (_, _) => Exited?.Invoke(); }
+        internal Child(Process p) { proc = p; p.EnableRaisingEvents = true; p.Exited += (_, _) => Exited?.Invoke(); }
         public bool Alive { get { try { return !proc.HasExited; } catch { return false; } } }
 
         public static async Task<(Child?, string?)> StartAsync(AppSettings s, CancellationToken ct)
@@ -142,7 +179,6 @@ public static class SteamClientHold
             Process? p;
             try { p = Process.Start(psi); } catch { p = null; }
             if (p == null) return (null, "can't start the helper");
-            p.EnableRaisingEvents = true;
             _ = p.StandardError.ReadToEndAsync(); // drained; Valve's library chats on stderr
             var c = new Child(p);
             string? why = "Steam didn't answer";
@@ -163,14 +199,29 @@ public static class SteamClientHold
         }
 
         /// The next JSON line, or null once the child's stdout ends (it exited or died).
-        public async Task<JsonElement?> ReadAsync()
+        public async Task<JsonElement?> ReadAsync(CancellationToken ct = default)
         {
             string? line;
-            while ((line = await proc.StandardOutput.ReadLineAsync()) != null)
+            while ((line = await proc.StandardOutput.ReadLineAsync(ct)) != null)
             {
                 try { return JsonDocument.Parse(line).RootElement.Clone(); } catch { }
             }
             return null;
+        }
+
+        /// {"op": "ping"}: the child asks Steam's library once and answers `done`. False (and killed) = no answer in time.
+        public async Task<bool> PingAsync(int ms)
+        {
+            if (!Send(new { op = "ping" })) return false;
+            using var to = new CancellationTokenSource(ms);
+            try
+            {
+                while (await ReadAsync(to.Token) is { } e)
+                    if (e.GetProperty("event").GetString() == "done") return true;
+            }
+            catch (Exception) { }
+            Kill();
+            return false;
         }
 
         public bool Send(object cmd)

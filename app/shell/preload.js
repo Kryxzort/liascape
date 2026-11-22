@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("liascape", {
   pathForFile: (f) => { try { return webUtils.getPathForFile(f); } catch { return ""; } },
   // FREEZE FIX: main-process WM focus signal → renderer pauses gif decoding when backgrounded.
   onActiveChange: (cb) => { ipcRenderer.on("liascape:active", (_e, v) => cb(!!v)); },
-  // the window shown (true) or hidden / minimized (false), whatever has focus
-  onShownChange: (cb) => { ipcRenderer.on("liascape:shown", (_e, v) => cb(!!v)); },
+  // the window shown (true) or hidden / minimized (false), whatever has focus; returns its remover. isShown: the state now
+  onShownChange: (cb) => { const h = (_e, v) => cb(!!v); ipcRenderer.on("liascape:shown", h); return () => ipcRenderer.removeListener("liascape:shown", h); },
+  isShown: () => ipcRenderer.invoke("liascape:is-shown"),
 });

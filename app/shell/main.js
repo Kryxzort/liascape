@@ -136,6 +136,13 @@ ipcMain.handle("liascape:pick", async (e, kind) => {
   return files ? r.filePaths : r.filePaths[0];
 });
 
+// whether the asking page's window is on screen now (not hidden, not minimized): a page loaded while it was hidden starts
+// from this, not from the shown/hidden events it missed (app/ui/src/hooks/useSteamAppPresence.ts)
+ipcMain.handle("liascape:is-shown", (e) => {
+  const w = isAppUrl(e.senderFrame?.url ?? "") ? BrowserWindow.fromWebContents(e.sender) : null;
+  return !!w && w.isVisible() && !w.isMinimized();
+});
+
 // Chromium restarts a GPU process that dies; log each one (a run of them is the NVIDIA crash-loop above)
 app.on("child-process-gone", (_e, d) => {
   if (d.type === "GPU") console.error(`[gpu] GPU process gone: ${d.reason} (exit code ${d.exitCode})`);

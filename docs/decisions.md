@@ -87,10 +87,10 @@ why; the to-do's "Let the Steam app do all N" is the user's own switch.
 ISteamUGC by vtable slot, read from Valve's wrappers. `Helpers/SteamClientUgc.cs`.
 
 ### Hold the Steam app connection while the Workshop shows on Browse — 2026-11-22
-Connected, Steam shows "Playing Wallpaper Engine": a connection per download blinked it per item, each a friends'
-"now playing" popup; one for the app's lifetime shows the user in-game all day and blocks the real Wallpaper Engine. It
-starts at the first download, stays while Browse shows the Workshop, ends 60 s after the user leaves.
-`Helpers/SteamClientHold.cs`.
+Connected, Steam shows "Playing Wallpaper Engine": a connection per download blinked it, each a friends' popup; one for
+the app's lifetime shows the user in-game all day and blocks the real Wallpaper Engine. It starts at the first download,
+stays while Browse shows the Workshop, ends 60 s after the user leaves or the page's heartbeat stops (a crashed UI can't
+hold it). `Helpers/SteamClientHold.cs`.
 
 ### Queue the Steam pages the user must click, one at a time, advanced by Next — 2026-11-11
 Opening N pages at once lost all but one (Steam shows one), and a bulk Delete from Source opened the whole subscriptions
@@ -113,7 +113,7 @@ password sign-in and downloads through the Steam app with no sign-in. Nothing re
 attempts extend Steam's block. `Web/SteamOps.cs`.
 
 ### Keep Steam tokens in the system keyring, a 0600 file as fallback — 2026-11-11
-Owner: "steam token is kept in plaintext??" → "system keyring and then fallback to some file other than settings.json".
+Owner: "steam token is kept in plaintext??" → "system keyring and then fallback".
 settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`: the Secret
 Service, else `~/.config/liascape/steam-auth.json` (0600). Keyring-only was rejected: with no Secret Service (bare
 compositors) signing in wouldn't work; the file is as safe as Chromium's "basic" store.
