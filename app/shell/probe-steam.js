@@ -196,7 +196,8 @@
 //                        with no Favourites row
 //   yours:oneOpen        the start and a reconnect with the favourites unread share one sync=open
 //   yours:steamUnknown   /steam/status unreadable: Favourites not dimmed, ✓ refused until a signed-in status
-//   yours:empty          "Nothing here matches" on an empty set (in a creator's and a scene's presets list too); its clear keeps the Yours rows;
+//   yours:empty          "Nothing here matches" on an empty set (in a creator's and a scene's presets list too); its clear keeps the Yours rows,
+//                        and a presets list's Type tags (ignored there) never offer a clear;
 //                        motion off + bg-live
 //   yours:signOut        signed out: the favourites leave at once, the row dims; another account never sees them
 //   lib:yours:fav        the Library's Favourites row: ✓ the starred items, ✕ the rest (non-Workshop too), – all; signed out dimmed and no effect; the
@@ -4049,6 +4050,16 @@ app.whenReady().then(async () => {
         await page(`document.querySelector(${J(NONE + " button")})?.click();`);
         const p1 = await shownAs(T("Dune"));
         if (J(p1) !== J(T("Dune"))) v.push(`in a presets list, cleared: ${J(p1)} (want Dune)`);
+        // only a Type tag besides the Yours rows, which a presets list ignores: no "Clear filters" (it would change nothing)
+        await setRow("Video", "inc");
+        if (J(await shownAs(T("Dune"))) !== J(T("Dune"))) return [...v, `a presets list with Video ✓: ${J(await shown())} (its Type is ignored there) — proved nothing`];
+        await setRow("@library", "inc");
+        const p5 = await shownAs([]);
+        const n5 = await waitFor(none, 2000);
+        console.log(`        in a presets list, Type alone: ${J(p5)} ${J(n5)}`);
+        if (p5.length || n5?.text !== "Nothing here matches") v.push(`in a presets list, Favourites ✓ + In my library ✓: ${J(p5)} ${J(n5)} (want empty, "Nothing here matches") — proved nothing`);
+        else if (n5.btn) v.push(`in a presets list with only a Type tag besides the Yours rows: a ${J(n5.btn)} control that changes nothing`);
+        await setRow("@library", "off"); await setRow("Video", "off");
         await yoursDone();
         await yoursOn(yData(), { looks: { morphs: false, liveWallpaperBehindAllTabs: true } });
         await setRow("@favorites", "inc");

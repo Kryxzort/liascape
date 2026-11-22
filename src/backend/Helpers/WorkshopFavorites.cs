@@ -43,6 +43,12 @@ public static class WorkshopFavorites
     // (or two windows') ticks into one ask
     // Guard: scripts/test-workshop-social.sh § 7 "sync=check twice in a row (and once after): one total-only ask; …"
     static readonly TimeSpan CheckEvery = TimeSpan.FromSeconds(50);
+    // A private profile's whole list costs one gated community page per 30 favourites, and Browse asks for the diff on every
+    // visit: within this long of the last whole read, a visit gets the page-1 check instead (a public list's diff is one
+    // ids-only ask, never held)
+    // Guard: scripts/test-workshop-social.sh § 7 "private profile: two quick sync=open after a whole read → no community
+    // page asked again (the page-1 check instead, held by its 50 s)"
+    static readonly TimeSpan PageDiffEvery = TimeSpan.FromMinutes(10);
 
     // A star (Favorite) or an unstar set in Liascape. Stamp orders it against the diffs (one app-wide counter: an edit
     // newer than a diff's start has a larger stamp); At is when it was set.
@@ -68,6 +74,8 @@ public static class WorkshopFavorites
         public Dictionary<string, Edit> Edits = [];
         // when the last count check started (Environment.TickCount64)
         public long? LastCheck;
+        // when Steam's whole list was last read to the end, a first load or a diff (Environment.TickCount64)
+        public long? LastRead;
     }
 
     // the file's shape: the whole list, whether it came from the community page (a private profile), Steam's total
@@ -78,9 +86,12 @@ public static class WorkshopFavorites
     // Guard: scripts/test-workshop-social.sh § 7 "another account: none of the first account's favourites, …"
     static readonly object _lock = new();
     static readonly Dictionary<ulong, Account> _accounts = [];
-    // one app-wide counter: a page that saw version N re-reads on any later one, whichever account changed
-    // Guard: scripts/test-workshop-social.sh § 7 "first load: the events carry a rising version and the progress, no ids"
-    static long _version;
+    // one app-wide counter: a page that saw version N re-reads on any later one, whichever account changed. It starts at
+    // the clock's milliseconds so a restarted backend still counts above what an open page holds (the page drops a read
+    // older than its copy).
+    // Guard: scripts/test-workshop-social.sh § 7 "first load: the events carry a rising version and the progress, no ids",
+    // "after a backend restart: the version read is above the one read before it"
+    static long _version = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     // orders edits against diffs (Edit.Stamp, a diff's start), under _lock
     // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites merge: a star newer than the diff stays"
     static long _stamp;
@@ -124,22 +135,30 @@ public static class WorkshopFavorites
     }
 
     // Single-flight, in the background: the first load when the account has no whole list yet (a failed one is tried
-    // again by the next Sync), else the id diff. The page asks for it when it shows the list, not on a timer.
+    // again by the next Sync), else the id diff; a private profile read whole within PageDiffEvery gets the count check
+    // instead. The page asks for it when it shows the list, not on a timer.
     // Guard: scripts/test-workshop-social.sh § 7 "sync=open with a cached list: one ids-only ask, only the new id's
-    // details (one GetDetails of 1 id), the list in Steam's new order, kept on disk"
+    // details (one GetDetails of 1 id), the list in Steam's new order, kept on disk", "private profile: two quick
+    // sync=open after a whole read → …"
     public static void Sync(ulong steamId)
     {
         lock (_lock)
         {
             var a = Of(steamId);
             if (a.Running != null) return;
-            var started = ++_stamp;
-            if (a.Complete) { a.Running = Task.Run(() => DiffAsync(steamId, a, started)); return; }
-            a.Error = null;
-            a.Loading = new Progress(0, null);
-            Bump(a);
-            a.Running = Task.Run(() => FirstLoadAsync(steamId, a, started));
+            if (!(a.Complete && a.ViaPage && a.LastRead is { } read && Environment.TickCount64 - read < (long)PageDiffEvery.TotalMilliseconds))
+            {
+                var started = ++_stamp;
+                if (a.Complete) { a.Running = Task.Run(() => DiffAsync(steamId, a, started)); return; }
+                a.Error = null;
+                a.Loading = new Progress(0, null);
+                Bump(a);
+                a.Running = Task.Run(() => FirstLoadAsync(steamId, a, started));
+                return;
+            }
         }
+        Console.WriteLine("workshop-favorites: sync=open: the community pages were read lately, the page-1 check instead");
+        Check(steamId);
     }
 
     // The cheap check whether Steam's list changed, at most once per CheckEvery per account, only for a whole list (the
@@ -269,7 +288,9 @@ public static class WorkshopFavorites
             }
             if (saved != null)
             {
-                try { AtomicFile.WriteAllText(FilePath(steamId), JsonSerializer.Serialize(saved, Json)); }
+                // the user's alone (0600, like settings.json): its name holds the Steam ID and the list may be a private one
+                // Guard: scripts/test-workshop-social.sh § 7 "first load: the list's file is the user's alone (0600)"
+                try { AtomicFile.WritePrivate(FilePath(steamId), JsonSerializer.Serialize(saved, Json)); }
                 // the type only: an IO error's message names the file, and its name holds the Steam ID
                 catch (Exception e) { Console.WriteLine($"workshop-favorites: couldn't save the list ({e.GetType().Name})"); }
             }
@@ -338,7 +359,7 @@ public static class WorkshopFavorites
         {
             TakeSteam(a, ids, started);
             a.ViaPage = viaPage; a.Total = viaPage ? null : total; a.Complete = true;
-            a.Loading = null; a.Error = null; a.Running = null;
+            a.Loading = null; a.Error = null; a.Running = null; a.LastRead = Environment.TickCount64;
             return true;
         });
         Console.WriteLine($"workshop-favorites: first load done — {ids.Count} item(s) ({(viaPage ? "the community page" : "client protocol")})");
@@ -456,11 +477,12 @@ public static class WorkshopFavorites
         lock (_lock) { wasViaPage = a.ViaPage; emptyOk = a.Steam.Count == 0; }
         var fromSteam = new List<string>();
         bool viaPage = wasViaPage;
+        uint? total = null;
         if (!wasViaPage)
         {
-            var ids = await SteamWorkshopDetails.UserFileIdsAsync(steamId, "myfavorites", PageTimeout).ConfigureAwait(false);
-            if (ids == null) { Console.WriteLine("workshop-favorites: the id diff: Steam didn't answer, the list kept"); return; }
-            if (ids.Count > 0) fromSteam = ids.Select((id) => id.ToString()).ToList();
+            var got = await SteamWorkshopDetails.UserFileIdsAsync(steamId, "myfavorites", PageTimeout).ConfigureAwait(false);
+            if (got == null) { Console.WriteLine("workshop-favorites: the id diff: Steam didn't answer, the list kept"); return; }
+            if (got.Ids.Count > 0) { fromSteam = got.Ids.Select((id) => id.ToString()).ToList(); total = got.Total; }
             else viaPage = true;
         }
         // a kept list never empties on a page that lists nothing (emptyOk only while there's nothing to lose)
@@ -475,7 +497,10 @@ public static class WorkshopFavorites
             var shown = a.Ids;
             TakeSteam(a, fromSteam, started);
             a.ViaPage = viaPage;
-            a.Total = viaPage ? null : fromSteam.Count;
+            // Steam's own total, the one the count check's `totalonly` answers
+            // Guard: scripts/test-workshop-social.sh § 7 "a diff keeps Steam's own total: …"
+            a.Total = viaPage ? null : (int?)total;
+            a.LastRead = Environment.TickCount64;
             return detailsMissing || !shown.SequenceEqual(a.Ids);
         });
         Console.WriteLine($"workshop-favorites: id diff done — {fromSteam.Count} item(s), {added} added, {removed} removed ({(viaPage ? "the community page" : "client protocol")})");

@@ -97,9 +97,6 @@ export const groupsFor = (scope: FilterScope, presets: boolean) =>
     : presets ? GROUPS.allP : GROUPS.all;
 export const usePresetsOn = () => useStore((s) => presetsOn(s.settings));
 
-// what a local item knows (components/facets.ts)
-export { facetsOf };
-
 const AGE = WF_GROUPS.find((g) => g.id === "age")!.subs[0].tags.map((t) => t.tag.toLowerCase());
 const GROUP_OF = new Map(GROUPS.allP.flatMap((g) => g.subs.flatMap((s) => s.tags.map((t) => [t.tag.toLowerCase(), g.id] as const))));
 // The filter as a test of one item's facets, with the Workshop's rules (the backend's WorkshopTags.Build): OR within a

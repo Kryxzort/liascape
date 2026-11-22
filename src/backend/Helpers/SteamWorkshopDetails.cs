@@ -220,10 +220,15 @@ public static class SteamWorkshopDetails
     private const int IdsPageSize = 1000;
 
     // The whole list's ids in Steam's `lastupdated` order, a page of IdsPageSize a request (the favourites cache's cheap
-    // check of membership and order). null = Steam unreachable, or a page failed partway (a partial list would read as
-    // items removed). Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: ids only = the whole list in
-    // Steam's order".
-    public static async Task<List<ulong>?> UserFileIdsAsync(ulong steamId, string type, TimeSpan timeout, CancellationToken ct = default)
+    // check of membership and order), with Steam's own total: the count check compares that one with `totalonly`'s, never
+    // the ids' count (a gap between the two would read as a change every time). An item updated while the pages are read
+    // moves up and can come twice, so an id is kept once, where it came first. null = Steam unreachable, or a page failed
+    // partway (a partial list would read as items removed).
+    // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: ids only = the whole list in Steam's order, with
+    // Steam's total", "user files: ids only across pages, an id listed twice kept once in its first place"
+    public sealed record UserFileIds(List<ulong> Ids, uint Total);
+
+    public static async Task<UserFileIds?> UserFileIdsAsync(ulong steamId, string type, TimeSpan timeout, CancellationToken ct = default)
     {
         var all = new List<ulong>();
         for (uint page = 1; ; page++)
@@ -235,7 +240,7 @@ public static class SteamWorkshopDetails
                 + (Fixture != null ? " (fixture)" : ""));
             if (got == null) return null;
             all.AddRange(got.Ids);
-            if (got.Ids.Count == 0 || all.Count >= got.Total) return all;
+            if (got.Ids.Count == 0 || all.Count >= got.Total) return new UserFileIds(all.Distinct().ToList(), got.Total);
         }
     }
 
@@ -271,8 +276,10 @@ public static class SteamWorkshopDetails
     // the fixture's `"@userfiles": {"<steamid>:<type>": [ {publishedfileid, title, tags, subscriptions, lifetime_subscriptions, …} ]}`
     // (the client protocol's own field names): built into Steam's own reply objects, so the mapping below is the one tested.
     // As Steam answers: `ids_only` items carry only their id (pages up to IdsPageSize, else 100), `totalonly` no items.
-    // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: ids only = the whole list in Steam's order",
-    // "user files: total only".
+    // `"@userfilestotal": {"<steamid>:<type>": N}` makes Steam's total N whatever the list holds (Steam counting an item
+    // it lists to no one).
+    // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "user files: ids only = the whole list in Steam's order, …",
+    // "user files: total only"; scripts/test-workshop-social.sh § 7 "a diff keeps Steam's own total: …"
     private static (List<PublishedFileDetails> Items, uint Total)? UserFilesFromFixture(string file, CPublishedFile_GetUserFiles_Request req)
     {
         try
@@ -282,12 +289,14 @@ public static class SteamWorkshopDetails
             if (!all.TryGetProperty($"{req.steamid}:{req.type}", out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
                 return ([], 0);
             var items = arr.EnumerateArray().Select(FixtureDetails).ToList();
-            if (req.totalonly) return ([], (uint)items.Count);
+            uint total = doc.RootElement.TryGetProperty("@userfilestotal", out var tot) && tot.TryGetProperty($"{req.steamid}:{req.type}", out var n)
+                ? n.GetUInt32() : (uint)items.Count;
+            if (req.totalonly) return ([], total);
             if (req.sortmethod == "score") items = items.OrderByDescending((d) => d.vote_data?.score ?? 0).ToList();
             int perPage = (int)Math.Min(req.numperpage, req.ids_only ? IdsPageSize : 100);
             var page = items.Skip((int)(req.page - 1) * perPage).Take(perPage);
             if (req.ids_only) page = page.Select((d) => new PublishedFileDetails { publishedfileid = d.publishedfileid });
-            return (page.ToList(), (uint)items.Count);
+            return (page.ToList(), total);
         }
         catch { return null; } // no fixture file = Steam unreachable
     }

@@ -3,7 +3,8 @@ import { favoritesUsable, unplayableReasonOf, useStore } from "../store";
 import { WsSetLoad } from "../components/WsSetLoad";
 import { LibraryCard } from "../components/LibraryCard";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
-import { facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
+import { facetsOf } from "../components/facets";
+import { knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { LibrarySide } from "../components/LibrarySide";
@@ -104,7 +105,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // its grid stays where it was
   useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
 
-  // PERF: one predicate per filter change and each item's facets computed once (workshopFilter.ts facetsOf) — no per-card work
+  // PERF: one predicate per filter change and each item's facets computed once (components/facets.ts facetsOf) — no per-card work
   const filtered = useMemo(() => {
     const q = libQuery.trim().toLowerCase();
     let f = q ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q)) : items;
