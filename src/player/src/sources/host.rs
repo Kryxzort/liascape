@@ -495,13 +495,20 @@ impl SourceHost {
         ids
     }
 
-    /// The low VRAM is over — every suspended source reopens (next `sync`) at the
-    /// position it had, its stand-in shown until its first frame; new media nodes open again.
-    /// Returns the ids.
-    pub fn resume_media(&mut self) -> Vec<String> {
+    /// The low VRAM is over — every suspended source but those in `keep` reopens (next `sync`)
+    /// at the position it had, its stand-in shown until its first frame; new media nodes open
+    /// again. A kept one (a source being replaced, on its way out) stays a still of its last
+    /// frame until its node goes, or until a later call no longer keeps it. Returns the ids
+    /// reopened.
+    pub fn resume_media(&mut self, keep: &BTreeSet<String>) -> Vec<String> {
         self.suspend_new = false;
         let mut ids = Vec::new();
-        for (id, sus) in std::mem::take(&mut self.suspended) {
+        let all = std::mem::take(&mut self.suspended);
+        for (id, sus) in all {
+            if keep.contains(&id) {
+                self.suspended.insert(id, sus);
+                continue;
+            }
             if let Some(t) = sus.position {
                 self.resume_at.insert(id.clone(), t);
             }
@@ -520,6 +527,15 @@ impl SourceHost {
     /// Suspended sources (probes).
     pub fn suspended_ids(&self) -> Vec<String> {
         self.suspended.keys().cloned().collect()
+    }
+
+    /// The hosted video/image/scene sources (what a low-VRAM `stop` would suspend).
+    pub fn media_ids(&self) -> Vec<String> {
+        self.sources
+            .iter()
+            .filter(|(_, h)| h.src.as_mpv().is_some() || h.src.as_scene().is_some())
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// Reopened sources still waiting for their first frame.

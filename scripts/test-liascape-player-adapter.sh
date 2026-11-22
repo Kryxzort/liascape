@@ -1380,8 +1380,28 @@ setting '.SceneVramStopShows = "last_frame"'
 waitfor $WAIT px_not_black out:VIRTUAL-1 && [ "$(nsch)" = "$ns" ] && [ "$(cur path)" = "$S1" ] && ok "…last_frame → its last frame back ($(px out:VIRTUAL-1)), no switch" || bad "SceneVramStopShows last_frame → out:VIRTUAL-1 $(px out:VIRTUAL-1), switches $ns → $(nsch)"
 vram_fake ""
 stop_now
-kill "$WSP" 2>/dev/null; WSP=""
+# § the low-VRAM hold is visible: video memory low (300 of 8192 MiB free) with the scene's worker at 3600 MiB → the player
+# holds the wallpaper and the UI learns what it waits for (WS `vram-hold {message}`, `/current.vramHold`: the resume bar
+# 768 + the scene's 3600 reserved, once the stop freed it); free again → the hold lets go and both say so (null)
 setting '.LimitVramPerScene = false'
+post /apply "{\"path\":\"$S1\"}" >/dev/null
+waitfor $WAIT scene_ready "$S1" || bad "/apply s1 (the low-VRAM hold) → $(basename "$(cur path)")"
+WP=$(wpid "$(srcIdForPath "$S1")")
+vram_at() { printf '{"total_mib":8192,"free_mib":%s,"procs":{%s}}' "$1" "$2" > "$VR.tmp" && mv "$VR.tmp" "$VR"; }
+vhold() { curl -sf -m 5 "$U/current" | jq -r '.vramHold // empty'; }
+HOLD="Paused: low video memory — 3940 MB free, needs 4368 MB"
+vram_at 300 "\"$WP\":3600"
+waitfor 8000 eval '[ -n "$(vhold)" ]' || bad "no /current.vramHold under low VRAM (worker $WP): $(ctl logs '{"kind_prefix":"vram.","limit":20}' | jq -c '[.events[].event]')"
+vram_at 3940 ""
+waitfor 8000 eval '[ "$(vhold)" = "$HOLD" ]' && ok "the low-VRAM hold → /current.vramHold \"$HOLD\"" || bad "/current.vramHold \"$(vhold)\", want \"$HOLD\""
+waitfor $WAIT eval 'grep "\"vram-hold\"" "$T/ws-vram.log" | jq -r ".payload.message // empty" | grep -qF "$HOLD"' \
+  && ok "…WS vram-hold says the same" || bad "no WS vram-hold \"$HOLD\": $(grep "vram-hold" "$T/ws-vram.log" | tail -3)"
+vram_fake ""
+waitfor 10000 eval '[ -z "$(vhold)" ]' && waitfor $WAIT eval 'grep "\"vram-hold\"" "$T/ws-vram.log" | tail -1 | jq -e ".payload.message == null" >/dev/null' \
+  && waitfor $WAIT scene_ready "$S1" && ok "…free again → the hold lets go (/current.vramHold and WS vram-hold null), the scene plays on" \
+  || bad "after the low VRAM: /current.vramHold \"$(vhold)\", last WS $(grep "vram-hold" "$T/ws-vram.log" | tail -1), s1 ready $(cur ready)"
+stop_now
+kill "$WSP" 2>/dev/null; WSP=""
 
 echo "== Phase 2: scene loudness learned on first play (scene.loudness → the index → gain.normalize, live)"
 # A player whose learning window is 3 s of audible play (LIASCAPE_PLAYER_LOUDNESS_WINDOW_S; 60 in production, a partial

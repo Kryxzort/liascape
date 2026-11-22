@@ -184,6 +184,9 @@ interface State {
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
   // API: why no scene can play here (/current scenesBlocked, WS scenes-blocked), else null: every scene card greys with it
   scenesBlocked: string | null; setScenesBlocked: (r: string | null) => void;
+  // API: liascape-player's low-VRAM hold keeps the wallpapers from playing (/current vramHold, WS vram-hold): what the
+  // now-playing line says first while it holds ("Paused: low video memory — 345 MB free, needs 4408 MB"), else null
+  vramHold: string | null; setVramHold: (m: string | null) => void;
   // the wallpaper is paused by the user (/current.paused, WS pause-changed): the in-app background holds still with it
   wallpaperPaused: boolean; setWallpaperPaused: (p: boolean) => void;
   // statusPlaying: `status` is the persistent now-playing line (refreshPlayingStatus), not a message (setStatus) — the top
@@ -365,7 +368,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
-  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, scenesBlocked: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
+  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, scenesBlocked: null, vramHold: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -869,6 +872,12 @@ export const useStore = create<State>((set, get) => ({
   },
   setKeepCurrent(k) { set({ keepCurrent: k }); get().refreshPlayingStatus(); },
   setScenesBlocked(r) { set({ scenesBlocked: r }); },
+  setVramHold(m) {
+    if (get().vramHold === m) return;
+    const playingLine = get().status === "" || get().status === buildPlayingStatus(get);
+    set({ vramHold: m });
+    if (playingLine) get().refreshPlayingStatus();
+  },
   setWallpaperPaused(p) { if (get().wallpaperPaused !== p) set({ wallpaperPaused: p }); },
   setPlaying(p) { playingEvents++; set({ playingPath: p }); get().refreshPlayingStatus(); },
   // Transient status message for 5s, then revert to the now-playing line.
@@ -954,9 +963,14 @@ function fmtInterval(total: number): string {
   if (h) p.push(`${h}h`); if (m) p.push(`${m}m`); if (s || !p.length) p.push(`${s}s`);
   return p.join(" ");
 }
-// Now-playing line — playlist/wallpaper • Vol% • Loop • speed×.
+// Now-playing line — playlist/wallpaper • Vol% • Loop • speed×; while the low-VRAM hold holds, its notice first (it stays
+// up as long as the hold does, whatever plays). Guard: probe-matrix vram:held
 function buildPlayingStatus(get: () => State): string {
   const st = get();
+  const line = playingLineOf(st);
+  return st.vramHold ? (line ? `${st.vramHold} • ${line}` : st.vramHold) : line;
+}
+function playingLineOf(st: State): string {
   if (!st.playingPath) return "";
   const set = st.settings ?? {};
   const titleOf = (p: string) => st.libraryItems.find((i) => i.videoPath === p)?.title
@@ -1033,7 +1047,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
-  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; }
+  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; p.vramHold = cur.v?.vramHold ?? null; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
   // this listing answers these settings: no second read for them (libraryFollowsEngine)
   if (lib && settings) libKey = libKeyOf(settings.v);
@@ -1059,6 +1073,6 @@ async function rereadPlaying(set: Setter, get: () => State) {
   const cur = await q.reply.catch(() => null);
   if (!cur || !q.fresh()) return;
   const playingLine = get().status === "" || get().status === buildPlayingStatus(get);
-  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep, scenesBlocked: cur.scenesBlocked ?? null });
+  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep, scenesBlocked: cur.scenesBlocked ?? null, vramHold: cur.vramHold ?? null });
   if (playingLine) get().refreshPlayingStatus();
 }

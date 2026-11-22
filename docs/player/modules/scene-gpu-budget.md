@@ -94,9 +94,12 @@ only while a rule needs it; the loop reads the newest sample. Test servers run w
 ## The low-VRAM rule (`vram::LowVram`, pure) and its hold
 
 `player.vram_low_mode` = `stop` (default) | `pause` | `off`. Low = free < max(512 MiB, 5 % of total) for 3 s →
-engage. Free again = free − reserve ≥ low + max(1024 MiB, 10 %) for 10 s → release; a dip restarts the hold. The
-reserve is what our resumed sources will take back (our processes' VRAM at the engage, or the rise of free VRAM in
-the 2 s after the stop; 0 for `pause`), so memory we freed never reads as free — no stop → resume → low loop. An
+engage. Free again = free − reserve ≥ low + 256 MiB for 10 s → release; a dip restarts the hold. The
+reserve is what our resumed sources will take back (our processes' VRAM at the engage, matched by pid: the
+compositor, its scene workers, its spare, never another `liascape-player`; or the rise of free VRAM in the 2 s after
+the stop; 0 for `pause`), so memory we freed never reads as free — no stop → resume → low loop. The margin is small on
+purpose: a wider bar leaves a 3.6 GB scene on an 8 GB card unable to resume after a dip,
+and anti-flap below is the loop guard. An
 engage within `FLAP_WINDOW` (60 s) of the last release doubles the resume hold (≤ `RESUME_HOLD_MAX`, 160 s). No sample
 for `UNAVAILABLE_RELEASE` (30 s) while engaged releases: a dead probe never keeps the wallpaper stopped. Test timing:
 `LIASCAPE_PLAYER_VRAM_TIMING=<interval>,<enter>,<resume>,<settle>,<scene_hold>` (ms).
@@ -109,6 +112,20 @@ the position it had, effectively paused, its stand-in shown and its `Ready` held
 goes once none is pending (or after 5 s) and the ordinary flow-gated resume follows. Mode changes are live (`off`
 releases; `pause` → `stop` frees now; `stop` → `pause` gives sources back and stays paused). A scene's worker after a
 resume is a new process, not a crash.
+
+The reserve follows the held sources (`Runtime::vram_follow_hold`, every tick while held). `settle` after the stop
+each stopped source gets a share: a scene its worker's VRAM at the engage, the videos and images what the compositor
+freed (its use then − now) plus the spare's; without per-process numbers the measured reserve split evenly. A source
+on its way out (`Runtime::vram_gone`: the A a live transition is replacing, a grave, a retired or destroyed one) drops
+its share at once (`LowVram::set_reserve` re-judges against the newest sample) and is never reopened: it stays its
+still until its node goes, and to an `align: end` switch off it, it has ended. A source created while held waits with
+no share. So a switch made during a hold plays as soon as the memory there is fits it, never held for memory its
+replaced sources would have taken back. `stop` clears the hold and starts the rule over.
+
+What the hold keeps from playing and how much free VRAM it waits for (`needed_mib` = the resume bar + the reserve) is
+in `hello.vram_hold` / `state.vram_hold`, the `vram` probe's `hold`, and the events `vram.held` (again whenever the
+sources or `needed_mib` change, or free VRAM moved 32 MiB) and `vram.released {reason: free | no_sample | off | stopped}`. The backend shows it on
+the now-playing line (WS `vram-hold`, `/current.vramHold`).
 
 ## Worker CPU
 

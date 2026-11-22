@@ -39,6 +39,7 @@ public static class LiascapePlayerMedia
                     c.Subscribed += () => InvalidateSources(); // events in the reconnect gap are lost (bar the outbox's)
                     c.OutboxEvent += OnOutboxEvent;
                     c.RendererMissingChanged += OnRendererMissing;
+                    c.VramHoldChanged += OnVramHold;
                     _hooked = c;
                 }
             }
@@ -405,6 +406,13 @@ public static class LiascapePlayerMedia
             });
             return;
         }
+        if (kind is "vram.held" or "vram.released")
+        {
+            // the player's low-VRAM hold took the wallpapers or let go: the UI says why (VramHoldChanged → OnVramHold);
+            // no source changed which file it shows
+            C.ApplyVramHold(kind == "vram.held" ? LiascapePlayerClient.VramHoldOf(e) : null);
+            return;
+        }
         if (kind == "source.rejected")
         {
             // a value a source refused (it keeps playing; e.g. an `af` mpv couldn't build → it plays without it,
@@ -568,6 +576,18 @@ public static class LiascapePlayerMedia
             PlayerHelper.OnScenesBlocked(reason);
         }
         catch (Exception ex) { LiascapePlayerClient.Log($"OnRendererMissing threw: {ex.Message}"); }
+    });
+
+    // The low-VRAM hold took the wallpapers or let go (LiascapePlayerClient.VramHold): WS `vram-hold {message}`, and
+    // `/current.vramHold` for a page that loads later, so a held screen is never a silent black or frozen one.
+    private static void OnVramHold(VramHoldInfo? hold) => _ = Task.Run(() =>
+    {
+        try
+        {
+            LiascapePlayerClient.Log(hold == null ? "the low-VRAM hold let go" : $"held for low video memory: {PlayerHelper.VramHoldMessage(hold)}");
+            PlayerHelper.OnVramHold(hold);
+        }
+        catch (Exception ex) { LiascapePlayerClient.Log($"OnVramHold threw: {ex.Message}"); }
     });
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —

@@ -66,6 +66,7 @@ public static class EventBus
         PlayerHelper.OnSceneCrashed = p => Broadcast("scene-crashed", new { path = p });
         PlayerHelper.OnSceneVramStoppedCb = (p, used, limit, msg) => Broadcast("scene-vram-stopped", new { path = p, usedMib = used, limitMib = limit, message = msg });
         PlayerHelper.OnScenesBlockedCb = r => Broadcast("scenes-blocked", new { reason = r });
+        PlayerHelper.OnVramHoldCb = m => Broadcast("vram-hold", new { message = m });
         PlayerHelper.OnTimedPlaylistStopped = () => Broadcast("timed-stopped");
     }
 }

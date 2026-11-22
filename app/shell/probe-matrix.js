@@ -356,9 +356,9 @@ async function reset(pl) {
 // whitelist, no overrides, and a healthy fake VRAM sample (test-ui-matrix.sh: LIASCAPE_PLAYER_VRAM_PROBE=fake:<file>).
 const SC_INDEX = SC.length ? path.join(path.dirname(SC[0]), "index.json") : null;
 const SC_KEY = (p) => path.basename(p);
-function vramFake(procs = {}) {
+function vramFake(procs = {}, free = 6000) {
   if (!E.LIASCAPE_VRAM_FAKE) return;
-  fs.writeFileSync(E.LIASCAPE_VRAM_FAKE + ".mx", JSON.stringify({ total_mib: 8192, free_mib: 6000, procs }));
+  fs.writeFileSync(E.LIASCAPE_VRAM_FAKE + ".mx", JSON.stringify({ total_mib: 8192, free_mib: free, procs }));
   fs.renameSync(E.LIASCAPE_VRAM_FAKE + ".mx", E.LIASCAPE_VRAM_FAKE);
 }
 function resetScenes() {
@@ -3508,6 +3508,40 @@ C["vram:exceeded"] = { states: ["sceneS"], switch: true,
     if (!c.ev.length) v.push(`no scene.vram_exceeded for s1 (worker ${c.pid})`);
     if (readScIndex()[SC_KEY(SC[0])]?.crashed) v.push("s1 was marked crashed by a VRAM stop");
     if (!c.status.includes("Stopped s1: it used 2000 MiB of video memory, over the 1536 MiB cap")) v.push(`the status bar says "${c.status}", expected "Stopped s1: it used 2000 MiB of video memory, over the 1536 MiB cap"`);
+    return v;
+  } };
+
+// the low-VRAM hold says what it holds and why while it holds: video memory low (300 of 8192 MiB free) with s1's worker
+// at 3600 MiB → the player stops s1, and the top bar's now-playing line leads with the notice; once the stop freed it
+// (3940 free) the line says what the hold waits for (the resume bar 768 + s1's 3600 reserved); free again → the notice
+// goes and s1 plays on a new worker. Guard for PlayerHelper.VramHoldMessage, store buildPlayingStatus, /current vramHold,
+// TopbarStatus's tooltip on the line
+C["vram:held"] = { states: ["scene"],
+  async run(c) {
+    const status = async () => String(await ui(`return document.querySelector(".status")?.textContent ?? "";`));
+    c.pid = workerOf(c.before.st, SC[0])?.pid;
+    vramFake({ [c.pid]: 3600 }, 300);
+    c.engaged = await waitFor(async () => (c.s0 = await status()).includes("Paused: low video memory"), 8000, 100);
+    vramFake({}, 3940);
+    c.waits = await waitFor(async () => (c.s1 = await status()).includes("3940 MB free, needs 4368 MB"), 8000, 100);
+    c.title = await ui(`return document.querySelector(".status [data-st=playing]")?.title ?? null;`);
+    fs.writeFileSync(path.join(OUT, "mx-vram-held.png"), (await win.webContents.capturePage({ x: 0, y: 0, width: 1400, height: 120 })).toPNG());
+    c.cur = (await http("GET", "/current")).json;
+    vramFake();
+    c.gone = await waitFor(async () => !(c.s2 = await status()).includes("low video memory"), 10000, 100);
+    c.cur2 = (await http("GET", "/current")).json;
+    c.newPid = await waitFor(async () => { const w = await scWorker(SC[0]); return w?.pid && w.pid !== c.pid ? w.pid : null; }, 8000, 100);
+  }, check(c) {
+    const v = [];
+    if (!c.pid) v.push("no s1 worker before the low VRAM (proved nothing)");
+    if (!c.engaged) v.push(`the status bar never said the wallpaper is held for low video memory: "${c.s0}"`);
+    if (!c.waits) v.push(`the status bar says "${c.s1}", expected it to lead with "Paused: low video memory — 3940 MB free, needs 4368 MB"`);
+    else if (!c.s1.startsWith("Paused: low video memory — 3940 MB free, needs 4368 MB")) v.push(`the notice isn't first on the line: "${c.s1}"`);
+    if (c.cur?.vramHold !== "Paused: low video memory — 3940 MB free, needs 4368 MB") v.push(`/current vramHold ${JSON.stringify(c.cur?.vramHold)} while held`);
+    if (c.title !== "Paused: low video memory — 3940 MB free, needs 4368 MB") v.push(`the line's tooltip ${JSON.stringify(c.title)}, expected the whole notice (its numbers can fall past the ellipsis)`);
+    if (!c.gone) v.push(`the notice stayed after the memory came back: "${c.s2}"`);
+    if (c.cur2?.vramHold != null) v.push(`/current vramHold ${JSON.stringify(c.cur2?.vramHold)} after the release`);
+    if (!c.newPid) v.push("s1 never came back on a new worker after the release");
     return v;
   } };
 

@@ -21,6 +21,10 @@ public sealed class LiascapePlayerException(string code, string message, string 
     public override string ToString() => $"{Code}: {Message} (hint: {Hint})";
 }
 
+// The player's low-VRAM hold (`hello.vram_hold`, `vram.held`): free video memory now and what it waits for (MiB; null
+// before its first sample).
+public sealed record VramHoldInfo(double? FreeMib, double? NeededMib);
+
 // The liascape-player Command API client: JSON Lines over the unix socket (docs/player/modules/command-api.md). One persistent request connection (serialized; reconnects after any error/timeout)
 // + one subscribed event connection read on a background thread (reconnects with backoff when the
 // player restarts).
@@ -164,6 +168,29 @@ public sealed class LiascapePlayerClient
         if (Interlocked.Exchange(ref _wordKick, 1) == 1) return;
         _ = Task.Run(() => { try { _ = ScenesAvailable; } catch (Exception ex) { Log($"scene word: {ex.Message}"); } finally { Volatile.Write(ref _wordKick, 0); } });
     }
+    // The player's low-VRAM hold: how much video memory is free and how much it waits for before the wallpapers play
+    // again, null when nothing is held. Set from every hello's `vram_hold` and live from `vram.held` / `vram.released`
+    // (LiascapePlayerMedia.OnEvent); VramHoldChanged → the UI's notice (PlayerHelper.OnVramHold). Guard: adapter IT
+    // § "the low-VRAM hold is visible".
+    public VramHoldInfo? VramHold { get; private set; }
+    // raised (on the thread that read the change) when VramHold changes: the handler must not block
+    public event Action<VramHoldInfo?>? VramHoldChanged;
+    private readonly object _vramLock = new();
+    internal void ApplyVramHold(VramHoldInfo? hold)
+    {
+        bool changed;
+        lock (_vramLock) { changed = !Equals(hold, VramHold); VramHold = hold; }
+        if (changed)
+            try { VramHoldChanged?.Invoke(hold); } catch (Exception ex) { Log($"vram hold handler threw: {ex.Message}"); }
+    }
+    // a `vram_hold` object (hello) or a `vram.held` event's fields → the hold; null when it isn't one
+    public static VramHoldInfo? VramHoldOf(JsonElement e)
+    {
+        if (e.ValueKind != JsonValueKind.Object) return null;
+        double? Num(string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : null;
+        return new VramHoldInfo(Num("free_mib"), Num("needed_mib"));
+    }
+
     // greets the player again (its capabilities and renderer word): a `scene.renderer_*` fact says they changed
     public void RefreshHello()
     {
@@ -463,6 +490,8 @@ public sealed class LiascapePlayerClient
                                 ApplyPlayerWord(result.TryGetProperty("scene_renderer_missing", out var rm) && rm.ValueKind == JsonValueKind.Object
                                     ? Prop(rm, "reason") : null);
                             }
+                            // its low-VRAM hold as it stands (a backend that connects mid-hold learns it here)
+                            ApplyVramHold(result.TryGetProperty("vram_hold", out var vh) ? VramHoldOf(vh) : null);
                             if (PlayerPid != p)
                             {
                                 bool restarted = PlayerPid != null;
@@ -985,7 +1014,8 @@ public sealed class LiascapePlayerClient
     // `scene.renderer_` — a scene's worker couldn't load the scene renderer (`_missing`: the install is broken, not the
     // scene, never marked crashed) or one loads it again (`_found`) → LiascapePlayerMedia re-reads the player's word
     // (RendererMissing).
-    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.renderer_", "scene.loudness", "scene.fonts", "program.", "source.rejected"];
+    // `vram.held` / `vram.released` — the low-VRAM hold took the wallpapers (what it waits for) or let go (VramHold).
+    public static readonly string[] Topics = ["transition.", "player.stopped", "source.retire", "source.broken", "scene.vram_exceeded", "scene.renderer_", "scene.loudness", "scene.fonts", "program.", "source.rejected", "vram.held", "vram.released"];
     public event Action<string, JsonElement>? Event;
     // An entry of the player's outbox (`source.broken`, `scene.loudness`, `scene.vram_exceeded` — kept
     // while no backend listened), drained on every subscription: (kind, its fields). Raised on the drain's thread, in

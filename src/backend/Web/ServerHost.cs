@@ -924,6 +924,9 @@ public static class ServerHost
                 // API: why no scene can play here (the scene renderer is missing), else null — every scene card greys with it
                 // (store unplayableReasonOf); WS `scenes-blocked` moves it live
                 scenesBlocked = PlayerHelper.ScenesBlockedReason,
+                // API: while liascape-player's low-VRAM hold keeps the wallpapers from playing, what the UI says about it
+                // ("Stopped: low video memory — 345 MB free, needs 4408 MB"), else null; WS `vram-hold` moves it live
+                vramHold = PlayerHelper.VramHoldNow,
             });
         });
 

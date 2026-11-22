@@ -19,12 +19,17 @@
 //!   total), held for [`Timing::enter_hold`] (3 s) without a sample at or above it → `Engage`.
 //!   A short dip (a game loading a level, a browser tab) never fires — WE's version false-fires
 //!   under light load (Steam report); this one needs seconds of genuinely low memory.
-//! - **free again** = free − reserve ≥ [`resume_mib`]`(total)` = low + max([`RESUME_MARGIN_FLOOR_MIB`]
-//!   1024, [`RESUME_MARGIN_FRACTION`] 10 %), held for the resume hold (10 s) → `Release`. The
-//!   **reserve** is what our resumed sources will take back — in `stop` mode the VRAM our own
-//!   processes used when it engaged (per-process numbers), or, without them, how much free VRAM
-//!   rose in the [`Timing::settle`] (2 s) after the stop; 0 in `pause` mode (nothing freed). So
-//!   the memory we released ourselves never reads as "free again" (no stop → resume → low loop).
+//! - **free again** = free − reserve ≥ [`resume_mib`]`(total)` = low + [`RESUME_MARGIN_MIB`]
+//!   256, held for the resume hold (10 s) → `Release`. A small margin on purpose: the reserve
+//!   already counts what resuming takes back, and anti-flap's doubling hold is the loop guard —
+//!   a wider bar keeps a heavy scene (3.6 GB on an 8 GB card) from ever resuming after a dip.
+//!   The **reserve** is what our resumed sources will take back — in `stop` mode the VRAM our
+//!   own processes (the compositor, its scene workers, its spare; matched by pid, nothing else)
+//!   used when it engaged, or, without per-process numbers, how much free VRAM rose in the
+//!   [`Timing::settle`] (2 s) after the stop; 0 in `pause` mode (nothing freed). So the memory
+//!   we released ourselves never reads as "free again" (no stop → resume → low loop). The
+//!   runtime then splits it per held source and keeps it to the sources that can still come
+//!   back ([`LowVram::set_reserve`]): one replaced, destroyed or stopped takes its share with it.
 //! - **anti-flap**: an `Engage` within [`FLAP_WINDOW`] (60 s) of the last `Release` doubles the
 //!   resume hold (10 → 20 → 40 … ≤ [`RESUME_HOLD_MAX`] 160 s); [`FLAP_RESET`] (5 min) without
 //!   one resets it.
@@ -35,7 +40,8 @@
 //! (composed with `player.paused` — the player-pause machinery and its gates ramp every source out and freezes
 //! time) and, in `stop` mode, then drops every video/image/scene source's decoder or worker
 //! (`SourceHost::suspend_media` — a still of its last frame stays shown); `Release` reopens them
-//! at their positions, waits for their first frames, then lets go of the pause.
+//! at their positions, waits for their first frames, then lets go of the pause. `stop` (the verb)
+//! clears the hold at once.
 
 use std::collections::BTreeMap;
 use std::ffi::{CString, c_char, c_int, c_uint, c_void};
@@ -49,10 +55,8 @@ use serde_json::{Value, json};
 pub const LOW_FLOOR_MIB: f64 = 512.0;
 /// …or below this fraction of the total, whichever is larger.
 pub const LOW_FRACTION: f64 = 0.05;
-/// Free again = above low by this floor…
-pub const RESUME_MARGIN_FLOOR_MIB: f64 = 1024.0;
-/// …or this fraction of the total, whichever is larger.
-pub const RESUME_MARGIN_FRACTION: f64 = 0.10;
+/// Free again = above low (once the reserve is taken off) by this much.
+pub const RESUME_MARGIN_MIB: f64 = 256.0;
 /// An engage this soon after a release doubles the resume hold.
 pub const FLAP_WINDOW: Duration = Duration::from_secs(60);
 /// The resume hold never grows past this.
@@ -73,7 +77,7 @@ pub fn low_mib(total_mib: f64) -> f64 {
 
 /// Free VRAM (minus the reserve) needed before the rule releases.
 pub fn resume_mib(total_mib: f64) -> f64 {
-    low_mib(total_mib) + RESUME_MARGIN_FLOOR_MIB.max(RESUME_MARGIN_FRACTION * total_mib)
+    low_mib(total_mib) + RESUME_MARGIN_MIB
 }
 
 /// The rule's timing. Production: [`Timing::default`]; tests shorten it with
@@ -767,6 +771,51 @@ impl LowVram {
         matches!(self.phase, Phase::Low { .. } | Phase::Recovering { .. })
     }
 
+    /// What resuming takes back (MiB), while engaged and known.
+    pub fn reserve(&self) -> Option<f64> {
+        match self.phase {
+            Phase::Low { reserve, .. } => reserve,
+            Phase::Recovering { reserve, .. } => Some(reserve),
+            _ => None,
+        }
+    }
+
+    /// While engaged: the reserve is now `reserve` (the held sources that can still come back),
+    /// judged at once against the newest sample's `free` — a smaller one can start the resume
+    /// hold without waiting for a sample, a larger one stops it. Never releases by itself.
+    pub fn set_reserve(&mut self, now: Duration, total: f64, free: f64, reserve: f64) {
+        let fits = free - reserve >= resume_mib(total);
+        self.phase = match self.phase {
+            Phase::Low { since, .. } if fits => Phase::Recovering {
+                since: now,
+                low_since: since,
+                reserve,
+            },
+            Phase::Low {
+                since,
+                free_at_engage,
+                ..
+            } => Phase::Low {
+                since,
+                free_at_engage,
+                reserve: Some(reserve),
+            },
+            Phase::Recovering {
+                since, low_since, ..
+            } if fits => Phase::Recovering {
+                since,
+                low_since,
+                reserve,
+            },
+            Phase::Recovering { low_since, .. } => Phase::Low {
+                since: low_since,
+                free_at_engage: free,
+                reserve: Some(reserve),
+            },
+            p => p,
+        };
+    }
+
     /// The resume hold in force (doubled by flapping).
     pub fn resume_hold(&self) -> Duration {
         self.resume_hold
@@ -935,8 +984,39 @@ mod tests {
     fn thresholds_scale_with_the_card() {
         assert_eq!(low_mib(8192.0), 512.0, "8 GiB: the floor");
         assert!((low_mib(24576.0) - 1228.8).abs() < 1e-9, "24 GiB: 5 %");
-        assert_eq!(resume_mib(8192.0), 512.0 + 1024.0);
-        assert!((resume_mib(24576.0) - (1228.8 + 2457.6)).abs() < 1e-9);
+        assert_eq!(resume_mib(8192.0), 512.0 + 256.0);
+        assert!((resume_mib(24576.0) - (1228.8 + 256.0)).abs() < 1e-9);
+    }
+
+    /// A heavy wallpaper (3600 MiB of our own) on an 8 GiB card resumes once free − its reserve
+    /// clears low + 256 MiB: 4500 free after the stop leaves 900 ≥ 768.
+    #[test]
+    fn low_vram_high_usage_resumes_at_the_resume_bar() {
+        let mut r = LowVram::new(Timing::default());
+        r.observe(s(0), 8192.0, 300.0, Some(3600.0), true);
+        assert_eq!(r.observe(s(3000), 8192.0, 300.0, Some(3600.0), true), Some(Action::Engage));
+        assert_eq!(r.observe(s(4000), 8192.0, 4500.0, None, true), None);
+        assert!(matches!(r.phase(), Phase::Recovering { .. }), "{:?}", r.phase());
+        assert_eq!(r.observe(s(14_000), 8192.0, 4500.0, None, true), Some(Action::Release));
+    }
+
+    /// The reserve follows the sources that can come back: shrinking it while held (a held source
+    /// replaced or destroyed) recovers on the free VRAM already there; growing it falls back to low.
+    #[test]
+    fn low_vram_reserve_follows_the_held_sources() {
+        let mut r = LowVram::new(Timing::default());
+        r.observe(s(0), 8192.0, 300.0, Some(4100.0), true);
+        assert_eq!(r.observe(s(3000), 8192.0, 300.0, Some(4100.0), true), Some(Action::Engage));
+        assert_eq!(r.observe(s(4000), 8192.0, 4400.0, None, true), None);
+        assert!(matches!(r.phase(), Phase::Low { reserve: Some(x), .. } if x == 4100.0));
+        r.set_reserve(s(5000), 8192.0, 4400.0, 0.0);
+        assert!(matches!(r.phase(), Phase::Recovering { reserve: 0.0, .. }), "{:?}", r.phase());
+        assert_eq!(r.reserve(), Some(0.0));
+        r.set_reserve(s(6000), 8192.0, 4400.0, 4000.0);
+        assert!(matches!(r.phase(), Phase::Low { reserve: Some(x), .. } if x == 4000.0));
+        r.set_reserve(s(7000), 8192.0, 4400.0, 100.0);
+        assert_eq!(r.observe(s(16_000), 8192.0, 4400.0, None, true), None, "the hold starts at 7 s");
+        assert_eq!(r.observe(s(17_000), 8192.0, 4400.0, None, true), Some(Action::Release));
     }
 
     /// Light load never fires: dips below the threshold shorter than the 3 s hold, and long
@@ -960,7 +1040,7 @@ mod tests {
     }
 
     /// Stop mode: engages after 3 s low; the memory it freed itself (its reserve, 600 MiB of our
-    /// processes) never counts as free; resumes after 10 s of free − reserve ≥ low + 1 GiB; a
+    /// processes) never counts as free; resumes after 10 s of free − reserve ≥ low + 256 MiB; a
     /// dip back under it restarts the 10 s.
     #[test]
     fn low_vram_engages_after_hold_and_resumes_with_hysteresis() {
@@ -975,11 +1055,11 @@ mod tests {
         for t in (4000..20_000).step_by(1000) {
             assert_eq!(r.observe(s(t), 8192.0, 900.0, None, true), None);
         }
-        // The game quits: 2200 free, − 600 = 1600 ≥ 1536 → recovering…
+        // The game quits: 2200 free, − 600 = 1600 ≥ 768 → recovering…
         assert_eq!(r.observe(s(20_000), 8192.0, 2200.0, None, true), None);
         assert!(matches!(r.phase(), Phase::Recovering { .. }));
-        // …a dip under it at 25 s: back to low, the hold starts over…
-        assert_eq!(r.observe(s(25_000), 8192.0, 2000.0, None, true), None);
+        // …a dip under it at 25 s (1300 − 600 = 700): back to low, the hold starts over…
+        assert_eq!(r.observe(s(25_000), 8192.0, 1300.0, None, true), None);
         assert!(matches!(r.phase(), Phase::Low { .. }));
         assert_eq!(r.observe(s(26_000), 8192.0, 2200.0, None, true), None);
         assert_eq!(r.observe(s(35_000), 8192.0, 2200.0, None, true), None);
@@ -1002,10 +1082,10 @@ mod tests {
         r.observe(s(4000), 8192.0, 1000.0, None, true);
         r.observe(s(5000), 8192.0, 1000.0, None, true);
         assert!(matches!(r.phase(), Phase::Low { reserve: Some(x), .. } if x == 800.0));
-        // 2300 − 800 = 1500 < 1536: still low; 2400 − 800 = 1600: recovering.
-        r.observe(s(6000), 8192.0, 2300.0, None, true);
+        // 1500 − 800 = 700 < 768: still low; 1600 − 800 = 800: recovering.
+        r.observe(s(6000), 8192.0, 1500.0, None, true);
         assert!(matches!(r.phase(), Phase::Low { .. }));
-        r.observe(s(7000), 8192.0, 2400.0, None, true);
+        r.observe(s(7000), 8192.0, 1600.0, None, true);
         assert!(matches!(r.phase(), Phase::Recovering { .. }));
 
         let mut p = LowVram::new(Timing::default());

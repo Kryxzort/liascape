@@ -112,6 +112,8 @@ export default function App() {
     else if (e.type === "wallpaper-changed") s.setPlaying(e.payload.path);
     else if (e.type === "settings-changed") s.mergeSettings(e.payload);
     else if (e.type === "pause-changed") useStore.getState().setWallpaperPaused(e.payload.paused);
+    // liascape-player's low-VRAM hold took the wallpapers or let go: the now-playing line says so while it holds
+    else if (e.type === "vram-hold") useStore.getState().setVramHold(e.payload.message);
     else if (e.type === "toggle-loop-current") { s.setKeepCurrent(e.payload.keep); s.setStatus(e.payload.message); }
     else if (e.type === "steam-qr") s.setQrPng(e.payload.png);
     else if (e.type === "workshop-favorites") useStore.getState().favoritesChanged(e.payload.version);

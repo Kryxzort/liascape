@@ -700,6 +700,8 @@ public static class PlayerHelper
     public static Action<string, double, double, string>? OnSceneVramStoppedCb;
     // liascape-player: why no scene can play here (ScenesBlockedReason), or null once they can again
     public static Action<string?>? OnScenesBlockedCb;
+    // liascape-player: the low-VRAM hold's message (VramHoldMessage) while it holds, null once it let go
+    public static Action<string?>? OnVramHoldCb;
     public static Action<string?>? OnWallpaperChanged;
 
     private record TimedState(
@@ -3989,6 +3991,22 @@ public static class PlayerHelper
             return c.RendererMissing;
         }
     }
+
+    // liascape-player's low-VRAM hold, in the words the UI shows while it holds (the now-playing line): the wallpapers
+    // are paused (in `stop` mode their memory freed too, a still shown) because video memory is low, and how much free
+    // memory it waits for. Guard: probe-matrix vram:held.
+    public static string VramHoldMessage(Liascape.Player.VramHoldInfo h) =>
+        h.FreeMib is double f && h.NeededMib is double n
+            ? $"Paused: low video memory — {f:0} MB free, needs {n:0} MB"
+            : "Paused: low video memory";
+
+    // the message while the low-VRAM hold holds, else null (under liascape-player only: legacy has no hold)
+    public static string? VramHoldNow =>
+        PlayerEngine.IsLiascapePlayer && LiascapePlayerClient.Shared.VramHold is { } h ? VramHoldMessage(h) : null;
+
+    // the hold took the wallpapers or let go → the UI (WS `vram-hold {message}`, null once it let go)
+    public static void OnVramHold(Liascape.Player.VramHoldInfo? hold) =>
+        OnVramHoldCb?.Invoke(hold == null ? null : VramHoldMessage(hold));
 
     // the latch moved → the UI (WS `scenes-blocked {reason}`) and the program's items (their skip follows ScenesPlayable)
     public static void OnScenesBlocked(string? reason)

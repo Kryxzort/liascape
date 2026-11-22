@@ -1150,6 +1150,30 @@ impl Transitions {
         (by_output, graves)
     }
 
+    /// The outgoing A's every live transition is replacing: no layer outside the transitions
+    /// shows them and none is another transition's B — what the low-VRAM hold never reopens
+    /// nor reserves memory for (`Runtime::vram_gone`).
+    pub fn replaced_sources(&self, g: &Graph) -> BTreeSet<String> {
+        let layers: Vec<String> = self
+            .active
+            .iter()
+            .flat_map(|t| t.sides.iter().flat_map(|s| s.layers.clone()))
+            .collect();
+        let incoming: BTreeSet<&str> = self.active.iter().map(|t| t.b.as_str()).collect();
+        self.active
+            .iter()
+            .flat_map(|t| t.sides.iter().filter_map(|s| s.a.clone()))
+            .filter(|a| !incoming.contains(a.as_str()) && !shown_outside(g, a, &layers))
+            .collect()
+    }
+
+    /// `id` holds its last frame from now on, as if it had played to its end (a replaced A the
+    /// low-VRAM hold keeps as a still): an `align: end` switch off it starts at once.
+    pub fn note_ended(&mut self, g: &Graph, id: &str, now: Duration) {
+        let tp = get_f64(g, id, "time_pos").unwrap_or(0.0);
+        self.ended.entry(id.to_string()).or_insert((tp, now));
+    }
+
     /// Every live transition.
     pub fn status(&self) -> Vec<TransitionStatus> {
         self.active
