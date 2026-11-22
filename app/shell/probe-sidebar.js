@@ -36,6 +36,8 @@
 //   lib:clearCrash:on|off  s2 marked crashed: a notice block (the section cards' material, a danger stripe, a .mini Clear) in the
 //                        body's 12 px rhythm; Clear → the notice and the whitelist row fade out, what follows glides into their room
 //                        (off: fade only, at once), the index mark and the card's go, s2 plays. Screenshots side-crash-*.png
+//   lib:clearCrash:multi  s1 and s2 marked crashed, Ctrl-selected with k1: Clear in s2's sidebar lifts both marks (index
+//                        and cards), the selection stays. Screenshot side-crash-cleared-multi.png
 //   lib:fontStandIn:on|off  s2 plays with a font stand-in (its synthetic Ready reports Consolas shown with Cascadia Mono): the
 //                        player's scene.fonts → the index → its open sidebar gets one muted line "Uses Consolas, shown with
 //                        Cascadia Mono" in Playback, fading in (off: opacity only); a play with every font installed clears it
@@ -1236,6 +1238,47 @@ app.whenReady().then(async () => {
         if (cur0) await post("/apply", { path: cur0 }); else await post("/stop");
         await sleep(800);
         await mv(5, 5); if (mode === "off") await setMotion(true);
+        await loadUi();
+      }
+      return v;
+    });
+
+    // lib:clearCrash:multi — Clear on a selection lifts every selected item's mark, as the selection's other actions repeat to
+    // all of it (LibrarySide.tsx clearCrash). s1 and s2 marked crashed and k1 (no mark) Ctrl-selected, the sidebar opened on s2
+    // with a right-click: one real click on Clear → neither index entry is crashed, neither card is marked, k1 is untouched.
+    await cell("lib:clearCrash:multi", async () => {
+      const v = [], J = JSON.stringify;
+      const scIdx = path.join(path.dirname(SC[1]), "index.json"), keys = [path.basename(SC[0]), path.basename(SC[1])], idx0 = fs.readFileSync(scIdx, "utf8");
+      const writeIdx = (j) => { fs.writeFileSync(scIdx + ".pb", typeof j === "string" ? j : JSON.stringify(j)); fs.renameSync(scIdx + ".pb", scIdx); };
+      if (path.dirname(SC[0]) !== path.dirname(SC[1])) return [`s1 and s2 live in different libraries — proved nothing`];
+      try {
+        const j = JSON.parse(idx0); for (const k of keys) j[k] = { ...(j[k] || {}), crashed: true }; writeIdx(j);
+        await setSettings({ allowScenes: true });
+        await loadUi();
+        await page(`await m.closeAll(); for (const t of ["s1", "s2", "k1"]) { m.thumb(t).dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })); await m.sleep(250); }
+          m.ctx(m.thumb("s2")); await m.waitSide("library"); await m.sleep(700);`);
+        const pre = await page(`const b = m.side()?.querySelector("[data-side-crash-clear]");
+          return { btn: b ? m.rect(b) : null, head: m.side()?.querySelector(".side-head")?.textContent ?? "", marked: ["s1", "s2"].map((t) => !!m.card(t)?.classList.contains("crashed")),
+            sel: document.querySelectorAll(".card.lib.selected").length };`);
+        console.log(`        ${J(pre)}`);
+        if (!pre.btn) return [`s2 marked crashed in a selection: no Clear (${J(pre)}) — proved nothing`];
+        if (pre.sel !== 3 || !/3 selected/.test(pre.head)) return [`the selection isn't s1, s2 and k1 (${pre.sel} selected, head ${J(pre.head.slice(0, 80))}) — proved nothing`];
+        if (!pre.marked.every(Boolean)) return [`s1 / s2 cards not both marked before Clear (${J(pre.marked)}) — proved nothing`];
+        await mv(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2, 300);
+        await clickAt(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2);
+        await sleep(900); await shot("crash-cleared-multi");
+        const post1 = await page(`return { marked: ["s1", "s2"].map((t) => !!m.card(t)?.classList.contains("crashed")), notice: !!m.side()?.querySelector("[data-side-crash]"),
+          sel: document.querySelectorAll(".card.lib.selected").length };`);
+        if (post1.notice) v.push("after Clear: the notice still shows");
+        if (post1.marked[0]) v.push("after Clear on the selection: s1's card is still marked crashed (only the clicked item was cleared)");
+        if (post1.marked[1]) v.push("after Clear: s2's card is still marked crashed");
+        if (post1.sel !== 3) v.push(`Clear changed the selection (${post1.sel} selected, want 3)`);
+        const after = JSON.parse(fs.readFileSync(scIdx, "utf8"));
+        keys.forEach((k, i) => { if (after[k]?.crashed) v.push(`after Clear: s${i + 1}'s index entry still crashed (${J(after[k])})`); });
+      } finally {
+        writeIdx(idx0);
+        await setSettings({ allowScenes: false });
+        await mv(5, 5); await page(`m.key("Escape"); await m.sleep(300); await m.closeAll();`);
         await loadUi();
       }
       return v;

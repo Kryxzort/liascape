@@ -205,9 +205,13 @@ export function LibrarySide({
   }, [presetNote.value, motion]);
   // "Uses <base>": the base's own card in the Library, the sidebar on it
   const showBase = (path: string) => { useStore.getState().focusLib(path); revealCard(`lib-${path}`); };
+  // On a selection it lifts every selected item's mark, as volume / speed / delete repeat to it. Guard: probe-sidebar lib:clearCrash:multi
   const clearCrash = () => {
-    patchItem(p, { hasCrashed: false });
-    api.libraryClearCrash(p).catch((e) => { patchItem(p, { hasCrashed: true }); useStore.getState().setError(`Couldn't clear the crash mark: ${(e as Error).message}`); });
+    const marked = new Set([p, ...targets.filter((t) => t.hasCrashed).map((t) => t.videoPath)]);
+    for (const t of marked) {
+      patchItem(t, { hasCrashed: false });
+      api.libraryClearCrash(t).catch((e) => { patchItem(t, { hasCrashed: true }); useStore.getState().setError(`Couldn't clear the crash mark: ${(e as Error).message}`); });
+    }
   };
 
   // the Unsubscribe tile's right-click menu; and when its kind changes under the open sidebar ("Unsubscribe without deleting"

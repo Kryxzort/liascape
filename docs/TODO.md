@@ -75,10 +75,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
-117. [ ] (owner) A multi-selection's crash-mark Clear clears every selected item, not only the one clicked: the
-       sidebar's Clear on a selection posts `/library/clear-crash` for each crashed item in it (or one batch endpoint),
-       the same way the selection's other actions apply to all of it. Guard: probe-sidebar `lib:clearCrash:*` with a
-       multi-selection.
 118. [ ] (owner) Find and clear crashed scenes in bulk: a "Crashed" filter in the Library's filter column (items whose
        `hasCrashed` is set), and a Housekeeping action "Clear crash marks" that lifts every mark (count shown, the same
        `LibraryService.ClearCrashed` path, so a rotation's skip flags follow).
