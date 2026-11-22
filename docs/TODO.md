@@ -184,6 +184,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] Text that changes in place pops, against design.md's "content changes slide or cross-fade … numbers and bars
+      ease" (only the sidebar title, `components/SideTitle.tsx`, does it). Add two shared primitives in `components/`:
+      a `SwapText` (keyed on the value: the old line leaves and the new one arrives with a short slide or cross-fade,
+      width morphing on the soft spring; `no-motion` = a cross-fade) and an `EaseNumber` (counts roll or ease to the new
+      value; `no-motion` = instant). Then audit and convert: status lines and counts (selection, results, the
+      favourites load line's "120 of 450"), the playlist bar's now-playing, sidebar facts on an item switch, setting
+      values, button labels that change state. Never on text the user is typing or selecting. Guard: a probe cell per
+      primitive (per-frame in-between states) plus one per converted area.
 - [ ] After #114 lands: make Knip (`npx knip@5` in `app/ui`) a check — 23 unused exports today (14 values, 9 types:
       e.g. `SIDE_SLIDE_MS`, `useFilterDocked`, `presetsUsing`, `locateFx`). Per export: drop `export` when only its own
       file uses it, delete it when nothing does (a probe reading it through the page counts as a use). Then add Knip as
