@@ -3529,8 +3529,17 @@ C["vram:held"] = { states: ["scene"],
     c.cur = (await http("GET", "/current")).json;
     vramFake();
     c.gone = await waitFor(async () => !(c.s2 = await status()).includes("low video memory"), 10000, 100);
-    c.cur2 = (await http("GET", "/current")).json;
-    c.newPid = await waitFor(async () => { const w = await scWorker(SC[0]); return w?.pid && w.pid !== c.pid ? w.pid : null; }, 8000, 100);
+    // released = an answer that says so, never a failed or empty one
+    c.cur2Null = await waitFor(async () => { c.cur2 = (await http("GET", "/current")).json; return !!c.cur2 && "vramHold" in c.cur2 && c.cur2.vramHold === null; }, 10000, 100);
+    await waitFor(async () => { const w = await scWorker(SC[0]); return !!(c.newPid = w?.pid && w.pid !== c.pid ? w.pid : null); }, 8000, 100);
+    // and it plays there: its source ready, the new worker's frames latched and its scene clock moving
+    c.plays = !!c.newPid && await waitFor(async () => {
+      const st = await ctl.call("state"), w = workerOf(st, SC[0]), id = srcIdsOf(st, SC[0])[0];
+      if (!w || w.pid !== c.newPid || st.graph[id]?.ready !== true) return false;
+      if (c.w0 == null) { c.w0 = { latched: w.latched, t: w.scene_time }; return false; }
+      c.w1 = { latched: w.latched, t: w.scene_time };
+      return w.latched > c.w0.latched && w.scene_time > c.w0.t;
+    }, 8000, 100);
   }, check(c) {
     const v = [];
     if (!c.pid) v.push("no s1 worker before the low VRAM (proved nothing)");
@@ -3540,8 +3549,9 @@ C["vram:held"] = { states: ["scene"],
     if (c.cur?.vramHold !== "Paused: low video memory — 3940 MB free, needs 4368 MB") v.push(`/current vramHold ${JSON.stringify(c.cur?.vramHold)} while held`);
     if (c.title !== "Paused: low video memory — 3940 MB free, needs 4368 MB") v.push(`the line's tooltip ${JSON.stringify(c.title)}, expected the whole notice (its numbers can fall past the ellipsis)`);
     if (!c.gone) v.push(`the notice stayed after the memory came back: "${c.s2}"`);
-    if (c.cur2?.vramHold != null) v.push(`/current vramHold ${JSON.stringify(c.cur2?.vramHold)} after the release`);
+    if (!c.cur2Null) v.push(`/current after the release: ${JSON.stringify(c.cur2)}, expected vramHold: null`);
     if (!c.newPid) v.push("s1 never came back on a new worker after the release");
+    else if (!c.plays) v.push(`s1's new worker ${c.newPid} never played (ready, frames latched, scene clock moving): ${JSON.stringify({ w0: c.w0, w1: c.w1 })}`);
     return v;
   } };
 

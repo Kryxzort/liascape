@@ -1389,6 +1389,8 @@ waitfor $WAIT scene_ready "$S1" || bad "/apply s1 (the low-VRAM hold) → $(base
 WP=$(wpid "$(srcIdForPath "$S1")")
 vram_at() { printf '{"total_mib":8192,"free_mib":%s,"procs":{%s}}' "$1" "$2" > "$VR.tmp" && mv "$VR.tmp" "$VR"; }
 vhold() { curl -sf -m 5 "$U/current" | jq -r '.vramHold // empty'; }
+# released: an answer that says so (`vramHold: null`), never a failed or empty one
+vhold_null() { curl -sf -m 5 "$U/current" | jq -e 'type == "object" and has("vramHold") and .vramHold == null' >/dev/null; }
 HOLD="Paused: low video memory — 3940 MB free, needs 4368 MB"
 vram_at 300 "\"$WP\":3600"
 waitfor 8000 eval '[ -n "$(vhold)" ]' || bad "no /current.vramHold under low VRAM (worker $WP): $(ctl logs '{"kind_prefix":"vram.","limit":20}' | jq -c '[.events[].event]')"
@@ -1397,7 +1399,7 @@ waitfor 8000 eval '[ "$(vhold)" = "$HOLD" ]' && ok "the low-VRAM hold → /curre
 waitfor $WAIT eval 'grep "\"vram-hold\"" "$T/ws-vram.log" | jq -r ".payload.message // empty" | grep -qF "$HOLD"' \
   && ok "…WS vram-hold says the same" || bad "no WS vram-hold \"$HOLD\": $(grep "vram-hold" "$T/ws-vram.log" | tail -3)"
 vram_fake ""
-waitfor 10000 eval '[ -z "$(vhold)" ]' && waitfor $WAIT eval 'grep "\"vram-hold\"" "$T/ws-vram.log" | tail -1 | jq -e ".payload.message == null" >/dev/null' \
+waitfor 10000 vhold_null && waitfor $WAIT eval 'grep "\"vram-hold\"" "$T/ws-vram.log" | tail -1 | jq -e ".payload.message == null" >/dev/null' \
   && waitfor $WAIT scene_ready "$S1" && ok "…free again → the hold lets go (/current.vramHold and WS vram-hold null), the scene plays on" \
   || bad "after the low VRAM: /current.vramHold \"$(vhold)\", last WS $(grep "vram-hold" "$T/ws-vram.log" | tail -1), s1 ready $(cur ready)"
 stop_now

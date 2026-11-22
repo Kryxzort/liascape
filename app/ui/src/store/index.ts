@@ -292,9 +292,12 @@ let playingEvents = 0;
 // made before the player started B (/current names B only from then) must not replace the event that said B, nor a newer
 // answer. Guard: matrix load:afterApply:staleReply
 let currentAsks = 0;
+// `vram-hold` events seen so far (setVramHold): an answer's vramHold is applied only if none landed since it was asked, so an
+// answer read before the hold took (or let go) never undoes the event that said so
+let holdEvents = 0;
 function askCurrent() {
-  const ev = playingEvents, ask = ++currentAsks;
-  return { reply: api.current(), fresh: () => ev === playingEvents && ask === currentAsks };
+  const ev = playingEvents, ask = ++currentAsks, hold = holdEvents;
+  return { reply: api.current(), fresh: () => ev === playingEvents && ask === currentAsks, holdFresh: () => hold === holdEvents };
 }
 // After a Play / play-from: the UI never guesses what plays (under Shuffle it's the player's pick, not item 1; under Resume it
 // may be what already plays). The player's `program.current` → `wallpaper-changed` says, when B starts; if none came yet, ask
@@ -757,6 +760,7 @@ export const useStore = create<State>((set, get) => ({
   setKeepCurrent(k) { set({ keepCurrent: k }); get().refreshPlayingStatus(); },
   setScenesBlocked(r) { set({ scenesBlocked: r }); },
   setVramHold(m) {
+    holdEvents++;
     if (get().vramHold === m) return;
     const playingLine = get().status === "" || get().status === buildPlayingStatus(get);
     set({ vramHold: m });
@@ -900,7 +904,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     const theme = tl.find((t) => t.name === name) ?? tl[0] ?? null;
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
-  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; p.vramHold = cur.v?.vramHold ?? null; }
+  if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; if (curQ.holdFresh()) p.vramHold = cur.v?.vramHold ?? null; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
   // this listing answers these settings: no second read for them (libraryFollowsEngine)
   if (lib && settings) libKey = libKeyOf(settings.v);
@@ -926,6 +930,6 @@ async function rereadPlaying(set: Setter, get: () => State) {
   const cur = await q.reply.catch(() => null);
   if (!cur || !q.fresh()) return;
   const playingLine = get().status === "" || get().status === buildPlayingStatus(get);
-  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep, scenesBlocked: cur.scenesBlocked ?? null, vramHold: cur.vramHold ?? null });
+  set({ playingPath: cur.path ?? null, keepCurrent: !!cur.keep, scenesBlocked: cur.scenesBlocked ?? null, ...(q.holdFresh() ? { vramHold: cur.vramHold ?? null } : {}) });
   if (playingLine) get().refreshPlayingStatus();
 }

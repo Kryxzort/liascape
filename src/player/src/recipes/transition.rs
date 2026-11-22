@@ -388,6 +388,8 @@ pub struct Transitions {
     /// Sources currently holding their end (`Ended` seen, not re-armed) → time_pos then,
     /// and the instant it came (the dropout probe's A snapshot, `begin_running`).
     ended: BTreeMap<String, (f64, Duration)>,
+    /// The `ended` entries the low-VRAM hold gave ([`Transitions::note_ended`]), not a real end.
+    held_ended: BTreeSet<String>,
     outbox: Vec<TransitionEvent>,
     prev_now: Duration,
     /// `restore_a`'s un-pause-then-ramp-in onsets (a snap-back, a
@@ -930,6 +932,7 @@ impl Transitions {
                 SourceEvent::Ended => {
                     let tp = get_f64(g, id, "time_pos").unwrap_or(0.0);
                     self.ended.insert(id.clone(), (tp, now));
+                    self.held_ended.remove(id);
                 }
                 SourceEvent::Ready => {
                     self.ended.remove(id);
@@ -959,6 +962,7 @@ impl Transitions {
             }
         }
         self.ended.retain(|id, _| is_source(g, id));
+        self.held_ended.retain(|id| self.ended.contains_key(id));
         self.restore_onsets.retain(|id| is_source(g, id));
         self.restore_onsets.tick(events, anim, now, "transition");
         self.bury(g, anim, now);
@@ -986,7 +990,7 @@ impl Transitions {
         (
             self.active.len(),
             self.graves.len(),
-            self.ended.len(),
+            self.ended.len(), // `held_ended` is a subset of it
             self.restore_onsets.len(),
         )
     }
@@ -1150,28 +1154,61 @@ impl Transitions {
         (by_output, graves)
     }
 
-    /// The outgoing A's every live transition is replacing: no layer outside the transitions
-    /// shows them and none is another transition's B — what the low-VRAM hold never reopens
-    /// nor reserves memory for (`Runtime::vram_gone`).
+    /// The outgoing A's the live transitions are replacing: shown by no layer but those of the
+    /// transitions replacing it, and not still coming in as a B — what the low-VRAM hold never
+    /// reopens nor reserves memory for (`Runtime::vram_gone`). A B already handed off counts as
+    /// shown, not incoming: a handoff still settling (its onset pending, its clock frozen by the
+    /// hold) never protects the B a newer switch replaces. Guard:
+    /// `a_settling_handoffs_b_is_replaced_by_the_next_switch`.
     pub fn replaced_sources(&self, g: &Graph) -> BTreeSet<String> {
-        let layers: Vec<String> = self
+        let incoming: BTreeSet<&str> = self
             .active
             .iter()
-            .flat_map(|t| t.sides.iter().flat_map(|s| s.layers.clone()))
+            .filter(|t| !matches!(t.phase, Phase::Handoff | Phase::Done))
+            .map(|t| t.b.as_str())
             .collect();
-        let incoming: BTreeSet<&str> = self.active.iter().map(|t| t.b.as_str()).collect();
-        self.active
+        let mut out = BTreeSet::new();
+        for a in self
+            .active
             .iter()
-            .flat_map(|t| t.sides.iter().filter_map(|s| s.a.clone()))
-            .filter(|a| !incoming.contains(a.as_str()) && !shown_outside(g, a, &layers))
-            .collect()
+            .flat_map(|t| t.sides.iter().filter_map(|s| s.a.as_deref()))
+        {
+            if incoming.contains(a) || out.contains(a) {
+                continue;
+            }
+            let replacing: Vec<String> = self
+                .active
+                .iter()
+                .flat_map(|t| t.sides.iter())
+                .filter(|s| s.a.as_deref() == Some(a))
+                .flat_map(|s| s.layers.clone())
+                .collect();
+            if !shown_outside(g, a, &replacing) {
+                out.insert(a.to_string());
+            }
+        }
+        out
     }
 
     /// `id` holds its last frame from now on, as if it had played to its end (a replaced A the
-    /// low-VRAM hold keeps as a still): an `align: end` switch off it starts at once.
+    /// low-VRAM hold keeps as a still): an `align: end` switch off it starts at once. Undone by
+    /// [`Transitions::forget_held_end`] when it reopens; a real `Ended` stays.
     pub fn note_ended(&mut self, g: &Graph, id: &str, now: Duration) {
+        if self.ended.contains_key(id) {
+            return;
+        }
         let tp = get_f64(g, id, "time_pos").unwrap_or(0.0);
-        self.ended.entry(id.to_string()).or_insert((tp, now));
+        self.ended.insert(id.to_string(), (tp, now));
+        self.held_ended.insert(id.to_string());
+    }
+
+    /// `id` reopened after the low-VRAM hold: the end [`Transitions::note_ended`] gave it goes
+    /// (its reopened twin's `Ready`, which would clear it, is held back as no news). Guard:
+    /// `a_held_end_is_forgotten_on_reopen_a_real_one_kept`.
+    pub fn forget_held_end(&mut self, id: &str) {
+        if self.held_ended.remove(id) {
+            self.ended.remove(id);
+        }
     }
 
     /// Every live transition.
@@ -2466,6 +2503,57 @@ mod tests {
             "outputs": "out:*", "to": {"path": to}, "effect_id": effect,
             "duration_ms": 500, "method": method, "align": align
         })
+    }
+
+    /// A switch off the B of a handoff still settling (its onset pending, as under the low-VRAM
+    /// hold's frozen clock) replaces that B where it shows only on the switch's outputs; one
+    /// still shown on another output is kept.
+    #[test]
+    fn a_settling_handoffs_b_is_replaced_by_the_next_switch() {
+        let mut h = H::new(&["V1", "V2"]);
+        h.video(&["V1", "V2"], 30.0, 1.0);
+        // frozen: its handoff settles only once B's audio flows (never, here)
+        let c1 = h.start(req("/b.mkv", "frozen", "now", Some("fade")));
+        let b = h.b_of(&c1);
+        h.observe(&b, "ready", PropValue::Bool(true));
+        h.tick(16, &[(b.clone(), SourceEvent::Ready)]);
+        for s in h.g.ids_of(NodeKind::Source) {
+            if get_str(&h.g, &s, "kind") == "snapshot" {
+                h.observe(&s, "ready", PropValue::Bool(true));
+            }
+        }
+        h.tick(16, &[]);
+        h.tick(600, &[]);
+        h.tick(50, &[]);
+        assert!(h.has(&c1, "transition.handoff") && !h.has(&c1, "transition.done"), "{:?}", h.events);
+        let c2 = h.start(json!({"outputs": "out:V1", "to": {"path": "/c.mkv"},
+                                "effect_id": "fade", "duration_ms": 100}));
+        let c = h.b_of(&c2);
+        let r = h.tr.replaced_sources(&h.g);
+        assert!(!r.contains(&b) && !r.contains(&c), "B still shows on V2: {r:?}");
+        let c3 = h.start(json!({"outputs": "out:V2", "to": {"path": "/c.mkv"},
+                                "effect_id": "fade", "duration_ms": 100}));
+        let c_2 = h.b_of(&c3);
+        let r = h.tr.replaced_sources(&h.g);
+        assert!(r.contains(&b), "B is replaced on every output it shows: {r:?}");
+        assert!(!r.contains(&c) && !r.contains(&c_2), "the incoming B's: {r:?}");
+    }
+
+    /// A suspension's end ([`Transitions::note_ended`]) is forgotten when the source comes back
+    /// ([`Transitions::forget_held_end`]); a real end is kept.
+    #[test]
+    fn a_held_end_is_forgotten_on_reopen_a_real_one_kept() {
+        let mut h = H::new(&["V1"]);
+        let a = h.video(&["V1"], 30.0, 1.0);
+        let b = h.video(&[], 30.0, 29.9);
+        h.tick(16, &[(b.clone(), SourceEvent::Ended)]);
+        h.tr.note_ended(&h.g, &a, h.now);
+        h.tr.note_ended(&h.g, &b, h.now);
+        assert_eq!(h.tr.bounds().2, 2);
+        h.tr.forget_held_end(&a);
+        h.tr.forget_held_end(&b);
+        assert!(!h.tr.ended.contains_key(&a), "a held end goes when it reopens");
+        assert!(h.tr.ended.contains_key(&b), "a real end stays");
     }
 
     /// Superseding an End-wait whose A already ended restores A's loop without a

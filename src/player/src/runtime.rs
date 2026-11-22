@@ -942,6 +942,14 @@ const VRAM_RESUME_WAIT: Duration = Duration::from_secs(5);
 /// `vram.held` is said again once free VRAM moved this far (MiB) from what it last said.
 const VRAM_HELD_FREE_STEP: f64 = 32.0;
 
+/// Sources the low-VRAM hold reopened lose the end it gave them as a still
+/// (`Transitions::forget_held_end`): an `align: end` off one waits for its real end again.
+fn forget_held_ends(tr: &mut Transitions, reopened: &[String]) {
+    for id in reopened {
+        tr.forget_held_end(id);
+    }
+}
+
 /// See `pause_gates`' doc and `docs/player/modules/runtime.md` § Three clocks for gains. The gate ramps its **own**
 /// slot, `gain.pause` — never `gain.anticlick`, which the recipe, retire and park ramp on
 /// other clocks — so it composes with every transition phase (a source waiting on an
@@ -1092,6 +1100,12 @@ impl Runtime {
             "graves": graves,
             "ended": ended,
             "restore_onsets": restore_onsets,
+            // the low-VRAM hold's per-source lists (0 without a hold)
+            "vram_held": self.vram.hold.as_ref().map_or(0, |h| h.suspended.len()),
+            "vram_stopped": self.vram.hold.as_ref().and_then(|h| h.stopped.as_ref()).map_or(0, |s| s.1.len()),
+            "vram_shares": self.vram.hold.as_ref().and_then(|h| h.shares.as_ref()).map_or(0, BTreeMap::len),
+            "vram_engaged_scenes": self.vram.hold.as_ref().map_or(0, |h| h.engaged.scenes.len()),
+            "vram_over_since": self.vram.over_since.len(),
         })
     }
 
@@ -1224,6 +1238,9 @@ impl Runtime {
             return;
         }
         self.vram_reopen_kept();
+        // The reserve follows what changed since the last tick (a cancelled switch's A wanted
+        // again) before this tick's sample can release on it; again at the end for this tick's.
+        self.vram_follow_hold();
         let mode = match self.str_prop("player", "vram_low_mode").as_str() {
             "pause" => "pause",
             "off" => "off",
@@ -1349,6 +1366,7 @@ impl Runtime {
             return;
         }
         let reopened = self.host.resume_media(&gone);
+        forget_held_ends(&mut self.tr, &reopened);
         log::event(
             "vram",
             Level::Info,
@@ -1522,6 +1540,7 @@ impl Runtime {
             .release(Instant::now().saturating_duration_since(self.started));
         let gone = self.vram_gone();
         let reopened = self.host.resume_media(&gone);
+        forget_held_ends(&mut self.tr, &reopened);
         log::event(
             "vram",
             Level::Info,
@@ -1655,6 +1674,7 @@ impl Runtime {
             }
         }
         let reopened = self.host.resume_media(&gone);
+        forget_held_ends(&mut self.tr, &reopened);
         if !reopened.is_empty() {
             log::event(
                 "vram",
@@ -1688,7 +1708,8 @@ impl Runtime {
                 h.suspended.clear();
                 h.stopped = None;
                 h.shares = None;
-                self.host.resume_media(&gone);
+                let reopened = self.host.resume_media(&gone);
+                forget_held_ends(&mut self.tr, &reopened);
             } else {
                 h.phase = HoldPhase::Pausing { at: Instant::now() };
             }
