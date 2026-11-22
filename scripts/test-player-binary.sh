@@ -4,11 +4,12 @@
 # stub that never plays.
 #  a legacy settings file: `"PlayerEngine":"legacy"` and legacy keys are ignored — /player-engine has no engine / active;
 #          a legacy wallpaper this session left running (a fake mpvpaper and linux-wallpaperengine with this run's HOME)
-#          is stopped at `serve` start and LastSession plays on the player instead, while one of another HOME is left
+#          is stopped at `serve` start (SIGTERM first, SIGKILL for one that ignores it) and LastSession plays on the
+#          player instead, while one of another HOME is left
 #          alone; an /apply plays on exactly one player (`serve` on this run's socket); the next save drops PlayerEngine and
 #          RestartMpvpaperEverySeconds.
 #  missing: no binary resolves → /player-engine says why, /apply answers non-2xx with that reason, /health/features
-#          marks liascape-player missing.
+#          marks liascape-player missing; the log says why once over attempts 11 s apart.
 #  appears later: the binary appears (a rebuild, a store path after boot) → the next /apply plays, no backend restart.
 #  stub never plays: LIASCAPE_PLAYER_BIN at an `exit 1` stub (what the other hermetic suites use to keep a player
 #          away) → an /apply tries it and no real `liascape-player serve` ever runs.
@@ -140,10 +141,11 @@ jq --arg v "$V1" '. + {NoAudio: true, AutoMute: false, LastSession: {Paths: [$v]
 export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 # a legacy session of this HOME still on screen, and another HOME's mpvpaper (another user session's: never ours to stop)
 # (a shell under that name: coreutils' multi-call binary won't run as `mpvpaper`; the loop keeps it from exec'ing sleep)
-fake() { exec -a "$1" bash -c 'while :; do sleep 1; done'; }
-(fake mpvpaper) & MP_OURS=$!
-(fake linux-wallpaperengine) & LWE_OURS=$!
-(export HOME=$T/other-home; fake mpvpaper) & MP_OTHER=$!
+# $2: what it does on SIGTERM (it notes the signal in $T/term-<name> first): `exit 0`, or `:` to ignore it
+fake() { exec -a "$1" bash -c "trap 'echo TERM >> \"$T/term-$1\"; $2' TERM; while :; do sleep 0.1; done"; }
+(fake mpvpaper 'exit 0') & MP_OURS=$!
+(fake linux-wallpaperengine :) & LWE_OURS=$!
+(export HOME=$T/other-home; fake mpvpaper 'exit 0') & MP_OTHER=$!
 disown $MP_OURS $LWE_OURS $MP_OTHER   # their kills below are the point: no job notices
 sleep 0.3
 [ "$(named_with_home mpvpaper "$HOME")" = "$MP_OURS" ] && [ "$(named_with_home mpvpaper "$T/other-home")" = "$MP_OTHER" ] \
@@ -156,6 +158,9 @@ for _ in $(seq 1 50); do kill -0 "$MP_OURS" 2>/dev/null || kill -0 "$LWE_OURS" 2
 ! kill -0 "$MP_OURS" 2>/dev/null && ! kill -0 "$LWE_OURS" 2>/dev/null \
   && ok "serve start stopped this session's legacy wallpaper (mpvpaper, linux-wallpaperengine)" \
   || bad "a legacy wallpaper of this HOME still runs after serve start: mpvpaper $(kill -0 "$MP_OURS" 2>/dev/null && echo alive || echo gone), LWE $(kill -0 "$LWE_OURS" 2>/dev/null && echo alive || echo gone)"
+[ -s "$T/term-mpvpaper" ] && [ -s "$T/term-linux-wallpaperengine" ] \
+  && ok "…each was asked with SIGTERM first (the one that ignored it was killed after the wait)" \
+  || bad "the reap sent no SIGTERM first: mpvpaper $([ -s "$T/term-mpvpaper" ] && echo TERM || echo none), LWE $([ -s "$T/term-linux-wallpaperengine" ] && echo TERM || echo none)"
 kill -0 "$MP_OTHER" 2>/dev/null && ok "…another HOME's mpvpaper is left alone" || bad "serve start killed another HOME's mpvpaper"
 waitcur "$V1" 300 && ok "…and the last session (v1.mp4) plays on liascape-player in its place" || bad "the last session didn't come back on the player: /current $(current)"
 code=$(api -o "$T/apply.txt" -w '%{http_code}' -X POST "$U/apply" -d "{\"path\":\"$V2\"}")
@@ -184,6 +189,13 @@ case "$code" in 2??) bad "/apply without a binary → HTTP $code (a silent black
 [ -z "$(players)" ] && ok "…and no player runs" || bad "a player runs without a binary: $(players | tr '\n' ' ')"
 hf=$(api "$U/health/features" | jq -c '.features[] | select(.id == "liascape-player") | [.ok, .inUse, (.reason // "" | test("binary not found"))]')
 [ "$hf" = '[false,true,true]' ] && ok "/health/features: liascape-player missing, in use, with the reason" || bad "/health/features liascape-player: $hf"
+# every attempt looks again; the log says why once, not once per attempt (past the log's own 10 s repeat limit)
+sleep 11
+api -o /dev/null -X POST "$U/apply" -d "{\"path\":\"$V1\"}"; api -o /dev/null "$U/player-engine"; api -o /dev/null "$U/health/features"
+AL=$XDG_CACHE_HOME/liascape/liascape-player-adapter.log
+nf=$(grep -c "liascape-player binary not found" "$AL" 2>/dev/null); ne=$(grep -c "LIASCAPE_PLAYER_BIN=.* does not exist" "$AL" 2>/dev/null)
+[ "${nf:-0}" = 1 ] && [ "${ne:-0}" = 1 ] && ok "the missing binary's reason is logged once over attempts 11 s apart" \
+  || bad "the missing binary logged ${nf:-0}× \"binary not found\" and ${ne:-0}× \"LIASCAPE_PLAYER_BIN … does not exist\" (want 1 each)"
 
 echo "== appears later: the binary turns up, the next /apply plays (no backend restart)"
 wrap_player absent

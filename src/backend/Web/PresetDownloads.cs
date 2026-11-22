@@ -89,7 +89,7 @@ public static class PresetDownloads
             {
                 LibraryStore.SetMeta(dir, m => m.BaseKind = kind);
                 Console.WriteLine($"workshop: {who}: its base {baseId} is a {kind} wallpaper — not fetched");
-                EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir, PlayerEngine.IsLiascapePlayer).Reason, baseTitle = facts.Title });
+                EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir).Reason, baseTitle = facts.Title });
                 return;
             }
             Task fetch;
@@ -155,7 +155,7 @@ public static class PresetDownloads
                 if (ProjectString(baseDir, "workshopid") == baseId)
                 {
                     LibraryStore.SetMeta(dir, m => { m.BaseKind = kind; m.BaseTitle ??= ProjectString(baseDir, "title"); });
-                    EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir, PlayerEngine.IsLiascapePlayer).Reason });
+                    EventBus.Broadcast("library-item-changed", new { path = dir, presetReason = Presets.StatusOf(dir).Reason });
                 }
                 return;
             }
@@ -331,7 +331,7 @@ public static class PresetBases
             foreach (var d in dirs)
                 if (Presets.Read(d) != null)
                 {
-                    var st = Presets.StatusOf(d, liascapePlayer: true);
+                    var st = Presets.StatusOf(d);
                     map[d] = (st.Problem, st.BaseDir);
                 }
         }

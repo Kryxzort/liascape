@@ -6,18 +6,16 @@ using Liascape.Models;
 
 namespace Liascape.Player;
 
-// The wallpaper engine: liascape-player, the Rust player (videos, images, and scenes when its scene worker + WE's assets
-// resolve), the only one. A missing binary is an error with its reason, never a fallback: docs/decisions.md
-// § "Make liascape-player the only engine, no fallback".
-public static class PlayerEngine
+// liascape-player, the Rust player (videos, images, and scenes when its scene worker + WE's assets resolve), is the only
+// engine: where its binary is, why nothing or no scene can play, and the low-VRAM state. A missing binary is an error
+// with its reason, never a fallback: docs/decisions.md § "Make liascape-player the only engine, no fallback".
+public static class PlayerStatus
 {
-    // Always true: the dead legacy branches behind it go with the legacy code. A property, not a const, so those
-    // branches don't warn as unreachable meanwhile.
-    public static bool IsLiascapePlayer => true;
-
     private static string? _bin;
     private static bool _binResolved;
     private static readonly object _lock = new();
+    // the missing-binary reason last logged (null while a binary resolves): every attempt looks again, the log says why once
+    private static string? _loggedMissing;
 
     public static string UnavailableReason =>
         "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape-backend, <prefix>/libexec/liascape, <prefix>/lib/liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
@@ -27,44 +25,31 @@ public static class PlayerEngine
     // Guard: scripts/test-player-binary.sh § missing, § appears later
     public static string? MissingReason() => (ResolveBinary() ?? ResolveBinary(fresh: true)) == null ? UnavailableReason : null;
 
-    // Can a scene item play right now? Scene support on, and the engine that runs can play one: liascape-player
-    // when the player has the `scene` capability — its liascape-scene-worker AND WE's assets dir
-    // resolve (`LiascapePlayerClient.ScenesAvailable`); legacy when linux-wallpaperengine is on PATH.
+    // Can a scene item play right now? Scene support on, and the player has the `scene` capability — its
+    // liascape-scene-worker AND WE's assets dir resolve (`LiascapePlayerClient.ScenesAvailable`).
     public static bool ScenesPlayable(AppSettings s) =>
-        ScenesPlayableFor(s.AllowScenes, IsLiascapePlayer, () => LiascapePlayerClient.Shared.ScenesAvailable, PlayerHelper.IsLweAvailable);
+        ScenesPlayableFor(s.AllowScenes, () => LiascapePlayerClient.Shared.ScenesAvailable);
 
-    // The rule itself (pure — the self-test's truth table): lazily asks only what the engine needs.
-    public static bool ScenesPlayableFor(bool allowScenes, bool isLiascapePlayer, Func<bool> liascapeScenes, Func<bool> lweAvailable) =>
-        allowScenes && (isLiascapePlayer ? liascapeScenes() : lweAvailable());
+    // The rule itself (pure — the self-test's truth table): the player is asked only when scene support is on.
+    public static bool ScenesPlayableFor(bool allowScenes, Func<bool> liascapeScenes) => allowScenes && liascapeScenes();
 
     // `/player-engine.scenes`: can a scene play now, and if not, why (the first condition that fails).
     public static object SceneStatus(AppSettings s)
     {
-        if (IsLiascapePlayer)
-        {
-            var (ok, why, assets) = LiascapePlayerClient.Shared.SceneStatus(withAssets: true);
-            return new
-            {
-                available = ok && s.AllowScenes,
-                reason = !s.AllowScenes ? SceneSupportOff : why,
-                assets_dir = assets,
-            };
-        }
-        bool lwe = PlayerHelper.IsLweAvailable();
+        var (ok, why, assets) = LiascapePlayerClient.Shared.SceneStatus(withAssets: true);
         return new
         {
-            available = s.AllowScenes && lwe,
-            reason = !s.AllowScenes ? SceneSupportOff : lwe ? null : "linux-wallpaperengine not found in PATH — install it to use scenes",
-            assets_dir = (string?)null,
+            available = ok && s.AllowScenes,
+            reason = !s.AllowScenes ? SceneSupportOff : why,
+            assets_dir = assets,
         };
     }
 
-    // `/player-engine.vram` (liascape-player only, else null): is the player's low-VRAM rule holding the wallpaper now
-    // (`player.vram_low_active` — paused, and in `stop` mode its GPU memory freed; NOT a user pause: `player.paused`
-    // stays as the user left it), under which mode. `low_active` null = no player answering.
-    public static object? VramStatus(AppSettings s)
+    // `/player-engine.vram`: is the player's low-VRAM rule holding the wallpaper now (`player.vram_low_active` — paused,
+    // and in `stop` mode its GPU memory freed; NOT a user pause: `player.paused` stays as the user left it), under which
+    // mode. `low_active` null = no player answering.
+    public static object VramStatus(AppSettings s)
     {
-        if (!IsLiascapePlayer) return null;
         bool? low = null;
         var c = LiascapePlayerClient.Shared;
         if (c.SocketExists)
@@ -79,7 +64,6 @@ public static class PlayerEngine
     public static string? SceneUnavailableReason(AppSettings s)
     {
         if (!s.AllowScenes) return "Turn on \"Play scenes\" in Settings to play scenes";
-        if (!IsLiascapePlayer) return PlayerHelper.IsLweAvailable() ? null : "linux-wallpaperengine not found in PATH — install it to use scenes";
         var (ok, why, _) = LiascapePlayerClient.Shared.SceneStatus(withAssets: false);
         return ok ? null : $"liascape-player can't play scenes here: {why}";
     }
@@ -92,20 +76,31 @@ public static class PlayerEngine
         lock (_lock)
         {
             if (_binResolved && !fresh) return _bin;
-            _bin = Resolve();
+            string? envMiss = null;
+            _bin = Resolve(ref envMiss);
             _binResolved = true;
+            // a status read and every switch resolve afresh while it's missing: say why once, again only when the why
+            // changes or a binary turned up meanwhile. Guard: scripts/test-player-binary.sh § missing ("logged once")
+            var why = _bin == null ? UnavailableReason : envMiss;
+            if (why == null) _loggedMissing = null;
+            else if (why != _loggedMissing)
+            {
+                _loggedMissing = why;
+                if (envMiss != null) LiascapePlayerClient.Log(envMiss);
+                if (_bin == null) LiascapePlayerClient.Log(UnavailableReason);
+            }
             return _bin;
         }
     }
 
-    private static string? Resolve()
+    private static string? Resolve(ref string? envMiss)
     {
         static bool Exe(string? p) => !string.IsNullOrEmpty(p) && File.Exists(p);
         var env = Environment.GetEnvironmentVariable("LIASCAPE_PLAYER_BIN");
         if (!string.IsNullOrEmpty(env))
         {
             if (Exe(env)) return Path.GetFullPath(env);
-            LiascapePlayerClient.Log($"LIASCAPE_PLAYER_BIN={env} does not exist — trying the other locations");
+            envMiss = $"LIASCAPE_PLAYER_BIN={env} does not exist — trying the other locations";
         }
         // next to this executable, or the installed layout's libexec/liascape/, or lib/liascape/ itself (Arch's package,
         // whose guidelines rule out /usr/libexec) — this backend runs from <prefix>/lib/liascape/backend/;

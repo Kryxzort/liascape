@@ -272,7 +272,6 @@ export interface TransitionUniform { name: string; type: string; default: number
 export interface TransitionEffect {
   id: string; name: string; category: string; defaultOn: boolean;
   author: string; license: string; uniforms: TransitionUniform[] | null;
-  reveal?: boolean; // plays live (B keeps playing) in Reveal method; else frozen fallback there
 }
 // a scene's user property (SceneProperties.Describe): value/default in WE's encoding — bool, number,
 // colour "r g b" (0–1), combo key, text
@@ -282,7 +281,7 @@ export interface SceneProp {
   min: number | null; max: number | null; step: number | null; fraction: boolean; precision: number | null;
   options: { label: string; value: string }[] | null;
 }
-export interface ScenePropsResp { path: string; live: boolean; note: string | null; props: SceneProp[] }
+export interface ScenePropsResp { path: string; props: SceneProp[] }
 export interface CustomPlaylist { videoPaths: string[]; settings: PlaylistSettings; name: string | null; }
 export interface Theme {
   name: string; bgBase: string; bgMantle: string; bgCrust: string;

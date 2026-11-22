@@ -13,8 +13,7 @@ using Liascape.Models;
 
 namespace Liascape.Player;
 
-// The media primitives PlayerHelper dispatches to under PlayerEngine=liascape-player
-// (.claude/rules/backend/player-adapter.md). Everything is "the same wallpaper on every output" (out:*):
+// The media primitives PlayerHelper dispatches to (.claude/rules/backend/player-adapter.md). Everything is "the same wallpaper on every output" (out:*):
 // a switch is ONE `transition` request (a cut when transitions are off); every setting reaches the live
 // sources through ONE resolver (`ResolveNow`, "the effective-settings resolver" below): each live source
 // — on screen, either side of an effect, a pending B — gets ITS OWN item's effective value, diffed
@@ -245,19 +244,18 @@ public static class LiascapePlayerMedia
         lock (_qLock) return (_pending.Last?.Value ?? _running)?.Done.Task ?? Task.CompletedTask;
     }
 
-    public static void QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd) =>
-        QueueEssential(() => Switch(path, s, tcfg, alignEnd));
+    public static void QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg) =>
+        QueueEssential(() => Switch(path, s, tcfg));
 
     public static void QueueStop() => QueueEssential(Stop);
 
     // ---- scene fps per monitor -----------------------------------------------------------------------
-    // `SceneMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live —
-    // under liascape-player it is not launch-only). `/settings` diffs prev → cur: a new or
+    // `SceneMonitors[].Fps` → `out:<name>.scene_fps` (the frame rate scenes shown there render at; live).
+    // `/settings` diffs prev → cur: a new or
     // changed entry sets its fps, a removed one goes back to the player's default (15, WE's own default fps).
     // Coalescible
     // per output. Every entry is (re)asserted once per player process (`Switch`, the reapply), so a
-    // fresh or restarted player runs them too. `IsPrimary` has no liascape-player meaning (one worker per scene,
-    // every output shows it; its audio is one stream on the bus) — the UI hides it there.
+    // fresh or restarted player runs them too.
     public const double DefaultSceneFps = 15;
 
     public static void ApplySceneFps(IReadOnlyList<SceneMonitor>? prev, IReadOnlyList<SceneMonitor> cur)
@@ -643,7 +641,6 @@ public static class LiascapePlayerMedia
         _startedAt.Clear();
         _onStarted.Clear();
         _lastCorr = null;
-        _alignedCorrs.Clear();
         if (_intent is { } it) _intent = it with { Corr = null }; // corr ids start over in the new process
         QueueEssential(ReconcileShown);
         QueueEssential(AnnounceShownAfterRestart);
@@ -658,16 +655,13 @@ public static class LiascapePlayerMedia
     // BEFORE it — and the settings reapply alone would leave it on screen while the backend and every UI
     // say otherwise. The player can't close that window itself (a switch's reply can't wait for an
     // fsync), so the backend, the one authority on WHAT plays, puts it back.
-    // `_intent` = what this backend last put on screen: an align:now switch's B from its request (it
-    // shows within ms, or its switch fails), an aligned switch's B from its effect's start (until then A
-    // shows and the switch is only armed), nothing after our
-    // `stop`. Unknown (null) when another client switched (a `transition.scheduled` for a path we didn't
+    // `_intent` = what this backend last put on screen: its switch's B from its request (it shows within ms, or its
+    // switch fails), nothing after our `stop`. Unknown (null) when another client switched (a `transition.scheduled` for a path we didn't
     // request — a second backend, `ctl`), our switch failed, or before our first switch: then the
     // player's own state stands.
     private sealed record Intent(string? Path, string? Corr);
     private static volatile Intent? _intent;
     private static volatile string? _requesting; // the path of the `transition` request in flight (its events can beat the reply)
-    private static readonly ConcurrentDictionary<string, string> _alignedCorrs = new(); // our armed aligned switches: corr → B's path
 
     private static void TrackIntent(string kind, JsonElement e)
     {
@@ -676,15 +670,10 @@ public static class LiascapePlayerMedia
         {
             case "transition.scheduled":
                 var path = Str(e, "path");
-                if (path.Length > 0 && path != _requesting && path != _intent?.Path && !_alignedCorrs.Values.Contains(path))
+                if (path.Length > 0 && path != _requesting && path != _intent?.Path)
                     _intent = null; // another client's switch: what shows is theirs
                 break;
-            case "transition.started" or "transition.handoff" when corr != null && _alignedCorrs.TryGetValue(corr, out var b):
-                _intent = new Intent(b, corr); // our aligned switch's effect runs: B shows from here
-                if (kind == "transition.handoff") _alignedCorrs.TryRemove(corr, out _);
-                break;
             case "transition.cancelled" or "transition.failed" when corr != null:
-                _alignedCorrs.TryRemove(corr, out _);
                 if (_intent?.Corr == corr) _intent = null; // ours didn't show (failed / taken over): the player's state stands
                 break;
         }
@@ -718,7 +707,7 @@ public static class LiascapePlayerMedia
             + (why == "restarted" ? " (its snapshot was behind)" : "")
             + $" — the backend last switched to {Path.GetFileName(intent.Path)}: switching {(why == "restarted" ? "back" : "to it")} (cut)");
         Interlocked.Increment(ref _reconciles);
-        Switch(intent.Path, SettingsService.Load(), null, alignEnd: false);
+        Switch(intent.Path, SettingsService.Load(), null);
     }
 
     // Queued by OnRestarted right after ReconcileShown: tell every client what the restarted player shows. A page loaded
@@ -925,7 +914,7 @@ public static class LiascapePlayerMedia
     // a still image the player shows (`kind: image`) — it never ends (the rotation's rules: rule.rs `PlayKind`)
     public static bool IsImagePath(string path) => ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant());
 
-    // B's create props: everything the legacy launch/loadfile carried, as live properties — the
+    // B's create props: every setting the source plays with, as live properties — the
     // resolver's own per-source computation (`Desired`, every resolved prop) + path, kind and loop.
     public static Dictionary<string, object?> SourceProps(string path, AppSettings s) => SourceProps(path, s, Presets.LoadDirOf);
 
@@ -1039,7 +1028,7 @@ public static class LiascapePlayerMedia
     // enough to be inaudible as a jump, short enough to read as "applied at once".
     public const int NormalizeRampMs = 500;
 
-    // Loudness normalization for `path` under `s` (mirrors PlayerHelper.NormalizeAf): unmeasured →
+    // Loudness normalization for `path` under `s`: unmeasured →
     // no filter now + a background measure for next time.
     private static string? NormalizeAf(string path, AppSettings s)
     {
@@ -1061,7 +1050,6 @@ public static class LiascapePlayerMedia
     private static void UpgradeWatchTick()
     {
         AudioMonitor.ReconcileEngine();
-        if (!PlayerEngine.IsLiascapePlayer) return;
         var client = C;
         if (client.PlayerPid == null && !client.Reachable()) return; // a player started before this backend: learn its pid
         if (client.StaleReason() == null) return;
@@ -1080,7 +1068,6 @@ public static class LiascapePlayerMedia
     private static int _upgradeAtCommit;
     public static void UpgradeAfterCommit()
     {
-        if (!PlayerEngine.IsLiascapePlayer) return;
         var client = C;
         if (client.StaleReason() == null || Interlocked.Exchange(ref _upgradeAtCommit, 1) == 1) return;
         _ = Task.Run(async () =>
@@ -1126,11 +1113,11 @@ public static class LiascapePlayerMedia
         catch (LiascapePlayerException) { return true; }
     }
 
-    // `transition {outputs:"out:*", to:{path, props}, effect from Pick(tcfg) or null (cut), method, align}`.
+    // `transition {outputs:"out:*", to:{path, props}, effect from Pick(tcfg) or null (cut), method, align: now}`.
     // Returns the corr (or null when the player can't be reached / refused — logged with its hint).
-    public static string? Switch(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
+    public static string? Switch(string path, AppSettings s, TransitionService.Config? tcfg)
     {
-        try { return SwitchCore(path, s, tcfg, alignEnd); }
+        try { return SwitchCore(path, s, tcfg); }
         finally { InvalidateSources(); } // a new B (and maybe an upgraded player): re-read the map next time
     }
 
@@ -1143,7 +1130,7 @@ public static class LiascapePlayerMedia
         if (!client.EnsureRunning()) return null;
         if (client.StaleReason() is string why) client.UpgradeInPlace(why); // A comes back as it was, then switches
         client.StartEvents();
-        // VideoScale is a layer property; (re)assert it so a hotplugged output or an engine switch
+        // VideoScale is a layer property; (re)assert it so a hotplugged output or a restarted player
         // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.
         client.TryCall("set", new Dictionary<string, object?> { ["path"] = "lay:*:main.fit", ["value"] = Fit(s) }, LiascapePlayerClient.QuickMs);
         if (_sceneFpsGen != client.Generation) AssertSceneFps(client, s); // once per player process
@@ -1151,24 +1138,20 @@ public static class LiascapePlayerMedia
     }
 
     // A program (LiascapePlayerProgram) owns what shows from here: no backend switch to put back after a restart.
-    internal static void ForgetIntent()
-    {
-        _intent = null;
-        _alignedCorrs.Clear();
-    }
+    internal static void ForgetIntent() => _intent = null;
 
-    private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd)
+    private static string? SwitchCore(string path, AppSettings s, TransitionService.Config? tcfg)
     {
         if (Ready(s) is not { } client)
         {
-            if (C.IsStalled) Lost(path, alignEnd, "not answering");
+            if (C.IsStalled) Lost(path, "not answering");
             return null;
         }
         var req = new Dictionary<string, object?>
         {
             ["outputs"] = "out:*",
             ["to"] = SourceProps(path, s),
-            ["align"] = alignEnd ? "end" : "now",
+            ["align"] = "now",
         };
         var pick = tcfg is { Enabled: true } ? TransitionService.Pick(tcfg) : null;
         if (pick is { } p)
@@ -1180,40 +1163,37 @@ public static class LiascapePlayerMedia
         }
         else req["effect_id"] = null; // cut: 30 ms ramp A down, swap, 30 ms ramp B up
         _requesting = path; // its `transition.scheduled` is ours, even when it beats the reply
-        try { return Requested(client.Call("transition", req), path, alignEnd); }
+        try { return Requested(client.Call("transition", req), path); }
         catch (LiascapePlayerException e) when (e.Code == "no_such_effect" && pick != null)
         {
             LiascapePlayerClient.Log($"effect {pick.Value.effectId} not in liascape-player's catalogue ({e.Hint}) → cut");
             req["effect_id"] = null;
             req.Remove("params"); req.Remove("duration_ms"); req.Remove("method");
-            try { return Requested(client.Call("transition", req), path, alignEnd); }
+            try { return Requested(client.Call("transition", req), path); }
             catch (LiascapePlayerException e2) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e2}"); return null; }
         }
         catch (LiascapePlayerException e) when (e.Code == "timeout")
         {
-            Lost(path, alignEnd, e.Message);
+            Lost(path, e.Message);
             return null;
         }
         catch (LiascapePlayerException e) { LiascapePlayerClient.Log($"transition to {Path.GetFileName(path)} failed — {e}"); return null; }
         finally { _requesting = null; }
     }
 
-    // A switch the stall swallowed (above, `LostToStall`). An aligned one is not: its caller hears "unreachable"
-    // and retries on its own; A still shows meanwhile, as it should.
-    private static void Lost(string path, bool alignEnd, string why)
+    // A switch the stall swallowed (above, `LostToStall`).
+    private static void Lost(string path, string why)
     {
-        if (alignEnd) { LiascapePlayerClient.Log($"aligned switch to {Path.GetFileName(path)} not requested — {why}"); return; }
         _intent = new Intent(path, null);
         LostToStall($"switch to {Path.GetFileName(path)} ({why})");
     }
 
-    private static string? Requested(JsonElement res, string path, bool alignEnd)
+    private static string? Requested(JsonElement res, string path)
     {
         var corr = Str(res, "corr");
         if (corr.Length == 0) return null;
         _lastCorr = corr;
-        if (alignEnd) _alignedCorrs[corr] = path; // shows from its effect's start (TrackIntent)
-        else _intent = new Intent(path, corr);
+        _intent = new Intent(path, corr);
         return corr;
     }
 
@@ -1222,10 +1202,10 @@ public static class LiascapePlayerMedia
 
     // Switch, then wait for ITS outcome: "handoff" | "cancelled:<why>" | "failed:<why>" | "unreachable"
     // | "caller-cancelled" (ct fired → `cancel {corr}` sent; an `unsupported` reply = it had already
-    // handed off). align:end waits as long as A plays. `onStarted` runs once (on the thread pool) if the
+    // handed off). `onStarted` runs once (on the thread pool) if the
     // switch reaches Running — never for one cancelled / superseded / failed before that; a missed
     // `transition.started` event (a reconnect gap) → just the terminal outcome, as without it.
-    public static async Task<string> SwitchAndWait(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd, CancellationToken ct,
+    public static async Task<string> SwitchAndWait(string path, AppSettings s, TransitionService.Config? tcfg, CancellationToken ct,
         Action? onStarted = null)
     {
         var client = C;
@@ -1233,39 +1213,21 @@ public static class LiascapePlayerMedia
         client.StartEvents();
         client.WaitSubscribed(2000); // so the handoff event can't slip past before we listen (the poll covers it anyway)
         if (ct.IsCancellationRequested) return "caller-cancelled";
-        // M2 (final review): an aligned wait is bounded too — A's remaining play time + slack (the
-        // player's own fallback, `transition.align_fallback`, fires 10 s after A's end; ours is a
-        // backstop behind it), re-derived each time it runs out (`AlignedWaitCheck`: A's speed may
-        // have changed, the player may be paused). While no output exists (parked) the player
-        // holds an aligned switch until one shows it — then the backstop keeps waiting too.
-        var remaining = alignEnd ? await Task.Run(TimeRemaining).ConfigureAwait(false) : null;
-        double? lastPos = alignEnd ? await Task.Run(() => Query("time_pos")).ConfigureAwait(false) : null; // A when armed
-        var corr = await QueueEssential(() => Switch(path, s, tcfg, alignEnd)).ConfigureAwait(false); // ordered with queued stop/sets; never dropped
+        var corr = await QueueEssential(() => Switch(path, s, tcfg)).ConfigureAwait(false); // ordered with queued stop/sets; never dropped
         if (corr == null) return "failed:request refused";
-        if (onStarted == null) return await WaitSwitch(client, corr, alignEnd, remaining, lastPos, ct).ConfigureAwait(false);
+        if (onStarted == null) return await WaitSwitch(client, corr, ct).ConfigureAwait(false);
         WhenStarted(corr, onStarted);
-        try { return await WaitSwitch(client, corr, alignEnd, remaining, lastPos, ct).ConfigureAwait(false); }
+        try { return await WaitSwitch(client, corr, ct).ConfigureAwait(false); }
         finally { _onStarted.TryRemove(corr, out _); }
     }
 
-    private static async Task<string> WaitSwitch(LiascapePlayerClient client, string corr, bool alignEnd, double? remaining, double? lastPos, CancellationToken ct)
+    private static async Task<string> WaitSwitch(LiascapePlayerClient client, string corr, CancellationToken ct)
     {
-        int bound = alignEnd ? BackstopMs(remaining) : 60_000;
-        string outcome;
-        while (true)
-        {
-            outcome = await WaitCorr(corr, ct, bound).ConfigureAwait(false);
-            if (outcome != "timeout" || !alignEnd) break;
-            // The bound is A's remaining time when the switch was armed — but A's end moves with
-            // its CURRENT speed and stands still while the player is paused (the player re-derives
-            // its own align deadline for both). Give up only when A stopped moving (a stall).
-            var (keepWaiting, next, pos) = await Task.Run(() => AlignedWaitCheck(client, lastPos)).ConfigureAwait(false);
-            if (!keepWaiting) break;
-            bound = next; lastPos = pos;
-        }
+        const int bound = 60_000;
+        string outcome = await WaitCorr(corr, ct, bound).ConfigureAwait(false);
         if (outcome == "timeout")
         {
-            LiascapePlayerClient.Log($"aligned switch {corr} not handed off within {bound} ms — cancelling it (the caller switches now)");
+            LiascapePlayerClient.Log($"switch {corr} not handed off within {bound} ms — cancelling it");
             try { client.Call("cancel", new Dictionary<string, object?> { ["corr"] = corr }); }
             catch (LiascapePlayerException) { } // already handed off / superseded meanwhile
             InvalidateSources();
@@ -1280,76 +1242,18 @@ public static class LiascapePlayerMedia
         return outcome;
     }
 
-    // Seconds past A's remaining play time an aligned switch is waited for (M2) — behind the
-    // player's own 10 s `align_fallback`, so the player normally resolves it first.
-    // LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC shortens it for scripts/test-liascape-player-adapter.sh only.
-    public static readonly double AlignBackstopSlackSec =
-        double.TryParse(Environment.GetEnvironmentVariable("LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC"),
-            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var slack) && slack > 0
-            ? slack : 15;
-
-    private static int BackstopMs(double? remainingSec) =>
-        (int)Math.Min(int.MaxValue - 1, ((remainingSec ?? 0) + AlignBackstopSlackSec) * 1000);
-
-    // An aligned switch's backstop expired: may it keep waiting, and how long until the next check?
-    // No output (I4: the player holds the switch until one shows it) or the player paused (its clock
-    // and the switch stand still) → yes. Otherwise only while A (what `cur:*` shows) still plays on,
-    // for its remaining time at its current speed + slack; A not moving since the last check (a
-    // stall), or no answer → give up (cancel, the caller switches now).
-    private static (bool wait, int boundMs, double? pos) AlignedWaitCheck(LiascapePlayerClient client, double? lastPos)
-    {
-        if (!HasOutputs(client)) return (true, BackstopMs(0), lastPos);
-        try
-        {
-            if (client.Call("get", new Dictionary<string, object?> { ["path"] = "player.paused" }, LiascapePlayerClient.QuickMs)
-                    .GetProperty("value").ValueKind == JsonValueKind.True)
-                return (true, BackstopMs(0), lastPos);
-        }
-        catch (LiascapePlayerException) { return (false, 0, lastPos); }
-        if (Query("time_pos") is not double pos || TimeRemaining() is not double rem) return (false, 0, lastPos);
-        if (lastPos is double lp && Math.Abs(pos - lp) < 1e-3) return (false, 0, pos);
-        return (true, BackstopMs(rem), pos);
-    }
-
-    // Whether the player has any output (false = parked: monitors off / unplugged).
-    private static bool HasOutputs(LiascapePlayerClient client)
-    {
-        try
-        {
-            var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
-            return st.TryGetProperty("outputs", out var o) && o.ValueKind == JsonValueKind.Array && o.GetArrayLength() > 0;
-        }
-        catch (LiascapePlayerException) { return true; } // unknown → treat as shown (don't wait forever)
-    }
-
     // Completes on `transition.handoff` of this switch; false on cancel / failure.
-    public static async Task<bool> SwitchAndWaitHandoff(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd, CancellationToken ct) =>
-        await SwitchAndWait(path, s, tcfg, alignEnd, ct).ConfigureAwait(false) == "handoff";
+    public static async Task<bool> SwitchAndWaitHandoff(string path, AppSettings s, TransitionService.Config? tcfg, CancellationToken ct) =>
+        await SwitchAndWait(path, s, tcfg, ct).ConfigureAwait(false) == "handoff";
 
     public static void Stop()
     {
         var client = C;
         _intent = new Intent(null, null); // nothing shows from here (a restart's snapshot can't bring one back)
         _lastCur = null;
-        _alignedCorrs.Clear();
         if (client.SocketExists && client.TryCall("stop", null, LiascapePlayerClient.QuickMs) == null && client.IsStalled) // item 6
             LostToStall("stop");
         InvalidateSources();
-    }
-
-    // Switching AWAY from liascape-player (synchronous, call it OUTSIDE PlayerHelper's _lock): whatever is
-    // queued runs (bounded), playback stops, the process is gone (quit → SIGTERM → SIGKILL) — so the
-    // other engine never starts while liascape-player still shows something.
-    public static void StopAndQuit()
-    {
-        var client = C;
-        try { Drain().Wait(3000); } catch { }
-        if (client.SocketExists) { try { client.Call("stop", null, LiascapePlayerClient.QuickMs); } catch (LiascapePlayerException) { } }
-        client.QuitOrKill();
-        InvalidateSources();
-        _lastCorr = null;
-        _intent = null; // no player: nothing to put back
-        _alignedCorrs.Clear();
     }
 
     // ---- the effective-settings resolver (player-adapter.md § Targeting) ---------------------------
@@ -1463,13 +1367,6 @@ public static class LiascapePlayerMedia
         });
     }
 
-    // The re-plan alone (the legacy engine: nothing live, the stored configuration still follows the props).
-    public static void ReplanInBackground(string path)
-    {
-        if (PlayerEngine.ResolveBinary() == null || !PlayerHelper.IsScenePath(path)) return;
-        _ = Task.Run(() => { try { Replan(path); } catch (Exception e) { LiascapePlayerClient.Log($"scene {Path.GetFileName(path)} re-plan failed: {e.Message}"); } });
-    }
-
     private static readonly object _replanLock = new();
     private static void Replan(string path)
     {
@@ -1555,10 +1452,6 @@ public static class LiascapePlayerMedia
         if (volume is int v) QueueSet("preview-global:gain.user", () => ResolveNow(new Req { Props = GainUser, GlobalGainDb = MpvPropertyMap.VolumeDb(v) }));
         if (speed is double sp) QueueSet("preview-global:speed", () => ResolveNow(new Req { Props = SpeedOnly, GlobalSpeed = sp }));
     }
-
-    // ApplyPlaybackSettingsLive's Loop (the legacy guard — a single, non-timed video only: during rotation
-    // the recipe owns A's loop, align:end turns it off until the switch; new sources take Loop at creation).
-    public static void SetLoop(bool loop) => QueueSet("set:loop", () => Set("loop", loop));
 
     // The coalescing key of a per-item command on `path` (same file → same key, like SamePath).
     public static string FullPath(string path)
@@ -1824,9 +1717,8 @@ public static class LiascapePlayerMedia
         catch (LiascapePlayerException) { return null; }
     }
 
-    // I1 (final review): a NEW wallpaper session (Apply / a cold Launch) starts
-    // playing, as with legacy (a fresh mpvpaper is never paused) — a pause belongs to the session
-    // it was made in. Queued (callers hold PlayerHelper's _lock), ahead of the session's switch.
+    // I1 (final review): a NEW wallpaper session (Apply, a restore's replay) starts playing — a pause belongs to
+    // the session it was made in. Queued (callers hold PlayerHelper's _lock), ahead of the session's switch.
     // (`stop` clears the player's pause on its own.)
     public static void QueueNewSession() => QueueEssential(() =>
     {
@@ -1866,24 +1758,6 @@ public static class LiascapePlayerMedia
 
     public static double? Query(string prop) =>
         GetCur(prop) is JsonElement { ValueKind: JsonValueKind.Number } v ? v.GetDouble() : null;
-
-    // mpv property names the legacy queries use → liascape-player
-    public static double? QueryMpv(string mpvProp) => mpvProp switch
-    {
-        "time-pos" => Query("time_pos"),
-        "duration" => Query("duration"),
-        "speed" => Query("speed"),
-        "playtime-remaining" => TimeRemaining(),
-        _ => null,
-    };
-
-    // wall-clock seconds left (mpv playtime-remaining = remaining / speed)
-    public static double? TimeRemaining()
-    {
-        if (Query("duration") is not double d || d <= 0 || Query("time_pos") is not double t) return null;
-        double sp = Query("speed") ?? 1.0;
-        return Math.Max(0, d - t) / Math.Max(0.01, sp);
-    }
 
     // `get cur:*.<prop>` (deduplicated across outputs); with different sources per output → the first
     // output's. Never spawns; null when nothing is on screen / no player.

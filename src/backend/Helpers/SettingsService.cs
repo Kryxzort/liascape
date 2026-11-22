@@ -16,8 +16,8 @@ public static class SettingsService
 
     // Every request, the adapter and the daemons load + save this file concurrently. A save that
     // truncates it and writes in place lets a load landing mid-write parse nothing and get the C# defaults
-    // (NoAudio on, volume 100, the legacy engine) — applied live, and saved back over everything by whoever
-    // saves next (`/settings` itself: its `prev` becomes the defaults → an engine "switch", the Steam tokens
+    // (NoAudio on, volume 100) — applied live, and saved back over everything by whoever
+    // saves next (`/settings` itself: its `prev` becomes the defaults, the Steam tokens
     // gone). Guard: the UI matrix's race:settingsSaveLoad cell. So a save writes a temp file and renames
     // it over (atomic: a reader sees the old file or the new one), and a load that still can't parse (a writer
     // that isn't this code — an older build's daemon) retries before falling back to the defaults.

@@ -173,7 +173,7 @@ export function TransitionPicker({
                         {list.map((e) => (
                           <button key={e.id} className={`tr-chip${sel.has(e.id) ? " on" : ""}${previewId === e.id ? " hov" : ""}`}
                             disabled={!en} onMouseEnter={() => setHovered(e.id)} onClick={() => toggle(e.id)}>
-                            {e.reveal && <span className="tr-live" title="Plays live (incoming keeps playing) in Reveal method" />}{e.name}</button>
+                            {e.name}</button>
                         ))}
                       </div>
                     </div>

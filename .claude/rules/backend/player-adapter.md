@@ -7,10 +7,10 @@ paths:
 
 # liascape-player adapter (C# side) and rotation
 
-`src/backend/Player/` drives the Rust player (`.claude/rules/player/core.md`), the only engine
-(`PlayerEngine.IsLiascapePlayer` is always true); `PlayerHelper` dispatches to it with `if (PlayerEngine.IsLiascapePlayer) { … }` at the top of each
-primitive, the legacy code below it unchanged (`.claude/rules/backend/legacy-engine.md`). How the adapter works (client,
-queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
+`src/backend/Player/` drives the Rust player (`.claude/rules/player/core.md`), the only engine; `PlayerHelper`'s
+primitives (apply, next / previous / random, stop, restore, pause, mute, volume, live settings) are requests to it,
+and `Player/PlayerStatus.cs` says where its binary is and why nothing or no scene can play. How the adapter works
+(client, queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 
 ## Threading: nothing waits on the player under `PlayerHelper._lock`
 - Queue every mutation through `LiascapePlayerMedia` (one ordered worker): switches, stops, property sets, resolver passes. Never call the player synchronously inside `_lock` except the quick queries (`LiascapePlayerClient.QuickMs`, 300 ms).
@@ -18,9 +18,10 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 - A per-item pass gets a batch key, not a key per item: 315 distinct `override:<path>` keys filled the 256 cap and dropped the playing item's pass. Guard: self-test "per-item override burst".
 - Queued commands call with `QuickMs`; only `Switch`'s own `transition`/`cancel` keeps the 2 s default.
 - The stall breaker opens for 3 s after a timeout. A STARTING player is not stalled: until it answered once, a request waits up to `StartGraceMs` (5 s after the socket's bind). Guard: self-test `StartupGraceAssertions`.
-- A legacy wallpaper this session left running (mpvpaper, LWE, matched by name and this HOME, never another session's) is reaped at `serve` start and `restore` (`PlayerHelper.ReapAllWallpaperProcs`); `serve` then replays the session on the player (`Restore`). Guard: `scripts/test-player-binary.sh` § a legacy settings file.
 
 ## Process lifecycle
+- A session an older build left running (its wallpaper processes, matched by name and this HOME, never another session's; its `timer-daemon` / `restart-daemon` / `monitor-daemon`, verified by command line) is stopped at `serve` start and `restore`, the daemons at `stop` too (`src/backend/Helpers/LegacyTakeover.cs`): SIGTERM, then SIGKILL after 2 s; `serve` then replays the session on the player (`Restore`). Guard: `scripts/test-player-binary.sh` § a legacy settings file.
+- A missing binary: every switch looks for it again (`PlayerStatus.MissingReason`) and refuses with the reason; the log says why once per reason, not once per attempt. Guard: `scripts/test-player-binary.sh` § missing.
 - Only a switch spawns the player (`EnsureRunning`); queries and sets never do. It runs detached (`setsid`), stdio to `~/.cache/liascape/liascape-player-serve.log` — the player outlives the backend on purpose.
 - `setsid` doesn't leave the backend's cgroup: when the user manager of `$XDG_RUNTIME_DIR` answers, the player starts in its own transient scope (`src/backend/Helpers/UserScope.cs`: `setsid systemd-run --user --scope --collect --unit=liascape-player-<random>.scope -- sh -c 'exec …'`), so stopping a unit the backend runs in (KillMode=control-group) leaves it playing. Every wrapper execs: the spawned pid is the supervisor's. Decided once per process by a real probe scope; no manager, no `systemd-run` or a refusal → started as before, logged once. Never via the session bus's manager (a test's private runtime dir must not reach the desktop's). Adoption is unchanged (the socket). Guard: `scripts/test-backend-stop.sh` § unit.
 - Restart with the running player's own `serve` arguments + `--restore` (`UserServeArgs`); `--session-start` only on a first `restore`-style start, never in an upgrade's or restart's arguments (it would start a playlist over). Self-test `StartArgsAssertions`.
@@ -40,7 +41,7 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 
 ## Pause
 - The player owns pause (`player.paused`, kept in its snapshot). Keep no copy: `TogglePause` reads `get player.paused` and sets the opposite; R81 never re-asserts it.
-- A new session (`Apply`, cold `Launch`) queues `set player.paused false` (`QueueNewSession`), a Play of a playlist loads its program unpaused (`keepPause: false`); a rotation keeps the pause.
+- A new session (`Apply`, a restore's replay) queues `set player.paused false` (`QueueNewSession`), a Play of a playlist loads its program unpaused (`keepPause: false`); a rotation keeps the pause.
 - A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`). With the setting on: the pause stays and the switch goes with its transition, which the player plays on the still frames (`.claude/rules/player/runtime-api.md` § Runtime loop); never send it as a cut. Guard: matrix `paused × cli:next-keep`.
 
 ## Reconnection (R81) and switches the player missed
@@ -80,25 +81,28 @@ Every rule runs in the player's program `prog:main` (`.claude/rules/player/runti
 ## Program wiring (liascape-player)
 - Load via `BuildSpec` + `Load` (essential); reuse an existing `prog:main` (`set key` first, so the old playlist keeps its resume point). A single `Apply` destroys `prog:main` first.
 - Verbs: next/prev/random → `program.next|prev|random`.
-- Stop a `timer-daemon`, `restart-daemon` or `monitor-daemon` a legacy session left running (`KillLegacyDaemons`, verified by its command line). A legacy `timed_state.json` or `pending_action.txt` left in the config dir is never read. Guard: adapter IT § "a legacy rotation's files".
+- A `timed_state.json` or `pending_action.txt` an older build left in the config dir is never read. Guard: adapter IT § "a legacy rotation's files".
 - Restore (`liascape restore`, `play`, `toggle-play` from stopped): start `serve --restore --session-start`; replay `LastSession` only when the player shows nothing.
 - Trash of the shown/incoming item: `SetItems` with the bar's survivors, then `program.next`.
 
 ## Scenes and loudness (adapter side)
 - `ScenesPlayable(s)` = `AllowScenes` && the running player's `scene` capability (else `liascape-player scene-check`, cached 30 s). A non-playable scene is skipped everywhere; a crashed-and-not-whitelisted one by every picker and rotation (`IsSkippedPath`) while a user's apply still plays it (`Apply`); an all-unplayable library answers 409, never 500.
-- A preset plays as its own source: `path` = its folder, `scene_dir` = its base's (`SourceProps`, create-only: never sent to a live source, a base found elsewhere waits for the next play; a running rotation's items follow a base that comes, goes or moves: `PresetDownloads.cs` `PresetBases`, a pass after the library's index writes settle); gates read `Presets.StatusOf` (`PlayerHelper.PresetUnplayableReason`: `Apply` and play-from on one refuse with its reason on both engines, a playlist of only such presets too; both `IsSkippedPath` overloads skip it). Trashing a base takes its presets off screen like trashed items (advance / stop) but keeps them in the playlist; trash and Undo push the items' `skip` and send `library-synced`. A preset image that doesn't load is logged with why, the rest plays. Guard: adapter IT § presets.
-- `source.broken` → `MarkCrashed` + WS `scene-crashed` + advance if it was playing. `scene.vram_exceeded` → WS `scene-vram-stopped` + advance, never `MarkCrashed`. A scene worker that couldn't load the scene renderer (the install's fault, not the scene's) is never `MarkCrashed`: latch the player's word (`hello.scene_renderer_missing`; scene-check's `renderer_missing` only while no player answers and none greeted during the check, `NoPlayerCheck`) in `LiascapePlayerClient.RendererMissing`, re-read on every `scene.renderer_*` fact, live or drained; a change → WS `scenes-blocked {reason}` + `PushItems`, and `/current.scenesBlocked` (never waits: `KickSceneWord`) → the UI greys every scene and preset with it while the engine is liascape-player (store `unplayableReasonOf`). The player drops its `scene` capability meanwhile, so the gates skip scenes. Guards: adapter IT § "a scene worker that can't load the scene renderer", self-test `RendererLatchAssertions`, probe-sidebar `lib:scenesBlocked`.
+- A preset plays as its own source: `path` = its folder, `scene_dir` = its base's (`SourceProps`, create-only: never sent to a live source, a base found elsewhere waits for the next play; a running rotation's items follow a base that comes, goes or moves: `PresetDownloads.cs` `PresetBases`, a pass after the library's index writes settle); gates read `Presets.StatusOf` (`PlayerHelper.PresetUnplayableReason`: `Apply` and play-from on one refuse with its reason, a playlist of only such presets too; both `IsSkippedPath` overloads skip it). Trashing a base takes its presets off screen like trashed items (advance / stop) but keeps them in the playlist; trash and Undo push the items' `skip` and send `library-synced`. A preset image that doesn't load is logged with why, the rest plays. Guard: adapter IT § presets.
+- `source.broken` → `MarkCrashed` + WS `scene-crashed` + advance if it was playing. `scene.vram_exceeded` → WS `scene-vram-stopped` + advance, never `MarkCrashed`. A scene worker that couldn't load the scene renderer (the install's fault, not the scene's) is never `MarkCrashed`: latch the player's word (`hello.scene_renderer_missing`; scene-check's `renderer_missing` only while no player answers and none greeted during the check, `NoPlayerCheck`) in `LiascapePlayerClient.RendererMissing`, re-read on every `scene.renderer_*` fact, live or drained; a change → WS `scenes-blocked {reason}` + `PushItems`, and `/current.scenesBlocked` (never waits: `KickSceneWord`) → the UI greys every scene and preset with it (store `unplayableReasonOf`). The player drops its `scene` capability meanwhile, so the gates skip scenes. Guards: adapter IT § "a scene worker that can't load the scene renderer", self-test `RendererLatchAssertions`, probe-sidebar `lib:scenesBlocked`.
 - `scene.fonts` (each scene load) → `LibraryService.StoreFontStandIns` (written only when it changed, an empty list clears) + `library-item-changed {fontStandIns}`; a live fact only, never the outbox (the next load reports again). Guard: self-test "scene.fonts reaches the backend".
 - Scene normalization is set once per play: each source keeps a pin (`NormalizePin`); re-pin only on the first complete 60 s window, a normalization-setting change, or a new audio configuration (`loudness_key`). Self-test `SceneLoudnessAssertions`.
 - Send `loudness_key` only to a player whose `hello.capabilities` has `scene_loudness_key`.
 - A scene props commit must leave `scene_props` out of its pass when a preview of the item was queued meanwhile (it would revert the preview).
 
-## Auto-mute under liascape-player
+## Auto-mute
 - The player's own Signal is the auto-mute (`AudioMonitor.AutoMuteInPlayer` = the `automute` capability); `AudioMonitor` runs only while `serve` runs and the player lacks it. It mutes `gain.automute`, so `gain.mute` and `PlayerHelper.IsMuted` stay the user's.
 - Ask for the `automute` capability on `AudioMonitor._probe` (its own client, `AutoSpawn = false`), never the shared
   client: a `hello` there discovers a new player from the timer thread and races the restart's reapply, and its
   timeout opens the shared stall breaker.
-- `AudioMonitor` must classify a stream before counting its level and skip the player's own streams by ownership (`OwnStreamFilter`: compositor pid, `node.name` prefix `liascape-player-`, the bus sink). Guard: IT § "auto-mute never hears our own switches".
+- `AudioMonitor` must classify a stream before counting its level and skip the player's own streams by ownership (`OwnStreamFilter`: compositor pid, `node.name` prefix `liascape-player-`, the bus sink); remember our ids until their `remove`. Guard: IT § "auto-mute never hears our own switches".
+- `AudioMonitor` hears each stream with `parec --monitor-stream=<id>`, never `@DEFAULT_MONITOR@` (it hears our own audio → mute/unmute oscillation). Keep `--latency-msec=10` (parec's default buffering delays the first data ~2 s). Why: `docs/decisions.md` § "Monitor auto-mute per stream with a 10 ms parec latency".
+- Reset `_aboveThresholdCount` at the top of `WatchStreamsAsync`, not in `Stop()`.
+- `SetMute` (auto) never unmutes while the user muted (`_userMuted` or `user_mute.state`); `toggle-mute` uses `SetUserMute`.
 
 ## Verify
 - `bash scripts/test-liascape-player-adapter.sh [--no-build]` — hermetic; never touches the owner's player. `LIASCAPE_IT_ONLY=automute` (or `presets`) runs one section.

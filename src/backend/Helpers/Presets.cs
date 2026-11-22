@@ -11,7 +11,7 @@ namespace Liascape.Helpers;
 // id) and its property values (`preset`, WE's own settings keys included; SceneProperties keeps only what the base defines).
 public sealed record PresetFile(string? BaseId, IReadOnlyDictionary<string, JsonElement> Values);
 
-public enum PresetProblem { None, NoBase, BaseNotScene, NeedsBase, Legacy }
+public enum PresetProblem { None, NoBase, BaseNotScene, NeedsBase }
 
 // BaseDir = the base item's folder when one was found; Reason = why the preset can't play now (null = it plays).
 public readonly record struct PresetStatus(PresetProblem Problem, string? BaseDir, string? Reason);
@@ -28,7 +28,6 @@ public static class Presets
 {
     public const string NeedsBaseReason = "Needs its base scene";
     public const string NoBaseReason = "Its preset file names no base scene";
-    public const string LegacyReason = "Presets play only in the Liascape player";
     public static string NotSceneReason(string kind)
     {
         var k = kind.ToLowerInvariant();
@@ -115,7 +114,7 @@ public static class Presets
 
     // Can the preset at this item folder play, and from which base folder? Reads its index entry fresh (its own Workshop
     // id, the base's kind a download saved). Not a preset → None with no base: nothing stops it here.
-    public static PresetStatus StatusOf(string presetDir, bool liascapePlayer)
+    public static PresetStatus StatusOf(string presetDir)
     {
         if (Read(presetDir) is not { } f) return new(PresetProblem.None, null, null);
         LibMeta? m = null; string? selfId = null;
@@ -124,16 +123,16 @@ public static class Presets
             m = LibraryStore.LoadIndex(loc.Source).GetValueOrDefault(loc.Key);
             selfId = m?.WorkshopId ?? (loc.Source is LibraryStore.Workshop or LibraryStore.Local ? loc.Key : null);
         }
-        return StatusFor(f, selfId, m?.BaseKind, BaseDirOf, KindOf, liascapePlayer);
+        return StatusFor(f, selfId, m?.BaseKind, BaseDirOf, KindOf);
     }
 
     // The rule (pure; the self-test's table). The first problem wins: no base named (no id, or its own id: never resolved
     // through itself) → a base the download found isn't a scene (LibMeta.BaseKind), unless a scene base of that id is in
     // the library now (what is here beats what was said: a saved kind never keeps a playable preset greyed) → the base
     // isn't in the library (or isn't whole) → the base folder isn't a scene (a preset: never resolved recursively; a
-    // video) → the legacy engine. Guard: player-selftest PresetAssertions, test-presets.sh § 1 "a scene base lands"
+    // video). Guard: player-selftest PresetAssertions, test-presets.sh § 1 "a scene base lands"
     internal static PresetStatus StatusFor(PresetFile f, string? selfId, string? baseKind, Func<string, string?> baseDirOf,
-        Func<string, string?> kindOfDir, bool liascapePlayer)
+        Func<string, string?> kindOfDir)
     {
         if (f.BaseId is not { } id || id == selfId) return new(PresetProblem.NoBase, null, NoBaseReason);
         var dir = baseDirOf(id);
@@ -142,16 +141,15 @@ public static class Presets
             return new(PresetProblem.BaseNotScene, null, NotSceneReason(bk));
         if (dir == null || kind == null) return new(PresetProblem.NeedsBase, null, NeedsBaseReason);
         if (kind != "scene") return new(PresetProblem.BaseNotScene, dir, NotSceneReason(kind));
-        if (!liascapePlayer) return new(PresetProblem.Legacy, dir, LegacyReason);
         return new(PresetProblem.None, dir, null);
     }
 
-    // The folder the player loads for an item: a scene's own; a preset's base's when the preset could play (whatever the
-    // engine); else null (a video, or a preset that can't play).
+    // The folder the player loads for an item: a scene's own; a preset's base's when the preset could play; else null (a
+    // video, or a preset that can't play).
     public static string? LoadDirOf(string itemPath)
     {
         if (Read(itemPath) != null)
-            return StatusOf(itemPath, liascapePlayer: true) is { Problem: PresetProblem.None, BaseDir: { } d } ? d : null;
+            return StatusOf(itemPath) is { Problem: PresetProblem.None, BaseDir: { } d } ? d : null;
         return Directory.Exists(itemPath) ? itemPath : null;
     }
 

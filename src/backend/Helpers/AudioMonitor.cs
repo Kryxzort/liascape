@@ -10,76 +10,15 @@ namespace Liascape.Helpers;
 
 public static class AudioMonitor
 {
-    internal static string MonitorPidPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "liascape", "monitor.pid");
-
-    public static void KillDetachedMonitor()
-    {
-        try
-        {
-            if (!File.Exists(MonitorPidPath)) return;
-            var pidText = File.ReadAllText(MonitorPidPath).Trim();
-            if (int.TryParse(pidText, out int pid))
-            {
-                try { Process.GetProcessById(pid).Kill(entireProcessTree: true); } catch { }
-            }
-            File.Delete(MonitorPidPath);
-        }
-        catch { }
-    }
-
-    // Legacy only: under liascape-player there is no `monitor-daemon` — the player's Signal mutes with
-    // the app closed, and a leftover daemon is stopped at serve start / restore / stop (PlayerHelper.KillLegacyDaemons).
-    public static void SpawnDetachedMonitor()
-    {
-        if (Liascape.Player.PlayerEngine.IsLiascapePlayer)
-        {
-            Liascape.Player.LiascapePlayerClient.Log("monitor-daemon: legacy-only — under liascape-player the player's Signal mutes with the app closed (skipped)");
-            return;
-        }
-        // A `serve` backend with AutoMute on runs the monitor in this process: a daemon beside it would be a second monitor
-        // on the same streams (a forwarded `play` reaches Restore here). `serve` closing stops its own first (Shutdown),
-        // then hands over.
-        if (RunsHere) return;
-        KillDetachedMonitor();
-        try
-        {
-            var selfArgs = PlayerHelper.GetSelfInvocationArgs();
-            if (selfArgs.Count == 0) return;
-            var psi = new ProcessStartInfo("setsid")
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            foreach (var a in selfArgs) psi.ArgumentList.Add(a);
-            psi.ArgumentList.Add("monitor-daemon");
-            var proc = Process.Start(psi);
-            if (proc != null)
-            {
-                proc.BeginOutputReadLine();
-                proc.BeginErrorReadLine();
-                // Daemon writes its own PID from RunDaemon — proc.Id here is
-                // the setsid wrapper, which may exec or fork depending on
-                // whether liascape is a process group leader.
-            }
-        }
-        catch { }
-    }
-
-    // The engine: under liascape-player the player
-    // runs auto-mute itself (the `automute` Signal, docs/player/modules/signals.md) whenever it has the `automute` capability.
-    // Capability absent (the player's `LIASCAPE_PLAYER_AUTOMUTE=0`, its audio bus down) → this monitor keeps the job while
-    // `serve` runs (criterion 10; with the app closed there is no monitor-daemon under liascape-player). Legacy: this
-    // monitor, as always.
+    // Who auto-mutes: the player itself (the `automute` Signal, docs/player/modules/signals.md) whenever it has the
+    // `automute` capability. Capability absent (the player's `LIASCAPE_PLAYER_AUTOMUTE=0`, its audio bus down) → this
+    // monitor keeps the job while `serve` runs (with the app closed, nothing auto-mutes then).
     // The probe's last word (below) when it is about the same player process the shared client talks to — it follows the
     // bus every 10 s, the shared client's capabilities only its connection's `hello`; else the shared client's.
     public static bool AutoMuteInPlayer
     {
         get
         {
-            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) return false;
             var shared = Liascape.Player.LiascapePlayerClient.Shared;
             bool own = shared.HasCapability("automute");
             return _probeSaid is (int pid, bool said) && pid == shared.PlayerPid ? said : own;
@@ -96,7 +35,6 @@ public static class AudioMonitor
     {
         get
         {
-            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) return false;
             var path = Liascape.Player.LiascapePlayerClient.Shared.SocketPath;
             var p = _probe;
             if (p == null || p.SocketPath != path) _probe = p = new Liascape.Player.LiascapePlayerClient(path) { AutoSpawn = false };
@@ -111,8 +49,7 @@ public static class AudioMonitor
     private static volatile bool _shuttingDown;
 
     // `serve`: who runs auto-mute is decided at start, on an AutoMute setting and every 10 s (the upgrade watch) — a player
-    // process or its bus coming or going, the engine switch. A handover can leave ≤ 10 s of both, which only mutes on
-    // either's word. Legacy reduces to today's Start / Stop (the capability is never asked).
+    // process or its bus coming or going. A handover can leave ≤ 10 s of both, which only mutes on either's word.
     public static void ReconcileEngine(bool settingChanged = false)
     {
         lock (_engineLock)
@@ -129,7 +66,7 @@ public static class AudioMonitor
                 Start(s.AutoMuteDelayMs, s.AutoUnmuteDelayMs, s.AutoMuteMinLevelDb, s.AutoMuteOnlyIfMprisActive);
             else if (!s.AutoMute && RunsHere)
                 Stop();
-            if (_engineInPlayer != inPlayer && Liascape.Player.PlayerEngine.IsLiascapePlayer)
+            if (_engineInPlayer != inPlayer)
                 Liascape.Player.LiascapePlayerClient.Log($"auto-mute engine: {(inPlayer ? "the player's Signal" : "AudioMonitor (the player has no automute capability)")}");
             _engineInPlayer = inPlayer;
         }
@@ -145,8 +82,8 @@ public static class AudioMonitor
         }
     }
 
-    // `restore` under liascape-player, the player just started: its Signal gets the settings (its bus gets ≤ 3 s to come
-    // up). No monitor-daemon either way (retired): a player without the capability has no auto-mute until the app opens.
+    // `restore`, the player just started: its Signal gets the settings (its bus gets ≤ 3 s to come up). A player without
+    // the capability has no auto-mute until the app opens (this monitor runs only inside `serve`).
     public static void AfterRestore(Liascape.Models.AppSettings s)
     {
         for (int i = 0; s.AutoMute && i < 30 && !AutoMuteInPlayerNow; i++) Thread.Sleep(100);
@@ -164,43 +101,10 @@ public static class AudioMonitor
     private static CancellationTokenSource? _cts;
     private static volatile bool _isMuted;
     public static bool IsMuted => _isMuted;
-    // this process runs the monitor itself (a `serve` backend with AutoMute on, a `monitor-daemon`)
+    // this process runs the monitor itself (a `serve` backend with AutoMute on)
     public static bool RunsHere => _cts != null;
     private static int _aboveThresholdCount;
     private static volatile bool _onlyIfMprisActive;
-
-    // Entry point for the detached `liascape monitor-daemon` daemon process — legacy only. Under liascape-player (started
-    // by hand, or by an older build) it hands the settings to the player's Signal when it can and ends.
-    public static void RunDaemon()
-    {
-        if (Liascape.Player.PlayerEngine.IsLiascapePlayer)
-        {
-            Liascape.Player.LiascapePlayerClient.Log("monitor-daemon: legacy-only — under liascape-player the player's Signal mutes with the app closed (ended)");
-            if (AutoMuteInPlayerNow)
-            {
-                Liascape.Player.LiascapePlayerMedia.ApplyAutoMuteSettings(SettingsService.Load());
-                Liascape.Player.LiascapePlayerMedia.Drain().Wait(3000);
-            }
-            return;
-        }
-        WriteMonitorPid();
-        PlayerHelper.InstallShutdownReaper(); // SIGTERM on system-shutdown → reap mpvpaper (see method)
-        var settings = SettingsService.Load();
-        if (settings.AutoMute)
-            Start(settings.AutoMuteDelayMs, settings.AutoUnmuteDelayMs, settings.AutoMuteMinLevelDb, settings.AutoMuteOnlyIfMprisActive);
-        Thread.Sleep(Timeout.Infinite);
-    }
-
-    private static void WriteMonitorPid()
-    {
-        try
-        {
-            var path = MonitorPidPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            AtomicFile.WriteAllText(path, Environment.ProcessId.ToString()); // a reader mid-write saw no owner
-        }
-        catch { }
-    }
 
     public static void Start(int muteDelayMs, int unmuteDelayMs, double thresholdDb, bool onlyIfMprisActive = false)
     {
@@ -507,8 +411,8 @@ public static class AudioMonitor
     }
 
     // Every listed sink-input + the foreign ones among them (one `pactl list sink-inputs`; liascape-player's ownership
-    // filter — itself a `pactl list short sinks` + maybe a `hello` — and the LWE client ids built concurrently, so
-    // classifying costs one round trip, inside parec's own start-up).
+    // filter — itself a `pactl list short sinks` + maybe a `hello` — built concurrently, so classifying costs one round
+    // trip, inside parec's own start-up).
     private static async Task<(HashSet<uint> listed, HashSet<uint> foreign)> ListStreamsAsync(CancellationToken ct)
     {
         var psi = new ProcessStartInfo("pactl")
@@ -521,10 +425,7 @@ public static class AudioMonitor
         psi.ArgumentList.Add("sink-inputs");
 
         // liascape-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name)
-        var isOwnTask = Liascape.Player.PlayerEngine.IsLiascapePlayer
-            ? Task.Run<Func<string, bool>?>(Liascape.Player.LiascapePlayerMedia.OwnStreamFilter, ct)
-            : Task.FromResult<Func<string, bool>?>(null);
-        var lweTask = Task.Run(PlayerHelper.GetLweClientObjectIds, ct);
+        var isOwnTask = Task.Run<Func<string, bool>?>(Liascape.Player.LiascapePlayerMedia.OwnStreamFilter, ct);
         Process? proc;
         try { proc = Process.Start(psi); }
         catch { return ([], []); }
@@ -534,15 +435,13 @@ public static class AudioMonitor
         {
             var output = await proc.StandardOutput.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct);
-            HashSet<string>? lweClientIds;
-            try { lweClientIds = await lweTask; } catch (OperationCanceledException) { throw; } catch { lweClientIds = null; }
             Func<string, bool>? isOwn;
             try { isOwn = await isOwnTask; } catch (OperationCanceledException) { throw; } catch { isOwn = null; }
-            return ParseStreams(output, lweClientIds, isOwn);
+            return ParseStreams(output, isOwn);
         }
     }
 
-    internal static (HashSet<uint> listed, HashSet<uint> foreign) ParseStreams(string output, HashSet<string>? lweClientIds = null, Func<string, bool>? isOwn = null)
+    internal static (HashSet<uint> listed, HashSet<uint> foreign) ParseStreams(string output, Func<string, bool>? isOwn = null)
     {
         var listed = new HashSet<uint>();
         var result = new HashSet<uint>();
@@ -553,23 +452,7 @@ public static class AudioMonitor
             listed.Add(blockId);
             if (block.Contains("application.process.binary = \"mpv\"")) continue;
             if (block.Contains("application.name = \"mpv\"")) continue;
-            if (block.Contains("application.process.binary = \"linux-wallpaperengine\"")) continue;
-            if (block.Contains("application.name = \"linux-wallpaperengine\"")) continue;
             if (isOwn != null && isOwn(block)) continue;
-            if (lweClientIds != null)
-            {
-                string? clientId = null;
-                foreach (var line in block.Split('\n'))
-                {
-                    var t = line.Trim();
-                    if (t.StartsWith("client.id = \""))
-                    {
-                        clientId = t.Substring("client.id = \"".Length).TrimEnd('"');
-                        break;
-                    }
-                }
-                if (clientId != null && lweClientIds.Contains(clientId)) continue;
-            }
             result.Add(blockId);
         }
         return (listed, result);

@@ -212,9 +212,9 @@ public static class LiascapePlayerSelfTest
         using var good = JsonDocument.Parse("""{"effects":{"ok":true,"reason":null},"vram":{"ok":true,"reason":null},"hwdec_interop":{"ok":true,"reason":null},"cover":{"ok":true,"reason":null,"source":"hyprland"},"scenes":{"ok":true,"reason":null},"automute":{"ok":true,"reason":null},"bus":{"ok":true,"reason":null,"state":"up"}}""");
         using var bad = JsonDocument.Parse("""{"effects":{"ok":false,"reason":"no catalogue"},"vram":{"ok":false,"reason":"no VRAM measurement here"},"hwdec_interop":{"ok":null,"reason":null},"cover":{"ok":false,"reason":"no window-state source here (no compositor IPC) — \"Pause behind windows\" can't act","source":"unavailable"},"automute":{"ok":false,"reason":"the player's audio bus is down"},"bus":{"ok":false,"reason":"the player's audio bus is down (no session manager) — sources play on mpv's default device instead","state":"down"}}""");
         FeatureHealth.Feature F(List<FeatureHealth.Feature> l, string id) => l.FirstOrDefault(x => x.id == id) ?? new(id, id, null, "MISSING FEATURE", []);
-        var all = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), _ => true, false));
+        var all = FeatureHealth.Build(new(null, good.RootElement, (true, null), _ => true));
         foreach (var x in all) if (x.ok != true) fails.Add($"health (everything present): {x.id} ok={x.ok} ({x.reason})");
-        var none = FeatureHealth.Build(new(true, null, bad.RootElement, (false, "liascape-scene-worker not found"), t => t is not ("pactl" or "playerctl" or "ffprobe"), false));
+        var none = FeatureHealth.Build(new(null, bad.RootElement, (false, "liascape-scene-worker not found"), t => t is not ("pactl" or "playerctl" or "ffprobe")));
         void Want(string id, bool? ok, string? inReason, string affects)
         {
             var x = F(none, id);
@@ -236,23 +236,23 @@ public static class LiascapePlayerSelfTest
         if ((F(none, "auto-mute").reason ?? "").Contains("parec")) fails.Add("health: auto-mute names parec, which is present");
         if (!(F(none, "auto-mute").reason ?? "").Contains("only while the app is open")) fails.Add($"health: a player without automute doesn't say the app-closed limit: {F(none, "auto-mute").reason}");
         // the Signal: pactl / parec / playerctl all missing don't matter; MPRIS needs a session bus; no player ran → unknown
-        var sig = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not ("pactl" or "parec" or "playerctl"), false, SessionBus: false));
+        var sig = FeatureHealth.Build(new(null, good.RootElement, (true, null), t => t is not ("pactl" or "parec" or "playerctl"), SessionBus: false));
         if (F(sig, "auto-mute").ok != true) fails.Add($"health: the Signal without pactl/parec: auto-mute ok={F(sig, "auto-mute").ok} ({F(sig, "auto-mute").reason})");
         if (F(sig, "mpris").ok != false || !(F(sig, "mpris").reason ?? "").Contains("session bus")) fails.Add($"health: the Signal without a session bus: mpris ok={F(sig, "mpris").ok} ({F(sig, "mpris").reason})");
-        var sigBus = FeatureHealth.Build(new(true, null, good.RootElement, (true, null), t => t is not "playerctl", false));
+        var sigBus = FeatureHealth.Build(new(null, good.RootElement, (true, null), t => t is not "playerctl"));
         if (F(sigBus, "mpris").ok != true) fails.Add($"health: the Signal with a session bus, no playerctl: mpris ok={F(sigBus, "mpris").ok} ({F(sigBus, "mpris").reason})");
         using var gateOn = JsonDocument.Parse("""{"automute":{"ok":null,"reason":null}}""");
-        var unk = FeatureHealth.Build(new(true, null, gateOn.RootElement, (true, null), _ => false, false));
+        var unk = FeatureHealth.Build(new(null, gateOn.RootElement, (true, null), _ => false));
         if (F(unk, "audio-bus").ok != null || F(unk, "audio-bus").reason != null) fails.Add($"health: no bus answer: audio-bus ok={F(unk, "audio-bus").ok} ({F(unk, "audio-bus").reason}), want unknown without a reason");
         if (F(unk, "auto-mute").ok != null || F(unk, "mpris").ok != null) fails.Add($"health: no player ran (the gate on): auto-mute ok={F(unk, "auto-mute").ok}, mpris ok={F(unk, "mpris").ok}, want unknown");
-        var leg = FeatureHealth.Build(new(false, null, good.RootElement, (true, null), t => t is not ("parec" or "playerctl"), true));
-        if (F(leg, "auto-mute").ok != false || !(F(leg, "auto-mute").reason ?? "").Contains("parec") || F(leg, "mpris").ok != false)
-            fails.Add($"health: legacy without parec/playerctl: auto-mute ok={F(leg, "auto-mute").ok} ({F(leg, "auto-mute").reason}), mpris ok={F(leg, "mpris").ok}");
-        var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, false));
+        // no player binary: AudioMonitor's tools decide auto-mute (pactl + parec, playerctl for MPRIS)
+        var noTools = FeatureHealth.Build(new("liascape-player not found", null, (false, "liascape-player not found"), t => t is not ("parec" or "playerctl")));
+        if (F(noTools, "auto-mute").ok != false || !(F(noTools, "auto-mute").reason ?? "").Contains("parec") || F(noTools, "mpris").ok != false)
+            fails.Add($"health: no player, no parec/playerctl: auto-mute ok={F(noTools, "auto-mute").ok} ({F(noTools, "auto-mute").reason}), mpris ok={F(noTools, "mpris").ok}");
+        var noBin = FeatureHealth.Build(new("liascape-player not found", null, (false, "liascape-player not found"), _ => true));
         if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram" || x.id == "audio-bus")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
         // the only engine: no setting picks it, so its row marks none (the summary only), and it is always in use
         if (F(noBin, "liascape-player").affects.Length != 0) fails.Add($"health: liascape-player affects [{string.Join(",", F(noBin, "liascape-player").affects)}], want none");
-        if (leg.Any(x => x.id == "audio-bus")) fails.Add("health: the legacy engine has no player audio bus row");
         var d = new AppSettings();
         foreach (var (id, want) in new[] { ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true), ("liascape-player", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
@@ -384,15 +384,14 @@ public static class LiascapePlayerSelfTest
             (new AppSettings { AllowScenes = true }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop scene_spare=True"),
             (new AppSettings { AllowScenes = true, SceneSpareWorker = false }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop scene_spare=False") })
             if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
-        // ScenesPlayable: AllowScenes × engine × (liascape-player: the player's `scene` capability | legacy: LWE)
+        // ScenesPlayable: AllowScenes × the player's `scene` capability (asked only with scene support on)
         foreach (var allow in new[] { false, true })
-        foreach (var onPlayer in new[] { false, true })
         foreach (var cap in new[] { false, true })
-        foreach (var lwe in new[] { false, true })
         {
-            bool want = allow && (onPlayer ? cap : lwe);
-            bool got = PlayerEngine.ScenesPlayableFor(allow, onPlayer, () => cap, () => lwe);
-            if (got != want) fails.Add($"ScenesPlayable(AllowScenes={allow}, liascape-player={onPlayer}, scene capability={cap}, LWE={lwe}) = {got}, want {want}");
+            bool asked = false;
+            bool got = PlayerStatus.ScenesPlayableFor(allow, () => { asked = true; return cap; });
+            if (got != (allow && cap) || asked != allow)
+                fails.Add($"ScenesPlayable(AllowScenes={allow}, scene capability={cap}) = {got} (capability asked: {asked}), want {allow && cap} (asked: {allow})");
         }
         // D6: a scene marked crashed is skipped unless whitelisted; a video never
         foreach (var crashed in new[] { false, true })
@@ -675,8 +674,8 @@ public static class LiascapePlayerSelfTest
         if (SceneProperties.Parse("{not json").Count != 0 || SceneProperties.Parse("{\"general\":{\"properties\":[1]}}").Count != 0)
             fails.Add("a malformed project.json must parse to no properties, never throw");
 
-        // values: Coerce (UI → WE encoding), ToPlayer (→ scene_props), ToCli (→ LWE --set-property)
-        void Co(string n, string json, string? want, string? player = null, string? cli = null)
+        // values: Coerce (UI → WE encoding), ToPlayer (→ scene_props)
+        void Co(string n, string json, string? want, string? player = null)
         {
             var p = P(n)!;
             var (v, err) = SceneProperties.Coerce(p, JsonDocument.Parse(json).RootElement);
@@ -685,24 +684,22 @@ public static class LiascapePlayerSelfTest
             if (v == null) return;
             var pl = JsonSerializer.Serialize(SceneProperties.ToPlayer(p, v));
             if (player != null && pl != player) fails.Add($"ToPlayer({n}, {got}) = {pl}, want {player}");
-            var c = SceneProperties.ToCli(p, v);
-            if (cli != null && c != cli) fails.Add($"ToCli({n}, {got}) = {c}, want {cli}");
         }
-        Co("clock", "false", "false", "false", "false");
-        Co("clock", "\"1\"", "true", "true", "true");
+        Co("clock", "false", "false", "false");
+        Co("clock", "\"1\"", "true", "true");
         Co("clock", "\"maybe\"", null);
-        Co("bars", "70", "64", "64", "64");            // clamped to max
-        Co("bars", "20.6", "21", "21", "21");          // fraction false → whole
-        Co("opacity", "\"0.5\"", "0.5", "0.5", "0.5");
+        Co("bars", "70", "64", "64");            // clamped to max
+        Co("bars", "20.6", "21", "21");          // fraction false → whole
+        Co("opacity", "\"0.5\"", "0.5", "0.5");
         Co("opacity", "\"x\"", null);
-        Co("schemecolor", "\"#ff8000\"", "\"1 0.501961 0\"", "[1,0.501961,0]", "1 0.501961 0");
-        Co("schemecolor", "[0, 1, 0]", "\"0 1 0\"", "[0,1,0]", "0 1 0");
+        Co("schemecolor", "\"#ff8000\"", "\"1 0.501961 0\"", "[1,0.501961,0]");
+        Co("schemecolor", "[0, 1, 0]", "\"0 1 0\"", "[0,1,0]");
         Co("schemecolor", "\"0 128 255\"", "\"0 0.501961 1\"");
         Co("schemecolor", "\"red\"", null);
-        Co("style", "1", "\"1\"", "\"1\"", "1");
-        Co("style", "\"x\"", "\"x\"", "\"x\"", "x");
+        Co("style", "1", "\"1\"", "\"1\"");
+        Co("style", "\"x\"", "\"x\"", "\"x\"");
         Co("style", "\"3\"", null);
-        Co("name", "\"Ada\"", "\"Ada\"", "\"Ada\"", "Ada");
+        Co("name", "\"Ada\"", "\"Ada\"", "\"Ada\"");
         Co("name", "5", null);
         if (SceneProperties.Coerce(P("launch")!, JsonDocument.Parse("\"x\"").RootElement).Error == null) fails.Add("a usershortcut must refuse a value");
         if (!SceneProperties.SameValue(P("schemecolor")!, System.Text.Json.Nodes.JsonValue.Create("0.5 0.25 1.0"), P("schemecolor")!.Default))
@@ -740,7 +737,7 @@ public static class LiascapePlayerSelfTest
 
         PresetLayerAssertions(fails, props);
 
-        // legacy launch args, only for overrides that name an editable property
+        // the player's map, only for overrides that name an editable property
         var dir = Path.Combine("/tmp", "lpst-props-" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
@@ -751,9 +748,6 @@ public static class LiascapePlayerSelfTest
                 ["clock"] = JsonDocument.Parse("false").RootElement, ["schemecolor"] = JsonDocument.Parse("\"0 1 0\"").RootElement,
                 ["launch"] = JsonDocument.Parse("\"x\"").RootElement, ["gone"] = JsonDocument.Parse("1").RootElement,
             };
-            var cli = string.Join(" ", SceneProperties.CliArgs(dir, ov));
-            if (cli != "--set-property schemecolor=0 1 0 --set-property clock=false")
-                fails.Add($"CliArgs = \"{cli}\", want \"--set-property schemecolor=0 1 0 --set-property clock=false\"");
             var map = JsonSerializer.Serialize(SceneProperties.PlayerMap(dir, ov));
             if (map != "{\"clock\":false,\"schemecolor\":[0,1,0]}") fails.Add($"PlayerMap = {map}, want {{\"clock\":false,\"schemecolor\":[0,1,0]}}");
             if (JsonSerializer.Serialize(SceneProperties.PlayerDefault(dir, "schemecolor")) != "[0.5,0.25,1]") fails.Add("PlayerDefault(schemecolor) wrong");
@@ -910,13 +904,9 @@ public static class LiascapePlayerSelfTest
 
     // ---- next/prev/random's scene-skip decision point -----------------------------------------
     // TryStepLibrary/ApplyRandom (PlayerHelper) skip a path exactly when
-    // `IsScenePath(path) && !PlayerEngine.ScenesPlayable(settings)` — the same formula the
-    // private IsSkippedPath uses, reused here rather than invented (.claude/rules/backend/legacy-engine.md /
-    // player-adapter.md: "skipped exactly like AllowScenes=false"). Needs no player, no
-    // mpvpaper, no `serve` — pure decision logic, so this also covers the "legacy engine
-    // check that scenes are still reachable when AllowScenes=true" requirement without needing
-    // linux-wallpaperengine installed on the test box (it stops at the decision point when LWE
-    // isn't on PATH here — documented below, same allowance task-20c gives the IT script).
+    // `IsScenePath(path) && !PlayerStatus.ScenesPlayable(settings)` — the same formula the
+    // private IsSkippedPath uses, reused here rather than invented (player-adapter.md § Scenes and loudness). Needs no
+    // player and no `serve` — pure decision logic.
     private static void SceneSkipAssertions(List<string> fails)
     {
         const string scenePath = "/tmp/liascape-selftest-lib/workshop/123";   // no extension → a scene
@@ -926,13 +916,13 @@ public static class LiascapePlayerSelfTest
         if (PlayerHelper.IsScenePath(videoPath)) fails.Add("IsScenePath(.mp4) should be false");
 
         static bool WouldSkip(string path, AppSettings s) =>
-            PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayable(s);
+            PlayerHelper.IsScenePath(path) && !PlayerStatus.ScenesPlayable(s);
 
         // liascape-player: playable exactly when the player has the `scene` capability — the
         // capability half is SceneAdapterAssertions' truth table (pure: asking the shared client
         // here would greet whatever player owns the default socket)
         static bool LiascapeSkip(string path, bool cap) =>
-            PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayableFor(true, true, () => cap, () => false);
+            PlayerHelper.IsScenePath(path) && !PlayerStatus.ScenesPlayableFor(true, () => cap);
         if (!LiascapeSkip(scenePath, cap: false)) fails.Add("liascape-player without the scene capability should skip a scene");
         if (LiascapeSkip(scenePath, cap: true)) fails.Add("liascape-player with the scene capability + AllowScenes should play a scene");
         if (LiascapeSkip(videoPath, cap: false)) fails.Add("liascape-player should never skip a video");
@@ -965,27 +955,25 @@ public static class LiascapePlayerSelfTest
         static PresetFile F(string? baseId) =>
             new(baseId, new Dictionary<string, JsonElement> { ["color"] = JsonDocument.Parse("\"0 0 1\"").RootElement });
         const string baseDir = "/lib/workshop/123";
-        void Row(string what, PresetFile f, string? selfId, string? baseKind, string? dir, string? kind, bool player,
+        void Row(string what, PresetFile f, string? selfId, string? baseKind, string? dir, string? kind,
             PresetProblem want, string? wantDir, string? wantReason)
         {
-            var got = Presets.StatusFor(f, selfId, baseKind, id => id == f.BaseId ? dir : null, d => d == dir ? kind : null, player);
+            var got = Presets.StatusFor(f, selfId, baseKind, id => id == f.BaseId ? dir : null, d => d == dir ? kind : null);
             if (got.Problem != want || got.BaseDir != wantDir || got.Reason != wantReason)
                 fails.Add($"preset status ({what}) = {got.Problem} {got.BaseDir ?? "null"} \"{got.Reason}\", want {want} {wantDir ?? "null"} \"{wantReason}\"");
         }
-        Row("base found, a scene", F("123"), "910", null, baseDir, "scene", true, PresetProblem.None, baseDir, null);
-        Row("no base id", F(null), "910", null, baseDir, "scene", true, PresetProblem.NoBase, null, "Its preset file names no base scene");
-        Row("its own id", F("910"), "910", null, "/lib/workshop/910", "preset", true, PresetProblem.NoBase, null, "Its preset file names no base scene");
-        Row("the download said web, no base here", F("123"), "910", "web", null, null, true, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
-        Row("the download said web, a video base here", F("123"), "910", "web", baseDir, "video", true, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
-        Row("the download said web, a scene base here now", F("123"), "910", "web", baseDir, "scene", true, PresetProblem.None, baseDir, null);
-        Row("the download said scene", F("123"), "910", "scene", baseDir, "scene", true, PresetProblem.None, baseDir, null);
-        Row("no base folder", F("123"), "910", null, null, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
-        Row("a base folder of no kind (not whole yet)", F("123"), "910", null, baseDir, null, true, PresetProblem.NeedsBase, null, "Needs its base scene");
-        Row("the base is a preset", F("123"), "910", null, baseDir, "preset", true, PresetProblem.BaseNotScene, baseDir, "Its base is a preset wallpaper, not a scene");
-        Row("the base is a video", F("123"), "910", null, baseDir, "video", true, PresetProblem.BaseNotScene, baseDir, "Its base is a video wallpaper, not a scene");
-        Row("the download said application", F("123"), "910", "application", null, null, true, PresetProblem.BaseNotScene, null, "Its base is an application wallpaper, not a scene");
-        Row("all fine, legacy engine", F("123"), "910", null, baseDir, "scene", false, PresetProblem.Legacy, baseDir, "Presets play only in the Liascape player");
-        Row("no base folder, legacy engine", F("123"), "910", null, null, null, false, PresetProblem.NeedsBase, null, "Needs its base scene");
+        Row("base found, a scene", F("123"), "910", null, baseDir, "scene", PresetProblem.None, baseDir, null);
+        Row("no base id", F(null), "910", null, baseDir, "scene", PresetProblem.NoBase, null, "Its preset file names no base scene");
+        Row("its own id", F("910"), "910", null, "/lib/workshop/910", "preset", PresetProblem.NoBase, null, "Its preset file names no base scene");
+        Row("the download said web, no base here", F("123"), "910", "web", null, null, PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
+        Row("the download said web, a video base here", F("123"), "910", "web", baseDir, "video", PresetProblem.BaseNotScene, null, "Its base is a web wallpaper, not a scene");
+        Row("the download said web, a scene base here now", F("123"), "910", "web", baseDir, "scene", PresetProblem.None, baseDir, null);
+        Row("the download said scene", F("123"), "910", "scene", baseDir, "scene", PresetProblem.None, baseDir, null);
+        Row("no base folder", F("123"), "910", null, null, null, PresetProblem.NeedsBase, null, "Needs its base scene");
+        Row("a base folder of no kind (not whole yet)", F("123"), "910", null, baseDir, null, PresetProblem.NeedsBase, null, "Needs its base scene");
+        Row("the base is a preset", F("123"), "910", null, baseDir, "preset", PresetProblem.BaseNotScene, baseDir, "Its base is a preset wallpaper, not a scene");
+        Row("the base is a video", F("123"), "910", null, baseDir, "video", PresetProblem.BaseNotScene, baseDir, "Its base is a video wallpaper, not a scene");
+        Row("the download said application", F("123"), "910", "application", null, null, PresetProblem.BaseNotScene, null, "Its base is an application wallpaper, not a scene");
 
         // Read over Wallpaper Engine's own files (scripts/test-fixtures/presets/<id>/project.json, from real Workshop items)
         string? fx = null;
@@ -1101,7 +1089,7 @@ public static class LiascapePlayerSelfTest
     // ---- protocol round-trip -----------------------------------------------------------------
     private static void RoundTrip(List<string> fails)
     {
-        var bin = PlayerEngine.ResolveBinary();
+        var bin = PlayerStatus.ResolveBinary();
         if (bin == null) { fails.Add("liascape-player binary not found (set LIASCAPE_PLAYER_BIN)"); return; }
         var tmp = Path.Combine("/tmp", "lpst-" + Guid.NewGuid().ToString("N")[..8]); // socket path < 108 bytes
         Directory.CreateDirectory(Path.Combine(tmp, "rt"));
@@ -1184,7 +1172,7 @@ public static class LiascapePlayerSelfTest
                 var cfg = new TransitionService.Config(true, ["fade"], 200, 0, false);
                 using (var to = new CancellationTokenSource(20000))
                 {
-                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(a, s, cfg, alignEnd: false, to.Token).GetAwaiter().GetResult();
+                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(a, s, cfg, to.Token).GetAwaiter().GetResult();
                     if (!ok) { fails.Add($"colour→clip (align now): no transition.handoff (corr {LiascapePlayerMedia.LastCorr})"); return; }
                 }
                 Phase("colour→clip handoff (align now)");
@@ -1267,13 +1255,13 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.InvalidateSources(); // …and no cached value pretends otherwise
                 LiascapePlayerMedia.Mpv(["set_property", "volume", 50]); LiascapePlayerMedia.Drain().Wait(2000); // back to the global (srcs:*)
 
-                // transitions OFF + video end (the gapless branch): cut at A's end
+                // transitions OFF: a cut
                 using (var to = new CancellationTokenSource(30000))
                 {
-                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(b, s, null, alignEnd: true, to.Token).GetAwaiter().GetResult();
-                    if (!ok) { fails.Add($"clip→clip cut (align end): no transition.handoff (corr {LiascapePlayerMedia.LastCorr})"); return; }
+                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(b, s, null, to.Token).GetAwaiter().GetResult();
+                    if (!ok) { fails.Add($"clip→clip cut: no transition.handoff (corr {LiascapePlayerMedia.LastCorr})"); return; }
                 }
-                Phase("clip→clip cut handoff (align end)");
+                Phase("clip→clip cut handoff");
                 if (LiascapePlayerMedia.CurrentPath() != b) fails.Add($"CurrentPath after cut = {LiascapePlayerMedia.CurrentPath() ?? "null"}, want b.mp4");
 
                 // the source map is invalidated by a switch: b's NEW source (absent from the map read
@@ -1303,13 +1291,13 @@ public static class LiascapePlayerSelfTest
                 LiascapePlayerMedia.Mpv(["set_property", "volume", 50]); LiascapePlayerMedia.Drain().Wait(2000);
 
                 // caller cancel → `cancel {corr}` → false, and the player reports it cancelled
-                stepping.Reset(); // clock frozen → A never ends → the aligned switch stays pending
+                stepping.Reset(); // clock frozen → the effect never ends → the switch stays in flight
                 using (var cts = new CancellationTokenSource(400))
                 {
-                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(a, s, cfg, alignEnd: true, cts.Token).GetAwaiter().GetResult();
-                    if (ok) fails.Add("cancelled aligned switch returned true");
+                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(a, s, cfg, cts.Token).GetAwaiter().GetResult();
+                    if (ok) fails.Add("a cancelled switch returned true");
                 }
-                Phase("cancelled aligned switch returned");
+                Phase("cancelled switch returned");
                 var corr = LiascapePlayerMedia.LastCorr;
                 var logs = client.Call("logs", new Dictionary<string, object?> { ["corr"] = corr, ["kind_prefix"] = "transition." });
                 bool cancelled = logs.GetProperty("events").EnumerateArray().Any(e => e.GetProperty("kind").GetString() == "transition.cancelled");
@@ -1323,7 +1311,7 @@ public static class LiascapePlayerSelfTest
                 SyntheticScene(scene, "{\"pattern\":\"solid\",\"rgb\":[0,128,255],\"native\":[640,360],\"fonts\":[{\"font\":\"Consolas\",\"shown\":\"Cascadia Mono\"}]}");
                 using (var to = new CancellationTokenSource(20000))
                 {
-                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(scene, s, cfg, alignEnd: false, to.Token).GetAwaiter().GetResult();
+                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(scene, s, cfg, to.Token).GetAwaiter().GetResult();
                     if (!ok) fails.Add($"clip→scene fade: no transition.handoff (corr {LiascapePlayerMedia.LastCorr})");
                 }
                 string? Cur(string prop) { try { var v = client.Call("get", new Dictionary<string, object?> { ["path"] = $"cur:*.{prop}" }).GetProperty("value"); return v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText(); } catch (LiascapePlayerException e) { return e.Code; } }
@@ -1364,7 +1352,7 @@ public static class LiascapePlayerSelfTest
                 else Phase("ApplyCoverSetting: pause_when_covered live and back");
                 using (var to = new CancellationTokenSource(20000))
                 {
-                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(b, s, null, alignEnd: false, to.Token).GetAwaiter().GetResult();
+                    bool ok = LiascapePlayerMedia.SwitchAndWaitHandoff(b, s, null, to.Token).GetAwaiter().GetResult();
                     if (!ok || LiascapePlayerMedia.CurrentPath() != b) fails.Add($"scene→clip cut: handoff={ok}, cur {LiascapePlayerMedia.CurrentPath() ?? "null"}");
                 }
                 LiascapePlayerMedia.Mpv(["set_property", "volume", 50]); LiascapePlayerMedia.Drain().Wait(2000);
@@ -1461,14 +1449,15 @@ public static class LiascapePlayerSelfTest
                     if (pausedToggled != JsonValueKind.False) fails.Add($"I3: one TogglePause after the restart left player.paused = {pausedToggled}, want false");
                 }
 
-                // StopAndQuit afterwards must leave NO liascape-player process — neither the (new) compositor
+                // QuitOrKill afterwards must leave NO liascape-player process — neither the (new) compositor
                 // nor the supervisor (the old adapter bug: signalling the compositor pid alone while its
                 // supervisor lived just made the supervisor restart it again).
-                LiascapePlayerMedia.StopAndQuit();
+                LiascapePlayerMedia.Drain().Wait(3000);
+                client.QuitOrKill();
                 bool compositorAlive = StillRunning(newCompositor >= 0 ? newCompositor : deadCompositor);
                 bool supervisorAlive = StillRunning(priorSupervisor);
-                if (compositorAlive || supervisorAlive) fails.Add($"StopAndQuit left a process alive (compositor={compositorAlive}, supervisor={supervisorAlive})");
-                else Phase("StopAndQuit left no liascape-player process (compositor and supervisor both gone)");
+                if (compositorAlive || supervisorAlive) fails.Add($"QuitOrKill left a process alive (compositor={compositorAlive}, supervisor={supervisorAlive})");
+                else Phase("QuitOrKill left no liascape-player process (compositor and supervisor both gone)");
             }
             finally
             {
@@ -1580,7 +1569,7 @@ public static class LiascapePlayerSelfTest
 
     // ---- a player that is still starting is waited for, never "stalled" (a cold boot) ----------------------------
     // The player binds its socket first, then starts (PipeWire bus ≤ 500 ms, EGL, CUDA…) and answers ~1 s later. A
-    // request from another process in that window (the restore's monitor-daemon, its `IsPlaying` a 300 ms `get`) must
+    // request from another process in that window (the app opening during a restore, its `IsPlaying` a 300 ms `get`) must
     // not time out its greeting `hello` and open the stall breaker (the `get` itself sent and timing out again), which
     // fails every request fast for 3 s. A fake player here binds and answers only 1 s later.
     private sealed class SlowStartPlayer : IDisposable

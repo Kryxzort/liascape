@@ -283,7 +283,7 @@ export LIASCAPE_TEST_NO_NETWORK=1
 # per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions LIASCAPE_UI_DIR=$T/ui
-export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
+export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 # restart:initDown loads the built UI from file:// (the dev topology: the UI on another origin than the backend — Chromium
 # sends Origin "null" on its fetches, "file://" on its WebSocket); a backend that serves its own UI admits no other
 # origin unless told (.claude/rules/backend/api.md § Security)
@@ -312,14 +312,6 @@ cleanup() {
       kill "$b2" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$b2" 2>/dev/null || break; sleep 0.1; done; kill -9 "$b2" 2>/dev/null
     fi
   fi
-  # a stopping backend may hand auto-mute to a detached monitor-daemon (setsid: out of this stack's process group),
-  # which would outlive its stack with its HOME gone. Stop it by its pid file, and only a pid whose HOME is this stack's.
-  for f in monitor; do
-    pf=$XDG_CONFIG_HOME/liascape/$f.pid; [ -s "$pf" ] || continue
-    for dp in $(tr -c '0-9\n' ' ' < "$pf"); do
-      tr '\0' '\n' < "/proc/$dp/environ" 2>/dev/null | grep -qx "HOME=$T/home" && kill "$dp" 2>/dev/null
-    done
-  done
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
   # pass: nothing stays. Fail: the results (screens, cells.jsonl) plus this stack's logs go to /tmp/liascape-mx-last, or

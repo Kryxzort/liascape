@@ -22,7 +22,7 @@ public static class UserScope
     private static bool? _usable;
 
     // The arguments to put between `setsid` and the command: `systemd-run --user --scope … --unit=<prefix>-<random> --`,
-    // or none when no user manager can take a scope. `prefix` names what runs in it (`liascape-player`, `mpvpaper`).
+    // or none when no user manager can take a scope. `prefix` names what runs in it (`liascape-player`).
     public static IReadOnlyList<string> Prefix(string prefix, Action<string> log)
     {
         if (!Usable(log)) return [];

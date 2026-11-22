@@ -13,7 +13,7 @@ public class AppSettings
     public int DemuxerMaxBackMib { get; set; } = 5;
     public string HwDec { get; set; } = "auto";
     public string VideoScale { get; set; } = "fill";
-    public int VideoFpsCap { get; set; } = 0; // cap mpv video playback fps (0 = native). Scenes (LWE) unaffected.
+    public int VideoFpsCap { get; set; } = 0; // cap video playback fps (0 = native); scenes have their own (SceneMonitors)
     private int _volume = 100;
     public int Volume
     {
@@ -47,9 +47,7 @@ public class AppSettings
     // the body says, and /library/watched edits it.
     public List<WatchedFolder> WatchedFolders { get; set; } = [];
     public bool AllowScenes { get; set; } = false;
-    public int LweVolume { get; set; } = 100;
     public List<SceneMonitor> SceneMonitors { get; set; } = [];
-    public int SceneTransitionDelayMs { get; set; } = 1000;
     public bool AutoMute { get; set; } = false;
     public int AutoMuteDelayMs { get; set; } = 500;
     public int AutoUnmuteDelayMs { get; set; } = 2000;
@@ -93,7 +91,7 @@ public class AppSettings
     public bool LiveWallpaperBehindAllTabs { get; set; } = false;    // UI: play the wallpaper behind Browse/Library too
     public bool DebugMode { get; set; } = false;             // UI: enable the liascapeDbg bridge + metrics
     public bool DebugOverlay { get; set; } = true;           // UI: show the on-screen debug HUD (when DebugMode on)
-    public bool StayPausedWhenSwitching { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (liascape-player: the transition plays on the still frames; legacy: a cut)
+    public bool StayPausedWhenSwitching { get; set; } = false;     // next/prev/random while paused: false = resume and switch, true = stay paused (the transition plays on the still frames)
     public bool ReplaceDirectWithWorkshop { get; set; } = false; // swap a direct-DL copy for a WE-dir symlink/copy when it appears
     public int LibrarySortIndex { get; set; } = 5;
     // The global rotation (player-adapter.md § Rotation): GlobalSwitchWhenVideoEnds ("Switch when video ends") off →
@@ -159,20 +157,15 @@ public class AppSettings
     public int GlobalTransitionDurationMs { get; set; } = 600;
     public int GlobalTransitionDurationMaxMs { get; set; } = 0;
     public bool GlobalTransitionShuffle { get; set; } = true;
-    // How transitions render (global, advanced): "reveal" = freeze A, reveal the LIVE wallpaper-B
-    // underneath (WE-style; warp effects fall back to frozen); "frozen" = both sides frozen stills
-    // (all effects, zero cost); "full-live" = overlay decodes A+B live (all effects, heavy on 4K).
+    // How transitions render (global, advanced): "reveal" = A holds its last frame while B plays in (WE-style);
+    // "frozen" = both sides hold still; "full-live" = both keep playing through the effect.
     public string TransitionMethod { get; set; } = "reveal";
-    // Full-live only: aim the outgoing (A) decoder this many ms relative to the live wallpaper at the
-    // cover, to cancel the per-machine settling drift (negative = aim slightly ahead). The renderer
-    // takes it in seconds via --lag-offset; ~-30ms suits this dev box, may differ per GPU/refresh.
-    public int FullLiveSyncOffsetMs { get; set; } = -30;
     // What the volume keybinds (`liascape volume up|down`, `/volume {delta}`) move — Advanced setting:
     // "auto" = the playing wallpaper's own volume when it has one, else the global; "item" = always the
     // playing wallpaper's own (creating its override); "global" = always the global (a wallpaper with its own
     // volume doesn't move). PlayerHelper.AdjustVolume.
     public string VolumeKeyTarget { get; set; } = "auto";
-    // liascape-player GPU / VRAM (all live: player-adapter.md § Scenes → "GPU / VRAM"; legacy: unused).
+    // liascape-player GPU / VRAM (all live: player-adapter.md § Scenes → "GPU / VRAM").
     // AutoThrottleScenes: a scene whose worker starves its outputs is throttled stepwise and restored (false = every
     // scene at its fixed fps) → `player.scene_throttle`.
     public bool AutoThrottleScenes { get; set; } = true;
@@ -237,63 +230,6 @@ public class AppSettings
     // out of all devices"). Backend-owned (SettingsService.Patch keeps it); cleared by a new QR sign-in or a sign-out.
     public bool SteamSignInRejected { get; set; }
     public LastSession? LastSession { get; set; }
-
-    public string BuildMpvOptions()
-    {
-        var parts = new List<string>();
-        parts.Add("loop"); // a lone video always loops (docs/decisions.md § "A lone video always loops")
-        if (NoAudio) parts.Add("--no-audio");
-        else parts.Add($"--volume={Volume}");
-        if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");
-        if (DisableCache) parts.Add("--cache=no");
-        if (DemuxerMaxMib > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxMib}MiB");
-        if (DemuxerMaxBackMib > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackMib}MiB");
-        if (!string.IsNullOrWhiteSpace(HwDec)) parts.Add($"--hwdec={HwDec}");
-        if (VideoFpsCap > 0) parts.Add($"--vf=fps={VideoFpsCap}"); // cap playback fps (video only)
-        if (VideoScale == "fill") parts.Add("--panscan=1.0");
-        parts.Add("--image-display-duration=inf");
-        return string.Join(" ", parts);
-    }
-
-    // For playlist mode: omit per-file loop so mpv advances to the next entry.
-    public string BuildMpvPlaylistOptions()
-    {
-        var parts = new List<string>();
-        if (NoAudio) parts.Add("--no-audio");
-        else parts.Add($"--volume={Volume}");
-        if (Speed != 1.0) parts.Add($"--speed={Speed.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}");
-        if (DisableCache) parts.Add("--cache=no");
-        if (DemuxerMaxMib > 0) parts.Add($"--demuxer-max-bytes={DemuxerMaxMib}MiB");
-        if (DemuxerMaxBackMib > 0) parts.Add($"--demuxer-max-back-bytes={DemuxerMaxBackMib}MiB");
-        if (!string.IsNullOrWhiteSpace(HwDec)) parts.Add($"--hwdec={HwDec}");
-        if (VideoFpsCap > 0) parts.Add($"--vf=fps={VideoFpsCap}"); // cap playback fps (video only)
-        if (VideoScale == "fill") parts.Add("--panscan=1.0");
-        parts.Add("--image-display-duration=10");
-        return string.Join(" ", parts);
-    }
-
-    // Live preview of the linux-wallpaperengine (scene) command, one line per configured monitor.
-    // Mirrors PlayerHelper.SpawnLweProcesses exactly. Uses a <monitor> placeholder when none set.
-    public string BuildLweOptions()
-    {
-        var monitors = SceneMonitors.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToList();
-        bool anyPrimary = monitors.Any(m => m.IsPrimary);
-        var src = monitors.Count > 0
-            ? monitors
-            : new List<SceneMonitor> { new() { Name = "<monitor>", Fps = 60, IsPrimary = true } };
-        var lines = new List<string>();
-        foreach (var m in src)
-        {
-            var parts = new List<string> { "linux-wallpaperengine", "--noautomute", "--screen-root", m.Name };
-            bool hasAudio = !anyPrimary || m.IsPrimary;
-            if (NoAudio || !hasAudio) parts.Add("--silent");
-            else { parts.Add("--volume"); parts.Add("100"); }
-            if (m.Fps > 0) { parts.Add("--fps"); parts.Add(m.Fps.ToString()); }
-            parts.Add("--no-fullscreen-pause");
-            lines.Add(string.Join(" ", parts));
-        }
-        return string.Join("\n", lines);
-    }
 
     public static AppSettings Default() => new();
 }

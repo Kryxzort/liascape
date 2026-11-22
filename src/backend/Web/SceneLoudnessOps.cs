@@ -69,14 +69,14 @@ public static class SceneLoudnessOps
     // incomplete last time). No-op without a liascape-player binary (the estimator is its subcommand).
     public static void AfterImport(string why)
     {
-        if (PlayerEngine.ResolveBinary() == null) return;
+        if (PlayerStatus.ResolveBinary() == null) return;
         _ = Task.Run(() => { try { Enqueue(null, false, why); } catch (Exception e) { LiascapePlayerClient.Log($"scene loudness: {why} failed: {e.Message}"); } });
     }
 
     // One imported item (a WE local import, a Workshop download): queued when it's a scene.
     public static void Imported(LibraryItem? item, string why)
     {
-        if (item is not { IsScene: true } || PlayerEngine.ResolveBinary() == null) return;
+        if (item is not { IsScene: true } || PlayerStatus.ResolveBinary() == null) return;
         _ = Task.Run(() => { try { Enqueue([item.VideoPath], false, why); } catch (Exception e) { LiascapePlayerClient.Log($"scene loudness: {why} failed: {e.Message}"); } });
     }
 
@@ -188,7 +188,7 @@ public static class SceneLoudnessOps
     public static void OnStored(string path, bool applied, bool fpChanged)
     {
         BroadcastItem(path);
-        if ((applied || fpChanged) && PlayerEngine.IsLiascapePlayer) LiascapePlayerMedia.ApplySceneLoudness(path);
+        if (applied || fpChanged) LiascapePlayerMedia.ApplySceneLoudness(path);
     }
 
     public static void BroadcastItem(string path)

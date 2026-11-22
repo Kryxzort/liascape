@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 Liascape is a live-wallpaper manager for Wayland: an Electron + React UI (`app/`) over a headless C# backend
-(`src/backend/`, the CLI, daemons and a loopback web API). Wallpapers play in `liascape-player`, a Rust compositor
-(`src/player/`), the only engine; the legacy engine's code (mpvpaper, `src/native/`) is unreachable and going.
+(`src/backend/`, the CLI and a loopback web API). Wallpapers play in `liascape-player`, a Rust compositor
+(`src/player/`), the only engine; the legacy engine's native helpers (`src/native/`) are unreachable and going.
 Users type one command, `liascape` (`scripts/liascape`): bare = the app, `liascape <command>` = the CLI, `liascape ctl …` = the player's socket.
 
 ## Verify your work
@@ -35,7 +35,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 
 ## Hard rules
 - Features compose: every feature keeps working alongside every other one it can co-occur with. Fix the interaction; never disable one behind another. Only a demonstrable hard limit excuses an incompatibility — say so explicitly. After building something, list the modes it touches and verify each combination (e.g. transitions × timed / advance-on-end / manual / random / restore × V→V, V→S, S→V, S→S).
-- Settings apply live: a change takes effect on the playing wallpaper at once, at its effective value (`override ?? global`). Wire a new setting's live path too; the only launch-only settings are legacy LWE's (`SceneMonitors`, scene properties).
+- Settings apply live: a change takes effect on the playing wallpaper at once, at its effective value (`override ?? global`). Wire a new setting's live path too; no setting is launch-only.
 - Tests are hermetic: own HOME / XDG dirs, backend, player socket and audio server. Never start, stop, restart or reconfigure the owner's running app, player, settings, library or keyring from a test or an experiment.
 - Never print, log or commit secrets: never `cat` `~/.config/liascape/settings.json` or `~/.config/liascape/steam-auth.json`, the API token (`serve.token`), or keyring values. Steam tokens live in `src/backend/Helpers/SecretStore.cs` (keyring, else `steam-auth.json`), never in settings.json. The repo is public: no personal details of the owner (accounts, emails, IPs, hostnames) in code, docs or commits; one person's own machine, habits or workflow go in their gitignored `CLAUDE.local.md`.
 - Shared state files (settings, playlist state, library `index.json`) are written field-level and atomically: `.claude/rules/backend/state-files.md`.
@@ -59,7 +59,6 @@ Path-scoped rules load when you read or edit matching files; open one directly w
 | library, index, loudness, scene properties, trash | `.claude/rules/backend/library.md` |
 | scrapers, Workshop, Steam sign-in, secrets, downloads | `.claude/rules/backend/sources-steam.md` |
 | C# side of liascape-player; rotation semantics | `.claude/rules/backend/player-adapter.md` |
-| legacy engine (mpvpaper, LWE, `liascape-transition`, `liascape-audio`) | `.claude/rules/backend/legacy-engine.md` |
 | Rust player: core invariants, graph, clocks, snapshot, supervisor | `.claude/rules/player/core.md` |
 | Rust player: EGL, Wayland, composition | `.claude/rules/player/gfx-wayland.md` |
 | Rust player: sources, mpv, audio bus | `.claude/rules/player/sources-audio.md` |

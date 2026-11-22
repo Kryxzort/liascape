@@ -9,7 +9,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        owner waived the rest of the bar (`docs/player/reports/switch-over.md`). Right after #114 lands, in order:
        a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,
        probes, `scripts/install.sh`, flake, PKGBUILD), with mpvpaper, the LWE launcher path, `src/native/`
-       (`liascape-transition`, `liascape-audio`), `.claude/rules/backend/legacy-engine.md` and the legacy decision
+       (`liascape-transition`, `liascape-audio`), the legacy engine's rule file and its decision
        entries; `docs/README-next.md` replaces `README.md`; the § Switch-over bar items below are closed by it.
        b) The start-up seam: the restored wallpaper's layer waits for its source's `Ready` (owner's pick of § 5).
        c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
@@ -265,39 +265,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       user's rule, so no default to pick up front. Scripting for advanced users is an advanced tier where users write scripts.
       Owner 2026-11-10: it should be general-purpose enough to build intricate setups that the built-in
       triggers/actions can't express (the escape hatch, not just one more action type).
-
-## Legacy player (current app) — small fixes
-- [ ] **Reveal/frozen don't match the intended semantics** (owner, 2026-10-20: "audio follows the picture"):
-      - **Video-end advances** with reveal/frozen fire ~effect + warmup *before* A's end (the legacy video-end wait leads by
-        `duration + coverMs` for every method; `--align-a-end` only exists for full-live). So A freezes several
-        seconds early instead of on its **last** frame. They should fire at A's end.
-      - **Reveal** hard-cuts A's audio at the freeze (possible click) and starts B's audio at full. It should get a
-        ≤ 30 ms anti-click fade on A, and B rising with the reveal (or full from the start, if the owner prefers).
-      - **Frozen** is already silent through the effect, which is correct; it needs only the ≤ 30 ms anti-click ramps.
-- [x] `nix flake update` → mpvpaper **1.9** (PR #132 `glFenceSync` leak fix). Done 2026-11-06: `nix flake update
-      nixpkgs` → `1d06008` (2026-11-03); the review is the commit message. Headless soak (a private headless sway,
-      synthetic 1080p60 loop, 4 min each): 1.8 grows linearly ~19 MB/min (553 → 626 MB), 1.9 is flat (664 → 668 MB,
-      no growth after 90 s).
-      - [x] Soak 1.9 on the real desktop (Owner's `RestartMpvpaperEverySeconds` is **0**; 1.8 reached 1.66 GB RSS in
-            42 min). Run 2026-11-11 01:42–04:42, 180 min, both monitors, workshop 2546567838 `Walk.mp4` (4K60,
-            nvdec, `no-audio loop`), sampled each minute (`.mpvpaper-wrapp` RSS + `nvidia-smi` per-process memory).
-            **GPU memory flat**: 1143 MB from minute 8 to 178 (1125 at the end), so the 1.8 GPU-side leak is fixed.
-            **RSS still grows**: 281 MB (0) → 243 (30) → 345 (80) → 413 (120) → 451 (140) → 489 (170) → 511 (180).
-            Growth is steady, in ~16–20 MB steps every ~10–20 min (~1.7 MB/min, ~100 MB/h), with no plateau by
-            minute 180; it is not the 8-min loop (steps don't line up with it). ~11× slower than 1.8 (~19 MB/min),
-            but not flat, so the restart default (600 s) **stays**. Open: find the RSS growth (mpv demuxer/hwdec
-            pool? try `demuxer-max-bytes`, `hwdec=no` A/B, a 1080p file) before relaxing it; a 1 h restart would
-            cap it at ~100 MB.
-      - [ ] `scripts/lwe.sh --nix` loses the caller's `LIASCAPE_LWE_CORE_DIR`: the devShell sets it to the store core,
-            so `build` tries to install into the read-only store. Workaround: `nix develop -c env
-            LIASCAPE_LWE_CORE_DIR=<dir> bash scripts/lwe.sh build …`. Fix: carry the caller's value (or the
-            `build/lwe-core` default) across the re-exec.
-- [ ] Measure the scene legs (V→S, S→V, S→S) of the cubic-volume crossfade fix (`6f0433a`). Only V→V is measured.
-- [ ] Harden `AUDIO_SETTLE` in `liascape-transition`: pin `audio-buffer=0.2` on the overlay decoders, and derive the settle
-      from audio-buffer + 2× PipeWire quantum. Only worth it if legacy stays the default for long.
-- [ ] First transition after backend start can fire late (lead estimate unmeasured). Gone in liascape-player.
-- [ ] Optional: reword the stale "WIP" commit titles `161bf0f` / `8c5c0e6`. They're pushed, so this needs a force-push;
-      owner's call.
 
 ## liascape-player (after design approval)
 - [ ] A PipeWire restart can wedge an mpv core for good (about 1 kill in 6 under load): the audio bus reconnects but
@@ -611,10 +578,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] Desktop pointer on Sway/other compositors: no global cursor source (Sway's IPC has none) → surface pointer.
 
 ## Backend structure
-- [ ] After #114 lands: prune `docs/decisions.md` (at its 30,000-char budget) against its own bar, "write it when
-      someone would otherwise fix it back": move the legacy-engine entries (audio settle, parec auto-mute, LWE volume,
-      mpvpaper restart, the video-end wait, the libpulse crossfade, legacy transitions, …) into
-      `.claude/rules/backend/legacy-engine.md`, which goes away with the engine; delete entries nobody would reverse
+- [ ] Prune `docs/decisions.md` (near its 30,000-char budget) against its own bar, "write it when
+      someone would otherwise fix it back": delete entries nobody would reverse
       (Electron + React, "a work of art", focus rings only while tabbing, …); cut entries that restate a rule to their
       why plus a link. Target ~18–20k chars. Rules citing a removed entry's heading get updated (check-rules).
 - [ ] One source of truth for the player's command API: the C# adapter's request/result/event types
@@ -624,6 +589,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       type (or generate the C# types from it). Same idea later for the UI's `api/client.ts` vs the backend's web API.
 
 ## Older backlog
+- [ ] `scripts/lwe.sh --nix` loses the caller's `LIASCAPE_LWE_CORE_DIR`: the devShell sets it to the store core,
+      so `build` tries to install into the read-only store. Workaround: `nix develop -c env
+      LIASCAPE_LWE_CORE_DIR=<dir> bash scripts/lwe.sh build …`. Fix: carry the caller's value (or the
+      `build/lwe-core` default) across the re-exec.
+- [ ] Optional: reword the stale "WIP" commit titles `161bf0f` / `8c5c0e6`. They're pushed, so this needs a force-push;
+      owner's call.
 - [ ] **Scene A's sound warbles during a transition** (owner 2026-11-06, not always; maybe headphone-specific — they
       changed headphones recently): when the outgoing wallpaper A is a scene, the transition sometimes plays "loud quiet
       loud quiet", "like audio in reverse or some ghost". **Not reproduced (2026-11-06 night, 39 recorded transitions)**

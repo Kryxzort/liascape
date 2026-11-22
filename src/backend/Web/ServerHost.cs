@@ -115,26 +115,20 @@ public static class ServerHost
         AtomicFile.WriteAllText(Path.Combine(ConfigDir, "serve.port"), port.ToString()); // Electron reads this (whole or not at all)
         Console.WriteLine($"liascape serve listening on 127.0.0.1:{port} (media 127.0.0.1:{mediaPort})");
 
-        // The serve backend owns the AudioMonitor in-process while running: take over from any detached
-        // `monitor-daemon` on startup so the AutoMute toggle can Start/Stop it live (`/settings`), then hand
-        // back to a detached `monitor-daemon` on shutdown so mute survives app close. Legacy only: under liascape-player
-        // the player's Signal mutes (app open or closed) and a leftover monitor-daemon is stopped below (KillLegacyDaemons).
-        if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) AudioMonitor.KillDetachedMonitor();
-        // A daemon or a legacy wallpaper (mpvpaper, LWE) a legacy session left running would stay beside liascape-player:
-        // stop them, and once the program mirror is seeded below, replay the session on the player.
-        PlayerHelper.KillLegacyDaemons();
-        int legacyReaped = PlayerHelper.ReapAllWallpaperProcs();
+        // A session an older build left running (its daemons, its wallpaper processes) would stay beside liascape-player:
+        // stop it, and once the program mirror is seeded below, replay the session on the player.
+        int legacyReaped = LegacyTakeover.Run();
         // a player left running by an older build (it outlives the backend) restarts onto the current one
         Liascape.Player.LiascapePlayerMedia.StartUpgradeWatch();
         // the rotation is the player's program: the mirror is seeded from it (it never stopped)
         Liascape.Player.LiascapePlayerProgram.Startup();
-        // the reaped legacy wallpaper's session, on the player: Restore replays LastSession only when the player shows
+        // the stopped wallpaper's session, on the player: Restore replays LastSession only when the player shows
         // nothing and no program runs
         if (legacyReaped > 0)
             _ = Task.Run(() =>
             {
                 try { PlayerHelper.Restore(); }
-                catch (Exception e) { Liascape.Player.LiascapePlayerClient.Log($"replaying the legacy session on liascape-player failed: {e.Message}"); }
+                catch (Exception e) { Liascape.Player.LiascapePlayerClient.Log($"replaying the stopped session on liascape-player failed: {e.Message}"); }
             });
         var startup = SettingsService.Load();
         // auto-mute: the player's Signal when it can (liascape-player + its `automute` capability), else AudioMonitor here
@@ -145,8 +139,6 @@ public static class ServerHost
             AudioMonitor.Shutdown();
             FolderWatch.Stop(); // no pass starts while the app stops
             SteamClientHold.Shutdown(); // "Playing Wallpaper Engine" ends with the app, not after the linger
-            // legacy: hand auto-mute to a detached monitor-daemon (retired under liascape-player: the player's Signal goes on)
-            if (s.AutoMute && !Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
         });
 
         // WE auto-import on startup, off-thread so the API is up immediately;
@@ -179,9 +171,9 @@ public static class ServerHost
     // Push live settings onto the (startup-built, reused) provider instances per request. Without this
     // the workshop/WE services keep their startup defaults (e.g. AllowScenes=false), so toggling scene
     // support has no effect and scene-only results (Puppet Warp etc.) are silently filtered to 0.
-    // SceneMonitors equal entry by entry (name, fps, primary) — /settings' scene-fps diff
+    // SceneMonitors equal entry by entry (name, fps) — /settings' scene-fps diff
     private static bool SameMonitors(IReadOnlyList<SceneMonitor> a, IReadOnlyList<SceneMonitor> b) =>
-        a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Fps == p.Second.Fps && p.First.IsPrimary == p.Second.IsPrimary);
+        a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Fps == p.Second.Fps);
 
     // `list` (a /browse's): which Workshop items it lists — absent = the whole Workshop (a /detail leaves it as it was)
     private static void ConfigureProvider(IBgsProvider p, AppSettings s, WorkshopFilter? filter, WorkshopList? list, bool browse = true)
@@ -189,7 +181,7 @@ public static class ServerHost
         if (p is SteamWorkshopService ws)
         {
             ws.AllowScenes = s.AllowScenes;
-            ws.AllowPresets = s.AllowScenes && Liascape.Player.PlayerEngine.IsLiascapePlayer;
+            ws.AllowPresets = s.AllowScenes;
             ws.WorkshopBasePath = s.WorkshopFolder;
             if (filter != null) ws.Filter = filter;
             if (browse) ws.List = list ?? new();
@@ -198,7 +190,7 @@ public static class ServerHost
         {
             we.WorkshopPath = s.WorkshopFolder;
             we.AllowScenes = s.AllowScenes;
-            we.AllowPresets = s.AllowScenes && Liascape.Player.PlayerEngine.IsLiascapePlayer;
+            we.AllowPresets = s.AllowScenes;
         }
     }
 
@@ -470,35 +462,17 @@ public static class ServerHost
             try { (prev, s) = SettingsService.Patch(body); }   // keeps LastSession + the Steam sign-in from disk
             catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             Mark("load+save");
-            // live-apply the cheap ones, but respect the PLAYING wallpaper's per-item override so a global
-            // change never clobbers an active override (effective = override ?? new global).
-            var curPlaying = PlayerHelper.QueryCurrentPath();
-            Mark("current");
-            bool onPlayer = Liascape.Player.PlayerEngine.IsLiascapePlayer;
-            if (onPlayer)
-            {
-                // liascape-player: ONE resolver pass for all of it — every live source its own effective volume/speed,
-                // af, mute and decode settings + the layer fit, diffed against what it runs (player-adapter.md
-                // § Targeting); covers the legacy calls below and ApplyPlaybackSettingsLive's
-                PlayerHelper.ApplyEffectiveLive();
-                Mark("resolve");
-                // per-monitor scene fps: live (`out:<name>.scene_fps`) — launch-only only under legacy (LWE)
-                if (!SameMonitors(prev.SceneMonitors, s.SceneMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.SceneMonitors, s.SceneMonitors);
-                // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
-                Liascape.Player.LiascapePlayerMedia.ApplyGpuSettings(prev, s);
-                // pause when covered: a player-level prop, live (diffed)
-                Liascape.Player.LiascapePlayerMedia.ApplyCoverSetting(prev, s);
-            }
-            else
-            {
-                PlayerHelper.SetVolume((curPlaying != null ? LibraryService.ReadVolumeOverride(curPlaying) : null) ?? s.Volume);
-                PlayerHelper.SetSpeed((curPlaying != null ? LibraryService.ReadSpeedOverride(curPlaying) : null) ?? s.Speed);
-                PlayerHelper.SetVideoScale(s.VideoScale); // fill/fit applies live to the playing video (no relaunch)
-                Mark("volume/speed/scale");
-                // loudness normalization: apply live to the playing wallpaper (toggle/retune now)
-                PlayerHelper.ApplyNormalizationLive(curPlaying);
-                Mark("normalize");
-            }
+            // ONE resolver pass for all of it — every live source its own effective volume/speed (override ?? new global,
+            // so a global change never clobbers an item's own), af, mute and decode settings + the layer fit, diffed
+            // against what it runs (player-adapter.md § Targeting)
+            PlayerHelper.ApplyEffectiveLive();
+            Mark("resolve");
+            // per-monitor scene fps: live (`out:<name>.scene_fps`)
+            if (!SameMonitors(prev.SceneMonitors, s.SceneMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.SceneMonitors, s.SceneMonitors);
+            // the scene GPU budget / VRAM guard / low-VRAM mode: player-level props, live (diffed)
+            Liascape.Player.LiascapePlayerMedia.ApplyGpuSettings(prev, s);
+            // pause when covered: a player-level prop, live (diffed)
+            Liascape.Player.LiascapePlayerMedia.ApplyCoverSetting(prev, s);
             // when normalization is on, (re)start the background measurement backfill so all clips get measured
             // while open — off this thread (it was 0.15–0.5 s of every no-op save: the whole library scan ran here)
             if (s.NormalizeAudio) LibraryService.KickLoudnessBackfill(force: !prev.NormalizeAudio);
@@ -511,9 +485,6 @@ public static class ServerHost
             if (prev.VideoPreviewQuality != s.VideoPreviewQuality || !prev.PreviewOnHover.SequenceEqual(s.PreviewOnHover)
                 || !prev.PreviewNotHovered.SequenceEqual(s.PreviewNotHovered) || prev.GifPreviewsAsVideo != s.GifPreviewsAsVideo)
                 PreviewBackfill.Kick("settings");
-            // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
-            // VideoFpsCap, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
-            if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
             // the maximum play time / the scene timing ("Separate timing for scenes" + "Switch scenes after") → the
             // running rotation, live (the effective one: a playlist with its own override keeps its own —
             // /playlist/state applies those).
@@ -537,10 +508,10 @@ public static class ServerHost
             // program's switch already armed for A's end takes it (it was requested with the old one)
             var plS = PlaylistService.LoadCurrentState()?.Settings;
             // "When the playlist starts again" (the global one, when the playlist follows it) → the program, for its next start
-            if (onPlayer && PlayerHelper.EffectiveStart(prev, plS) != PlayerHelper.EffectiveStart(s, plS) && Liascape.Player.LiascapePlayerProgram.IsActive)
+            if (PlayerHelper.EffectiveStart(prev, plS) != PlayerHelper.EffectiveStart(s, plS) && Liascape.Player.LiascapePlayerProgram.IsActive)
                 Liascape.Player.LiascapePlayerProgram.SetStartMode(PlayerHelper.EffectiveStart(s, plS));
             // "When no monitor shows the wallpaper" (Expert): the running program's while_parked, live
-            if (onPlayer && prev.RotateWhileParked != s.RotateWhileParked && Liascape.Player.LiascapePlayerProgram.IsActive)
+            if (prev.RotateWhileParked != s.RotateWhileParked && Liascape.Player.LiascapePlayerProgram.IsActive)
                 Liascape.Player.LiascapePlayerProgram.SetWhileParked(s.RotateWhileParked);
             if (prev.TransitionMethod != s.TransitionMethod
                 || !TransitionService.SameConfig(TransitionService.Effective(prev, plS), TransitionService.Effective(s, plS)))
@@ -559,13 +530,11 @@ public static class ServerHost
             return Results.Ok();
         });
         app.MapGet("/themes", () => Results.Json(ThemeService.All));
-        app.MapGet("/mpv-preview", () => Results.Text(SettingsService.Load().BuildMpvOptions()));
         // whether liascape-player can run (+ why not), what runs, scene and low-VRAM status (Settings reads it)
-        app.MapGet("/player-engine", () => Results.Json(Liascape.Player.PlayerEngine.Status()));
+        app.MapGet("/player-engine", () => Results.Json(Liascape.Player.PlayerStatus.Status()));
         // API: which features can't work here because a build piece / runtime tool is missing (FeatureHealth) — the
         // Settings page's warning icons (one quick player hello; CLI checks cached 30 s).
         app.MapGet("/health/features", () => Results.Json(new { features = FeatureHealth.Report(SettingsService.Load()) }));
-        app.MapGet("/lwe-preview", () => Results.Text(SettingsService.Load().BuildLweOptions()));
         app.MapPost("/library/import", async (ImportReq r) =>
         {
             var item = await ImportService.ImportAsync(r.Path, r.Title);
@@ -595,20 +564,18 @@ public static class ServerHost
         // save the override (drops to global when == global) THEN apply it live to the playing wallpaper
         app.MapPost("/library/volume", (OverrideReq r) => { LibraryService.SaveVolumeOverride(r.Path, r.IntValue); PlayerHelper.ApplyOverrideLive(r.Path); return Results.Ok(); });
         app.MapPost("/library/speed", (OverrideReq r) => { LibraryService.SaveSpeedOverride(r.Path, r.DoubleValue); PlayerHelper.ApplyOverrideLive(r.Path); return Results.Ok(); });
-        // Live PREVIEW during a slider drag: set mpv/LWE volume|speed NOW — no persist, no QueryCurrentPath.
-        // Cheap vs hammering /library/volume per tick (which writes index.json + 2 IPC calls + a pactl spawn
-        // for scenes, ×~60/s → backlog so the desktop only catches up on release). The UI throttles these and
-        // gates on "the edited item is the playing one", then persists once on release via /library/{volume,speed}.
+        // Live PREVIEW during a slider drag: the volume|speed NOW — no persist. Cheap vs hammering /library/volume per
+        // tick (an index.json write each, ×~60/s → a backlog the desktop only catches up with on release). The UI
+        // throttles these, then persists once on release via /library/{volume,speed}.
         app.MapPost("/preview", (PreviewReq r) =>
         {
             // the Settings page's global Volume/Speed drag: every live wallpaper that follows the global
             // (no override of its own for that field — override ?? global); never an overridden one
             if (r.Global == true) { PlayerHelper.PreviewGlobal(r.Volume, r.Speed); return Results.Ok(); }
-            // liascape-player: a per-item value → the EDITED item's source(s), not srcs:* — mid-transition
-            // `cur:*` is the incoming side, so "what's playing" would move the other wallpaper.
-            if (Liascape.Player.PlayerEngine.IsLiascapePlayer) { Liascape.Player.LiascapePlayerMedia.Preview(r.Volume, r.Speed, r.Paths); return Results.Ok(); }
-            if (r.Paths is { Count: > 0 } && !r.Paths.Contains(PlayerHelper.QueryCurrentPath() ?? "")) return Results.Ok();
-            if (r.Volume.HasValue) PlayerHelper.SetVolume(r.Volume.Value); if (r.Speed.HasValue) PlayerHelper.SetSpeed(r.Speed.Value); return Results.Ok();
+            // a per-item value → the EDITED item's source(s), not srcs:* — mid-transition `cur:*` is the incoming side,
+            // so "what's playing" would move the other wallpaper.
+            Liascape.Player.LiascapePlayerMedia.Preview(r.Volume, r.Speed, r.Paths);
+            return Results.Ok();
         });
         app.MapPost("/library/whitelist", (WhitelistReq r) =>
         {
@@ -686,7 +653,7 @@ public static class ServerHost
                 }
                 if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why) return NotApplied(why);
                 // the apply's own refusal (scenes off or unplayable here, no player binary): the same answer
-                try { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions()); }
+                try { PlayerHelper.Apply(item.VideoPath); }
                 catch (InvalidOperationException e) { return NotApplied(e.Message); }
                 SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } });
             }
@@ -832,9 +799,8 @@ public static class ServerHost
         // ---- playback ---------------------------------------------------------------------
         app.MapPost("/apply", (PathReq r) =>
         {
-            var s = SettingsService.Load();
-            PlayerHelper.Apply(r.Path, s.BuildMpvOptions());      // apply + save as last session
-            // only LastSession: `s` was loaded before the switch — saved whole, it reverted a /settings change made meanwhile
+            PlayerHelper.Apply(r.Path);      // apply + save as last session
+            // only LastSession: saving a whole settings copy loaded before the switch reverted a /settings change made meanwhile
             SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { r.Path } });
             return Results.Ok();
         });
@@ -851,10 +817,10 @@ public static class ServerHost
                 : Results.Json(new { ok = true, message = info });
         });
         // next/prev/random step the library/playlist to pick an item — unplayable scenes (AllowScenes off,
-        // the engine can't, or crashed and not whitelisted) are skipped (PlayerHelper.IsSkippedPath), but when
+        // the player can't, or crashed and not whitelisted) are skipped (PlayerHelper.IsSkippedPath), but when
         // NOT ONE item is playable (all-scene library) the picker throws instead of handing Apply()
         // an unplayable path. Catch that domain exception here so it's a clear 409, never an
-        // unhandled 500 (player-adapter.md / .claude/rules/backend/legacy-engine.md: never invent a new skip mechanism).
+        // unhandled 500 (player-adapter.md § Scenes and loudness: never invent a new skip mechanism).
         app.MapPost("/next", () =>
         {
             try { PlayerHelper.NextWallpaper(); return Results.Ok(); }
@@ -886,18 +852,17 @@ public static class ServerHost
         {
             // liascape-player: a player that doesn't answer (a stall) still names what it last reported, never "nothing
             // plays" (LiascapePlayerMedia.CurrentPathOrLast)
-            bool lp = Liascape.Player.PlayerEngine.IsLiascapePlayer;
-            var path = lp ? Liascape.Player.LiascapePlayerMedia.CurrentPathOrLast() : PlayerHelper.QueryCurrentPath();
-            bool playing = lp ? path != null : PlayerHelper.IsPlaying;
+            var path = Liascape.Player.LiascapePlayerMedia.CurrentPathOrLast();
+            bool playing = path != null;
             return Results.Json(new
             {
                 path,
                 sceneId = path != null && PlayerHelper.IsScenePath(path) ? Path.GetFileName(path.TrimEnd('/')) : null,
                 playing,
                 timed = PlayerHelper.IsTimedPlaylistActive(),
-                position = PlayerHelper.QueryTimePos(), // live mpv time-pos → sync the in-app preview
+                position = PlayerHelper.QueryTimePos(), // the playing video's position → sync the in-app preview
                 keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape toggle-loop-current`: the rotation holds what plays
-                // the user's pause (`player.paused` / mpv `pause`; never "pause behind windows", a per-output clock): the in-app
+                // the user's pause (`player.paused`; never "pause behind windows", a per-output clock): the in-app
                 // background (WallpaperBg) holds still with the wallpaper
                 paused = playing && PlayerHelper.IsPausedNow(),
                 // API: why no scene can play here (the scene renderer is missing), else null — every scene card greys with it

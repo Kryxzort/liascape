@@ -23,21 +23,19 @@ public static class FeatureHealth
 
     // What one report is built from — gathered by Report(), a table in the self-test.
     public sealed record Inputs(
-        bool LiascapePlayer,                 // liascape-player is the engine (what the user runs)
         string? LiascapePlayerMissing,       // null = the binary resolves, else why not
         JsonElement? PlayerHealth,     // hello.health / `liascape-player health` (null: no answer)
         (bool ok, string? reason) Scenes,
         Func<string, bool> OnPath,
-        bool LegacyTransitions,        // legacy: liascape-transition + the catalogue resolve
         bool SessionBus = true);       // a D-Bus session bus is reachable (the Signal's MPRIS check reads it)
 
     public static List<Feature> Report(AppSettings s)
     {
-        bool onPlayer = PlayerEngine.IsLiascapePlayer; // the only engine (a missing binary is the first feature)
-        string? missing = PlayerEngine.ResolveBinary() == null ? PlayerEngine.UnavailableReason : null;
+        // a missing binary is the first feature
+        string? missing = PlayerStatus.ResolveBinary() == null ? PlayerStatus.UnavailableReason : null;
         JsonElement? ph = null;
         (bool, string?) scenes;
-        if (onPlayer && missing == null)
+        if (missing == null)
         {
             // a probe that throws reads as unknown (the endpoint never 500s over one)
             try { ph = LiascapePlayerClient.Shared.Health().Health; } catch (Exception e) { LiascapePlayerClient.Log($"/health/features: player health: {e.Message}"); }
@@ -47,11 +45,8 @@ public static class FeatureHealth
                 try { var (ok, why, _) = LiascapePlayerClient.Shared.SceneStatus(withAssets: false); scenes = (ok, why); }
                 catch (Exception e) { scenes = (false, $"couldn't check scene support: {e.Message}"); }
         }
-        else if (onPlayer) scenes = (false, missing);
-        else scenes = PlayerHelper.IsLweAvailable() ? (true, null) : (false, "linux-wallpaperengine not found in PATH — install it to use scenes");
-        bool legacyTr = !onPlayer && TransitionService.ResolveDir() != null && TransitionService.ResolveBinary() != null;
-        return Build(new Inputs(onPlayer, missing, ph, scenes, OnPath, legacyTr,
-                SessionBusReachable()))
+        else scenes = (false, missing);
+        return Build(new Inputs(missing, ph, scenes, OnPath, SessionBusReachable()))
             .Select(f => f with { inUse = InUse(f.id, s) }).ToList();
     }
 
@@ -105,39 +100,31 @@ public static class FeatureHealth
             new("scenes", "Wallpaper Engine scenes", i.Scenes.ok,
                 i.Scenes.ok ? null : i.Scenes.reason ?? "scenes can't play here", ["allowScenes"]),
         };
-        if (i.LiascapePlayer)
+        bool onPlayer = i.LiascapePlayerMissing == null;
+        if (onPlayer)
         {
-            if (i.LiascapePlayerMissing == null)
-            {
-                var (eok, ewhy) = Part(i.PlayerHealth, "effects");
-                f.Add(new("transitions", "Transition effects", eok, eok == false ? ewhy : null,
-                    ["globalTransitionEnabled", "transitionMethod", "transitions"]));
-                var (vok, vwhy) = Part(i.PlayerHealth, "vram");
-                f.Add(new("vram", "VRAM measurement", vok, vok == false ? vwhy : null,
-                    ["limitVramPerScene", "sceneVramLimitMib", "sceneVramStopShows", "vramLowMode"]));
-                var (hok, hwhy) = Part(i.PlayerHealth, "hwdec_interop");
-                f.Add(new("hwdec-interop", "Zero-copy hardware decoding", hok, hok == false ? hwhy : null, ["hwDec"]));
-                // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause behind windows" can't act
-                var (cok, cwhy) = Part(i.PlayerHealth, "cover");
-                f.Add(new("cover", "Pause behind windows", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
-                // the player's own PipeWire audio bus (docs/player/modules/audio-bus.md): down → the sources play on mpv's default
-                // device (nothing stops, but no bus meter and no in-player auto-mute). No setting of its own to mark: it
-                // shows in the Settings summary only. Unknown while the first session is being set up / before a player ran.
-                var (bok, bwhy) = Part(i.PlayerHealth, "bus");
-                f.Add(new("audio-bus", "Player audio bus (PipeWire)", bok, bok == false ? bwhy : null, []));
-            }
-        }
-        else
-            f.Add(new("transitions", "Transition effects", i.LegacyTransitions,
-                i.LegacyTransitions ? null : "liascape-transition or the transitions catalogue not found (install.sh builds it) — every switch is a cut",
+            var (eok, ewhy) = Part(i.PlayerHealth, "effects");
+            f.Add(new("transitions", "Transition effects", eok, eok == false ? ewhy : null,
                 ["globalTransitionEnabled", "transitionMethod", "transitions"]));
-        // auto-mute. liascape-player: the player's `automute` Signal hears other
-        // apps' audio itself — no pactl / parec / playerctl; "Only if MPRIS player active" needs a session bus. Its health
-        // part `automute` false (LIASCAPE_PLAYER_AUTOMUTE=0, its audio bus down): the backend's AudioMonitor mutes while the
-        // app is open, nothing with it closed (no monitor-daemon under liascape-player) — said so, with AudioMonitor's
-        // tools. Unknown (no player ran yet, the gate on): unknown. Legacy: AudioMonitor (pactl + parec, playerctl).
-        var (amok, amwhy) = i.LiascapePlayer && i.LiascapePlayerMissing == null ? Part(i.PlayerHealth, "automute") : (false, null);
-        bool onPlayer = i.LiascapePlayer && i.LiascapePlayerMissing == null;
+            var (vok, vwhy) = Part(i.PlayerHealth, "vram");
+            f.Add(new("vram", "VRAM measurement", vok, vok == false ? vwhy : null,
+                ["limitVramPerScene", "sceneVramLimitMib", "sceneVramStopShows", "vramLowMode"]));
+            var (hok, hwhy) = Part(i.PlayerHealth, "hwdec_interop");
+            f.Add(new("hwdec-interop", "Zero-copy hardware decoding", hok, hok == false ? hwhy : null, ["hwDec"]));
+            // the cover Signal's window-state source (Hyprland / Sway IPC, wlr-foreign-toplevel): none → "Pause behind windows" can't act
+            var (cok, cwhy) = Part(i.PlayerHealth, "cover");
+            f.Add(new("cover", "Pause behind windows", cok, cok == false ? cwhy : null, ["pauseWhenCovered"]));
+            // the player's own PipeWire audio bus (docs/player/modules/audio-bus.md): down → the sources play on mpv's default
+            // device (nothing stops, but no bus meter and no in-player auto-mute). No setting of its own to mark: it
+            // shows in the Settings summary only. Unknown while the first session is being set up / before a player ran.
+            var (bok, bwhy) = Part(i.PlayerHealth, "bus");
+            f.Add(new("audio-bus", "Player audio bus (PipeWire)", bok, bok == false ? bwhy : null, []));
+        }
+        // auto-mute: the player's `automute` Signal hears other apps' audio itself — no pactl / parec / playerctl; "Only
+        // if MPRIS player active" needs a session bus. Its health part `automute` false (LIASCAPE_PLAYER_AUTOMUTE=0, its
+        // audio bus down): the backend's AudioMonitor mutes while the app is open, nothing with it closed — said so, with
+        // AudioMonitor's tools (pactl + parec, playerctl). Unknown (no player ran yet, the gate on): unknown.
+        var (amok, amwhy) = onPlayer ? Part(i.PlayerHealth, "automute") : (false, null);
         if (onPlayer && amok != false)
         {
             f.Add(new("auto-mute", "Auto-mute", amok, null, ["autoMute"]));

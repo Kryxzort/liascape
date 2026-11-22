@@ -57,7 +57,7 @@ public class LibraryItem
     public string? WatchedFrom { get; init; }
     // A Wallpaper Engine preset (Helpers/Presets.cs; also IsScene): its base scene's Workshop id (null = its file names
     // none), the base's library folder when found, the base's title (its own, else the one its download saved), and why it
-    // can't play now (null = it plays; the legacy engine's reason included). Read at every GET /library.
+    // can't play now (null = it plays). Read at every GET /library.
     public bool IsPreset { get; init; }
     public string? BaseWorkshopId { get; init; }
     public string? BasePath { get; init; }

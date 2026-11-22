@@ -134,5 +134,5 @@ and no rule starts a switch under a hold. With no output it does what `while_par
 
 Two schedulers caused the legacy engine's double switches. The backend loads a program, edits its properties, sends
 verbs and mirrors `program.current`; it never decides a switch is due, so closing the app changes nothing about a
-rotation. Guards: the adapter integration test's origin check (every switch of a session is `origin:
-program:prog:main`), the `legacy rotation path reached` guard in `PlayerHelper`.
+rotation. Guard: the adapter integration test's origin check (every switch of a session is `origin:
+program:prog:main`).
