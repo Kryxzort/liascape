@@ -13,7 +13,7 @@ namespace Liascape.Helpers;
 //   workshop/<id>/{file.mp4, preview.*, project.json}      direct-DL video (owned, Steam-mirror)
 //   local/<id> -> symlink into the user's WE dir           subscribed/WE-local video
 //   workshop/<id> | local/<id>                             SCENE — the item FOLDER itself is the play path.
-//       PlayerHelper.IsScenePath = "no media extension"; LWE launches by id (local) or dir (owned).
+//       PlayerHelper.IsScenePath = "no media extension".
 //       Scene-ness comes from index .IsScene / project.json type / scene.pkg / a preset (Presets.Read: plays its base).
 //   <source>/index.json                                    metadata (volume/speed/crashed/whitelist/source/…)
 // Metadata + dedup live in the per-source index.json (see LibraryStore).
@@ -159,8 +159,7 @@ public static class LibraryService
     // Spotify normalizes (docs/decisions.md § "Normalize video loudness with one fixed gain capped by the true peak"):
     // turned down as far as needed, turned UP only as far as the item's
     // true peak allows with 1 dB of headroom (PeakCeilingDb) — the sound itself is never altered, no limiter, no rider.
-    // Null if the item isn't measured yet. Used by the player (LiascapePlayerMedia), mpvpaper (PlayerHelper) and the
-    // transition overlay (TransitionService → liascape-transition --from-af/--to-af).
+    // Null if the item isn't measured yet. The player's `af` for the item (LiascapePlayerMedia).
     // NOT ffmpeg's loudnorm (audibly fades in, climbs louder toward the end and clicks at the end):
     // even with `linear=true` and the pass-1 measurements it silently falls back to its DYNAMIC mode whenever the linear
     // gain would put the true peak over its TP or the measured LRA is over its target LRA — a 3 s look-ahead rider that
@@ -525,14 +524,12 @@ public static class LibraryService
     }
 
     // What building items reads beyond each one's own entry, once per listing: each source's index (a preset's base is
-    // another item, its title in that item's entry) and the engine that runs (a preset's legacy reason).
+    // another item, its title in that item's entry).
     private sealed class BuildContext
     {
         private readonly Dictionary<string, Dictionary<string, LibMeta>> _idx = new();
-        private bool? _player;
         public Dictionary<string, LibMeta> Index(string source) =>
             _idx.TryGetValue(source, out var i) ? i : _idx[source] = LibraryStore.LoadIndex(source);
-        public bool LiascapePlayer => _player ??= Liascape.Player.PlayerEngine.IsLiascapePlayer;
     }
 
     private static LibraryItem? BuildItem(string source, string itemDir, LibMeta? m, BuildContext ctx)
@@ -581,7 +578,7 @@ public static class LibraryService
     private sealed record PresetFacts(string? BaseId, PresetStatus Status, string? BaseTitle);
     private static PresetFacts PresetFactsOf(PresetFile f, LibMeta? m, string? selfId, BuildContext ctx)
     {
-        var st = Presets.StatusFor(f, selfId, m?.BaseKind, id => Presets.BaseDirOf(id, ctx.Index), Presets.KindOf, ctx.LiascapePlayer);
+        var st = Presets.StatusFor(f, selfId, m?.BaseKind, id => Presets.BaseDirOf(id, ctx.Index), Presets.KindOf);
         string? own = null;
         if (st.BaseDir is { } bd && LibraryStore.Locate(bd) is { } bl)
             own = ctx.Index(bl.Source).GetValueOrDefault(bl.Key)?.Title;

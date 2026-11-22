@@ -10,7 +10,7 @@ using Liascape.Models;
 namespace Liascape.Player;
 
 // The adapter's program half (`.claude/rules/backend/player-adapter.md` § Rotation,
-// `docs/player/adapter.md`). Under PlayerEngine=liascape-player a rotation session — Play / play-from of a playlist,
+// `docs/player/adapter.md`). A rotation session — Play / play-from of a playlist,
 // a timed or advance-on-end one, Play All with more than one item — is ONE player program, `prog:main` on `out:*`:
 // the player keeps its clock, its order, its history and every rule of § Rotation (recipes/program/), and keeps
 // rotating with the app closed. The backend only (a) turns the playlist + the settings into the program's spec
@@ -81,7 +81,7 @@ public static class LiascapePlayerProgram
         defaults ??= LiascapePlayerMedia.DesiredGlobal(s);
         // asked only for a scene item (a video's skip never depends on it): with no player answering it runs
         // `liascape-player scene-check`, ~55 ms in front of a videos-only playlist's load
-        var scenesOk = new Lazy<bool>(() => PlayerEngine.ScenesPlayable(s));
+        var scenesOk = new Lazy<bool>(() => PlayerStatus.ScenesPlayable(s));
         // DesiredItem kicks a loudness measure for an unmeasured video (normalization on): the program measures nothing
         return BuildItems(paths, defaults, path => LiascapePlayerMedia.DesiredItem(path, s),
             path => PlayerHelper.IsScenePath(path) && PlayerHelper.SkippedForRotation(path, scenesOk.Value));
@@ -150,7 +150,7 @@ public static class LiascapePlayerProgram
     {
         get
         {
-            if (!PlayerEngine.IsLiascapePlayer || !C.SocketExists) return false;
+            if (!C.SocketExists) return false;
             EnsureSynced();
             lock (_lock) return _exists;
         }
@@ -176,7 +176,6 @@ public static class LiascapePlayerProgram
     public static void Sync()
     {
         var client = C;
-        if (!PlayerEngine.IsLiascapePlayer) return;
         if (!client.SocketExists)
         {
             lock (_lock) { _known = true; _gen = client.Generation; _exists = false; _path = null; _index = -1; }
@@ -366,7 +365,7 @@ public static class LiascapePlayerProgram
     {
         bool had;
         lock (_lock) { had = _exists || _model != null; _model = null; _paths = null; _exists = false; _path = null; _index = -1; _wantKey = null; }
-        if (!had || !PlayerEngine.IsLiascapePlayer) return;
+        if (!had) return;
         LiascapePlayerMedia.QueueEssential(DestroyNow);
     }
 
@@ -396,7 +395,7 @@ public static class LiascapePlayerProgram
         DestroyNow();
     }
 
-    // `stop` (the player destroys every program itself) / the engine switched away: forget it.
+    // `stop` (the player destroys every program itself): forget it.
     public static void Forget()
     {
         lock (_lock) { _model = null; _paths = null; _exists = false; _path = null; _index = -1; _wantKey = null; _sentItems = _sentDefaults = null; }
@@ -408,7 +407,7 @@ public static class LiascapePlayerProgram
     public static bool PrevIsNoOp()
     {
         var client = C;
-        if (!PlayerEngine.IsLiascapePlayer || !client.SocketExists) return false;
+        if (!client.SocketExists) return false;
         try
         {
             var st = client.Call("state", null, LiascapePlayerClient.QuickMs);
@@ -428,7 +427,6 @@ public static class LiascapePlayerProgram
     // waited for: null = no rotation to hold (no prog:main) or no answer, else the new value.
     public static bool? ToggleKeep()
     {
-        if (!PlayerEngine.IsLiascapePlayer) return null;
         var t = LiascapePlayerMedia.QueueEssential<bool?>(() =>
         {
             var client = C;
@@ -445,7 +443,7 @@ public static class LiascapePlayerProgram
     // `prog:main.keep` now (false: off, or no rotation). A quick read for /current.
     public static bool Kept()
     {
-        if (!PlayerEngine.IsLiascapePlayer || !C.SocketExists || !IsActive) return false;
+        if (!C.SocketExists || !IsActive) return false;
         return Get(C, "keep") is { ValueKind: JsonValueKind.True };
     }
 
@@ -553,7 +551,6 @@ public static class LiascapePlayerProgram
 
     public static void PushItems()
     {
-        if (!PlayerEngine.IsLiascapePlayer) return;
         lock (_lock) if (!_exists && _model == null && !Unseeded()) return;
         LiascapePlayerMedia.QueueSet("program:items", PushItemsNow);
     }
@@ -593,7 +590,6 @@ public static class LiascapePlayerProgram
     // The globals changed (/settings, the volume key, the mute): the next B's defaults.
     public static void PushDefaults()
     {
-        if (!PlayerEngine.IsLiascapePlayer) return;
         lock (_lock) if (!_exists && _model == null && !Unseeded()) return;
         LiascapePlayerMedia.QueueSet("program:defaults", () =>
         {
@@ -618,7 +614,6 @@ public static class LiascapePlayerProgram
 
     private static void SetProps(string key, List<(string prop, object? value)> props)
     {
-        if (!PlayerEngine.IsLiascapePlayer) return;
         lock (_lock) if (!_exists && _model == null) return;
         LiascapePlayerMedia.QueueSet(key, () =>
         {
@@ -636,7 +631,6 @@ public static class LiascapePlayerProgram
     // load the program) → the player's own program stands.
     public static void Reapply()
     {
-        if (!PlayerEngine.IsLiascapePlayer) return;
         lock (_lock) if (_model == null) return;
         LiascapePlayerMedia.QueueSet("program:reapply", ReapplyNow);
     }

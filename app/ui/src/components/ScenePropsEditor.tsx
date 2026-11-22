@@ -177,7 +177,6 @@ export function ScenePropsEditor({ path, preset = false, onReady }: { path: stri
         {!folded && (
           <motion.div key="body" id={bodyId} className="sp-body" data-scene-props-body layout={motionOn} layoutDependency={folded}
             transition={morph} {...fade}>
-            {data.note && <div className="shint sp-note">{data.note}</div>}
             {data.props.map(row)}
           </motion.div>
         )}

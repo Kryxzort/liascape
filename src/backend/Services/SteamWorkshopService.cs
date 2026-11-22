@@ -122,7 +122,7 @@ public class SteamWorkshopService : IBgsProvider
 
     // A scene's presets: one QueryFiles page of the items that require it (SteamWorkshopDetails.QueryChildrenAsync), the
     // filter's other groups applied by Steam. No page fallback (like the user lists): Steam unreachable is an error the
-    // list shows. Presets not allowed (scene support off, the legacy engine) → nothing.
+    // list shows. Presets not allowed (scene support off) → nothing.
     // Guard: test-workshop-social § 5.
     private static async Task<List<WallpaperResult>> PresetsAsync(WorkshopFilter filter, bool allowPresets, ulong sceneId, string sort, int appPage, CancellationToken ct)
     {

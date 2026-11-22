@@ -53,12 +53,12 @@ public static class SceneLoudnessPlanner
     {
         error = null;
         var load = Presets.LoadDirOf(scenePath);
-        if (load == null && Presets.StatusOf(scenePath, liascapePlayer: true).Reason is { Length: > 0 } why)
+        if (load == null && Presets.StatusOf(scenePath).Reason is { Length: > 0 } why)
         {
             error = char.ToLowerInvariant(why[0]) + why[1..];
             return null;
         }
-        var bin = PlayerEngine.ResolveBinary();
+        var bin = PlayerStatus.ResolveBinary();
         if (bin == null) { error = "liascape-player not found"; return null; }
         var (props, key) = PropsOf(scenePath, LibraryStore.GetMeta(scenePath));
         var dir = Path.GetFullPath(load ?? scenePath).TrimEnd('/');

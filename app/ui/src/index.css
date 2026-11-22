@@ -799,7 +799,6 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .yt-frame { width: 100%; aspect-ratio: 16 / 9; max-height: 100%; border: 0; display: block; }
 /* the Library sidebar's "Scene properties" (components/ScenePropsEditor.tsx) */
 .sp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
-.sp-note { margin-bottom: 6px; }
 .sp-group { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin: 12px 0 2px; }
 .sp-text { margin: 6px 0; white-space: pre-line; overflow-wrap: anywhere; }
 .sp-num { min-width: 3ch; text-align: right; }
@@ -1326,10 +1325,6 @@ input[type=range]:focus-visible { outline: none; }
 .tr-chip:hover:not(:disabled), .tr-chip.hov { border-color: var(--accent); color: var(--text); box-shadow: var(--glow-sm); }
 .tr-chip.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); box-shadow: var(--glow-sm); }
 .tr-chip:disabled { opacity: .5; cursor: default; }
-/* small dot = effect plays live (incoming keeps playing) in Reveal method */
-.tr-live { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%;
-  background: var(--success); box-shadow: 0 0 5px -1px var(--success); vertical-align: middle; }
-.tr-chip.on .tr-live { background: var(--accent-fg); box-shadow: none; }
 .tr-empty { text-align: center; color: var(--muted); padding: 30px; }
 
 /* ---- Settings → Look & feel: the live card preview (components/CardPreview.tsx) ----
@@ -1420,7 +1415,6 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-crash-ico > svg { filter: none; }
 :root.no-glow .sp-fold .sp-chev { filter: none; }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
-:root.no-glow .tr-live { box-shadow: none; }
 :root.no-glow .pw-modal h2 svg { filter: none; }
 :root.no-glow .side-chip > svg.lucide, :root.no-glow .side-sub-ico.subscribed > svg { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }

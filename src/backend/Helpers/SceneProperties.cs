@@ -14,7 +14,7 @@ namespace Liascape.Helpers;
 // A Wallpaper Engine scene's user properties (`project.json` → `general.properties`) — what the item
 // settings modal edits. `.claude/rules/backend/library.md` § Scene properties.
 //
-// Values are kept in WE's own encoding (what `project.json` and LWE's `--set-property name=value` use):
+// Values are kept in WE's own encoding (what `project.json` uses):
 // bool → true/false, slider → a number, color → "r g b" (0–1 floats), combo → the option's key (a string; a
 // numeric key as LWE parses it — `std::to_string(value.get<int>())`), textinput → a string. The player gets
 // `ToPlayer` of them (a colour as [r, g, b], what `wp_project_property_set_color_by_name` takes).
@@ -331,16 +331,6 @@ public static class SceneProperties
         _ => null,
     };
 
-    // LWE's `--set-property name=value` text (legacy engine): PropertyBoolean "true"/"false", PropertySlider
-    // `stof`, PropertyColor `ColorBuilder::parse` ("r g b"), combo key / text as is.
-    public static string ToCli(SceneProp p, JsonNode? v) => p.Type switch
-    {
-        "bool" => Truthy(v) ? "true" : "false",
-        "slider" => (Num(v) ?? 0).ToString("R", CultureInfo.InvariantCulture),
-        "color" => FormatColor(ParseColor(v) ?? [1, 1, 1]),
-        _ => Str(v) ?? "",
-    };
-
     // The item's saved overrides (index), the parsed properties, merged: name → effective WE value.
     public static Dictionary<string, JsonNode?> Effective(IReadOnlyList<SceneProp> props, IReadOnlyDictionary<string, JsonElement>? overrides,
         IReadOnlyDictionary<string, JsonElement>? transient = null)
@@ -391,21 +381,6 @@ public static class SceneProperties
             if (v != null) m[p.Name] = ToPlayer(p, v);
         }
         return m;
-    }
-
-    // Legacy engine: `--set-property name=value` per override (LWE applies them at launch only — it has no live
-    // property IPC, so under legacy a change shows at the scene's next start).
-    public static List<string> CliArgs(string sceneDir, IReadOnlyDictionary<string, JsonElement>? overrides)
-    {
-        var args = new List<string>();
-        if (overrides == null || overrides.Count == 0) return args;
-        foreach (var p in ForItem(sceneDir))
-            if (p.Editable && overrides.TryGetValue(p.Name, out var ov) && Coerce(p, ov) is ({ } c, null))
-            {
-                args.Add("--set-property");
-                args.Add($"{p.Name}={ToCli(p, c)}");
-            }
-        return args;
     }
 
     // The player-encoded default of `name` (a reset: LWE has no "reset to default", so the default is sent).

@@ -26,7 +26,7 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 ## Layout and identity
 - Identity = the folder name: `<id>` for `workshop/` and `local/`, `<name>` for web sources and `imported/`.
 - `local/<id>` is a symlink into the user's Wallpaper Engine folder (Steam owns the bytes); `workshop/<id>` is an owned copy ("Download without subscribing").
-- "Unsubscribe without deleting" (`LibraryService.KeepOwnCopy`) turns a `local/<id>` link into an owned copy at the same path, copied through a staging folder under `.trash` and swapped in for the link before the unsubscribe is queued; never moved to `workshop/<id>`: the path is the item's identity (playlist, playing item, sidebar), and the reconcile of direct downloads would swap a `workshop/<id>` copy back to a link and delete it while Steam's folder still exists. So test "is it a link", never "is it under `local/`", for "Steam owns it" (legacy LWE then launches by path). Subscribed again (auto-import on), the copy gives way to a link at the same path once Steam's folder is whole (`LibraryService.RelinkOwnCopies`). Guard: `scripts/test-steam-signin.sh` § 3 i.
+- "Unsubscribe without deleting" (`LibraryService.KeepOwnCopy`) turns a `local/<id>` link into an owned copy at the same path, copied through a staging folder under `.trash` and swapped in for the link before the unsubscribe is queued; never moved to `workshop/<id>`: the path is the item's identity (playlist, playing item, sidebar), and the reconcile of direct downloads would swap a `workshop/<id>` copy back to a link and delete it while Steam's folder still exists. So test "is it a link", never "is it under `local/`", for "Steam owns it". Subscribed again (auto-import on), the copy gives way to a link at the same path once Steam's folder is whole (`LibraryService.RelinkOwnCopies`). Guard: `scripts/test-steam-signin.sh` § 3 i.
 - A scene's play path IS its folder (no `.scene` marker): `PlayerHelper.IsScenePath` = no media extension. Scene-ness on load: index `IsScene`, else `project.json` `type:"scene"`, else a preset (§ Presets), else a `scene.pkg`.
 - Deleting a `local/<id>` item unlinks the symlink only; never delete inside the WE folder ourselves.
 
@@ -37,20 +37,19 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - `Locate` refuses a `..` segment.
 
 ## Per-item overrides
-- Every playback path reads overrides through `LibraryService` (`PlayerHelper`'s private readers delegate to it); effective = `override ?? global` everywhere.
+- Every playback path reads overrides through `LibraryService`; effective = `override ?? global` everywhere.
 - After saving an override, apply it live (`PlayerHelper.ApplyOverrideLive`).
 - A scene's crash mark (`Crashed`) is set by `PlayerHelper.OnSceneBroken` and lifted only by the user (`POST /library/clear-crash` → `LibraryService.ClearCrashed`: field-level, writes only an entry that carries it; then `LiascapePlayerProgram.PushItem` so a rotation's skip flag follows, and `library-item-changed {hasCrashed: false}`). Settings → Housekeeping's "Clear crash marks" lifts every mark through `POST /library/clear-crash-all` (`AppOps.ClearAllCrashes`: `AppOps.ClearCrash` per marked item, never a loop of its own; answers `{cleared: n}`). Every gate (Apply, the pickers, the program's `skip`) reads the index fresh. Guard: `scripts/test-item-actions.sh`, probe-sidebar `lib:clearCrash:*`, probe-settings `crash:*`, probe-filters `lib:crashed`.
 
 ## Loudness
 - Videos: measure once with ffmpeg `loudnorm` pass 1 (`EnsureLoudnessAsync`, all four values or `loudnessSkip`); play with ONE fixed gain (`LoudnormAf` → `volume=<g>dB`), `g = min(target − I, −1 − TP)`. Never use `loudnorm` at playback — it falls back to dynamic mode and pumps.
-- Scenes (liascape-player only): `sceneLoudness[<fingerprint>] = {estimate, live}` + `sceneLoudnessFp` (the current audio configuration). An estimate never displaces live data; the applied `loudnessI`/`loudnessTP` moves only by ≥ 0.5 LU within one configuration. Merge rules: `MergeSceneLoudness`, `MergeSceneEstimate`; how the player applies them: `.claude/rules/backend/player-adapter.md` § Scenes and loudness.
-- Legacy LWE scenes are not normalized.
+- Scenes: `sceneLoudness[<fingerprint>] = {estimate, live}` + `sceneLoudnessFp` (the current audio configuration). An estimate never displaces live data; the applied `loudnessI`/`loudnessTP` moves only by ≥ 0.5 LU within one configuration. Merge rules: `MergeSceneLoudness`, `MergeSceneEstimate`; how the player applies them: `.claude/rules/backend/player-adapter.md` § Scenes and loudness.
 
 ## Scene properties (`Helpers/SceneProperties.cs`)
 - Overrides live in `LibMeta.SceneProps` in WE's own encoding (bool, number, colour `"r g b"` 0–1, combo key string, text); a value equal to the default drops the key. Validate with `SceneProperties.Coerce`.
 - Parse defensively: skip anything malformed, never throw. Render labels as plain text (strip HTML), never as HTML.
 - `Visible(condition, values)`: an unevaluable condition → shown.
-- Under legacy they are launch-only (`--set-property`); under liascape-player live (`SceneProperties.PlayerMap`).
+- They apply live (`SceneProperties.PlayerMap`).
 - A preset: scene defaults → preset values → the card's tweaks. `ForItem(<preset>)` = its base's properties with the
   preset's values as their `Default` (`WithPreset`: only a value of the type's saved JSON kind that `Coerce` accepts;
   the rest drop alone) and the scene's own as `SceneDefault`; its tweaks live in the preset's own `SceneProps` (equal to
@@ -96,8 +95,7 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - Reasons (`presetReason`, exact text), first match wins (`Presets.StatusFor`): no base id or its own id → "Its preset
   file names no base scene"; `LibMeta.BaseKind` (the download's) not `scene`, while no scene base of that id is in the
   library (a saved kind never outlives a scene base landing) → "Its base is a(n) {kind} wallpaper, not a scene"; no base folder (or one with no kind yet) → "Needs its base scene"; the base folder a preset or a video → the
-  same "Its base is a …" (never resolved through another preset); the legacy engine → "Presets play only in the
-  Liascape player". `baseTitle` = the base's own title, else `LibMeta.BaseTitle`. Guard: `scripts/test-presets.sh` § 1.
+  same "Its base is a …" (never resolved through another preset). `baseTitle` = the base's own title, else `LibMeta.BaseTitle`. Guard: `scripts/test-presets.sh` § 1.
 
 ## Steam tags, trailers and frame sizes (`Web/LibraryFactsOps.cs`)
 - One background pass, single-flight, kicked after the startup sync, `/library/sync`, an import and a download. It writes each fact field-level (`UpdateIndex`) and asks only for what an item doesn't have yet: never on every launch.

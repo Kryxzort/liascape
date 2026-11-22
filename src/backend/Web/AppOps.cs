@@ -50,7 +50,7 @@ public static class AppOps
         bool shuffle = ps.Order == PlaylistOrder.Shuffle;
         int interval = EffInterval(s, ps);   // advance-on-end: the minimum play time; else the timer
 
-        if (PlayerEngine.MissingReason() is string missing) return missing;
+        if (PlayerStatus.MissingReason() is string missing) return missing;
         // the player's program — the bar's order (the player shuffles), the playlist's "When the
         // playlist starts again" (§ Playlist start: Start over / Resume), its identity = the bar's saved name
         bool adv = EffAdvance(s, ps);
@@ -160,18 +160,12 @@ public static class AppOps
         !string.IsNullOrEmpty(path) && PlayerHelper.IsScenePath(path) && Directory.Exists(path);
 
     // GET /library/scene-props: the scene's properties in display order, each with its effective value, default,
-    // whether it's overridden and visible (its `condition` over the effective values). `live` = a change reaches
-    // the playing scene at once (liascape-player); legacy applies them at the scene's next start (LWE --set-property).
+    // whether it's overridden and visible (its `condition` over the effective values). A change reaches the playing
+    // scene at once. Guard: scripts/test-liascape-player-adapter.sh § scene props ("no engine / note / live")
     public static object SceneProps(string path)
     {
-        bool onPlayer = PlayerEngine.IsLiascapePlayer;
         object props = IsSceneItem(path) ? SceneProperties.Describe(path, LibraryService.ReadSceneProps(path)) : Array.Empty<object>();
-        return new
-        {
-            path, engine = onPlayer ? "liascape-player" : "legacy", live = onPlayer,
-            note = onPlayer ? null : "Applied when the scene starts — the legacy engine can't change them while it plays",
-            props,
-        };
+        return new { path, props };
     }
 
     // POST /library/scene-props: save (field-level, the index lock), then live. Returns an error or null.
@@ -185,10 +179,8 @@ public static class AppOps
         else err = LibraryService.SaveSceneProp(r.Path, r.Name, v);
         if (err == null)
         {
-            // liascape-player: re-planned (its loudness configuration) then live; legacy: re-planned only, so the
-            // stored configuration follows the props whichever engine plays (no-op without the binary)
-            if (Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.ApplyScenePropsLive(r.Path);
-            else Liascape.Player.LiascapePlayerMedia.ReplanInBackground(r.Path);
+            // re-planned (its loudness configuration), then live
+            PlayerHelper.ApplyScenePropsLive(r.Path);
         }
         return err;
     }
@@ -375,7 +367,6 @@ public static class AppOps
     public static string? LoopCurrent(out string? info)
     {
         info = null;
-        if (!PlayerEngine.IsLiascapePlayer) return "toggle-loop-current needs the liascape-player engine (Settings → Player engine)";
         var path = LiascapePlayerProgram.CurrentPath ?? PlayerHelper.QueryCurrentPath();
         string title = path == null ? "" : LibraryService.LoadAll().FirstOrDefault(i => i.VideoPath == path)?.Title ?? Path.GetFileNameWithoutExtension(path.TrimEnd('/'));
         if (!LiascapePlayerProgram.IsActive)
@@ -480,20 +471,15 @@ public static class AppOps
         return paths.Distinct().ToList();
     }
 
-    // what's on screen or about to be (liascape-player: either output, the incoming side of a switch; legacy:
-    // the current file)
-    private static List<string> ShownOrIncoming()
-    {
-        if (PlayerEngine.IsLiascapePlayer) return LiascapePlayerMedia.ShownOrIncomingPaths();
-        return PlayerHelper.QueryCurrentPath() is string p ? [p] : [];
-    }
+    // what's on screen or about to be (either output, the incoming side of a switch)
+    private static List<string> ShownOrIncoming() => LiascapePlayerMedia.ShownOrIncomingPaths();
 
     // `playing` (trashed, or a preset of a trashed base: `off`) was on screen. A playlist session plays on from the next
     // surviving item after it (wrapping), like the old app; a single item / no playable survivor stops. `off` stays in
     // the playlist (its `skip` flag passes it by).
     private static void StopOrAdvanceAfterDelete(string playing, HashSet<string> del, CustomPlaylist? pl, IReadOnlySet<string> off)
     {
-        if (PlayerEngine.IsLiascapePlayer && LiascapePlayerProgram.IsActive)
+        if (LiascapePlayerProgram.IsActive)
         {
             // .claude/rules/backend/api.md § Session and playlist operations: the program's items lose it (the bar's survivors), then the rotation goes
             // on to the next survivor at once — the item after the trashed one's place (the reorder rule)
@@ -502,7 +488,7 @@ public static class AppOps
             {
                 if (pl != null) SavePlaylistState(new CustomPlaylist { VideoPaths = keep, Settings = pl.Settings, Name = pl.Name });
                 else LiascapePlayerProgram.SetItems(keep);
-                LiascapePlayerMedia.QueueNewSession(); // I1, as the legacy play-from of the survivors: it plays on
+                LiascapePlayerMedia.QueueNewSession(); // I1, as a play-from of the survivors: it plays on
                 LiascapePlayerProgram.Next();
                 return;
             }

@@ -218,8 +218,8 @@ public sealed class LiascapePlayerClient
             if (_sceneCheck is { } c && Environment.TickCount64 - c.At < 30_000) return (c.Available, c.Reason, c.AssetsDir, c.Renderer);
             (bool, string?, string?) r;
             string? renderer = null;
-            var bin = PlayerEngine.ResolveBinary();
-            if (bin == null) r = (false, PlayerEngine.UnavailableReason, null);
+            var bin = PlayerStatus.ResolveBinary();
+            if (bin == null) r = (false, PlayerStatus.UnavailableReason, null);
             else
             {
                 try
@@ -269,7 +269,7 @@ public sealed class LiascapePlayerClient
         {
             if (_healthCheck is { } c && Environment.TickCount64 - c.At < 30_000) return c.V;
             JsonElement? r = null;
-            if (PlayerEngine.ResolveBinary() is string bin)
+            if (PlayerStatus.ResolveBinary() is string bin)
                 try
                 {
                     var psi = new ProcessStartInfo(bin) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -356,7 +356,7 @@ public sealed class LiascapePlayerClient
 
     // Startup grace (a cold boot): the player binds its socket FIRST, then starts — the PipeWire bus (≤ 500 ms),
     // EGL, CUDA, the catalogue — and answers ~1 s later. A request reaching it in that window is waiting for a STARTING
-    // player, not a stalled one: without the grace a 300 ms `get` from another process (the restore's monitor-daemon) trips
+    // player, not a stalled one: without the grace a 300 ms `get` from another process (the app opening during a restore) trips
     // the breaker on the player the restore just spawned and fails every request for 3 s. So until a player answered this client
     // once, a request waits for its first answer up to StartGraceMs after its socket was bound (the socket file's mtime
     // = its bind time; a supervised restart's child binds anew), and the request connection's lock as long. Only once
@@ -497,7 +497,7 @@ public sealed class LiascapePlayerClient
                                 bool restarted = PlayerPid != null;
                                 // the supervisor stayed the same and only its child changed = a supervised
                                 // restart (the crash was restarted with `--restore`), not a fresh process
-                                // from EnsureRunning/an engine switch (which replaces the supervisor too).
+                                // from EnsureRunning (which replaces the supervisor too).
                                 bool supervised = restarted && sup != null && sup == SupervisorPid;
                                 int? prevPid = PlayerPid;
                                 PlayerPid = p; Generation++;
@@ -621,11 +621,11 @@ public sealed class LiascapePlayerClient
         catch { return false; }
     }
 
-    // Make sure the player is GONE — supervisor AND compositor (engine switch away from liascape-player):
+    // Make sure the player is GONE — supervisor AND compositor (an upgrade, a restart):
     // `quit` over the socket first (the compositor exits 0, the supervisor classifies that as a clean
     // exit and exits too, no restart). If that didn't work, escalate against the SUPERVISOR (never the
     // compositor alone — a supervisor that's still alive treats a dead/signalled child as a crash and
-    // RESTARTS it with `--restore`, which is exactly what an engine switch away from liascape-player must not
+    // RESTARTS it with `--restore`, which is exactly what a quit must not
     // leave behind): SIGCONT+SIGTERM it (it forwards the TERM to its child and exits cleanly), then
     // SIGKILL it (its child dies via PR_SET_PDEATHSIG) — and if the compositor pid is somehow still
     // alive a short moment later (PDEATHSIG race / unsupervised), SIGKILL it directly too. Unsupervised
@@ -691,7 +691,7 @@ public sealed class LiascapePlayerClient
     public string? StaleReason()
     {
         if (PlayerPid is not int pid) return null;
-        var bin = PlayerEngine.ResolveBinary(fresh: true);
+        var bin = PlayerStatus.ResolveBinary(fresh: true);
         return bin == null ? null : StaleReasonFor(pid, bin);
     }
 
@@ -786,7 +786,7 @@ public sealed class LiascapePlayerClient
         lock (_spawnLock)
         {
             if (!AutoSpawn) return false;
-            var bin = PlayerEngine.ResolveBinary(fresh: true);
+            var bin = PlayerStatus.ResolveBinary(fresh: true);
             if (bin == null || (SupervisorPid ?? PlayerPid) is not int src) return false;
             if ((ServeArgs(src) ?? _serveArgs?.ToList()) is not { } args) { Log($"liascape-player is out of date ({why}) but pid {src}'s `serve` arguments can't be read — not restarting it"); return false; }
             _serveArgs = [.. args];
@@ -949,8 +949,8 @@ public sealed class LiascapePlayerClient
             // none cached → looked for again: a binary that appeared since (a rebuild, a store path after boot) starts
             // now, and a missing one isn't a failed start (no 10 s backoff). Guard: scripts/test-player-binary.sh
             // § appears later
-            var bin = PlayerEngine.ResolveBinary() ?? PlayerEngine.ResolveBinary(fresh: true);
-            if (bin == null) { LastError = PlayerEngine.UnavailableReason; Log(LastError); return false; }
+            var bin = PlayerStatus.ResolveBinary() ?? PlayerStatus.ResolveBinary(fresh: true);
+            if (bin == null) { LastError = PlayerStatus.UnavailableReason; Log(LastError); return false; }
             Process? p;
             // the last player's own arguments + --restore (it went away: a failed upgrade, its supervisor gave up
             // or was killed) — the same outputs/socket/audio, showing what it showed until the switch lands; a

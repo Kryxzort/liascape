@@ -422,7 +422,6 @@ public static class PreviewBackfill
         _playerHeld = null;
         try
         {
-            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) return null;
             var c = Liascape.Player.LiascapePlayerClient.Shared;
             if (!c.SocketExists) return null;
             var st = c.Call("state", null, Liascape.Player.LiascapePlayerClient.QuickMs);

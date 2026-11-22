@@ -19,8 +19,7 @@
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
 # XDG_STATE_HOME (so its own settings.json, library, liascape-player socket + event log) and its own random
 # backend port. It never talks to another backend (e.g. the dev one on :5174), never reads the real
-# settings.json, never connects to the real liascape-player socket, never starts or kills mpvpaper (it aborts
-# before any playback call unless the backend reports `active: liascape-player`). Display/compositor env is
+# settings.json, never connects to the real liascape-player socket. Display/compositor env is
 # unset; audio is `--ao null` (but the auto-mute section's, on its own private PipeWire). Everything it started is stopped and its temp dir removed on every exit
 # path (EXIT/INT/TERM/HUP trap; a SIGSTOPped compositor is SIGCONTed first; cleanup kills the SUPERVISOR
 # `$SP` — never just a compositor pid, which would only make it restart again).
@@ -94,9 +93,6 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 # scenes: the private player (and every one the backend starts) plays synthetic scene folders, and
 # finds its worker even when its binary is a copy elsewhere (the upgrade test replaces $T/bin/liascape-player)
 export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=$ROOT/src/player/target/debug/liascape-scene-worker
-# The adapter's aligned-switch backstop slack (LiascapePlayerMedia.AlignBackstopSlackSec, 15 s in production),
-# shortened so the speed-drop / long-pause scenarios below reach it in seconds.
-export LIASCAPE_TEST_ALIGN_BACKSTOP_SLACK_SEC=2
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 unset PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH PIPEWIRE_RUNTIME_DIR PIPEWIRE_REMOTE
 # No session bus: the MPRIS checks (AudioMonitor's playerctl, the player's lia-mpris) never read the machine's players.
@@ -816,8 +812,8 @@ stop_now
 ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
 
 echo "== Task 20c: /next /prev /random skip scenes under liascape-player (never a 500, never land on one)"
-# Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (.claude/rules/backend/library.md /
-# .claude/rules/backend/legacy-engine.md): a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
+# Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (.claude/rules/backend/library.md):
+# a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
 # what IsSceneFolder checks, and exactly what makes PlayerHelper.IsScenePath (no media extension) true
 # for that folder's path. No linux-wallpaperengine / scene.pkg needed to be *recognized* as a scene —
 # only to actually render one, which these never attempt (they must be SKIPPED, not launched).
@@ -869,11 +865,8 @@ code=$(postcode /prev)
 
 mv "$T/removed-sv1" "$LIB/imported/sv1"; mv "$T/removed-sv2" "$LIB/imported/sv2"; mv "$T/removed-sv3" "$LIB/imported/sv3"
 mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
-# The legacy-engine "scenes still reachable when AllowScenes=true" decision-point check lives in the
-# self-test instead (LiascapePlayerSelfTest.SceneSkipAssertions) — this IT script stays on liascape-player
-# throughout by design (see header: "it aborts before any playback call unless active: liascape-player"),
-# and switching the live engine to legacy here while something is playing would try to launch a real
-# mpvpaper/LWE, which this hermetic sandbox explicitly never does.
+# The pure "scenes reachable when AllowScenes=true" decision-point check lives in the self-test
+# (LiascapePlayerSelfTest.SceneSkipAssertions).
 stop_now
 
 echo "== Phase 2: scenes under liascape-player (synthetic scenes — the player runs with LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1)"
@@ -1068,8 +1061,8 @@ echo "$SPJ" | jq -e '[.props[].name] == ["color","hdr","clock","style","bars","n
   and (.props[0] | .type == "color" and .label == "Scheme color" and .value == "1 0 0" and .overridden == false and .editable)
   and (.props[1] | .type == "text" and .label == "Clock" and (.editable | not))
   and (.props[3] | .visible and (.options | length) == 2) and (.props[4] | .visible | not)
-  and (.props[6] | (.editable | not) and .unsupported != null) and .live == true' >/dev/null \
-  && ok "GET /library/scene-props: 7 properties in order, types/labels/defaults, condition visibility, usershortcut not editable" || bad "GET /library/scene-props → $(echo "$SPJ" | jq -c '[.props[] | {name, type, label, value, visible, editable}]')"
+  and (.props[6] | (.editable | not) and .unsupported != null) and ([has("engine"), has("note"), has("live")] == [false, false, false])' >/dev/null \
+  && ok "GET /library/scene-props: 7 properties in order, types/labels/defaults, condition visibility, usershortcut not editable, no engine / note / live" || bad "GET /library/scene-props → $(echo "$SPJ" | jq -c '{engine, note, live, props: [.props[] | {name, type, label, value, visible, editable}]}')"
 post /apply "{\"path\":\"$S1\"}" >/dev/null
 waitfor $WAIT scene_ready "$S1" || bad "/apply scene 1 → $(basename "$(cur path)")"
 SID=$(srcIdForPath "$S1"); WP=$(wpid "$SID")
@@ -1782,14 +1775,12 @@ echo "$st" | jq -e '.settings.order == 1' >/dev/null && ok "play-from kept the p
   || bad "play-from overwrote the saved order: $(echo "$st" | jq -c '.settings.order')"
 stop_now
 
-# An aligned (wait-for-video-end) switch is bounded by the adapter at A's remaining time + slack, read
-# when it was armed. A's real remaining time moves with its CURRENT speed and stands still while the
-# player is paused (the player re-derives its own align deadline for both) — a fixed bound gave up
-# early: cancel + switch now, cutting A long before its end (and switching while paused).
+# A rotation's aligned (wait-for-video-end) switch waits for A's real end: A's remaining time moves with its CURRENT
+# speed and stands still while the player is paused (the player re-derives its align deadline for both) — a bound
+# fixed when it was armed gave up early: cancel + switch now, cutting A long before its end (and switching while paused).
 aligned_corr() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq -r --arg p "$1" '[.events[] | select(.align=="end" and .path==$p)][-1].corr // empty'; }
 armed_for() { ac=$(aligned_corr "$1"); [ -n "$ac" ]; }
 nsched() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
-backstops() { grep -c "not handed off within" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null || true; }
 # `ac` handed off; to what — from its handoff event (B is a short clip whose own aligned switch starts
 # ~0.3 s before ITS end, so reading `cur:*` after a slow poll could already show the next one)
 handed_off() {
@@ -1799,17 +1790,17 @@ handed_off() {
 }
 pyint() { python3 -c "print(int($1))"; }
 
-echo "== aligned wait survives a speed drop (the backstop follows A's current speed)"
+echo "== aligned wait survives a speed drop (the wait follows A's current speed)"
 # The window is MEASURED, not assumed: 9 s after the drop, but never later than 1 s before E1's own end
-# at 0.5× — and never earlier than 3 s past the old bound (read when armed at 4×: E1's remaining/4 + the
-# 2 s slack, so it ran out at "E1's end at 4×" + 2 s wherever it was armed). A fixed 9 s overran E1's
+# at 0.5× — and never earlier than 5 s past E1's end at 4× (a bound read when armed: E1's remaining/4 + 2 s,
+# + 3 s). A fixed 9 s overran E1's
 # real end whenever the drop landed late under load (E1 at 8 s of 12 → at 0.5× it ends 8 s later).
 tpos() { local v; v=$(cur time_pos); case "$v" in ''|null) echo "$1" ;; *) echo "$v" ;; esac; }
 setting '.Speed = 4'
 post /playlist/play "{\"paths\":[\"$E1\",\"$E2\"],\"settings\":{\"Order\":0}}" >/dev/null
 ac=""; waitfor $WAIT armed_for "$E2"
 p_arm=$(tpos 0); t_arm=$(ms_now)
-bs0=$(backstops); ns0=$(nsched)
+ns0=$(nsched)
 setting '.Speed = 0.5'
 waitfor $WAIT cur_near speed 0.5 || bad "speed drop: E1 at $(cur speed)x"
 p_drop=$(tpos 12); t_drop=$(ms_now)
@@ -1826,7 +1817,6 @@ nst_=$(n_before transition.started "$ac" "$t_check"); nn_=$(n_before transition.
   || bad "speed drop: corr=$ac cancelled=$nc_ handoff=$nh_ new switches=$nn_ by +$(( t_check - t_arm )) ms"
 # E1 on screen then = no effect had started from it (mid-effect `cur:*` is the incoming side) and nothing replaced it
 [ "$nst_" = 0 ] && [ "$nn_" = 0 ] && ok "E1 still on screen (not cut before its end)" || bad "speed drop: $ac started=$nst_, new switches=$nn_ by +$(( t_check - t_arm )) ms — E1 was cut early"
-[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired" || bad "the adapter backstop fired: $(grep "not handed off within" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -1)"
 setting '.Speed = 4'
 cp=""; waitfor 20000 handed_off   # E1's rest at 4×: ≤ 3 s
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$cp" = "$E2" ] && ok "back at 4x: the same aligned switch handed off to E2 at E1's end" || bad "after 4x: handoff=$(corr_has "$ac" handoff) to $(basename "$cp")"
@@ -1837,14 +1827,13 @@ post /playlist/play "{\"paths\":[\"$P1\",\"$P2\"],\"settings\":{\"Order\":0}}" >
 ac=""; waitfor $WAIT armed_for "$P2"
 post /pause '{}' >/dev/null
 waitfor $WAIT paused_is true; p_pause=$(tpos "?")
-bs0=$(backstops); ns0=$(nsched)
+ns0=$(nsched)
 echo "     paused at P1 ${p_pause} s"
-sleep 8   # > P1's remaining (< 4 s) + the 2 s slack, from arming — nothing moves while paused
+sleep 8   # > P1's remaining (< 4 s) + 2 s, from arming — nothing moves while paused
 pp=$(playerPaused); nc_=$(corr_has "$ac" cancelled); nn_=$(( $(nsched) - ns0 )); cp=$(cur path)
 [ "$pp" = true ] && [ -n "$ac" ] && [ "$nc_" = 0 ] && [ "$nn_" = 0 ] && [ "$cp" = "$P1" ] \
   && ok "8 s paused: aligned switch $ac still waiting, P1 on screen, no new switch" \
   || bad "long pause: paused=$pp corr=$ac cancelled=$nc_ new switches=$nn_ cur $(basename "$cp") (paused at P1 ${p_pause} s)"
-[ "$(backstops)" = "$bs0" ] && ok "no adapter backstop fired while paused" || bad "the adapter backstop fired while paused: $(grep "not handed off within" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -1)"
 post /pause '{}' >/dev/null
 cp=""; waitfor 20000 handed_off   # P1's rest: < 4 s
 [ "$(corr_has "$ac" handoff)" = 1 ] && [ "$cp" = "$P2" ] && ok "resumed: the same aligned switch handed off to P2 at P1's end" || bad "after resume: handoff=$(corr_has "$ac" handoff) to $(basename "$cp")"
@@ -2676,7 +2665,7 @@ EOF
   (setsid bash -c 'while :; do sleep 1; done' liascape-backend monitor-daemon >/dev/null 2>&1 & echo $! > "$XDG_CONFIG_HOME/liascape/monitor.pid")
   LMD=$(cat "$XDG_CONFIG_HOME/liascape/monitor.pid"); waitfor 2000 eval '[ "$(md_procs)" -ge 1 ]' || bad "the fake leftover monitor-daemon never ran"
   backend_up backend-am.log
-  # serve stops it AFTER writing its port (KillLegacyDaemons: a whole-tree kill, then the pid file) — under load that
+  # serve stops it AFTER writing its port (LegacyTakeover.StopDaemons: SIGTERM, then the pid file) — under load that
   # landed past a 5 s bound once (killed, monitor.pid still there): wait on all three, ≤ 30 s
   lmd_stopped() { ! kill -0 "$LMD" 2>/dev/null && no_md && grep -q "stopped a leftover monitor-daemon (pid $LMD)" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log"; }
   waitfor 30000 lmd_stopped \

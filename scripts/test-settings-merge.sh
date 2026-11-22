@@ -207,7 +207,7 @@ post /settings '{"volume":70,"Speed":1.25}' >/dev/null; snap s2
 [ "$(f .volume s2)" = 70 ] && [ "$(f .speed s2)" = 1.25 ] && ok "camelCase + PascalCase keys both bind (volume 70, speed 1.25)" || bad "volume $(f .volume s2) speed $(f .speed s2)"
 same s1 s2 '["volume","speed"]' "{volume, Speed}"
 post /settings '{"SceneMonitors":[{"Name":"DP-9","Fps":15,"IsPrimary":true}]}' >/dev/null; snap s3
-[ "$(f .sceneMonitors s3)" = '[{"name":"DP-9","fps":15,"isPrimary":true}]' ] && ok "SceneMonitors: the array is replaced whole (1 entry)" || bad "sceneMonitors → $(f .sceneMonitors s3)"
+[ "$(f .sceneMonitors s3)" = '[{"name":"DP-9","fps":15}]' ] && ok "SceneMonitors: the array is replaced whole (1 entry; an entry's unknown isPrimary dropped)" || bad "sceneMonitors → $(f .sceneMonitors s3)"
 same s2 s3 '["sceneMonitors"]' "{SceneMonitors}"
 post /settings '{"globalTransitionEffectIds":["wipeLeft"]}' >/dev/null; snap s4
 [ "$(f .globalTransitionEffectIds s4)" = '["wipeLeft"]' ] && ok "globalTransitionEffectIds replaced whole" || bad "effect ids → $(f .globalTransitionEffectIds s4)"
@@ -407,7 +407,7 @@ post /playlist/state "$ps0" >/dev/null
 echo "== parallel partial bodies all land"
 # 8 rounds × 10 bodies released at once, each setting a different field: without one poster at a time, two
 # that load the same file each save it with only their own field changed → the other's change is lost
-PF='["librarySortIndex","lweVolume","sceneTransitionDelayMs","fullLiveSyncOffsetMs","globalTransitionDurationMaxMs",
+PF='["librarySortIndex","demuxerMaxMib","globalSwitchScenesAfterSeconds","volume","globalTransitionDurationMaxMs",
      "autoMuteDelayMs","autoUnmuteDelayMs","demuxerMaxBackMib","globalTransitionDurationMs","videoFpsCap"]'
 lost=$(python3 - "$U" "$PF" <<'PY'
 import http.client, json, os, sys, threading

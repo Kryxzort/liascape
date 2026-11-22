@@ -4,10 +4,10 @@ using System.Text.Json;
 
 namespace Liascape.Player;
 
-// Legacy mpv IPC property commands → liascape-player graph properties (see .claude/rules/backend/player-adapter.md
-// § Property map). PlayerHelper still speaks mpv (`SendCommand("set_property", "volume", 80)`); under
-// PlayerEngine=liascape-player its dispatch hands those args here and LiascapePlayerMedia.Mpv routes the result
-// (volume/speed/mute → the effective-settings resolver, layer props → `lay:*:main`, the rest → `srcs:*`).
+// mpv IPC property commands → liascape-player graph properties (see .claude/rules/backend/player-adapter.md
+// § Property map). PlayerHelper speaks mpv (`SendCommand("set_property", "volume", 80)`); LiascapePlayerMedia.Mpv
+// hands those args here and routes the result (volume/speed/mute → the effective-settings resolver, layer props →
+// `lay:*:main`, the rest → `srcs:*`).
 public static class MpvPropertyMap
 {
     public const double SilentDb = -96.0;  // mpv volume-gain-min = liascape-player's silent
@@ -42,7 +42,7 @@ public static class MpvPropertyMap
                     if (Bool(v) is bool lb) return ("loop", lb);
                     return Num(v) is double n ? ("loop", n > 0) : Unknown(mpvArgs, "loop value");
                 }
-            // legacy VideoScale: fill = panscan 1.0, fit = panscan 0.0 → the layer's `fit`
+            // VideoScale as mpv panscan: fill = 1.0, fit = 0.0 → the layer's `fit`
             case "panscan": return Num(v) is double ps ? ("fit", ps >= 0.5 ? "fill" : "fit") : Unknown(mpvArgs, "panscan not a number");
             case "vf":
                 {

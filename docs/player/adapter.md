@@ -34,9 +34,10 @@ evidence.
 
 ## Binary, start, upgrade
 
-- **Binary** (`PlayerEngine.ResolveBinary`): `LIASCAPE_PLAYER_BIN` → next to the running liascape executable → the
+- **Binary** (`PlayerStatus.ResolveBinary`): `LIASCAPE_PLAYER_BIN` → next to the running liascape executable → the
   dev tree `src/player/target/{release,debug}/liascape-player` (release first: debug is `opt-level 0` and the player
-  mixes audio itself) → `PATH`. Missing → a switch refuses with why (`/player-engine` too); one that appears later plays.
+  mixes audio itself) → `PATH`. Missing → every apply fails with the reason (`/player-engine` too, logged once per
+  reason); one that appears later plays.
 - **Start** (`EnsureRunning`, only from a switch): `setsid [systemd-run --scope] sh -c 'exec … serve'` with the
   session's environment, waiting ≤ 3 s for the socket. Once this client has talked to a player it restarts with that player's
   own arguments + `--restore` (`UserServeArgs`, from the supervisor's cmdline minus `--supervised`, `--restore`,
@@ -60,13 +61,13 @@ evidence.
   PDEATHSIG; a compositor still alive after that is SIGKILLed too). `/player-engine` → `running {pid, supervisor, exe,
   started, stale}`.
 
-## Dispatch (`PlayerHelper`, `if (PlayerEngine.IsLiascapePlayer)` at the top of each primitive)
+## Dispatch (`PlayerHelper`)
 
-| primitive | under liascape-player |
+| primitive | request |
 |---|---|
-| `SwitchToFile` / `Launch` | `QueueSwitch` → `transition {outputs: "out:*", to: {path, props}, effect from `TransitionService.Pick` or null, align}`; a picked duration 0 = a cut (`effect_id: null`), never a 0 ms effect |
-| `SendCommand` / `TrySendCommand` | `Mpv(args)` → `MpvPropertyMap` → a resolver pass (volume/speed literal, mute) or a `Set` |
-| `KillCurrentProcess`, `Stop` | a queued `stop` (the process stays up) |
+| `SwitchToFile` | `QueueSwitch` → `transition {outputs: "out:*", to: {path, props}, effect from `TransitionService.Pick` or null, align: now}`; a picked duration 0 = a cut (`effect_id: null`), never a 0 ms effect |
+| `SendCommand` | `Mpv(args)` → `MpvPropertyMap` → a resolver pass (volume/speed literal, mute) or a `Set` |
+| `Stop` | a queued `stop` (the process stays up) |
 | `AppOps.Trash` | `ShownOrIncomingPaths()`: every layer's content (an effect's `to`) + each requested switch's B unless aligned and still waiting |
 
 ## Rotation wiring (`LiascapePlayerProgram`)
@@ -133,12 +134,11 @@ invalidation happened is never stored (epoch).
 
 ## Reconnection and missed switches
 
-`ReconcileShown` (queued essential on `Restarted`, before pending waits fail so a re-armed aligned switch is requested
-after it) compares the screen (every layer's content, an effect's `to`, a requested non-waiting B, the parked
-wallpaper) with `_intent`: an align:now switch's B from its reply, an aligned switch's B from its
-`transition.started`/`.handoff` (until then it is only armed — `_alignedCorrs`), nothing after `Stop()`. The intent
-is unknown before our first switch, after `StopAndQuit`, after our switch failed or was cancelled, and after a
-`transition.scheduled` for a path we didn't request (`_requesting` covers our own event beating its reply).
+`ReconcileShown` (queued essential on `Restarted`, before pending waits fail) compares the screen (every layer's
+content, an effect's `to`, a requested non-waiting B, the parked wallpaper) with `_intent`: our switch's B from its
+reply, nothing after `Stop()`. The intent is unknown before our first switch, after our switch failed or was
+cancelled, and after a `transition.scheduled` for a path we didn't request (`_requesting` covers our own event beating
+its reply); a program owns what shows while it runs (`ForgetIntent`).
 
 A switch or stop lost to a stall (`LostToStall`) becomes the intent, logged, and `ProbeUntilAnswered` sends a quick
 `hello` every 500 ms (≤ 30 min) so the stall's end is noticed with no UI open; the answer runs
@@ -162,8 +162,8 @@ them), which is why `Sync` calls `Hook()` first. An older player (`no_such_verb`
 capability on a client of its own (`AudioMonitor._probe`, `AutoSpawn = false`): on the shared client its `hello` was
 what discovered a new player process from the timer thread, racing the restart's reapply, and its timeout on a player
 busy quitting opened the shared breaker. Capable → the monitor stops and settings go to the player; otherwise
-`AudioMonitor` runs while `serve` does. `monitor-daemon` is retired under liascape-player; a leftover one is stopped
-by `KillLegacyDaemons`. `toggle-mute` while auto-muted sends `automute.release`.
+`AudioMonitor` runs while `serve` does (nothing auto-mutes with the app closed then). `toggle-mute` while auto-muted
+sends `automute.release`.
 
 `OwnStreamFilter` matches our streams from their first event; the switches that once muted themselves came from
 counting a stream's level before classifying it, hence "classify, then count".

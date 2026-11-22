@@ -52,6 +52,11 @@ in a one-shot process a switch happened behind the backend (stale history, the w
 back to running locally once the POST was sent: a doubled next skips one, a doubled toggle undoes itself.
 `Web/ActionForward.cs`; `.claude/rules/backend/api.md` § CLI forwarding.
 
+### Monitor auto-mute per stream with a 10 ms parec latency — 2026-10-20
+`@DEFAULT_MONITOR@` hears our own audio and oscillates, so each foreign stream is monitored on its own. parec's default
+buffering held the first data ~2 s; `--latency-msec=10` gets it in ~65 ms. `Helpers/AudioMonitor.cs`
+(`.claude/rules/backend/player-adapter.md` § Auto-mute).
+
 ## Steam & sources
 
 ### Browse the Workshop over Steam's client protocol, anonymously — 2026-11-11
@@ -295,36 +300,6 @@ Native selects can't be themed, made translucent or smooth-scrolled on Chromium/
 ### Build the UI in Electron + React — 2026-06-24
 A bake-off measured Electron at display refresh (135–240 fps on a dense animated grid) and the frameworks tied on
 performance, so React won for framer-motion's ceiling.
-
-## Legacy engine
-
-### Hold the audio handoff for `AUDIO_SETTLE`, not a longer `BAND_HOLD` — 2026-10-20
-Each overlay speed step glitches its audio ~200–240 ms later, so mpvpaper-A is cut 300 ms after the last step.
-Lengthening `BAND_HOLD` to 350 ms made the speed tracker limit-cycle and blow its 4 s budget.
-`.claude/rules/backend/legacy-engine.md` § Transitions.
-
-### Monitor auto-mute per stream with a 10 ms parec latency — 2026-10-20
-`@DEFAULT_MONITOR@` hears our own audio and oscillates, so each foreign stream is monitored on its own. parec's default
-buffering held the first data ~2 s; `--latency-msec=10` gets it in ~65 ms. `Helpers/AudioMonitor.cs`.
-
-### Ramp volume in dB with equal-power curves — 2026-10-03
-mpv `volume` and PulseAudio percent volumes are cubic (mpv 50 % = −18 dB, measured), so a linear percent crossfade
-sagged ~17 dB mid-transition. The renderer ramps `volume-gain` (exact dB); the backend pre-distorts percents by the cube
-root (`XfPct`). `.claude/rules/backend/legacy-engine.md` § Transitions.
-
-### Launch a legacy scene's audio open, never `--silent` — 2026-07-14
-The primary monitor's LWE starts at `--volume 0` when NoAudio is on, so mute toggles live; `--silent` creates no
-sink-input to unmute and would need a relaunch. Secondary monitors stay `--silent`. `PlayerHelper` LWE launch.
-
-### Crossfade scene audio in an event-driven libpulse helper — 2026-07-14
-Shelling `pactl` per stream (10–40 ms) can't beat PulseAudio's default volume at stream creation and LWE's stream
-re-creation: audible flashes. `liascape-audio` applies the volume in-process on every sink-input event, matching
-streams by process id. `.claude/rules/backend/legacy-engine.md` § Transitions.
-
-### Keep both sides playing through a legacy transition — 2026-06-25
-The renderer decodes A and B with libmpv (full-live), so V→V effects show live video rather than two frozen stills;
-stills are the warmup fallback and the source for a scene side — LWE's `--screenshot` dump, with grim only as a
-fallback because grim captures open windows. `src/native/liascape-transition`.
 
 ## Player (`liascape-player`)
 

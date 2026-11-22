@@ -66,12 +66,6 @@ sealed class Program
                 PlayerHelper.Stop();
                 DrainLiascapePlayerBeforeExit();
                 return;
-            // internal: the auto-mute daemon a closing app hands its work to (setsid-spawned by the backend itself).
-            // Legacy-only: under liascape-player it returns at once (AudioMonitor): the player's auto-mute Signal runs
-            // with the app closed.
-            case "monitor-daemon":
-                AudioMonitor.RunDaemon();
-                return;
             case "restore":
                 RunHeadlessAutoSync();
                 try { PlayerHelper.Restore(); }
@@ -120,11 +114,10 @@ sealed class Program
     // `restore`) has no such lifetime: if the process exits right after enqueueing a switch/set, the
     // queued work may never actually run (the whole CLR goes with it) — the exact gap this closes,
     // found by the on-machine acceptance round (`volume up` silently not reaching a live
-    // liascape-player wallpaper). Bounded and a no-op under legacy/when nothing was queued.
+    // liascape-player wallpaper). Bounded and a no-op when nothing was queued.
     internal static void DrainLiascapePlayerBeforeExit()
     {
-        if (Liascape.Player.PlayerEngine.IsLiascapePlayer)
-            try { Liascape.Player.LiascapePlayerMedia.Drain().Wait(3000); } catch { }
+        try { Liascape.Player.LiascapePlayerMedia.Drain().Wait(3000); } catch { }
     }
 
     // Runs WE auto-import + playlist auto-add on `restore` and `serve` startup, so the library
