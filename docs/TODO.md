@@ -13,6 +13,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        for sources that can't come back; the guard re-evaluates on each apply. A held state must be visible in the UI
        (what's held and why) instead of a silent black screen. Guard: a player test that fills VRAM (stub sampler),
        suspends A, applies B / stops / applies C, and asserts B and C play once VRAM allows and Stop empties `suspended`.
+       Also: the reserve counts only this player's own processes (check whether hermetic test players running the same
+       binary were counted — 4161 MiB for two wallpapers is suspect), and the resume bar drops from low + max(1024 MiB,
+       10 %) to low + 256 MiB (anti-flap's doubling hold is the loop guard): on 8 GB the old bar meant a 3.6 GB scene
+       that plays fine on a quiet desktop could never resume after a dip.
 0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, now** — the
        owner waived the rest of the bar (`docs/player/reports/switch-over.md`). Right after #114 lands, in order:
        a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,
