@@ -26,11 +26,12 @@ comments. The tabs differ only in what the action area holds.
 
 ## Filters
 - The top-bar creator / presets pill goes. The filter column gets two editable fields: **Author** (a Steam ID, a profile
-  URL, or a name seen before — a card, a sidebar, the library) and **Presets of** (a scene's Workshop ID or URL).
+  URL, or a custom profile name — the `name` in steamcommunity.com/id/name) and **Presets of** (a scene's Workshop ID or URL).
 - A click on the sidebar's creator or presets row fills that field; clearing the field leaves the list.
-- Steam has no author search syntax (its search matches titles and descriptions only), so an Author field resolves to a
-  Steam ID itself: a profile URL via the public profile page, a known name from what the app has seen; an unknown plain
-  name says to paste their profile link or ID.
+- Steam has no author search syntax (its search matches titles and descriptions only), so the Author field resolves to a
+  Steam ID itself, always the same way: a custom profile name or URL through the public profile page. Display names are
+  not accepted (they aren't unique and Steam has no lookup for them); typing one says so and asks for the profile link,
+  ID or custom name.
 
 ## Motion
 The sidebar open/close is variant E from the motion lab (worktree `agent-a841082c364487870`, `app/ui/motion-lab/`):
