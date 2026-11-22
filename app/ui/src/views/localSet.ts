@@ -11,6 +11,8 @@ import { inLibrary } from "./libraryMatch";
 // UI-only pseudo-tags in the include / exclude sets, never sent (store wireFilter strips every "@" tag)
 export const LIBRARY_TAG = "@library";
 export const FAVORITES_TAG = "@favorites";
+// the Library's own "Crashed" row (items whose scene crashed the player: LibraryItem.hasCrashed), matched in views/Library.tsx
+export const CRASHED_TAG = "@crashed";
 
 export type SetMode = "inc" | "exc" | null;
 export type SetModes = { lib: SetMode; fav: SetMode };

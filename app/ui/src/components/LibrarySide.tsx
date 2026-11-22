@@ -173,16 +173,24 @@ export function LibrarySide({
   // "Clear" on the crash notice: playable again (POST /library/clear-crash; its library-item-changed tells every other page,
   // a new crash marks it again). The notice and the whitelist row fade out (motion off too — never a pop), then what sat
   // after them glides into their room (a FLIP: measured as the fade starts, played back once they unmount).
-  // Guard: probe-sidebar lib:clearCrash
+  // The notice shows while any item Clear would lift is marked (the open one, or another of the selection), naming how many
+  // when it isn't just the open one ("3 selected scenes crashed the player"); the whitelist row is the open item's own.
+  // Guard: probe-sidebar lib:clearCrash:*
   const motion = useMotion();
-  const crash = useLinger(item.hasCrashed || null, CRASH_OUT_MS, motion);
+  const crashN = new Set([...(item.hasCrashed ? [p] : []), ...targets.filter((t) => t.hasCrashed).map((t) => t.videoPath)]).size;
+  const them = crashN > 1 ? "them" : "it";
+  const crashText = !crashN ? null : item.hasCrashed && crashN === 1 ? "This scene crashed the player — rotations skip it; a click still plays it"
+    : `${crashN} selected scene${crashN > 1 ? "s" : ""} crashed the player — rotations skip ${them}; a click still plays ${them}`;
+  const crash = useLinger(crashText, CRASH_OUT_MS, motion);
+  const wlRow = useLinger(item.hasCrashed || null, CRASH_OUT_MS, motion);
+  const crashLeaving = crash.closing || wlRow.closing;
   const bodyRef = useRef<HTMLDivElement>(null);
   const flipFrom = useRef<ReturnType<typeof snapFlip>>(null);
-  useLayoutEffect(() => { if (crash.closing && motion) flipFrom.current = snapFlip(bodyRef.current, CRASH_FLIP); }, [crash.closing, motion]);
+  useLayoutEffect(() => { if (crashLeaving && motion) flipFrom.current = snapFlip(bodyRef.current, CRASH_FLIP); }, [crashLeaving, motion]);
   useLayoutEffect(() => {
-    if (crash.value != null || !flipFrom.current) return;
+    if (crashLeaving || !flipFrom.current) return;
     glideFlip(flipFrom.current, bodyRef.current, CRASH_FLIP); flipFrom.current = null;
-  }, [crash.value]);
+  }, [crashLeaving]);
   // an item that can't play (a preset; any scene while the scene renderer is missing): its notice (the crash notice's
   // block), fading out once it can (its base back, the engine switched, the renderer found), what follows gliding into its room as for the crash notice. Guard: probe-sidebar lib:preset:needsBase*
   const reason = useStore((s) => unplayableReasonOf(item, s.settings, s.scenesBlocked));
@@ -311,8 +319,8 @@ export function LibrarySide({
         {crash.value && (
           <div className={`side-crash${crash.closing ? " leaving" : ""}`} data-side-crash role="status">
             <span className="side-crash-ico"><AlertTriangle size={16} /></span>
-            <span className="side-crash-text">This scene crashed the player — rotations skip it; a click still plays it</span>
-            <button className="mini side-crash-clear" data-side-crash-clear aria-label="Clear the crash mark" disabled={crash.closing}
+            <span className="side-crash-text" data-side-crash-text>{crash.value}</span>
+            <button className="mini side-crash-clear" data-side-crash-clear aria-label={crashN > 1 ? "Clear the crash marks" : "Clear the crash mark"} disabled={crash.closing}
               onClick={clearCrash}>Clear</button>
           </div>
         )}
@@ -361,8 +369,8 @@ export function LibrarySide({
           <SubToggle key={item.workshopId} id={item.workshopId} title={item.title} weLocal={false} only="unsubscribed" likely={!item.subscribed} />
         )}
         <SideSection icon={<SlidersHorizontal size={15} />} title="Playback" data-sec="playback">
-          {crash.value && (
-            <label className={`inline side-wl${crash.closing ? " leaving" : ""}`}>
+          {wlRow.value && (
+            <label className={`inline side-wl${wlRow.closing ? " leaving" : ""}`}>
               <input type="checkbox" checked={wl} onChange={(e) => toggleWl(e.target.checked)} /> Keep in playlist despite crash (whitelist)
             </label>
           )}

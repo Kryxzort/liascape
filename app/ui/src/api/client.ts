@@ -333,6 +333,8 @@ export const api = {
   libraryWhitelist: (path: string, value: boolean) => jpost("/library/whitelist", { path, value }),
   // API: a crashed scene playable again (the backend broadcasts library-item-changed {hasCrashed: false})
   libraryClearCrash: (path: string) => jpost<{ cleared: boolean }>("/library/clear-crash", { path }),
+  // API: every crash mark at once (Settings → Housekeeping; AppOps.ClearAllCrashes: library-item-changed per item, as above)
+  libraryClearCrashAll: () => jpost<{ cleared: number }>("/library/clear-crash-all", {}),
   // API: a scene's user properties (project.json general.properties) — list, set (saved per item + live),
   // reset (name: one, none: all), and the drag twin (live, nothing saved)
   sceneProps: (path: string) => jget<ScenePropsResp>(`/library/scene-props?path=${encodeURIComponent(path)}`),

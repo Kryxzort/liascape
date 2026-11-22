@@ -170,6 +170,43 @@ function CachePicker() {
   );
 }
 
+// Settings → Housekeeping → "Clear crash marks": every item whose scene crashed the player (rotations skip it) playable again
+// at once, through the backend's one loop (POST /library/clear-crash-all → AppOps.ClearAllCrashes: each mark as the sidebar's
+// Clear lifts it, a rotation's skip flag and every page's copy following). The button names how many are marked; with none it
+// is off and says "No crash marks". Its two faces share one cell (.xfade): the swap rolls, the button keeps its width, and a
+// leaving face keeps the last count it showed. Guard: probe-settings crash:*
+function CrashMarks() {
+  const items = useStore((s) => s.libraryItems);
+  const patchItem = useStore((s) => s.patchLibraryItem);
+  const marked = useMemo(() => items.filter((i) => i.hasCrashed).map((i) => i.videoPath), [items]);
+  const n = marked.length;
+  const [shownN, setShownN] = useState(n);
+  if (n > 0 && n !== shownN) setShownN(n); // follow during render: the "Clear" face rolls out with its last count
+  const [busy, setBusy] = useState(false);
+  const clear = async () => {
+    setBusy(true);
+    for (const p of marked) patchItem(p, { hasCrashed: false });
+    try { await api.libraryClearCrashAll(); }
+    catch (e) {
+      for (const p of marked) patchItem(p, { hasCrashed: true });
+      useStore.getState().setError(`Couldn't clear the crash marks: ${(e as Error).message}`);
+    }
+    setBusy(false);
+  };
+  const none = n === 0;
+  return (
+    <Row label="Clear crash marks" hint="scenes that crashed the player, which rotations skip. Cleared, they play in rotations again.">
+      <button className="btn ghost crash-clear-all" data-crash-clear-all data-crash-n={n} disabled={none || busy} onClick={clear}
+        aria-label={none ? "No crash marks" : `Clear ${n} crash mark${n === 1 ? "" : "s"}`}>
+        <span className="xfade">
+          <span data-off={none ? "" : undefined} aria-hidden>Clear {shownN} mark{shownN === 1 ? "" : "s"}</span>
+          <span data-off={none ? undefined : ""} aria-hidden>No crash marks</span>
+        </span>
+      </button>
+    </Row>
+  );
+}
+
 // Settings → Watched folders (AppSettings.WatchedFolders, backend-owned: edited through /library/watched, never by the settings
 // save): a row per folder, its path, how many wallpapers it brought in, its own "Copy files instead of linking" (the
 // Workshop folder's wording; it applies to what the folder imports from then on) and a remove that stops the watching (what it
@@ -818,6 +855,7 @@ export const Settings = memo(function Settings() {
 
       <Section title="Housekeeping" icon={<LibraryIcon size={15} />}>
         <CachePicker />
+        <CrashMarks />
         <Row label="Reset all settings" hint="every setting back to its default" lv="standard">
           <div className="hms">
             {wipeArm < 0 && <button className="btn danger" onClick={() => setWipeArm(3)}>Reset Settings</button>}

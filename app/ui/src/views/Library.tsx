@@ -22,7 +22,7 @@ import type { LibraryItem } from "../api/client";
 import { unsubBlocked } from "../components/subscribeMode";
 import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
 import { confirmBaseRemoval } from "../components/baseConfirm";
-import { byFavorites, setModesOf } from "./localSet";
+import { CRASHED_TAG, byFavorites, setModesOf } from "./localSet";
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -85,7 +85,13 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const libFilter = useStore((s) => s.libFilter);
   const clearTags = useStore((s) => s.clearTags);
   const match = useMemo(() => localMatcher(libFilter), [libFilter]);
-  const known = useMemo(() => knownTags(items, (i) => i.videoPath), [items]);
+  const known = useMemo(() => {
+    const k = knownTags(items, (i) => i.videoPath);
+    if (items.some((i) => i.hasCrashed)) k.add(CRASHED_TAG);
+    return k;
+  }, [items]);
+  // The Crashed row: ✓ keeps the items whose scene crashed the player, ✕ the rest. Guard: probe-filters lib:crashed
+  const crashMode = libFilter.include.includes(CRASHED_TAG) ? "inc" : libFilter.exclude.includes(CRASHED_TAG) ? "exc" : null;
   // The Favourites row: ✓ keeps the items starred on the Workshop, ✕ the rest (a non-Workshop item is never starred). Signed
   // out (or Steam turning the account down) it means nothing. While the list isn't read yet (unread, loading with none in, or a
   // failed read with none in) the whole Library shows under the load line / error with Retry (WsSetLoad, as in Browse): never an
@@ -111,8 +117,12 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     let f = q ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q)) : items;
     if (match) f = f.filter((i) => match(facetsOf(i, i.videoPath)));
     if (favSet) f = byFavorites(f, favMode, favSet, (i) => i.workshopId);
+    if (crashMode) f = f.filter((i) => !!i.hasCrashed === (crashMode === "inc"));
     return sortItems(f, libSort);
-  }, [items, libQuery, libSort, match, favSet, favMode]);
+  }, [items, libQuery, libSort, match, favSet, favMode, crashMode]);
+  // the marked items while the Crashed row is on: a mark lifted (the sidebar's Clear, Housekeeping's) narrows the selection
+  // like a star does under Favourites
+  const crashSig = useMemo(() => (crashMode ? items.filter((i) => i.hasCrashed).map((i) => i.videoPath).join("\n") : ""), [items, crashMode]);
   // app open / the first Library visit with something playing: the playing card in view (once per session)
   const showsPlaying = useMemo(() => !!playingPath && filtered.some((i) => i.videoPath === playingPath), [filtered, playingPath]);
   useTravelToPlaying(scrollRef, "library", "y", ".card.playing", playingPath, showsPlaying);
@@ -122,16 +132,16 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const filterKey = JSON.stringify([libFilter.include, libFilter.exclude, libFilter.featureMatch, libFilter.genreMatch]);
   // a star that comes or goes while the Favourites row is on narrows the selection the same way, the grid keeping its place.
   // Guard: probe-steam lib:yours:fav
-  const shownFilter = useRef(filterKey), shownFavs = useRef(favSet);
+  const shownFilter = useRef(filterKey), shownFavs = useRef(favSet), shownCrash = useRef(crashSig);
   useLayoutEffect(() => {
     const filterChanged = shownFilter.current !== filterKey;
-    if (!filterChanged && shownFavs.current === favSet) return;
-    shownFilter.current = filterKey; shownFavs.current = favSet;
+    if (!filterChanged && shownFavs.current === favSet && shownCrash.current === crashSig) return;
+    shownFilter.current = filterKey; shownFavs.current = favSet; shownCrash.current = crashSig;
     if (filterChanged && scrollRef.current && scrollRef.current.scrollTop > 0) scrollRef.current.scrollTop = 0;
     const vis = new Set(filtered.map((i) => i.videoPath));
     setSel((x) => { const n = new Set([...x].filter((p) => vis.has(p))); return n.size === x.size ? x : n; });
     if (anchor.current && !vis.has(anchor.current)) anchor.current = null;
-  }, [filterKey, favSet, filtered]);
+  }, [filterKey, favSet, crashSig, filtered]);
 
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
   // the order the backend makes the cards' missing previews in: the sidebar's item, the cards on screen, then this
@@ -274,7 +284,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     <>
     <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       <WsSetLoad scope="library" />
-      {(match || favSet) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
+      {(match || favSet || crashMode) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
       <div className="grid">
         {filtered.map((it) => (
           <LibraryCard key={it.videoPath} item={it}

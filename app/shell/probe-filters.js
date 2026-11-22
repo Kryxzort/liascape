@@ -87,6 +87,10 @@
 //                     Standard Definition (k1-k4's 320×180 files, read by the backend), Anime + Nature; no row above the grid
 //   lib:filter        include / exclude / age (untagged out under any age filter) / genre any → all / features all, from the
 //                     page: the cards follow, no /browse request; nothing left → "No wallpapers match" + Clear filters
+//   lib:crashed       s2 marked crashed (its index entry): the Library's Yours gains "Crashed" (@crashed, after Favourites; none
+//                     while nothing is marked: lib:column); ✓ shows only s2, ✕ the other six, – all; kept over a reload
+//                     (localStorage libFilter); a mark lifted (POST /library/clear-crash) under ✓ leaves "No wallpapers match"
+//                     with the row still there to turn off, and once off the row goes. Screenshot wf-lib-crashed.png
 //   lib:scope         the Library's filter and the Workshop's never mix (each column, the POST, localStorage); both kept over a reload
 //   lib:interplay     Ctrl+A / the arrows reach only shown cards; a filter change drops hidden cards from the selection and
 //                     starts the grid at its top; a tab visit keeps the view; the playlist bar is untouched; over 300+ cards a
@@ -1830,6 +1834,46 @@ app.whenReady().then(async () => {
       await libClear();
       const n1 = await page(`return window.__browse.length + window.__more.length;`);
       if (n1 !== n0) v.push(`${n1 - n0} /browse request(s) for the Library's filter (want none)`);
+      return v;
+    });
+
+    await cell("lib:crashed", async () => {
+      const v = [];
+      await libSetup();
+      const idxF = path.join(E.XDG_DATA_HOME, "liascape", "library", "workshop", "index.json"), idx0 = fs.readFileSync(idxF, "utf8");
+      const writeIdx = (t) => { fs.writeFileSync(idxF + ".pf", t); fs.renameSync(idxF + ".pf", idxF); };
+      const s2 = (await http("GET", "/library")).json.find((i) => i.title === "s2");
+      if (!s2) return ["no s2 in /library — proved nothing"];
+      const yours = () => page(`await m.ensure(); return [...(m.q('.wf-col[data-wf-page="library"]:not(.closing) [data-wf-group="yours"]')?.querySelectorAll(".wf-row") ?? [])]
+        .map((x) => [x.dataset.wfTag, x.querySelector(".wf-name")?.textContent, x.dataset.state]);`);
+      try {
+        const j = JSON.parse(idx0); j["900000002"] = { ...(j["900000002"] || {}), crashed: true }; writeIdx(JSON.stringify(j));
+        await loadUi(); await tab("Library"); await sleep(400);
+        const rows = await yours();
+        if (J(rows.map((r) => r.slice(0, 2))) !== J([["@favorites", "Favourites"], ["@crashed", "Crashed"]])) return [`s2 marked: the Library's Yours rows ${J(rows)} (want Favourites, Crashed)`];
+        const steps = [["inc", ["s2"]], ["exc", ["k1", "k2", "k3", "k4", "s1", "s3"]], ["off", ["k1", "k2", "k3", "k4", "s1", "s2", "s3"]], ["inc", ["s2"]]];
+        for (const [st, want] of steps) {
+          if (!(await libSeg("@crashed", st))) { v.push("no Crashed row"); break; }
+          const got = await libTitles();
+          if (J(got) !== J(want)) v.push(`Crashed ${st} → ${J(got)} (want ${J(want)})`);
+        }
+        await shot("lib-crashed");
+        const saved = await page(`return JSON.parse(localStorage.getItem("liascape.libFilter"))?.include ?? null;`);
+        if (!saved?.includes("@crashed")) v.push(`the ✓ isn't saved (libFilter include ${J(saved)})`);
+        await loadUi(); await tab("Library");
+        if (J(await libTitles()) !== J(["s2"])) v.push(`after a reload the Library shows ${J(await libTitles())} (want the kept Crashed ✓: s2)`);
+        await post("/library/clear-crash", { path: s2.videoPath }); await sleep(800);
+        const after = await page(`return { cards: m.qa(".lib-scroll .card").length, none: !!m.q(".lib-scroll [data-wf-none]") };`);
+        if (after.cards || !after.none) v.push(`the mark lifted under ✓: ${after.cards} cards, "No wallpapers match" ${after.none} (want none + the message)`);
+        const r1 = await yours();
+        if (!r1.some((r) => r[0] === "@crashed" && r[2] === "inc")) v.push(`the mark lifted under ✓: the Crashed row is gone or off (${J(r1)}) — it must stay to be turned off`);
+        await libSeg("@crashed", "off");
+        if ((await yours()).some((r) => r[0] === "@crashed")) v.push("nothing marked and the row off: Crashed still offered");
+      } finally {
+        writeIdx(idx0);
+        await page(`localStorage.removeItem("liascape.libFilter"); true`);
+        await loadUi(); await tab("Library");
+      }
       return v;
     });
 

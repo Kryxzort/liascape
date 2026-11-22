@@ -4,7 +4,7 @@ import type { WorkshopFilter } from "../api/client";
 import { useMotion } from "./motion";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { keepCardInView } from "../hooks/gridKeys";
-import { FAVORITES_TAG, LIBRARY_TAG } from "../views/localSet";
+import { CRASHED_TAG, FAVORITES_TAG, LIBRARY_TAG } from "../views/localSet";
 import { facetsOf, type Facetable } from "./facets";
 
 // The Workshop filter column's data + hooks (components/WorkshopFilterColumn.tsx) — a module of its own so the component file
@@ -25,6 +25,8 @@ const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "
 // "In my library": the library's items. Not on the Library (everything in it is).
 // "Favourites": the signed-in account's Workshop favourites; signed out it's dimmed and can only be cleared (store
 // favoritesUsable). Not on the local WE folder.
+// "Crashed": the Library's alone, its items whose scene crashed the player (✓ only them, ✕ the rest); offered while one is
+// marked (or while it is on, so it can be turned off). Guard: probe-filters lib:crashed
 // On the Workshop a ✓ on either shows that set itself with no request (views/localSet.ts) and ✕ alone hides it from the
 // Workshop's pages; on the local WE folder "In my library" keeps or hides its owned items (Browse's render, `inLibrary`).
 const YOURS = { id: "yours", name: "Yours" };
@@ -85,12 +87,12 @@ const withPreset = (gs: Group[]) => gs.map((g) => (g.id === "type" ? TYPE_PRESET
 // Yours with only the rows a scope can match
 const yoursOnly = (tag: string): Group[] => WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: g.subs[0].tags.filter((x) => x.tag === tag) }] } : g));
 const WE_GROUPS = yoursOnly(LIBRARY_TAG);
-const LIB_GROUPS = yoursOnly(FAVORITES_TAG);
+const LIB_GROUPS = WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: [t(FAVORITES_TAG, "Favourites"), t(CRASHED_TAG, "Crashed")] }] } : g));
 const GROUPS = {
   all: WF_GROUPS, allP: withPreset(WF_GROUPS), we: WE_GROUPS, weP: withPreset(WE_GROUPS), lib: LIB_GROUPS, libP: withPreset(LIB_GROUPS),
 };
 // the groups a scope offers (stable arrays): Yours holds both rows on the Workshop, "In my library" alone on the local WE
-// folder, "Favourites" alone on the Library; Type has Preset only while presets can play. Guard: probe-filters wf:yours:rows,
+// folder, "Favourites" and "Crashed" on the Library; Type has Preset only while presets can play. Guard: probe-filters wf:yours:rows,
 // local:weFolder, lib:column
 export const groupsFor = (scope: FilterScope, presets: boolean) =>
   scope === "library" ? (presets ? GROUPS.libP : GROUPS.lib) : scope === "weLocal" ? (presets ? GROUPS.weP : GROUPS.we)
@@ -138,12 +140,13 @@ export function knownTags<T extends Facetable>(items: T[], path: (x: T) => strin
 }
 
 // the column's groups for a list that knows `known` (null = all, the Workshop): a row shows while some item has its tag or
-// while it is on (so it can be turned off), a pseudo-tag always; a sub-heading or a group left empty goes
+// while it is on (so it can be turned off), a pseudo-tag always but "Crashed" (only while the list knows "@crashed": some
+// item is marked); a sub-heading or a group left empty goes
 export function visibleGroups(groups: Group[], known: Set<string> | null, states: Map<string, TagState>): Group[] {
   if (!known) return groups;
   const out: Group[] = [];
   for (const g of groups) {
-    const subs = g.subs.map((s) => ({ ...s, tags: s.tags.filter((t) => t.tag.startsWith("@") || known.has(t.tag.toLowerCase()) || states.get(t.tag)) }))
+    const subs = g.subs.map((s) => ({ ...s, tags: s.tags.filter((t) => (t.tag.startsWith("@") && t.tag !== CRASHED_TAG) || known.has(t.tag.toLowerCase()) || states.get(t.tag)) }))
       .filter((s) => s.tags.length);
     if (subs.length) out.push({ ...g, subs });
   }

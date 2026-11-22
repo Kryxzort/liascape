@@ -129,6 +129,11 @@ public static class AppOps
         return true;
     }
 
+    // Settings → Housekeeping's "Clear crash marks": every marked item through ClearCrash, so each one's skip flag and page
+    // event follow as for the sidebar's Clear. Returns how many it cleared.
+    public static int ClearAllCrashes() =>
+        LibraryService.LoadAll().Where(i => i.HasCrashed).Count(i => ClearCrash(i.VideoPath));
+
     // The resolved file (ApiSecurity.OpenableMedia) handed to xdg-open — the desktop's default app for its type. False = refused.
     public static bool OpenMedia(string? path)
     {

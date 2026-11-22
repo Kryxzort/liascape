@@ -36,8 +36,12 @@
 //   lib:clearCrash:on|off  s2 marked crashed: a notice block (the section cards' material, a danger stripe, a .mini Clear) in the
 //                        body's 12 px rhythm; Clear → the notice and the whitelist row fade out, what follows glides into their room
 //                        (off: fade only, at once), the index mark and the card's go, s2 plays. Screenshots side-crash-*.png
-//   lib:clearCrash:multi  s1 and s2 marked crashed, Ctrl-selected with k1: Clear in s2's sidebar lifts both marks (index
-//                        and cards), the selection stays. Screenshot side-crash-cleared-multi.png
+//   lib:clearCrash:multi  s1 and s2 marked crashed, Ctrl-selected with k1: s2's notice reads "2 selected scenes crashed the
+//                        player"; Clear in s2's sidebar lifts both marks (index and cards), the selection stays. Screenshots
+//                        side-crash-multi.png, side-crash-cleared-multi.png
+//   lib:clearCrash:others  s1 alone marked, Ctrl-selected with k1, the sidebar on k1 (no mark of its own): the notice shows
+//                        ("1 selected scene crashed the player"), no whitelist row (that is s1's own); Clear lifts s1's mark,
+//                        the notice fades out (motion on and off: in-between opacity frames). Screenshot side-crash-others.png
 //   lib:fontStandIn:on|off  s2 plays with a font stand-in (its synthetic Ready reports Consolas shown with Cascadia Mono): the
 //                        player's scene.fonts → the index → its open sidebar gets one muted line "Uses Consolas, shown with
 //                        Cascadia Mono" in Playback, fading in (off: opacity only); a play with every font installed clears it
@@ -1264,6 +1268,9 @@ app.whenReady().then(async () => {
         if (!pre.btn) return [`s2 marked crashed in a selection: no Clear (${J(pre)}) — proved nothing`];
         if (pre.sel !== 3 || !/3 selected/.test(pre.head)) return [`the selection isn't s1, s2 and k1 (${pre.sel} selected, head ${J(pre.head.slice(0, 80))}) — proved nothing`];
         if (!pre.marked.every(Boolean)) return [`s1 / s2 cards not both marked before Clear (${J(pre.marked)}) — proved nothing`];
+        const txt = await page(`return m.side()?.querySelector("[data-side-crash-text]")?.textContent ?? m.side()?.querySelector("[data-side-crash]")?.textContent ?? null;`);
+        if (!/^2 selected scenes crashed the player/.test(txt ?? "")) v.push(`two marked in the selection: the notice reads ${J(txt)} (want "2 selected scenes crashed the player…")`);
+        await shot("crash-multi");
         await mv(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2, 300);
         await clickAt(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2);
         await sleep(900); await shot("crash-cleared-multi");
@@ -1279,6 +1286,50 @@ app.whenReady().then(async () => {
         writeIdx(idx0);
         await setSettings({ allowScenes: false });
         await mv(5, 5); await page(`m.key("Escape"); await m.sleep(300); await m.closeAll();`);
+        await loadUi();
+      }
+      return v;
+    });
+
+    // lib:clearCrash:others — the notice shows for a mark Clear would lift though the open item has none: s1 marked, s1 and k1
+    // Ctrl-selected, the sidebar opened on k1. "1 selected scene crashed the player", no whitelist row (it is s1's own setting);
+    // a real click on Clear → s1's index entry and card unmarked, the notice fades out (in-between opacity frames, motion on
+    // and off), the selection stays.
+    for (const mode of ["on", "off"]) await cell(`lib:clearCrash:others:${mode}`, async () => {
+      const v = [], J = JSON.stringify;
+      const scIdx = path.join(path.dirname(SC[0]), "index.json"), key = path.basename(SC[0]), idx0 = fs.readFileSync(scIdx, "utf8");
+      const writeIdx = (j) => { fs.writeFileSync(scIdx + ".pb", typeof j === "string" ? j : JSON.stringify(j)); fs.renameSync(scIdx + ".pb", scIdx); };
+      try {
+        const j = JSON.parse(idx0); j[key] = { ...(j[key] || {}), crashed: true }; writeIdx(j);
+        await setSettings({ allowScenes: true });
+        await loadUi(); if (mode === "off") await setMotion(false);
+        await page(`await m.closeAll(); for (const t of ["s1", "k1"]) { m.thumb(t).dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true })); await m.sleep(250); }
+          m.ctx(m.thumb("k1")); await m.waitSide("library"); await m.sleep(700);`);
+        const pre = await page(`const s = m.side(), b = s?.querySelector("[data-side-crash-clear]");
+          return { btn: b ? m.rect(b) : null, text: s?.querySelector("[data-side-crash]")?.textContent?.trim() ?? null, wl: !!s?.querySelector(".side-wl"),
+            sel: document.querySelectorAll(".card.lib.selected").length, marked: !!m.card("s1")?.classList.contains("crashed") };`);
+        console.log(`        ${J(pre)}`);
+        if (pre.sel !== 2 || !pre.marked) return [`the selection isn't s1 (marked) + k1 (${J(pre)}) — proved nothing`];
+        if (!pre.btn) return [`s1 marked in the selection, the sidebar on k1: no crash notice (${J(pre)})`];
+        if (!/^1 selected scene crashed the player/.test(pre.text ?? "")) v.push(`the notice reads ${J(pre.text)} (want "1 selected scene crashed the player…")`);
+        if (pre.wl) v.push("k1 has no mark: a whitelist row shows (s1's own setting)");
+        if (mode === "on") await shot("crash-others");
+        await mv(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2, 300);
+        const samp = js(MO.SAMPLE({ notice: ".side-panel:not(.closing) [data-side-crash]" }, 900));
+        await sleep(40); await clickAt(pre.btn.x + pre.btn.w / 2, pre.btn.y + pre.btn.h / 2);
+        const fr = await samp;
+        v.push(...MO.judge("the notice", fr.notice, { leave: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        await sleep(300);
+        const post1 = await page(`return { notice: !!m.side()?.querySelector("[data-side-crash]"), marked: !!m.card("s1")?.classList.contains("crashed"), sel: document.querySelectorAll(".card.lib.selected").length };`);
+        if (post1.notice) v.push("after Clear: the notice still shows");
+        if (post1.marked) v.push("after Clear: s1's card is still marked crashed");
+        if (post1.sel !== 2) v.push(`Clear changed the selection (${post1.sel} selected, want 2)`);
+        if (JSON.parse(fs.readFileSync(scIdx, "utf8"))[key]?.crashed) v.push("after Clear: s1's index entry still crashed");
+      } finally {
+        writeIdx(idx0);
+        await setSettings({ allowScenes: false });
+        await mv(5, 5); await page(`m.key("Escape"); await m.sleep(300); await m.closeAll();`);
+        if (mode === "off") await setMotion(true);
         await loadUi();
       }
       return v;

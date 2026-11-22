@@ -2,7 +2,8 @@
 # Hermetic test of two of the item sidebar's actions (src/backend/Web/AppOps.cs ClearCrash / OpenMedia):
 #  crash: POST /library/clear-crash lifts a scene's crash mark field-level (its other index fields kept), /library and a
 #         WebSocket `library-item-changed {path, hasCrashed:false}` say so; a second clear (or a path outside the library)
-#         changes nothing and writes nothing.
+#         changes nothing and writes nothing. POST /library/clear-crash-all (Settings → Housekeeping) lifts every other
+#         mark (a scene's, a video's) the same way, answers how many, and a second one clears nothing.
 #  open:  POST /open/media hands a library video / GIF / PNG / JPEG to xdg-open (a stub on PATH that records its argv) as
 #         ONE argument, the resolved file; it refuses with 403 (and opens nothing) a path outside the library, a symlink
 #         escaping it, a `..` path, a .desktop renamed .mp4 or .png, a .desktop behind a forged MP4 box, a script renamed
@@ -74,14 +75,17 @@ vid() { ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=blue:s=64x36" -f
 # a crashed scene with other fields of its own (they must survive the clear)
 SC=$LIB/workshop/900000009
 mkdir -p "$SC"; printf '{"type":"scene","file":"scene.json","title":"sc"}' > "$SC/project.json"; head -c 16 /dev/zero > "$SC/scene.pkg"
-printf '{"900000009":{"title":"sc","isScene":true,"workshopId":"900000009","crashed":true,"whitelist":false,"volume":40}}' > "$LIB/workshop/index.json"
+# two more marks for Housekeeping's clear-all: a second scene and a video
+SC2=$LIB/workshop/900000010
+mkdir -p "$SC2"; printf '{"type":"scene","file":"scene.json","title":"sc2"}' > "$SC2/project.json"; head -c 16 /dev/zero > "$SC2/scene.pkg"
+printf '{"900000009":{"title":"sc","isScene":true,"workshopId":"900000009","crashed":true,"whitelist":false,"volume":40},"900000010":{"title":"sc2","isScene":true,"workshopId":"900000010","crashed":true,"speed":1.5}}' > "$LIB/workshop/index.json"
 # media to open
 mkdir -p "$LIB/imported/v1" "$LIB/imported/g1" "$LIB/imported/p1" "$LIB/imported/bad"
 vid "$LIB/imported/v1/v1.mp4"
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=32x32:rate=4:duration=1" "$LIB/imported/g1/g1.gif"
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=green:s=32x18" -frames:v 1 "$LIB/imported/p1/p1.png"
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=green:s=32x18" -frames:v 1 "$LIB/imported/p1/p1.jpg"
-printf '{"v1":{"title":"v1"},"g1":{"title":"g1"},"p1":{"title":"p1"}}' > "$LIB/imported/index.json"
+printf '{"v1":{"title":"v1","crashed":true},"g1":{"title":"g1"},"p1":{"title":"p1"}}' > "$LIB/imported/index.json"
 mkdir -p "$WE/920000001"; vid "$WE/920000001/v.mp4"; ln -s "$WE/920000001" "$LIB/local/920000001"
 vid "$OUT/o.mp4"
 ln -s "$OUT/o.mp4" "$LIB/imported/bad/escape.mp4"
@@ -159,6 +163,22 @@ check "a path outside the library → nothing cleared" "$(postc /library/clear-c
 check "…no index made for it" "$(ls "$OUT")" "o.mp4"
 n=$(grep -c library-item-changed "$T/events.jsonl" 2>/dev/null); sleep 0.3
 check "…and no event for either" "$(grep -c library-item-changed "$T/events.jsonl" 2>/dev/null)" "$n"
+
+echo "== crash: Housekeeping's clear-all"
+SC2P=$(item sc2 | jq -r .videoPath); V1P=$(item v1 | jq -r .videoPath)
+check "sc2 and v1 show as crashed, sc not" "$(api "$U/library" | jq -c '[.[] | select(.hasCrashed) | .title] | sort')" '["sc2","v1"]'
+check "POST /library/clear-crash-all → cleared 2" "$(postc /library/clear-crash-all '{}') $(cat "$T/body")" '200 {"cleared":2}'
+check "…no item crashed in /library" "$(api "$U/library" | jq -c '[.[] | select(.hasCrashed)] | length')" 0
+check "…both marks gone from their index entries, other fields kept" \
+  "$(jq -c '.["900000010"] | [(.crashed // false), .speed, .title]' "$LIB/workshop/index.json") $(jq -c '.v1 | [(.crashed // false), .title]' "$LIB/imported/index.json")" '[false,1.5,"sc2"] [false,"v1"]'
+for p in "$SC2P" "$V1P"; do
+  got=""; for _ in $(seq 1 30); do got=$(jq -c --arg p "$p" 'select(.type == "library-item-changed" and .payload.path == $p) | .payload' "$T/events.jsonl" 2>/dev/null | head -1); [ -n "$got" ] && break; sleep 0.1; done
+  check "…every page told for $(basename "$p"): library-item-changed {path, hasCrashed:false}" "$got" "$(jq -nc --arg p "$p" '{path: $p, hasCrashed: false}')"
+done
+n=$(grep -c library-item-changed "$T/events.jsonl" 2>/dev/null)
+check "a second clear-all clears nothing" "$(postc /library/clear-crash-all '{}') $(cat "$T/body")" '200 {"cleared":0}'
+sleep 0.3
+check "…and sends no event" "$(grep -c library-item-changed "$T/events.jsonl" 2>/dev/null)" "$n"
 
 echo "== open: a library video / GIF / picture in the user's own app"
 opened() { cat "$OPENED"; }

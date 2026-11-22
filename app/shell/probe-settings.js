@@ -47,6 +47,13 @@
 //                     "Freed N" appears; pictures settings-cache-mid-*.png, settings-cache-done-*.png
 //   cache:look        a line's hover glow (and none under no-glow), the size and "Freed" in theme colours, bg-live: the
 //                     lines add no fill of their own over the section card; pictures settings-cache-*.png
+//   crash:count       Housekeeping's "Clear crash marks" row (Settings.tsx CrashMarks): s1 and s2 marked crashed in their index
+//                     entries → its ghost button reads "Clear 2 marks", on; nothing marked → "No crash marks", off
+//   crash:clear:<m>   a real click on it lifts both marks (the index entries, /library), the button turns off and its words swap
+//                     to "No crash marks" — motion on they roll; off / prefers-reduced-motion they only cross-fade — the button
+//                     keeps its width and place. Pictures settings-crash-mid-*.png, settings-crash-done-*.png
+//   crash:look        hovered it glows (none under no-glow), its words in --text; off it dims and never glows; bg-live: its
+//                     fill is see-through. Pictures settings-crash-*.png
 //   mute:reset        the Volume row's reset unmutes and puts the level at 100 %; shown only while muted or off 100 %
 //   mute:row:<level>  Sound has no "Mute wallpapers" checkbox row; the Volume row ends in the shared mute chip (button.side-mute,
 //                     components/MuteButton.tsx) after the slider, 32 px, on the slider's centre line, at the row's control edge;
@@ -983,6 +990,114 @@ app.whenReady().then(async () => {
       if (fc !== await C("var(--success)")) v.push(`"Freed" is ${fc}, want --success ${await C("var(--success)")}`);
       await mv(5, 5, 900);
       await shot("cache-freed", rect);
+      return v;
+    });
+
+    // ---- Housekeeping: "Clear crash marks" (Settings.tsx CrashMarks; the backend's POST /library/clear-crash-all) ----
+    const SC = JSON.parse(E.LIASCAPE_SCENES || "[]");
+    const scIdx = SC.length ? path.join(path.dirname(SC[0]), "index.json") : null;
+    const markCrashed = (keys) => {
+      const j = JSON.parse(fs.readFileSync(scIdx, "utf8"));
+      for (const sc of SC) { const k = path.basename(sc); if (j[k]) delete j[k].crashed; }
+      for (const k of keys) j[k] = { ...(j[k] || {}), crashed: true };
+      fs.writeFileSync(scIdx + ".ps", JSON.stringify(j)); fs.renameSync(scIdx + ".ps", scIdx);
+    };
+    const CRASH_BTN = ".settings [data-crash-clear-all]";
+    const crashRead = () => js(`const b = document.querySelector(${J(CRASH_BTN)}); if (!b) return null;
+      return { dis: b.disabled, n: b.dataset.crashN, shown: [...b.querySelectorAll(".xfade > *")].filter((x) => !x.hasAttribute("data-off")).map((x) => x.textContent),
+        label: b.getAttribute("aria-label"), row: window.__x.row("Clear crash marks") === b.closest(".srow") }`);
+    const crashRect = () => js(`const r = window.__x.row("Clear crash marks").getBoundingClientRect(); return { x: Math.round(r.x) - 8, y: Math.round(r.y) - 8, width: Math.round(r.width) + 16, height: Math.round(r.height) + 16 }`);
+    const crashKeys = SC.slice(0, 2).map((x) => path.basename(x));
+
+    await cell("crash:count — the row names how many are marked; with none it is off and says so", async () => {
+      if (SC.length < 2) return ["the stack has fewer than two scenes — proved nothing"];
+      const v = [];
+      try {
+        markCrashed(crashKeys); await load();
+        const on = await crashRead();
+        if (!on) return ['no "Clear crash marks" button in Housekeeping'];
+        if (!on.row) v.push('the button isn\'t in a row labelled "Clear crash marks"');
+        if (on.dis || J(on.shown) !== J(["Clear 2 marks"])) v.push(`s1 + s2 marked: ${J(on)} (want "Clear 2 marks", on)`);
+        markCrashed([]); await load();
+        const off = await crashRead();
+        if (!off?.dis || J(off.shown) !== J(["No crash marks"])) v.push(`nothing marked: ${J(off)} (want "No crash marks", off)`);
+      } finally { markCrashed([]); }
+      return v;
+    });
+
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`crash:clear:${mode} — Clear lifts every mark; the words swap to "No crash marks" (roll on, cross-fade off)`, async () => {
+        if (SC.length < 2) return ["the stack has fewer than two scenes — proved nothing"];
+        const v = [];
+        await setSettings({ Morphs: mode !== "off" }); await reducedMotion(mode === "reduced");
+        try {
+          markCrashed(crashKeys); await load();
+          const noMotion = await js(`return document.documentElement.classList.contains("no-motion")`);
+          if (noMotion !== (mode !== "on")) return [`:root.no-motion is ${noMotion} under motion ${mode} — proved nothing`];
+          const pre = await crashRead();
+          if (!pre || pre.dis) return [`s1 + s2 marked: no enabled Clear (${J(pre)}) — proved nothing`];
+          const p = await js(`return await window.__x.show(document.querySelector(${J(CRASH_BTN)}))`);
+          await sleep(300);
+          const rect = await crashRect();
+          // its layout box (the press squeezes it on `transform`, which the frames' rects include): the same before and after
+          const box = () => js(`const b = document.querySelector(${J(CRASH_BTN)}); return [b.offsetWidth, b.offsetLeft, b.offsetTop]`);
+          const box0 = await box();
+          const samp = js(`return await ${SAMPLE(CRASH_BTN, null, 900, 900)}`);
+          await sleep(60); await clickAt(p.x, p.y);
+          await sleep(mode === "on" ? 150 : 60); await shot(`crash-mid-${mode}`, rect);
+          const fr = await samp;
+          v.push(...judgeSwap("the Clear button", fr, mode, { onIdx: 1, back: false, steady: false }));
+          const box1 = await box();
+          if (J(box0) !== J(box1)) v.push(`the button's layout box changed with its words (${J(box0)} → ${J(box1)}: width, left, top)`);
+          const post = await crashRead();
+          if (!post?.dis || J(post.shown) !== J(["No crash marks"])) v.push(`after Clear: ${J(post)} (want "No crash marks", off)`);
+          const idx = JSON.parse(fs.readFileSync(scIdx, "utf8"));
+          for (const k of crashKeys) if (idx[k]?.crashed) v.push(`after Clear: ${k}'s index entry still crashed`);
+          const lib = (await http("GET", "/library")).json ?? [];
+          if (lib.some((i) => i.hasCrashed)) v.push(`after Clear: /library still lists ${lib.filter((i) => i.hasCrashed).map((i) => i.title)} crashed`);
+          await mv(5, 5, 300); await shot(`crash-done-${mode}`, rect);
+        } finally { markCrashed([]); await reducedMotion(false); }
+        return v;
+      });
+    }
+    await setSettings({ Morphs: true });
+
+    await cell("crash:look — hover glow (none under no-glow), off dims without a glow, bg-live see-through; pictures", async () => {
+      if (SC.length < 2) return ["the stack has fewer than two scenes — proved nothing"];
+      const v = [];
+      const lit = (sh) => !!sh && sh !== "none" && sh.split(/,(?![^(]*\))/).some((part) => {
+        const m = /rgba?\(([^)]*)\)/.exec(part); if (!m) return false; const c = m[1].split(",").map(Number); return c.length < 4 || c[3] > 0; });
+      const alpha = (c) => +(/\/\s*([0-9.]+)\s*\)$/.exec(c)?.[1] ?? /rgba\([^)]*,\s*([0-9.]+)\)/.exec(c)?.[1] ?? (/^(rgb|color)\(/.test(c) ? 1 : 0));
+      const C = (expr) => js(`const p = document.createElement("i"); p.style.color = ${J(expr)}; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c`);
+      const read = () => js(`const b = document.querySelector(${J(CRASH_BTN)}), cs = getComputedStyle(b); return { glow: cs.boxShadow, color: cs.color, bg: cs.backgroundColor, o: +cs.opacity }`);
+      try {
+        markCrashed(crashKeys); await load();
+        const p = await js(`return await window.__x.show(document.querySelector(${J(CRASH_BTN)}))`);
+        const rect = await crashRect();
+        await mv(5, 5, 300); await shot("crash-rest", rect);
+        const rest = await read();
+        if (rest.color !== await C("var(--text)")) v.push(`its words are ${rest.color}, want --text`);
+        await mv(p.x, p.y, 400);
+        const hov = await read();
+        if (!lit(hov.glow)) v.push(`hovered, it doesn't glow (${hov.glow})`);
+        await shot("crash-hover", rect);
+        await js(`document.documentElement.classList.add("no-glow"); return true`); await sleep(300);
+        if (lit((await read()).glow)) v.push(`no-glow: hovered, it still glows (${(await read()).glow})`);
+        await shot("crash-hover-noglow", rect);
+        await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await mv(5, 5, 300);
+        const bl = await read();
+        if (!(alpha(bl.bg) < 1)) v.push(`bg-live: its fill is opaque (${bl.bg})`);
+        await shot("crash-bglive", rect);
+        await js(`document.documentElement.classList.remove("bg-live"); return true`);
+        markCrashed([]); await load();
+        const q = await js(`return await window.__x.show(document.querySelector(${J(CRASH_BTN)}))`);
+        await mv(q.x, q.y, 400);
+        const off = await read();
+        if (lit(off.glow)) v.push(`off and hovered, it glows (${off.glow})`);
+        if (!(off.o < 0.8)) v.push(`off, it isn't dimmed (opacity ${off.o})`);
+        await shot("crash-off-hover", await crashRect());
+        await mv(5, 5, 100);
+      } finally { markCrashed([]); }
       return v;
     });
 

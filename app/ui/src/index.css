@@ -936,6 +936,12 @@ input[type=range]:focus-visible { outline: none; }
   transition: opacity .18s ease, transform var(--spring-soft-dur) var(--spring-soft); }
 .cache-freed[data-off] { opacity: 0; transform: translateY(60%); pointer-events: none; }
 :root.no-motion .cache-freed { transform: none; transition: opacity var(--fade-dur) linear; }
+/* Housekeeping → "Clear crash marks" (Settings.tsx CrashMarks): the cache foot's ghost button, its two faces rolling in one
+   cell (.xfade); with no mark left it dims and stops glowing as it says so. Guard: probe-settings crash:look */
+.crash-clear-all { overflow: hidden; transition: transform .08s, box-shadow .2s, background .15s, opacity .18s ease; }
+.btn.ghost.crash-clear-all:disabled { opacity: .55; cursor: default; box-shadow: none;
+  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); }
+:root.no-motion .crash-clear-all { transition: opacity var(--fade-dur) linear; }
 
 /* ---- steam QR modal ---- */
 .qr-modal { width: 340px; padding: 24px; text-align: center; }

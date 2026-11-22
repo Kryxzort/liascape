@@ -644,6 +644,8 @@ public static class ServerHost
         });
         // the sidebar's "Clear" on a crashed scene's chip → playable again (AppOps.ClearCrash). Guard: scripts/test-item-actions.sh § crash
         app.MapPost("/library/clear-crash", (PathReq r) => Results.Json(new { cleared = AppOps.ClearCrash(r.Path) }));
+        // Settings → Housekeeping's "Clear crash marks": every mark at once (AppOps.ClearAllCrashes). Guard: scripts/test-item-actions.sh § crash
+        app.MapPost("/library/clear-crash-all", () => Results.Json(new { cleared = AppOps.ClearAllCrashes() }));
         // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
         // item in its index, then live on its source(s) under liascape-player), and the drag twin (live, nothing saved)
         app.MapGet("/library/scene-props", (string path) => Results.Json(AppOps.SceneProps(path)));
