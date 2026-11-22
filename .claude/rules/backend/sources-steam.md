@@ -13,6 +13,8 @@ paths:
   - "src/backend/Web/PresetDownloads.cs"
   - "src/backend/Models/WorkshopList.cs"
   - "scripts/test-steam-signin.sh"
+  - "scripts/test-steam-app-hold.sh"
+  - "app/ui/src/hooks/useSteamAppPresence.ts"
   - "scripts/test-workshop-social.sh"
   - "scripts/test-fixtures/**"
 ---
@@ -68,7 +70,8 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Modes: `steamapp` (the running Steam client through `Helpers/SteamClientUgc.cs`), `steampage` (always the item's page in the Steam app), `subscribe` (the sign-in, the default). Any other stored value (the dropped `steamcmd`) reads as `subscribe` (the `AppSettings.WorkshopDownloadMode` setter). Each mode does an action only its own way, never another mode's as a fallback (`docs/decisions.md` § "Offer three Workshop download modes, the user's choice").
 - One rule says which Workshop actions (Download, Subscribe, Unsubscribe incl. "without deleting" and Delete from source, "Download without subscribing") a mode can't do now: `WorkshopDownloader.Blocked` / `BlockedFor`, mirrored by `components/subscribeMode.ts` `actionBlocked` (from `/steam/status` `usable`). `subscribe` without a usable sign-in: all of them, "Sign in to Steam to download / subscribe / unsubscribe / download without subscribing" (merged, auto-import on: a Download says "subscribe"); `steampage`: the one-off ("A Steam page can only subscribe"); `steamapp`: none (a client that can't answer fails at the click). Every control shows it disabled up front with those words; every endpoint (`/download`, `/workshop/subscribe`, `/unsubscribe`, `/unsubscribe-keep`, `/delete-from-source`) answers 400 with them before anything reaches Steam; a due unsubscribe the mode can't send is dropped like its Undo (`AppOps.DropUnsubscribes`, `SteamOps.SignInLost` inside the Undo window); Undo's re-subscribe sends nothing and says it. Nothing waits for a later sign-in, no page. Guard: steam-selftest "action rule", "unsub allowed", "unsub, signed out", "undo's re-subscribe"; `test-steam-signin.sh` § 2 (refused); probe-steam `side:blocked:*`, `side:unsub:signedOut`, `steam:subToggle:signedOut`.
 - `steamapp` never switches method: when the Steam client can't do it (download, Subscribe, unsubscribe drain, undo's re-subscribe) it fails with `SteamClientUgc.FailureMessage` and leaves unsubscribes queued. Only the to-do's "Let the Steam app do all N" is the user's explicit switch. Guard: `test-steam-signin.sh` § 3.
-- `SteamClientUgc` loads the Steam client's own `steamclient.so` in a short-lived child (`liascape-backend steam-ugc …`); never ship or load Valve's `libsteam_api.so`. One child at a time app-wide (`SteamClientUgc.Turn`); `ProbeAsync` is exempt.
+- `SteamClientUgc` loads the Steam client's own `steamclient.so` in a child (`liascape-backend steam-ugc session …`, commands on its stdin); never ship or load Valve's `libsteam_api.so`. One child, and one operation on it, at a time app-wide (`SteamClientUgc.Turn`); `ProbeAsync` is exempt (a connected child answers it without a second connection).
+- Hold that child (`Helpers/SteamClientHold.cs`) from the first operation, while the page says the Workshop shows on Browse in a shown window under `steamapp` (`app/ui/src/hooks/useSteamAppPresence.ts` → `POST /steam/app-presence`, repeated every 30 s; 90 s without one = left), then 60 s more; never connect for presence alone. The backend's stop releases it at once; a dead child is never `appConnected` (`/steam/status`) and the next operation starts a fresh one; a held child whose command Steam didn't take is dropped and the command sent once more on a fresh one. Why: `docs/decisions.md` § "Hold the Steam app connection while the Workshop shows on Browse". Guard: `scripts/test-steam-app-hold.sh`, probe-steam `browse:appPresence`.
 - Every Steam page the user must click goes through ONE app-wide queue, one page at a time: the Steam to-do (`Web/SteamTodo.cs`). Never open several pages at once or the subscriptions list.
 - A to-do subscribe entry ends by itself only when its item was absent at its turn and its files then appear (`ItemOnDisk`, `WatchDisk`); otherwise it waits for the user's Next. Unsubscribe entries always wait for Next.
 - A queued unsubscribe stays `pending` until Next → `MarkBlocked`; Skip/Stop → `Unblock` (kept subscribed).
@@ -92,4 +95,5 @@ choices here: `docs/decisions.md` § Steam & sources.
 
 ## Verify
 - `bash scripts/test-workshop-social.sh` — hermetic (`unshare -rn`, the fake community server, `LIASCAPE_STEAM_CM_FIXTURE` `@userfiles`).
+- `bash scripts/test-steam-app-hold.sh` — hermetic (the fake `steamclient.so`, a shortened linger and heartbeat timeout).
 - `bash scripts/test-steam-signin.sh` — hermetic (stub `xdg-open`, fake Workshop folder, fake `steamclient.so` from `scripts/test-fixtures/`); includes `liascape-backend steam-selftest`, which fails if the password appears anywhere or a token reaches settings.json.

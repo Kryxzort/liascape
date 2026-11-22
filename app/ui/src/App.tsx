@@ -4,6 +4,7 @@ import { LayoutGroup } from "framer-motion";
 import { Square, Undo2 } from "lucide-react";
 import { glideTo } from "./hooks/travelToPlaying";
 import { useStableFn } from "./hooks/useStableFn";
+import { useSteamAppPresence } from "./hooks/useSteamAppPresence";
 import { useStore } from "./store";
 import { useShallow } from "zustand/react/shallow";
 import { useEvents, type LiascapeEvent } from "./api/events";
@@ -80,6 +81,9 @@ export default function App() {
     const t = setInterval(() => void clipSweepHold(true), 20_000);
     return () => { clearInterval(t); void clipSweepHold(false); };
   }, [onSettings]);
+  // "Use the Steam app" keeps its Steam connection while the Workshop shows on Browse (hooks/useSteamAppPresence.ts)
+  useSteamAppPresence(picked.tab === "browse" && !!s.sources[s.activeSource]?.supportsTagFilter
+    && s.settings?.workshopDownloadMode === "steamapp");
   // PERF: the Library page and the playlist bar stay mounted once shown, hidden (React's <Activity>: display none) while
   // another tab shows. A switch back reveals them instead of building their ~1,000 components and DOM again: about half the
   // missed frames of a switch, at 240 Hz and at 4× CPU / 60 Hz. Hidden, their effects are cleaned up (key handlers,

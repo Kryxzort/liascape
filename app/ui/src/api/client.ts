@@ -374,6 +374,17 @@ export const api = {
     steamWarmedAt = Date.now();
     jpost("/steam/warm").catch(() => {});
   },
+  // API: whether the Workshop shows on Browse in a visible window, sent on every change and repeated as a heartbeat while
+  // true (the backend counts ~90 s without one as gone): "Use the Steam app" keeps its Steam connection that long, plus a
+  // linger (Helpers/SteamClientHold.cs). It never connects by itself. `leaving`: the page is going away, so the request
+  // outlives it (keepalive). Fire and forget. Guard: probe-steam browse:appPresence
+  steamAppPresence: (showing: boolean, leaving = false) => {
+    fetch(`${API}/steam/app-presence`, {
+      method: "POST", keepalive: leaving,
+      headers: authHeaders({ "Content-Type": "application/json", "X-Liascape-Client": CLIENT_ID }),
+      body: JSON.stringify({ showing }),
+    }).catch(() => {});
+  },
   qrStart: () => jpost("/steam/qr/start"),
   qrCancel: () => jpost("/steam/qr/cancel"),
   signout: () => jpost("/steam/signout"),

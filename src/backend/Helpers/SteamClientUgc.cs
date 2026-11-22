@@ -27,13 +27,15 @@ namespace Liascape.Helpers;
 //   GetISteamGenericInterface 12; ISteamUGC "STEAMUGC_INTERFACE_VERSION018" SubscribeItem 68, UnsubscribeItem 69, GetItemState 72,
 //   GetItemInstallInfo 73, GetItemDownloadInfo 74, DownloadItem 75 (the slot after GetItemDownloadInfo in every version's
 //   wrappers: 014 0x210 → 0x218, 021 0x270 → 0x278).
-// - In a SHORT-LIVED CHILD (`liascape-backend steam-ugc subscribe <id> <steamclient.so>…`, SteamAppId=431960 in ITS
-//   environment only): connected for the download's seconds, not the backend's lifetime, and a crash in Steam's library
-//   can't take the backend down. JSON lines on stdout; the parent closes its stdin to stop it (release → exit).
+// - In a CHILD SESSION (`liascape-backend steam-ugc session <steamclient.so>…`, SteamAppId=431960 in ITS environment only),
+//   so a crash in Steam's library can't take the backend down: JSON commands on its stdin, JSON lines on its stdout; a
+//   closed stdin = release Steam + exit. It stays connected between operations only while the user browses the Workshop,
+//   plus a linger (Helpers/SteamClientHold.cs: one connection per visit, not a "Playing" blink per download).
 // - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason; the caller fails
 //   with `FailureMessage` and never switches method by itself (sources-steam.md § Workshop downloads).
-// - ONE subscribe/unsubscribe child at a time, app-wide (`Turn`; a bulk download waits with "Waiting for the Steam app…").
-//   `steam-ugc probe` (connect, release, exit) answers the Steam to-do's "Let the Steam app do all N" (Web/SteamTodo.cs).
+// - ONE child, ONE operation on it at a time, app-wide (`Turn`; a bulk download waits with "Waiting for the Steam app…").
+//   `steam-ugc probe` (connect, release, exit) answers the Steam to-do's "Let the Steam app do all N" (Web/SteamTodo.cs)
+//   when no session is connected.
 // Measured (prototype): a 2.1 MB item subscribed 0.5 s, bytes 0.8 → 1.1 → 2.1 MB,
 // installed 4.5 s, the folder on the library Steam chose (/mnt/Games/… — no symlink guessing).
 public static class SteamClientUgc
@@ -68,7 +70,7 @@ public static class SteamClientUgc
         "account that owns Wallpaper Engine), or pick another way under Settings → Getting Workshop wallpapers.";
 
     /// Subscribe + wait for Steam to install it. Folder = done; Fallback = why this route couldn't be used (the caller
-    /// carries on the old way). Throws only for cancellation and for failures AFTER Steam took the subscribe.
+    /// fails with it). Throws only for cancellation and for failures AFTER Steam took the subscribe.
     public static async Task<Result> SubscribeAsync(string workshopId, AppSettings s, IProgress<(double, string)>? progress, CancellationToken ct)
     {
         await TakeTurnAsync(progress, ct);
@@ -103,10 +105,11 @@ public static class SteamClientUgc
     /// The card's words while a download waits for its turn with the Steam client (another helper is running).
     public const string WaitingForSteamApp = "Waiting for the Steam app…";
 
-    // ONE helper child at a time, app-wide (a bulk download under "Use the Steam app" spawned a child per item at once — N
-    // processes each presenting themselves as Wallpaper Engine to one Steam client). The queued ones say so on their card.
+    // ONE operation on ONE helper child at a time, app-wide (N children each presenting themselves as Wallpaper Engine to one
+    // Steam client is what a bulk download must never start); it also guards the child's start and release
+    // (SteamClientHold). The queued ones say so on their card.
     // The connect-only probe (ProbeAsync) is exempt: it holds no turn's worth of work and must answer while a long download runs.
-    static readonly SemaphoreSlim Turn = new(1, 1);
+    internal static readonly SemaphoreSlim Turn = new(1, 1);
     static async Task TakeTurnAsync(IProgress<(double, string)>? progress, CancellationToken ct)
     {
         if (Turn.Wait(0)) return;
@@ -114,41 +117,54 @@ public static class SteamClientUgc
         await Turn.WaitAsync(ct);
     }
 
-    // what a `subscribe` / `download` child said: Accepted = Steam took the request; Folder = installed there
+    // what a command got: Accepted = Steam took the request (an unsubscribe: confirmed one); Folder = installed there
     sealed record RunResult(bool Accepted, string? Folder, string? Error, bool Refused, bool WasSubscribed);
 
+    // One command on the held child (SteamClientHold), with the turn held. A child reused from an earlier operation whose
+    // command Steam didn't take may be talking to a Steam that restarted since: dropped, and the command runs once more on a
+    // fresh one (the same route, never another method).
     static async Task<RunResult> RunItemAsync(string verb, string workshopId, AppSettings s, IProgress<(double, string)>? progress, string asking, CancellationToken ct)
     {
-        var libs = Candidates(s);
-        if (libs.Count == 0) return new(false, null, "the Steam client's steamclient.so wasn't found — is Steam installed?", false, false);
-        var self = PlayerHelper.GetSelfInvocationArgs();
-        if (self.Count == 0) return new(false, null, "can't start the helper", false, false);
-        var psi = new ProcessStartInfo(self[0]) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var a in self.Skip(1)) psi.ArgumentList.Add(a);
-        psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add(verb); psi.ArgumentList.Add(workshopId);
-        foreach (var l in libs) psi.ArgumentList.Add(l);
-        psi.Environment["SteamAppId"] = WallpaperEngineAppId.ToString();
-        psi.Environment["SteamGameId"] = WallpaperEngineAppId.ToString();
-        psi.Environment.Remove("LD_LIBRARY_PATH"); // the backend's (a dev shell's) must not shadow Steam's client library's
-
         progress?.Report((-1, asking));
-        using var proc = Process.Start(psi);
-        if (proc == null) return new(false, null, "can't start the helper", false, false);
-        _ = proc.StandardError.ReadToEndAsync(); // drained; Valve's library chats on stderr
-        bool accepted = false, refused = false, wasSubscribed = false; string? folder = null, error = null; var shown = "";
-        using var reg = ct.Register(() => { try { proc.StandardInput.Close(); } catch { } }); // the child shuts down + exits
+        for (int attempt = 0; ; attempt++)
+        {
+            var (child, reused, why) = await SteamClientHold.AcquireAsync(s, ct);
+            if (child == null) return new(false, null, why, false, false);
+            (RunResult R, bool Ended) res;
+            try { res = await RunCommandAsync(child, verb, [workshopId], progress, null, ct); }
+            catch { SteamClientHold.Done(child, drop: !child.Alive); throw; }
+            bool retry = reused && attempt == 0 && res.R.Folder == null && !res.R.Accepted;
+            SteamClientHold.Done(child, drop: !res.Ended || retry);
+            if (!retry) return res.R;
+            Console.WriteLine($"steam-app: Steam didn't take the {verb} on the held connection; trying a fresh one");
+        }
+    }
+
+    // Sends one command and reads its lines up to its `done`. Ended = the child answered `done` (false: it died or was
+    // killed on the way). A cancel asks the child to stop the command; one that doesn't answer within 3 s is killed.
+    static async Task<(RunResult, bool Ended)> RunCommandAsync(SteamClientHold.Child child, string verb, IReadOnlyList<string> ids,
+        IProgress<(double, string)>? progress, Action<string>? onUnsubscribed, CancellationToken ct)
+    {
+        bool accepted = false, refused = false, wasSubscribed = false, ended = false; string? folder = null, error = null; var shown = "";
+        ct.ThrowIfCancellationRequested();
+        if (!child.Send(new { op = verb, ids })) return (new(false, null, "the Steam app helper stopped", false, false), false);
+        Timer? watchdog = null; int over = 0; // 1 = the command is over: a late cancel's watchdog kills nothing
+        using var reg = ct.Register(() =>
+        {
+            child.Send(new { op = "cancel" });
+            watchdog = new Timer(_ => { if (Volatile.Read(ref over) == 0) child.Kill(); }, null, 3000, Timeout.Infinite);
+        });
         try
         {
-            string? line;
-            while ((line = await proc.StandardOutput.ReadLineAsync()) != null)
+            while (await child.ReadAsync() is { } e)
             {
-                JsonElement e;
-                try { e = JsonDocument.Parse(line).RootElement; } catch { continue; }
                 switch (e.GetProperty("event").GetString())
                 {
+                    case "done": ended = true; break;
                     case "subscribed": case "accepted": accepted = true; break;
                     case "before": wasSubscribed = e.GetProperty("subscribed").GetBoolean(); break;
                     case "refused": refused = true; break;
+                    case "unsubscribed": if (e.GetProperty("id").GetString() is string id) { accepted = true; onUnsubscribed?.Invoke(id); } break;
                     case "progress":
                         long done = e.GetProperty("done").GetInt64(), total = e.GetProperty("total").GetInt64();
                         if (total > 0) { shown = "bytes"; progress?.Report((Math.Clamp((double)done / total, 0.001, 0.999), WorkshopDownloader.SteamDownloading)); }
@@ -158,14 +174,13 @@ public static class SteamClientUgc
                     case "installed": folder = e.GetProperty("folder").GetString(); break;
                     case "error": error = e.GetProperty("message").GetString(); break;
                 }
+                if (ended) break;
             }
         }
-        finally
-        {
-            if (!proc.WaitForExit(3000)) { try { proc.Kill(); } catch { } } // a wedged library: it had its chance to shut down
-        }
+        finally { Volatile.Write(ref over, 1); watchdog?.Dispose(); }
+        if (!ended) error ??= "the Steam app helper stopped";
         ct.ThrowIfCancellationRequested();
-        return new(accepted, folder, error, refused, wasSubscribed);
+        return (new(accepted, folder, error, refused, wasSubscribed), ended);
     }
 
     /// Unsubscribe through the running Steam client. `claim` names the ids to send, asked once this caller has the Steam
@@ -193,6 +208,7 @@ public static class SteamClientUgc
     /// anything, so a Steam that can't answer leaves the to-do as it was. Null = yes; else why not.
     public static async Task<string?> ProbeAsync(AppSettings s, CancellationToken ct)
     {
+        if (SteamClientHold.Connected) return null; // the held connection already answers for it, and a second would flicker
         var libs = Candidates(s);
         if (libs.Count == 0) return "the Steam client's steamclient.so wasn't found — is Steam installed?";
         var self = PlayerHelper.GetSelfInvocationArgs();
@@ -232,36 +248,19 @@ public static class SteamClientUgc
         Action<string>? onDone, CancellationToken ct)
     {
         var done = new HashSet<string>();
-        var libs = Candidates(s);
-        if (libs.Count == 0) return (done, "the Steam client's steamclient.so wasn't found — is Steam installed?");
-        var self = PlayerHelper.GetSelfInvocationArgs();
-        if (self.Count == 0) return (done, "can't start the helper");
-        var psi = new ProcessStartInfo(self[0]) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var a in self.Skip(1)) psi.ArgumentList.Add(a);
-        psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add("unsubscribe"); psi.ArgumentList.Add(string.Join(",", ids));
-        foreach (var l in libs) psi.ArgumentList.Add(l);
-        psi.Environment["SteamAppId"] = WallpaperEngineAppId.ToString();
-        psi.Environment["SteamGameId"] = WallpaperEngineAppId.ToString();
-        psi.Environment.Remove("LD_LIBRARY_PATH");
-        using var proc = Process.Start(psi);
-        if (proc == null) return (done, "can't start the helper");
-        _ = proc.StandardError.ReadToEndAsync();
-        string? error = null;
-        using var reg = ct.Register(() => { try { proc.StandardInput.Close(); } catch { } });
-        try
+        for (int attempt = 0; ; attempt++)
         {
-            string? line;
-            while ((line = await proc.StandardOutput.ReadLineAsync()) != null)
-            {
-                JsonElement e;
-                try { e = JsonDocument.Parse(line).RootElement; } catch { continue; }
-                var ev = e.GetProperty("event").GetString();
-                if (ev == "unsubscribed" && e.GetProperty("id").GetString() is string id) { done.Add(id); onDone?.Invoke(id); }
-                else if (ev == "error") error = e.GetProperty("message").GetString();
-            }
+            var (child, reused, why) = await SteamClientHold.AcquireAsync(s, ct);
+            if (child == null) return (done, why);
+            (RunResult R, bool Ended) res;
+            try { res = await RunCommandAsync(child, "unsubscribe", ids, null, id => { done.Add(id); onDone?.Invoke(id); }, ct); }
+            catch { SteamClientHold.Done(child, drop: !child.Alive); throw; }
+            // nothing confirmed on a held connection: perhaps a Steam that restarted since (see RunItemAsync)
+            bool retry = reused && attempt == 0 && done.Count == 0;
+            SteamClientHold.Done(child, drop: !res.Ended || retry);
+            if (!retry) return (done, done.Count == 0 && res.R.Error != null ? res.R.Error : null);
+            Console.WriteLine("steam-app: Steam didn't take the unsubscribe on the held connection; trying a fresh one");
         }
-        finally { if (!proc.WaitForExit(3000)) { try { proc.Kill(); } catch { } } }
-        return (done, done.Count == 0 && error != null ? error : null);
     }
 
     // ---- the child side (`steam-ugc …`, its own process) -------------------------------------------------------------
@@ -344,21 +343,65 @@ public static class SteamClientUgc
             Emit(new { @event = "ready" });
             return 0;
         }
-        if (args.Length < 3 || args[0] is not ("subscribe" or "unsubscribe" or "download"))
-        { Emit(new { @event = "error", message = "usage: steam-ugc subscribe <id> | download <id> | unsubscribe <id,id,…> | probe  <steamclient.so>…" }); return 2; }
-        var ids = new List<ulong>();
-        foreach (var part in args[1].Split(',', StringSplitOptions.RemoveEmptyEntries))
-            if (ulong.TryParse(part, out var v)) ids.Add(v);
-            else { Emit(new { @event = "error", message = $"not a Workshop id: {part}" }); return 2; }
-        if (ids.Count == 0 || (args[0] != "unsubscribe" && ids.Count != 1)) { Emit(new { @event = "error", message = "one id to subscribe or download, one or more to unsubscribe" }); return 2; }
-
-        var session = Connect(args.Skip(2), out var why);
+        if (args.Length < 2 || args[0] != "session")
+        { Emit(new { @event = "error", message = "usage: steam-ugc session | probe  <steamclient.so>…" }); return 2; }
+        var session = Connect(args.Skip(1), out var why);
         if (session == null) { Emit(new { @event = "error", message = why }); return 3; }
-        // the parent closes our stdin to stop us (a cancel)
-        var stop = new ManualResetEventSlim();
-        new Thread(() => { try { while (Console.In.ReadLine() != null) { } } catch { } stop.Set(); }) { IsBackground = true }.Start();
-        try { return args[0] switch { "subscribe" => Subscribe(session, ids[0], stop), "download" => Download(session, ids[0], stop), _ => Unsubscribe(session, ids, stop) }; }
+        Emit(new { @event = "ready" });
+        try { RunSession(session); return 0; }
         finally { Release(session); }
+    }
+
+    sealed record Command(string Op, List<ulong> Ids, int Gen);
+
+    // The session's loop: one JSON command a line on stdin — {"op": "subscribe" | "download" | "unsubscribe", "ids": [...]},
+    // {"op": "cancel"} (stops the running command and any sent before it), {"op": "release"} — each command's events on stdout,
+    // then {"event": "done", "rc": N}. A closed stdin = release: the parent's choice, or the parent gone.
+    static void RunSession(Session session)
+    {
+        var queue = new System.Collections.Concurrent.BlockingCollection<Command>();
+        var gate = new object();
+        ManualResetEventSlim? current = null; int cancelGen = 0, gen = 0; bool quit = false;
+        new Thread(() =>
+        {
+            try
+            {
+                string? line;
+                while ((line = Console.In.ReadLine()) != null)
+                {
+                    string? op = null; var ids = new List<ulong>(); bool bad = false;
+                    try
+                    {
+                        var e = JsonDocument.Parse(line).RootElement;
+                        op = e.GetProperty("op").GetString();
+                        if (e.TryGetProperty("ids", out var arr))
+                            foreach (var x in arr.EnumerateArray())
+                                if (ulong.TryParse(x.GetString(), out var v)) ids.Add(v); else bad = true;
+                    }
+                    catch { bad = true; }
+                    if (op == "release") break;
+                    if (op == "cancel") { lock (gate) { cancelGen = gen; current?.Set(); } continue; }
+                    int g; lock (gate) g = ++gen;
+                    queue.Add(new Command(bad ? "" : op ?? "", ids, g));
+                }
+            }
+            catch { }
+            lock (gate) { quit = true; current?.Set(); }
+            queue.CompleteAdding();
+        }) { IsBackground = true }.Start();
+
+        foreach (var cmd in queue.GetConsumingEnumerable())
+        {
+            var stop = new ManualResetEventSlim();
+            lock (gate) { if (quit) break; current = stop; if (cancelGen >= cmd.Gen) stop.Set(); }
+            int rc;
+            if (stop.IsSet) { Emit(new { @event = "error", message = "cancelled" }); rc = 1; }
+            else if (cmd.Ids.Count == 0 || cmd.Op is not ("subscribe" or "download" or "unsubscribe") || (cmd.Op != "unsubscribe" && cmd.Ids.Count != 1))
+            { Emit(new { @event = "error", message = "one Workshop id to subscribe or download, one or more to unsubscribe" }); rc = 2; }
+            else rc = cmd.Op switch { "subscribe" => Subscribe(session, cmd.Ids[0], stop), "download" => Download(session, cmd.Ids[0], stop), _ => Unsubscribe(session, cmd.Ids, stop) };
+            lock (gate) current = null;
+            Emit(new { @event = "done", rc });
+        }
     }
 
     static int Unsubscribe(Session s, List<ulong> ids, ManualResetEventSlim stop)

@@ -16,7 +16,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Adapter self-test: `LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`
 - Settings merge / cross-process writes / settings latency: `bash scripts/test-settings-merge.sh`, `bash scripts/test-cross-process.sh`, `bash scripts/test-settings-latency.sh`
 - Player engine switching (a quick switch back, a binary that appears later): `bash scripts/test-engine-heal.sh`
-- Steam paths (no account needed): `bash scripts/test-steam-signin.sh`
+- Steam paths (no account needed): `bash scripts/test-steam-signin.sh`; how long "Use the Steam app" stays connected: `bash scripts/test-steam-app-hold.sh`
 - The item sidebars' Workshop favourite / comments / creator / counts and Browse's Workshop lists (a fake community server, no network): `bash scripts/test-workshop-social.sh`
 - Library tags, trailers, frame sizes and sizes on disk (no network, fake Steam servers): `bash scripts/test-library-facts.sh`
 - Presets: their base scene, layered properties, the base's delete (fake Steam servers, no network): `bash scripts/test-presets.sh`

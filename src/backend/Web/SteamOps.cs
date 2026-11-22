@@ -29,6 +29,8 @@ public static class SteamOps
             // API: what the UI's Workshop controls need to mirror WorkshopDownloader.Blocked under any mode
             // (components/subscribeMode.ts actionBlocked): a sign-in the actions can use
             usable = SteamAuthService.HasUsableSignIn(s),
+            // "Use the Steam app" holds its Steam connection now (Helpers/SteamClientHold.cs): Steam shows Wallpaper Engine playing
+            appConnected = SteamClientHold.Connected,
         };
     }
 
