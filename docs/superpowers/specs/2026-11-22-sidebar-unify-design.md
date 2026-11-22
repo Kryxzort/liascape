@@ -15,7 +15,7 @@ comments. The tabs differ only in what the action area holds.
   Subscribe/Unsubscribe toggle (`SubToggle`), the hint line under the buttons (`side-cta-note`). Right-click keeps the
   download menu it has now.
 - Downloaded (Browse; Library for Workshop items): one split button, Play | Unsubscribe. Right-click on Unsubscribe:
-  "Unsubscribe, keep the files". Library items not from the Workshop: Play only (owner to confirm the second half).
+  "Unsubscribe, keep the files". Library items not from the Workshop: Play | Delete (the Library's existing delete: to the trash, with its undo).
 - "Show in Library": an icon button under the close button, in the head's tool slot (`SideHeadTools`); the "In your
   library" chip goes.
 - Favourite: the favourites count pill is the toggle (star filled when favourited, click toggles; signed out it
