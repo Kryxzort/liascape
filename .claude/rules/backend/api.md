@@ -46,7 +46,7 @@ paths:
 - `PlayFrom` persists the playlist bar in its own order, not the play order.
 - Removing the playing item from the bar keeps it playing; the rotation goes on from its place (the program's items, `LiascapePlayerProgram.SetItems` → the player's `Order::reorder`).
 - Trash removes the items from the playlist too; Undo puts each back at its index. If one was on screen or incoming (`LiascapePlayerMedia.ShownOrIncomingPaths`) a playlist plays on from the next surviving item, a single wallpaper stops.
-- A playlist's transition change re-arms an already-armed aligned switch (`PlayerHelper.RearmAlignedSwitch`).
+- A transition change re-arms the program's already-armed aligned switch: a global one from `/settings` (`PlayerHelper.RearmAlignedSwitch`), the playlist's own from the bar (`AppOps.ApplyToProgram` → `LiascapePlayerProgram.SetTransition`).
 
 ## CLI forwarding (`Web/ActionForward.cs`)
 - `liascape <action>` goes to a running backend (`serve.port` → `GET /health` → `POST /action` with the token), runs locally only when no backend answers `/health`, and never falls back once the POST was sent.

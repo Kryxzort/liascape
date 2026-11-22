@@ -143,7 +143,7 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
 ## Programs (`recipes/program/`)
 - A program is a graph node `prog:<name>` that only issues `transition` requests through
   `Transitions::start` (or `transition_parked`); never add a second switch path, never render, never touch
-  a source. Rotation semantics port the C# contract in [player-adapter.md](../backend/player-adapter.md).
+  a source. Rotation semantics follow the contract in [player-adapter.md](../backend/player-adapter.md) § Rotation.
 - Program create/destroy never moves `picture_rev`/`demand_rev`.
 - Stash the transition outbox (`Runtime::stash_tr_events`) in the `transition`/`cancel` verbs and output
   removal instead of dropping it: programs read those events on the next tick.

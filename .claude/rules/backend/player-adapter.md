@@ -71,7 +71,7 @@ Every rule runs in the player's program `prog:main` (`.claude/rules/player/runti
 - Toggle OFF: a scene's minimum reached is its end; no minimum → the maximum moves it; neither → it stays. Both set → the minimum.
 - `rule.rs` `item_rule(kind, min, max, separate, scenes_after)` is the whole table. Guard: `rule.rs` `item_rule_table`.
 - Play time counts wall clock (never speed-scaled), not while paused, resets on every switch (an aligned B from its effect's start), never on an edit.
-- A 1-item playlist never switches by itself (`CanRotate`), but takes a user next/random.
+- A 1-item playlist never switches by itself (`can_rotate` in `src/player/src/recipes/program/mod.rs`), but takes a user next/random.
 - Live edits (`/settings` for a playlist following globals, `/playlist/state` diffed prev → now) never reset the countdown or play time; a new minimum re-arms the armed end switch to the same B; a transition change re-arms it (`RearmAlignedSwitch`).
 - B becomes the session's current item when its effect STARTS (`transition.started`), not at the handoff.
 - "Keep playing this one" (`liascape toggle-loop-current`) toggles `prog:main.keep`; it lives in the player only (kept across player restarts, never carried by `Reapply`); a Play / play-from clears it.

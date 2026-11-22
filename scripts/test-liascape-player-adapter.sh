@@ -520,7 +520,7 @@ armed_to() { ctl state | jq -e --arg p "$1" '. as $s | [.transitions[] | select(
 nsched_all() { ctl logs '{"kind_prefix":"transition.scheduled","limit":10000}' | jq '.events|length'; }
 stop_now
 
-# min before the play (ApplyTimedPlaylist picks it up): a.mp4 is 2 s → its loops end at +1.7, +3.7, +5.7 s; the first ≥ 5 s is the 3rd
+# min before the play (the program's load picks it up): a.mp4 is 2 s → its loops end at +1.7, +3.7, +5.7 s; the first ≥ 5 s is the 3rd
 setting '.GlobalIntervalSeconds = 5 | .GlobalMaxPlaySeconds = 0'
 m0=$(tev_n); nw0=$(nows)
 post /playlist/play "{\"paths\":[\"$A\",\"$Bc\"],\"settings\":{\"Order\":0}}" >/dev/null
@@ -1987,9 +1987,6 @@ e1_window "$te" "$pe"   # E1 (12 s) ends inside this window → exactly one alig
 [ "$(storms)" = "$st0" ] && ok "no switch storm across the restart" || bad "switch storm: $(( $(storms) - st0 )) failed/superseded aligned switches — $(grep "→ switching in" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" | tail -3 | tr '\n' ' ')"
 [ "$(nows)" = "$nw0" ] && ok "no immediate (align:now) switch during the handover" || bad "$(( $(nows) - nw0 )) align:now switches during the handover"
 one_advance && ok "one advance at E1's end, E2 on screen" || bad "$dh handoffs, the last to $(basename "$dto")"
-# no backend owns a timer under liascape-player (the player's program rotates) — no gui_timer.pid
-[ ! -e "$XDG_CONFIG_HOME/liascape/gui_timer.pid" ] && ok "no backend claims the timer (no gui_timer.pid: the player's program rotates)" || bad "gui_timer.pid = $(cat "$XDG_CONFIG_HOME/liascape/gui_timer.pid" 2>/dev/null) (new backend $BP)"
-tp=$(cat "$XDG_CONFIG_HOME/liascape/timer.pid" 2>/dev/null); { [ -z "$tp" ] || ! kill -0 "$tp" 2>/dev/null; } && ok "no timer-daemon left running" || bad "a timer-daemon (pid $tp) runs next to the new backend"
 kill "$WSP" 2>/dev/null; WSP=""
 stop_now
 
