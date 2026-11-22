@@ -5,6 +5,18 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
+0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, now** — the
+       owner waived the rest of the bar (`docs/player/reports/switch-over.md`). Right after #114 lands, in order:
+       a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,
+       probes, `scripts/install.sh`, flake, PKGBUILD), with mpvpaper, the LWE launcher path, `src/native/`
+       (`liascape-transition`, `liascape-audio`), `.claude/rules/backend/legacy-engine.md` and the legacy decision
+       entries; `docs/README-next.md` replaces `README.md`; the § Switch-over bar items below are closed by it.
+       b) The start-up seam: the restored wallpaper's layer waits for its source's `Ready` (owner's pick of § 5).
+       c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
+       `LICENSE.upstream-MIT` and the README's fork line go.
+       Not blocking, run at night: the crash-isolation re-run (`scenes.sh crash`, `programs.sh crash`) and the 8 h soak
+       (`scenes.sh soak --minutes 480`); a regression they find is a bug to fix, not a reason to keep legacy.
+       Frozen-onset micro-gaps (2–10 ms) don't count as failures unless the owner hears them.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
