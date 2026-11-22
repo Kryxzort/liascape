@@ -35,8 +35,9 @@ comments. The tabs differ only in what the action area holds.
 
 ## Motion
 The sidebar open/close is variant E from the motion lab (worktree `agent-a841082c364487870`, `app/ui/motion-lab/`):
-full slide, cards glide nearest first and stay visible under a backdrop that fades in, content soft-cascades in late
-and from further back (values: owner's pick in the lab).
+full slide, cards glide nearest first and stay visible under a backdrop that fades in, content soft-cascades in (`--spring-soft`, no overshoot, the 1× pace) starting
+30 % into the panel slide, each item travelling 6× the current offset (owner's pick in the lab: "start 30 % · travel 6×").
+Item switches keep B's quick carousel; close is B's slide out. Motion off: fades only.
 
 ## UI rules added to `.claude/rules/ui/design.md`
 1. Agents decide visual details themselves; every visual decision beyond the brief is one line in the report
