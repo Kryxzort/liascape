@@ -64,8 +64,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 115. [ ] Favourite and comment through Steam where Liascape has no Steam login: the sidebar's star and comment box
        become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and Liascape
        watches that item's favourite state every few seconds for a few minutes after, updating the favourites cache
-       (`Helpers/WorkshopFavorites.cs`, whose count check is held to once per 50 s) when it flips. The Steam page is
-       #116's last resort, so this is that rule applied to the social controls.
+       (`Helpers/WorkshopFavorites.cs`) when it flips. The cache's once-per-50 s hold on its count check wins: the watch
+       never goes through that check, it reads that one item's state. The Steam page is #116's last resort, so this is
+       that rule applied to the social controls.
 116. [ ] Two Workshop download modes, the Steam page the last resort. Owner: the page needs no login and gives Liascape
        nothing, so falling back to it never exceeds the trust chosen; the Steam sign-in backs up the Steam app because
        the user signed in themselves. Nothing else stands in for a chosen mode.

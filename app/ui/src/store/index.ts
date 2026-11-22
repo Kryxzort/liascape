@@ -141,9 +141,8 @@ interface State {
   // what the shown list was read for (its source, search and filter; "" while a switched-to source loads): Browse starts
   // a list read for anything else at its top, and brings a kept scroll offset back only onto the list it was left on
   browseFor: string;
-  // the Workshop source's list (api/client.ts WsList): the whole Workshop (null), the signed-in account's favourites, one
-  // creator's items or a scene's presets, its sort, and why a list couldn't be read (a sign-in it needs, Steam unreachable) —
-  // shown in the grid
+  // the Workshop source's list (api/client.ts WsList): the whole Workshop (null), one creator's items or a scene's presets,
+  // its sort, and why a list couldn't be read (Steam unreachable, in its own words) — shown in the grid
   wsList: WsList; wsListSort: WsListSort; wsListNote: { text: string } | null;
   // a Workshop item the Browse sidebar shows though the list doesn't hold it (a preset's base scene: showBrowseItem)
   browseExtra: Wallpaper | null;

@@ -4476,14 +4476,18 @@ app.whenReady().then(async () => {
         const wait2 = async (code, ms = 6000) => { for (let t = 0; t < ms; t += 100) { const r = await p2(code); if (r) return r; await sleep(100); } return p2(code); };
         const titles2 = () => p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title);`);
         await w2.loadURL(withToken(U + "/"));
+        // every request (the page's own fetch, looked up at each call)
+        await p2(`const f = window.fetch; window.__asked = []; window.fetch = (u, o) => { window.__asked.push(String(u?.url ?? u)); return f(u, o); }; return true;`);
         await wait2(`return document.querySelectorAll(".tab").length >= 3`);
         await p2(`[...document.querySelectorAll(".tab")].find((e) => e.textContent.trim() === "Browse")?.click();`); await sleep(500);
         await p2(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
         const ws0 = await wait2(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0`);
         if (!ws0) return [`the Workshop showed no cards ${J(await titles2())} — proved nothing`];
-        // every request from here on (the page's own fetch, looked up at each call), once the pill's own reload is in
-        await sleep(1200);
-        await p2(`const f = window.fetch; window.__asked = []; window.fetch = (u, o) => { window.__asked.push(String(u?.url ?? u)); return f(u, o); }; return true;`);
+        // the pill's own reload settled (no new /browse for 600 ms), then only what the ✓ asks counts
+        const nBrowse = () => p2(`return window.__asked.filter((u) => /\\/browse(\\?|$)/.test(u)).length;`);
+        for (let n = await nBrowse(), quiet = 0, t = 0; quiet < 600 && t < 6000; t += 100) {
+          await sleep(100); const m = await nBrowse(); if (m === n) quiet += 100; else { n = m; quiet = 0; } }
+        await p2(`window.__asked = []; return true;`);
         const row = await wait2(`const r = document.querySelector(".wf-row[data-wf-tag='@favorites']"); if (r) return { off: r.hasAttribute("data-wf-off") };
           const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") t?.click(); return null;`, 3000);
         if (!row || row.off) return [`the Favourites row ${row ? "reads signed out" : "never showed"} with the stack signed in — proved nothing`];
