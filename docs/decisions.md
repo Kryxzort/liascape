@@ -336,14 +336,6 @@ The renderer decodes A and B with libmpv (full-live), so V→V effects show live
 stills are the warmup fallback and the source for a scene side — LWE's `--screenshot` dump, with grim only as a
 fallback because grim captures open windows. `src/native/liascape-transition`.
 
-### Restart mpvpaper periodically for its frame-buffer leak — 2026-05-08
-mpvpaper leaks ~1.3 MB/s; `RestartMpvpaperEverySeconds` (default 600, 0 = off) relaunches it, through the tick under a
-timed playlist. liascape-player never runs this machinery. `.claude/rules/backend/legacy-engine.md` § Restart daemon.
-
-### Give `DoVideoEndWait` 3 s of empty readings before it gives up — 2026-05-03
-mpv reports no time remaining around a load; breaking after 500 ms switched scenes early, so the wait allows 30 polls
-(3 s). `PlayerHelper.DoVideoEndWait`.
-
 ## Player (`liascape-player`)
 
 ### Keep the pointer's arrival jump, not WE's first-frame corner stroke — 2026-11-20

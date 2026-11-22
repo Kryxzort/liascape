@@ -30,13 +30,16 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` �
 - User switches go through `pending_action.txt` (atomic write + rename), consumed only by the tick owner. `restart` relaunches without advancing or resetting the countdown.
 - Start an end-of-video wait only through `ArmVideoEndWait`; call `PostSwitch` after every timed switch; use `PlayingHistoryIndex` (the pre-fetch makes `_historyIndex` one ahead).
 - `DoVideoEndWait` first waits until mpv's `path` equals `_lastSwitchTarget` (≤ 8 s) — without it a bailed transition re-fires every ~85 ms.
-- `DoVideoEndWait` gives up on an empty time-remaining only after 30 polls (3 s), never sooner: `docs/decisions.md` § Give `DoVideoEndWait` 3 s of empty readings before it gives up.
+- `DoVideoEndWait` gives up on an empty time-remaining only after 30 polls (3 s), never sooner: mpv reports no time remaining
+  around a load, and breaking after 500 ms switched scenes early.
 - `RandomAndLaunch` re-seats both cursors (`_timedIndex` = the pick, forward history dropped). Guard: matrix `seq:random+next` / `seq:random+prev`.
 - `UpdateTimedSettings` keeps the elapsed time proportionally; it never restarts the current wallpaper.
 - A superseded aligned switch re-arms for A's end (backoff), it never switches now.
 - A timed session starts at its first item that isn't a preset (`ApplyTimedPlaylist`: Play, play-from, shuffle and every replay), and a resumed one moves past a preset (`RestoreTimedPlaylist`): LWE on a preset's folder dies behind a screen the old wallpaper left, with no crash advance. Guard: `scripts/test-legacy-launch.sh` § presets.
 
 ## Restart daemon (mpvpaper frame-buffer leak)
+- Why it exists: mpvpaper leaks ~1.3 MB/s, so `RestartMpvpaperEverySeconds` (default 600, 0 = off) relaunches it;
+  liascape-player never runs this machinery.
 - `RestartMpvpaperEverySeconds <= 0` → every restart path is a no-op. Under a timed playlist write `restart` to `pending_action.txt` instead of restarting directly; skip it while paused.
 - `RestartCurrent` re-checks `IsPlaying` inside `_lock` before `DoColdRestart`.
 
