@@ -27,7 +27,6 @@ const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "
 // favoritesUsable). Not on the local WE folder.
 // On the Workshop a ✓ on either shows that set itself with no request (views/localSet.ts) and ✕ alone hides it from the
 // Workshop's pages; on the local WE folder "In my library" keeps or hides its owned items (Browse's render, `inLibrary`).
-export { FAVORITES_TAG, LIBRARY_TAG };
 const YOURS = { id: "yours", name: "Yours" };
 export const WF_GROUPS: Group[] = [
   { ...YOURS, subs: [{ tags: [t(LIBRARY_TAG, "In my library"), t(FAVORITES_TAG, "Favourites")] }] },
@@ -60,7 +59,7 @@ export const WS_SORT_OPTIONS = [
   ...PERIODS.map(([d, l]) => ({ value: `trend:${d}`, label: `Most Popular · ${l}` })),
   ...SORTS.filter(([v]) => v !== "trend").map(([v, l]) => ({ value: v, label: l })),
 ];
-// a Workshop list's sorts (favourites, a creator's items): the two Steam's client protocol orders a user's files by
+// a Workshop list's sorts (a creator's items, a scene's presets): the two orders Steam's client protocol gives both
 export const WS_LIST_SORTS = [{ value: "lastupdated", label: "Recently Updated" }, { value: "toprated", label: "Top Rated" }];
 export const wsSortValue = (f: WorkshopFilter) => (f.sort === "trend" ? `trend:${f.trendDays}` : f.sort);
 export const wsSortPatch = (v: string): Partial<WorkshopFilter> => (v.startsWith("trend:") ? { sort: "trend", trendDays: +v.slice(6) } : { sort: v });
@@ -106,7 +105,7 @@ const GROUP_OF = new Map(GROUPS.allP.flatMap((g) => g.subs.flatMap((s) => s.tags
 // The filter as a test of one item's facets, with the Workshop's rules (the backend's WorkshopTags.Build): OR within a
 // group, Genre / Features by their All / Any switch, AND across groups, an excluded tag hides, and any age include or
 // exclude drops an item with no age rating (docs/decisions.md § "Drop untagged items under any age filter"). The "@"
-// pseudo-tags are the page's own ("In my library"). null = nothing on: every item passes. Guard: probe-filters lib:filter
+// pseudo-tags are the page's own ("In my library", "Favourites"). null = nothing on: every item passes. Guard: probe-filters lib:filter
 export function localMatcher(f: WorkshopFilter): ((facets: Set<string>) => boolean) | null {
   const exc = new Set(f.exclude.filter((t) => !t.startsWith("@")).map((t) => t.toLowerCase()));
   const inc = [...new Set(f.include.filter((t) => !t.startsWith("@")).map((t) => t.toLowerCase()))].filter((t) => !exc.has(t));

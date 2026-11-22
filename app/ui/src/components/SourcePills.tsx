@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { RefreshCw, SlidersHorizontal, Star, X } from "lucide-react";
+import { RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -68,12 +68,10 @@ export function SourcePills() {
           return [
             <button key={x.index} className={`pill${active === x.index && !(ws && wsList) ? " active" : ""}`}
               {...warm} onClick={(e) => { into(e); setSource(x.index); }}>{x.name}</button>,
-            // the Workshop's lists, beside its pill (store wsList): the signed-in account's favourites, and the creator the
-            // sidebar's creator row picked — its avatar + name, × back to the whole Workshop. Guard: probe-steam ws:pills
-            x.supportsTagFilter && (
-              <button key="ws-fav" className={`pill ico ws-pill${ws && wsList?.kind === "favorites" ? " active" : ""}`} data-ws-pill="favorites"
-                {...warm} onClick={(e) => { into(e); setWsList({ kind: "favorites" }); }}><Star size={14} /> Favourites</button>
-            ),
+            // a Workshop list opened from a sidebar, beside its pill only while it's open (store wsList): the creator the
+            // sidebar's creator row picked — its avatar + name, × back to the whole Workshop. The favourites are no list but
+            // a filter row (docs/decisions.md § "Show Favourites and In my library as sets in the filter column").
+            // Guard: probe-steam ws:pills
             x.supportsTagFilter && creator.value && (
               <span key="ws-creator" ref={inView} className={`ws-pill-pair${creator.closing ? " closing" : ""}`} data-ws-pill="creator">
                 <button className={`pill ico ws-pill${ws && wsList?.kind === "creator" ? " active" : ""}`}

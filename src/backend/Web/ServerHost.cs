@@ -421,8 +421,6 @@ public static class ServerHost
             }
             // Steam asked us to slow down (SteamGate): say when to retry — nothing more was sent
             catch (SteamCooldownException e) { return Results.Json(new { error = e.Message }, statusCode: 429); }
-            // the favourites list without a sign-in: the UI says "Sign in to …"
-            catch (SteamCommunity.SignInRequiredException e) { return Results.Json(new { error = e.Message, signIn = true }, statusCode: 403); }
         });
 
         app.MapPost("/detail", async (DetailReq r) =>

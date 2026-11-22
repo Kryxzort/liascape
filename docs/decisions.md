@@ -6,10 +6,10 @@ Choices that ruled out a tempting alternative, so nobody "fixes" them back. Form
 ## Backend/API
 
 ### Run the agent window in a private compositor, not an output of the session's Hyprland — 2026-11-12
-Agents drive their own Liascape window (`scripts/agent-window.sh`) in a headless gamescope (no seat, input or DRM; bwrap,
-its own network namespace), never a headless output added to the owner's Hyprland: removing an output always warps the
-cursor to another monitor's centre (`CMonitor::onDisconnect`; `cursor:no_warps` doesn't stop it), and an output that
-stays is a workspace the owner's keys can land on. The script only reads Hyprland. `.claude/rules/ui/shell-and-probes.md`.
+Agents drive their own Liascape window (`scripts/agent-window.sh`) in a headless gamescope, never a headless output
+added to the owner's Hyprland: removing an output always warps the cursor to another monitor's centre
+(`CMonitor::onDisconnect`; `cursor:no_warps` doesn't stop it), and an output that stays is a workspace the owner's keys
+can land on. The script only reads Hyprland. `.claude/rules/ui/shell-and-probes.md`.
 
 ### Serve media from a second listener — 2026-11-12
 Chromium opens 6 HTTP/1.1 connections per origin; slow media loads held them all and API calls queued behind. Media
@@ -61,13 +61,13 @@ page with tags, previews and descriptions; the page scraper is the fallback only
 connect + logon (1.2–2.6 s) costs more than a page (0.5–1.3 s). `Helpers/SteamAnonymous.cs`, `.claude/rules/backend/sources-steam.md`.
 
 ### Gate every steamcommunity.com request app-wide — 2026-11-11
-Owner: "make sure you obey the rate limits so user dont face ip issues". One gate spaces request starts and turns a 429
+Owner's call: Steam must never block the user's IP. One gate spaces request starts and turns a 429
 into a cooldown persisted across restarts, so no code path can burst on its own. `Helpers/SteamGate.cs`;
 `.claude/rules/backend/sources-steam.md` § Steam Community rate limits.
 
 ### AND Workshop features, OR genres, each switchable — 2026-11-11
 Feature tags stack on one item and Steam's own page ANDs them; an item usually has one genre, so AND would find almost
-nothing. The owner asked for an all/any switch on both ("what if a user wants 3D OR HDR"); defaults are features all,
+nothing. The owner asked for an all/any switch on both; defaults are features all,
 genres any. `Helpers/WorkshopTags.cs` `Build`.
 
 ### Drop untagged items under any age filter — 2026-11-11
@@ -78,19 +78,19 @@ of the allowed ages, which drops the few hundred items with no age tag; other gr
 ### Offer three Workshop download modes, the user's choice — 2026-11-18
 `steampage` (no login), `steamapp` (none given to Liascape), `subscribe` (default, the sign-in): one per level of trust.
 It replaced a steamcmd mode, dropped: it needs a Steam login too and the sign-in already downloads without subscribing.
-A mode never uses another's way (owner: "we dont switch modes when user haven't chose it!"): what it can't do is disabled
+A mode never uses another's way (owner's rule: no mode the user didn't choose): what it can't do is disabled
 with why; the to-do's "Let the Steam app do all N" is the user's own switch. `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
-`libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a copy
-(owner: "what if other users dont got steamvr?"). A short-lived child loads the installed client's `steamclient.so` and
-calls ISteamUGC by vtable slot, slots read from Valve's wrappers with objdump. `Helpers/SteamClientUgc.cs`.
+`libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a
+copy. A short-lived child loads the installed client's `steamclient.so` and calls ISteamUGC by vtable slot, slots read
+from Valve's wrappers with objdump. `Helpers/SteamClientUgc.cs`.
 
 ### Queue the Steam pages the user must click, one at a time, advanced by Next — 2026-11-11
 Opening N pages at once lost all but one (Steam shows one), and a bulk Delete from Source opened the whole subscriptions
 list. The to-do opens one page and waits for Next; it never reads Steam's subscribed state (that needs a Steam-client
-connection a `steampage` user may avoid, and "not on disk" doesn't mean unsubscribed). The only auto-advance (owner: "auto
-detect then if its flawless"): a subscribe entry absent at its turn whose files then appear. `Web/SteamTodo.cs`.
+connection a `steampage` user may avoid, and "not on disk" doesn't mean unsubscribed). The only auto-advance (the owner's
+ask): a subscribe entry absent at its turn whose files then appear. `Web/SteamTodo.cs`.
 
 ### Report Workshop download phases, not a percent — 2026-11-11
 Steam may reserve a staged file's full size before writing it, so a size-based percent sat at an empty bar for a minute
@@ -102,17 +102,21 @@ on a large item. The poll reports "Steam is downloading it…" / "Steam is finis
 never one, so ids without a folder are blocked at once, no page. `WorkshopDownloader.UnsubscribeInSteamApp`.
 
 ### Offer a password sign-in beside the QR — 2026-11-11
-Owner: "is it a dead end for users without mobile guard?" The QR sign-in needs the Steam mobile app; he chose both a
-password sign-in and downloads through the Steam app with no sign-in. Nothing retries a sign-in by itself: repeated
-attempts extend Steam's block. `Web/SteamOps.cs`; `.claude/rules/backend/sources-steam.md` § Sign-in.
+The QR sign-in needs the Steam mobile app, so the owner chose both a password sign-in and downloads through the Steam
+app with no sign-in. Nothing retries a sign-in by itself: repeated attempts extend Steam's block. `Web/SteamOps.cs`;
+`.claude/rules/backend/sources-steam.md` § Sign-in.
 
 ### Keep Steam tokens in the system keyring, a 0600 file as fallback — 2026-11-11
-Owner: "steam token is kept in plaintext??" → "system keyring and then fallback to some file other than settings.json".
-settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`: the Secret
-Service, else `~/.config/liascape/steam-auth.json` (0600). Keyring-only was rejected: with no Secret Service (bare
-compositors) signing in wouldn't work; the file is as safe as Chromium's "basic" store. A denied keyring means signed
-out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
+Owner's call: settings.json is posted by the UI and read by every process, so the tokens live in `Helpers/SecretStore.cs`:
+the Secret Service, else `~/.config/liascape/steam-auth.json` (0600). Keyring-only was rejected: with no Secret Service (bare
+compositors) signing in wouldn't work; the file is as safe as Chromium's "basic" store.
+`.claude/rules/backend/sources-steam.md` § Secrets.
 
+### Show Favourites and In my library as sets in the filter column — 2026-11-21
+Owner's call: favourites are a subset of the Workshop, so they are a three-way row beside "In my library" (group Yours,
+the Library's column too), not a pill swapping Browse to Steam's favourites list (no search, two sorts). ✓ shows the set
+from a cache (`Helpers/WorkshopFavorites.cs`, the library index) with local search and sorts, ✕ hides it from the
+Workshop's pages; no row scans pages for its items. `views/localSet.ts`; guard probe-steam `yours:*`.
 ### Ask Steam for a whole library's details in one request; never cache "can't tell" as "none" — 2026-11-12
 Tags and trailers are Workshop listing, not files: auto-imported items lack them. CM `GetDetails` takes 1000 ids, not 100
 "to be safe": 100–1000 all came back in 574–600 ms (the web API's ~200 cap is a URL length); `QueryFiles` returns 100
@@ -121,7 +125,7 @@ whatever is asked. A failed check stores nothing (WE's offline mode caches "none
 ### Keep the Workshop in Steam's own sort orders — 2026-06-02
 Only Steam's sorts are offered for the Workshop (trend + period, newest, updated, most subscribed, top rated): results
 arrive page by page in Steam's order, so a client-side sort would reshuffle what infinite scroll already loaded. Only
-the local Wallpaper Engine source sorts client-side.
+lists held whole (the local Wallpaper Engine source, a Yours set) sort client-side.
 
 ## Library
 
@@ -151,7 +155,6 @@ measurements refine the stored value for the next play. Gain moving mid-play is 
 `scenetexture`, `file` and `directory` need a file picker and `usershortcut` launches a Windows app: they are listed
 with a reason, not editable. `Helpers/SceneProperties.cs`.
 
-
 ## Settings & state
 
 ### Order card previews in two lists, not toggles — 2026-11-15
@@ -159,7 +162,7 @@ with a reason, not editable. `Helpers/SceneProperties.cs`.
 toggles that couldn't say every order; Basic picks a preset. Guard: matrix `appear:previewOrder`.
 
 ### Use four settings levels, Standard by default, and never reset a hidden value — 2026-11-06
-Owner: "the forever final 4 levels" — Basic · Standard · Advanced · Expert, replacing the "Advanced settings" and "Show
+Owner's final call: Basic · Standard · Advanced · Expert, replacing the "Advanced settings" and "Show
 expert options" toggles. A hidden changed value gets the "tucked away" note with Show; a bulk reset was rejected because
 it also reset deliberate choices such as the player engine. `src/settingsLevel.ts`; `.claude/rules/ui/state-and-api.md`.
 
@@ -191,11 +194,11 @@ motion and people saving its cost; an opacity fade moves nothing and runs on the
 panels and menus pop. Enforced: `.claude/rules/ui/design.md` § Motion off; the motion-off probe cells.
 
 ### Let a hidden gif preview keep its own clock; hold its frame only as a video — 2026-11-18
-A gif preview out of sight (hover ended, scrolled away, window inactive, another tab) stays mounted, hidden and undecoded,
-and comes back where Chromium's clock for it is, never at frame 0. Holding its frame on a canvas needs our own ImageDecoder
-player (40 gifs: twice the renderer CPU, ~400 MB more); a frozen screenshot was dropped ("the gif freeze sucks"). Only "Play
-GIF previews as videos" (off by default) holds it: the gif plays as its clip, paused while the window is inactive.
-Guard: matrix `appear:gifResume`, `appear:gifVideo`; `.claude/rules/ui/design.md` § Performance.
+A gif preview out of sight stays mounted, hidden and undecoded, and comes back where Chromium's clock for it is, never
+at frame 0. Holding its frame on a canvas needs our own ImageDecoder player (40 gifs: twice the renderer CPU, ~400 MB
+more); a frozen screenshot was dropped. Only "Play GIF previews as videos" (off by default) holds it: the gif plays as
+its clip, paused while the window is inactive. Guard: matrix `appear:gifResume`, `appear:gifVideo`;
+`.claude/rules/ui/design.md` § Performance.
 
 ### Play every on-screen video preview, each as a small clip — 2026-11-18
 Every on-screen video preview plays a backend-made clip (`Web/ClipStore.cs`), never the wallpaper's file (it holds a
@@ -249,13 +252,13 @@ Placement (owner's pick): on the right, one panel at a time with the item sideba
 half of the split sort button (`components/SortFilterButton.tsx`); a left column, a top-bar pill, an edge handle and a
 sticky row were rejected. Guard probe-filters `split:*`, `panel:*`, `swap:*`.
 ### Keep the playlist bar's items 112 px tall at every Thumbnail shape; the dock aims at a fixed rise — 2026-11-12
-The width follows the shape (Widescreen ≈ 199 × 112) rather than a fixed 112 px width: widescreen items were "too small"
+The width follows the shape (Widescreen ≈ 199 × 112) rather than a fixed 112 px width: widescreen items were too small
 and the bar's height changed with the setting. The dock rises a fixed 12 px (not a fixed 1.16×, which on 112 px items
-needs a header gap the owner found "too much"), and its bell is measured in item pitches so it parts the same at both.
+needs a header gap the owner found too big), and its bell is measured in item pitches so it parts the same at both.
 `hooks/useDockLift.ts`; guard probe-plbar `bar:shape`, `bar:shapes`, `bar:headroom`.
 
 ### Bounce the playlist bar's dock only when entering, stopping or leaving — 2026-11-11
-Items magnify by pointer distance; a bounce on every item during a sweep "feels stuttery" (owner), so sweeping is
+Items magnify by pointer distance; a bounce on every item during a sweep feels stuttery, so sweeping is
 critically damped and only entry, stop and leave overshoot. `hooks/useDockLift.ts`; guard probe-plbar `bar:bounce`.
 
 ### Travel to the playing wallpaper once per session, spotlit in the playing green — 2026-11-10
@@ -280,7 +283,7 @@ Owner: "everything should let you empty out the field entirely and only snap bac
 Native selects can't be themed, made translucent or smooth-scrolled on Chromium/Linux. `components/Select.tsx`.
 
 ### Never blur behind panels (`backdrop-filter`) — 2026-06-24
-`backdrop-filter: blur` was removed for its paint cost and at the owner's request; translucency is `--tr` / `--tr-strong`.
+`backdrop-filter: blur` went for its paint cost and at the owner's request; translucency is `--tr` / `--tr-strong`.
 `.claude/rules/ui/design.md` § Performance.
 
 ### Build the UI in Electron + React — 2026-06-24

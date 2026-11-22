@@ -361,8 +361,8 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
   );
 }
 
-// A Workshop list that couldn't be read (store wsListNote), or one that's empty, says so where the grid would be: "Sign in to
-// …" for the favourites without a sign-in, Steam's own words otherwise. Guard: probe-steam ws:pills, ws:presetsEmpty
+// A Workshop list that couldn't be read (store wsListNote), or one that's empty, says so where the grid would be: Steam's own
+// words, or what's empty. Guard: probe-steam ws:presetsEmpty
 export function WsListNote() {
   // a local set (a Yours row ✓) isn't the list's pages: neither the list's error nor its emptiness is the set's.
   // Guard: probe-steam yours:inList
@@ -371,8 +371,7 @@ export function WsListNote() {
   const empty = useStore((s) => !!s.wsList && !s.loading && !s.hasMore && s.wallpapers.length === 0 && s.browseFor !== "");
   const kind = useStore((s) => s.wsList?.kind);
   if (local || (!note && !empty)) return null;
-  const text = note ? (note.signIn ? "Sign in to Steam to see your Workshop favourites — Settings → Getting Workshop wallpapers." : note.text)
-    : kind === "favorites" ? "No Wallpaper Engine favourites on Steam yet — or none that match these filters."
+  const text = note ? note.text
     : kind === "presets" ? "This scene has no presets yet — or none that match these filters." : "No wallpapers here match these filters.";
-  return <div className="wf-none ws-list-note" data-ws-list-note={note ? (note.signIn ? "sign-in" : "error") : "empty"}><span>{text}</span></div>;
+  return <div className="wf-none ws-list-note" data-ws-list-note={note ? "error" : "empty"}><span>{text}</span></div>;
 }

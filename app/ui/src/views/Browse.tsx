@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { PRESET_TAG, presetsOn, useStore } from "../store";
 import { Card } from "../components/Card";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
-import { LIBRARY_TAG, WF_GROUPS, facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
+import { WF_GROUPS, facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
@@ -22,7 +22,7 @@ import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper, WorkshopFilter } from "../api/client";
 import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
-import { FAVORITES_TAG, buildLocalSet, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
+import { FAVORITES_TAG, LIBRARY_TAG, buildLocalSet, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // WE-local browse sort menu (client-side over the single loaded page).

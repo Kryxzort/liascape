@@ -48,7 +48,7 @@ public class SteamWorkshopService : IBgsProvider
         get { lock (_lock) return _filter; }
         set { var k = (value ?? new()).Key(); lock (_lock) { _filter = value ?? new(); if (k != _filterKey) { _filterKey = k; Invalidate(); } } }
     }
-    // the list Browse shows (Models/WorkshopList.cs): the whole Workshop, the signed-in account's favourites or a creator's items
+    // the list Browse shows (Models/WorkshopList.cs): the whole Workshop, a creator's items or a scene's presets
     public WorkshopList List
     {
         get { lock (_lock) return _list; }
@@ -139,73 +139,39 @@ public class SteamWorkshopService : IBgsProvider
         return SteamWorkshopScraper.MapToResults(got.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes: true, allowPresets: true);
     }
 
-    // A list (the favourites, a creator's items): Steam's client protocol pages a user's files 100 at a time and can't
-    // filter them by tag, so the filter's tags (and the playable types) are matched here — and a page the filter empties
-    // reads on (up to ListPagesPerLoad Steam pages), so an app page only comes back empty at the end of the list. Where the
-    // next app page starts is remembered per list generation (_cursor). A private profile's favourites (the client protocol
-    // sees none) come from the community's favourites page with the sign-in's cookie instead, 30 a page, SteamGate-paced.
+    // A creator's items: Steam's client protocol pages a user's files 100 at a time and can't filter them by tag, so the
+    // filter's tags (and the playable types) are matched here — and a page the filter empties reads on (up to
+    // ListPagesPerLoad Steam pages), so an app page only comes back empty at the end of the list. Where the next app page
+    // starts is remembered per list generation (_cursor). No page fallback: Steam unreachable is the list's error.
     private const int ListPagesPerLoad = 5, ListEnd = int.MaxValue / 2;
     private readonly Dictionary<(int gen, int appPage), int> _cursor = [];
-    private readonly HashSet<ulong> _favoritesViaPage = [];
 
     private async Task<List<WallpaperResult>> ListAsync(WorkshopFilter filter, bool allowScenes, bool allowPresets, WorkshopList list, int gen, int appPage, CancellationToken ct)
     {
         var plan = WorkshopTags.Build(filter, allowScenes, allowPresets);
         if (plan.Empty) return [];
-        ulong steamId;
-        if (list.IsCreator) steamId = ulong.Parse(list.Id!);
-        else
+        ulong steamId = ulong.Parse(list.Id!);
+        int start; lock (_lock) start = _cursor.TryGetValue((gen, appPage), out var c) ? c : appPage;
+        if (start >= ListEnd) return []; // the previous app page reached the list's end
+        var sw = Stopwatch.StartNew();
+        var outList = new List<WallpaperResult>();
+        int cm = start;
+        for (int n = 0; n < ListPagesPerLoad; n++, cm++)
         {
-            var who = await SteamCommunity.SignInAsync(ct).ConfigureAwait(false);
-            if (who is not { SteamId: > 0 } w) throw new SteamCommunity.SignInRequiredException("Sign in to Steam to see your Workshop favourites (Settings → Getting Workshop wallpapers).");
-            steamId = w.SteamId;
-        }
-        string type = list.IsCreator ? "myfiles" : "myfavorites";
-        List<WallpaperResult> Keep(IReadOnlyList<SteamWorkshopScraper.PublishedFileDetail> page)
-        {
+            var got = await SteamWorkshopDetails.UserFilesAsync(steamId, "myfiles", list.SteamSort, cm, CmPageSize, CmTimeout, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (got == null) throw new InvalidOperationException("Steam's servers didn't answer — try again in a moment.");
             var byId = new Dictionary<string, SteamWorkshopScraper.PublishedFileDetail>();
-            foreach (var d in page) byId.TryAdd(d.Id, d);
-            return SteamWorkshopScraper.MapToResults(page.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes, allowPresets)
-                .Where((r) => WorkshopTags.Matches(plan, r.Tags ?? [])).ToList();
+            foreach (var d in got.Items) byId.TryAdd(d.Id, d);
+            outList.AddRange(SteamWorkshopScraper.MapToResults(got.Items.Select((d) => d.Id).Distinct().ToList(), byId, allowScenes, allowPresets)
+                .Where((r) => WorkshopTags.Matches(plan, r.Tags ?? [])));
+            bool end = (long)cm * CmPageSize >= got.Total || got.Items.Count == 0;
+            if (end) { cm = ListEnd; break; }
+            if (outList.Count > 0) { cm++; break; }
         }
-        bool viaPage; lock (_lock) viaPage = !list.IsCreator && _favoritesViaPage.Contains(steamId);
-        if (!viaPage)
-        {
-            int start; lock (_lock) start = _cursor.TryGetValue((gen, appPage), out var c) ? c : appPage;
-            if (start >= ListEnd) return []; // the previous app page reached the list's end
-            var sw = Stopwatch.StartNew();
-            var outList = new List<WallpaperResult>();
-            int cm = start;
-            for (int n = 0; n < ListPagesPerLoad; n++, cm++)
-            {
-                var got = await SteamWorkshopDetails.UserFilesAsync(steamId, type, list.SteamSort, cm, CmPageSize, CmTimeout, ct).ConfigureAwait(false);
-                ct.ThrowIfCancellationRequested();
-                if (got == null) throw new InvalidOperationException("Steam's servers didn't answer — try again in a moment.");
-                // a private profile's favourites: the client protocol sees none — the community's page with the sign-in
-                if (!list.IsCreator && cm == 1 && got.Total == 0)
-                {
-                    lock (_lock) _favoritesViaPage.Add(steamId);
-                    viaPage = true;
-                    break;
-                }
-                outList.AddRange(Keep(got.Items));
-                bool end = (long)cm * CmPageSize >= got.Total || got.Items.Count == 0;
-                if (end) { cm = ListEnd; break; }
-                if (outList.Count > 0) { cm++; break; }
-            }
-            if (!viaPage)
-            {
-                lock (_lock) { if (gen == _gen) _cursor[(gen, appPage + 1)] = cm; }
-                Served(Path.Steam, $"Steam's client protocol (anonymous) — {type}: {outList.Count} item(s) in {sw.ElapsedMilliseconds} ms");
-                return outList;
-            }
-        }
-        // the favourites page (30 a page; app page = its page); a page the filter empties is an empty app page
-        Served(Path.Fallback, "the community's favourites page (a private profile — the sign-in's cookie, SteamGate-paced)");
-        var ids = (await SteamCommunity.MyFavoritesPageAsync(appPage, SteamGate.Kind.Interactive, ct).ConfigureAwait(false)).Ids;
-        if (ids.Count == 0) return [];
-        var details = await SteamWorkshopScraper.GetDetailsBatchAsync(ids).ConfigureAwait(false);
-        return Keep(ids.Where(details.ContainsKey).Select((id) => details[id]).ToList());
+        lock (_lock) { if (gen == _gen) _cursor[(gen, appPage + 1)] = cm; }
+        Served(Path.Steam, $"Steam's client protocol (anonymous) — myfiles: {outList.Count} item(s) in {sw.ElapsedMilliseconds} ms");
+        return outList;
     }
 
     private static bool ForceFallback => Environment.GetEnvironmentVariable("LIASCAPE_WORKSHOP_FALLBACK") == "1";

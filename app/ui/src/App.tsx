@@ -251,7 +251,7 @@ export default function App() {
 
         {/* "Go to selected": glides the grid to the card whose sidebar is open and rings it, like the Library's go to playing */}
         {tab === "browse" && <BrowseLocate focus={s.browseFocus} motion={motion} />}
-        {/* a Workshop list (favourites, a creator's) has no search: Steam can't search a user's files. A local set (a Yours
+        {/* a Workshop list (a creator's, a scene's presets) has no search: Steam can't search them. A local set (a Yours
             row ✓, views/localSet.ts) searches itself, inside a list too. Guard: probe-steam yours:search, yours:inList */}
         {tab === "browse" && src?.supportsSearch && (!(src.supportsTagFilter && s.wsList) || s.localSetOn) && <TopbarSearch placeholder={`Search ${src.name}…`} value={s.query} onChange={s.setQuery} />}
         {/* the filter panel's toggle + the sort, one split button (the Workshop's period is in its sort menu) */}

@@ -4,7 +4,8 @@ import { favoritesSignedOut, filterOf, useStore, type FilterScope, type TagState
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
-import { FAVORITES_TAG, groupsFor, usePresetsOn, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
+import { groupsFor, usePresetsOn, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
+import { FAVORITES_TAG } from "../views/localSet";
 
 // COOL: the filter column — Wallpaper Engine's filter column (docs/decisions.md § "Filter the Workshop in a column of
 // three-way switches"), on the Workshop, on Browse's local Wallpaper Engine folder and on the Library, the same control

@@ -385,7 +385,7 @@ public static class SteamCommunity
     /// this request is sent with is checked against it, and another account's throws with nothing sent (a list kept per
     /// account must never take a page fetched after a switch).
     // Guard: scripts/test-workshop-social.sh "favourites of a private profile: the community page (with the cookie) + the
-    // keyless details"; its parsing: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: …"; `account`:
+    // items' details"; its parsing: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: …"; `account`:
     // test-workshop-social.sh § 7 "a sign-in switched mid-load: no page asked as the other account, …".
     public static async Task<FavoritesPage> MyFavoritesPageAsync(int page, SteamGate.Kind kind, CancellationToken ct = default, ulong account = 0)
     {

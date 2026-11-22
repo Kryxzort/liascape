@@ -48,7 +48,11 @@ export function WsSetLoad({ scope = "workshop" }: { scope?: FavScope }) {
   useEffect(() => {
     const d = dock.current, sc = d?.parentElement;
     if (!d || !sc) return;
-    let h0: number | null = null, top0 = 0;
+    // an empty dock is no box (index.css .ws-set-load-dock:empty): its height is 0 from the start, so a line that first
+    // shows as an error (one already read, the row then turned on) glides from there, whether or not the engine reports
+    // a hidden box's first size (Chromium does, as 0). Reading it would force a layout in the mount. Guard: probe-steam
+    // yours:errorFirst
+    let h0: number | null = d.firstElementChild ? null : 0, top0 = 0;
     const onScroll = () => { top0 = sc.scrollTop; };
     const ro = new ResizeObserver(([e]) => {
       const h = e.borderBoxSize?.[0]?.blockSize ?? e.contentRect.height, top = sc.scrollTop;
