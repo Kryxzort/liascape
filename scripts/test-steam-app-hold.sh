@@ -38,8 +38,6 @@ fi
 [ -f "$DLL" ] || { echo "not built: $DLL (drop --no-build)"; exit 2; }
 
 T=$(mktemp -d /tmp/liascape-hold-XXXXXX)
-mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
-DLL=$T/backend/liascape-backend.dll
 BP=""
 stopbe() { [ -n "$1" ] && { kill "$1" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$1" 2>/dev/null || break; sleep 0.1; done; kill -9 "$1" 2>/dev/null; }; }
 cleanup() {
@@ -50,6 +48,9 @@ cleanup() {
   lp_tmp_done "$T" /tmp/liascape-hold- "$rc"
 }
 trap cleanup EXIT
+# copied after the trap so a copy that fails partway still leaves no temp root behind
+mkdir -p "$T/backend"; cp -a "$(dirname "$DLL")/." "$T/backend/" || { echo "ABORT: can't copy the backend build"; exit 2; }
+DLL=$T/backend/liascape-backend.dll
 trap 'exit 130' INT TERM HUP
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT LIASCAPE_PLAYER_SOCKET
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_SECRETS=file

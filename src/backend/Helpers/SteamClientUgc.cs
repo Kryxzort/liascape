@@ -144,11 +144,11 @@ public static class SteamClientUgc
         bool accepted = false, refused = false, wasSubscribed = false, ended = false; string? folder = null, error = null; var shown = "";
         if (ct.IsCancellationRequested) { cmd.Ended = true; ct.ThrowIfCancellationRequested(); } // nothing sent: the child is as it was
         if (!child.Send(new { op = verb, ids })) return new(false, null, "the Steam app helper stopped", false, false);
-        Timer? watchdog = null; int over = 0; // 1 = the command is over: a late cancel's watchdog kills nothing
+        Timer? watchdog = null; int over = 0; var overGate = new object(); // 1 = the command is over: a late cancel's watchdog kills nothing; the gate keeps its check-and-kill from straddling the end
         using var reg = ct.Register(() =>
         {
             child.Send(new { op = "cancel" });
-            watchdog = new Timer(_ => { if (Volatile.Read(ref over) == 0) child.Kill(); }, null, 3000, Timeout.Infinite);
+            watchdog = new Timer(_ => { lock (overGate) { if (over == 0) child.Kill(); } }, null, 3000, Timeout.Infinite);
         });
         try
         {
@@ -173,7 +173,7 @@ public static class SteamClientUgc
                 if (ended) break;
             }
         }
-        finally { Volatile.Write(ref over, 1); watchdog?.Dispose(); }
+        finally { lock (overGate) over = 1; watchdog?.Dispose(); }
         if (!ended) error ??= "the Steam app helper stopped";
         ct.ThrowIfCancellationRequested();
         return new(accepted, folder, error, refused, wasSubscribed);
