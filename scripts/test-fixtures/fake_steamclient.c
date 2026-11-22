@@ -11,6 +11,8 @@
 //   $FAKE_UGC_DIR/fail-init exists → ConnectToGlobalUser returns 0 (Steam not running / WE not owned)
 //   $FAKE_UGC_DIR/hold-install exists → a download stays at 50 % until it's removed (its helper keeps the one Steam-client turn)
 //   $FAKE_UGC_DIR/calls ← a line "subscribe <id>" / "unsubscribe <id>" per SubscribeItem / UnsubscribeItem Steam took
+//   $FAKE_UGC_DIR/hang-once exists → the next GetItemState removes it, writes a line to $FAKE_UGC_DIR/hung and never returns
+//   (a hung library: the parent's ping of a held child gets no answer)
 //   $FAKE_UGC_DIR/hold-unsub exists → UnsubscribeItem writes $FAKE_UGC_DIR/unsub-held and waits until it's removed, then unsubscribes
 //   $FAKE_UGC_OPEN_DELAY_MS (env) → every helper takes that long to connect (CreateInterface): a loaded or cold machine, where
 //   starting a helper takes seconds, made repeatable (a rerun of the suite with it shows which waits assume a fast helper)
@@ -97,6 +99,10 @@ static uint64_t unsubscribe(Obj *s, uint64_t id) {
   char line[48]; snprintf(line, sizeof line, "unsubscribe %llu\n", (unsigned long long)id); note("calls", line); return 2;
 }
 static uint32_t item_state(Obj *s, uint64_t id) {
+  if (exists("hang-once")) {
+    char h[4096]; snprintf(h, sizeof h, "%s/hang-once", dir()); unlink(h); note("hung", "x\n");
+    for (;;) pause();
+  }
   (void)s; double f = frac(id); char p[4096]; subfile(id, p, sizeof p);
   uint32_t sub = access(p, F_OK) == 0 ? 1 : 0;
   if (f < 0) return sub ? (1 | 4) : 0; // subscribed by an earlier run

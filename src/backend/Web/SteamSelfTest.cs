@@ -297,6 +297,43 @@ public static class SteamSelfTest
         }
     }
 
+    // "Use the Steam app"'s held child (Helpers/SteamClientHold.cs): the linger's tick can land while something holds the
+    // Steam client's turn without ending in Done (an unsubscribe whose claim came back empty); the release must still come.
+    // A `cat` stands in for the child: it exits once its stdin closes, as the real one releases Steam.
+    private static async Task HoldTickWhileTurnHeld()
+    {
+        System.Diagnostics.Process? cat = null;
+        var (linger, hb) = (SteamClientHold.Linger, SteamClientHold.HeartbeatTimeout);
+        try
+        {
+            cat = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cat")
+                { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true });
+            if (cat == null) { Check(false, "steam-app hold: can't start the stand-in child (cat)"); return; }
+            int pid = cat.Id;
+            static bool Exited(int pid) { try { using var p = System.Diagnostics.Process.GetProcessById(pid); return p.HasExited; } catch { return true; } }
+            SteamClientHold.Linger = TimeSpan.FromMilliseconds(200);
+            SteamClientHold.AdoptForTest(cat); // idle, its operation just over, the Workshop not showing
+            await SteamClientUgc.Turn.WaitAsync();
+            bool heldMeanwhile;
+            try
+            {
+                SteamClientHold.SetShowing(false); // a tick now, and the linger's end, both find the turn taken
+                await Task.Delay(700);
+                heldMeanwhile = SteamClientHold.Connected;
+            }
+            finally { SteamClientUgc.Turn.Release(); } // no Done: nothing else will look again
+            bool gone = false;
+            for (int i = 0; i < 60 && !gone; i++) { await Task.Delay(50); gone = !SteamClientHold.Connected && Exited(pid); }
+            Check(heldMeanwhile && gone, $"steam-app hold: a tick while the turn is held looks again; released once it is free (held meanwhile {heldMeanwhile}, released {gone})");
+        }
+        finally
+        {
+            SteamClientHold.Linger = linger; SteamClientHold.HeartbeatTimeout = hb;
+            try { if (cat is { HasExited: false }) cat.Kill(); } catch { }
+            cat?.Dispose();
+        }
+    }
+
     private static async Task RunAll()
     {
         Check(SecretStore.Backend == ExpectBackend, $"secrets: the {ExpectBackend} backend is in use ({SecretStore.Backend})");
@@ -304,6 +341,7 @@ public static class SteamSelfTest
         OneOffRoutes();
         ReconcileSkipsBlocked();
         WarmUp();
+        await HoldTickWhileTurnHeld();
         await NoNetwork();
         SteamOps.SignOut();
         SecretStore.Set(SecretStore.RefreshToken, FakeJwt(76561190000000009));
