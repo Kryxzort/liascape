@@ -25,7 +25,7 @@ fi
 # control families (matched anywhere after "× ", so the seq:/seq3:/seq5: chains that contain them run too)
 LIB='itemVol|itemSpd|playlistBarVol|trash|sel[A-Z]|cardToggle|cardApply|race:index|normalize|cli:volume'
 PL='pl[A-Z]|playlistBar|race:playlist|shuffle|cardToggle'
-SET='set:|g[A-Z]|globalDrag|appear|noop|race:settings|cli:volume|autoMute|normalize'
+SET='set:|g[A-Z]|globalDrag|appear|race:settings|cli:volume|autoMute|normalize'
 AUTOMUTE='autoMute|mute'
 MODAL='itemVol|itemSpd|playlistBarVol|selVol|previewDrag|globalDrag|cli:volume-up:modalOpen'
 CARD='card|sel[A-Z]|trash|itemVol|itemSpd'

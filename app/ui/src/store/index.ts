@@ -22,10 +22,10 @@ export type FilterPage = "browse" | "library";
 // what the backend gets for the Workshop's list: only on the Workshop source, never the pill's name / avatar / scene
 const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boolean }) =>
   s.wsList && s.isWorkshop() ? { kind: s.wsList.kind, id: s.wsList.id, sort: s.wsListSort } : undefined;
-// Workshop presets can be listed and played: scene support on and the Liascape player (the backend's
-// SteamWorkshopService.AllowPresets; presets are liascape-player only). Browse offers its Preset option and a scene's Presets
-// row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
-export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine !== "legacy";
+// Workshop presets can be listed and played: scene support on (the backend's SteamWorkshopService.AllowPresets). Browse
+// offers its Preset option and a scene's Presets row only then. Guard: probe-filters filter:preset:offered, probe-steam
+// ws:presetsHidden
+export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes;
 export const PRESET_TAG = "Preset";
 // the favourites can be read only for a signed-in account Steam hasn't rejected: otherwise the row is dimmed, a saved ✓ / ✕
 // stays (it comes back with the sign-in) but means nothing, and it can only be cleared
@@ -41,20 +41,12 @@ export const favoritesRowOn = (s: State, scope: FavScope) =>
 // a usable Favourites row is on in the Workshop's filter or the Library's: the favourites copy is wanted, and kept current
 const favoritesWanted = (s: Pick<State, "steam" | "browseFilter" | "libFilter">) =>
   favoritesUsable(s.steam) && (setModesOf(s.browseFilter, true).fav !== null || setModesOf(s.libFilter, true).fav !== null);
-// API: Helpers/Presets.cs LegacyReason, word for word
-export const PRESET_LEGACY = "Presets play only in the Liascape player";
-// Why a library item can't play now, or null: a preset's own reason (GET /library), and under the legacy engine every preset
-// (the page's settings say so at once; the library's re-read after the switch says it too: libraryFollowsEngine).
-// Guard: probe-sidebar lib:preset:legacy
-export const presetReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason">, settings: Record<string, unknown> | null) =>
-  i.presetReason ?? (i.isPreset && settings && settings.playerEngine === "legacy" ? PRESET_LEGACY : null);
-// Why a library item can't play now, or null: a preset's own reason (presetReasonOf), else, for a scene or a preset under
-// liascape-player, why it can't play a scene here (the store's scenesBlocked: the scene renderer is missing — GET /current,
-// WS scenes-blocked; the legacy engine plays scenes without it, and a switch back shows it again). The card greys with
-// it, the sidebar says it, a click plays nothing. Guard: probe-sidebar lib:scenesBlocked
-export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene">, settings: Record<string, unknown> | null,
-  scenesBlocked: string | null) => presetReasonOf(i, settings)
-  ?? ((i.isScene || i.isPreset) && scenesBlocked && settings?.playerEngine !== "legacy" ? scenesBlocked : null);
+// Why a library item can't play now, or null: a preset's own reason (GET /library `presetReason`), else, for a scene or a
+// preset, why it can't play a scene here (the store's scenesBlocked: the scene renderer is missing — GET /current, WS
+// scenes-blocked). The card greys with it, the sidebar says it, a click plays nothing. Guard: probe-sidebar
+// lib:preset:needsBase, lib:scenesBlocked
+export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene">, scenesBlocked: string | null) =>
+  i.presetReason ?? ((i.isScene || i.isPreset) && scenesBlocked ? scenesBlocked : null);
 // the status bar's "Can't play X: it needs its base scene" (a reason starts with a capital: it is also the card's tooltip)
 export const cantPlay = (title: string, why: string) =>
   `Can't play ${title}: ${/^Needs /.test(why) ? "it n" + why.slice(1) : why[0].toLowerCase() + why.slice(1)}`;
@@ -177,9 +169,6 @@ interface State {
   openOnSteam(workshopId: string): Promise<void>;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
-  // bumped when a settings save has reached the backend: what reads the saved file back (Settings → the mpv / LWE
-  // command previews) refetches on it, never on a timer that can beat the debounced save
-  settingsSaves: number;
   // `liascape toggle-loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS toggle-loop-current)
   keepCurrent: boolean; setKeepCurrent: (k: boolean) => void;
   // API: why no scene can play here (/current scenesBlocked, WS scenes-blocked), else null: every scene card greys with it
@@ -298,15 +287,15 @@ const dlCtrls: Record<string, AbortController> = {}; // per-download abort (canc
 // environment-derived so it's intentionally omitted (no fixed default to reset to).
 export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   noAudio: false, disableCache: false, settingsLevel: "standard", videoFpsCap: 0, liveWallpaperBehindAllTabs: false,
-  debugMode: false, debugOverlay: true, restartOnlyAtPlaylistChangeover: false, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, restartMpvpaperEverySeconds: 600, normalizeAudio: false, normalizeTargetLufs: -14,
+  debugMode: false, debugOverlay: true, stayPausedWhenSwitching: false, replaceDirectWithWorkshop: false, volume: 100, speed: 1, normalizeAudio: false, normalizeTargetLufs: -14,
   globalSwitchWhenVideoEnds: true, globalIntervalSeconds: 0, globalMaxPlaySeconds: 0, autoAddLibraryToPlaylist: false,
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,
-  globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", fullLiveSyncOffsetMs: -30,
+  globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal",
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 500, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
   hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5,
   autoThrottleScenes: true, sceneSpareWorker: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", gifPreviewsAsVideo: false, glows: true, textShadow: false, morphs: true,
-  copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],
+  copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneMonitors: [],
   workshopDownloadMode: "subscribe",
   theme: "Catppuccin Mocha",
   // pause when covered, the playlist start, while parked
@@ -371,7 +360,7 @@ export const useStore = create<State>((set, get) => ({
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
-  themes: [], theme: null, settings: null, settingsSaves: 0, playingPath: null, keepCurrent: false, scenesBlocked: null, vramHold: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
+  themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, scenesBlocked: null, vramHold: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
   libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
@@ -626,7 +615,7 @@ export const useStore = create<State>((set, get) => ({
     // spread defaults over current → preserves daemon-owned fields (lastSession, steam tokens) the
     // backend also guards; re-applies the default theme's CSS vars (settings.theme alone won't).
     const s = { ...(get().settings ?? {}), ...SETTINGS_DEFAULTS };
-    set({ settings: s }); api.saveSettings(s).then(() => libraryFollowsEngine(get)).catch(() => {});
+    set({ settings: s }); api.saveSettings(s).then(() => libraryFollowsScenes(get)).catch(() => {});
     get().applyTheme(SETTINGS_DEFAULTS.theme as string);
     get().setStatus("Settings are back to their defaults");
   },
@@ -657,11 +646,11 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({ libraryItems: s.libraryItems.map(p) }));
   },
   async applyItem(path) {
-    // an item that can't play (a preset: its base scene gone, the legacy engine…; any scene while the scene renderer is
-    // missing) plays nothing: the status bar says why (the card, Enter and the sidebar's picture alike). Guard: probe-sidebar
-    // lib:preset:needsBase, lib:preset:legacy, lib:scenesBlocked
+    // an item that can't play (a preset: its base scene gone; any scene while the scene renderer is missing) plays nothing:
+    // the status bar says why (the card, Enter and the sidebar's picture alike). Guard: probe-sidebar lib:preset:needsBase,
+    // lib:scenesBlocked
     const it = get().libraryItems.find((i) => i.videoPath === path);
-    const why = it ? unplayableReasonOf(it, get().settings, get().scenesBlocked) : null;
+    const why = it ? unplayableReasonOf(it, get().scenesBlocked) : null;
     if (it && why) { get().setStatus(cantPlay(it.title, why), true, true); return; }
     await api.apply(path); set({ playingPath: path });
     const t = get().libraryItems.find((i) => i.videoPath === path)?.title ?? (path.split("/").pop() ?? "").replace(/\.[^.]+$/, "");
@@ -741,7 +730,7 @@ export const useStore = create<State>((set, get) => ({
   // save posts the whole object, so the store must hold the new values or the next save reverts them.
   mergeSettings(p) {
     set({ settings: { ...(get().settings ?? {}), ...p } });
-    libraryFollowsEngine(get);
+    libraryFollowsScenes(get);
     if (get().playingPath) get().refreshPlayingStatus();
   },
   setSetting(key, value) {
@@ -752,7 +741,7 @@ export const useStore = create<State>((set, get) => ({
     set({ settings: s });
     clearTimeout(settingsTimer); settingsSavePending = true;
     // saves what the store holds THEN (not this snapshot): a backend change merged meanwhile survives
-    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).then(() => { set({ settingsSaves: get().settingsSaves + 1 }); libraryFollowsEngine(get); }).catch(() => {}); }, 250);
+    settingsTimer = setTimeout(() => { settingsSavePending = false; api.saveSettings(get().settings ?? s).then(() => libraryFollowsScenes(get)).catch(() => {}); }, 250);
     // vol/loop/speed/rotation changes refresh the now-playing line live
     if (get().playingPath && ["volume", "noAudio", "speed", "globalSwitchWhenVideoEnds", "globalIntervalSeconds", "globalMaxPlaySeconds",
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
@@ -896,7 +885,7 @@ export const useStore = create<State>((set, get) => ({
   refreshPlayingStatus() { if (Date.now() < statusHeldUntil) return; clearTimeout(statusTimer); set({ status: buildPlayingStatus(get), statusPlaying: true }); },
 }));
 
-// Preset is offered only while presets can play (presetsOn). When they stop (scene support off, the legacy engine) a Preset
+// Preset is offered only while presets can play (presetsOn). When they stop (scene support off) a Preset
 // left ticked or hidden leaves every filter — behind a row that's gone it would keep the Workshop listing nothing (the backend
 // sends no request for it) — and a scene's presets list goes back to the whole Workshop. Settings not read yet decide
 // nothing. Guard: probe-filters filter:preset:cleared
@@ -947,13 +936,12 @@ useStore.subscribe((s) => {
   if (favoritesWanted(useStore.getState())) useStore.getState().loadFavorites("open");
 });
 
-// A library listing depends on the engine and scene support (a preset's legacy reason, the presets the WE auto-import brings):
-// when either changes, read the library again once the backend has the change (after the page's own save lands, or at once for
-// a change the backend made: settings-changed), so a preset greys out or plays again without a reload. libKey = the settings
-// the shown listing answers. Guard: probe-sidebar lib:preset:legacy
-const libKeyOf = (s: Record<string, unknown> | null | undefined) => (s ? `${String(s.playerEngine)}|${!!s.allowScenes}` : null);
+// A library listing depends on scene support (the presets the WE auto-import brings): when it changes, read the library again
+// once the backend has the change (after the page's own save lands, or at once for a change the backend made:
+// settings-changed), without a reload. libKey = the setting the shown listing answers.
+const libKeyOf = (s: Record<string, unknown> | null | undefined) => (s ? String(!!s.allowScenes) : null);
 let libKey: string | null = null;
-function libraryFollowsEngine(get: () => State) {
+function libraryFollowsScenes(get: () => State) {
   const k = libKeyOf(get().settings);
   if (k === null || k === libKey) return;
   const first = libKey === null;
@@ -1053,7 +1041,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   }
   if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; if (curQ.holdFresh()) p.vramHold = cur.v?.vramHold ?? null; }
   if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
-  // this listing answers these settings: no second read for them (libraryFollowsEngine)
+  // this listing answers these settings: no second read for them (libraryFollowsScenes)
   if (lib && settings) libKey = libKeyOf(settings.v);
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;

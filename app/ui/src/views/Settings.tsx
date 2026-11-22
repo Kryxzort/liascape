@@ -1,7 +1,7 @@
 import { isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
-  Layers, MonitorSmartphone, Download, Terminal, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
+  Layers, MonitorSmartphone, Download, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
   Film, ImagePlay, Image as ImageIcon, FolderSync,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -355,8 +355,8 @@ function Row({ label, hint, disabled, liveChip, rk, wk, def, deviated, deviatedT
   );
 }
 // a whole section can sit at a level too (`lv`); a section's rows still filter themselves, and a section none of whose
-// rows the level (or the engine) shows hides with them (index.css `.ssection[data-rows]`), so no heading ever stands
-// alone. `bare` = a section whose content isn't rows (a command block, the monitor list's add button): it always shows.
+// rows the level shows hides with them (index.css `.ssection[data-rows]`), so no heading ever stands alone. `bare` = a
+// section whose content isn't rows (the monitor list's add button): it always shows.
 // Guard: probe-settings levels:noEmptySection.
 function Section({ title, icon, lv, bare, boxRef, children }: {
   title: string; icon?: React.ReactNode; lv?: Level; bare?: boolean; boxRef?: React.Ref<HTMLDivElement>; children: React.ReactNode;
@@ -451,32 +451,14 @@ export const Settings = memo(function Settings() {
   const smoothRef = useSmoothScroll(scrollRef);
   // the Look & feel rows that change how a library card looks: the card preview shows beside them while they're on screen
   const cardRowsRef = useRef<HTMLDivElement>(null);
-  const [mpv, setMpv] = useState("");
-  const [lwe, setLwe] = useState("");
   const [clearArm, setClearArm] = useState(-1); // -1 idle, >0 counting, 0 ready-to-confirm
   const [wipeArm, setWipeArm] = useState(-1);   // same arming pattern for "Clear settings"
   // auto-detected outputs (hyprctl/sway): name + current refresh rate + which is focused/primary
   const [detected, setDetected] = useState<{ name: string; refreshHz: number; primary: boolean }[]>([]);
   // liascape-player's status (binary found? last start error? scenes, low VRAM)
-  const [engine, setEngine] = useState<{ active?: string; available: boolean; reason: string | null;
+  const [player, setPlayer] = useState<{ available: boolean; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null } | null>(null);
-  // liascape-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
-  // no scene-load lead (it switches when the scene's first frame is in), the fps applies live
-  // (the backend has one engine and names none; `active: "legacy"` only from a probe's stubbed status)
-  const liascapeActive = engine !== null && engine.active !== "legacy";
-  // legacy-only rows wait for the engine status (they'd show, then vanish, under liascape-player)
-  const legacyActive = engine?.active === "legacy";
-
-  // the command previews read the SAVED settings back: refetch once each save has landed (store.settingsSaves). A fixed
-  // delay would race the 250 ms debounced save and read the file from before the change. Guard: probe-settings preview:monitors
-  const settingsSaves = useStore((s) => s.settingsSaves);
-  useEffect(() => {
-    let alive = true;
-    api.mpvPreview().then((x) => alive && setMpv(x));
-    api.lwePreview().then((x) => alive && setLwe(x));
-    return () => { alive = false; };
-  }, [settingsSaves]);
 
   useEffect(() => {
     if (clearArm <= 0) return;
@@ -494,19 +476,18 @@ export const Settings = memo(function Settings() {
   // read at once on mount, then again after a scene-support change (the backend may report a start failure).
   // Unreachable → not available, with the reason.
   useEffect(() => {
-    const t = setTimeout(() => api.playerEngine().then(setEngine)
-      .catch(() => setEngine({ available: false, reason: "couldn't read the engine status from the backend" })),
-      engine === null ? 0 : 600);
+    const t = setTimeout(() => api.playerStatus().then(setPlayer)
+      .catch(() => setPlayer({ available: false, reason: "couldn't read the player's status from the backend" })),
+      player === null ? 0 : 600);
     return () => clearTimeout(t);
-  }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
-  // under liascape-player: the low-VRAM status (GPU / VRAM section) follows the player while Settings is open
+  }, [g("allowScenes", false)]); // eslint-disable-line
+  // the low-VRAM status (GPU & memory section) follows the player while Settings is open
   useEffect(() => {
-    if (!liascapeActive) return;
-    const t = setInterval(() => api.playerEngine().then(setEngine).catch(() => {}), 5000);
+    const t = setInterval(() => api.playerStatus().then(setPlayer).catch(() => {}), 5000);
     return () => clearInterval(t);
-  }, [liascapeActive]);
+  }, []);
   // missing build pieces / tools (API: /health/features) → warning icons on the rows they break + the summary;
-  // re-read after a change that can move them (engine, scenes) and every 15 s while open (a player that
+  // re-read after a change that can move them (scenes) and every 15 s while open (a player that
   // started meanwhile reports its GPU interop / VRAM probe)
   const [features, setFeatures] = useState<FeatureHealth[]>([]);
   useEffect(() => {
@@ -514,7 +495,7 @@ export const Settings = memo(function Settings() {
     const read = () => api.featureHealth().then((r) => alive && setFeatures(r.features ?? [])).catch(() => {});
     const t0 = setTimeout(read, 300), t = setInterval(read, 15000);
     return () => { alive = false; clearTimeout(t0); clearInterval(t); };
-  }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
+  }, [g("allowScenes", false)]); // eslint-disable-line
   const warnings = useMemo(() => healthWarnings(features), [features]);
   // the summary: what breaks something switched on / selected now (the row icons show regardless)
   const broken = features.filter((f) => f.ok === false && f.inUse !== false);
@@ -532,17 +513,17 @@ export const Settings = memo(function Settings() {
   // a playlist is playing now → the start-mode hint says a change waits for its next start
   const playlistPlaying = useStore((s) => s.playlist.length > 1 && !!s.playingPath && s.playlist.includes(s.playingPath));
   const plStart = g<string>("globalPlaylistStart", "start_over");
-  type Mon = { name: string; fps: number; isPrimary: boolean };
+  type Mon = { name: string; fps: number };
   // Wallpaper Engine's own default FPS limit (its exe writes 15 when unset; the first-run preset is
   // "medium" = 15). Like WE's, the scene runs at this rate even above the monitor's refresh.
   const WE_DEFAULT_FPS = 15;
   const monitors = g<Mon[]>("sceneMonitors", []);
   const setMonitors = (m: Mon[]) => set("sceneMonitors", m);
   // Auto-populate the scene monitor list from detected outputs the first time scenes are enabled
-  // (empty list). First detected output = primary. Won't clobber a list the user already configured.
+  // (empty list). Won't clobber a list the user already configured.
   useEffect(() => {
     if (!g("allowScenes", false) || !detected.length || monitors.length) return;
-    setMonitors(detected.map((d) => ({ name: d.name, fps: WE_DEFAULT_FPS, isPrimary: d.primary })));
+    setMonitors(detected.map((d) => ({ name: d.name, fps: WE_DEFAULT_FPS })));
   }, [detected, g("allowScenes", false)]); // eslint-disable-line
 
   const mode = g<string>("workshopDownloadMode", "subscribe");
@@ -616,15 +597,13 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Playback" icon={<SlidersHorizontal size={15} />}>
-        {liascapeActive && <Row label="Pause behind windows" hint={ROT_HINT.cover} rk="pauseWhenCovered">
+        <Row label="Pause behind windows" hint={ROT_HINT.cover} rk="pauseWhenCovered">
           <Select value={g("pauseWhenCovered", "maximized")} onChange={(v) => set("pauseWhenCovered", v)}
-            options={[{ value: "off", label: "Off" }, { value: "fullscreen", label: "A fullscreen window" }, { value: "maximized", label: "A fullscreen or maximized window" }]} /></Row>}
+            options={[{ value: "off", label: "Off" }, { value: "fullscreen", label: "A fullscreen window" }, { value: "maximized", label: "A fullscreen or maximized window" }]} /></Row>
         <Row label="Playback speed" hint={`${g("speed", 1)}×`} rk="speed"><input type="range" min={0.1} max={4} step={0.1} value={g("speed", 1)} onChange={(e) => { set("speed", +e.target.value); previewGlobal({ speed: +e.target.value }); }} /></Row>
         <Row label="Stay paused when switching" hint="by default, a paused wallpaper unpauses when you switch with a keybind or command. This keeps it paused: the transition still plays, and the next wallpaper waits, paused, on its first frame." rk="stayPausedWhenSwitching">
           <input type="checkbox" checked={g("stayPausedWhenSwitching", false)} onChange={(e) => set("stayPausedWhenSwitching", e.target.checked)} /></Row>
         <Row label="Disable video cache" hint="reads videos straight from disk instead of buffering ahead" rk="disableCache"><input type="checkbox" checked={g("disableCache", false)} onChange={(e) => set("disableCache", e.target.checked)} /></Row>
-        <Row label="Restart legacy player every (s)" hint="the legacy player (mpvpaper) leaks memory over time, and restarting it now and then keeps that in check. 0 means never." rk="restartMpvpaperEverySeconds"><NumInput min={0} max={3600} value={g("restartMpvpaperEverySeconds", 600)} onChange={(v) => set("restartMpvpaperEverySeconds", v)} /></Row>
-        <Row label="Only restart between wallpapers" hint="waits for the next switch instead of restarting mid-video, so there's no flash. A lone video still restarts." rk="restartOnlyAtPlaylistChangeover"><input type="checkbox" checked={g("restartOnlyAtPlaylistChangeover", false)} onChange={(e) => set("restartOnlyAtPlaylistChangeover", e.target.checked)} /></Row>
       </Section>
 
       <Section title="Playlist & rotation" icon={<Repeat size={15} />}>
@@ -668,27 +647,25 @@ export const Settings = memo(function Settings() {
         <Row label="Look-back buffer (MiB)" hint="how much already-played video is kept for seeking back" rk="demuxerMaxBackMib"><NumInput min={1} max={10000} value={g("demuxerMaxBackMib", 5)} onChange={(v) => set("demuxerMaxBackMib", v)} /></Row>
       </Section>
 
-      {/* liascape-player only (the player owns the GPU budget + both VRAM rules); every row applies live
+      {/* the player owns the GPU budget and both VRAM rules; every row applies live
           (API: /settings → player.scene_throttle / scene_vram_limit_mib / scene_vram_stop_shows / vram_low_mode / scene_spare) */}
-      {liascapeActive && (
-        <Section title="GPU & memory" icon={<Gauge size={15} />} lv="standard">
-          <Row label="Ease off heavy scenes" hint="if a scene makes your GPU stutter, it runs at a lower frame rate until things calm down. Off, every scene keeps its set frame rate." rk="autoThrottleScenes">
-            <input type="checkbox" checked={g("autoThrottleScenes", true)} onChange={(e) => set("autoThrottleScenes", e.target.checked)} /></Row>
-          <Row label="When video memory runs low" hint="when a game grabs the GPU's memory. Stop frees the wallpaper's memory and shows its last frame, Pause only pauses. Both pick up again once there's room." rk="vramLowMode">
-            <Select value={g("vramLowMode", "stop")} onChange={(v) => set("vramLowMode", v)}
-              options={[{ value: "stop", label: "Stop (free memory)" }, { value: "pause", label: "Pause" }, { value: "off", label: "Off" }]} /></Row>
-          <Row label="Cap each scene's video memory" hint="stops a scene that uses more video memory than the cap. A playlist moves on. It doesn't count as a crash." rk="limitVramPerScene">
-            <input type="checkbox" checked={g("limitVramPerScene", false)} onChange={(e) => set("limitVramPerScene", e.target.checked)} /></Row>
-          {g("limitVramPerScene", false) && <Row label="Video memory cap (MiB)" hint="per scene" rk="sceneVramLimitMib">
-            <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 2048)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
-          {g("limitVramPerScene", false) && <Row label="Stopped scene shows" hint="Last frame: its picture stays, still. Nothing: the screen goes black." rk="sceneVramStopShows">
-            <Segmented<string> label="Stopped scene shows" value={g<string>("sceneVramStopShows", "last_frame")} onChange={(v) => set("sceneVramStopShows", v)}
-              options={[{ value: "last_frame", label: "Last frame" }, { value: "nothing", label: "Nothing" }]} /></Row>}
-          <Row label="Keep a scene renderer ready" hint="while you play scenes, one renderer starts ahead and waits, so the next scene appears about a tenth of a second sooner. It holds about 60 MB of memory while it waits." rk="sceneSpareWorker">
-            <input type="checkbox" checked={g("sceneSpareWorker", true)} onChange={(e) => set("sceneSpareWorker", e.target.checked)} /></Row>
-          {engine?.vram?.low_active && <Help>Video memory is low right now — the wallpaper is {engine.vram.mode === "stop" ? "stopped (its memory freed)" : "paused"} until it frees up.</Help>}
-        </Section>
-      )}
+      <Section title="GPU & memory" icon={<Gauge size={15} />} lv="standard">
+        <Row label="Ease off heavy scenes" hint="if a scene makes your GPU stutter, it runs at a lower frame rate until things calm down. Off, every scene keeps its set frame rate." rk="autoThrottleScenes">
+          <input type="checkbox" checked={g("autoThrottleScenes", true)} onChange={(e) => set("autoThrottleScenes", e.target.checked)} /></Row>
+        <Row label="When video memory runs low" hint="when a game grabs the GPU's memory. Stop frees the wallpaper's memory and shows its last frame, Pause only pauses. Both pick up again once there's room." rk="vramLowMode">
+          <Select value={g("vramLowMode", "stop")} onChange={(v) => set("vramLowMode", v)}
+            options={[{ value: "stop", label: "Stop (free memory)" }, { value: "pause", label: "Pause" }, { value: "off", label: "Off" }]} /></Row>
+        <Row label="Cap each scene's video memory" hint="stops a scene that uses more video memory than the cap. A playlist moves on. It doesn't count as a crash." rk="limitVramPerScene">
+          <input type="checkbox" checked={g("limitVramPerScene", false)} onChange={(e) => set("limitVramPerScene", e.target.checked)} /></Row>
+        {g("limitVramPerScene", false) && <Row label="Video memory cap (MiB)" hint="per scene" rk="sceneVramLimitMib">
+          <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 2048)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
+        {g("limitVramPerScene", false) && <Row label="Stopped scene shows" hint="Last frame: its picture stays, still. Nothing: the screen goes black." rk="sceneVramStopShows">
+          <Segmented<string> label="Stopped scene shows" value={g<string>("sceneVramStopShows", "last_frame")} onChange={(v) => set("sceneVramStopShows", v)}
+            options={[{ value: "last_frame", label: "Last frame" }, { value: "nothing", label: "Nothing" }]} /></Row>}
+        <Row label="Keep a scene renderer ready" hint="while you play scenes, one renderer starts ahead and waits, so the next scene appears about a tenth of a second sooner. It holds about 60 MB of memory while it waits." rk="sceneSpareWorker">
+          <input type="checkbox" checked={g("sceneSpareWorker", true)} onChange={(e) => set("sceneSpareWorker", e.target.checked)} /></Row>
+        {player?.vram?.low_active && <Help>Video memory is low right now — the wallpaper is {player.vram.mode === "stop" ? "stopped (its memory freed)" : "paused"} until it frees up.</Help>}
+      </Section>
 
       <CardPreview scrollRef={scrollRef} rowsRef={cardRowsRef}>
       <Section title="Look & feel" icon={<Palette size={15} />}>
@@ -728,9 +705,8 @@ export const Settings = memo(function Settings() {
         <Row label="Import new Workshop wallpapers" hint="anything new in the Workshop folder lands in your library by itself" rk="autoAddWeWallpapersToLibrary"><input type="checkbox" checked={g("autoAddWeWallpapersToLibrary", true)} onChange={(e) => set("autoAddWeWallpapersToLibrary", e.target.checked)} /></Row>
         <Row label="Copy files instead of linking" hint="copies Workshop files into the library instead of linking to them (uses more disk)" rk="copyFilesInsteadOfSymlinking"><input type="checkbox" checked={g("copyFilesInsteadOfSymlinking", false)} onChange={(e) => set("copyFilesInsteadOfSymlinking", e.target.checked)} /></Row>
         <Row label="Replace direct downloads with Workshop copies" hint="when a wallpaper you downloaded directly shows up in the Workshop folder, it switches to that one and frees the duplicate's disk space" rk="replaceDirectWithWorkshop"><input type="checkbox" checked={g("replaceDirectWithWorkshop", false)} onChange={(e) => set("replaceDirectWithWorkshop", e.target.checked)} /></Row>
-        {!liascapeActive && <Row label="Scene transition delay (ms)" rk="sceneTransitionDelayMs"><NumInput min={0} max={5000} value={g("sceneTransitionDelayMs", 1000)} onChange={(v) => set("sceneTransitionDelayMs", v)} /></Row>}
-        {liascapeActive && g("allowScenes", false) && engine?.scenes && !engine.scenes.available && engine.scenes.reason &&
-          <Help>Scenes can't play right now: {engine.scenes.reason}</Help>}
+        {g("allowScenes", false) && player?.scenes && !player.scenes.available && player.scenes.reason &&
+          <Help>Scenes can't play right now: {player.scenes.reason}</Help>}
       </Section>
 
       <WatchedFolders />
@@ -748,10 +724,6 @@ export const Settings = memo(function Settings() {
                   onChange={(e) => setMonitors(monitors.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                 <NumInput min={1} max={480} value={m.fps}
                   onChange={(v) => setMonitors(monitors.map((x, j) => j === i ? { ...x, fps: v } : x))} /><span>fps</span>
-                {/* primary is one-of-N (exactly one monitor) → radio, like the Workshop download mode section;
-                    legacy only (LWE's audio-owning instance) — liascape-player runs one worker for every output */}
-                {!liascapeActive && <label className="inline"><input type="radio" name="lwe-primary" checked={m.isPrimary}
-                  onChange={() => setMonitors(monitors.map((x, j) => ({ ...x, isPrimary: j === i })))} /> primary</label>}
                 <button className="mini ico" aria-label="Remove monitor" onClick={() => setMonitors(monitors.filter((_, j) => j !== i))}><X size={14} /></button>
               </div>
             </Row>
@@ -759,7 +731,7 @@ export const Settings = memo(function Settings() {
           <button className="btn ghost" onClick={() => {
             const used = new Set(monitors.map((m) => m.name));
             const next = detected.find((d) => !used.has(d.name));
-            setMonitors([...monitors, { name: next?.name ?? `DP-${monitors.length + 1}`, fps: WE_DEFAULT_FPS, isPrimary: monitors.length === 0 }]);
+            setMonitors([...monitors, { name: next?.name ?? `DP-${monitors.length + 1}`, fps: WE_DEFAULT_FPS }]);
           }}>+ Add monitor</button>
         </Section>
       )}
@@ -802,26 +774,12 @@ export const Settings = memo(function Settings() {
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
             options={[{ value: "reveal", label: "Reveal" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />
         </Row>
-        {/* only the legacy transition helper reads it (TransitionService --lag-offset); hidden, the value stays saved.
-            Guard: probe-settings nudge:engine */}
-        {legacyActive && g<string>("transitionMethod", "reveal") === "full-live" && <Row label="Full-live sync nudge" hint="Legacy player, Full-live only. Shifts the outgoing video this many ms against the live one to cancel drift (negative is ahead). A slight rewind means raise it toward 0, a slight skip ahead means lower it. About −30 is typical." rk="fullLiveSyncOffsetMs">
-          <NumInput min={-200} max={200} step={5} value={g("fullLiveSyncOffsetMs", -30)} onChange={(v) => set("fullLiveSyncOffsetMs", v)} /><span>ms</span>
-        </Row>}
         <Row label="Volume keys change" hint="what the volume keybinds change. Auto: the playing wallpaper's own volume if it differs, else the global one. This wallpaper: always that wallpaper's. Global: always the global one." rk="volumeKeyTarget">
           <Select value={g("volumeKeyTarget", "auto")} onChange={(v) => set("volumeKeyTarget", v)}
             options={[{ value: "auto", label: "Auto" }, { value: "item", label: "This wallpaper" }, { value: "global", label: "Global" }]} />
         </Row>
         <Row label="Debug mode" hint="turns on the liascapeDbg bridge and performance metrics" rk="debugMode"><input type="checkbox" checked={g("debugMode", false)} onChange={(e) => set("debugMode", e.target.checked)} /></Row>
         {g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics readout" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
-      </Section>
-
-      <Section title="mpv command" icon={<Terminal size={15} />} lv="expert" bare>
-        <div className="cmd-block"><pre className="mpv">{mpv || "…"}</pre><CopyButton text={mpv} what="mpv command" /></div>
-      </Section>
-
-      <Section title="linux-wallpaperengine command" icon={<Terminal size={15} />} lv="expert" bare>
-        <Help>The scene command, one line per monitor; each scene's Workshop ID goes on the end.</Help>
-        <div className="cmd-block"><pre className="mpv">{lwe || "…"}</pre><CopyButton text={lwe} what="linux-wallpaperengine command" /></div>
       </Section>
 
       <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />}>

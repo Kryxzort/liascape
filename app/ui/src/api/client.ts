@@ -282,7 +282,7 @@ export interface SceneProp {
   min: number | null; max: number | null; step: number | null; fraction: boolean; precision: number | null;
   options: { label: string; value: string }[] | null;
 }
-export interface ScenePropsResp { path: string; engine: string; live: boolean; note: string | null; props: SceneProp[] }
+export interface ScenePropsResp { path: string; live: boolean; note: string | null; props: SceneProp[] }
 export interface CustomPlaylist { videoPaths: string[]; settings: PlaylistSettings; name: string | null; }
 export interface Theme {
   name: string; bgBase: string; bgMantle: string; bgCrust: string;
@@ -299,15 +299,13 @@ export const api = {
   settings: () => jget<Record<string, unknown>>("/settings"),
   monitors: () => jget<{ name: string; refreshHz: number; primary: boolean }[]>("/monitors"),
   saveSettings: (s: Record<string, unknown>) => jpost("/settings", s),
-  mpvPreview: () => fetch(`${API}/mpv-preview`, { headers: authHeaders() }).then((r) => r.text()),
   // API: /player-engine — whether liascape-player can run (+ why not), its scene and low-VRAM status
-  playerEngine: () => jget<{ available: boolean; binary: string | null; reason: string | null;
+  playerStatus: () => jget<{ available: boolean; binary: string | null; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null }>("/player-engine"),
   // API: /health/features — features a missing build piece / tool breaks here (FeatureHealth.cs); `affects` = the
   // settings keys whose rows get a warning icon. ok null = not known yet.
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
-  lwePreview: () => fetch(`${API}/lwe-preview`, { headers: authHeaders() }).then((r) => r.text()),
   // API: a folder's (or dropped files') wallpapers listed before anything lands (Web/FolderImportOps.cs Scan), then the ticked
   // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked, which a watch never
   // imports and a preset never brings as its base; `roots`: the folders scanned, where a ticked preset's base is looked for)
@@ -357,7 +355,7 @@ export const api = {
   // WorkshopDownloader.AcquireOneOffAsync)
   download: (source: number, result: Wallpaper, apply: boolean, signal?: AbortSignal, oneOff = false) =>
     // `skipped`: the user skipped / stopped it in the Steam to-do — not a failure. `notApplied`: downloaded, but a preset
-    // that still can't play (its base scene didn't come, the legacy engine): the reason, nothing applied
+    // that still can't play (its base scene didn't come): the reason, nothing applied
     jpost<LibraryItem & { error?: string; skipped?: boolean; message?: string; notApplied?: string }>("/download", { source, result, apply, oneOff }, signal),
   transitions: () => jget<TransitionEffect[]>("/transitions"),
   // cache-bust frag/vert: the GLSL is regenerated during dev, and a stale Electron HTTP-cache

@@ -38,7 +38,6 @@ app.whenReady().then(async () => {
   const settings = await win.webContents.executeJavaScript(`(() => ({
     sections: document.querySelectorAll('.ssection').length,
     rows: document.querySelectorAll('.srow').length,
-    mpvLen: (document.querySelector('.mpv')?.textContent || '').length,
     keybinds: document.querySelectorAll('.kb').length,
     steamSignedIn: [...document.querySelectorAll('.shint')].some(e => /Signed in as/.test(e.textContent||'')),
   }))()`).catch((e) => ({ error: String(e) }));
