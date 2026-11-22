@@ -54,6 +54,9 @@ DLL=$T/backend/liascape-backend.dll
 trap 'exit 130' INT TERM HUP
 unset LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT LIASCAPE_PLAYER_SOCKET
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_SECRETS=file
+# the player: an `exit 1` stub, so no real liascape-player ever starts here
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
 bad() { echo "FAIL  $1"; FAIL=$((FAIL + 1)); }
@@ -66,7 +69,7 @@ export PATH=$T/bin:$PATH
 "$CC" -shared -fPIC -O1 -o "$T/steamclient.so" "$ROOT/scripts/test-fixtures/fake_steamclient.c" || { echo "the fake steamclient.so didn't build"; exit 2; }
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -t 1 -c:v libx264 -pix_fmt yuv420p "$T/clip.mp4"
 echo '{}' > "$T/cm.json"
-printf '{"PlayerEngine":"legacy","WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
+printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
 LINGER=2500 BEAT=4000
 (cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_LINGER_MS=$LINGER LIASCAPE_STEAM_APP_HEARTBEAT_MS=$BEAT LIASCAPE_WORKSHOP_POLL_MS=300 \

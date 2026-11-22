@@ -63,6 +63,9 @@ H=$T/home
 mkdir -p "$H/.config/liascape" "$H/.cache" "$H/.local/share" "$H/rt" "$H/st"
 export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME=$H/.local/share XDG_RUNTIME_DIR=$H/rt XDG_STATE_HOME=$H/st
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# the player: an `exit 1` stub, so no real liascape-player ever starts here
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 export LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
@@ -143,7 +146,7 @@ ln -s data/a.bin "$LIB/imported/isz/a-link.bin"
 IDX=$(jq -c '.isz = {title: "isz"}' <<< "$IDX")
 printf '%s' "$IDX" > "$LIB/imported/index.json"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"legacy","WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
+{"WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
 EOF
 
 LOG=""

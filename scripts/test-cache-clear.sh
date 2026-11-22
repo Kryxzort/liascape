@@ -11,7 +11,8 @@
 #  logs:   the logs category empties a current `*.log` in place (a writer appending to it carries on at the new end) and
 #          deletes a rotated `*.log.<n>`; nothing else in the cache root is touched
 #  link:   a category folder that is itself a symlink is never followed: size 0, nothing deleted behind it
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
+# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# `exit 1` stub (nothing plays).
 # Never touches ~/.cache/liascape, ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-cache-clear.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -54,6 +55,9 @@ H=$T/home
 mkdir -p "$H/.config/liascape" "$H/.cache" "$H/xdg-cache" "$H/.local/share" "$H/rt" "$H/st"
 export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/xdg-cache XDG_DATA_HOME=$H/.local/share XDG_RUNTIME_DIR=$H/rt XDG_STATE_HOME=$H/st
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# the player: an `exit 1` stub, so no real liascape-player ever starts here
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
 bad() { echo "FAIL  $1"; FAIL=$((FAIL + 1)); }
@@ -87,7 +91,7 @@ for f in "$BC/liascape-player-serve.log" "$BC/freeze.log" "$BC/history-backup/h.
 mk "$BC/freeze.log.1" 3333; KEEP+=("$BC/freeze.log.1")   # a rotated log: kept until the logs category is cleared
 KEEP+=("$OUT/target.bin")
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"legacy","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}
+{"AutoAddWeWallpapersToLibrary":false,"NoAudio":true}
 EOF
 KEEP+=("$XDG_CONFIG_HOME/liascape/settings.json")
 sums() { for f in "${KEEP[@]}"; do if [ -L "$f" ]; then printf 'L %s %s\n' "$f" "$(readlink "$f")"; else sha256sum "$f" 2>/dev/null || echo "MISSING $f"; fi; done; }

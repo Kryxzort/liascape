@@ -10,7 +10,9 @@ paths:
 
 # Legacy engine (`PlayerEngine=legacy`: mpvpaper + `liascape-transition` + LWE + `liascape-audio`)
 
-Everything here applies only when `PlayerEngine.IsLiascapePlayer` is false; the liascape-player branch at the top of
+Unreachable: `PlayerEngine.IsLiascapePlayer` is always true (`docs/decisions.md` Â§ "Make liascape-player the only
+engine, no fallback"); this file goes with the legacy code. Everything here applied only when it was false; the
+liascape-player branch at the top of
 each `PlayerHelper` primitive is `.claude/rules/backend/player-adapter.md`. Rotation semantics (minimum / maximum /
 scene timing) live there too. Why behind the choices here: `docs/decisions.md` Â§ Legacy engine.
 
@@ -22,7 +24,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` Â
 - Pre-shuffle playlists in `ApplyPlaylist`; never use mpv's `--shuffle`, `--playlist=file` or `--loop-playlist` â€” the timed machinery owns rotation.
 - A videoâ†’video IPC switch carries the effective volume/speed/mute as `loadfile` per-file options, `mute=yes|no` explicitly both ways (file-local options restore the pre-file value at the next load).
 - Read `_isMuted` fresh inside the task; never capture it into a local before `Task.Run`.
-- A cold `Launch` re-announces `wallpaper-changed` with mpv's own `path` once its IPC first answers, only while `_shownGen` is unchanged (`AnnounceWhenIpcAnswers`): a page loaded during the launch can't stay on "nothing playing", and a superseded or stopped launch never announces. Guard: `scripts/test-legacy-launch.sh`.
+- A cold `Launch` re-announces `wallpaper-changed` with mpv's own `path` once its IPC first answers, only while `_shownGen` is unchanged (`AnnounceWhenIpcAnswers`): a page loaded during the launch can't stay on "nothing playing", and a superseded or stopped launch never announces.
 
 ## Timed playlist (legacy only)
 - At most one process owns the timer: `timer.pid` (daemon) / `gui_timer.pid` (GUI). A stopping backend `ReleaseTimer()`s FIRST, deletes only its OWN pid, then hands off to `timer-daemon`.
@@ -35,7 +37,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` Â
 - `RandomAndLaunch` re-seats both cursors (`_timedIndex` = the pick, forward history dropped). Guard: matrix `seq:random+next` / `seq:random+prev`.
 - `UpdateTimedSettings` keeps the elapsed time proportionally; it never restarts the current wallpaper.
 - A superseded aligned switch re-arms for A's end (backoff), it never switches now.
-- A timed session starts at its first item that isn't a preset (`ApplyTimedPlaylist`: Play, play-from, shuffle and every replay), and a resumed one moves past a preset (`RestoreTimedPlaylist`): LWE on a preset's folder dies behind a screen the old wallpaper left, with no crash advance. Guard: `scripts/test-legacy-launch.sh` Â§ presets.
+- A timed session starts at its first item that isn't a preset (`ApplyTimedPlaylist`: Play, play-from, shuffle and every replay), and a resumed one moves past a preset (`RestoreTimedPlaylist`): LWE on a preset's folder dies behind a screen the old wallpaper left, with no crash advance.
 
 ## Restart daemon (mpvpaper frame-buffer leak)
 - Why it exists: mpvpaper leaks ~1.3 MB/s, so `RestartMpvpaperEverySeconds` (default 600, 0 = off) relaunches it;
@@ -49,7 +51,7 @@ scene timing) live there too. Why behind the choices here: `docs/decisions.md` Â
 - Classify a stream (ours / LWE / mpv / foreign) before counting its level; remember our ids until their `remove`.
 - Reset `_aboveThresholdCount` at the top of `WatchStreamsAsync`, not in `Stop()`.
 - `monitor-daemon` (app closed) is legacy only; under liascape-player the player's Signal mutes.
-- `AudioMonitor.SpawnDetachedMonitor` is a no-op while `AudioMonitor.RunsHere` (a forwarded `play` inside `serve` never adds a second monitor). Guard: `scripts/test-legacy-launch.sh`.
+- `AudioMonitor.SpawnDetachedMonitor` is a no-op while `AudioMonitor.RunsHere` (a forwarded `play` inside `serve` never adds a second monitor).
 
 ## Transitions (`TransitionService` + `src/native/liascape-transition`)
 - `SwitchToFile` is the one switch chokepoint; the transition hook lives there.

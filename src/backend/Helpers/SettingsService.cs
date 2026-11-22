@@ -53,7 +53,7 @@ public static class SettingsService
 
     // POST /settings has PATCH semantics. Bound as the whole AppSettings, a partial body
     // ({"Volume": 50} from an agent) would reset every field it left out to its C# default —
-    // SceneMonitors and PlayerEngine among them (→ a live engine switch). The API's own binding options
+    // SceneMonitors and the rotation among them. The API's own binding options
     // (web defaults: camelCase or PascalCase keys, numbers in strings) bind each key it does have.
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private static readonly Dictionary<string, PropertyInfo> Fields = typeof(AppSettings)

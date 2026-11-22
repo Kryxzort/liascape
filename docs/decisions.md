@@ -326,17 +326,17 @@ Shelling `pactl` per stream (10–40 ms) can't beat PulseAudio's default volume 
 re-creation: audible flashes. `liascape-audio` applies the volume in-process on every sink-input event, matching
 streams by process id. `.claude/rules/backend/legacy-engine.md` § Transitions.
 
-### Correct LWE's restored stream volume reactively — 2026-06-25
-PulseAudio's stream-restore remembers LWE's single app volume, so a fade value poisons the next fresh scene launch. LWE
-forces its `application.name` and PipeWire ignores `module-stream-restore.id`, so the key can't change:
-`PlayerHelper.CorrectSceneVolume` holds the new scene at target for ~3 s.
-
 ### Keep both sides playing through a legacy transition — 2026-06-25
 The renderer decodes A and B with libmpv (full-live), so V→V effects show live video rather than two frozen stills;
 stills are the warmup fallback and the source for a scene side — LWE's `--screenshot` dump, with grim only as a
 fallback because grim captures open windows. `src/native/liascape-transition`.
 
 ## Player (`liascape-player`)
+
+### Make liascape-player the only engine, no fallback — 2026-11-22
+Owner: "even with issues, it's better than the previous engine". A missing player binary is an error with its reason
+(`/apply`, `/player-engine`, the health summary) and plays once it appears, never a fall back to legacy; a regression
+is a bug to fix, not a reason to bring legacy back. Guard: `scripts/test-player-binary.sh`.
 
 ### Keep the pointer's arrival jump, not WE's first-frame corner stroke — 2026-11-20
 WE starts the last pointer at 0 0, so its first frame strokes cursor effects from the top-left corner; ours jumps.

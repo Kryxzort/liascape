@@ -40,7 +40,7 @@ public static class AudioMonitor
         }
         // A `serve` backend with AutoMute on runs the monitor in this process: a daemon beside it would be a second monitor
         // on the same streams (a forwarded `play` reaches Restore here). `serve` closing stops its own first (Shutdown),
-        // then hands over. Guard: scripts/test-legacy-launch.sh § monitor
+        // then hands over.
         if (RunsHere) return;
         KillDetachedMonitor();
         try

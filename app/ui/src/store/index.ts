@@ -25,7 +25,7 @@ const wireList = (s: { wsList: WsList; wsListSort: WsListSort; isWorkshop(): boo
 // Workshop presets can be listed and played: scene support on and the Liascape player (the backend's
 // SteamWorkshopService.AllowPresets; presets are liascape-player only). Browse offers its Preset option and a scene's Presets
 // row only then. Guard: probe-filters filter:preset:offered, probe-steam ws:presetsHidden
-export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine === "liascape-player";
+export const presetsOn = (settings: Record<string, unknown> | null) => !!settings?.allowScenes && settings?.playerEngine !== "legacy";
 export const PRESET_TAG = "Preset";
 // the favourites can be read only for a signed-in account Steam hasn't rejected: otherwise the row is dimmed, a saved ✓ / ✕
 // stays (it comes back with the sign-in) but means nothing, and it can only be cleared
@@ -47,14 +47,14 @@ export const PRESET_LEGACY = "Presets play only in the Liascape player";
 // (the page's settings say so at once; the library's re-read after the switch says it too: libraryFollowsEngine).
 // Guard: probe-sidebar lib:preset:legacy
 export const presetReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason">, settings: Record<string, unknown> | null) =>
-  i.presetReason ?? (i.isPreset && settings && settings.playerEngine !== "liascape-player" ? PRESET_LEGACY : null);
+  i.presetReason ?? (i.isPreset && settings && settings.playerEngine === "legacy" ? PRESET_LEGACY : null);
 // Why a library item can't play now, or null: a preset's own reason (presetReasonOf), else, for a scene or a preset under
 // liascape-player, why it can't play a scene here (the store's scenesBlocked: the scene renderer is missing — GET /current,
 // WS scenes-blocked; the legacy engine plays scenes without it, and a switch back shows it again). The card greys with
 // it, the sidebar says it, a click plays nothing. Guard: probe-sidebar lib:scenesBlocked
 export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene">, settings: Record<string, unknown> | null,
   scenesBlocked: string | null) => presetReasonOf(i, settings)
-  ?? ((i.isScene || i.isPreset) && scenesBlocked && settings?.playerEngine === "liascape-player" ? scenesBlocked : null);
+  ?? ((i.isScene || i.isPreset) && scenesBlocked && settings?.playerEngine !== "legacy" ? scenesBlocked : null);
 // the status bar's "Can't play X: it needs its base scene" (a reason starts with a capital: it is also the card's tooltip)
 export const cantPlay = (title: string, why: string) =>
   `Can't play ${title}: ${/^Needs /.test(why) ? "it n" + why.slice(1) : why[0].toLowerCase() + why.slice(1)}`;
@@ -303,7 +303,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   globalSeparateSceneTiming: true, globalSwitchScenesAfterSeconds: 1800,
   globalTransitionEnabled: false, globalTransitionEffectIds: [], globalTransitionDurationMs: 600, globalTransitionDurationMaxMs: 0, globalTransitionShuffle: true, transitionMethod: "reveal", fullLiveSyncOffsetMs: -30,
   autoMute: false, autoMuteOnlyIfMprisActive: false, autoMuteDelayMs: 500, autoUnmuteDelayMs: 2000, autoMuteMinLevelDb: -70,
-  hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5, playerEngine: "legacy",
+  hwDec: "auto", videoScale: "fill", demuxerMaxMib: 20, demuxerMaxBackMib: 5,
   autoThrottleScenes: true, sceneSpareWorker: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", gifPreviewsAsVideo: false, glows: true, textShadow: false, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneTransitionDelayMs: 1000, sceneMonitors: [],

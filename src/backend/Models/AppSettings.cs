@@ -174,10 +174,6 @@ public class AppSettings
     // cover, to cancel the per-machine settling drift (negative = aim slightly ahead). The renderer
     // takes it in seconds via --lag-offset; ~-30ms suits this dev box, may differ per GPU/refresh.
     public int FullLiveSyncOffsetMs { get; set; } = -30;
-    // Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE) or "liascape-player" (the
-    // Rust player). Switching applies
-    // live (/settings → PlayerHelper.SwitchEngineLive). See .claude/rules/backend/player-adapter.md.
-    public string PlayerEngine { get; set; } = "legacy";
     // What the volume keybinds (`liascape volume up|down`, `/volume {delta}`) move — Advanced setting:
     // "auto" = the playing wallpaper's own volume when it has one, else the global; "item" = always the
     // playing wallpaper's own (creating its override); "global" = always the global (a wallpaper with its own

@@ -1,57 +1,31 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using Liascape.Helpers;
 using Liascape.Models;
 
 namespace Liascape.Player;
 
-// Which player drives the wallpaper: "legacy" (mpvpaper + liascape-transition + LWE, the default) or
-// "liascape-player" (the Rust player: videos/images, and scenes when its scene worker + WE's
-// assets resolve). PlayerHelper dispatches
-// at its media primitives on IsLiascapePlayer; every legacy branch is untouched when it's false.
+// The wallpaper engine: liascape-player, the Rust player (videos, images, and scenes when its scene worker + WE's assets
+// resolve), the only one. A missing binary is an error with its reason, never a fallback: docs/decisions.md
+// § "Make liascape-player the only engine, no fallback".
 public static class PlayerEngine
 {
-    public const string Legacy = "legacy";
-    public const string LiascapePlayer = "liascape-player";
+    // Always true: the dead legacy branches behind it go with the legacy code. A property, not a const, so those
+    // branches don't warn as unreachable meanwhile.
+    public static bool IsLiascapePlayer => true;
 
-    // -1 = not loaded yet, 0 = legacy, 1 = liascape-player. Cached (hot path: every IPC primitive asks), loaded
-    // lazily from settings.json and refreshed by /settings (Refresh) — daemons/CLI processes load fresh.
-    private static volatile int _isPlayer = -1;
     private static string? _bin;
     private static bool _binResolved;
     private static readonly object _lock = new();
 
-    public static bool IsLiascapePlayer
-    {
-        get
-        {
-            int v = _isPlayer;
-            if (v < 0) { Refresh(SettingsService.Load()); v = _isPlayer; }
-            return v == 1;
-        }
-    }
-
-    public static bool Wants(AppSettings s) =>
-        string.Equals(s.PlayerEngine?.Trim(), LiascapePlayer, StringComparison.OrdinalIgnoreCase);
-
-    // What IsLiascapePlayer would be for these settings: the setting asks for liascape-player AND the binary exists.
-    // A missing binary never crashes — the engine reports unavailable and legacy keeps working.
-    public static bool WouldBeLiascapePlayer(AppSettings s) => Wants(s) && ResolveBinary() != null;
-
-    public static void Refresh(AppSettings s)
-    {
-        lock (_lock) { _binResolved = false; } // re-resolve: a build/install since the last check counts
-        bool onPlayer = WouldBeLiascapePlayer(s);
-        if (Wants(s) && !onPlayer)
-            LiascapePlayerClient.Log($"PlayerEngine=liascape-player but {UnavailableReason} → using the legacy engine");
-        _isPlayer = onPlayer ? 1 : 0;
-    }
-
     public static string UnavailableReason =>
         "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape-backend, <prefix>/libexec/liascape, <prefix>/lib/liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
+
+    // Why nothing can play here: no player binary resolves (a cached miss is looked for again, so one that appeared
+    // since counts), else null. A switch refuses with it rather than queue one that can't start.
+    // Guard: scripts/test-player-binary.sh § missing, § appears later
+    public static string? MissingReason() => (ResolveBinary() ?? ResolveBinary(fresh: true)) == null ? UnavailableReason : null;
 
     // Can a scene item play right now? Scene support on, and the engine that runs can play one: liascape-player
     // when the player has the `scene` capability — its liascape-scene-worker AND WE's assets dir
@@ -112,7 +86,7 @@ public static class PlayerEngine
 
     // env LIASCAPE_PLAYER_BIN → next to the running liascape-backend / libexec/liascape/ / lib/liascape/ → the repo dev tree
     // src/player/target/{release,debug}/liascape-player → PATH (release first: debug is opt-level 0 and the
-    // player mixes audio itself). Cached until the next Refresh, or `fresh` (the upgrade check).
+    // player mixes audio itself). Cached; `fresh` resolves again (the upgrade check, a status read, a start that found none).
     public static string? ResolveBinary(bool fresh = false)
     {
         lock (_lock)
@@ -161,48 +135,20 @@ public static class PlayerEngine
         return null;
     }
 
-    // The setting asks for liascape-player but its binary wasn't there when that was decided (serve started mid-rebuild,
-    // a boot before the store path existed): legacy runs meanwhile. Once the binary
-    // resolves (every GET /player-engine re-resolves it; Settings asks every 15 s), switch by itself, the same way a
-    // selection does (PlayerHelper.SwitchEngineLive: the session replays on liascape-player). One switch at a time.
-    // Guard: scripts/test-engine-heal.sh
-    private static int _healing;
-    private static bool HealIfFound(AppSettings s, string? bin)
-    {
-        if (bin == null || !Wants(s) || IsLiascapePlayer) return false;
-        if (Interlocked.Exchange(ref _healing, 1) == 0)
-            Task.Run(() =>
-            {
-                try
-                {
-                    LiascapePlayerClient.Log("PlayerEngine=liascape-player and it is available, legacy runs → switching");
-                    PlayerHelper.SwitchEngineLive(SettingsService.Load(), SettingsService.Load());
-                }
-                catch (Exception e) { LiascapePlayerClient.Log($"switching to liascape-player failed: {e.Message}"); }
-                finally { Interlocked.Exchange(ref _healing, 0); }
-            });
-        return true;
-    }
-
-    // GET /player-engine: what the setting asks for, what runs, whether liascape-player can run (+ why not).
+    // GET /player-engine: whether liascape-player can run (+ why not), what runs, scene and VRAM status. Resolves the
+    // binary afresh: one that appeared since (a rebuild, a store path after boot) shows here, and the next switch starts it.
     public static object Status()
     {
         var s = SettingsService.Load();
-        lock (_lock) { _binResolved = false; }
-        var bin = ResolveBinary();
-        bool healing = HealIfFound(s, bin);
+        var bin = ResolveBinary(fresh: true);
         return new
         {
-            engine = Wants(s) ? LiascapePlayer : Legacy,
-            active = IsLiascapePlayer ? LiascapePlayer : Legacy,
             available = bin != null,
             binary = bin,
             running = LiascapePlayerClient.Shared.RunningInfo(),
             scenes = SceneStatus(s),
             vram = VramStatus(s),
-            reason = bin == null ? UnavailableReason
-                : healing ? "switching to liascape-player…"
-                : LiascapePlayerClient.Shared.LastError,
+            reason = bin == null ? UnavailableReason : LiascapePlayerClient.Shared.LastError,
         };
     }
 }

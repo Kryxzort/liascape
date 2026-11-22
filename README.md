@@ -14,8 +14,7 @@ animated transition between them. Once you close the window, the wallpaper keeps
 ![Liascape](docs/app.png)
 
 **Status: pre-release.** Video, GIF and picture wallpapers, the library, playlists, transitions and all the
-wallpaper sources work every day. The new built-in player (`liascape-player`) and Wallpaper Engine scenes on it are
-experimental. There are no packages yet: you install from source or with Nix. Settings and file formats may still
+wallpaper sources work every day. Wallpaper Engine scenes are experimental. There are no packages yet: you install from source or with Nix. Settings and file formats may still
 change between versions.
 
 ## What it does
@@ -24,8 +23,8 @@ change between versions.
 Workshop. You can browse the Workshop without signing in: filter by tags and age rating, sort the way Steam does, read
 comments, and see a creator's other wallpapers. Your local Wallpaper Engine folder shows up as a source too.
 Wallpaper Engine's web and application wallpapers don't play, so Browse leaves them out. Presets (someone's saved
-settings for a scene) play over their scene in liascape-player: tick Preset in the Workshop's Type filter, or open a
-scene's Presets from its sidebar. Getting a preset gets its scene too.
+settings for a scene) play over their scene: tick Preset in the Workshop's Type filter, or open a scene's Presets from
+its sidebar. Getting a preset gets its scene too.
 
 **Keeps a library.** Downloads land in your library, and so does anything new in your Wallpaper Engine Workshop folder
 (you can turn that off). Import a folder of your own videos, GIFs and pictures, or a backed-up Workshop folder, with the
@@ -45,20 +44,9 @@ too.
 another app plays sound, and can be limited to media players such as Spotify or a browser. Both start off; turn them
 on in Settings → Sound and Settings → Auto-mute.
 
-**Stays out of the way.** With `liascape-player`, the wallpaper pauses while a maximized or fullscreen window covers
-it, eases off a scene that makes your GPU stutter, and can stop scenes that use too much video memory. If a scene
-crashes, only that scene is affected: it restarts, and after three crashes in a minute it shows a still picture.
-
-## Two players
-
-Liascape has two ways to draw the wallpaper. You choose in Settings → Under the hood → Player engine (set the
-settings level at the top to Advanced to see it). It switches live.
-
-- **Legacy** is the default today. It plays videos with [mpvpaper](https://github.com/GhostNaN/mpvpaper) and scenes
-  with [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine), which you install yourself.
-- **liascape-player** is the new all-in-one player, built with Liascape. It plays videos, pictures and scenes itself
-  (scenes need no separate program) and adds pausing behind windows, the GPU and video memory settings, and Windows
-  fonts in scenes. It's marked experimental and will replace the legacy player.
+**Stays out of the way.** The wallpaper pauses while a maximized or fullscreen window covers it, eases off a scene
+that makes your GPU stutter, and can stop scenes that use too much video memory. If a scene crashes, only that scene
+is affected: it restarts, and after three crashes in a minute it shows a still picture.
 
 ## What you need
 
@@ -141,9 +129,6 @@ If your distro has no .NET 10 package, Microsoft's `dotnet-install.sh` installs 
 <summary>Programs Liascape uses at run time</summary>
 
 - `ffmpeg` (with `ffprobe`): thumbnails, imports, video previews, video lengths and loudness measuring.
-- Legacy player only: `mpvpaper` and `mpv` for videos, `linux-wallpaperengine` for scenes, `pactl` and `parec`
-  (from `libpulse` or `pipewire-pulse`) for auto-mute, and `playerctl` for "Only mute for media players".
-  `liascape-player` needs none of these.
 - Optional: `secret-tool` (libsecret) keeps your Steam sign-in in the system keyring. Without it, the sign-in is kept
   in `~/.config/liascape/steam-auth.json`, readable only by you.
 

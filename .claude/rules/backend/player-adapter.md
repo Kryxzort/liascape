@@ -7,8 +7,8 @@ paths:
 
 # liascape-player adapter (C# side) and rotation
 
-`src/backend/Player/` drives the Rust player (`.claude/rules/player/core.md`) when `AppSettings.PlayerEngine` is
-`liascape-player`; `PlayerHelper` dispatches to it with `if (PlayerEngine.IsLiascapePlayer) { … }` at the top of each
+`src/backend/Player/` drives the Rust player (`.claude/rules/player/core.md`), the only engine
+(`PlayerEngine.IsLiascapePlayer` is always true); `PlayerHelper` dispatches to it with `if (PlayerEngine.IsLiascapePlayer) { … }` at the top of each
 primitive, the legacy code below it unchanged (`.claude/rules/backend/legacy-engine.md`). How the adapter works (client,
 queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 
@@ -18,7 +18,7 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 - A per-item pass gets a batch key, not a key per item: 315 distinct `override:<path>` keys filled the 256 cap and dropped the playing item's pass. Guard: self-test "per-item override burst".
 - Queued commands call with `QuickMs`; only `Switch`'s own `transition`/`cancel` keeps the 2 s default.
 - The stall breaker opens for 3 s after a timeout. A STARTING player is not stalled: until it answered once, a request waits up to `StartGraceMs` (5 s after the socket's bind). Guard: self-test `StartupGraceAssertions`.
-- `SwitchEngineLive` talks to the player only after releasing `_lock`; `StopAndQuit` runs synchronously before the new engine starts, so both engines are never on screen.
+- A legacy wallpaper this session left running (mpvpaper, LWE, matched by name and this HOME, never another session's) is reaped at `serve` start and `restore` (`PlayerHelper.ReapAllWallpaperProcs`); `serve` then replays the session on the player (`Restore`). Guard: `scripts/test-player-binary.sh` § a legacy settings file.
 
 ## Process lifecycle
 - Only a switch spawns the player (`EnsureRunning`); queries and sets never do. It runs detached (`setsid`), stdio to `~/.cache/liascape/liascape-player-serve.log` — the player outlives the backend on purpose.

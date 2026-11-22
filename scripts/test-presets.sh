@@ -5,7 +5,7 @@
 #     linked to its base scene by Workshop id whatever form the base has (a `local/<id>` link, the library's own copy at
 #     that path once Steam's folder is gone, `workshop/<id>`, an `imported/` folder with that Workshop id), greyed with
 #     its reason when it can't play (no base, a malformed preset file, a base that is a preset / a video / a web
-#     wallpaper, the legacy engine); the WE auto-import brings presets in only with scene support on; a preset added from
+#     wallpaper; a legacy settings file changes none of it); the WE auto-import brings presets in only with scene support on; a preset added from
 #     Browse's "Wallpaper Engine (Local)" brings its base from that folder the same way (a link), one whose base isn't
 #     there needs it, one whose base there is a web wallpaper says so when that folder's project.json names the id (never
 #     added); a scene base landing beats a saved non-scene kind; trashing a preset leaves its base alone.
@@ -20,7 +20,7 @@
 #     playable again (playing them: the adapter IT § presets).
 # Runs in its own network namespace (`unshare -rn`) with a temp HOME + XDG dirs and a private backend whose Steam servers
 # are an empty fixture (LIASCAPE_STEAM_CM_FIXTURE) and which refuses every real server (LIASCAPE_TEST_NO_NETWORK=1). The
-# engine is liascape-player through a stub binary that never runs (nothing is played here); the base scene is synthetic.
+# player is a stub binary that never plays (nothing is played here); the base scene is synthetic.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-presets.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -65,7 +65,7 @@ export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 export LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
 echo '{}' > "$LIASCAPE_STEAM_CM_FIXTURE"
-# the engine is liascape-player (presets play only there), its binary a stub: nothing here ever plays. Once
+# the player's binary is a stub: nothing here ever plays. Once
 # $T/stub-loudness exists it answers `scene-loudness <dir> --props <json>` (the offline estimate) with a fingerprint of
 # exactly what it was given and logs the call in $T/loudness-calls
 mkdir -p "$T/bin"
@@ -144,7 +144,7 @@ item() { api "$U/library" | jq -c --arg p "$1" '[.[] | select(.videoPath == $p)]
 pf() { item "$1" | jq -c "$2"; }   # $1 = folder, $2 = jq of the item
 
 cat > "$SETTINGS" <<EOF
-{"PlayerEngine":"liascape-player","WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
+{"WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
 EOF
 
 # ---- the library as it starts ------------------------------------------------------------------------------------------
@@ -163,7 +163,7 @@ P2=$LIB/workshop/910000102; mk_preset "$P2" '"900000001"' "Preset no preview" '{
 idx workshop '. + {"910000101": {title: "Preset one", workshopId: "910000101"}, "910000102": {title: "Preset no preview", workshopId: "910000102"}}'
 
 startbe
-check "the engine is liascape-player (the stub binary resolves)" "$(api "$U/player-engine" | jq -r .active)" liascape-player
+check "the player binary resolves (the stub)" "$(api "$U/player-engine" | jq -r .available)" true
 
 echo "== 1. library: Wallpaper Engine's preset files list as presets that need their base"
 [ -n "$FXIDS" ] || bad "no preset fixtures in $FX: proved nothing"
@@ -305,19 +305,18 @@ check "…the other preset of that base still plays" "$(pf "$P2" '.presetReason'
 check "undo → the preset is back, over its base" "$(api -X POST "$U/library/undo" | jq -c .ok) $(pf "$P1" '[.isPreset, .presetReason]')" 'true [true,null]'
 stopbe
 
-echo "== 1. legacy engine: presets play only in the Liascape player"
+echo "== 1. a legacy settings file: PlayerEngine legacy is ignored, presets play"
 jqset "$SETTINGS" '.PlayerEngine = "legacy"'
 startbe
-check "the engine is legacy" "$(api "$U/player-engine" | jq -r .active)" legacy
-check "a preset whose base is here → the legacy reason" "$(pf "$P1" '[.isPreset, .presetReason, .basePath]')" "[true,\"Presets play only in the Liascape player\",\"$LIB/workshop/900000001\"]"
+check "/player-engine names no engine" "$(api "$U/player-engine" | jq -c '[has("engine"), has("active")]')" '[false,false]'
+check "a preset whose base is here → playable" "$(pf "$P1" '[.isPreset, .presetReason, .basePath]')" "[true,null,\"$LIB/workshop/900000001\"]"
 check "…a missing base still says so first" "$(pf "$LIB/workshop/3009121253" '.presetReason')" '"Needs its base scene"'
 check "…a malformed one too" "$(pf "$LIB/workshop/910000201" '.presetReason')" '"Its preset file names no base scene"'
 stopbe
 
 # ---- 2. layered properties --------------------------------------------------------------------------------------------
-jqset "$SETTINGS" '.PlayerEngine = "liascape-player"'
+jqset "$SETTINGS" 'del(.PlayerEngine)'
 startbe
-check "§ 2 runs under liascape-player" "$(api "$U/player-engine" | jq -r .active)" liascape-player
 BASE=$LIB/workshop/900000001
 props() { api "$U/library/scene-props?path=$(jq -rn --arg p "$1" '$p|@uri')"; }
 prop() { props "$1" | jq -c --arg n "$2" '.props[] | select(.name == $n) | '"$3"; }

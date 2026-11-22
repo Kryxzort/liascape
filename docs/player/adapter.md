@@ -36,7 +36,7 @@ evidence.
 
 - **Binary** (`PlayerEngine.ResolveBinary`): `LIASCAPE_PLAYER_BIN` → next to the running liascape executable → the
   dev tree `src/player/target/{release,debug}/liascape-player` (release first: debug is `opt-level 0` and the player
-  mixes audio itself) → `PATH`. Missing → the engine reads as unavailable, `/player-engine` says why, legacy works.
+  mixes audio itself) → `PATH`. Missing → a switch refuses with why (`/player-engine` too); one that appears later plays.
 - **Start** (`EnsureRunning`, only from a switch): `setsid [systemd-run --scope] sh -c 'exec … serve'` with the
   session's environment, waiting ≤ 3 s for the socket. Once this client has talked to a player it restarts with that player's
   own arguments + `--restore` (`UserServeArgs`, from the supervisor's cmdline minus `--supervised`, `--restore`,
@@ -179,7 +179,7 @@ Adapter log `~/.cache/liascape/liascape-player-adapter.log` (identical lines ≤
 
 - **Integration test** (`scripts/test-liascape-player-adapter.sh [--no-build]`, `RESULT pass=N fail=M`): the real
   backend over HTTP against a private headless player (`--clock real --ao null`), hermetic (temp HOME and XDG dirs,
-  own socket and port, display env unset; it aborts unless `/player-engine` says `active: liascape-player`). Every
+  own socket and port, display env unset; it aborts unless `/player-engine` says the player is `available`). Every
   player it starts runs the backend's own binary path, so the upgrade check never replaces it under the script.
   Converging state is polled to a deadline, never read after a fixed sleep. `LIASCAPE_KEEP_TMP=1` keeps its temp
   dir; `LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor` runs the auto-mute section on the old engine.

@@ -667,7 +667,7 @@ public static class PlayerHelper
                 int intervalMs = settings.RestartMpvpaperEverySeconds * 1000;
                 Thread.Sleep(intervalMs);
                 settings = SettingsService.Load();
-                if (PlayerEngine.WouldBeLiascapePlayer(settings)) continue; // mpvpaper leak workaround — legacy only
+                if (PlayerEngine.IsLiascapePlayer) continue; // mpvpaper leak workaround — legacy only
                 if (IsTimedPlaylistActive() && !IsTimedPlaylistPaused())
                 {
                     var (count, cur) = ReadTimedSnapshot();
@@ -834,6 +834,8 @@ public static class PlayerHelper
     {
         // a preset that can't play (both engines): its reason, never its plain base scene
         if (PresetUnplayableReason(videoPath) is string presetWhy) throw new InvalidOperationException(presetWhy);
+        // no player binary: the reason, never a queued switch that can't start (a silent black screen)
+        if (PlayerEngine.MissingReason() is string missing) throw new InvalidOperationException(missing);
         lock (_lock)
         {
             if (IsScenePath(videoPath))
@@ -937,7 +939,7 @@ public static class PlayerHelper
             // start at the first item that isn't a preset: under legacy none plays (PresetUnplayableReason), and LWE launched
             // on a preset's folder (no scene in it) dies behind a screen the old wallpaper already left, with no crash
             // advance (the tick skips a skipped path). Play, play-from, shuffle and every replay (an engine switch, restore,
-            // the timer daemon) start here. A crashed scene keeps legacy's own handling. Guard: test-legacy-launch.sh § presets
+            // the timer daemon) start here. A crashed scene keeps legacy's own handling.
             int first = ordered.FindIndex(p => PresetUnplayableReason(p) == null);
             for (int i = 0; i < (first < 0 ? ordered.Count : first); i++)
                 Console.Error.WriteLine($"timed playlist: skipping {Path.GetFileName(ordered[i])}: {PresetUnplayableReason(ordered[i])}");
@@ -2734,9 +2736,9 @@ public static class PlayerHelper
             ? _history[playingIdx]
             : null;
         // Same IsSkippedPath contract as AdvanceToNext/TryStepLibrary/ApplyRandom — _timedPaths is
-        // normally already scene-filtered under liascape-player (ApplyPlaylist), but a stale cross-engine
-        // session (SwitchEngineLive replaying a legacy LastSession) can still carry one through; skip
-        // it here too rather than randomizing onto a path that just stops playback.
+        // normally already scene-filtered under liascape-player (ApplyPlaylist), but a replayed LastSession
+        // saved before can still carry one through; skip it here too rather than randomizing onto a path that
+        // just stops playback.
         bool scenesOk = PlayerEngine.ScenesPlayable(SettingsService.Load());
         var pool = _timedPaths.Where(p => !IsSkippedPath(p, scenesOk)).ToList();
         // nothing playable to pick — leave the current wallpaper (and its armed video-end wait) alone
@@ -2974,60 +2976,6 @@ public static class PlayerHelper
         UpdateTimedSettings(_timedShuffle, intervalSeconds, switchWhenVideoEnds);
     }
 
-    // PlayerEngine changed (/settings), live: stop the OLD engine's media, then replay on the new one —
-    // a running timed playlist resumes at the item it was on (timed_state.json), else LastSession.
-    // Nothing playing → nothing started. Unchanged engine → just refresh the cached engine/binary.
-    // One switch at a time, each on the settings saved NOW: two quick changes (legacy, then back within a second) ran
-    // side by side, the second saw liascape-player still cached and returned, and the first then cached legacy over it,
-    // so legacy ran while the setting said liascape-player. Guard: scripts/test-engine-heal.sh (quick switch back)
-    private static readonly SemaphoreSlim _engineSwitch = new(1, 1);
-    public static void SwitchEngineLive(AppSettings prev, AppSettings cur)
-    {
-        _engineSwitch.Wait();
-        try { SwitchEngineNow(SettingsService.Load()); }
-        finally { _engineSwitch.Release(); }
-    }
-
-    private static void SwitchEngineNow(AppSettings cur)
-    {
-        bool wasPlayer = PlayerEngine.IsLiascapePlayer;          // what actually runs (cached since serve start)
-        bool nowPlayer = PlayerEngine.WouldBeLiascapePlayer(cur);
-        if (wasPlayer == nowPlayer) { PlayerEngine.Refresh(cur); return; }
-        bool timed, playing = IsPlaying;                // (an liascape-player query → outside _lock)
-        lock (_lock)
-        {
-            timed = _timedPaths != null && !_timedTimerStopped;
-            playing |= timed;
-            SaveTimedState();       // the playlist position for the replay (no-op without a timed session)
-            TeardownTimer();        // state only — timed_state.json is kept; the tick can't switch any more
-            if (!wasPlayer) KillCurrentProcess();             // legacy media: process kills, no socket waits
-            else { StopPlaylistObserver(); _current = null; }
-        }
-        // liascape-player OUTSIDE _lock, synchronously: the old engine is fully gone (stop → quit → TERM/KILL)
-        // before the new one starts — never both on screen
-        if (wasPlayer) LiascapePlayerMedia.StopAndQuit();
-        PlayerEngine.Refresh(cur);
-        KillRestartDaemon();
-        TransitionService.ClearInProgress();
-        LiascapePlayerClient.Log($"PlayerEngine {(wasPlayer ? "liascape-player" : "legacy")} → {(nowPlayer ? "liascape-player" : "legacy")}: " +
-            (!playing ? "nothing was playing" : timed ? "resuming the timed playlist" : "replaying the last session"));
-        if (!playing) return;
-        try
-        {
-            if (timed && RestoreTimedPlaylist()) return;
-            var session = cur.LastSession;
-            if (session == null || session.Paths.Count == 0) return;
-            if (session.IsTimedPlaylist)
-            {
-                var paths = session.Shuffle ? session.Paths.OrderBy(_ => Guid.NewGuid()).ToList() : session.Paths;
-                ApplyTimedPlaylist(paths, cur.BuildMpvOptions(), session.Shuffle, session.TimedIntervalSeconds, session.SwitchWhenVideoEnds);
-            }
-            else if (session.IsPlaylist) ApplyPlaylist(session.Paths, cur.BuildMpvPlaylistOptions(), session.Shuffle);
-            else Apply(session.Paths[0], cur.BuildMpvOptions());
-        }
-        catch (Exception e) { LiascapePlayerClient.Log($"replaying the session on {(nowPlayer ? "liascape-player" : "legacy")} failed: {e.Message}"); }
-    }
-
     public static void Stop()
     {
         if (PlayerEngine.IsLiascapePlayer) LiascapePlayerProgram.Forget(); // `stop` destroys the player's programs itself
@@ -3082,6 +3030,7 @@ public static class PlayerHelper
     {
         // auto-mute: no monitor-daemon — the player's Signal gets the settings once it answers (AfterRestore)
         KillLegacyDaemons();
+        ReapAllWallpaperProcs(); // a legacy wallpaper still up would stay on screen beside the player
         if (!LiascapePlayerClient.Shared.EnsureRunning(restore: true, sessionStart: true))
             throw new InvalidOperationException($"liascape-player could not start: {LiascapePlayerClient.Shared.LastError ?? "unknown reason"}");
         AudioMonitor.AfterRestore(settings);
@@ -3698,7 +3647,7 @@ public static class PlayerHelper
     // the launch's file, and only while no newer switch, stop or launch came since: checked and sent under _lock, which
     // every switch and stop holds while it bumps the generation and announces, so this can never land after a newer
     // announcement (a superseded or stopped launch says nothing). Polling stops at the first answer, a newer generation
-    // or 15 s. Guard: scripts/test-legacy-launch.sh § launch
+    // or 15 s.
     private static void AnnounceWhenIpcAnswers(int gen)
     {
         if (OnWallpaperChanged == null) return; // a daemon or a one-shot CLI: no page listens here
@@ -3737,14 +3686,44 @@ public static class PlayerHelper
 
     private static Process[] MpvpaperProcs() => ProcsByCmdline("mpvpaper");
 
-    // Reap EVERY wallpaper-related process by cmdline scan — NOT just `_current` (which is null in a
-    // daemon process that never spawned mpvpaper). mpvpaper is detached (setsid) so scanning /proc is
-    // the only cross-process way to find it. Used by the shutdown reaper below.
-    private static void ReapAllWallpaperProcs()
+    // Reap every legacy wallpaper process of THIS user session — NOT just `_current` (which is null in a daemon process
+    // that never spawned mpvpaper). mpvpaper and LWE are detached (setsid), so scanning /proc is the only cross-process
+    // way to find them. Matched by program name (argv[0] or the executable, a Nix `.<name>-wrapped` counts), and only
+    // a process whose HOME is ours: a hermetic test's backend must never reach the desktop session's wallpaper.
+    // Used by the shutdown reaper below and at `serve` start / restore, where a legacy session left running would
+    // stay on screen beside liascape-player. Returns how many it reaped. Guard: scripts/test-player-binary.sh
+    // § a legacy settings file
+    internal static int ReapAllWallpaperProcs()
     {
-        foreach (var needle in new[] { "mpvpaper", "liascape-transition", "liascape-audio" })
-            foreach (var p in ProcsByCmdline(needle))
-                using (p) { try { p.Kill(entireProcessTree: true); } catch { } }
+        var names = new HashSet<string> { "mpvpaper", "liascape-transition", "liascape-audio", "linux-wallpaperengine" };
+        var home = Environment.GetEnvironmentVariable("HOME");
+        if (string.IsNullOrEmpty(home)) return 0;
+        static string Norm(string? path)
+        {
+            var n = Path.GetFileName(path ?? "");
+            if (n.StartsWith('.') && n.EndsWith("-wrapped")) n = n[1..^"-wrapped".Length];
+            return n;
+        }
+        int reaped = 0;
+        foreach (var dir in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(dir), out int pid) || pid == Environment.ProcessId) continue;
+            try
+            {
+                var argv0 = File.ReadAllText(Path.Combine(dir, "cmdline")).Split('\0')[0];
+                string? exe = null;
+                try { exe = new FileInfo(Path.Combine(dir, "exe")).LinkTarget; } catch { }
+                if (!names.Contains(Norm(argv0)) && !names.Contains(Norm(exe))) continue;
+                var env = File.ReadAllText(Path.Combine(dir, "environ")).Split('\0');
+                if (!env.Contains("HOME=" + home)) continue;
+                using var p = Process.GetProcessById(pid);
+                p.Kill(entireProcessTree: true);
+                reaped++;
+                LiascapePlayerClient.Log($"stopped a legacy wallpaper process: {Norm(argv0)} (pid {pid})");
+            }
+            catch { } // gone meanwhile, or not ours to read
+        }
+        return reaped;
     }
 
     // Graceful shutdown reaper for the long-lived daemons (monitor-daemon/timer-daemon/restart-daemon).
