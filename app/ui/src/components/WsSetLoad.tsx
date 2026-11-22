@@ -56,7 +56,9 @@ export function WsSetLoad({ scope = "workshop" }: { scope?: FavScope }) {
     const onScroll = () => { top0 = sc.scrollTop; };
     const ro = new ResizeObserver(([e]) => {
       const h = e.borderBoxSize?.[0]?.blockSize ?? e.contentRect.height, top = sc.scrollTop;
-      const shift = h0 === null ? 0 : h - h0 - (top - top0);
+      // only the dock's own change glides: a callback at the same height (the first one, after a kept scroll offset came
+      // back: top0 is still 0) is no move of the grid. Guard: probe-layout tabs:browse
+      const shift = h0 === null || h === h0 ? 0 : h - h0 - (top - top0);
       if (glide.current && Math.abs(shift) >= 1)
         for (let el = d.nextElementSibling; el; el = el.nextElementSibling)
           if (el.matches(".grid, .wf-none")) el.animate([{ transform: `translateY(${-shift}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: "cubic-bezier(.25, .8, .25, 1)" });
