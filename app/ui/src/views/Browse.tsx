@@ -3,7 +3,8 @@ import { useShallow } from "zustand/react/shallow";
 import { PRESET_TAG, presetsOn, useStore } from "../store";
 import { Card } from "../components/Card";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
-import { WF_GROUPS, facetsOf, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
+import { facetsOf } from "../components/facets";
+import { WF_GROUPS, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { BrowseSide } from "../components/BrowseSide";
@@ -231,12 +232,14 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
 
   // a local set nothing in it matches (inside a creator's or a scene's presets list too, where the list's own note stays
   // hidden): say so, with a way out that clears the search and the other tags but never the Yours rows, the set itself. Not
-  // while the favourites are still coming or couldn't be read: the load line speaks then. Guard: probe-steam yours:empty
+  // while the favourites are still coming or couldn't be read: the load line speaks then. A presets list ignores the Type
+  // tags (withoutType), so they neither count as a filter to clear there nor get cleared. Guard: probe-steam yours:empty
   const setEmpty = setOn && !sorted.length && !(modes.fav === "inc" && (!favs || !!favs.loading || !!favs.error));
-  const others = browseFilter.include.some((t) => !isYours(t)) || browseFilter.exclude.some((t) => !isYours(t));
+  const stays = (t: string) => isYours(t) || (wsList?.kind === "presets" && TYPE_TAGS.has(t));
+  const others = browseFilter.include.some((t) => !stays(t)) || browseFilter.exclude.some((t) => !stays(t));
   const setClear = query && others ? "Clear search and filters" : query ? "Clear search" : others ? "Clear filters" : null;
   const clearOthers = () => {
-    if (others) setBrowseFilter({ include: browseFilter.include.filter(isYours), exclude: browseFilter.exclude.filter(isYours) });
+    if (others) setBrowseFilter({ include: browseFilter.include.filter(stays), exclude: browseFilter.exclude.filter(stays) });
     if (query) setQuery("");
   };
 

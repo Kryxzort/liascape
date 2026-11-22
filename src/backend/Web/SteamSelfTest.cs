@@ -258,7 +258,21 @@ public static class SteamSelfTest
         try
         {
             var ids = await SteamWorkshopDetails.UserFileIdsAsync(me, "myfavorites", t);
-            Check(ids?.Count == 230 && ids.SequenceEqual(expectedOrder), $"user files: ids only = the whole list in Steam's order ({ids?.Count.ToString() ?? "null"})");
+            Check(ids?.Ids.Count == 230 && ids.Ids.SequenceEqual(expectedOrder) && ids.Total == 230,
+                $"user files: ids only = the whole list in Steam's order, with Steam's total ({ids?.Ids.Count.ToString() ?? "null"} of {ids?.Total.ToString() ?? "null"})");
+            // an item that moved up while the pages were read (Steam's order is lastupdated): listed on page 1 and again on
+            // page 2, kept once, where it came first
+            var dupOrder = Enumerable.Range(0, 1005).Select((i) => 6_000_000_000UL + (ulong)(i == 1002 ? 5 : i)).ToList();
+            string dupFile = Path.Combine(dir, "steam-cm-userfiles-dup.json");
+            File.WriteAllText(dupFile, JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["@userfiles"] = new Dictionary<string, object> { [$"{me}:myfavorites"] = dupOrder.Select((id) => new Dictionary<string, object> { ["publishedfileid"] = id.ToString() }).ToList() },
+            }));
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", dupFile);
+            var dup = await SteamWorkshopDetails.UserFileIdsAsync(me, "myfavorites", t);
+            Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", file);
+            Check(dup?.Ids.Count == 1004 && dup.Ids.SequenceEqual(dupOrder.Distinct()) && dup.Total == 1005,
+                $"user files: ids only across pages, an id listed twice kept once in its first place ({dup?.Ids.Count.ToString() ?? "null"} of {dup?.Total.ToString() ?? "null"})");
             var total = await SteamWorkshopDetails.UserFilesTotalAsync(me, "myfavorites", t);
             Check(total == 230, $"user files: total only ({total?.ToString() ?? "null"})");
             var page = await SteamWorkshopDetails.UserFilesAsync(me, "myfavorites", "lastupdated", 1, 100, t);

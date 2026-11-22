@@ -48,6 +48,8 @@
 #     details in the background) and holds against a later diff whose Steam answer lacks it; a private profile's check
 #     reads page 1 only, and a grown page 1 → the pages again, with any listed id still missing its details asked again;
 #     a 200 page that isn't the favourites page (a login page as page 1, a blank page 2) is no answer: the list is kept.
+#     The list's file is 0600; a restarted backend's version counts above the last run's; a diff keeps Steam's own total
+#     (a count check right after finds no change); a private profile read whole lately gets the page-1 check on a visit.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-workshop-social.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -278,6 +280,8 @@ if (process.argv[2]?.startsWith("fav")) {
       "first load: the list, web left out (248 in Steam's order, with created times)", J({ n: titles(r).length, first: titles(r).slice(0, 3), e: r.json?.error }));
     const saved = readJson(FF(ME));
     out(J(saved?.ids) === J(FAVS) && saved.viaPage === false && saved.total === 250, "first load: the whole list kept on disk ({ids, viaPage, total})", J(saved && { n: saved.ids?.length, v: saved.viaPage, t: saved.total }));
+    const mode = fs.existsSync(FF(ME)) ? (fs.statSync(FF(ME)).mode & 0o777).toString(8) : null;
+    out(mode === "600", "first load: the list's file is the user's alone (0600)", J({ mode }));
     out(!logNow().includes(ME) && !FAVS.some((id) => logNow().includes(id)) && /GetUserFiles myfavorites sort=lastupdated page 3/.test(blog().slice(L1)),
       "first load: no Steam ID or item ID in the log", J(logNow().split("\n").filter((l) => l.includes(ME) || /32000005/.test(l)).slice(0, 3)));
     // the creator's name: one this run already read (the sidebar's creator), never a profile read for the list
@@ -302,6 +306,36 @@ if (process.argv[2]?.startsWith("fav")) {
     out(countIn(blog().slice(Lc), /GetUserFiles myfavorites total-only/) === 1 && /count check: no change/.test(blog().slice(Lc)) && !/ids-only|GetUserFiles myfavorites sort=/.test(blog().slice(Lc))
       && J(titles(await favs())) === J(shown),
       "sync=check, Steam's count unchanged: one total-only ask, no diff", J({ log: blog().slice(Lc) }));
+    // what an open page holds now: the next phase's restarted backend must count above it
+    fs.writeFileSync(`${T}/fav-version`, String((await favs()).json?.version ?? ""));
+    process.exit(0);
+  }
+
+  if (MODE === "fav-total") {
+    // a page left open across a backend restart drops any read older than its copy: the new run's version must be higher
+    const before = Number(fs.readFileSync(`${T}/fav-version`, "utf8"));
+    let r = await favs("none");
+    out(r.json?.signedIn === true && before > 0 && r.json.version > before, "after a backend restart: the version read is above the one read before it",
+      J({ before, after: r.json?.version }));
+    // Steam's total above the ids it lists (an item it counts but shows no one): a diff keeps Steam's total, so the count
+    // check right after compares like with like and finds no change
+    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    fx["@userfilestotal"] = { [`${ME}:myfavorites`]: 251 };
+    fs.writeFileSync(FX, J(fx));
+    let L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (done|stopped)/.test(blog().slice(L)), 8000);
+    const total = readJson(FF(ME))?.total;
+    L = blog().length;
+    await favs("check");
+    await waitFor(() => /count check/.test(blog().slice(L)), 4000);
+    await sleep(300);
+    const le = blog().slice(L);
+    out(total === 251 && /count check: no change/.test(le) && !/ids-only/.test(le) && J(titles(await favs())) === J(shown),
+      "a diff keeps Steam's own total: the count check right after finds no change (a total of 251 over 250 listed ids)",
+      J({ total, log: le.split("\n").filter((l) => /steam-cm|count check/.test(l)) }));
+    delete fx["@userfilestotal"];
+    fs.writeFileSync(FX, J(fx));
     process.exit(0);
   }
 
@@ -457,6 +491,18 @@ if (process.argv[2]?.startsWith("fav")) {
     const asked1 = (await since(n0)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`);
     out(asked1.length === 1 && asked1[0].query.p === "1" && asked1[0].signedIn && /count check: no change/.test(blog().slice(Lc)) && J(titles(await favs())) === J(PRIV.map((_, i) => `pfav-${i}`)),
       "private profile: sync=check reads page 1 only (one myworkshopfiles request), no change", J({ asked: asked1.map((x) => x.query.p), log: blog().slice(Lc) }));
+    // two quick visits to Browse after that whole read: the page-1 check (held by its 50 s: one just ran), never the
+    // community pages again
+    n0 = (await fakeLog()).length;
+    const Lo = blog().length;
+    await favs("open");
+    await favs("open");
+    await waitFor(() => countIn(blog().slice(Lo), /the page-1 check instead/) === 2 || /id diff (done|stopped)/.test(blog().slice(Lo)), 20000);
+    await sleep(500);
+    const asked2 = (await since(n0)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`);
+    out(asked2.length === 0 && countIn(blog().slice(Lo), /the page-1 check instead/) === 2 && !/id diff/.test(blog().slice(Lo)),
+      "private profile: two quick sync=open after a whole read → no community page asked again (the page-1 check instead, held by its 50 s)",
+      J({ asked: asked2.map((x) => x.query.p), log: blog().slice(Lo).split("\n").filter((l) => /workshop-favorites|community/.test(l)) }));
     // the next phase (a restarted backend, so its count check isn't held off): a favourite new on page 1
     const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
     fx["3300000999"] = { tags: ["Video"], title: "pfav-new", time_created: 1700000999, creator: OWNER };
@@ -780,7 +826,7 @@ stop_backend; start_backend
 (cd "$T" && timeout 60 node drive.mjs after-restart) >> "$T/drive.log" 2>&1 || rc=$?
 # § 7 on a backend without § 4's cooldown (a private profile's community pages must go out), restarted before each phase
 stop_backend; rm -f "$XDG_CACHE_HOME/liascape/steam-cooldown.json"; start_backend
-for phase in fav fav-restart fav-private fav-private-grow fav-private-odd; do
+for phase in fav fav-total fav-restart fav-private fav-private-grow fav-private-odd; do
   [ $phase = fav ] || { stop_backend; start_backend; }
   (cd "$T" && timeout 60 node drive.mjs $phase) >> "$T/drive.log" 2>&1 || rc=$?
 done
