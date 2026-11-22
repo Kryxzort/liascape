@@ -4887,8 +4887,6 @@ function fuzzEligible(n, x, last) {
 }
 
 // what runs now, as a control sees it (see above)
-const TIMED = path.join(path.dirname(E.LIASCAPE_USER_MUTE), "timed_state.json"); // the backend's timed-playlist session (history, mode)
-const readTimed = () => { try { return JSON.parse(fs.readFileSync(TIMED, "utf8")); } catch { return null; } };
 function fuzzContext(snap, fz) {
   const { st } = snap, trs = st.transitions || [];
   const pathOf = (id) => st.graph[id]?.path ?? null;
@@ -4898,10 +4896,11 @@ function fuzzContext(snap, fz) {
   // with no output nothing is "shown", so /current is null: what plays is the session's own bookkeeping then
   const live = !!snap.cur?.path || (fz.noOutput && sourcesOf(st).length > 0);
   const playlist = live && !!snap.cur?.timed;
-  const ts = playlist ? readTimed() : null;
-  const pending = playlist && !!ts?.SwitchWhenVideoEnds;
-  const hi = ts ? (ts.WaitingForVideoEnd && ts.HistoryIndex > 0 ? ts.HistoryIndex - 1 : ts.HistoryIndex) : -1; // the playing item's (a pre-fetched next is one ahead)
-  const cur = snap.cur?.path ?? (live ? (playlist ? ts?.History?.[hi] : snap.s.lastSession?.paths?.[0]) ?? null : null);
+  // the rotation: the player's program (its mode on the node, what plays and its place in the history in `state.programs`)
+  const prog = playlist ? progOf(st) : null;
+  const pending = playlist && st.graph["prog:main"]?.mode === "on_end";
+  const hi = prog ? prog.history_index : -1;
+  const cur = snap.cur?.path ?? (live ? (playlist ? prog?.path : snap.s.lastSession?.paths?.[0]) ?? null : null);
   const playlistBar = snap.ps?.videoPaths || [], ps = snap.ps?.settings || {}, own = ps.overrideGlobalSettings !== false;
   let shown = cur, other = null;
   if (midT) { other = pathOf(midT.to) ?? cur; shown = [...midT.from.map(pathOf), ...sourcesOf(st).map(([, n]) => n.path)].find((p) => p && p !== other) ?? cur; }

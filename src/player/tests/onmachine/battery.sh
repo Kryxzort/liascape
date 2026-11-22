@@ -949,13 +949,12 @@ run_cell() {
       # very first switch, "transition did not reach a terminal state", tr-136/324/515 -- confirmed
       # via events.jsonl: each was scheduled align:"end" then genuinely CANCELLED ~15.5-16s later by
       # LiascapePlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop, not by this script's own /stop -- i.e. the switch was still correctly
-      # in flight, this script just stopped watching too early). wait-for-end's countdown freezes
-      # while _waitingForVideoEnd (PlayerHelper.cs ~line 992), so its real per-switch bound is the
-      # CLIP's own remaining play time, not EFFECT_DURATION_MS -- use MAX_SHORT_VIDEO_MS (+ the
-      # player's 10s align_fallback / adapter's 15s backstop + margin) instead of term() for this
-      # mode only. advance-on-end's own interval always wins first (PlayerHelper.cs ~line 1032: the
-      # interval elapsing while _waitingForVideoEnd && !_waitForVideoEnd force-advances at the
-      # interval, well under `term`), so it keeps the plain term().
+      # in flight, this script just stopped watching too early). An end-of-video switch waits for
+      # the clip's end, so its real per-switch bound is the CLIP's own remaining play time, not
+      # EFFECT_DURATION_MS -- use MAX_SHORT_VIDEO_MS (+ the player's 10s align_fallback / adapter's
+      # 15s backstop + margin) instead of term() for this mode only. advance-on-end's own interval
+      # always wins first (the program's maximum advances at the interval, well under `term`), so it
+      # keeps the plain term().
       local term_this="$term"
       [ "$mode" = wait-for-end ] && term_this=$(python3 -c "print(int($MAX_SHORT_VIDEO_MS/1000) + 30)")
       prev=$(last_corr)

@@ -11,7 +11,6 @@ export type LiascapeEvent =
   // liascape-player's low-VRAM hold took the wallpapers ("Paused: low video memory — 345 MB free, needs 4408 MB"), or
   // null once it let go
   | { type: "vram-hold"; payload: { message: string | null } }
-  | { type: "timed-stopped"; payload: null }
   // `liascape toggle-loop-current` toggled "keep playing this one" (the rotation holds what plays)
   // `toggle-pause` ran (AppOps): the wallpaper's own pause, for the in-app background (components/WallpaperBg.tsx)
   | { type: "pause-changed"; payload: { paused: boolean } }

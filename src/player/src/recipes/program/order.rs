@@ -1,10 +1,9 @@
 //! A program's play order (pure, seeded): the cycle through its items, shuffle cycles,
-//! the history next/previous walk, random and the live reorder — `PlayerHelper`'s
-//! `_timedPaths` / `_timedIndex` / `_history` / `_historyIndex`, ported.
+//! the history next/previous walk, random and the live reorder.
 //!
-//! Unlike the C# (which advanced its cursor when it *requested* an end-of-video switch, the
-//! "pre-fetch", and had to step back on a cancel), a step is **planned** and only
-//! **committed** when its B starts ([`Order::commit`]): the cursor always names what plays.
+//! A step is **planned** and only **committed** when its B starts ([`Order::commit`]), never
+//! when an end-of-video switch is requested: the cursor always names what plays, and a
+//! cancelled request leaves nothing to step back.
 //! A planned [`Step`] carries the cursor state after it; committing one that a reorder
 //! made stale re-seats the cursor at its path instead.
 
@@ -59,9 +58,9 @@ impl Step {
 
 #[derive(Debug, Clone)]
 pub struct Order {
-    /// The play order (`_timedPaths`): the bar order, or a cycle's shuffle.
+    /// The play order: the bar order, or a cycle's shuffle.
     items: Vec<String>,
-    /// The cursor in `items` (`_timedIndex`).
+    /// The cursor in `items`.
     idx: usize,
     shuffle: bool,
     history: Vec<String>,
@@ -206,8 +205,7 @@ impl Order {
         None
     }
 
-    /// `PlayerHelper.StepBackAndLaunch`: the previous history entry; `None` at the
-    /// session's first item.
+    /// Previous: the previous history entry; `None` at the session's first item.
     pub fn plan_back(&self) -> Option<Step> {
         if self.hist_idx == 0 || self.hist_idx > self.history.len() {
             return None;
@@ -294,7 +292,7 @@ impl Order {
 
     /// Plan on the order as it will be once `prev` (a step requested and not started yet)
     /// commits — a user switch while another is still on its way goes on from *that* one
-    /// (`PlayerHelper` advanced its cursor at each request: ten `next`s land ten items on).
+    /// (ten `next`s in a row land ten items on).
     /// The step returned commits on `self` as if planned here (it carries the whole cursor
     /// state, `prev`'s reshuffle included).
     pub fn plan_after(

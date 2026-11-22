@@ -1,7 +1,6 @@
 //! A rotation's per-item play rules (pure): what a playing item plays before the program
-//! moves on, ported from `PlayerHelper`'s rotation arithmetic (`docs/player/adapter.md`
-//! § Rotation wiring). Every value is wall-clock ms on the
-//! player clock; **0 = off** for the minimum and the maximum (`scenes_after_ms` is never 0:
+//! moves on (the contract: `.claude/rules/backend/player-adapter.md` § Rotation). Every value
+//! is wall-clock ms on the player clock; **0 = off** for the minimum and the maximum (`scenes_after_ms` is never 0:
 //! its prop's range starts at 1000).
 //!
 //! - `mode: timer` ("Switch when video ends" off): `interval_ms` is a plain countdown,
@@ -10,7 +9,7 @@
 //!   [`item_rule`] turns them (and the scene timing) into the playing item's own
 //!   [`ItemRule`].
 
-/// What an item is, for its rule (`PlayerHelper.PlayKind`).
+/// What an item is, for its rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayKind {
     Video,
