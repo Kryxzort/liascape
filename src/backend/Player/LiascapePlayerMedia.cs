@@ -580,14 +580,24 @@ public static class LiascapePlayerMedia
 
     // The low-VRAM hold took the wallpapers or let go (LiascapePlayerClient.VramHold): WS `vram-hold {message}`, and
     // `/current.vramHold` for a page that loads later, so a held screen is never a silent black or frozen one.
-    private static void OnVramHold(VramHoldInfo? hold) => _ = Task.Run(() =>
+    // One at a time, each publishing the hold as it stands when it runs (not the change that queued it): pool tasks finish
+    // in any order, and a "held" published after the "released" would leave the notice up with nothing held.
+    private static readonly object _vramHoldPub = new();
+    private static (bool Any, VramHoldInfo? Hold) _vramHoldSaid;
+    private static void OnVramHold(VramHoldInfo? changed) => _ = Task.Run(() =>
     {
-        try
+        lock (_vramHoldPub)
         {
-            LiascapePlayerClient.Log(hold == null ? "the low-VRAM hold let go" : $"held for low video memory: {PlayerHelper.VramHoldMessage(hold)}");
-            PlayerHelper.OnVramHold(hold);
+            try
+            {
+                var hold = C.VramHold;
+                if (_vramHoldSaid.Any && Equals(_vramHoldSaid.Hold, hold)) return; // a later change's task said it already
+                _vramHoldSaid = (true, hold);
+                LiascapePlayerClient.Log(hold == null ? "the low-VRAM hold let go" : $"held for low video memory: {PlayerHelper.VramHoldMessage(hold)}");
+                PlayerHelper.OnVramHold(hold);
+            }
+            catch (Exception ex) { LiascapePlayerClient.Log($"OnVramHold threw: {ex.Message}"); }
         }
-        catch (Exception ex) { LiascapePlayerClient.Log($"OnVramHold threw: {ex.Message}"); }
     });
 
     // `scene.loudness`: store it under its configuration (`key`; the measurement covering the most audible play wins —

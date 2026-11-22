@@ -116,9 +116,10 @@ resume is a new process, not a crash.
 The reserve follows the held sources (`Runtime::vram_follow_hold`, every tick while held). `settle` after the stop
 each stopped source gets a share: a scene its worker's VRAM at the engage, the videos and images what the compositor
 freed (its use then − now) plus the spare's; without per-process numbers the measured reserve split evenly. A source
-on its way out (`Runtime::vram_gone`: the A a live transition is replacing, a grave, a retired or destroyed one) drops
+on its way out (`Runtime::vram_gone`: the A a live transition is replacing on every output it shows, a handed-off B whose
+handoff still settles included; a grave; a retired or destroyed one) drops
 its share at once (`LowVram::set_reserve` re-judges against the newest sample) and is never reopened: it stays its
-still until its node goes, and to an `align: end` switch off it, it has ended. A source created while held waits with
+still until its node goes, and to an `align: end` switch off it, it has ended (forgotten if it is wanted again and reopens). A source created while held waits with
 no share. So a switch made during a hold plays as soon as the memory there is fits it, never held for memory its
 replaced sources would have taken back. `stop` clears the hold and starts the rule over.
 

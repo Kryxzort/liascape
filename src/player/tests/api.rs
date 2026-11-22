@@ -3743,6 +3743,11 @@ fn c1_long_run_switches_stay_bounded() {
         "restore_onsets",
         "dying",
         "open_queued",
+        "vram_held",
+        "vram_stopped",
+        "vram_shares",
+        "vram_engaged_scenes",
+        "vram_over_since",
     ] {
         assert!(n(k) <= 4, "bounds.{k} grew: {b}");
     }
@@ -9669,8 +9674,17 @@ fn vram_serve() -> Option<(Serve, PathBuf)> {
     vram_serve_with(&[])
 }
 
+/// The rule's test timing (`LIASCAPE_PLAYER_VRAM_TIMING`: interval, enter, resume, settle, scene
+/// hold in ms).
+const VRAM_TIMING: &str = "50,300,600,200,1000";
+
 /// [`vram_serve`] with `extra` in the server's environment.
 fn vram_serve_with(extra: &[(&str, &Path)]) -> Option<(Serve, PathBuf)> {
+    vram_serve_timed(VRAM_TIMING, extra)
+}
+
+/// [`vram_serve_with`] under the rule's `timing`.
+fn vram_serve_timed(timing: &str, extra: &[(&str, &Path)]) -> Option<(Serve, PathBuf)> {
     let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     if !can_run() {
         return None;
@@ -9682,7 +9696,7 @@ fn vram_serve_with(extra: &[(&str, &Path)]) -> Option<(Serve, PathBuf)> {
     let mut env: Vec<(&str, &Path)> = vec![
         ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
         ("LIASCAPE_PLAYER_VRAM_PROBE", &probe),
-        ("LIASCAPE_PLAYER_VRAM_TIMING", Path::new("50,300,600,200,1000")),
+        ("LIASCAPE_PLAYER_VRAM_TIMING", Path::new(timing)),
     ];
     env.extend_from_slice(extra);
     let srv = Serve::spawn_env(root, &["--clock", "real"], &env, Some(serial));
@@ -10032,11 +10046,18 @@ fn low_vram_pause_mode_pauses_without_freeing() {
     wait_moving(&mut c, &v, t1);
 }
 
-/// A video and a scene held by the low-VRAM `stop` hold with a big reserve: the scene's worker
-/// used 3600 MiB and the compositor 100 when it engaged; after the stop the compositor uses 60,
-/// so the reserve settles at 3640 (the scene's 3600 + the 40 the compositor freed; another
-/// process's VRAM in the sample is never ours) and 3940 free − 3640 stays low. The hold is
-/// announced (`vram.held`, `hello.vram_hold`, `state.vram_hold`). Returns (video, scene).
+/// [`vram_serve`] whose rule measures each stopped source's share 2 s after the stop
+/// ([`held_with_big_reserve`] writes the post-stop sample within it, however slow the client).
+fn vram_serve_slow_settle() -> Option<(Serve, PathBuf)> {
+    vram_serve_timed("50,300,600,2000,1000", &[])
+}
+
+/// A video and a scene held by the low-VRAM `stop` hold with a big reserve (a
+/// [`vram_serve_slow_settle`] server): the scene's worker used 3600 MiB and the compositor 100
+/// when it engaged; after the stop the compositor uses 60, so the reserve settles at 3640 (the
+/// scene's 3600 + the 40 the compositor freed; another process's VRAM in the sample is never
+/// ours) and 3940 free − 3640 stays low. The hold is announced (`vram.held`, `hello.vram_hold`,
+/// `state.vram_hold`). Returns (video, scene).
 fn held_with_big_reserve(
     c: &mut Client,
     file: &Path,
@@ -10053,7 +10074,7 @@ fn held_with_big_reserve(
     let vp = vram_probe(c);
     assert_eq!(vp["rule"]["reserve_mib"], json!(3700.0), "ours only, at the engage: {vp}");
     write_vram(file, 3940.0, &[(me, 60.0), (other, 3000.0)]);
-    wait_for(Duration::from_secs(3), "the reserve to settle at the held sources' share", || {
+    wait_for(Duration::from_secs(5), "the reserve to settle at the held sources' share", || {
         let vp = vram_probe(c);
         let r = vp["rule"]["reserve_mib"].as_f64();
         r.is_some_and(|r| (r - 3640.0).abs() < 0.01).then_some(())
@@ -10086,7 +10107,7 @@ fn held_with_big_reserve(
 /// the free VRAM there is and B plays; the replaced sources never reopen.
 #[test]
 fn low_vram_apply_while_held_plays_once_memory_allows() {
-    let Some((srv, file)) = vram_serve() else {
+    let Some((srv, file)) = vram_serve_slow_settle() else {
         return;
     };
     let mut c = srv.client();
@@ -10138,7 +10159,7 @@ fn low_vram_apply_while_held_plays_once_memory_allows() {
 /// `stopped`, nothing suspended, the rule back to normal), and the next wallpaper plays.
 #[test]
 fn low_vram_stop_clears_the_hold() {
-    let Some((srv, file)) = vram_serve() else {
+    let Some((srv, file)) = vram_serve_slow_settle() else {
         return;
     };
     let mut c = srv.client();
@@ -10164,7 +10185,7 @@ fn low_vram_stop_clears_the_hold() {
 /// video's 40 MiB stays reserved, the rule recovers, and only the video reopens.
 #[test]
 fn low_vram_replaced_source_drops_its_reserve() {
-    let Some((srv, file)) = vram_serve() else {
+    let Some((srv, file)) = vram_serve_slow_settle() else {
         return;
     };
     let mut c = srv.client();
