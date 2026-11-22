@@ -170,6 +170,14 @@ function openWindow(loadUrl) {
   win.on("minimize", () => sendActive(false));
   win.on("show", () => sendActive(true));
   win.on("restore", () => sendActive(true));
+  // the window on screen or not (hidden, minimized), apart from focus: with backgroundThrottling off Chromium keeps
+  // `visibilityState` "visible" in a hidden window. "Use the Steam app" holds Steam only while the Workshop shows
+  // (app/ui/src/hooks/useSteamAppPresence.ts)
+  const sendShown = (v) => { try { win.webContents.send("liascape:shown", v); } catch {} };
+  win.on("hide", () => sendShown(false));
+  win.on("minimize", () => sendShown(false));
+  win.on("show", () => sendShown(true));
+  win.on("restore", () => sendShown(true));
   // a page whose renderer dies or hangs comes back by itself; each reload carries the token the backend has now
   require("./renderer-recovery").recoverRenderer(win, () => withToken(loadUrl));
   win.loadURL(loadUrl);

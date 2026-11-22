@@ -729,7 +729,7 @@ export const Settings = memo(function Settings() {
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
         {/* three ways, one radio group (docs/decisions.md § "Offer three Workshop download modes, the user's choice") — each
             route its own radio, never a switch inside another or a silent fallback */}
-        <Row label="Use the Steam app" hint="like Wallpaper Engine does it, with a live progress bar. Needs Wallpaper Engine, and Steam shows you playing it for a few seconds." wk="workshopDownloadMode">
+        <Row label="Use the Steam app" hint="like Wallpaper Engine does it, with a live progress bar. Needs Wallpaper Engine. Steam shows you playing it from your first download until a minute after you leave the Workshop." wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
         <Row label="Open in the Steam app" hint="opens the wallpaper's page in Steam. You subscribe there and it downloads here.">
           <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>

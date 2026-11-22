@@ -151,6 +151,7 @@ public static class ServerHost
             var s = SettingsService.Load();
             AudioMonitor.Shutdown();
             FolderWatch.Stop(); // no pass starts while the app stops
+            SteamClientHold.Shutdown(); // "Playing Wallpaper Engine" ends with the app, not after the linger
             // legacy: hand auto-mute to a detached monitor-daemon (retired under liascape-player: the player's Signal goes on)
             if (s.AutoMute && !Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
             // Release timer ownership, then hand the timed playlist back to a detached `timer-daemon`
@@ -777,6 +778,9 @@ public static class ServerHost
         app.MapGet("/steam/status", () => Results.Json(SteamOps.Status()));
         // the UI expects a Workshop Browse request soon: connect the anonymous session ahead of it (never waits, never fails)
         app.MapPost("/steam/warm", () => Results.Json(new { warm = SteamAnonymous.Warm() }));
+        // the UI's word that the Workshop shows on Browse (repeated as a heartbeat) or not: how long "Use the Steam app" keeps
+        // its Steam connection (Helpers/SteamClientHold.cs); never connects by itself
+        app.MapPost("/steam/app-presence", (PresenceReq r) => { SteamClientHold.SetShowing(r.Showing); return Results.Json(new { connected = SteamClientHold.Connected }); });
         app.MapPost("/steam/qr/start", () => { SteamOps.StartQr(); return Results.Ok(); });
         app.MapPost("/steam/qr/cancel", () => { SteamOps.CancelQr(); return Results.Ok(); });
         app.MapPost("/steam/signout", () => { SteamOps.SignOut(); return Results.Ok(); });
@@ -1133,6 +1137,7 @@ public static class ServerHost
     public record MuteReq(bool User, bool Value);
     public record TrashReq(List<LibraryItem> Items);
     public record WorkshopIdReq(string? WorkshopId, string? Title = null);
+    public record PresenceReq(bool Showing);
     public record IdsReq(List<string>? Ids);
     public record FavoriteReq(string? WorkshopId, bool Favorite);
     public record CommentReq(string? WorkshopId, string? Owner, string? Text, int? Count);

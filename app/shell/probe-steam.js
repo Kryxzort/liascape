@@ -171,6 +171,9 @@
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
 //                         (Steam's session connects ahead of the page), at most one per 20 s; none from the tab while another
 //                         source shows there, none from another source's pill
+//   browse:appPresence    "Use the Steam app": the Workshop shown on Browse → POST /steam/app-presence {showing: true}; the
+//                         Library tab, another source, the window hidden (the shell's onShownChange) → {showing: false}, each
+//                         way back → true; under another download mode the page never sends one
 //   lib:ws:order         a Workshop item's Library sidebar: its counts in the hero row, the creator under it, then Playback, the
 //                         scene properties, the favourite and the comments, last, 12 px apart; none off the Workshop, for a plain
 //                         item, for a multi-selection
@@ -220,6 +223,8 @@ const STUB = `(() => {
     constructor(...a) { super(...a); sockets.push(this); }
     send(d) { st.wsSent.push(String(d)); return super.send(d); }
   };
+  // the shell's window-shown signal (browse:appPresence), only when a cell asks: the page sees no window.liascape otherwise
+  if (localStorage.getItem("__probe_shell_shown") === "1") window.liascape = { onShownChange: (cb) => { window.__shown = cb; } };
   window.__fakeWs = (type, payload) => { let n = 0; for (const s of sockets) if (s.readyState === 1 && s.onmessage) { s.onmessage({ data: JSON.stringify({ type, payload }) }); n++; } return n; };
   const items = Array.from({ length: 6 }, (_, i) => ({ title: "ws-" + (i + 1), thumbnailUrl: "", animatedThumbnailUrl: null,
     pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + (930000 + i), resolution: "1920 x 1080", isScene: false,
@@ -3129,6 +3134,45 @@ app.whenReady().then(async () => {
         if (!(await hover(".pill-strip > .pill", wsName))) return [...v, "no Workshop pill — proved nothing"];
         if (await warms() !== 1) v.push(`the Workshop pill hovered: ${await warms()} warm-ups, want 1`);
       } finally { await js(`localStorage.removeItem("__probe_we_local"); true`); }
+      return v;
+    });
+
+    // browse:appPresence — "Use the Steam app" holds its Steam connection only while the page says the Workshop shows on
+    // Browse in a shown window (hooks/useSteamAppPresence.ts → Helpers/SteamClientHold.cs); every change is one POST
+    await cell("browse:appPresence", async () => {
+      const v = [];
+      const srcs = (await http("GET", "/sources")).json;
+      const wsName = srcs.find((s) => s.supportsTagFilter && s.available)?.name, other = srcs.find((s) => s.supportsLocalFilter && s.available)?.name;
+      if (!wsName || !other) return [`no Workshop source (${wsName}) or no other source (${other}) — proved nothing`];
+      const sent = async () => (await calls()).filter((c) => c.p === "/steam/app-presence").map((c) => c.body?.showing);
+      const pill = (name) => page(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(name)})?.click();`);
+      const expect = async (want, what) => {
+        const got = await waitFor(async () => { const x = await sent(); return J(x) === J(want) ? x : null; }, 2500) || await sent();
+        if (J(got) !== J(want)) v.push(`${what}: sent ${J(got)}, want ${J(want)}`);
+      };
+      const mode0 = (await http("GET", "/settings")).json?.workshopDownloadMode ?? "subscribe";
+      await js(`localStorage.setItem("__probe_shell_shown", "1"); localStorage.setItem("__probe_we_local", "1"); true`);
+      try {
+        await setSettings({ workshopDownloadMode: "steamapp" });
+        await browseWs(SIGNED_OUT);
+        await expect([true], "the Workshop shown on Browse");
+        await tab("Library"); await expect([true, false], "the Library tab");
+        await tab("Browse"); await expect([true, false, true], "back on Browse");
+        await pill(other); await sleep(300); await expect([true, false, true, false], `${other} on Browse`);
+        await pill(wsName); await sleep(300); await expect([true, false, true, false, true], "the Workshop again");
+        if (!(await js(`typeof window.__shown === "function"`))) v.push("the page never listened to the shell's onShownChange");
+        else {
+          await js(`window.__shown(false); true`); await expect([true, false, true, false, true, false], "the window hidden");
+          await js(`window.__shown(true); true`); await expect([true, false, true, false, true, false, true], "the window shown again");
+        }
+        // another download mode: nothing at all, on load or on Browse
+        await setSettings({ workshopDownloadMode: "subscribe" });
+        await browseWs(SIGNED_OUT); await tab("Library"); await tab("Browse"); await sleep(500);
+        if ((await sent()).length) v.push(`under "Subscribe with Steam login": sent ${J(await sent())}, want nothing`);
+      } finally {
+        await setSettings({ workshopDownloadMode: mode0 });
+        await js(`localStorage.removeItem("__probe_shell_shown"); localStorage.removeItem("__probe_we_local"); true`);
+      }
       return v;
     });
 

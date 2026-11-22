@@ -55,10 +55,10 @@ back to running locally once the POST was sent: a doubled next skips one, a doub
 ## Steam & sources
 
 ### Browse the Workshop over Steam's client protocol, anonymously — 2026-11-11
-Scraping steamcommunity.com's browse page (30 items a page, AND-only tags, a page read per detail for the trailer) trips
-Steam's per-IP limit, which locks the user's browser out for 30+ min too. `PublishedFile.QueryFiles` gives 100 items a
-page with tags, previews and descriptions; the page scraper is the fallback only. One shared session, not one per call:
-connect + logon (1.2–2.6 s) costs more than a page (0.5–1.3 s). `Helpers/SteamAnonymous.cs`, `.claude/rules/backend/sources-steam.md`.
+Scraping steamcommunity.com's browse page (30 items a page, AND-only tags, a page read per detail) trips Steam's per-IP
+limit, locking the user's browser out for 30+ min too. `PublishedFile.QueryFiles` gives 100 items a page with tags,
+previews and descriptions; the scraper is the fallback only. One shared session: connect + logon (1.2–2.6 s) costs more
+than a page (0.5–1.3 s). `Helpers/SteamAnonymous.cs`.
 
 ### Gate every steamcommunity.com request app-wide — 2026-11-11
 Owner: "make sure you obey the rate limits so user dont face ip issues". One gate spaces request starts and turns a 429
@@ -77,25 +77,31 @@ of the allowed ages, which drops the few hundred items with no age tag; other gr
 
 ### Offer three Workshop download modes, the user's choice — 2026-11-18
 `steampage` (no login), `steamapp` (none given to Liascape), `subscribe` (default, the sign-in): one per level of trust.
-It replaced a steamcmd mode, dropped: it needs a Steam login too and the sign-in already downloads without subscribing.
-A mode never uses another's way (owner: "we dont switch modes when user haven't chose it!"): what it can't do is disabled
-with why; the to-do's "Let the Steam app do all N" is the user's own switch. `.claude/rules/backend/sources-steam.md`.
+A steamcmd mode was dropped: it needs a Steam login too, and the sign-in already downloads without subscribing. A mode
+never uses another's way (owner: "we dont switch modes when user haven't chose it!"): what it can't do is disabled with
+why; the to-do's "Let the Steam app do all N" is the user's own switch.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
-`libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a copy
-(owner: "what if other users dont got steamvr?"). A short-lived child loads the installed client's `steamclient.so` and
-calls ISteamUGC by vtable slot, slots read from Valve's wrappers with objdump. `Helpers/SteamClientUgc.cs`.
+`libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry one
+(owner: "what if other users dont got steamvr?"). A child loads the installed client's `steamclient.so` and calls
+ISteamUGC by vtable slot, read from Valve's wrappers. `Helpers/SteamClientUgc.cs`.
+
+### Hold the Steam app connection while the Workshop shows on Browse — 2026-11-22
+Connected, Steam shows "Playing Wallpaper Engine": a connection per download blinked it per item, each a friends'
+"now playing" popup; one for the app's lifetime shows the user in-game all day and blocks the real Wallpaper Engine. It
+starts at the first download, stays while Browse shows the Workshop, ends 60 s after the user leaves.
+`Helpers/SteamClientHold.cs`.
 
 ### Queue the Steam pages the user must click, one at a time, advanced by Next — 2026-11-11
 Opening N pages at once lost all but one (Steam shows one), and a bulk Delete from Source opened the whole subscriptions
-list. The to-do opens one page and waits for Next; it never reads Steam's subscribed state (that needs a Steam-client
-connection a `steampage` user may avoid, and "not on disk" doesn't mean unsubscribed). The only auto-advance (owner: "auto
-detect then if its flawless"): a subscribe entry absent at its turn whose files then appear. `Web/SteamTodo.cs`.
+list. The to-do opens one page and waits for Next; it never reads Steam's subscribed state (a Steam-client connection a
+`steampage` user may avoid; "not on disk" isn't unsubscribed). The one auto-advance (owner: "auto detect then if its
+flawless"): a subscribe entry absent at its turn whose files then appear. `Web/SteamTodo.cs`.
 
 ### Report Workshop download phases, not a percent — 2026-11-11
-Steam may reserve a staged file's full size before writing it, so a size-based percent sat at an empty bar for a minute
-on a large item. The poll reports "Steam is downloading it…" / "Steam is finishing…" over an indeterminate bar; only
-`steamapp` has Steam's real byte counts. `Helpers/WorkshopDownloader.cs`.
+Steam may reserve a staged file's full size before writing it: a size-based percent sat at an empty bar for a minute on
+a large item. The poll reports phases over an indeterminate bar; only `steamapp` has Steam's real byte counts.
+`Helpers/WorkshopDownloader.cs`.
 
 ### Open an unsubscribe page only for items in a Steam Workshop folder — 2026-11-11
 "Open in the Steam app"'s unsubscribe: a `local/<id>` link is a subscription, an owned `workshop/<id>` copy (a one-off)
@@ -104,14 +110,14 @@ never one, so ids without a folder are blocked at once, no page. `WorkshopDownlo
 ### Offer a password sign-in beside the QR — 2026-11-11
 Owner: "is it a dead end for users without mobile guard?" The QR sign-in needs the Steam mobile app; he chose both a
 password sign-in and downloads through the Steam app with no sign-in. Nothing retries a sign-in by itself: repeated
-attempts extend Steam's block. `Web/SteamOps.cs`; `.claude/rules/backend/sources-steam.md` § Sign-in.
+attempts extend Steam's block. `Web/SteamOps.cs`.
 
 ### Keep Steam tokens in the system keyring, a 0600 file as fallback — 2026-11-11
 Owner: "steam token is kept in plaintext??" → "system keyring and then fallback to some file other than settings.json".
 settings.json is posted by the UI and read by every process, so the tokens moved to `Helpers/SecretStore.cs`: the Secret
 Service, else `~/.config/liascape/steam-auth.json` (0600). Keyring-only was rejected: with no Secret Service (bare
-compositors) signing in wouldn't work; the file is as safe as Chromium's "basic" store. A denied keyring means signed
-out for 10 min, never a prompt loop. `.claude/rules/backend/sources-steam.md` § Secrets.
+compositors) signing in wouldn't work; the file is as safe as Chromium's "basic" store.
+`.claude/rules/backend/sources-steam.md` § Secrets.
 
 ### Ask Steam for a whole library's details in one request; never cache "can't tell" as "none" — 2026-11-12
 Tags and trailers are Workshop listing, not files: auto-imported items lack them. CM `GetDetails` takes 1000 ids, not 100
@@ -119,9 +125,8 @@ Tags and trailers are Workshop listing, not files: auto-imported items lack them
 whatever is asked. A failed check stores nothing (WE's offline mode caches "none" for good). `Web/LibraryFactsOps.cs`.
 
 ### Keep the Workshop in Steam's own sort orders — 2026-06-02
-Only Steam's sorts are offered for the Workshop (trend + period, newest, updated, most subscribed, top rated): results
-arrive page by page in Steam's order, so a client-side sort would reshuffle what infinite scroll already loaded. Only
-the local Wallpaper Engine source sorts client-side.
+Only Steam's sorts are offered for the Workshop: results arrive page by page in Steam's order, so a client-side sort
+would reshuffle what infinite scroll already loaded. The local Wallpaper Engine source sorts client-side.
 
 ## Library
 
