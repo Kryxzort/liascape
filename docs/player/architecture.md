@@ -5,8 +5,9 @@ Covers the whole Rust player (`src/player/`) and how the C# backend drives it (`
 [invariants.md](invariants.md). When this map and those disagree, they are right.
 
 `liascape-player` replaces mpvpaper + `liascape-transition` + per-monitor `linux-wallpaperengine` + `liascape-audio`
-with one process tree that owns every wallpaper type, on every monitor, with every transition. The backend selects
-it with `AppSettings.PlayerEngine` (`legacy` by default, `liascape-player` opt-in).
+with one process tree that owns every wallpaper type, on every monitor, with every transition. It is the backend's only
+engine; a missing binary is an error with its reason, never a fallback (`docs/decisions.md` § "Make liascape-player the
+only engine, no fallback").
 
 ## The invariant everything follows from
 
@@ -111,8 +112,8 @@ dropout detector after every transition; [debugging.md](debugging.md) maps audio
   `ctl`), but nothing in the app assigns different wallpapers, rotations or controls per output.
 - **The switch-over bar** (zero dropouts and seams across the compose matrix for ≥ 50 switches per
   mode, full live-settings parity, proven crash isolation, an 8 h soak with flat RSS and VRAM, a scene corpus no
-  worse than the legacy engine) is not yet met; only then does `PlayerEngine` default to `liascape-player` and the
-  legacy path go. Dated results: `docs/player/reports/`.
+  worse than the legacy engine) was waived: liascape-player is the only engine, and what those runs find is a bug to
+  fix. Dated results: `docs/player/reports/`.
 - **Scene compatibility** is an ongoing, corpus-driven programme of LWE patches (`patches/lwe/`, `UPSTREAM.md`),
   measured by the corpus and health runners ([modules/scene-lwe-core.md](modules/scene-lwe-core.md)).
 - **Out of scope by design:** X11 sessions and compositors without `wlr-layer-shell` (GNOME), WE "application"

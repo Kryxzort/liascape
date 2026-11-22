@@ -30,6 +30,9 @@ DLL=$T/backend/liascape-backend.dll
 mkdir -p "$T/home/.config/liascape" "$T/home/.cache" "$T/home/.local/share" "$T/rt" "$T/st"
 export HOME=$T/home XDG_CONFIG_HOME=$T/home/.config XDG_CACHE_HOME=$T/home/.cache XDG_DATA_HOME=$T/home/.local/share
 export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never reach the session's keyring from a test
+# the player: an `exit 1` stub, so no real liascape-player ever starts here
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 cleanup() { rc=$?; lp_tmp_done "$T" /tmp/liascape-xp- "$rc"; }
@@ -41,7 +44,7 @@ SJ=$XDG_CONFIG_HOME/liascape/settings.json
 
 N=16
 for round in 1 2 3; do
-  echo '{"Volume":0,"VolumeKeyTarget":"global","PlayerEngine":"legacy","AutoMute":false}' > "$SJ"
+  echo '{"Volume":0,"VolumeKeyTarget":"global","AutoMute":false}' > "$SJ"
   pids=()
   for _ in $(seq 1 $N); do "$DOTNET" "$DLL" volume-up >>"$T/cli.log" 2>&1 & pids+=($!); done
   codes=0; for p in "${pids[@]}"; do wait "$p" || codes=$((codes+1)); done

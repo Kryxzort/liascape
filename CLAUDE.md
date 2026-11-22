@@ -2,7 +2,7 @@
 
 Liascape is a live-wallpaper manager for Wayland: an Electron + React UI (`app/`) over a headless C# backend
 (`src/backend/`, the CLI, daemons and a loopback web API). Wallpapers play in `liascape-player`, a Rust compositor
-(`src/player/`), or under the legacy engine (`PlayerEngine=legacy`) in mpvpaper + linux-wallpaperengine + C helpers (`src/native/`).
+(`src/player/`), the only engine; the legacy engine's code (mpvpaper, `src/native/`) is unreachable and going.
 Users type one command, `liascape` (`scripts/liascape`): bare = the app, `liascape <command>` = the CLI, `liascape ctl …` = the player's socket.
 
 ## Verify your work
@@ -15,14 +15,13 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Adapter integration test: `bash scripts/test-liascape-player-adapter.sh [--no-build]`
 - Adapter self-test: `LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`
 - Settings merge / cross-process writes / settings latency: `bash scripts/test-settings-merge.sh`, `bash scripts/test-cross-process.sh`, `bash scripts/test-settings-latency.sh`
-- Player engine switching (a quick switch back, a binary that appears later): `bash scripts/test-engine-heal.sh`
+- liascape-player the only engine (a legacy settings file and session, a missing binary, one that appears later, the tests' stub): `bash scripts/test-player-binary.sh`
 - Steam paths (no account needed): `bash scripts/test-steam-signin.sh`; how long "Use the Steam app" stays connected: `bash scripts/test-steam-app-hold.sh`
 - The item sidebars' Workshop favourite / comments / creator / counts and Browse's Workshop lists (a fake community server, no network): `bash scripts/test-workshop-social.sh`
 - Library tags, trailers, frame sizes and sizes on disk (no network, fake Steam servers): `bash scripts/test-library-facts.sh`
 - Presets: their base scene, layered properties, the base's delete (fake Steam servers, no network): `bash scripts/test-presets.sh`
 - Preview clips following "Video preview quality" (debounce, up / down, cancel, restart): `bash scripts/test-clip-sweep.sh`
 - Previews made ahead of their cards (on-screen first, failures remembered, the hold, restart, live preview settings): `bash scripts/test-preview-backfill.sh`
-- Legacy engine: a cold launch's late announce and one auto-mute monitor (stub mpvpaper, own PID namespace): `bash scripts/test-legacy-launch.sh`
 - `serve` exits within 3 s of SIGTERM (idle, an open page's WebSocket, playing, a stalled /media download, the clip sweep): `bash scripts/test-backend-stop.sh`
 - The sidebar's crash-mark Clear and "open in your default app" (a stub xdg-open; what /open/media refuses): `bash scripts/test-item-actions.sh`
 - Folder import and watched folders (the scan, link / copy, live pickup, removals; sources never touched): `bash scripts/test-folder-import.sh`

@@ -127,8 +127,14 @@ public static class ServerHost
         // live. Handed back to a detached daemon on shutdown (below) so the playlist survives app close.
         // liascape-player: the player's program rotates by itself — no timer to own (no gui_timer.pid),
         // only a timer-daemon / restart-daemon a legacy session left behind to stop.
-        // (This also loads the engine NOW, cached: /settings compares against what actually runs when it changes.)
-        if (Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.KillLegacyDaemons();
+        // A legacy wallpaper (mpvpaper, LWE) this session left running would stay on screen beside liascape-player:
+        // reap it, and once the program is seeded below, replay the session on the player.
+        int legacyReaped = 0;
+        if (Liascape.Player.PlayerEngine.IsLiascapePlayer)
+        {
+            PlayerHelper.KillLegacyDaemons();
+            legacyReaped = PlayerHelper.ReapAllWallpaperProcs();
+        }
         else
         {
             PlayerHelper.KillTimerDaemon();
@@ -143,6 +149,14 @@ public static class ServerHost
         // stopped), and a legacy session still in timed_state.json moves into it
         if (Liascape.Player.PlayerEngine.IsLiascapePlayer) Liascape.Player.LiascapePlayerProgram.Startup();
         else if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
+        // the reaped legacy wallpaper's session, on the player: Restore replays LastSession only when the player shows
+        // nothing and no program runs (a legacy timed_state.json became the program just above)
+        if (legacyReaped > 0)
+            _ = Task.Run(() =>
+            {
+                try { PlayerHelper.Restore(); }
+                catch (Exception e) { Liascape.Player.LiascapePlayerClient.Log($"replaying the legacy session on liascape-player failed: {e.Message}"); }
+            });
         var startup = SettingsService.Load();
         // auto-mute: the player's Signal when it can (liascape-player + its `automute` capability), else AudioMonitor here
         AudioMonitor.ReconcileEngine();
@@ -487,10 +501,6 @@ public static class ServerHost
             try { (prev, s) = SettingsService.Patch(body); }   // keeps LastSession + the Steam sign-in from disk
             catch (JsonException e) { return Results.BadRequest(new { error = e.Message }); }
             Mark("load+save");
-            // PlayerEngine changed → stop the old engine, replay the session on the new one (else just
-            // refresh the cached engine + binary resolution). First, so everything below hits the new one.
-            PlayerHelper.SwitchEngineLive(prev, s);
-            Mark("engine");
             // live-apply the cheap ones, but respect the PLAYING wallpaper's per-item override so a global
             // change never clobbers an active override (effective = override ?? new global).
             var curPlaying = PlayerHelper.QueryCurrentPath();
@@ -586,7 +596,7 @@ public static class ServerHost
         });
         app.MapGet("/themes", () => Results.Json(ThemeService.All));
         app.MapGet("/mpv-preview", () => Results.Text(SettingsService.Load().BuildMpvOptions()));
-        // the Player engine row: what's asked for / running, whether liascape-player can run (+ why not)
+        // whether liascape-player can run (+ why not), what runs, scene and low-VRAM status (Settings reads it)
         app.MapGet("/player-engine", () => Results.Json(Liascape.Player.PlayerEngine.Status()));
         // API: which features can't work here because a build piece / runtime tool is missing (FeatureHealth) — the
         // Settings page's warning icons (one quick player hello; CLI checks cached 30 s).
@@ -704,13 +714,16 @@ public static class ServerHost
                     EventBus.Broadcast("download-progress", new { id = r.Result.PageUrl, value = 1.0, status = PresetDownloads.GettingBase });
                     await baseFetch.WaitAsync(ctx.RequestAborted);
                 }
-                if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why)
+                IResult NotApplied(string why)
                 {
                     var o = JsonSerializer.SerializeToNode(item, new JsonSerializerOptions(JsonSerializerDefaults.Web))!.AsObject();
                     o["notApplied"] = why;
                     return Results.Json(o);
                 }
-                var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions());
+                if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why) return NotApplied(why);
+                // the apply's own refusal (scenes off or unplayable here, no player binary): the same answer
+                try { var s = SettingsService.Load(); PlayerHelper.Apply(item.VideoPath, s.BuildMpvOptions()); }
+                catch (InvalidOperationException e) { return NotApplied(e.Message); }
                 SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } });
             }
             return Results.Json(item);

@@ -48,4 +48,4 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 - The dev backend keeps `serve.token` across `dotnet watch` restarts; Vite's dev-only `/__liascape/token` (`app/ui/vite.config.ts`) hands it to a page opened without `?token=`. A browser tab without Electron: `http://localhost:5173/?api=5174&token=$(cat ~/.config/liascape/serve.token)`.
 
 ## Binary resolution (backend)
-- `PlayerEngine.ResolveBinary`: `LIASCAPE_PLAYER_BIN` → next to `liascape-backend` → `<prefix>/libexec/liascape/` → `<prefix>/lib/liascape/` → the repo's release build, then its debug build → `PATH`. A missing player falls back to legacy with `/player-engine` `available:false`; it never crashes.
+- `PlayerEngine.ResolveBinary`: `LIASCAPE_PLAYER_BIN` → next to `liascape-backend` → `<prefix>/libexec/liascape/` → `<prefix>/lib/liascape/` → the repo's release build, then its debug build → `PATH`. A missing player is an error with its reason (`/player-engine` `available:false`, `/apply` refuses with it), never a fallback; it never crashes. Guard: `scripts/test-player-binary.sh`.

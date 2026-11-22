@@ -29,10 +29,11 @@
 #          only when the folder's own project.json names the id) and a scene base of that id landing later makes the preset
 #          play; a base not there leaves "Needs its base scene"; in a watched folder a preset waits
 #          for "Play scenes", joins the playlist, plays once its base turns up there (the presets' base pass runs), and
-#          leaves when its folder goes; under the legacy engine its reason; nothing in the tree or the fixtures changes.
+#          leaves when its folder goes; a legacy settings file changes none of it; nothing in the tree or the fixtures changes.
 #  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
 #          every root nor a watched folder's file by its own path, and no longer once the folder is unwatched.
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
+# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# `exit 1` stub (nothing ever plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-folder-import.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -79,6 +80,8 @@ export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET
 mkdir -p "$T/bin"; OPENED=$T/xdg-open.log; : > "$OPENED"
 printf '#!/bin/sh\n{ printf "argc=%%s\\n" "$#"; for a; do printf "arg=%%s\\n" "$a"; done; } >> %s\n' "'$OPENED'" > "$T/bin/xdg-open"
 chmod +x "$T/bin/xdg-open"; export PATH=$T/bin:$PATH
+# the player: a stub that never plays (nothing here applies a wallpaper)
+printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"; export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
 bad() { echo "FAIL  $1"; FAIL=$((FAIL + 1)); }
@@ -122,7 +125,7 @@ printf '{"5555555555":{"title":"Subscribed","workshopId":"5555555555"}}' > "$LIB
 SRC_SUM=$(cd "$S" && find . -path ./locked -prune -o -type f -print0 2>/dev/null | sort -z | xargs -0 sha1sum | sha1sum)
 
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"legacy","WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
+{"WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
 EOF
 
 LOG=$T/backend.log
@@ -385,10 +388,8 @@ webdir() { mkdir -p "$1"; printf '{"type":"web","file":"index.html","title":"%s"
 webdir "$PT/web/3419466417" "Web Base" 3419466417; webdir "$PT/web2/900000077" "Web By Name"
 treesum() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum); }
 PT_SUM=$(treesum "$PT"); FX_SUM=$(treesum "$FX")
-printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
-jq '.PlayerEngine = "liascape-player"' "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/s" && mv "$T/s" "$XDG_CONFIG_HOME/liascape/settings.json"
-startbe LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=800 LIASCAPE_WATCH_RESCAN_MS=60000
-check "the engine is liascape-player (the stub binary)" "$(api "$U/player-engine" | jq -r .active)" liascape-player
+startbe LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=800 LIASCAPE_WATCH_RESCAN_MS=60000
+check "the player binary resolves (the stub)" "$(api "$U/player-engine" | jq -r .available)" true
 pr() { item "$1" | jq -c '[.isPreset, .isScene, .presetReason, .basePath]'; }
 found() { jq -nc --argjson p "$(P "${@:3}")" --argjson s "$2" --argjson r "$(P "$PT")" --argjson c "$1" '{paths: $p, copy: $c, skip: $s, roots: $r}'; }   # $1 copy, $2 skip (JSON), paths…
 SP=$(post /library/scan "$(jq -nc --arg p "$PT" '{paths: [$p]}')")
@@ -468,8 +469,8 @@ post /library/watched "$(jq -nc --arg w "$W3" '{path: $w, remove: true}')" > /de
 stopbe
 jq '.PlayerEngine = "legacy"' "$XDG_CONFIG_HOME/liascape/settings.json" > "$T/s" && mv "$T/s" "$XDG_CONFIG_HOME/liascape/settings.json"
 startbe
-check "legacy engine: an imported preset with its base says it plays only in the Liascape player" \
-  "$(pr "Preset fixture 1")" "[true,true,\"Presets play only in the Liascape player\",\"$IMP/Base One\"]"
+check "a legacy settings file (PlayerEngine legacy, ignored): an imported preset with its base still plays" \
+  "$(pr "Preset fixture 1")" "[true,true,null,\"$IMP/Base One\"]"
 check "…a missing base still says so first" "$(item "Preset fixture 2, named base" | jq -c .presetReason)" '"Needs its base scene"'
 for t in "Preset fixture 1" "Preset fixture 2" "Preset fixture 1, my copy" "Preset fixture 2, named base" "Base One"; do post /library/delete "$(item "$t")" > /dev/null; done
 check "deleted (copies and links): every source file and fixture unchanged" "$(treesum "$PT") $(treesum "$FX")" "$PT_SUM $FX_SUM"

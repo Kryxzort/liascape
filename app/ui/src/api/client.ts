@@ -300,8 +300,8 @@ export const api = {
   monitors: () => jget<{ name: string; refreshHz: number; primary: boolean }[]>("/monitors"),
   saveSettings: (s: Record<string, unknown>) => jpost("/settings", s),
   mpvPreview: () => fetch(`${API}/mpv-preview`, { headers: authHeaders() }).then((r) => r.text()),
-  // Player engine row: asked-for vs running engine, whether liascape-player can run (+ why not)
-  playerEngine: () => jget<{ engine: string; active: string; available: boolean; binary: string | null; reason: string | null;
+  // API: /player-engine — whether liascape-player can run (+ why not), its scene and low-VRAM status
+  playerEngine: () => jget<{ available: boolean; binary: string | null; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null }>("/player-engine"),
   // API: /health/features — features a missing build piece / tool breaks here (FeatureHealth.cs); `affects` = the

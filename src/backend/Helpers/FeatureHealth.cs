@@ -33,7 +33,7 @@ public static class FeatureHealth
 
     public static List<Feature> Report(AppSettings s)
     {
-        bool onPlayer = PlayerEngine.Wants(s); // the engine the user picked (a missing binary is the first feature)
+        bool onPlayer = PlayerEngine.IsLiascapePlayer; // the only engine (a missing binary is the first feature)
         string? missing = PlayerEngine.ResolveBinary() == null ? PlayerEngine.UnavailableReason : null;
         JsonElement? ph = null;
         (bool, string?) scenes;
@@ -57,7 +57,7 @@ public static class FeatureHealth
 
     public static bool InUse(string id, AppSettings s) => id switch
     {
-        "liascape-player" => PlayerEngine.Wants(s),
+        "liascape-player" => true,
         "scenes" => s.AllowScenes,
         "transitions" => s.GlobalTransitionEnabled,
         "vram" => s.LimitVramPerScene || !string.Equals(s.VramLowMode, "off", StringComparison.OrdinalIgnoreCase),
@@ -101,7 +101,7 @@ public static class FeatureHealth
     {
         var f = new List<Feature>
         {
-            new("liascape-player", "liascape-player (the wallpaper player)", i.LiascapePlayerMissing == null, i.LiascapePlayerMissing, ["playerEngine"]),
+            new("liascape-player", "liascape-player (the wallpaper player)", i.LiascapePlayerMissing == null, i.LiascapePlayerMissing, []),
             new("scenes", "Wallpaper Engine scenes", i.Scenes.ok,
                 i.Scenes.ok ? null : i.Scenes.reason ?? "scenes can't play here", ["allowScenes"]),
         };

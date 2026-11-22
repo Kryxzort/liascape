@@ -648,8 +648,8 @@ app.whenReady().then(async () => {
 
     await cell("nudge:engine — \"Full-live sync nudge\" only under the legacy engine; its value stays saved", async () => {
       const v = [];
-      const eng = (await http("GET", "/player-engine")).json?.active;
-      if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
+      const eng = (await http("GET", "/player-engine")).json;
+      if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
       await setSettings({ SettingsLevel: "expert", TransitionMethod: "full-live", FullLiveSyncOffsetMs: -40 });
       try {
         await load();
@@ -691,8 +691,8 @@ app.whenReady().then(async () => {
 
     await cell("vram:stopShows — \"Stopped scene shows\" sits under the cap, a Last frame / Nothing switch that saves sceneVramStopShows", async () => {
       const v = [];
-      const eng = (await http("GET", "/player-engine")).json?.active;
-      if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
+      const eng = (await http("GET", "/player-engine")).json;
+      if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
       const ROW = "Stopped scene shows";
       await setSettings({ SettingsLevel: "expert", LimitVramPerScene: false, SceneVramStopShows: "last_frame" });
       try {
@@ -730,8 +730,8 @@ app.whenReady().then(async () => {
     // bring none back. Proves something only where "Play scenes" (the rows' old neighbour) shows.
     await cell("fonts:gone — no \"Use Windows fonts in scenes\" / \"Windows fonts folder\" row at any level", async () => {
       const v = [];
-      const eng = (await http("GET", "/player-engine")).json?.active;
-      if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
+      const eng = (await http("GET", "/player-engine")).json;
+      if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
       try {
         await setSettings({ UseWindowsFonts: true, WindowsFontsFolder: "/mnt/win/Windows/Fonts" });
         for (const lv of ["basic", "standard", "advanced", "expert"]) {
@@ -774,8 +774,8 @@ app.whenReady().then(async () => {
 
     await cell("levels:rows — every row the re-tier moved shows from exactly its level, its section's other rows keep theirs", async () => {
       const v = [];
-      const eng = (await http("GET", "/player-engine")).json?.active;
-      if (eng !== "liascape-player") return [`the stack runs ${J(eng)}, not liascape-player — proved nothing`];
+      const eng = (await http("GET", "/player-engine")).json;
+      if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
       try {
         await setSettings({ NormalizeAudio: true, NoAudio: false, LimitVramPerScene: true, WorkshopDownloadMode: "steamcmd" });
         for (const lv of LEVELS) {

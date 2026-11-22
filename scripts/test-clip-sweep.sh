@@ -60,6 +60,9 @@ H=$T/home
 mkdir -p "$H/.config/liascape" "$H/.cache" "$H/.local/share" "$H/rt" "$H/st"
 export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME=$H/.local/share XDG_RUNTIME_DIR=$H/rt XDG_STATE_HOME=$H/st
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# the player: an `exit 1` stub, so no real liascape-player ever starts here
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 export LIASCAPE_CLIP_SETTLE_MS=1000 LIASCAPE_CLIP_GRACE_MS=2000 LIASCAPE_CLIP_RELEASE_MS=500 LIASCAPE_CLIP_HOLD_MS=5000
 PASS=0; FAIL=0
 ok() { echo "PASS  $1"; PASS=$((PASS + 1)); }
@@ -83,7 +86,7 @@ ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=size=320x240:rate=10" -f l
 IDX=$(jq -c '.f = {title: "f"}' <<< "$IDX")
 printf '%s' "$IDX" > "$LIB/imported/index.json"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"legacy","WorkshopFolder":"$T/we","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,"VideoPreviewQuality":"high"}
+{"WorkshopFolder":"$T/we","AutoAddWeWallpapersToLibrary":false,"NoAudio":true,"VideoPreviewQuality":"high"}
 EOF
 SRC_SUM=$(sha256sum "$LIB"/imported/*/*.mp4 | sha256sum)
 

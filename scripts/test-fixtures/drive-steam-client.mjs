@@ -628,14 +628,14 @@ await setMode("steamapp");
   }
   const presetResult = (id) => ({ ...result(id), isScene: true, isPreset: true });
   const dl = (id, oneOff = false) => post("/download", { source: src, result: presetResult(id), apply: false, oneOff });
-  const LEGACY = "Presets play only in the Liascape player"; // the legacy engine here: the base was found, a scene
+  const PLAYS = null; // a preset's presetReason once its base scene is here: it plays
   const calls = () => fakeLines("calls");
   n0 = urls().length;
   const rk = await settle(dl("3583880694"), 60000);
-  await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === LEGACY, 60000);
+  await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === PLAYS, 60000);
   const c1 = calls();
   out(rk?.status === 200 && c1.includes("subscribe 3583880694") && c1.indexOf("subscribe 3354740764") > c1.indexOf("subscribe 3583880694")
-    && !!(await item("3354740764")) && (await item("3583880694"))?.presetReason === LEGACY && urls().length === n0,
+    && !!(await item("3354740764")) && (await item("3583880694"))?.presetReason === PLAYS && urls().length === n0,
     "preset (Use the Steam app): the client subscribes the preset, then its base; both imported, nothing opened", `${rk?.status} | ${c1.filter((l) => /33547|35838/.test(l)).join(", ")}`);
   const rk2 = await settle(dl("3420428971", true), 60000);
   await until(async () => (await item("3419466417")) && fakeLines("downloads").includes("3419466417"), 60000);
@@ -678,9 +678,9 @@ await setMode("steamapp");
   await waitTodo((x) => x?.total === 1 && x.current?.id === "910000101");
   await post("/steam-todo/use-steam-app");
   const rT = await pT;
-  await until(async () => (await item("900000001")) && (await item("910000101"))?.presetReason === LEGACY, 30000);
+  await until(async () => (await item("900000001")) && (await item("910000101"))?.presetReason === PLAYS, 30000);
   const cT = calls();
-  out(rT?.status === 200 && after(cT, "910000101", "900000001") && !!(await item("900000001")) && (await item("910000101"))?.presetReason === LEGACY
+  out(rT?.status === 200 && after(cT, "910000101", "900000001") && !!(await item("900000001")) && (await item("910000101"))?.presetReason === PLAYS
     && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000101",
     "preset (Open in the Steam app → Let the Steam app do all 1): the client subscribes the preset, then its base; both imported, only the preset's page opened",
     `${rT?.status} | ${cT.filter((l) => /910000101|900000001/.test(l)).join(", ")} | ${(await item("910000101"))?.presetReason} | ${urls().slice(n0).join(" ")}`);

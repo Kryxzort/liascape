@@ -24,11 +24,11 @@
 #     community page + the items' details (current counts again);
 #     the cookie's token in no log line and not in settings.json; every request with the Firefox User-Agent.
 #  4. Steam's 429: the comments answer 429 "try again in N min", the cooldown file is written and the next read sends nothing.
-#  5. a scene's presets (/browse `list` kind "presets", QueryFiles' child lookup; the engine is liascape-player through a
+#  5. a scene's presets (/browse `list` kind "presets", QueryFiles' child lookup; the player is a
 #     stub binary that never runs): exactly the presets naming it (a web-based one left out), paged 100 at a time, sorted
 #     as asked; the whole Workshop's default list holds none, Preset ticked holds only presets; a preset's base
 #     (/workshop/base: Steam's one child, its title and kind, the library's folder, one GetDetails per item; 404 / 400);
-#     scene support off or the legacy engine → no presets.
+#     scene support off → no presets; a legacy settings file's PlayerEngine changes nothing.
 #  6. the shared Workshop details cache (POST /workshop/details, Helpers/WorkshopDetailsCache.cs): the found items in the
 #     asked order with their created time and score, the missing ones in one GetDetails, a second ask sends nothing (an id
 #     Steam has none of remembered for the run, not on disk), kept in $XDG_CACHE_HOME/liascape/workshop/details.json (saves
@@ -141,10 +141,10 @@ node "$ROOT/scripts/test-fixtures/fake-steam-community.mjs" "$T/fake.port" "$ME"
 for _ in $(seq 1 50); do [ -s "$T/fake.port" ] && break; sleep 0.1; done
 [ -s "$T/fake.port" ] || { echo "FAIL  the fake community server didn't start"; cat "$T/fake.log"; exit 1; }
 export FAKE=http://127.0.0.1:$(cat "$T/fake.port")
-# the engine is liascape-player (presets are offered only there), its binary a stub: nothing here ever plays
+# the player's binary is a stub: nothing here ever plays
 mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
 export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
-printf '{"PlayerEngine":"liascape-player","NoAudio":true,"AllowScenes":true,"AutoAddWeWallpapersToLibrary":false}\n' > "$XDG_CONFIG_HOME/liascape/settings.json"
+printf '{"NoAudio":true,"AllowScenes":true,"AutoAddWeWallpapersToLibrary":false}\n' > "$XDG_CONFIG_HOME/liascape/settings.json"
 # the backend's log is appended to across a restart (§ 6 counts its GetDetails lines over both runs)
 start_backend() {
   rm -f "$XDG_CONFIG_HOME/liascape/serve.port"
@@ -774,7 +774,7 @@ setFile({ AllowScenes: true });
 out(r.status === 200 && r.json?.length === 0 && rf.status === 200 && rf.json?.length === 0, "scene support off: no presets list, Preset ticked finds nothing", J([r, rf.json?.length]));
 r = await post("/settings", { PlayerEngine: "legacy" });
 const rl = await browse({ kind: "presets", id: "1003" });
-out(r.status === 200 && rl.status === 200 && rl.json?.length === 0, "the legacy engine: no presets list", J([r.status, rl]));
+out(r.status === 200 && rl.status === 200 && J(wids(rl)) === J(["2001", "2002"]), "PlayerEngine legacy (an old settings key, ignored): the presets list as before", J([r.status, wids(rl)]));
 
 // ---- 6. the shared Workshop details cache (POST /workshop/details) ----
 let before = count(/GetDetails of/);

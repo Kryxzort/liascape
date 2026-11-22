@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic integration test of the backend's liascape-player adapter (PlayerEngine=liascape-player).
+# Hermetic integration test of the backend's liascape-player adapter.
 # See docs/player/adapter.md § Integration test.
 #
 # It runs the REAL `liascape serve` backend against a PRIVATE `liascape-player serve --headless --clock
@@ -31,7 +31,7 @@
 #   scripts/test-liascape-player-adapter.sh             # builds liascape-player (cargo, via the flake devShell when
 #                                                 # `nix` exists) + the backend (dotnet build), then tests
 #   scripts/test-liascape-player-adapter.sh --no-build  # use what's built (e.g. a tree `dotnet watch` owns)
-#   LIASCAPE_IT_ONLY=presets …                          # only the presets section (then the engine switch at the end)
+#   LIASCAPE_IT_ONLY=presets …                          # only the presets section
 #   LIASCAPE_IT_ONLY=automute …                         # only the auto-mute section
 #   LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor …          # the auto-mute section with the backend's AudioMonitor as the
 #                                                 # engine (the player's Signal off: LIASCAPE_PLAYER_AUTOMUTE=0) —
@@ -158,7 +158,7 @@ L1=$T/l1.mp4; clip "$L1" testsrc2 360 20
 LU=$T/lu.mp4; clip "$LU" testsrc2 360 30   # outlasts the 10 s stale check while an end-of-video switch is armed
 
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Volume":100,"GlobalTransitionEnabled":true,
+{"NoAudio":false,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
  "GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
  "RestartMpvpaperEverySeconds":600}
@@ -298,7 +298,7 @@ SNAP=$XDG_STATE_HOME/liascape/liascape-player/snapshot.json
 snap_paused() { jq -e --argjson v "$1" '.player.paused == $v' "$SNAP" >/dev/null 2>&1; }
 
 PE=$(curl -sf -m 5 "$U/player-engine"); echo "player-engine: $PE"
-[ "$(echo "$PE" | jq -r .active)" = "liascape-player" ] || { echo "ABORT: backend not on liascape-player — refusing to touch any legacy player"; exit 1; }
+[ "$(echo "$PE" | jq -r .available)" = true ] || { echo "ABORT: the backend's liascape-player isn't available"; exit 1; }
 
 # Helpers more than one section uses (here, so `LIASCAPE_IT_ONLY` can skip the sections that once defined them)
 LIB=$XDG_DATA_HOME/liascape/library
@@ -2855,6 +2855,17 @@ for _ in 1 2 3 4; do post /random '{}' >/dev/null; waitfor $WAIT settled; done
   && ok "/random ×4 never lands on them ($(( $(nsch) - ns )) switches)" || bad "/random after the base's trash: $(pr_sched_to "$ns" "$PR1") to P1, $(pr_sched_to "$ns" "$PR2") to P2 of $(( $(nsch) - ns ))"
 err=$(curl -s -m 10 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$PR1\"}" "$U/apply" | jq -r '.error // empty')
 [ "$err" = "Needs its base scene" ] && [ "$(cur path)" != "$PR1" ] && ok "/apply the preset → refused: \"$err\"" || bad "/apply a preset without its base → error \"$err\", cur $(basename "$(cur path)")"
+# a playlist of unplayable presets plays nothing and says why; play-from on one is refused with its reason (never quietly
+# the item after it); the rotation that plays goes on (it may switch between a and b meanwhile), the saved playlist is untouched
+ns=$(nsch); pl0=$(curl -sf -m 5 "$U/playlist/state" | jq -c .videoPaths)
+m1=$(post /playlist/play "{\"paths\":[\"$PR1\",\"$PR2\"],\"settings\":{\"order\":0}}" | jq -r '.message // "?"')
+m2=$(post /playlist/play-from "{\"paths\":[\"$A\",\"$PR1\"],\"startIndex\":1,\"settings\":{\"order\":0}}" | jq -r '.message // "?"')
+sleep 1
+c=$(cur path)
+[ "$m1" = "Needs its base scene" ] && [ "$m2" = "Needs its base scene" ] && [ "$(pr_sched_to "$ns" "$PR1")$(pr_sched_to "$ns" "$PR2")" = 00 ] \
+  && { [ "$c" = "$A" ] || [ "$c" = "$Bc" ]; } && [ "$(curl -sf -m 5 "$U/playlist/state" | jq -c .videoPaths)" = "$pl0" ] \
+  && ok "Play [P1, P2] and play-from P1 → refused: \"$m1\", the rotation plays on ($(basename "$c"))" \
+  || bad "unplayable presets: Play → \"$m1\", play-from → \"$m2\", switches to P1 $(pr_sched_to "$ns" "$PR1") / P2 $(pr_sched_to "$ns" "$PR2"), cur $(basename "$c"), playlist $(curl -sf -m 5 "$U/playlist/state" | jq -c .videoPaths)"
 undo=$(post /library/undo '{}' | jq -c .ok)
 [ "$undo" = true ] && [ "$(reason_of "$PR1")$(reason_of "$PR2")" = '[true,null][true,null]' ] && ok "Undo → the base is back, both presets playable" || bad "undo: $undo, P1 $(reason_of "$PR1"), P2 $(reason_of "$PR2")"
 ns=$(nsch); hit=0
@@ -2904,16 +2915,7 @@ kill "$FWP" 2>/dev/null; wait "$FWP" 2>/dev/null; FWP=""
 [ ! -s "$LEGACY_FILES_LOG" ] && ok "no pending_action.txt / timer.pid / gui_timer.pid / restart.pid / timed_state.json / playlist_observer_paths.json at any sample" \
   || bad "legacy files seen: $(awk '{print $2}' "$LEGACY_FILES_LOG" | sort | uniq -c | tr -s ' \n' ' ') (first: $(head -1 "$LEGACY_FILES_LOG"))"
 
-echo "== engine switch liascape-player → legacy with nothing playing (no legacy media starts)"
-mp0=$(pgrep -c -f mpvpaper); setting '.PlayerEngine = "legacy"'; sleep 1
-[ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = legacy ] && ok "/player-engine active=legacy" || bad "active → $(curl -sf -m 5 "$U/player-engine")"
-kill -0 "$SP" 2>/dev/null && bad "liascape-player supervisor still running after the switch away" || ok "liascape-player supervisor quit on switch away"
-kill -0 "$CP" 2>/dev/null && bad "liascape-player compositor still running after the switch away" || ok "liascape-player compositor quit on switch away"
-[ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "no mpvpaper started/killed" || bad "mpvpaper count changed"
-if [ -n "${PR1:-}" ]; then
-  perr=$(curl -s -m 10 -X POST -H 'Content-Type: application/json' -d "{\"path\":\"$PR1\"}" "$U/apply" | jq -r '.error // empty')
-  [ "$perr" = "Presets play only in the Liascape player" ] && [ "$(pgrep -c -f mpvpaper)" = "$mp0" ] && ok "legacy engine: /apply a preset → refused: \"$perr\"" || bad "legacy × /apply a preset: error \"$perr\", mpvpaper $(pgrep -c -f mpvpaper) (was $mp0)"
-fi
+echo "== no settings dump in the logs"
 grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 
 echo "== adapter log (tail)"

@@ -35,8 +35,8 @@ public static class AppOps
         int? playFrom = null)
     {
         if (paths.Count == 0) return "Playlist is empty";
-        // a playlist of presets that can't play (their base gone, the legacy engine) plays nothing: say why rather than
-        // leave the screen as it was with no word. Guard: test-legacy-launch.sh § presets
+        // a playlist of presets that can't play (their base gone) plays nothing: say why rather than leave the screen as
+        // it was with no word. Guard: scripts/test-liascape-player-adapter.sh § presets
         if (paths.All(p => PlayerHelper.PresetUnplayableReason(p) != null)) return PlayerHelper.PresetUnplayableReason(paths[0])!;
         // Persist what's actually playing as the current playlist state. TransitionService.CurrentConfig()
         // (the transition/crossfade gate) reads playlist_state.json — without this, /playlist/play only
@@ -53,6 +53,7 @@ public static class AppOps
 
         if (PlayerEngine.IsLiascapePlayer)
         {
+            if (PlayerEngine.MissingReason() is string missing) return missing;
             // the player's program — the bar's order (the player shuffles), the playlist's "When the
             // playlist starts again" (§ Playlist start: Start over / Resume), its identity = the bar's saved name
             bool adv = EffAdvance(s, ps);
@@ -86,8 +87,8 @@ public static class AppOps
     public static string PlayFrom(List<string> paths, int startIndex, PlaylistSettings ps)
     {
         if (paths.Count == 0 || startIndex < 0 || startIndex >= paths.Count) return "bad index";
-        // the clicked item is a preset that can't play: refused with its reason, as /apply is (both engines), never
-        // quietly the item after it. Guard: test-legacy-launch.sh § presets
+        // the clicked item is a preset that can't play: refused with its reason, as /apply is, never quietly the item
+        // after it. Guard: scripts/test-liascape-player-adapter.sh § presets
         if (PlayerHelper.PresetUnplayableReason(paths[startIndex]) is string why) return why;
         // liascape-player: the program plays from that item (`from: index` — an explicit play-from beats the
         // start setting) in the playlist's own order; the player shuffles the rest of a shuffled cycle

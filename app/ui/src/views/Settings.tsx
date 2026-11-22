@@ -457,13 +457,14 @@ export const Settings = memo(function Settings() {
   const [wipeArm, setWipeArm] = useState(-1);   // same arming pattern for "Clear settings"
   // auto-detected outputs (hyprctl/sway): name + current refresh rate + which is focused/primary
   const [detected, setDetected] = useState<{ name: string; refreshHz: number; primary: boolean }[]>([]);
-  // liascape-player availability for the "Player engine" row (binary found? last start error?)
-  const [engine, setEngine] = useState<{ active: string; available: boolean; reason: string | null;
+  // liascape-player's status (binary found? last start error? scenes, low VRAM)
+  const [engine, setEngine] = useState<{ active?: string; available: boolean; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
     vram?: { low_active: boolean | null; mode: string } | null } | null>(null);
   // liascape-player draws the wallpaper: one scene worker shared by every output (no per-monitor primary),
   // no scene-load lead (it switches when the scene's first frame is in), the fps applies live
-  const liascapeActive = engine?.active === "liascape-player";
+  // (the backend has one engine and names none; `active: "legacy"` only from a probe's stubbed status)
+  const liascapeActive = engine !== null && engine.active !== "legacy";
   // legacy-only rows wait for the engine status (they'd show, then vanish, under liascape-player)
   const legacyActive = engine?.active === "legacy";
 
@@ -490,11 +491,11 @@ export const Settings = memo(function Settings() {
   // Monitor auto-detection feeds a datalist so the name fields autocomplete real outputs
   // instead of pure free-text guessing.
   useEffect(() => { api.monitors().then(setDetected).catch(() => {}); }, []);
-  // read at once on mount, then again after an engine change (the backend switches live and may
-  // report a start failure). Unreachable → not available, with the reason.
+  // read at once on mount, then again after a scene-support change (the backend may report a start failure).
+  // Unreachable → not available, with the reason.
   useEffect(() => {
     const t = setTimeout(() => api.playerEngine().then(setEngine)
-      .catch(() => setEngine({ active: "legacy", available: false, reason: "couldn't read the engine status from the backend" })),
+      .catch(() => setEngine({ available: false, reason: "couldn't read the engine status from the backend" })),
       engine === null ? 0 : 600);
     return () => clearTimeout(t);
   }, [g("playerEngine", "legacy"), g("allowScenes", false)]); // eslint-disable-line
@@ -797,23 +798,6 @@ export const Settings = memo(function Settings() {
       </Section>
 
       <Section title="Under the hood" icon={<Wrench size={15} />} lv="advanced">
-        {(() => {
-          const wantPlayer = g<string>("playerEngine", "legacy") === "liascape-player";
-          // status not read yet → disabled ("checking…"); binary missing → disabled with the reason
-          // (switching back to Legacy always stays possible)
-          const loading = engine === null;
-          const unavailable = !loading && !engine.available;
-          const off = loading || (unavailable && !wantPlayer);
-          const hint = loading ? "checking liascape-player…"
-            : unavailable ? engine.reason ?? "liascape-player is not available"
-            : wantPlayer && engine.active !== "liascape-player" ? "liascape-player is selected but not running: " + (engine.reason ?? "starting…")
-            : wantPlayer && engine.reason ? engine.reason
-            : "what draws the wallpaper. liascape-player is the new all-in-one player (experimental, scenes need Wallpaper Engine installed for its assets). It switches live.";
-          return <Row label="Player engine" hint={hint} disabled={off} rk="playerEngine">
-            <Select value={g("playerEngine", "legacy")} disabled={off} onChange={(v) => set("playerEngine", v)}
-              options={[{ value: "legacy", label: "Legacy" }, { value: "liascape-player", label: "liascape-player (experimental)" }]} />
-          </Row>;
-        })()}
         <Row label="Transition style" hint={"how one wallpaper changes to the next. " + (TRANSITION_STYLE[g<string>("transitionMethod", "reveal")] ?? TRANSITION_STYLE.reveal)} rk="transitionMethod">
           <Select value={g("transitionMethod", "reveal")} onChange={(v) => set("transitionMethod", v)}
             options={[{ value: "reveal", label: "Reveal" }, { value: "frozen", label: "Frozen" }, { value: "full-live", label: "Full-live" }]} />

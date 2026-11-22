@@ -14,7 +14,8 @@
 #         own animated preview and the videos without one, /media serves each as its own type, the gif and the mkv open in
 #         the user's app, a re-import is the same item, delete takes it away; a URL download's <key>.gif beside its video
 #         stays its preview, and never stands in for a broken video link. Helpers/ImportService.cs, LibraryService.ResolveItemMedia.
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend (legacy engine: no player).
+# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# `exit 1` stub (nothing plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-item-actions.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -57,6 +58,9 @@ H=$T/home
 mkdir -p "$H/.config/liascape" "$H/.cache" "$H/.local/share" "$H/rt" "$H/st"
 export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME=$H/.local/share XDG_RUNTIME_DIR=$H/rt XDG_STATE_HOME=$H/st
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# the player: an `exit 1` stub, so no real liascape-player ever starts here
+mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"
+export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 # the backend's xdg-open: records each call's argv, opens nothing
 mkdir -p "$T/bin"; OPENED=$T/xdg-open.log; : > "$OPENED"
 printf '#!/bin/sh\n{ printf "argc=%%s\\n" "$#"; for a; do printf "arg=%%s\\n" "$a"; done; } >> %s\n' "'$OPENED'" > "$T/bin/xdg-open"
@@ -100,7 +104,7 @@ cp "$LIB/imported/v1/v1.mp4" "$LIB/imported/bad/video.txt"
 mkdir -p "$LIB/imported/bad/dir.mp4"
 mkfifo "$LIB/imported/bad/fifo.mp4"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"legacy","WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
+{"WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
 EOF
 
 LOG=$T/backend.log

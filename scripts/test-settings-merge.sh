@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Hermetic test of POST /settings's merge (PATCH) semantics under PlayerEngine=liascape-player: the body's keys
+# Hermetic test of POST /settings's merge (PATCH) semantics on liascape-player: the body's keys
 # overwrite the saved settings, every key it leaves out keeps its saved value. Replacing the whole
 # AppSettings, a partial body (an agent's {"Volume": 50}) would reset every other field to its C# default
-# (SceneMonitors and the engine among them, which then switches the player away). Checks: a partial body
+# (SceneMonitors and the rotation among them). Checks: a partial body
 # changes only its own fields (camelCase and PascalCase keys), a provided array replaces the whole array,
 # an explicit null sets null, unknown keys (incl. the removed LweSilent) are ignored, a bad value is a 400
 # that saves nothing, parallel partial bodies all land, a full body (the UI's whole copy) behaves as
 # before incl. the backend-owned fields kept from disk, and a partial body still applies live: Volume /
 # Speed / NoAudio / VideoScale on the playing wallpaper, override ?? global, a running rotation's
-# interval, the engine switch. Also: a settings.json that still carries LweSilent loads.
+# interval; the removed PlayerEngine key is ignored. Also: a settings.json that still carries LweSilent loads.
 # PauseWhenCovered (default maximized) / GlobalPlaylistStart (start_over) / RotateWhileParked (true) /
 # SettingsLevel ("standard") — the defaults on a file without the keys, partial bodies keep them, bad values are
 # normalized, an old file's ResumeFromLast loads and is gone from GET and the next save, each is live on the player
@@ -20,7 +20,7 @@
 # Hermetic like scripts/test-liascape-player-adapter.sh: temp HOME + every XDG dir (own settings.json, library,
 # player socket), a private `liascape-player serve --headless --clock real --ao null`, its own backend port;
 # never touches another backend, the real settings or the real player, and stops before any playback call
-# unless /player-engine says `active: liascape-player` (so it can't start or kill mpvpaper). It never prints a
+# unless /player-engine says the player is available. It never prints a
 # /settings response or settings.json — only field NAMES and non-secret single values. Stopped on exit.
 #
 # Usage: scripts/test-settings-merge.sh [--no-build]
@@ -93,7 +93,7 @@ SJ=$XDG_CONFIG_HOME/liascape/settings.json
 mkdir -p "$XDG_CONFIG_HOME/liascape"
 (umask 077; printf '%s' '{"steam-refresh-token":"test-refresh-token","steam-access-token":"test-access-token"}' > "$XDG_CONFIG_HOME/liascape/steam-auth.json")
 cat > "$SJ" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
+{"NoAudio":false,"Volume":80,"Speed":1,"VideoScale":"fill","HwDec":"no",
  "DemuxerMaxMib":32,"DemuxerMaxBackMib":8,"LweSilent":true,"LweVolume":55,
  "SceneMonitors":[{"Name":"DP-1","Fps":144,"IsPrimary":true},{"Name":"HDMI-A-1","Fps":30,"IsPrimary":false}],
  "SceneTransitionDelayMs":1500,"Theme":"Catppuccin Latte","CardSize":"Large","ThumbnailAspect":"16:9","LibrarySortIndex":2,
@@ -112,8 +112,8 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
-engine() { curl -sf -m 5 "$U/player-engine" | jq -r .active; }
-[ "$(engine)" = liascape-player ] || { echo "ABORT: backend not on liascape-player — refusing to touch any legacy player"; exit 1; }
+available() { curl -sf -m 5 "$U/player-engine" | jq -r .available; }
+[ "$(available)" = true ] || { echo "ABORT: the backend's liascape-player isn't available"; exit 1; }
 
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
 code() { curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
@@ -196,11 +196,11 @@ tokens_kept && ok "the Steam tokens survived in steam-auth.json (0600), none in 
   && ok "…and wrote the preview orders with their defaults" || bad "settings.json preview orders after the save: $(disk '[.PreviewOnHover, .PreviewNotHovered]' | tr -d '\n ')"
 [ "$(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .SettingsLevel] == ["maximized","start_over",true,"standard"]')" = true ] \
   && ok "…and wrote the Task 10 keys with their defaults" || bad "settings.json after the save: $(disk '[.PauseWhenCovered, .GlobalPlaylistStart, .RotateWhileParked, .SettingsLevel]' | tr -d '\n ')"
-if [ "$(engine)" != liascape-player ]; then
-  bad "the partial body switched the engine to $(engine) — stopping here (every check below plays on liascape-player)"
+if [ "$(available)" != true ]; then
+  bad "liascape-player is no longer available — stopping here (every check below plays on it)"
   echo "RESULT pass=$pass fail=$fail"; exit 1
 fi
-ok "the engine is still liascape-player"
+ok "liascape-player is still available"
 
 echo "== key spelling, arrays, null, unknown keys"
 post /settings '{"volume":70,"Speed":1.25}' >/dev/null; snap s2
@@ -442,7 +442,7 @@ PLAYER=$(post /library/import "{\"path\":\"$C1\",\"title\":\"merge one\"}" | jq 
 post /apply "{\"path\":\"$PLAYER\"}" >/dev/null
 for _ in $(seq 1 40); do [ "$(cur path)" = "$PLAYER" ] && break; sleep 0.1; done
 [ "$(cur path)" = "$PLAYER" ] && ok "/apply → playing" || bad "/apply → cur $(cur path)"
-[ "$(engine)" = liascape-player ] || { bad "not on liascape-player any more — stopping"; echo "RESULT pass=$pass fail=$fail"; exit 1; }
+[ "$(available)" = true ] || { bad "liascape-player isn't available any more — stopping"; echo "RESULT pass=$pass fail=$fail"; exit 1; }
 # the cover setting is a player prop — asserted on this fresh player (its own default is off), then live
 pcov() { ctl get '{"path":"player.pause_when_covered"}' | jq -r .value; }
 for _ in $(seq 1 30); do [ "$(pcov)" = maximized ] && break; sleep 0.1; done
@@ -601,13 +601,12 @@ d_sc=$(( $(date +%s%3N) - t_sc ))
 post /settings '{"GlobalSwitchScenesAfterSeconds":1800,"GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":600}' >/dev/null
 post /stop '{}' >/dev/null; sleep 0.6
 
-echo "== a partial body switches the engine (nothing playing → nothing starts)"
-mp0=$(pgrep -c -x mpvpaper)
+echo "== the removed PlayerEngine key: ignored like any unknown key (no engine to switch, the player stays)"
 snap e0; post /settings '{"PlayerEngine":"legacy"}' >/dev/null; sleep 1; snap e1
-[ "$(engine)" = legacy ] && ok "{PlayerEngine:legacy} → /player-engine active=legacy" || bad "engine → $(engine)"
-same e0 e1 '["playerEngine"]' "{PlayerEngine:legacy}"
-kill -0 "$SP" 2>/dev/null && bad "liascape-player still running after the switch away" || ok "liascape-player quit on the switch away"
-[ "$(pgrep -c -x mpvpaper)" = "$mp0" ] && ok "no mpvpaper started or killed" || bad "the mpvpaper count changed"
+same e0 e1 '[]' "{PlayerEngine:legacy}"
+[ "$(f 'has("playerEngine")' e1) $(disk 'has("PlayerEngine")')" = "false false" ] && ok "…GET /settings and settings.json have no PlayerEngine" \
+  || bad "PlayerEngine after the post: GET $(f 'has("playerEngine")' e1), file $(disk 'has("PlayerEngine")')"
+kill -0 "$SP" 2>/dev/null && [ "$(available)" = true ] && ok "liascape-player still runs, available" || bad "the player after {PlayerEngine:legacy}: supervisor alive $(kill -0 "$SP" 2>/dev/null && echo yes || echo no), available $(available)"
 grep -q "test-refresh-token" "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

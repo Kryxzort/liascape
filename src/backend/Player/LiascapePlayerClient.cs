@@ -431,7 +431,7 @@ public sealed class LiascapePlayerClient
                 while (Spawning && sw.ElapsedMilliseconds < StartGraceMs && !EnsureConnected()) Thread.Sleep(25);
                 if (_sock == null)
                     throw new LiascapePlayerException("io", $"no liascape-player answering on {SocketPath}",
-                        "select Player engine = liascape-player (liascape starts it) or run `liascape-player serve`");
+                        "apply a wallpaper (liascape starts it) or run `liascape-player serve`");
             }
             // a player that hasn't answered us yet may still be starting: wait for its first answer
             timeoutMs = Math.Max(timeoutMs, StartingMs());
@@ -946,8 +946,11 @@ public sealed class LiascapePlayerClient
             if (_lastSpawnFail != 0 && Environment.TickCount64 - _lastSpawnFail < 10_000) return false;
             // alive but not answering (stopped/stalled): a second `serve` would only lose the instance lock
             if (IsStalled && SocketExists) { LastError = "liascape-player is not responding"; return false; }
-            var bin = PlayerEngine.ResolveBinary();
-            if (bin == null) { Fail(PlayerEngine.UnavailableReason); return false; }
+            // none cached → looked for again: a binary that appeared since (a rebuild, a store path after boot) starts
+            // now, and a missing one isn't a failed start (no 10 s backoff). Guard: scripts/test-player-binary.sh
+            // § appears later
+            var bin = PlayerEngine.ResolveBinary() ?? PlayerEngine.ResolveBinary(fresh: true);
+            if (bin == null) { LastError = PlayerEngine.UnavailableReason; Log(LastError); return false; }
             Process? p;
             // the last player's own arguments + --restore (it went away: a failed upgrade, its supervisor gave up
             // or was killed) — the same outputs/socket/audio, showing what it showed until the switch lands; a

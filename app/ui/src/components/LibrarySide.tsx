@@ -83,7 +83,7 @@ export function LibrarySide({
   const patchItem = useStore((s) => s.patchLibraryItem);
   const openOnSteam = useStore((s) => s.openOnSteam);
   // liascape-player plays a scene at its speed (its animation and its pitch-kept sound, by design); legacy's LWE is 1×
-  const sceneSpeed = useStore((s) => s.settings?.playerEngine === "liascape-player");
+  const sceneSpeed = useStore((s) => s.settings?.playerEngine !== "legacy");
   // Settings levels (settingsLevel.ts): the sidebar's rows follow the level like the Settings page's rows do
   const level = useStore((s) => levelOf(s.settings?.settingsLevel));
   const at = (l: Level) => rank(level) >= rank(l);

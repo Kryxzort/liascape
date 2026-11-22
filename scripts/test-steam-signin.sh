@@ -130,8 +130,10 @@ EOF
 chmod +x "$T/bin/xdg-open"
 export PATH=$T/bin:$PATH
 [ "$(command -v xdg-open)" = "$T/bin/xdg-open" ] || { bad "the stub xdg-open isn't first on PATH"; exit 1; }
+# the player: a stub that never plays (a download & apply here reaches the apply, which can't play a scene)
+printf '#!/bin/sh\nexit 1\n' > "$T/bin/liascape-player"; chmod +x "$T/bin/liascape-player"; export LIASCAPE_PLAYER_BIN=$T/bin/liascape-player
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"legacy","WorkshopDownloadMode":"subscribe","WorkshopFolder":"$T/ws/431960","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}
+{"WorkshopDownloadMode":"subscribe","WorkshopFolder":"$T/ws/431960","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}
 EOF
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -t 1 -c:v libx264 -pix_fmt yuv420p "$T/clip.mp4"
 # Steam's item details for every backend here (LIASCAPE_STEAM_CM_FIXTURE: no CM session, no network): the presets and their
@@ -451,7 +453,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const subCalls = async (id) => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path) && e.form.id === id).map((e) => e.path.slice(13));
   const order = async () => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path)).map((e) => `${e.path.slice(13)} ${e.form.id}`);
   const beLog = () => fs.readFileSync(`${T}/backend.log`, "utf8");
-  const LEGACY = "Presets play only in the Liascape player"; // this backend runs the legacy engine: the base was found, a scene
+  const PLAYS = null; // a preset's presetReason once its base scene is here: it plays
   const libDir = (src, id) => `${process.env.XDG_DATA_HOME}/liascape/library/${src}/${id}`;
   const own = (id) => fs.existsSync(libDir("workshop", id)) && !fs.lstatSync(libDir("workshop", id)).isSymbolicLink();
 
@@ -464,9 +466,9 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const rA = await pA;
   const waitingA = await until(() => (status[pageUrl("3354740764")] ?? []).includes("Waiting for Steam to download its base scene…"), 10000);
   dropBase("3354740764");
-  await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === LEGACY, 15000);
+  await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === PLAYS, 15000);
   const pa = await item("3583880694"), ba = await item("3354740764");
-  out(rA?.status === 200 && pa?.isPreset === true && !!ba && pa.presetReason === LEGACY,
+  out(rA?.status === 200 && pa?.isPreset === true && !!ba && pa.presetReason === PLAYS,
     "preset (Open in the Steam app): the preset, then its base scene once Steam delivers it — both in the library, the preset no longer needs its base",
     `${rA?.status} | preset ${JSON.stringify(pa && { r: pa.presetReason, b: pa.baseWorkshopId })} base ${!!ba}`);
   out(waitingA && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/3583880694",
@@ -495,13 +497,14 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const rC = await pC;
   const subB = await until(async () => (await subCalls("3419466417")).includes("subscribe"), 10000);
   dropBase("3419466417");
-  await until(async () => (await item("3419466417")) && (await item("3420428971"))?.presetReason === LEGACY, 15000);
+  await until(async () => (await item("3419466417")) && (await item("3420428971"))?.presetReason === PLAYS, 15000);
   const ord = await order();
   const iP = ord.indexOf("subscribe 3420428971"), iB = ord.indexOf("subscribe 3419466417");
-  out(rC?.status === 200 && subB && iP >= 0 && iB > iP && !!(await item("3419466417")) && (await item("3420428971"))?.presetReason === LEGACY && urls().length === n0,
+  out(rC?.status === 200 && subB && iP >= 0 && iB > iP && !!(await item("3419466417")) && (await item("3420428971"))?.presetReason === PLAYS && urls().length === n0,
     "preset (Subscribe with Steam login): Steam is asked to subscribe the preset, then its base; both imported, nothing opened", `${rC?.status} | ${ord.join(", ")}`);
   // "Download & apply" of a preset whose base isn't here: the answer waits for the base its download fetches, then applies;
-  // this backend runs the legacy engine, so it answers the item with why it isn't applied — never a 500 "Download failed"
+  // scene support is off here (and the player a stub), so the apply refuses: it answers the item with why it isn't applied
+  // — never a 500 "Download failed"
   const pG = settle(dl("910000105", false, true));
   await until(async () => (await subCalls("910000105")).includes("subscribe"), 10000);
   dropPreset("910000105", "3420428971", "900000007");
@@ -509,7 +512,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const early = await Promise.race([pG.then(() => "answered"), sleep(1500).then(() => "waiting")]);
   dropBase("900000007");
   const rG = await pG;
-  out(rG?.status === 200 && subG && early === "waiting" && rG.body?.videoPath?.endsWith("/910000105") && rG.body?.notApplied === LEGACY
+  out(rG?.status === 200 && subG && early === "waiting" && rG.body?.videoPath?.endsWith("/910000105") && rG.body?.notApplied === 'Turn on "Play scenes" in Settings to play scenes'
     && (status[pageUrl("910000105")] ?? []).includes("Getting its base scene…") && !!(await item("900000007")),
     "…download & apply: waits for its base (\"Getting its base scene…\"), then answers the preset with why it isn't applied, not a failure",
     `${rG?.status} ${early} | ${JSON.stringify(rG?.body && { error: rG.body.error, notApplied: rG.body.notApplied })} | ${(status[pageUrl("910000105")] ?? []).join(" / ")}`);
@@ -521,7 +524,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const reused = await until(() => /3520333138: its base 3354740764 is in the library/.test(beLog()), 10000);
   await sleep(500);
   out(rE?.status === 200 && reused && (await subCalls("3354740764")).length === 0 && (await lib()).filter((i) => i.workshopId === "3354740764").length === 1
-    && (await item("3520333138"))?.presetReason === LEGACY,
+    && (await item("3520333138"))?.presetReason === PLAYS,
     "…a base already in the library: reused, never subscribed again or duplicated", `${rE?.status} | reused ${reused} | ${(await subCalls("3354740764")).join(" ")}`);
   // a base that isn't a scene: never asked for; the preset reads why
   const pF = settle(dl("910000103"));
@@ -543,7 +546,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   await until(async () => (await item("2932157836")) && (await subCalls("2932157836")).includes("unsubscribe") && (await subCalls("3009121253")).includes("unsubscribe"), 15000);
   out(rD?.status === 200 && subD && own("3009121253") && own("2932157836") && !fs.existsSync(libDir("local", "2932157836"))
     && (await subCalls("3009121253")).join(" ") === "subscribe unsubscribe" && (await subCalls("2932157836")).join(" ") === "subscribe unsubscribe"
-    && (await item("3009121253"))?.presetReason === LEGACY,
+    && (await item("3009121253"))?.presetReason === PLAYS,
     "…one-off: the preset and its base each the library's own workshop/<id> copy, each unsubscribed once copied",
     `${rD?.status} | own ${own("3009121253")} ${own("2932157836")} | ${(await subCalls("3009121253")).join(" ")} / ${(await subCalls("2932157836")).join(" ")}`);
   // Subscribe (the sidebar's, nothing imported) of a preset whose base is neither subscribed nor in the library: its base too
@@ -577,7 +580,7 @@ if [ -z "$CC" ]; then bad "no C compiler for the fake steamclient.so"; else
 privhome "$T/h3"
 mkdir -p "$T/ws3/431960" "$T/steamlib"
 : > "$T/xdg-open.urls"
-printf '{"PlayerEngine":"legacy","WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
+printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws3/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
 # no linger: with no page saying the Workshop shows, every Steam-client child lets go right after its operation, so the
 # checks below see one connection per operation (how long it is held otherwise: scripts/test-steam-app-hold.sh)

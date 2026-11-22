@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UI × player-state matrix (PlayerEngine=liascape-player): every playback-relevant UI control (and every
+# UI × player-state matrix (on liascape-player): every playback-relevant UI control (and every
 # keybind command) exercised in every player state — idle, playing, playlist, an effect running,
 # an align:end switch pending, paused, paused mid-effect, no output, muted — through the REAL UI
 # (headless Electron clicking the built bundle), checking after each step what every live source of
@@ -347,7 +347,7 @@ clip "$T/k1.mp4" testsrc2 330 30; clip "$T/k2.mp4" smptebars 440 30; clip "$T/k3
 
 # Expert: every Settings row renders, so the cells that drive an Expert row (video cache, buffers, the legacy restart) find it
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
+{"NoAudio":false,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalSwitchWhenVideoEnds":false,"GlobalMaxPlaySeconds":0,
  "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"expert","RestartMpvpaperEverySeconds":0,
@@ -442,7 +442,7 @@ for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
-[ "$(curl -sf -m 5 "$U/player-engine" | jq -r .active)" = liascape-player ] || { echo "ABORT: backend not on liascape-player"; exit 1; }
+[ "$(curl -sf -m 5 "$U/player-engine" | jq -r .available)" = true ] || { echo "ABORT: the backend's liascape-player isn't available"; exit 1; }
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
 CLIPS=$(for k in k1 k2 k3 k4; do post /library/import "{\"path\":\"$T/$k.mp4\",\"title\":\"$k\"}" | jq -c .videoPath; done | jq -sc .)
 echo "library: $CLIPS"

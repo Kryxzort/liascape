@@ -311,9 +311,11 @@ public static class LiascapePlayerSelfTest
             fails.Add($"health: legacy without parec/playerctl: auto-mute ok={F(leg, "auto-mute").ok} ({F(leg, "auto-mute").reason}), mpris ok={F(leg, "mpris").ok}");
         var noBin = FeatureHealth.Build(new(true, "liascape-player not found", null, (false, "liascape-player not found"), _ => true, false));
         if (F(noBin, "liascape-player").ok != false || noBin.Any(x => x.id == "vram" || x.id == "audio-bus")) fails.Add("health: a missing liascape-player → its feature false, no player-side features");
+        // the only engine: no setting picks it, so its row marks none (the summary only), and it is always in use
+        if (F(noBin, "liascape-player").affects.Length != 0) fails.Add($"health: liascape-player affects [{string.Join(",", F(noBin, "liascape-player").affects)}], want none");
         if (leg.Any(x => x.id == "audio-bus")) fails.Add("health: the legacy engine has no player audio bus row");
         var d = new AppSettings();
-        foreach (var (id, want) in new[] { ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true) })
+        foreach (var (id, want) in new[] { ("auto-mute", false), ("mpris", false), ("scenes", false), ("ffmpeg", true), ("vram", true), ("hwdec-interop", true), ("cover", true), ("audio-bus", true), ("liascape-player", true) })
             if (FeatureHealth.InUse(id, d) != want) fails.Add($"health: InUse({id}) with the defaults = {!want}, want {want}");
     }
 
@@ -987,57 +989,35 @@ public static class LiascapePlayerSelfTest
         static bool WouldSkip(string path, AppSettings s) =>
             PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayable(s);
 
+        // liascape-player: playable exactly when the player has the `scene` capability — the
+        // capability half is SceneAdapterAssertions' truth table (pure: asking the shared client
+        // here would greet whatever player owns the default socket)
+        static bool LiascapeSkip(string path, bool cap) =>
+            PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayableFor(true, true, () => cap, () => false);
+        if (!LiascapeSkip(scenePath, cap: false)) fails.Add("liascape-player without the scene capability should skip a scene");
+        if (LiascapeSkip(scenePath, cap: true)) fails.Add("liascape-player with the scene capability + AllowScenes should play a scene");
+        if (LiascapeSkip(videoPath, cap: false)) fails.Add("liascape-player should never skip a video");
+
+        var scenesOff = new AppSettings { AllowScenes = false };
+        if (!WouldSkip(scenePath, scenesOff))
+            fails.Add("AllowScenes=false should skip a scene");
+
+        // a preset that can't play (here: its file names no base) is skipped by every picker and refused by Apply with
+        // its reason, scenes playable or not; a plain scene folder beside it is not
+        var root = Path.Combine("/tmp", "lpst-preset-skip-" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
-            // liascape-player: playable exactly when the player has the `scene` capability — the
-            // capability half is SceneAdapterAssertions' truth table (pure: asking the shared client
-            // here would greet whatever player owns the default socket)
-            static bool LiascapeSkip(string path, bool cap) =>
-                PlayerHelper.IsScenePath(path) && !PlayerEngine.ScenesPlayableFor(true, true, () => cap, () => false);
-            if (!LiascapeSkip(scenePath, cap: false)) fails.Add("liascape-player without the scene capability should skip a scene");
-            if (LiascapeSkip(scenePath, cap: true)) fails.Add("liascape-player with the scene capability + AllowScenes should play a scene");
-            if (LiascapeSkip(videoPath, cap: false)) fails.Add("liascape-player should never skip a video");
-
-            var legacyOff = new AppSettings { PlayerEngine = PlayerEngine.Legacy, AllowScenes = false };
-            PlayerEngine.Refresh(legacyOff);
-            if (!WouldSkip(scenePath, legacyOff))
-                fails.Add("legacy + AllowScenes=false should still skip a scene (unchanged contract)");
-
-            // legacy + AllowScenes=true: ACTUALLY reaching a scene additionally needs
-            // linux-wallpaperengine on PATH (ScenesPlayable → PlayerHelper.IsLweAvailable, a real
-            // `which`) — orthogonal to this fix and not faked here. What this proves without it:
-            // the skip formula has no liascape-player-only special case — it's driven purely by
-            // ScenesPlayable, so whenever that's true (LWE present, e.g. a real install) a scene
-            // is reached, never skipped — identical to the pre-fix TryStepLibrary, which picked
-            // library[idx] unconditionally (WouldSkip is false for every candidate in that case).
-            var legacyOn = new AppSettings { PlayerEngine = PlayerEngine.Legacy, AllowScenes = true };
-            PlayerEngine.Refresh(legacyOn);
-            bool lweHere = PlayerEngine.ScenesPlayable(legacyOn);
-            if (lweHere && WouldSkip(scenePath, legacyOn))
-                fails.Add("legacy + AllowScenes=true + LWE present should NOT skip a scene (regression)");
-            Console.WriteLine(lweHere
-                ? "  scene-skip: linux-wallpaperengine found on PATH — legacy+AllowScenes=true scene reachability verified live"
-                : "  scene-skip: no linux-wallpaperengine on PATH here — stopped at the decision point (task-20c); " +
-                  "verified the skip formula has no engine-specific case instead");
-
-            // a preset that can't play (here: its file names no base) is skipped by every picker and refused by Apply with
-            // its reason, scenes playable or not; a plain scene folder beside it is not
-            var root = Path.Combine("/tmp", "lpst-preset-skip-" + Guid.NewGuid().ToString("N")[..8]);
-            try
-            {
-                string noBase = Path.Combine(root, "910000201"), plain = Path.Combine(root, "900000001");
-                Directory.CreateDirectory(noBase); Directory.CreateDirectory(plain);
-                File.WriteAllText(Path.Combine(noBase, "project.json"), "{\"preset\":{\"color\":\"0 0 1\"},\"title\":\"No base\"}");
-                File.WriteAllText(Path.Combine(plain, "project.json"), "{\"type\":\"scene\",\"file\":\"scene.json\"}");
-                if (PlayerHelper.PresetUnplayableReason(noBase) != Presets.NoBaseReason)
-                    fails.Add($"PresetUnplayableReason(a preset naming no base) = {PlayerHelper.PresetUnplayableReason(noBase) ?? "null"}, want \"{Presets.NoBaseReason}\"");
-                if (!PlayerHelper.SkippedForRotation(noBase, scenesPlayable: true)) fails.Add("a preset that can't play must be skipped by the pickers (scenes playable)");
-                if (PlayerHelper.PresetUnplayableReason(plain) != null) fails.Add("PresetUnplayableReason(a plain scene) must be null");
-                if (PlayerHelper.SkippedForRotation(plain, scenesPlayable: true)) fails.Add("a plain scene (playable, not crashed) must not be skipped");
-            }
-            finally { try { Directory.Delete(root, true); } catch { } }
+            string noBase = Path.Combine(root, "910000201"), plain = Path.Combine(root, "900000001");
+            Directory.CreateDirectory(noBase); Directory.CreateDirectory(plain);
+            File.WriteAllText(Path.Combine(noBase, "project.json"), "{\"preset\":{\"color\":\"0 0 1\"},\"title\":\"No base\"}");
+            File.WriteAllText(Path.Combine(plain, "project.json"), "{\"type\":\"scene\",\"file\":\"scene.json\"}");
+            if (PlayerHelper.PresetUnplayableReason(noBase) != Presets.NoBaseReason)
+                fails.Add($"PresetUnplayableReason(a preset naming no base) = {PlayerHelper.PresetUnplayableReason(noBase) ?? "null"}, want \"{Presets.NoBaseReason}\"");
+            if (!PlayerHelper.SkippedForRotation(noBase, scenesPlayable: true)) fails.Add("a preset that can't play must be skipped by the pickers (scenes playable)");
+            if (PlayerHelper.PresetUnplayableReason(plain) != null) fails.Add("PresetUnplayableReason(a plain scene) must be null");
+            if (PlayerHelper.SkippedForRotation(plain, scenesPlayable: true)) fails.Add("a plain scene (playable, not crashed) must not be skipped");
         }
-        finally { PlayerEngine.Refresh(SettingsService.Load()); } // restore the real cached engine for RoundTrip
+        finally { try { Directory.Delete(root, true); } catch { } }
     }
 
     // ---- presets: a preset's status (pure: StatusFor's table) and reading its project.json (Presets.Read) ---------------
