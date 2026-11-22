@@ -18,11 +18,10 @@ pub enum PlayKind {
     Scene,
 }
 
-/// Never reached, and never overflows `played + remaining` (`PlayerHelper.NeverMs`).
+/// Never reached, and never overflows `played + remaining`.
 pub const NEVER_MS: u64 = u64::MAX / 4;
 
-/// A loop ending within this of the minimum counts as reaching it
-/// (`PlayerHelper.MinPlayToleranceMs`).
+/// A loop ending within this of the minimum counts as reaching it.
 pub const MIN_SLACK_MS: u64 = 150;
 
 /// The playing item's limits under `on_end`: `min_ms` (a video plays at least this long,
@@ -35,7 +34,7 @@ pub struct ItemRule {
     pub max_ms: u64,
 }
 
-/// `PlayerHelper.ItemPlayRule` — the whole table: video `(min, max)`; separate scene timing
+/// The whole table: video `(min, max)`; separate scene timing
 /// on → scene / image `(after, 0)`; off → scene `(min, 0)` or, with no minimum,
 /// `(NEVER, max)`,
 /// image `(min, max)`.
@@ -60,16 +59,15 @@ pub fn item_rule(
     ItemRule { min_ms, max_ms }
 }
 
-/// `PlayerHelper.MaxPlayReached`: the item played its maximum → the rotation advances now
+/// The item played its maximum → the rotation advances now
 /// (align now, even mid-video). Only under `on_end`, only with something to rotate to.
 pub fn max_reached(on_end: bool, can_rotate: bool, played_ms: u64, max_ms: u64) -> bool {
     on_end && can_rotate && max_ms > 0 && played_ms >= max_ms
 }
 
 /// A still's end under `on_end` — an item that never ends switches once its rule's
-/// minimum is reached: `PlayerHelper.SceneMinReached` for a scene (a minimum of 0 never
-/// fires; `item_rule` never gives one) and `HoldForMinPlay`'s still-image branch for an
-/// image (minimum 0 → at once). [`NEVER_MS`] is never reached. A video is never a still.
+/// minimum is reached: a scene's minimum (a minimum of 0 never fires; `item_rule` never
+/// gives one), an image's minimum (0 → at once). [`NEVER_MS`] is never reached. A video is never a still.
 pub fn still_min_reached(
     on_end: bool,
     can_rotate: bool,
@@ -87,10 +85,9 @@ pub fn still_min_reached(
     }
 }
 
-/// `PlayerHelper.MinPlayReached`: the loop playing now reaches the minimum — what played +
-/// what is left of this loop (wall clock at A's speed) + [`MIN_SLACK_MS`] ≥ min. No end
-/// known (`None`) → the play time alone (`played ≥ min`; the C# poll added the slack here
-/// too, a ≤ 1 s poll's tolerance the tick doesn't need). A minimum of 0 is always reached.
+/// The loop playing now reaches the minimum — what played + what is left of this loop
+/// (wall clock at A's speed) + [`MIN_SLACK_MS`] ≥ min. No end known (`None`) → the play
+/// time alone (`played ≥ min`). A minimum of 0 is always reached.
 pub fn min_reached(played_ms: u64, loop_remaining_ms: Option<u64>, min_ms: u64) -> bool {
     if min_ms == 0 {
         return true;
@@ -101,7 +98,7 @@ pub fn min_reached(played_ms: u64, loop_remaining_ms: Option<u64>, min_ms: u64) 
     }
 }
 
-/// `PlayerHelper.UpdateTimedSettings`' countdown arithmetic: a new interval keeps the time
+/// The countdown arithmetic of a live interval change: a new interval keeps the time
 /// already elapsed — `elapsed = max(0, old − remaining)`; `remaining = elapsed ≥ new ? new
 /// : new − elapsed` (an interval already used up starts a full new one, as today).
 pub fn retime_remaining(old_interval_ms: u64, remaining_ms: u64, new_interval_ms: u64) -> u64 {

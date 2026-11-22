@@ -68,7 +68,6 @@ evidence.
 | `SendCommand` / `TrySendCommand` | `Mpv(args)` → `MpvPropertyMap` → a resolver pass (volume/speed literal, mute) or a `Set` |
 | `KillCurrentProcess`, `Stop` | a queued `stop` (the process stays up) |
 | `AppOps.Trash` | `ShownOrIncomingPaths()`: every layer's content (an effect's `to`) + each requested switch's B unless aligned and still waiting |
-| restart daemon, timer daemon, `pending_action.txt`, `timed_state.json` | no-op, logged once (`RetiredUnderPlayer`) — the player's program rotates |
 
 ## Rotation wiring (`LiascapePlayerProgram`)
 

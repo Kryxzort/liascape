@@ -298,11 +298,6 @@ performance, so React won for framer-motion's ceiling.
 
 ## Legacy engine
 
-### Give a one-item timed session a tick, but never rotate it — 2026-10-28
-The tick is the only consumer of `pending_action.txt` and only the timer owner may switch, so a one-item session needs
-one to take next / random / restart; a second consumer of the queue was rejected. `CanRotate` (> 1 item) keeps it from
-rotating by itself. `.claude/rules/backend/legacy-engine.md` § Timed playlist.
-
 ### Hold the audio handoff for `AUDIO_SETTLE`, not a longer `BAND_HOLD` — 2026-10-20
 Each overlay speed step glitches its audio ~200–240 ms later, so mpvpaper-A is cut 300 ms after the last step.
 Lengthening `BAND_HOLD` to 350 ms made the speed tracker limit-cycle and blow its 4 s budget.

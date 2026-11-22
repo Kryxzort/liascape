@@ -633,8 +633,8 @@ public static class LiascapePlayerMedia
     // leave a stale value on screen. Fire-and-forget: this runs ON the client's event-reading callback
     // (inside LiascapePlayerClient.Call's lock for the request-connection case), so it must never block —
     // Queue(...) returns at once; ReapplyAllNow runs later, on the thread pool.
-    // The wallpaper too (`ReconcileShown`): queued FIRST — before the waits fail, so an aligned switch
-    // the backend re-arms (DoVideoEndWait, "failed:player restarted") is requested after it.
+    // The wallpaper too (`ReconcileShown`): queued FIRST — before the pending waits fail, so a switch their
+    // callers request again ("failed:player restarted") comes after it.
     private static void OnRestarted()
     {
         LiascapePlayerClient.Log("liascape-player restarted (new pid) — pending switch waits end as failed");
@@ -660,7 +660,7 @@ public static class LiascapePlayerMedia
     // fsync), so the backend, the one authority on WHAT plays, puts it back.
     // `_intent` = what this backend last put on screen: an align:now switch's B from its request (it
     // shows within ms, or its switch fails), an aligned switch's B from its effect's start (until then A
-    // shows and the switch is only armed — DoVideoEndWait re-arms it after a restart), nothing after our
+    // shows and the switch is only armed), nothing after our
     // `stop`. Unknown (null) when another client switched (a `transition.scheduled` for a path we didn't
     // request — a second backend, `ctl`), our switch failed, or before our first switch: then the
     // player's own state stands.
@@ -853,7 +853,7 @@ public static class LiascapePlayerMedia
 
     // `transition.started` = Running: the effect animates and `cur:*` already names B — from here a new
     // request COMMITS it (→ handoff) and a cancel snaps back to A. An aligned switch is the session's
-    // current item from here (DoVideoEndWait's `onStarted`), not only from its handoff. The event can beat
+    // current item from here, not only from its handoff. The event can beat
     // the request's reply (different connections), so it's remembered by corr.
     private static readonly ConcurrentDictionary<string, long> _startedAt = new();
     private static readonly ConcurrentDictionary<string, Action> _onStarted = new();
@@ -888,7 +888,7 @@ public static class LiascapePlayerMedia
     public static async Task<string> WaitCorr(string corr, CancellationToken ct, int timeoutMs)
     {
         if (_recent.TryGetValue(corr, out var r)) return r.outcome;
-        // several waiters on one corr (e.g. WaitLastHandoff + its SwitchAndWait) share one TCS;
+        // several waiters on one corr share one TCS;
         // Record removes it when the outcome lands
         var tcs = _waiters.GetOrAdd(corr, _ => new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously));
         if (_recent.TryGetValue(corr, out r)) { Record(corr, r.outcome); return r.outcome; }
@@ -922,7 +922,7 @@ public static class LiascapePlayerMedia
 
     // ---- switches --------------------------------------------------------------------------------
     private static readonly string[] ImageExt = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif", ".jxl", ".tif", ".tiff"];
-    // a still image the player shows (`kind: image`) — it never ends (PlayerHelper.PlayKindOf, the rotation's rules)
+    // a still image the player shows (`kind: image`) — it never ends (the rotation's rules: rule.rs `PlayKind`)
     public static bool IsImagePath(string path) => ImageExt.Contains(Path.GetExtension(path).ToLowerInvariant());
 
     // B's create props: everything the legacy launch/loadfile carried, as live properties — the
@@ -1198,8 +1198,8 @@ public static class LiascapePlayerMedia
         finally { _requesting = null; }
     }
 
-    // A switch the stall swallowed (above, `LostToStall`). An aligned one is not: its caller (DoVideoEndWait / the
-    // rotation's fallback) hears "unreachable" and retries on its own; A still shows meanwhile, as it should.
+    // A switch the stall swallowed (above, `LostToStall`). An aligned one is not: its caller hears "unreachable"
+    // and retries on its own; A still shows meanwhile, as it should.
     private static void Lost(string path, bool alignEnd, string why)
     {
         if (alignEnd) { LiascapePlayerClient.Log($"aligned switch to {Path.GetFileName(path)} not requested — {why}"); return; }
@@ -1322,33 +1322,9 @@ public static class LiascapePlayerMedia
         catch (LiascapePlayerException) { return true; } // unknown → treat as shown (don't wait forever)
     }
 
-    // I4 (final review): consecutive switches that didn't hand off (refused / failed / timed out)
-    // back off 1 s, 2 s, 4 s … ≤ 30 s before the playlist advances — a player refusing for any
-    // reason can never make rotation (and OnWallpaperChanged) spin. A handoff resets it.
-    private static int _failStreak;
-    public static int FailStreak => Volatile.Read(ref _failStreak);
-    public static TimeSpan NextFailureBackoff()
-    {
-        int n = Interlocked.Increment(ref _failStreak);
-        return TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(n - 1, 5))));
-    }
-    public static void ResetFailureBackoff() => Interlocked.Exchange(ref _failStreak, 0);
-
     // Completes on `transition.handoff` of this switch; false on cancel / failure.
     public static async Task<bool> SwitchAndWaitHandoff(string path, AppSettings s, TransitionService.Config? tcfg, bool alignEnd, CancellationToken ct) =>
         await SwitchAndWait(path, s, tcfg, alignEnd, ct).ConfigureAwait(false) == "handoff";
-
-    // The handoff gate (replaces the legacy `_lastSwitchTarget` settle gate): before an aligned switch
-    // is requested, the previous one must have handed off — a new request would SUPERSEDE a pre-Running
-    // one (its B would never show).
-    public static async Task WaitLastHandoff(CancellationToken ct)
-    {
-        try { await Drain().WaitAsync(ct).ConfigureAwait(false); } // a still-queued switch counts
-        catch (OperationCanceledException) { return; }
-        var corr = _lastCorr;
-        if (corr == null || !C.SocketExists) return;
-        await WaitCorr(corr, ct, 30_000).ConfigureAwait(false);
-    }
 
     public static void Stop()
     {
@@ -1542,20 +1518,12 @@ public static class LiascapePlayerMedia
     }
 
     // `path`'s own volume/speed (its override ?? the global) onto its source(s) — wherever they are (on
-    // screen, either side of an effect, a pending B). `onPlayingSpeed` gets its effective speed when it is
-    // what `cur:*` shows (the timed tick's speed factor). Coalescible per item: it re-reads the override.
+    // screen, either side of an effect, a pending B). Coalescible per item: it re-reads the override.
     // Batched (`override`, one pending pass for every item whose override changed — a loop over the whole
-    // library is one command, not one per item). `onPlayingSpeed`: the newest one given.
-    private static Action<double>? _onPlayingSpeed;
-    public static void ApplyOverride(string path, Action<double>? onPlayingSpeed = null)
+    // library is one command, not one per item).
+    public static void ApplyOverride(string path)
     {
-        if (onPlayingSpeed != null) _onPlayingSpeed = onPlayingSpeed;
-        QueueBatch("override", FullPath(path), paths =>
-        {
-            if (ResolveNow(new Req { Items = paths, OnlyItems = true, Props = PerItem }) == 0 || _onPlayingSpeed is not { } cb) return;
-            if (CurrentPath() is string cur && paths.Contains(FullPath(cur)))
-                cb(Math.Clamp(LibraryService.ReadSpeedOverride(cur) ?? SettingsService.Load().Speed, 0.1, 4.0));
-        });
+        QueueBatch("override", FullPath(path), paths => ResolveNow(new Req { Items = paths, OnlyItems = true, Props = PerItem }));
         LiascapePlayerProgram.PushItem(path); // a rotation's next B of it
     }
 
@@ -1856,7 +1824,7 @@ public static class LiascapePlayerMedia
         catch (LiascapePlayerException) { return null; }
     }
 
-    // I1 (final review): a NEW wallpaper session (Apply / ApplyPlaylist / a cold Launch) starts
+    // I1 (final review): a NEW wallpaper session (Apply / a cold Launch) starts
     // playing, as with legacy (a fresh mpvpaper is never paused) — a pause belongs to the session
     // it was made in. Queued (callers hold PlayerHelper's _lock), ahead of the session's switch.
     // (`stop` clears the player's pause on its own.)

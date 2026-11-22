@@ -398,7 +398,7 @@ fn src_f64(g: &Graph, id: &str, prop: &str) -> Option<f64> {
     }
 }
 
-/// What the source plays, for its rule (`PlayerHelper.PlayKindOf`): the graph's `kind`
+/// What the source plays, for its rule: the graph's `kind`
 /// (the live source corrects an image's), else the path's extension.
 fn play_kind(g: &Graph, src: &str) -> PlayKind {
     match src_str(g, src, "kind").as_str() {
@@ -1646,8 +1646,7 @@ impl Programs {
                     // by the next tick (A's loop comes back with the abort)
                     let gone = |p: &Prog, path: &str| p.index_of(path) < 0 || p.skipped(path);
                     // …or one the new order no longer plays next (a reorder, an add or an undo
-                    // put another item after the current one — `ReorderPlaylist` re-armed the
-                    // playlist bar's next): cancelled too, the next tick arms the new next
+                    // put another item after the current one): cancelled too, the next tick arms the new next
                     let reordered = p.started && (list_changed || old.shuffle != p.cfg.shuffle);
                     let stale = |p: &Prog, path: &str| {
                         reordered && {

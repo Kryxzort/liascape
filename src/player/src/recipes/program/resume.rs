@@ -127,7 +127,7 @@ pub struct StartPlan {
     pub resumed: bool,
 }
 
-/// A fresh start's order (`ApplyTimedPlaylist`): sequential → the items as given, the
+/// A fresh start's order: sequential → the items as given, the
 /// cursor on the first playable one; shuffle → a new permutation whose first is playable
 /// and ≠ `avoid_first` (the last one played: a restart never repeats what was just on).
 /// `None` when nothing is playable.

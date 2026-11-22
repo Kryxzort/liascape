@@ -8,13 +8,12 @@
 #   apply + transitions · every live setting · mute · pause (incl. an in-flight transition's pending B) ·
 #   volume± · /preview · per-item overrides (incl. a pending B's own override) · timed rotation with
 #   align:end · /next mid-wait · /stop · a SIGSTOPped COMPOSITOR (/settings must still answer < 500 ms) ·
-#   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · switching the
-#   engine liascape-player → legacy with nothing playing · scenes (synthetic scene items: apply, every live
+#   a kill -9 of the COMPOSITOR → a supervised restart (new hello.pid, same supervisor) · scenes (synthetic scene items: apply, every live
 #   setting, scene fps, V→S/S→S/S→V, a crashing scene → marked + skipped + advanced, a missing folder, a worker
 #   that can't load the scene renderer → told why, never marked, no worker) ·
 #   auto-mute never hearing our own switches (the one section with real audio: a private PipeWire + pipewire-pulse) ·
-#   the app closed (the program rotates alone, no timer/restart daemon, none of legacy's daemon files
-#   ever written), keybinds as one-shot CLI processes with no backend (a 10× `next` storm, every action), `liascape
+#   the app closed (the program rotates alone, no timer/restart daemon), a legacy rotation's files left in the config
+#   dir (ignored), keybinds as one-shot CLI processes with no backend (a 10× `next` storm, every action), `liascape
 #   restore` × the playlist start mode (it starts the player `serve --restore --session-start` through a headless shim).
 #
 # Hermetic: its own temp HOME / XDG_CONFIG_HOME / XDG_DATA_HOME / XDG_CACHE_HOME / XDG_RUNTIME_DIR /
@@ -124,11 +123,8 @@ cleanup() {
   [ -n "$CP" ] && kill -CONT "$CP" 2>/dev/null
   [ -n "$SP" ] && kill -CONT "$SP" 2>/dev/null
   [ -n "${WSP:-}" ] && kill "$WSP" 2>/dev/null
-  [ -n "${FWP:-}" ] && kill "$FWP" 2>/dev/null
   [ -n "${SMP:-}" ] && kill "$SMP" 2>/dev/null
   for bp in "$BP" ${BP_OLD:-}; do [ -n "$bp" ] && { kill "$bp" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$bp" 2>/dev/null || break; sleep 0.1; done; kill -9 "$bp" 2>/dev/null; }; done
-  # a `timer-daemon` a stopping backend handed the playlist to (the restart test below)
-  [ -s "$XDG_CONFIG_HOME/liascape/timer.pid" ] && kill -9 "$(cat "$XDG_CONFIG_HOME/liascape/timer.pid")" 2>/dev/null
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # clean child exit → the supervisor exits too, no restart
   # Fallback: kill the SUPERVISOR (never a bare compositor pid — that would just make it restart again).
   [ -n "$SP" ] && { for _ in $(seq 1 30); do kill -0 "$SP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$SP" 2>/dev/null; }
@@ -160,21 +156,9 @@ LU=$T/lu.mp4; clip "$LU" testsrc2 360 30   # outlasts the 10 s stale check while
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"NoAudio":false,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":300,"TransitionMethod":"full-live",
- "GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false,
- "RestartMpvpaperEverySeconds":600}
+ "GlobalSwitchWhenVideoEnds":true,"GlobalIntervalSeconds":0,"GlobalMaxPlaySeconds":0,"GlobalSeparateSceneTiming":false}
 EOF
 
-# under liascape-player legacy's daemon files are never written (no timer-daemon / restart-daemon, no
-# pending-action IPC, no timer ownership) — sampled every 0.2 s for the whole run, checked before the engine switch at
-# the end. The legacy timed_state.json the rotation-program section plants itself is exempt while its marker exists.
-LEGACY_FILES_LOG=$T/legacy-files.log; : > "$LEGACY_FILES_LOG"
-( while :; do
-    for f in pending_action.txt timer.pid gui_timer.pid restart.pid timed_state.json; do
-      [ -e "$XDG_CONFIG_HOME/liascape/$f" ] && [ ! -e "$T/planted-$f" ] && echo "$(date +%T.%N) $f" >> "$LEGACY_FILES_LOG"
-    done
-    [ -e "$XDG_CACHE_HOME/liascape/playlist_observer_paths.json" ] && echo "$(date +%T.%N) playlist_observer_paths.json" >> "$LEGACY_FILES_LOG"
-    sleep 0.2
-  done ) & FWP=$!
 ms_now() { date +%s%3N; }
 waitfor() { local end=$(( $(ms_now) + $1 )); shift; until "$@"; do [ "$(ms_now)" -ge "$end" ] && return 1; sleep 0.1; done; }   # § Condition waits below
 # Every player this script starts runs the backend's own binary path ($LIASCAPE_PLAYER_BIN: a link to this build
@@ -1763,18 +1747,23 @@ waitfor $WAIT eval '[ "$(curs_after "$c9" | jq "map(select(.r == \"play\")) | le
 stop_now
 post /playlist/state '{"videoPaths":[],"settings":{"order":0},"name":null}' >/dev/null
 
-# a backend restart under a legacy rotation (timed_state.json — an older backend): the player's program takes over at its item
-touch "$T/planted-timed_state.json"   # planted on purpose: the legacy-files watch ignores it until the takeover removed it
+# a backend restart with a legacy rotation's files left in the config dir (an older build's timed_state.json and a
+# queued pending_action.txt): ignored, never read — `play` replays LastSession (d.mp4), not the planted rotation
+post /apply "{\"path\":\"$D\"}" >/dev/null; waitfor $WAIT shows "$D" || bad "precondition: /apply d.mp4 → $(cur path)"
+[ "$(jq -c '.LastSession.Paths' "$XDG_CONFIG_HOME/liascape/settings.json")" = "[\"$D\"]" ] || bad "precondition: LastSession $(jq -c .LastSession "$XDG_CONFIG_HOME/liascape/settings.json")"
+stop_now
 printf '{"Paths":["%s","%s","%s"],"Index":1,"Options":"","Shuffle":false,"IntervalSeconds":3,"History":["%s","%s"],"HistoryIndex":1,"TimerPaused":false,"TimerStopped":false,"RemainingMs":2000,"SwitchWhenVideoEnds":false,"WaitingForVideoEnd":false,"ItemPlayedMs":0,"PlayedSavedAtMs":0}' \
   "$A" "$Bc" "$C" "$A" "$Bc" > "$XDG_CONFIG_HOME/liascape/timed_state.json"
-port0=$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); old=$BP; c10=$(ncur)
-kill -TERM "$BP"; BP_OLD="${BP_OLD:-} $BP"; for _ in $(seq 1 100); do kill -0 "$old" 2>/dev/null || break; sleep 0.1; done
-"$DOTNET" "$DLL" serve > "$T/backend-legacy-state.log" 2>&1 & BP=$!
-waitfor 60000 eval '[ "$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)" != "$port0" ]'; U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port"); waitfor 30000 eval 'curl -sf -m 2 "$U/health" >/dev/null'
-waitfor 15000 eval '[ "$(curs_after "$c10" | jq "map(select(.r == \"play\")) | length")" -gt 0 ]'
-[ "$(curs_after "$c10" | jq -c 'map(select(.r == "play"))[0] | {p, r}')" = '{"p":"b.mp4","r":"play"}' ] && prog_is mode '"timer"' && [ ! -e "$XDG_CONFIG_HOME/liascape/timed_state.json" ] \
-  && ok "a legacy timed_state.json at serve start → the player's program at its item (b.mp4), the file gone" || bad "legacy takeover: $(curs_after "$c10"), mode $(prog mode), file $(ls "$XDG_CONFIG_HOME/liascape/timed_state.json" 2>&1)"
-waitfor $WAIT eval '[ ! -e "$XDG_CONFIG_HOME/liascape/timed_state.json" ]'; mv "$T/planted-timed_state.json" "$T/planted-done"
+printf next > "$XDG_CONFIG_HOME/liascape/pending_action.txt"
+backend_down; backend_up backend-legacy-files.log
+post /action '{"name":"play"}' >/dev/null
+waitfor 15000 eval '[ "$(curl -sf -m 5 "$U/current" | jq -r .path)" = "$D" ]'
+lf_cur=$(curl -sf -m 5 "$U/current" | jq -r '.path // "none"'); lf_prog=$(pst)
+[ "$lf_cur" = "$D" ] && [ -z "$lf_prog" ] && ok "a timed_state.json + pending_action.txt left at serve start are ignored: play → LastSession (d.mp4), no program" \
+  || bad "legacy files at serve start: /current $(basename "$lf_cur") (want d.mp4, never the planted a/b/c), program $lf_prog"
+[ "$(cat "$XDG_CONFIG_HOME/liascape/pending_action.txt" 2>/dev/null)" = next ] && [ -s "$XDG_CONFIG_HOME/liascape/timed_state.json" ] \
+  && ok "…neither file read or consumed (both still as planted)" || bad "a planted legacy file was consumed: $(ls "$XDG_CONFIG_HOME/liascape" | grep -E '^(pending_action\.txt|timed_state\.json)$' | tr '\n' ' ')"
+rm -f "$XDG_CONFIG_HOME/liascape/timed_state.json" "$XDG_CONFIG_HOME/liascape/pending_action.txt"
 stop_now
 kill "$WSP" 2>/dev/null; WSP=""
 setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .GlobalPlaylistStart = "start_over" | .Volume = 100'
@@ -2407,7 +2396,6 @@ player_quit; mv "$SNAP" "$T/snapshot-aside2.json"; restore_cli; waitfor $WAIT ev
 set_file '.GlobalPlaylistStart = "start_over"'
 # `serve` start stops a daemon a legacy session left (its cmdline says it is one) — and never what a stale pid file
 # names by now (a pid file outlives a reboot): an unrelated process lives on, both pid files go
-touch "$T/planted-timer.pid" "$T/planted-restart.pid"
 python3 -c 'import time; time.sleep(300)' liascape-backend.dll timer-daemon & FAKED=$!
 sleep 300 & INNOCENT=$!
 waitfor $WAIT eval 'grep -qa timer-daemon "/proc/$FAKED/cmdline"' || bad "precondition: the fake timer-daemon never started"
@@ -2418,7 +2406,6 @@ waitfor $WAIT eval '! kill -0 "$FAKED" 2>/dev/null' && ok "serve start stops a l
 kill -0 "$INNOCENT" 2>/dev/null && ok "…and never an unrelated process a stale restart.pid names" || bad "serve start killed the unrelated process a stale restart.pid named"
 [ ! -e "$XDG_CONFIG_HOME/liascape/timer.pid" ] && [ ! -e "$XDG_CONFIG_HOME/liascape/restart.pid" ] && ok "…both pid files gone" || bad "pid files left: $(ls "$XDG_CONFIG_HOME/liascape" | grep -E '^(timer|restart)\.pid$' | tr '\n' ' ')"
 kill "$FAKED" "$INNOCENT" 2>/dev/null
-mv "$T/planted-timer.pid" "$T/planted-timer-done"; mv "$T/planted-restart.pid" "$T/planted-restart-done"
 post /library/volume "{\"path\":\"$QB\",\"intValue\":null}" >/dev/null
 setting '.GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0 | .Volume = 100'
 stop_now
@@ -2909,11 +2896,6 @@ for _ in 1 2 3 4; do post /next '{}' >/dev/null; waitfor $WAIT settled; c=$(cur 
 stop_now
 setting '.WorkshopFolder = "" | .GlobalSwitchWhenVideoEnds = true | .GlobalIntervalSeconds = 0'
 fi
-
-echo "== Phase 3 Task 8: legacy's daemon files never existed under liascape-player (the whole run, sampled every 0.2 s)"
-kill "$FWP" 2>/dev/null; wait "$FWP" 2>/dev/null; FWP=""
-[ ! -s "$LEGACY_FILES_LOG" ] && ok "no pending_action.txt / timer.pid / gui_timer.pid / restart.pid / timed_state.json / playlist_observer_paths.json at any sample" \
-  || bad "legacy files seen: $(awk '{print $2}' "$LEGACY_FILES_LOG" | sort | uniq -c | tr -s ' \n' ' ') (first: $(head -1 "$LEGACY_FILES_LOG"))"
 
 echo "== no settings dump in the logs"
 grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"

@@ -28,10 +28,9 @@ public static class AppOps
         p.OverrideGlobalSettings ? p.SwitchWhenVideoEnds : s.GlobalSwitchWhenVideoEnds;
 
     // `paths` are already in the desired order (the UI sends the current playlist bar order).
-    // `persist` / `persistPaths` = what to save as the current playlist state when it differs from what
-    // plays (play-from plays a pre-arranged order but keeps the playlist's own Order setting and the
-    // playlistBar's own order — saving the play order reordered the playlist bar on the next launch).
-    public static string PlayPlaylist(List<string> paths, PlaylistSettings ps, PlaylistSettings? persist = null, List<string>? persistPaths = null,
+    // `persistPaths` = what to save as the current playlist state when it differs from what plays (a trash playing on
+    // from the session's own survivors keeps the playlist bar's).
+    public static string PlayPlaylist(List<string> paths, PlaylistSettings ps, List<string>? persistPaths = null,
         int? playFrom = null)
     {
         if (paths.Count == 0) return "Playlist is empty";
@@ -44,42 +43,22 @@ public static class AppOps
         try
         {
             var existing = PlaylistService.LoadCurrentState();
-            PlaylistService.SaveCurrentState(new CustomPlaylist { VideoPaths = persistPaths ?? paths, Settings = persist ?? ps, Name = existing?.Name ?? "" });
+            PlaylistService.SaveCurrentState(new CustomPlaylist { VideoPaths = persistPaths ?? paths, Settings = ps, Name = existing?.Name ?? "" });
         }
         catch { }
         var s = SettingsService.Load();
         bool shuffle = ps.Order == PlaylistOrder.Shuffle;
         int interval = EffInterval(s, ps);   // advance-on-end: the minimum play time; else the timer
 
-        if (PlayerEngine.IsLiascapePlayer)
-        {
-            if (PlayerEngine.MissingReason() is string missing) return missing;
-            // the player's program — the bar's order (the player shuffles), the playlist's "When the
-            // playlist starts again" (§ Playlist start: Start over / Resume), its identity = the bar's saved name
-            bool adv = EffAdvance(s, ps);
-            if (!adv && interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
-            var bar = PlaylistService.LoadCurrentState();
-            PlayerHelper.LoadProgram(paths, s, ps, shuffle, interval, adv, from: playFrom != null ? "index" : null, index: playFrom ?? 0,
-                key: LiascapePlayerProgram.KeyOf(bar?.Name));
-            Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = adv, OverrideGlobalSettings = ps.OverrideGlobalSettings });
-            return "";
-        }
-
-        if (EffAdvance(s, ps))
-        {
-            // always the timed machinery, whatever the minimum (0 = switch at every end is an ordinary value): through
-            // ApplyPlaylist one item (a trash leaving one survivor, a one-item playlist) would become a plain non-timed
-            // launch — an Undo growing it back would then have no rotation to re-arm
-            var play = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-            PlayerHelper.ApplyTimedPlaylist(play, s.BuildMpvOptions(), shuffle, interval, switchWhenVideoEnds: true);
-            Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = true, OverrideGlobalSettings = ps.OverrideGlobalSettings });
-            return "";
-        }
-
-        if (interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
-        var timed = shuffle ? paths.OrderBy(_ => Guid.NewGuid()).ToList() : paths;
-        PlayerHelper.ApplyTimedPlaylist(timed, s.BuildMpvOptions(), shuffle, interval);
-        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = false, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+        if (PlayerEngine.MissingReason() is string missing) return missing;
+        // the player's program — the bar's order (the player shuffles), the playlist's "When the
+        // playlist starts again" (§ Playlist start: Start over / Resume), its identity = the bar's saved name
+        bool adv = EffAdvance(s, ps);
+        if (!adv && interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
+        var bar = PlaylistService.LoadCurrentState();
+        PlayerHelper.LoadProgram(paths, s, ps, shuffle, interval, adv, from: playFrom != null ? "index" : null, index: playFrom ?? 0,
+            key: LiascapePlayerProgram.KeyOf(bar?.Name));
+        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = adv, OverrideGlobalSettings = ps.OverrideGlobalSettings });
         return "";
     }
 
@@ -90,18 +69,9 @@ public static class AppOps
         // the clicked item is a preset that can't play: refused with its reason, as /apply is, never quietly the item
         // after it. Guard: scripts/test-liascape-player-adapter.sh § presets
         if (PlayerHelper.PresetUnplayableReason(paths[startIndex]) is string why) return why;
-        // liascape-player: the program plays from that item (`from: index` — an explicit play-from beats the
-        // start setting) in the playlist's own order; the player shuffles the rest of a shuffled cycle
-        if (PlayerEngine.IsLiascapePlayer) return PlayPlaylist(paths, ps, playFrom: startIndex);
-        bool shuffle = ps.Order == PlaylistOrder.Shuffle;
-        var rest = paths.Where((_, i) => i != startIndex).ToList();
-        if (shuffle) rest = rest.OrderBy(_ => Guid.NewGuid()).ToList();
-        var ordered = new List<string> { paths[startIndex] }.Concat(rest).ToList();
-        // Clone, never rebuild: a hand-copied subset dropped every transition field (play-from
-        // switched transitions off). Plays the pre-arranged order; saves the playlist's own Order.
-        var play = ps.Clone();
-        play.Order = PlaylistOrder.Sequential; // pre-arranged; don't reshuffle
-        return PlayPlaylist(ordered, play, persist: ps, persistPaths: paths);
+        // the program plays from that item (`from: index` — an explicit play-from beats the start setting) in the
+        // playlist's own order; the player shuffles the rest of a shuffled cycle
+        return PlayPlaylist(paths, ps, playFrom: startIndex);
     }
 
     // only LastSession: `s` was loaded before the switch, and saving it whole reverted any /settings change since
@@ -422,41 +392,7 @@ public static class AppOps
     {
         var prevP = PlaylistService.LoadCurrentState();
         PlaylistService.SaveCurrentState(p);
-        if (PlayerEngine.IsLiascapePlayer)
-        {
-            if (LiascapePlayerProgram.IsActive) ApplyToProgram(prevP, p);
-            return;
-        }
-        // Live-apply a rotation change (interval — the minimum under advance-on-end — / advance-on-end / the
-        // maximum, or the override toggle) to
-        // the RUNNING timed playlist — no replay. Diff the EFFECTIVE rotation vs the previously-saved
-        // state so a plain reorder/add (which also POSTs state) never resets the countdown. When the
-        // playlist follows globals, /settings owns the live-apply (this stays a no-op then).
-        if (PlayerHelper.IsTimedPlaylistActive())
-        {
-            // Order (Sequential↔Shuffle) or the playlist bar contents (drag-reorder / add / remove) changed →
-            // reflect it on the RUNNING playlist live (keeps the current item playing + the countdown).
-            // Diffed so a rotation/transition-only save doesn't needlessly re-shuffle. Reorder FIRST so
-            // it rebuilds _timedPaths before the rotation re-chains the video-end wait.
-            bool orderChanged = (prevP?.Settings.Order ?? PlaylistOrder.Sequential) != p.Settings.Order;
-            bool listChanged = prevP == null || !prevP.VideoPaths.SequenceEqual(p.VideoPaths);
-            if ((orderChanged || listChanged) && p.VideoPaths.Count > 0)
-                PlayerHelper.ReorderPlaylist(p.VideoPaths, true, p.Settings.Order == PlaylistOrder.Shuffle, prevP?.VideoPaths);
-
-            var g = SettingsService.Load();
-            // the effective rotation, diffed prev → now: an unrelated save (a reorder, a transition) leaves the
-            // countdown, the item's play time and an armed switch alone. The maximum + the scene timing first, so a
-            // switch the rotation arms (advance-on-end just turned on) already reads them.
-            var now = PlayerHelper.EffectiveRotation(g, p.Settings);
-            var was = PlayerHelper.EffectiveRotation(g, prevP?.Settings);
-            if ((now.Max, now.SeparateScenes, now.ScenesAfter) != (was.Max, was.SeparateScenes, was.ScenesAfter))
-                PlayerHelper.ApplyPlayLimitsLive(now.Max, now.SeparateScenes, now.ScenesAfter);
-            if ((now.Interval, now.Advance) != (was.Interval, was.Advance)) PlayerHelper.ApplyRotationLive(now.Interval, now.Advance);
-            // the playlist's transitions changed (on/off, effects, duration): an armed aligned switch takes them
-            if (!TransitionService.SameConfig(TransitionService.Effective(g, prevP?.Settings), TransitionService.Effective(g, p.Settings)))
-                PlayerHelper.RearmAlignedSwitch();
-        }
-        
+        if (LiascapePlayerProgram.IsActive) ApplyToProgram(prevP, p);
     }
 
     // The playlist bar's save → the player's program, live, diffed prev → now (an unrelated save sends nothing): the

@@ -717,8 +717,7 @@ EOF
 VIDEOS=(); IMAGES=(); SHORT_VIDEOS=()
 # battery-script fix (found analysing task20-final-run, all 3 wait-for-end cells: tr-136/324/515,
 # every one "scheduled" with align:end then "cancelled" by LiascapePlayerMedia.SwitchAndWait's own
-# AlignBackstopSlackSec=15s backstop ~15.5-16s later -- see player-adapter.md's `DoVideoEndWait`
-# row and LiascapePlayerMedia.cs's AlignBackstopSlackSec). term_timeout() below is EFFECT_DURATION_MS-based,
+# AlignBackstopSlackSec=15s backstop ~15.5-16s later -- see LiascapePlayerMedia.cs's AlignBackstopSlackSec). term_timeout() below is EFFECT_DURATION_MS-based,
 # which bounds a plain cut/effect switch fine but has NOTHING to do with how long an align:"end"
 # wait-for-the-video's-real-end switch can legitimately take -- that's bounded by the CLIP's own
 # remaining play time (+ the player's own 10 s align_fallback, behind which sits the adapter's own
@@ -949,8 +948,7 @@ run_cell() {
       # battery-script fix (task20-final-run: full-live/reveal/frozen wait-for-end ALL failed their
       # very first switch, "transition did not reach a terminal state", tr-136/324/515 -- confirmed
       # via events.jsonl: each was scheduled align:"end" then genuinely CANCELLED ~15.5-16s later by
-      # LiascapePlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop (player-adapter.md's
-      # `DoVideoEndWait` row), not by this script's own /stop -- i.e. the switch was still correctly
+      # LiascapePlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop, not by this script's own /stop -- i.e. the switch was still correctly
       # in flight, this script just stopped watching too early). wait-for-end's countdown freezes
       # while _waitingForVideoEnd (PlayerHelper.cs ~line 992), so its real per-switch bound is the
       # CLIP's own remaining play time, not EFFECT_DURATION_MS -- use MAX_SHORT_VIDEO_MS (+ the

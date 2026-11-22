@@ -40,14 +40,13 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 
 ## Pause
 - The player owns pause (`player.paused`, kept in its snapshot). Keep no copy: `TogglePause` reads `get player.paused` and sets the opposite; R81 never re-asserts it.
-- A new session (`Apply`, `ApplyPlaylist`, cold `Launch`) queues `set player.paused false` (`QueueNewSession`); a rotation keeps the pause.
-- A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`). With the setting on: the pause stays and the switch goes with its transition, which the player plays on the still frames (`.claude/rules/player/runtime-api.md` § Runtime loop); never send it as a cut. Legacy cuts. Guard: matrix `paused × cli:next-keep`.
+- A new session (`Apply`, cold `Launch`) queues `set player.paused false` (`QueueNewSession`), a Play of a playlist loads its program unpaused (`keepPause: false`); a rotation keeps the pause.
+- A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`). With the setting on: the pause stays and the switch goes with its transition, which the player plays on the still frames (`.claude/rules/player/runtime-api.md` § Runtime loop); never send it as a cut. Guard: matrix `paused × cli:next-keep`.
 
 ## Reconnection (R81) and switches the player missed
 - `Restarted` (new compositor pid) and `Recovered` (breaker closed) both queue `ReapplyAll` — a Fresh resolver pass — fire-and-forget; never `Drain().Wait()` inside the client's callback.
 - `ReconcileShown` (essential, before failing pending waits): if the screen lacks `_intent`'s path, cut to it; after our own `stop`, stop again. `_intent` is unknown after a failed/cancelled switch or a `transition.scheduled` for a path we didn't request (another client).
 - A switch or stop lost to a stall becomes `_intent` and is put on screen when the player answers (`ProbeUntilAnswered` → `ReconcileAfterStall`). Aligned switches are retried by their caller instead.
-- `DoVideoEndWait` on `failed:player restarted` re-arms for A's end; it never switches now.
 
 ## Events and the outbox
 - Subscribe only to the kinds consumed (`LiascapePlayerClient.Topics`); never `source.` as a whole (it streams `source.position`).
@@ -60,17 +59,17 @@ queue, upgrade, resolver, scenes, outbox): `docs/player/adapter.md`.
 - Drain the player's outbox on every subscribe ack; ack only after the handler stored synchronously; handlers must be idempotent (`OnOutboxEvent`). Self-test `OutboxAckAssertions`.
 
 ## Rotation (the one home of its semantics)
-Under liascape-player every rule runs in the player's program `prog:main` (`.claude/rules/player/runtime-api.md`); the
-backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules run in `PlayerHelper`'s tick.
+Every rule runs in the player's program `prog:main` (`.claude/rules/player/runtime-api.md`); the backend half is
+`Player/LiascapePlayerProgram.cs`.
 - Rotation per playlist = the globals, or its own when `OverrideGlobalSettings` (`PlayerHelper.EffectiveRotation`).
 - "Switch when video ends" OFF: `IntervalSeconds` is "Switch every", a plain timer (switches mid-video); the maximum doesn't apply.
 - ON: the same field is the "Minimum play time" and `MaxPlaySeconds` the maximum. Both wall-clock seconds, 0 = off strictly (minimum 0: switch at every end; maximum 0: never cut).
 - The maximum is 0 or at least the minimum (`AppSettings.RotationMax`, ON only): every settings / playlist save stores a smaller one as the minimum and `EffectiveRotation` reads it so, so a raised minimum carries the maximum up (never back down) and the program gets it live; the UI does the same as you type (`store` `maxOverMin`; a shorter maximum typed is a draft, leaving saves the minimum). Guards: `test-settings-merge.sh` § "0 (off) or at least the minimum", probe-settings `playtime:maxFloor:*`.
-- A video plays at least the minimum, then switches at its next end (`align:end`). A clip shorter than the minimum loops and advances at the end of the loop that reaches it, never mid-loop (`HoldForMinPlay`, turns `Loop` on while held).
+- A video plays at least the minimum, then switches at its next end (`align:end`). A clip shorter than the minimum loops and advances at the end of the loop that reaches it, never mid-loop (the program's hold, `program.held`, turns `loop` on while held).
 - The maximum switches now, mid-video, with the transition.
 - "Separate timing for scenes" ON: scenes AND still images switch after "Switch scenes after", never 0 (`AppSettings.SceneTime`: 1 s floor; the player's `scenes_after_ms` range starts at 1000); the minimum/maximum apply to videos only.
 - Toggle OFF: a scene's minimum reached is its end; no minimum → the maximum moves it; neither → it stays. Both set → the minimum.
-- `PlayerHelper.ItemPlayRule(kind, min, max, separate, scenesAfter)` is the whole table. Guards: `rule.rs` `item_rule_table`, self-test `PlayLimitAssertions` / `ItemPlayRule`.
+- `rule.rs` `item_rule(kind, min, max, separate, scenes_after)` is the whole table. Guard: `rule.rs` `item_rule_table`.
 - Play time counts wall clock (never speed-scaled), not while paused, resets on every switch (an aligned B from its effect's start), never on an edit.
 - A 1-item playlist never switches by itself (`CanRotate`), but takes a user next/random.
 - Live edits (`/settings` for a playlist following globals, `/playlist/state` diffed prev → now) never reset the countdown or play time; a new minimum re-arms the armed end switch to the same B; a transition change re-arms it (`RearmAlignedSwitch`).
@@ -80,8 +79,8 @@ backend half is `Player/LiascapePlayerProgram.cs`. Under legacy the same rules r
 
 ## Program wiring (liascape-player)
 - Load via `BuildSpec` + `Load` (essential); reuse an existing `prog:main` (`set key` first, so the old playlist keeps its resume point). A single `Apply` destroys `prog:main` first.
-- Verbs: next/prev/random → `program.next|prev|random`; never write `pending_action.txt`.
-- Never start `timer-daemon`, `restart-daemon` or `monitor-daemon`, and never write `timer.pid`, `gui_timer.pid`, `restart.pid`, `pending_action.txt`, `timed_state.json` under liascape-player (`PlayerHelper.RetiredUnderPlayer`); stop a leftover legacy daemon (`KillLegacyDaemons`). A legacy `timed_state.json` is read once as the program to load, then removed.
+- Verbs: next/prev/random → `program.next|prev|random`.
+- Stop a `timer-daemon`, `restart-daemon` or `monitor-daemon` a legacy session left running (`KillLegacyDaemons`, verified by its command line). A legacy `timed_state.json` or `pending_action.txt` left in the config dir is never read. Guard: adapter IT § "a legacy rotation's files".
 - Restore (`liascape restore`, `play`, `toggle-play` from stopped): start `serve --restore --session-start`; replay `LastSession` only when the player shows nothing.
 - Trash of the shown/incoming item: `SetItems` with the bar's survivors, then `program.next`.
 

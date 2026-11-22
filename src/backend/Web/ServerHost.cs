@@ -120,37 +120,16 @@ public static class ServerHost
         // back to a detached `monitor-daemon` on shutdown so mute survives app close. Legacy only: under liascape-player
         // the player's Signal mutes (app open or closed) and a leftover monitor-daemon is stopped below (KillLegacyDaemons).
         if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) AudioMonitor.KillDetachedMonitor();
-        // Same ownership handoff for the TIMED-PLAYLIST timer: `serve` runs the timer IN-PROCESS, so it
-        // must KILL any detached `timer-daemon` (e.g. one spawned at boot by `liascape restore`) — otherwise
-        // BOTH own mpvpaper and the daemon keeps cycling its own (stale) playlist over ours ("creep") —
-        // and CLAIM ownership (WriteGuiTimerPid) so SpawnTimerDaemon's IsGuiTimerAlive guard skips while we
-        // live. Handed back to a detached daemon on shutdown (below) so the playlist survives app close.
-        // liascape-player: the player's program rotates by itself — no timer to own (no gui_timer.pid),
-        // only a timer-daemon / restart-daemon a legacy session left behind to stop.
-        // A legacy wallpaper (mpvpaper, LWE) this session left running would stay on screen beside liascape-player:
-        // reap it, and once the program is seeded below, replay the session on the player.
-        int legacyReaped = 0;
-        if (Liascape.Player.PlayerEngine.IsLiascapePlayer)
-        {
-            PlayerHelper.KillLegacyDaemons();
-            legacyReaped = PlayerHelper.ReapAllWallpaperProcs();
-        }
-        else
-        {
-            PlayerHelper.KillTimerDaemon();
-            PlayerHelper.WriteGuiTimerPid();
-        }
+        // A daemon or a legacy wallpaper (mpvpaper, LWE) a legacy session left running would stay beside liascape-player:
+        // stop them, and once the program mirror is seeded below, replay the session on the player.
+        PlayerHelper.KillLegacyDaemons();
+        int legacyReaped = PlayerHelper.ReapAllWallpaperProcs();
         // a player left running by an older build (it outlives the backend) restarts onto the current one
         Liascape.Player.LiascapePlayerMedia.StartUpgradeWatch();
-        // ...and RESUME the tick in-process so the playlist the daemon was running keeps advancing on
-        // GUI-open instead of freezing (the other half of the take-over — mirrors AudioMonitor.Start
-        // below). ResumeTimedTimer preserves the countdown and does NOT relaunch the on-screen wallpaper.
-        // liascape-player: the rotation is the player's program — the mirror is seeded from it (it never
-        // stopped), and a legacy session still in timed_state.json moves into it
-        if (Liascape.Player.PlayerEngine.IsLiascapePlayer) Liascape.Player.LiascapePlayerProgram.Startup();
-        else if (PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.ResumeTimedTimer();
+        // the rotation is the player's program: the mirror is seeded from it (it never stopped)
+        Liascape.Player.LiascapePlayerProgram.Startup();
         // the reaped legacy wallpaper's session, on the player: Restore replays LastSession only when the player shows
-        // nothing and no program runs (a legacy timed_state.json became the program just above)
+        // nothing and no program runs
         if (legacyReaped > 0)
             _ = Task.Run(() =>
             {
@@ -168,16 +147,6 @@ public static class ServerHost
             SteamClientHold.Shutdown(); // "Playing Wallpaper Engine" ends with the app, not after the linger
             // legacy: hand auto-mute to a detached monitor-daemon (retired under liascape-player: the player's Signal goes on)
             if (s.AutoMute && !Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsPlaying) AudioMonitor.SpawnDetachedMonitor();
-            // Release timer ownership, then hand the timed playlist back to a detached `timer-daemon`
-            // so it keeps cycling after the app closes (the Electron shell only kills the backend — it
-            // doesn't run `liascape restore`). Stop our own ticking first: this process may live on for a while
-            // (Kestrel waits for open WebSockets), and two owners supersede each other's switches.
-            // Clear-first so SpawnTimerDaemon's IsGuiTimerAlive guard lets it spawn.
-            // liascape-player: the player rotates on its own with the app closed — nothing to release or hand over
-            // Our own gui_timer.pid claim goes either way (a serve started on legacy, switched live).
-            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer) PlayerHelper.ReleaseTimer();
-            PlayerHelper.ClearGuiTimerPid();
-            if (!Liascape.Player.PlayerEngine.IsLiascapePlayer && PlayerHelper.IsTimedPlaylistActive()) PlayerHelper.SpawnTimerDaemon();
         });
 
         // WE auto-import on startup, off-thread so the API is up immediately;
@@ -511,7 +480,7 @@ public static class ServerHost
                 // liascape-player: ONE resolver pass for all of it — every live source its own effective volume/speed,
                 // af, mute and decode settings + the layer fit, diffed against what it runs (player-adapter.md
                 // § Targeting); covers the legacy calls below and ApplyPlaybackSettingsLive's
-                PlayerHelper.ApplyEffectiveLive(prev, s, curPlaying);
+                PlayerHelper.ApplyEffectiveLive();
                 Mark("resolve");
                 // per-monitor scene fps: live (`out:<name>.scene_fps`) — launch-only only under legacy (LWE)
                 if (!SameMonitors(prev.SceneMonitors, s.SceneMonitors)) Liascape.Player.LiascapePlayerMedia.ApplySceneFps(prev.SceneMonitors, s.SceneMonitors);
@@ -545,14 +514,9 @@ public static class ServerHost
             // live-apply the remaining playback settings to the playing wallpaper (Loop, NoAudio,
             // VideoFpsCap, DisableCache, Demuxer*, HwDec + scene mute) — formerly needed a stop/replay.
             if (!onPlayer) { PlayerHelper.ApplyPlaybackSettingsLive(prev, s, curPlaying); Mark("playback"); }
-            // restart-daemon interval/mode changed → re-arm the in-process leak-restart timer now
-            // (0 → off) instead of only on the next play.
-            if (prev.RestartMpvpaperEverySeconds != s.RestartMpvpaperEverySeconds || prev.RestartOnlyAtPlaylistChangeover != s.RestartOnlyAtPlaylistChangeover)
-                PlayerHelper.UpdateRestartTimer();
             // the maximum play time / the scene timing ("Separate timing for scenes" + "Switch scenes after") → the
             // running rotation, live (the effective one: a playlist with its own override keeps its own —
-            // /playlist/state applies those). Before the rotation below, so a switch it arms (advance-on-end just
-            // turned on) already reads them.
+            // /playlist/state applies those).
             if ((prev.GlobalMaxPlaySeconds, prev.GlobalSeparateSceneTiming, prev.GlobalSwitchScenesAfterSeconds)
                 != (s.GlobalMaxPlaySeconds, s.GlobalSeparateSceneTiming, s.GlobalSwitchScenesAfterSeconds))
             {
@@ -560,7 +524,7 @@ public static class ServerHost
                 PlayerHelper.ApplyPlayLimitsLive(r.Max, r.SeparateScenes, r.ScenesAfter);
             }
             // rotation (interval — the minimum play time under advance-on-end — / advance-on-end) changed →
-            // live-update a RUNNING timed playlist that follows the GLOBAL settings (a playlist with its own
+            // live-update a running program that follows the GLOBAL settings (a playlist with its own
             // override is updated by /playlist/state instead). No replay needed.
             if (PlayerHelper.IsTimedPlaylistActive()
                 && (prev.GlobalIntervalSeconds != s.GlobalIntervalSeconds
@@ -569,8 +533,8 @@ public static class ServerHost
             {
                 PlayerHelper.ApplyRotationLive(s.GlobalIntervalSeconds, s.GlobalSwitchWhenVideoEnds);
             }
-            // the effective transition (the globals, when the playlist follows them) or the method changed → an
-            // aligned switch already armed for A's end takes it (liascape-player requested it with the old one)
+            // the effective transition (the globals, when the playlist follows them) or the method changed → the
+            // program's switch already armed for A's end takes it (it was requested with the old one)
             var plS = PlaylistService.LoadCurrentState()?.Settings;
             // "When the playlist starts again" (the global one, when the playlist follows it) → the program, for its next start
             if (onPlayer && PlayerHelper.EffectiveStart(prev, plS) != PlayerHelper.EffectiveStart(s, plS) && Liascape.Player.LiascapePlayerProgram.IsActive)
@@ -928,7 +892,7 @@ public static class ServerHost
             return Results.Json(new
             {
                 path,
-                sceneId = PlayerHelper.QueryCurrentSceneWorkshopId(),
+                sceneId = path != null && PlayerHelper.IsScenePath(path) ? Path.GetFileName(path.TrimEnd('/')) : null,
                 playing,
                 timed = PlayerHelper.IsTimedPlaylistActive(),
                 position = PlayerHelper.QueryTimePos(), // live mpv time-pos → sync the in-app preview

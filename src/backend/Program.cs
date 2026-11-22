@@ -66,18 +66,11 @@ sealed class Program
                 PlayerHelper.Stop();
                 DrainLiascapePlayerBeforeExit();
                 return;
-            // internal: the daemons a closing app hands its work to (setsid-spawned by the backend itself).
-            // timer-daemon / restart-daemon are legacy-only: under liascape-player the player's program rotates by
-            // itself and both return at once; so does monitor-daemon (AudioMonitor): the player's auto-mute
-            // Signal runs with the app closed.
+            // internal: the auto-mute daemon a closing app hands its work to (setsid-spawned by the backend itself).
+            // Legacy-only: under liascape-player it returns at once (AudioMonitor): the player's auto-mute Signal runs
+            // with the app closed.
             case "monitor-daemon":
                 AudioMonitor.RunDaemon();
-                return;
-            case "timer-daemon":
-                PlayerHelper.RunTimerDaemon();
-                return;
-            case "restart-daemon":
-                PlayerHelper.RunRestartDaemon();
                 return;
             case "restore":
                 RunHeadlessAutoSync();
