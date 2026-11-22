@@ -82,8 +82,6 @@ export function LibrarySide({
   const [dur, setDur] = useState("");
   const patchItem = useStore((s) => s.patchLibraryItem);
   const openOnSteam = useStore((s) => s.openOnSteam);
-  // liascape-player plays a scene at its speed (its animation and its pitch-kept sound, by design); legacy's LWE is 1×
-  const sceneSpeed = useStore((s) => s.settings?.playerEngine !== "legacy");
   // Settings levels (settingsLevel.ts): the sidebar's rows follow the level like the Settings page's rows do
   const level = useStore((s) => levelOf(s.settings?.settingsLevel));
   const at = (l: Level) => rank(level) >= rank(l);
@@ -193,8 +191,8 @@ export function LibrarySide({
     glideFlip(flipFrom.current, bodyRef.current, CRASH_FLIP); flipFrom.current = null;
   }, [crashLeaving]);
   // an item that can't play (a preset; any scene while the scene renderer is missing): its notice (the crash notice's
-  // block), fading out once it can (its base back, the engine switched, the renderer found), what follows gliding into its room as for the crash notice. Guard: probe-sidebar lib:preset:needsBase*
-  const reason = useStore((s) => unplayableReasonOf(item, s.settings, s.scenesBlocked));
+  // block), fading out once it can (its base back, the renderer found), what follows gliding into its room as for the crash notice. Guard: probe-sidebar lib:preset:needsBase*
+  const reason = useStore((s) => unplayableReasonOf(item, s.scenesBlocked));
   const presetNote = useLinger(reason, CRASH_OUT_MS, motion);
   // one that turns up while the sidebar is open fades in (the body's own entrance plays for one there at the open)
   const [noteAtOpen] = useState(() => reason != null);
@@ -251,14 +249,14 @@ export function LibrarySide({
   const files = { video: vidFile, gif: gifSrc ? local(anim) : null, image: local(stillSrc) };
   const online = useOnline();
   const preview = usePreview("library", { gif: !!gifSrc, video: !!vidSrc, youtube: !!item.youtubeUrl && online });
-  const loud = item.isScene && sceneSpeed ? sceneLoudnessText(item) : null;
+  const loud = item.isScene ? sceneLoudnessText(item) : null;
   // the pills below show the resolution and the age rating: their tags would only repeat them
   const tags = sideTags(item.tags, { resolution: !!item.resolution, age: !!item.ageRating });
   // a row the level hides still shows when this item has its own value for it — hiding never hides a change
-  const showSpeed = (!item.isScene || sceneSpeed) && (at("standard") || targets.some((t) => t.speedOverride != null));
+  const showSpeed = at("standard") || targets.some((t) => t.speedOverride != null);
   const showLoud = !!loud && at("standard");
-  // "Uses Consolas, shown with Cascadia Mono" (each stand-in of the scene's last load under liascape-player, one line)
-  const fontLine = item.isScene && sceneSpeed && !multi && item.fontStandIns?.length
+  // "Uses Consolas, shown with Cascadia Mono" (each stand-in of the scene's last load, one line)
+  const fontLine = item.isScene && !multi && item.fontStandIns?.length
     ? "Uses " + item.fontStandIns.map((f) => `${f.font}, shown with ${f.shown}`).join("; ") : null;
   // a report that lands while the sidebar is open (the scene just loaded) fades in; one that clears it fades out; what sits
   // below the Playback section glides by the line's height either way (motion off: it takes its place at once)
@@ -378,7 +376,6 @@ export function LibrarySide({
           <div className="srow" data-side-row="volume"><div className="slabel"><span className="slabel-row">Volume{!volOv && <span className="side-global">global</span>}</span><span className="side-val">{vol}</span></div>
             <div className="sctl"><input type="range" min={0} max={100} value={vol} style={rangeFill(vol, 0, 100)} onChange={(e) => setVolume(+e.target.value)} />
               {volOv && <button className="mini ico" onClick={resetVolume}><RotateCcw size={13} /> Global</button>}</div></div>
-          {/* legacy scenes render at 1× (linux-wallpaperengine has no speed control) → no no-op slider there */}
           {showSpeed && (
             <div className="srow" data-side-row="speed"><div className="slabel"><span className="slabel-row">Speed{!spdOv && <span className="side-global">global</span>}</span><span className="side-val">{spd}×</span></div>
               <div className="sctl"><input type="range" min={0.1} max={4} step={0.1} value={spd} style={rangeFill(spd, 0.1, 4)} onChange={(e) => setSpeed(+e.target.value)} />

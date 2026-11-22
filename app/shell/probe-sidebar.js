@@ -93,11 +93,9 @@
 //                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
 //                        for the library's own copy with a one-off route, disabled with the reason when the mode can't; the
 //                        base back → the notice leaves, the cards come back; no-glow, bg-live. Shots side-needsbase-*.png
-//   lib:preset:legacy    the legacy engine (page-only settings-changed): every preset greyed with "Presets play only in the
-//                        Liascape player", the library read again, a click plays nothing; back → playable, no reload
 //   lib:scenesBlocked    the scene renderer missing (page-only scenes-blocked): every scene and preset greyed with the reason
-//                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why; under
-//                        the legacy engine no scene greyed, back on liascape-player greyed again; cleared → back
+//                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why;
+//                        cleared → back
 //   lib:baseDelete[Off]  Delete of a base two presets play (card button, Delete key, sidebar; Delete and unsubscribe too) asks,
 //                        naming 2; Keep it / Escape delete nothing; Delete trashes it and both presets grey out; a scene no
 //                        preset plays and a preset itself delete unasked; the dialog zooms in (Off: fades), no-glow, bg-live.
@@ -2368,7 +2366,7 @@ app.whenReady().then(async () => {
     }));
 
     // ---- presets in the Library (LibraryCard reason, LibrarySide PresetNotice / BaseRow / PresetsRow, baseConfirm.ts,
-    // BaseSceneConfirm.tsx, store presetReasonOf / libraryFollowsEngine). The cells add their own items to the stack's library
+    // BaseSceneConfirm.tsx, store unplayableReasonOf). The cells add their own items to the stack's library
     // and take them away again (the shared library the other cells count stays as it was): pb, a copy of s1 (its properties
     // color / clock / bars, bars shown while clock is on) under the Workshop id 910000003 (the CM fixture's scene whose two
     // presets Browse lists, "children"), and two presets of it in Wallpaper Engine's format, pp1 (color "0 0 1", clock false)
@@ -2717,49 +2715,10 @@ app.whenReady().then(async () => {
       return v;
     }, { workshopDownloadMode: "steamapp" }));
 
-    // lib:preset:legacy — the legacy engine (a WS settings-changed only the page sees: the stack's backend stays on
-    // liascape-player): every preset greys out at once with "Presets play only in the Liascape player", the scene itself
-    // doesn't; the page reads the library again; a click plays nothing and the status bar says why; the preset's notice has
-    // the reason and no download; the scene's Presets row goes. Back on liascape-player: read again, playable, no reload.
-    await cell("lib:preset:legacy", async () => withPresets(async () => {
-      const v = [], J = JSON.stringify, LEG = "Presets play only in the Liascape player";
-      const c0 = await cardState("pp1");
-      if (c0?.off) return [`pp1 is greyed before the switch (${J(c0)}) — proved nothing`];
-      const libReads = (from) => reqsSince(from).then((l) => l.filter(([mt, p]) => mt === "GET" && p === "/library").length);
-      let n0 = await reqMark();
-      await js(`window.__fakeWs("settings-changed", { playerEngine: "legacy" })`); await sleep(800);
-      const st = { pp1: await cardState("pp1"), pp2: await cardState("pp2"), pb: await cardState("pb") };
-      console.log(`        legacy: ${J(st)}`);
-      for (const t of ["pp1", "pp2"]) if (!st[t]?.off || st[t].reason !== LEG || st[t].title !== LEG) v.push(`${t} under legacy: ${J(st[t])}`);
-      if (st.pb?.off) v.push("the base scene greyed under legacy");
-      if (await libReads(n0) < 1) v.push("the engine switch didn't re-read the library");
-      await shot("preset-legacy");
-      const th = await page(`const t = m.thumb("pp1"); t.scrollIntoView({ block: "center" }); await m.sleep(300); return m.rect(t);`);
-      n0 = await reqMark();
-      await clickAt(th.x + th.w / 2, th.y + th.h / 2); await sleep(500);
-      if ((await reqsSince(n0)).some(([mt, p]) => mt === "POST" && p === "/apply")) v.push("a click on pp1 under legacy posted /apply");
-      const sb = await statusText();
-      if (sb !== "Can't play pp1: presets play only in the Liascape player") v.push(`the status bar says ${J(sb)}`);
-      await page(`await m.openSide("pp1"); await m.sleep(500);`);
-      const note = await page(`const n = m.side().querySelector("[data-preset-note]"); return n ? { text: n.querySelector(".side-crash-text").textContent.trim(), get: !!n.querySelector("[data-preset-get]") } : null;`);
-      if (!note || note.text !== LEG || note.get) v.push(`pp1's notice under legacy: ${J(note)}`);
-      await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(400);`);
-      if (await page(`return !!m.side().querySelector("[data-ws-presets]");`)) v.push("pb shows a Presets row under legacy");
-      await page(`await m.closeAll();`);
-      n0 = await reqMark();
-      await js(`window.__fakeWs("settings-changed", { playerEngine: "liascape-player" })`); await sleep(800);
-      const back = { pp1: await cardState("pp1"), pp2: await cardState("pp2") };
-      console.log(`        back: ${J(back)}`);
-      for (const t of ["pp1", "pp2"]) if (back[t]?.off || back[t]?.op > 0.01) v.push(`${t} still greyed back on liascape-player: ${J(back[t])}`);
-      if (await libReads(n0) < 1) v.push("the switch back didn't re-read the library");
-      return v;
-    }));
-
     // lib:scenesBlocked — the scene renderer is missing (a WS scenes-blocked only the page sees; the backend's latch, read
     // at load from /current): every scene (pb, s2) and preset (pp1) greys with the reason through the preset's own path
     // (the same status icon, its tooltip the reason), a video doesn't; a click plays nothing and the status bar says why;
-    // the sidebar's notice has the reason. Under the legacy engine (page-only settings-changed) no scene greys; back on
-    // liascape-player they do again. Cleared → all playable again.
+    // the sidebar's notice has the reason. Cleared → all playable again.
     await cell("lib:scenesBlocked", async () => withPresets(async () => {
       const v = [], J = JSON.stringify, WHY = "The scene renderer is missing — rebuild or reinstall Liascape";
       const video = await page(`const c = [...document.querySelectorAll(".card.lib")].find((c) => !c.querySelector(".badge") && !c.querySelector("[data-card-reason]"));
@@ -2784,16 +2743,6 @@ app.whenReady().then(async () => {
       const note = await page(`const n = m.side().querySelector("[data-preset-note]"); return n ? n.querySelector(".side-crash-text").textContent.trim() : null;`);
       if (note !== WHY) v.push(`pb's notice: ${J(note)}`);
       await page(`await m.closeAll();`);
-      // the legacy engine plays scenes without the player's renderer: the latch doesn't apply there (a preset keeps its
-      // own legacy reason); back on liascape-player it does again
-      await js(`window.__fakeWs("settings-changed", { playerEngine: "legacy" })`); await sleep(800);
-      const leg = { pb: await cardState("pb"), s2: await cardState("s2"), pp1: await cardState("pp1") };
-      console.log(`        legacy: ${J(leg)}`);
-      for (const t of ["pb", "s2"]) if (leg[t]?.off || leg[t]?.op > 0.01) v.push(`${t} greyed under legacy: ${J(leg[t])}`);
-      if (!leg.pp1?.off || leg.pp1.reason === WHY) v.push(`pp1 under legacy: ${J(leg.pp1)}`);
-      await js(`window.__fakeWs("settings-changed", { playerEngine: "liascape-player" })`); await sleep(800);
-      const lp = { pb: await cardState("pb"), s2: await cardState("s2") };
-      for (const t of ["pb", "s2"]) if (!lp[t]?.off || lp[t].reason !== WHY) v.push(`${t} back on liascape-player: ${J(lp[t])}`);
       await js(`window.__fakeWs("scenes-blocked", { reason: null })`); await sleep(800);
       const back = { pb: await cardState("pb"), s2: await cardState("s2"), pp1: await cardState("pp1") };
       console.log(`        back: ${J(back)}`);

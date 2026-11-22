@@ -64,8 +64,8 @@ async function settingsRows() {
     return { rows, summary: sum ? [...sum.querySelectorAll("[data-feature]")].map((li) => li.dataset.feature) : null };`);
 }
 
-// rows a missing piece must mark, by feature id (the stack runs at the Advanced settings level and PlayerEngine=liascape-player,
-// so Hardware decoding / Transition method / the GPU section are shown)
+// rows a missing piece must mark, by feature id (the stack runs at the Advanced settings level, so Hardware decoding /
+// Transition method / the GPU section are shown)
 const ROWS = {
   scenes: ["Play scenes"],
   transitions: ["Transitions", "Transition style"],

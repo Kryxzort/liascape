@@ -4,10 +4,8 @@
 //   copy:feedback     Keyboard shortcuts' Copy turns into a green "Copied" and settles back to "Copy" (hooks/useCopied.ts, the
 //                     sidebar pill's timing): the two faces roll (motion on) or only cross-fade (motion off, prefers-reduced-motion),
 //                     the button keeps its width and the command beside it never moves
-//   copy:commands     what lands on the clipboard: a shortcut's command, Autostart's, and (Expert) the whole "mpv command"
-//                     and "linux-wallpaperengine command" blocks
-//   preview:monitors  removing a scene monitor drops it from the linux-wallpaperengine command (the preview used to read
-//                     the settings file before the debounced save landed, so it showed the old list)
+//   copy:commands     what lands on the clipboard: a shortcut's command and Autostart's
+//   preview:monitors  removing a scene monitor saves sceneMonitors without it (the other kept), and the list on screen agrees
 //   hint:transition   the Transition style hint explains only the chosen style; Settings has no Pre-measure scenes row
 //   playtime:maxFloor:<where>  the maximum play time is 0 (off) or at least the minimum, in Settings (global) and the
 //                     playlist window (its own rotation): a total typed under the minimum is a draft (shown, never saved)
@@ -23,20 +21,17 @@
 //                     a 0 saved through the API comes back as 1 s
 //   copy:sidebarPill  the Library sidebar's Workshop ID pill, which shares the feedback (hooks/useCopied.ts), still flips and copies
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
-//   nudge:engine      "Full-live sync nudge" (Full-live at Expert) only while the legacy engine runs — the page is told
-//                     "legacy" by a stubbed /player-engine; hidden, its value stays saved
 //   bg:onePoll        the live background behind Settings (components/WallpaperBg.tsx) keeps one /current read open at a
 //                     time while every answer is held 7 s, and reads again once the slow one answered
-//   vram:stopShows    "Stopped scene shows" (Expert, liascape-player) sits right under the video memory cap and only while the
+//   vram:stopShows    "Stopped scene shows" (Expert) sits right under the video memory cap and only while the
 //                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
 //                     saves sceneVramStopShows; at Advanced it hides and the value stays
-//   fonts:gone        no "Use Windows fonts in scenes" / "Windows fonts folder" row at any level under liascape-player, old
-//                     keys in settings.json bring none back (scene fonts come from fontconfig)
+//   fonts:gone        no "Use Windows fonts in scenes" / "Windows fonts folder" row at any level, old keys in settings.json
+//                     bring none back (scene fonts come from fontconfig)
 //   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; a
 //                     stored "steamcmd" download mode (dropped) brings back none of its rows at any level
-//   levels:noEmptySection:<engine>  at every level, under liascape-player and a stubbed legacy, no section heading shows
-//                     without a row; Video and Keyboard shortcuts open at Basic with one row each; Playback hides at Basic on legacy;
-//                     legacy: "Scene transition delay (ms)" only at Expert
+//   levels:noEmptySection  at every level no section heading shows without a row; Video and Keyboard shortcuts open at
+//                     Basic with one row each, Playback with "Pause behind windows"; pictures settings-levels-<level>-<n>.png
 //   cache:lines       Housekeeping's cache picker: one line per cache (AppOps.CacheCategories) with its words, a themed tick
 //                     and the size of exactly its folder on disk (the shader cache's absent folder reads "Empty"); the
 //                     thumbnails ticked by default, nothing else; /cache/size agrees with the disk
@@ -129,19 +124,18 @@ const HELPERS = `
       const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, l: r.left, t: r.top, w: r.width, h: r.height }; },
     async tab(name) { [...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === name)?.click(); await this.sleep(500); },
   }; true`;
-// `engine`: answer the page's /player-engine with this engine (the Settings view asks it when it mounts).
-// Settings shows its rows before the store's settings and the engine's answer arrive (a row they hide is simply absent
+// Settings shows its rows before the store's settings and the player's status arrive (a row they hide is simply absent
 // until then), so a load waits for both: the level on screen is the saved one, and the view's /player-engine answered.
-// No fixed pause covers a loaded box (nudge:engine read "legacy, Full-live: no nudge row") and a stalled disk holds
-// them for seconds, so the wait is long; it ends the moment both are in.
-async function load({ engine } = {}) {
+// No fixed pause covers a loaded box and a stalled disk holds them for seconds, so the wait is long; it ends the moment
+// both are in.
+async function load() {
   await win.loadURL(withToken(U + "/"));
   for (let i = 0; i < 100 && !(await js(`return !!document.querySelector(".tab")`)); i++) await sleep(100);
   await js(HELPERS);
   await js(`await window.__x.tab("Library"); return true`);
   await js(`const of = window.fetch.bind(window); window.__engineRead = 0; window.__engineAsked = [];
     window.fetch = (u, o) => !String(u).includes("/player-engine") ? of(u, o)
-      : (window.__engineAsked.push(Math.round(performance.now())), ${engine ? `Promise.resolve(new Response(${J(J({ engine, active: engine, available: true, binary: null, reason: null }))}, { headers: { "Content-Type": "application/json" } }))` : "of(u, o)"})
+      : (window.__engineAsked.push(Math.round(performance.now())), of(u, o))
         .finally(() => { window.__engineRead++; }); return true`);
   const level = (await field("settingsLevel")) ?? "standard";
   const ready = await js(`await window.__x.tab("Settings");
@@ -337,21 +331,17 @@ app.whenReady().then(async () => {
     }
     await setSettings({ Morphs: true });
 
-    await cell("copy:commands — a shortcut, Autostart and both Expert command blocks copy what they show", async () => {
+    await cell("copy:commands — a shortcut and Autostart copy what they show", async () => {
       const v = [];
-      await setSettings({ SettingsLevel: "expert" }); await load();
+      await setSettings({ SettingsLevel: "standard" }); await load();
       // the page's own writes too: a cross-check when the session's clipboard can't be read
       await js(`const w = navigator.clipboard.writeText.bind(navigator.clipboard); window.__wrote = [];
         navigator.clipboard.writeText = (t) => { window.__wrote.push(t); return w(t); }; return true`);
-      const blocks = await js(`return Object.fromEntries([...document.querySelectorAll(".settings .ssection")].map((s) => [s.querySelector("h3")?.textContent.trim(), s.querySelector("pre.mpv")?.textContent ?? null]).filter(([, t]) => t != null))`);
       const want = [
         ["volume-up shortcut", '[data-copy="liascape volume up"]', "liascape volume up"],
         ["Autostart", '[data-copy="liascape restore"]', "liascape restore"],
-        ["mpv command", '[data-copy="mpv command"]', blocks["mpv command"]],
-        ["linux-wallpaperengine command", '[data-copy="linux-wallpaperengine command"]', blocks["linux-wallpaperengine command"]],
       ];
       for (const [what, sel, text] of want) {
-        if (!text || text === "…") { v.push(`${what}: nothing to copy (${J(text)}) — proved nothing`); continue; }
         const p = await js(`return await window.__x.show(document.querySelector(${J(sel)}))`);
         if (!p) { v.push(`${what}: no Copy button (${sel})`); continue; }
         await clipboard.writeText("");
@@ -362,27 +352,28 @@ app.whenReady().then(async () => {
         if (got !== text) v.push(`${what}: the clipboard holds ${J(got.slice(0, 80))}${wrote.length ? ` (the page wrote ${J(wrote[0]?.slice(0, 80))})` : " (no write)"}, want ${J(text.slice(0, 80))}`);
         if (!(await js(`return document.querySelector(${J(sel)})?.hasAttribute("data-copied")`))) v.push(`${what}: the button didn't turn into "Copied"`);
       }
-      // the block's button doesn't sit over the command's first line
-      const lap = await js(`return [...document.querySelectorAll(".cmd-block")].map((c) => { const b = c.querySelector(".copy-btn").getBoundingClientRect(), pre = c.querySelector("pre");
-        const cs = getComputedStyle(pre), textRight = pre.getBoundingClientRect().right - parseFloat(cs.paddingRight); return +(textRight - b.left).toFixed(1); })`);
-      if (lap.length !== 2) v.push(`${lap.length} command blocks with a Copy button, want 2`);
-      for (const d of lap) if (d > 0) v.push(`a block's Copy button covers ${d} px of its command's lines`);
-      await setSettings({ SettingsLevel: "standard" });
       return v;
     });
 
-    await cell("preview:monitors — removing a scene monitor drops it from the linux-wallpaperengine command (it read the old file)", async () => {
+    await cell("preview:monitors — removing a scene monitor saves sceneMonitors without it", async () => {
       const v = [];
-      await setSettings({ SettingsLevel: "expert", AllowScenes: true, SceneMonitors: [{ Name: "PRB-A", Fps: 15, IsPrimary: true }, { Name: "PRB-B", Fps: 15, IsPrimary: false }] });
-      await load();
-      const lwe = () => js(`return [...document.querySelectorAll(".settings .ssection")].find((s) => s.querySelector("h3")?.textContent.trim() === "linux-wallpaperengine command")?.querySelector("pre.mpv")?.textContent ?? null`);
-      if (!(await waitFor(async () => /PRB-B/.test((await lwe()) ?? ""), 6000))) v.push(`before: the command doesn't list PRB-B (${J(await lwe())})`);
-      const p = await js(`const b = [...document.querySelectorAll('[aria-label="Remove monitor"]')].pop(); return b ? await window.__x.show(b) : null`);
-      if (!p) return [...v, "no Remove monitor button"];
-      await clickAt(p.x, p.y);
-      if (!(await waitFor(async () => { const s = (await lwe()) ?? ""; return /PRB-A/.test(s) && !/PRB-B/.test(s); }, SAVE_MS)))
-        v.push(`after removing PRB-B the command still reads ${J(await lwe())}`);
-      await setSettings({ SceneMonitors: [], AllowScenes: false, SettingsLevel: "standard" });
+      const names = async () => ((await field("sceneMonitors")) ?? []).map((m) => m.name ?? m.Name);
+      const shown = () => js(`return [...document.querySelectorAll(".settings input.mon-name")].map((i) => i.value)`);
+      await setSettings({ SettingsLevel: "standard", AllowScenes: true, SceneMonitors: [{ Name: "PRB-A", Fps: 15 }, { Name: "PRB-B", Fps: 24 }] });
+      try {
+        await load();
+        if (J(await shown()) !== J(["PRB-A", "PRB-B"])) return [`before: the list shows ${J(await shown())}, want ["PRB-A","PRB-B"] — proved nothing`];
+        if (await js(`return [...document.querySelectorAll(".settings input.mon-name")].some((i) => i.closest(".hms")?.querySelector("input[type=radio]"))`)) v.push("a monitor row still has a primary radio");
+        const p = await js(`const b = [...document.querySelectorAll('[aria-label="Remove monitor"]')].pop(); return b ? await window.__x.show(b) : null`);
+        if (!p) return [...v, "no Remove monitor button"];
+        await clickAt(p.x, p.y);
+        if (!(await waitFor(async () => J(await names()) === J(["PRB-A"]), SAVE_MS))) v.push(`after removing PRB-B /settings holds ${J(await names())}, want ["PRB-A"]`);
+        const kept = ((await field("sceneMonitors")) ?? [])[0];
+        if ((kept?.fps ?? kept?.Fps) !== 15) v.push(`PRB-A's fps changed on the save: ${J(kept)}`);
+        if (J(await shown()) !== J(["PRB-A"])) v.push(`after the removal the list shows ${J(await shown())}`);
+      } finally {
+        await setSettings({ SceneMonitors: [], AllowScenes: false, SettingsLevel: "standard" });
+      }
       return v;
     });
 
@@ -632,37 +623,8 @@ app.whenReady().then(async () => {
       if (done.color !== await C("var(--success)")) v.push(`"Copied" is ${done.color}, want --success ${await C("var(--success)")}`);
       await shot("copy-done", row);
       await mv(5, 5, 1500);
-      const b = await js(`return await window.__x.show(document.querySelector('[data-copy="mpv command"]')?.closest(".ssection"))`);
-      if (b) {
-        const rect = { x: Math.round(b.l) - 6, y: Math.round(b.t) - 6, width: Math.round(b.w) + 12, height: Math.round(b.h) + 12 };
-        await shot("copy-mpv-rest", rect);
-        const q = await js(`const r = document.querySelector('[data-copy="mpv command"]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }`);
-        await clickAt(q.x, q.y); await sleep(500); await shot("copy-mpv-done", rect);
-        await js(`document.documentElement.classList.add("bg-live"); return true`); await sleep(300); await shot("copy-mpv-bglive", rect);
-        await js(`document.documentElement.classList.remove("bg-live"); return true`);
-      } else v.push("no mpv command block at Expert");
       await mv(5, 5);
       await setSettings({ SettingsLevel: "standard" });
-      return v;
-    });
-
-    await cell("nudge:engine — \"Full-live sync nudge\" only under the legacy engine; its value stays saved", async () => {
-      const v = [];
-      const eng = (await http("GET", "/player-engine")).json;
-      if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
-      await setSettings({ SettingsLevel: "expert", TransitionMethod: "full-live", FullLiveSyncOffsetMs: -40 });
-      try {
-        await load();
-        if (!(await has("Transition style"))) return ['no "Transition style" row at Expert — proved nothing'];
-        if (await has("Full-live sync nudge")) v.push("liascape-player: the nudge row shows (only the legacy helper reads it)");
-        await load({ engine: "legacy" });
-        if (!(await has("Full-live sync nudge"))) v.push("legacy, Full-live: no nudge row");
-        await setSettings({ TransitionMethod: "reveal" }); await load({ engine: "legacy" });
-        if (await has("Full-live sync nudge")) v.push("legacy, Reveal: the nudge row shows (it's Full-live only)");
-        if ((await field("fullLiveSyncOffsetMs")) !== -40) v.push(`hiding changed the saved value: fullLiveSyncOffsetMs ${await field("fullLiveSyncOffsetMs")}, want -40`);
-      } finally {
-        await setSettings({ SettingsLevel: "standard", TransitionMethod: "reveal", FullLiveSyncOffsetMs: -30 });
-      }
       return v;
     });
 
@@ -755,7 +717,7 @@ app.whenReady().then(async () => {
     // label → the level it shows from (liascape-player; normalization and the scene memory cap on)
     const MOVED = {
       "Loudness target": "advanced", "Fade out after (ms)": "advanced", "Come back after (ms)": "advanced",
-      "Disable video cache": "expert", "Restart legacy player every (s)": "expert", "Only restart between wallpapers": "expert",
+      "Disable video cache": "expert",
       "Fit to screen": "basic", "Read-ahead buffer (MiB)": "expert", "Look-back buffer (MiB)": "expert",
       "Stopped scene shows": "expert", "Keep a scene renderer ready": "advanced",
       "Thumbnail shape": "basic", "Smooth window animations": "basic", "Text shadow": "advanced", "On hover": "advanced",
@@ -766,10 +728,10 @@ app.whenReady().then(async () => {
     };
     // the dropped steamcmd mode's rows: none at any level, even with "steamcmd" stored (it reads as the default)
     const GONE = ["Download via steamcmd", "steamcmd path", "Steam username", "Sign in"];
-    // every shown section (a heading on screen) holds a row, a command block or a button; the headings per level
+    // every shown section (a heading on screen) holds a row or a button; the headings per level
     const sectionsAt = () => js(`return [...document.querySelectorAll(".settings .ssection")].filter((s) => getComputedStyle(s).display !== "none").map((s) => ({
       title: s.querySelector("h3")?.textContent.trim(), rows: [...s.querySelectorAll(".srow")].filter((r) => r.getClientRects().length).length,
-      other: [...s.querySelectorAll(".cmd-block, .btn")].filter((e) => e.getClientRects().length).length }))`);
+      other: [...s.querySelectorAll(".btn")].filter((e) => e.getClientRects().length).length }))`);
     const emptyAt = (secs) => secs.filter((s) => !s.rows && !s.other).map((s) => s.title);
 
     await cell("levels:rows — every row the re-tier moved shows from exactly its level, its section's other rows keep theirs", async () => {
@@ -793,35 +755,33 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    for (const engine of ["liascape-player", "legacy"]) {
-      await cell(`levels:noEmptySection:${engine} — at every level no section heading shows without a row under it`, async () => {
-        const v = [];
-        try {
-          for (const lv of LEVELS) {
-            await setSettings({ SettingsLevel: lv }); await load(engine === "legacy" ? { engine } : {});
-            const secs = await sectionsAt();
-            if (secs.length < 5) { v.push(`${lv}: only ${secs.length} sections shown — proved nothing`); continue; }
-            for (const t of emptyAt(secs)) v.push(`${lv}: "${t}" shows its heading with nothing under it`);
-            const titles = secs.map((s) => s.title);
-            // the legacy-only "Scene transition delay (ms)" moved to Expert
-            if (engine === "legacy" && (await has("Scene transition delay (ms)")) !== (lv === "expert"))
-              v.push(`${lv}, legacy: "Scene transition delay (ms)" ${lv === "expert" ? "is missing" : "shows"} (it's an expert row)`);
-            // Basic: the Video and Keyboard shortcuts sections open for their one Basic row each; Playback's only Basic row is
-            // liascape-player's, so under legacy it hides at Basic
-            if (lv === "basic") {
-              for (const [t, row] of [["Video", "Fit to screen"], ["Keyboard shortcuts", "Autostart"]]) {
-                const s = secs.find((x) => x.title === t);
-                if (!s) v.push(`basic: no "${t}" section (its "${row}" row is Basic)`);
-                else if (s.rows !== 1) v.push(`basic: "${t}" shows ${s.rows} rows, want just "${row}"`);
-              }
-              if (engine === "legacy" && titles.includes("Playback")) v.push("basic, legacy: the Playback heading shows (its only Basic row is liascape-player's)");
-              if (engine === "liascape-player" && !titles.includes("Playback")) v.push("basic, liascape-player: no Playback section (Pause behind windows is Basic)");
+    await cell("levels:noEmptySection — at every level no section heading shows without a row under it", async () => {
+      const v = [];
+      try {
+        for (const lv of LEVELS) {
+          await setSettings({ SettingsLevel: lv }); await load();
+          const secs = await sectionsAt();
+          if (secs.length < 5) { v.push(`${lv}: only ${secs.length} sections shown — proved nothing`); continue; }
+          for (const t of emptyAt(secs)) v.push(`${lv}: "${t}" shows its heading with nothing under it`);
+          // the page top to bottom, one picture per screenful (settings-levels-<level>-<n>.png): a section that lost rows reflows
+          const pages = await js(`const sc = document.querySelector(".scroll.settings"); return Math.min(10, Math.ceil(sc.scrollHeight / sc.clientHeight))`);
+          for (let i = 0; i < pages; i++) {
+            await js(`const sc = document.querySelector(".scroll.settings"); sc.scrollTop = ${i} * sc.clientHeight; return true`); await sleep(350);
+            await shot(`levels-${lv}-${i}`);
+          }
+          await js(`document.querySelector(".scroll.settings").scrollTop = 0; return true`);
+          // Basic: the Video, Keyboard shortcuts and Playback sections open for their one Basic row each
+          if (lv === "basic") {
+            for (const [t, row] of [["Video", "Fit to screen"], ["Keyboard shortcuts", "Autostart"], ["Playback", "Pause behind windows"]]) {
+              const s = secs.find((x) => x.title === t);
+              if (!s) v.push(`basic: no "${t}" section (its "${row}" row is Basic)`);
+              else if (s.rows !== 1) v.push(`basic: "${t}" shows ${s.rows} rows, want just "${row}"`);
             }
           }
-        } finally { await setSettings({ SettingsLevel: "standard" }); }
-        return v;
-      });
-    }
+        }
+      } finally { await setSettings({ SettingsLevel: "standard" }); }
+      return v;
+    });
 
     await cell("cache:lines — one line per cache: its words, a themed tick, its folder's size; the thumbnails ticked", async () => {
       const v = [];

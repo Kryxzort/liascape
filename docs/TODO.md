@@ -248,6 +248,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] UI matrix fuzz: `playlistBarDrag:lastToSecond` fails "a switch was requested" (a playlist-bar drag of the last item
       to second asks the player to switch), on lp-player as well as with the #67 change. Replay: `scripts/test-ui-matrix.sh --fuzz-replay 'pending:seq:itemSpdDrag+next:shown,itemVolReset:other,seq:plTrEffect+next,itemVolDrag:other,seq3:playlistBarRemove+trashUndo+next,playlistBarVol:off,seq5:playlistBarDrag+next+pause+resume+next,playlistBarDrag:lastToSecond'`.
       Find whether the drag really switches (a product bug) or the cell misreads a switch an earlier step queued.
+- [ ] UI matrix: `single × appear:gifVideo` fails "on, Settings' preview card: never showed a video of its gif in 6 s ([])":
+      every per-frame sample taken on the Settings tab is empty (`m.card("k1")` finds no k1 card in Settings' card
+      preview while the "Play GIF previews as videos" row is centred), so its "off" checks fail too. Alone and in a
+      subset, on the UI from before the switch-over (`4375e574`) as well as after it. The Library half passes. Find
+      whether the preview stopped showing k1 there (a product bug) or the cell looks in the wrong place.
 - [ ] Settings → "Video memory cap (MiB)" accepts up to 1048576 (1 TiB: `views/Settings.tsx` NumInput `max`). Bound it by the
       card's real VRAM: the player already reads the total (`src/player/src/vram.rs` Probe: NVML, else AMD's
       `mem_info_vram_total`); surface it to the UI, make it the field's `max`, and clamp a saved value above it with a

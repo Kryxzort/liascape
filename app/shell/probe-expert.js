@@ -159,7 +159,7 @@ app.whenReady().then(async () => {
     await cell("a changed setting hidden by a lower level: kept and live, the note counts it, Show raises the level", async () => {
       const v = [];
       await LEVEL("standard"); await sleep(300);
-      const n0 = +((await view()).hidden ?? 0); // the stack's own non-default hidden settings (engine, transition style, …)
+      const n0 = +((await view()).hidden ?? 0); // the stack's own non-default hidden settings (transition style, …)
       await LEVEL("expert");
       await js(`await window.__x.select(${JSON.stringify(EXPERT_ROW)}, "Hold until a monitor returns"); return true`);
       if (!(await waitFor(async () => (await field("rotateWhileParked")) === false, 4000))) v.push(`rotateWhileParked not saved false (${await field("rotateWhileParked")})`);
@@ -174,7 +174,7 @@ app.whenReady().then(async () => {
       if (!(await waitFor(async () => (await field("rotateWhileParked")) === true, 4000))) v.push(`the row's reset did not restore rotateWhileParked (${await field("rotateWhileParked")})`);
       await LEVEL("standard"); await sleep(300);
       if (+((await view()).hidden ?? 0) !== n0) v.push(`after the reset the note reads ${JSON.stringify((await view()).hidden)}, want ${n0 || null}`);
-      if (await js(`return !!document.querySelector("[data-hidden-reset]")`)) v.push("a bulk reset button on the note (it could flip the player engine)");
+      if (await js(`return !!document.querySelector("[data-hidden-reset]")`)) v.push("a bulk reset button on the note (it could reset settings the user never saw)");
       return v;
     });
 

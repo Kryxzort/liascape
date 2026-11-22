@@ -1453,17 +1453,17 @@ C["seq:previewDrag+reopen"] = { states: ["single", "playlist", "effect"], async 
 
 // The UI saves its whole settings on every change while the backend reads them (every request, the tick, the
 // adapter): a read that lands mid-save must still see the settings — never the C# defaults (
-// volume 100, the legacy engine; /settings itself then saved those over everything, Steam tokens included).
+// volume 100, the Standard level; /settings itself then saved those over everything, Steam tokens included).
 C["race:settingsSaveLoad"] = { states: ["idle"], async run(c) {
-    const s = await getSettings(); c.want = { volume: s.volume, noAudio: s.noAudio, playerEngine: s.playerEngine };
+    const s = await getSettings(); c.want = { volume: s.volume, noAudio: s.noAudio, settingsLevel: s.settingsLevel };
     let bad = 0, n = 0, first = null;
     const writers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 25; i++) await post("/settings", s); });
     const readers = Array.from({ length: 3 }, async () => { for (let i = 0; i < 80; i++) { const g = await getSettings(); n++;
-      if (!g || g.volume !== s.volume || g.noAudio !== s.noAudio || g.playerEngine !== s.playerEngine) { bad++; first ??= g && { volume: g.volume, noAudio: g.noAudio, playerEngine: g.playerEngine }; } } });
+      if (!g || g.volume !== s.volume || g.noAudio !== s.noAudio || g.settingsLevel !== s.settingsLevel) { bad++; first ??= g && { volume: g.volume, noAudio: g.noAudio, settingsLevel: g.settingsLevel }; } } });
     await Promise.all([...writers, ...readers]);
     c.race = { bad, n, first };
   }, check: (c) => [...(c.race.bad ? [`${c.race.bad}/${c.race.n} reads of /settings during saves were not the settings: ${JSON.stringify(c.race.first)}, saved ${JSON.stringify(c.want)}`] : []),
-    ...(c.after.s.playerEngine !== c.want.playerEngine || c.after.s.volume !== c.want.volume ? [`after the saves: engine ${c.after.s.playerEngine} volume ${c.after.s.volume}`] : [])] };
+    ...(c.after.s.settingsLevel !== c.want.settingsLevel || c.after.s.volume !== c.want.volume ? [`after the saves: level ${c.after.s.settingsLevel} volume ${c.after.s.volume}`] : [])] };
 
 // The same race for the other shared state files: the current playlist (playlist_state.json — the playlist bar saves it on
 // every edit; the UI's init, the tick's transition config and /settings read it) and a library index (index.json —
@@ -1986,12 +1986,6 @@ const APPEAR = {
   "appear:cardSize": { drive: () => `await m.select("Card size", "Large");`, saved: (c) => c.after.s.cardSize === "Large" },
   "appear:gifs": { drive: () => `await m.select("Card previews", "Always animate");`, saved: (c) => c.after.s.previewNotHovered?.[0] === "gif" },
   "appear:wallpaperBg": { drive: () => `m.setCheck(m.input("Wallpaper behind every tab"), true, "bg");`, saved: (c) => c.after.s.liveWallpaperBehindAllTabs === true },
-  // the mpvpaper leak-restart (Settings → "Restart mpvpaper every"): a legacy-only workaround, a no-op under liascape-player —
-  // a 2 s interval, sampled for 3.5 s: nothing relaunches (a single video restarts under legacy, a playlist at its changeover)
-  "noop:restartEvery": { states: ["single", "playlist", "effect"], ms: 3500, drive: () => `m.setValue(m.input("Restart legacy player every (s)"), 2, "restart");`, saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 },
-  "noop:restartAtChangeover": { states: ["single", "playlist"], ms: 3500,
-    drive: () => `m.setValue(m.input("Restart legacy player every (s)"), 2, "restart"); await m.sleep(300); m.setCheck(m.input("Only restart between wallpapers"), true, "changeover");`,
-    saved: (c) => c.after.s.restartMpvpaperEverySeconds === 2 && c.after.s.restartOnlyAtPlaylistChangeover === true },
 };
 for (const [k, a] of Object.entries(APPEAR)) C[k] = { states: a.states ?? ["effect", "pending"], noSwitch: true,
   async pre(c) { if (c.other) { await post("/library/volume", { path: c.other, intValue: 30 }); await post("/library/speed", { path: c.other, doubleValue: 0.8 }); } },

@@ -30,8 +30,6 @@ export const LEVEL_OF_KEY: Record<string, Level> = {
   copyFilesInsteadOfSymlinking: "advanced", replaceDirectWithWorkshop: "advanced",
   transitionMethod: "advanced", volumeKeyTarget: "advanced",
   // expert
-  disableCache: "expert", restartMpvpaperEverySeconds: "expert", restartOnlyAtPlaylistChangeover: "expert",
-  demuxerMaxMib: "expert", demuxerMaxBackMib: "expert", sceneVramStopShows: "expert",
-  sceneTransitionDelayMs: "expert", fullLiveSyncOffsetMs: "expert",
+  disableCache: "expert", demuxerMaxMib: "expert", demuxerMaxBackMib: "expert", sceneVramStopShows: "expert",
   rotateWhileParked: "expert", debugMode: "expert", debugOverlay: "expert",
 };

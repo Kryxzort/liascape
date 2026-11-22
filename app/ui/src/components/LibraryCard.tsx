@@ -20,7 +20,7 @@ export const LibraryCard = memo(function LibraryCard({
   // unsubscribe now (signed out): the button shows disabled, its name says why, and a click only puts that in the status bar
   // (no tooltips on cards). Guard: probe-steam side:unsub:signedOut
   item: LibraryItem; playing: boolean; selected: boolean; focused: boolean; inPlaylist: boolean; unsub?: boolean; unsubOff?: string | null;
-  // why it can't play now (a preset: its base scene gone, the legacy engine…; a scene or preset: the scene renderer missing —
+  // why it can't play now (a preset: its base scene gone; a scene or preset: the scene renderer missing —
   // store unplayableReasonOf), else null: the card greys
   // out with a status icon whose tooltip is the reason, and a click plays nothing (store applyItem says why in the status bar)
   reason?: string | null;
@@ -52,7 +52,7 @@ export const LibraryCard = memo(function LibraryCard({
         {/* a preset is a scene for everything else (greying, "Play scenes" off); only its badge names it. Guard: probe-sidebar
             lib:preset:badge */}
         {item.isScene && <TypeBadge preset={item.isPreset} />}
-        {/* Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy, lib:scenesBlocked (a scene's too) */}
+        {/* Guard: probe-sidebar lib:preset:needsBase, lib:scenesBlocked (a scene's too) */}
         {(item.isPreset || item.isScene) && <span className={`warn preset${reason ? " on" : ""}`} data-card-reason={reason ?? ""} title={reason ?? undefined}
           aria-hidden={reason ? undefined : true}><Unplug size={15} /></span>}
         {item.hasCrashed && !reason && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}

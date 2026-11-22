@@ -163,8 +163,8 @@
 //                         its two presets (the stack's backend + fake Steam servers): "Presets · <scene>" pill slides in (Off:
 //                         fades), lit, the sidebar closes, the library's one marked in library, the list's sorts and second
 //                         page; × back (the pill leaves); no-glow + bg-live
-//   ws:presetsHidden      no Presets row on a video's or a preset's sidebar, nor (live) under the legacy engine or with scene
-//                         support off; the filter's Type group offers Preset only alongside it
+//   ws:presetsHidden      no Presets row on a video's or a preset's sidebar, nor (live) with scene support off; the filter's
+//                         Type group offers Preset only alongside it
 //   ws:presetsEmpty       a scene with no presets: the list says so in the grid
 //   ws:presetBase         a preset's sidebar: "Uses" + its base's title (asked once); a click shows the base's Library card, else
 //                         its Browse card (the list's own, else one of its own), never a Steam page
@@ -618,9 +618,8 @@ app.whenReady().then(async () => {
       if (!box) v.push("no ticked checkbox in Settings to measure");
       else {
         // the box as drawn: Settings' sections cascade in (index.css ssection-in, up to ~1.4 s from the tab opening, later
-        // sections last) and a section mounted late (GPU & memory, once the engine is known) starts its own, so a capture
-        // taken on a timer can catch the box at opacity 0. Wait for every animation on it and its ancestors to finish, then
-        // for a frame drawn after that.
+        // sections last), so a capture taken on a timer can catch the box at opacity 0. Wait for every animation on it and
+        // its ancestors to finish, then for a frame drawn after that.
         const b2 = await page(`const e = document.querySelector("[data-tick-probe]");
           for (let n = 0; n < 5; n++) {
             const run = [...e.getAnimations({ subtree: true })]; for (let x = e.parentElement; x; x = x.parentElement) run.push(...x.getAnimations());
@@ -3108,8 +3107,8 @@ app.whenReady().then(async () => {
     }
 
     // ws:presetsHidden — no Presets row where there's nothing to list (a video's sidebar, a preset's own) nor while presets can't
-    // play: the legacy engine, scene support off (a WS settings-changed: the page's own settings, the backend's untouched) —
-    // live, under an open sidebar; the filter's Type group offers Preset only alongside it
+    // play: scene support off (a WS settings-changed: the page's own settings, the backend's untouched) — live, under an
+    // open sidebar; the filter's Type group offers Preset only alongside it
     await cell("ws:presetsHidden", async () => {
       const v = [];
       try {
@@ -3124,14 +3123,14 @@ app.whenReady().then(async () => {
         const typeRows = () => page(`const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") { t?.click(); await new Promise((r) => setTimeout(r, 450)); }
           return [...(document.querySelector('.wf-col:not(.closing) [data-wf-group="type"]')?.querySelectorAll(".wf-row") ?? [])].map((r) => r.dataset.wfTag);`);
         if (!(await typeRows()).includes("Preset")) v.push(`presets on: the filter's Type rows ${J(await typeRows())} (want Preset)`);
-        for (const [what, patch] of [["the legacy engine", { playerEngine: "legacy" }], ["scene support off", { playerEngine: "liascape-player", allowScenes: false }]]) {
-          await ev("settings-changed", { playerEngine: "liascape-player", allowScenes: true });
-          await at(0);
-          if (!(await js(`!!document.querySelector(${J(PROW)})`))) { v.push(`${what}: no Presets row before the change — proved nothing`); continue; }
-          await ev("settings-changed", patch); await sleep(500);
-          if (await js(`!!document.querySelector(${J(PROW)})`)) v.push(`${what}: the open scene sidebar still offers Presets`);
+        await ev("settings-changed", { allowScenes: true });
+        await at(0);
+        if (!(await js(`!!document.querySelector(${J(PROW)})`))) v.push("scene support off: no Presets row before the change — proved nothing");
+        else {
+          await ev("settings-changed", { allowScenes: false }); await sleep(500);
+          if (await js(`!!document.querySelector(${J(PROW)})`)) v.push("scene support off: the open scene sidebar still offers Presets");
           const rows = await typeRows();
-          if (rows.includes("Preset") || !rows.includes("Scene")) v.push(`${what}: the filter's Type rows ${J(rows)} (want no Preset)`);
+          if (rows.includes("Preset") || !rows.includes("Scene")) v.push(`scene support off: the filter's Type rows ${J(rows)} (want no Preset)`);
         }
       } finally { await presetsDone(); }
       return v;
