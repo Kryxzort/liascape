@@ -84,7 +84,7 @@ The rest you'll learn by using Liascape.
 
 ## Install
 
-As with any other application, Liascape depends on 25 packages (and 364 more that npm and Cargo fetch for you while it builds).
+As with any other application, Liascape depends on 23 packages (and 364 more that npm and Cargo fetch for you while it builds).
 
 **You'll need:**
 - A Wayland compositor that supports wlr-layer-shell, such as Hyprland, Sway or KDE Plasma. GNOME doesn't(Deserved af, stop using GNOME), so Liascape can't draw a wallpaper there.
@@ -131,8 +131,8 @@ To build it by hand instead, `nix develop` in the cloned repo gives you a shell 
 <summary><b>Arch</b></summary>
 
 ```bash
-sudo pacman -S --needed base-devel rust clang cmake git wayland wayland-protocols libglvnd mpv libpulse pipewire \
-  libxkbcommon sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg dotnet-sdk aspnet-targeting-pack nodejs npm
+sudo pacman -S --needed base-devel rust clang cmake git wayland libglvnd mpv pipewire libpulse sdl2 freetype2 \
+  fontconfig harfbuzz glm lz4 zlib ffmpeg dotnet-sdk aspnet-targeting-pack nodejs npm
 paru -S --needed electron45-bin   # or any AUR helper
 ```
 
@@ -150,10 +150,10 @@ Then [build it](#then-build-it).
 <summary><b>Debian / Ubuntu</b></summary>
 
 ```bash
-sudo apt install build-essential cargo rustc libclang-dev libwayland-bin libwayland-dev libegl-dev libgles-dev \
-  libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev cmake git libsdl2-dev libfreetype-dev \
-  libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev \
-  libswresample-dev libswscale-dev libavutil-dev libgl-dev ffmpeg dotnet-sdk-10.0 nodejs npm
+sudo apt install build-essential pkg-config cargo rustc libclang-dev libwayland-dev libegl-dev libmpv-dev \
+  libpipewire-0.3-dev cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev \
+  zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libgl-dev ffmpeg \
+  pulseaudio-utils dotnet-sdk-10.0 nodejs npm
 ```
 
 Liascape needs Rust 1.85 or newer. If your release's `rustc` is older, install Rust with [rustup](https://rustup.rs) instead.
@@ -170,9 +170,9 @@ Then [build it](#then-build-it).
 <summary><b>Fedora</b></summary>
 
 ```bash
-sudo dnf install gcc make cargo rust clang-devel wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel \
-  pulseaudio-libs-devel pipewire-devel libxkbcommon-devel cmake git SDL2-devel freetype-devel fontconfig-devel \
-  harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel ffmpeg-free libglvnd-devel dotnet-sdk-10.0 nodejs npm
+sudo dnf install gcc gcc-c++ make pkgconf cargo rust clang-devel wayland-devel mesa-libEGL-devel mpv-libs-devel \
+  pipewire-devel cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel \
+  ffmpeg-free-devel ffmpeg-free libglvnd-devel pulseaudio-utils dotnet-sdk-10.0 nodejs npm
 ```
 
 There's no Electron package here: put an `electron45` or `electron` binary on your `PATH`, or point
