@@ -15,6 +15,7 @@ use crate::graph::{ApiError, NodeKind, PropType, PropValue, props};
 use crate::headless::OutputInfo;
 use crate::log::{self, Level, LogFilter};
 use crate::recipes::TransitionReq;
+use crate::recipes::transition::Align;
 use crate::runtime::Runtime;
 use crate::units::{GainSlot, db_to_lin};
 
@@ -283,8 +284,9 @@ fn state(rt: &mut Runtime, _: u64, _: &Value) -> Result<Value, ApiError> {
         .outputs()
         .iter()
         .map(|o| {
+            // `pending`: the restored source its layer shows at its `Ready` (else null).
             json!({"name": o.name, "width": o.width, "height": o.height, "hz": o.hz,
-                   "refresh_mhz": o.refresh_mhz})
+                   "refresh_mhz": o.refresh_mhz, "pending": rt.pending_on(&o.name)})
         })
         .collect();
     Ok(json!({
@@ -509,6 +511,15 @@ fn set(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError> {
         return Ok(json!({ "targets": [] }));
     }
     let targets = rt.graph.set_json(&PropPath(path.to_string()), value)?;
+    // A layer given content (or emptied) stops waiting for a restored source.
+    if path.split_once('.').is_some_and(|(_, prop)| prop == "content") {
+        let conns: Vec<String> = targets
+            .iter()
+            .filter_map(|t| t.strip_prefix("lay:")?.strip_suffix(":main"))
+            .map(str::to_string)
+            .collect();
+        rt.drop_pending(conns);
+    }
     // A program's settings are live — the program re-reads its node
     for t in &targets {
         if rt.graph.kind_of(t) == Some(NodeKind::Program) {
@@ -689,8 +700,12 @@ fn transition(rt: &mut Runtime, _: u64, args: &Value) -> Result<Value, ApiError>
         let (corr, to) = rt.transition_parked(req)?;
         return Ok(json!({ "corr": corr, "to": to, "parked": true }));
     }
-    let now = rt.now();
-    let corr = rt.tr.start(req, &mut rt.graph, &mut rt.anim, now)?;
+    // Over layers that may still wait for a restored source (`Runtime::start_switch`).
+    let (outputs, end) = (req.outputs.clone(), req.align == Align::End);
+    let corr = rt.start_switch(&outputs, end, |rt| {
+        let now = rt.now();
+        rt.tr.start(req, &mut rt.graph, &mut rt.anim, now)
+    })?;
     rt.stash_tr_events(); // logged → subscribers via the tap; programs see them next tick
     rt.refresh_srcs();
     let to = rt

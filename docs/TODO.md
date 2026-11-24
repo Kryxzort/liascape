@@ -7,8 +7,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 ## Queued (in order — the next thing to pick up)
 0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, the rest** —
        liascape-player is the only engine; the owner waived the rest of the bar (`docs/player/reports/switch-over.md`).
-       In order (a, the only engine, is done):
-       b) The start-up seam: the restored wallpaper's layer waits for its source's `Ready` (owner's pick of § 5).
+       Left (a, the only engine, and b, the restored layer waiting for its source's `Ready`, are done):
        c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
        `LICENSE.upstream-MIT` and the README's fork line go.
        Not blocking, run at night: the crash-isolation re-run (`scenes.sh crash`, `programs.sh crash`) and the 8 h soak
@@ -192,8 +191,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       unmute delay stops it.
 
 ## Switch-over bar
-- [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
-      output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
+- [ ] Seam probe at start-up, on a real session: the on-machine seam probe (`scenes.sh`) reports 0 start-up seam frames
+      now that a restored layer waits for its source's `Ready` (hermetic guard: `src/player/tests/api.rs`
+      `restore_waits_for_ready_no_seam`).
 
 ## UI
 - [ ] Matrix cell `single × appear:gifVideo` fails alone on lp-player `b73086f9` too: Settings' preview card "never

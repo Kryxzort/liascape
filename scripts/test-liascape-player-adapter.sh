@@ -2452,6 +2452,25 @@ jq --arg a "$SS1" --arg b "$SS2" '.AllowScenes = false | .LastSession = {IsTimed
 LIASCAPE_PLAYER_BIN=$HB/liascape-player "$DOTNET" "$DLL" restore > "$T/restore-np.log" 2>&1; rc=$?; SP=$(sup_pid); CP=$(comp_pid)
 [ "$rc" != 0 ] && grep -q "Nothing in this playlist can play" "$T/restore-np.log" && ok "restore × a last session that can't play → exit $rc with why" || bad "restore × a last session that can't play: exit $rc, said: $(tail -c 300 "$T/restore-np.log")"
 jq --argjson o "$sf0" '. + $o' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
+# A restored layer waits for its source's first frame (`state.outputs[].pending`): a `restore` during that wait (boot,
+# autostart) counts it as shown and never replays LastSession over it; once it is ready the layer shows it.
+SL=$T/slow-restore-scene; SLJ='{"pattern":"solid","rgb":[0,200,100],"native":[640,360]'
+mk_scene "$SL" "$SLJ}"
+cli stop; waitfor $WAIT nothing_shown
+ctl transition "{\"outputs\":\"out:*\",\"to\":{\"kind\":\"scene\",\"path\":\"$SL\"},\"effect_id\":null}" >/dev/null
+waitfor $WAIT scene_ready "$SL" || bad "precondition: the scene never showed: cur $(cur path)"
+set_file ".LastSession = {\"Paths\":[\"$QA\"]}"
+mk_scene "$SL" "$SLJ,\"load_ms\":8000}"   # its restored load is slow
+pend() { ctl state | jq -r '[.outputs[].pending // empty] | unique | join(",")'; }
+player_quit; n0=$(grep -c . "$HB/spawned.log"); restore_cli
+sid=$(srcIdForPath "$SL"); p1=$(pend); r1=$(cur ready)
+restore_cli; p2=$(pend); r2=$(cur ready)
+[ -n "$sid" ] && [ "$p1/$r1" = "$sid/false" ] && [ "$p2/$r2" = "$sid/false" ] || bad "proved nothing: the restores didn't run during the wait (source $sid, pending $p1 → $p2, ready $r1 → $r2)"
+[ "$(cur path)" = "$SL" ] && ok "restore during the wait: cur is the restored scene before its first frame" || bad "restore during the wait: cur $(cur path)"
+waitfor 20000 scene_ready "$SL"
+[ "$(nsch)" = 0 ] && [ "$(( $(grep -c . "$HB/spawned.log") - n0 ))" = 1 ] && [ "$(cur path)" = "$SL" ] && [ -z "$(pend)" ] \
+  && ok "…2 restores during the wait: no switch (LastSession not replayed), one player start, the scene shown at its Ready" \
+  || bad "restore during the wait: $(nsch) switches ($(ctl logs '{"kind_prefix":"transition.scheduled","limit":100}' | jq -c '[.events[].path]')), $(( $(grep -c . "$HB/spawned.log") - n0 )) player starts, cur $(cur path), pending $(pend)"
 set_file '.GlobalPlaylistStart = "start_over"'
 # `serve` start stops a daemon a legacy session left (its cmdline says it is one) — and never what a stale pid file
 # names by now (a pid file outlives a reboot): an unrelated process lives on, both pid files go

@@ -33,6 +33,17 @@ What the player shows, so a restarted player comes back with the same wallpaper 
   it appears; only one wallpaper can be parked — others log `snapshot.dropped`); a present connector the file
   didn't know shows the current wallpaper. A value the schema rejects is skipped (`snapshot.prop_rejected`,
   `snapshot.source_failed`).
+- **A restored layer waits for `Ready`.** Restored content goes on its layer at the source's first frame, as a
+  switch's B does, never before (a layer pointing at a source with no frame composes a hole); a scene restored
+  `broken` shows its preview at once. Meanwhile `Runtime::pending_show` holds the wait: `cur:` names the source,
+  `srcs:` includes it (global settings reach it, a scene loads at its outputs' size), `state`'s `outputs[].pending`
+  names it, and a snapshot saves it as that output's content — so the backend counts it as shown and a `restore`
+  meanwhile doesn't replay its last session. An output plugged in meanwhile, or one that unparks a source still
+  loading, waits for it too. A `transition` or a `set` of the layer's `content` on that output wins (the source no
+  layer waits for any more is retired; the switch is a cut, there is no A picture) — except an `align: end` switch
+  over a waiting video (a restored program re-arming), which keeps it as its A: it shows at its `Ready` and plays to
+  its end first (`Runtime::start_switch`); `stop` and the output going end the wait; a source that fails instead (`Error`) leaves its layers empty and is retired. Logged as
+  `snapshot.pending_shown` / `snapshot.pending_dropped` / `snapshot.pending_failed`.
 - **Audio on restore.** A restored playing video starts at `gain.anticlick` −96 with a not-yet-started ramp to
   0 dB (corr `restore-fade`), re-added from now once it is `Ready` and its audio flows. Until then `target_of`
   reports 0 dB, so a transition starting meanwhile records where it is heading; a recipe's own anticlick ramp

@@ -23,10 +23,12 @@
 //! - `lay:*:main` — every main layer, sorted by id.
 //! - `cur:<connector>` / `cur:*` — the source currently shown by that output's (or every
 //!   output's, deduplicated) main layer: if `content` is a `Source`, that id; if `content`
-//!   is an `Effect`, its `to` (the incoming side); if `content` is unset, no entry.
+//!   is an `Effect`, its `to` (the incoming side); if `content` is unset, the restored source
+//!   the layer waits for ([`Graph::set_pending_show`]), else no entry.
 //! - `srcs:<connector>` / `srcs:*` — every `Source` whose picture is on that
 //!   output (a layer of it shows it directly or as either side of an effect) **or** that an
-//!   in-flight transition on it holds (its pending B, held A's) — snapshots and graves
+//!   in-flight transition on it holds (its pending B, held A's) or its main layer waits for
+//!   (a restored source before its `Ready`) — snapshots and graves
 //!   excluded. Where global settings (`gain.user`, `no_audio`, `speed`, …) go, so a
 //!   setting changed mid-transition also reaches the B that is about to take over. The
 //!   transition part comes from [`Graph::set_transition_sources`], refreshed by the runtime
@@ -220,6 +222,9 @@ pub struct Graph {
     tr_graves: BTreeSet<String>,
     /// The wallpaper parked while no output exists: part of `srcs:*`.
     parked: Option<String>,
+    /// Connector → the restored source its main layer waits for (shown at its `Ready`): part of
+    /// `srcs:<connector>` and, while the layer is empty, of `cur:<connector>`.
+    pending_show: BTreeMap<String, String>,
     /// Picture-affecting mutations so far (see the module doc).
     picture_rev: u64,
     /// Mutations that can change [`Graph::outputs_of`] or what those outputs ask of a source
@@ -261,6 +266,7 @@ impl Graph {
             tr_sources: BTreeMap::new(),
             tr_graves: BTreeSet::new(),
             parked: None,
+            pending_show: BTreeMap::new(),
             picture_rev: 0,
             demand_rev: 0,
             uid: {
@@ -531,6 +537,15 @@ impl Graph {
         self.parked = id;
     }
 
+    /// The restored sources main layers wait for (connector → source id), mirrored from the
+    /// runtime's `pending_show`. Replaces the previous value.
+    pub fn set_pending_show(&mut self, by_connector: BTreeMap<String, String>) {
+        if self.pending_show != by_connector {
+            self.demand_rev += 1;
+        }
+        self.pending_show = by_connector;
+    }
+
     /// Writes an **observed** value (what a live source reports: `ready`, `duration`,
     /// `time_pos`, `width`, `height`, and `paused` as mpv reports it — mirrored by
     /// `sources::SourceHost::update`). Same resolution and type/range validation as
@@ -750,10 +765,32 @@ impl Graph {
         }
     }
 
-    /// What `lay:<connector>:main` currently shows, per the `cur:` alias rule: the `Source`
-    /// id directly, the `to` side if it's showing through an `Effect`, or nothing if
-    /// `content` is unset or dangling.
+    /// The `cur:` alias rule: what the layer shows ([`Graph::layer_shows`]), else the restored
+    /// source it waits for — the backend counts that as shown.
     fn cur_for_connector(&self, connector: &str) -> Vec<String> {
+        let shown = self.layer_shows(connector);
+        if !shown.is_empty() {
+            return shown;
+        }
+        let layer_empty = self
+            .nodes
+            .get(&format!("lay:{connector}:main"))
+            .is_some_and(|l| match l.props.get("content") {
+                Some(PropValue::Str(c)) => c.is_empty(),
+                _ => true,
+            });
+        match self.pending_show.get(connector) {
+            Some(id) if layer_empty && self.kind_of(id) == Some(NodeKind::Source) => {
+                vec![id.clone()]
+            }
+            _ => vec![],
+        }
+    }
+
+    /// What `lay:<connector>:main` itself shows: the `Source` id directly, the `to` side if
+    /// it's showing through an `Effect`, or nothing if `content` is unset or dangling — never
+    /// a source the layer only waits for.
+    fn layer_shows(&self, connector: &str) -> Vec<String> {
         let Some(layer) = self.nodes.get(&format!("lay:{connector}:main")) else {
             return vec![];
         };
@@ -822,6 +859,9 @@ impl Graph {
                 }
                 _ => {}
             }
+        }
+        if let Some(id) = self.pending_show.get(connector) {
+            set.insert(id.clone());
         }
         if let Some(held) = self.tr_sources.get(&out) {
             set.extend(
@@ -1015,6 +1055,33 @@ mod tests {
         src(&mut g, "src1");
         let err = g.set(&p("src1.duration"), PropValue::F64(3.0)).unwrap_err();
         assert_eq!(err.code, "read_only");
+    }
+
+    /// A layer waiting for a restored source (`set_pending_show`): `cur:` and `srcs:` name it
+    /// while the layer is empty, `cur:` follows the layer once it shows something, and a
+    /// connector without an output resolves nothing.
+    #[test]
+    fn pending_show_counts_as_shown_until_the_layer_shows() {
+        let mut g = Graph::new();
+        out(&mut g, "out:DP-1");
+        src(&mut g, "src1");
+        src(&mut g, "src2");
+        let rev = g.demand_rev();
+        g.set_pending_show(BTreeMap::from([
+            ("DP-1".to_string(), "src1".to_string()),
+            ("DP-9".to_string(), "src1".to_string()),
+        ]));
+        assert_ne!(g.demand_rev(), rev, "srcs: changed");
+        assert_eq!(g.resolve("cur:DP-1"), vec!["src1".to_string()]);
+        assert_eq!(g.resolve("cur:*"), vec!["src1".to_string()]);
+        assert!(g.resolve("srcs:DP-1").contains(&"src1".to_string()));
+        assert_eq!(g.resolve("cur:DP-9"), Vec::<String>::new(), "no such output");
+        assert_eq!(g.outputs_of("src1"), vec!["out:DP-1".to_string()]);
+        g.set(&p("lay:DP-1:main.content"), PropValue::Str("src2".into()))
+            .unwrap();
+        assert_eq!(g.resolve("cur:DP-1"), vec!["src2".to_string()]);
+        g.set_pending_show(BTreeMap::new());
+        assert!(!g.resolve("srcs:DP-1").contains(&"src1".to_string()));
     }
 
     #[test]

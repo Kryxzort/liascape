@@ -52,7 +52,7 @@ use crate::onset::{self, ONSET_TIMEOUT, Onsets, PendingOnset};
 use crate::probe::dropout::{self, GainHistory, PendingWindows};
 use crate::probe::frames::FrameStats;
 use crate::recipes::program::{ProgramAction, Programs};
-use crate::recipes::transition::{ANTICLICK, AUDIO_SETTLE_TAIL};
+use crate::recipes::transition::{ANTICLICK, AUDIO_SETTLE_TAIL, Align};
 use crate::recipes::{TransitionEventKind, Transitions};
 use crate::redraw::{self, Redraw};
 use crate::snapshot::{self, Snapshot};
@@ -797,6 +797,12 @@ pub struct Runtime {
     /// not-yet-started `gain.anticlick` animation to 0 dB ([`RESTORE_FADE`] corr), so a
     /// recipe recording its gains sees the 0 dB it is heading to.
     fade_in: BTreeMap<String, FadeWait>,
+    /// Restored sources (and a not-yet-ready one a plugged-in output takes over) → the
+    /// connectors whose main layer shows them at their `Ready` (`Runtime::show_when_ready`),
+    /// never before: a layer must not compose a hole. `cur:`, `srcs:`, `state` and the
+    /// snapshot count them as shown meanwhile. A command that changes the layer, the output
+    /// going or the source failing ends the wait. `docs/player/modules/persistence.md` § Snapshot.
+    pub(crate) pending_show: BTreeMap<String, BTreeSet<String>>,
     /// The last `player.paused` [`Runtime::sync_sources`] saw — mirrors
     /// the graph's `player.paused` so [`Runtime::now`] and `SourceHost` don't have to
     /// read the graph on every call.
@@ -1083,6 +1089,7 @@ impl Runtime {
             "pending_destroy": self.pending_destroy.len(),
             "onsets": self.onsets.len(),
             "fade_in": self.fade_in.len(),
+            "pending_show": self.pending_show.len(),
             "dropout_windows": self.dropout_windows.len(),
             "dropout_due": self.dropout_due.len(),
             "pause_gates": self.pause_gates.len(),
@@ -2019,10 +2026,12 @@ impl Runtime {
                     let res = if parked {
                         self.transition_parked(req).map(|(c, b)| (c, Some(b)))
                     } else {
-                        let now = self.now();
-                        self.tr
-                            .start(req, &mut self.graph, &mut self.anim, now)
-                            .map(|c| (c, None))
+                        let (outputs, end) = (req.outputs.clone(), req.align == Align::End);
+                        self.start_switch(&outputs, end, |rt| {
+                            let now = rt.now();
+                            rt.tr.start(req, &mut rt.graph, &mut rt.anim, now)
+                        })
+                        .map(|c| (c, None))
                     };
                     let now = self.rotation_now();
                     match res {
@@ -2093,6 +2102,7 @@ impl Runtime {
         // `tick`/`begin_step` already called this for `now`'s sake this iteration).
         self.update_player_paused();
         self.update_scene_assets();
+        self.prune_pending();
         let changes = self.graph.drain_changes();
         if !changes.is_empty() || self.graph.picture_rev() != self.snap.seen_rev {
             self.snap.seen_rev = self.graph.picture_rev();
@@ -2479,6 +2489,7 @@ impl Runtime {
         self.onsets
             .retain(|id| g.kind_of(id) == Some(NodeKind::Source));
         self.onsets.tick(evs, &mut self.anim, now, "runtime");
+        self.show_pending(evs);
         if self.fade_in.is_empty() {
             return;
         }
@@ -3384,15 +3395,15 @@ impl Runtime {
                 .find_map(|o| self.tr.adopt_output(&id, o, &mut self.graph))
         };
         let content = if own_parked && let Some(pk) = self.unpark() {
-            let _ = self.graph.set(&p(&layer), PropValue::Str(pk.clone()));
+            self.show_when_ready(&info.name, &pk);
             Some(json!(pk))
         } else if adopted.is_some() {
             self.graph.get(&p(&layer)).ok().map(|v| v.to_json())
         } else if let Some(cur) = &current {
-            let _ = self.graph.set(&p(&layer), PropValue::Str(cur.clone()));
+            self.show_when_ready(&info.name, cur);
             Some(json!(cur))
         } else if let Some(pk) = self.unpark() {
-            let _ = self.graph.set(&p(&layer), PropValue::Str(pk.clone()));
+            self.show_when_ready(&info.name, &pk);
             Some(json!(pk))
         } else {
             None
@@ -3486,6 +3497,8 @@ impl Runtime {
             .into_iter()
             .next();
         let _ = self.graph.destroy(&id);
+        // A restored source it waited for stays a candidate (parked or retired below).
+        candidates.extend(self.unpend(&BTreeSet::from([name.to_string()])));
         let now = self.now();
         let committed = self
             .tr
@@ -3521,6 +3534,7 @@ impl Runtime {
             let is_src = self.graph.kind_of(&c) == Some(NodeKind::Source);
             if !is_src
                 || self.parked.as_ref().is_some_and(|pk| pk.id == c)
+                || self.pending_show.contains_key(&c)
                 || held.contains(&c)
                 || self.str_prop(&c, "kind") == "snapshot"
                 || self.shown_anywhere(&c)
@@ -3555,6 +3569,229 @@ impl Runtime {
             .ids_of(NodeKind::Layer)
             .iter()
             .any(|l| self.shown_by(l).contains(id))
+    }
+
+    /// Show source `id` on `conn`'s main layer: now if it has a picture (it is `Ready`, or a
+    /// scene restored broken shows its preview), else at its `Ready` (`pending_show`) — a layer
+    /// never composes a source before its first frame, as a switch's B never does.
+    fn show_when_ready(&mut self, conn: &str, id: &str) {
+        let conns = BTreeSet::from([conn.to_string()]);
+        let orphans = self.unpend(&conns);
+        let has_picture = self.graph.kind_of(id) != Some(NodeKind::Source)
+            || self.bool_prop(id, "ready")
+            || self.bool_prop(id, "broken");
+        if has_picture {
+            let _ = self.graph.set(
+                &p(&format!("lay:{conn}:main.content")),
+                PropValue::Str(id.to_string()),
+            );
+        } else {
+            self.pending_show.entry(id.to_string()).or_default().insert(conn.to_string());
+            self.mirror_pending();
+        }
+        for o in orphans.into_iter().filter(|o| o != id) {
+            self.retire_unused(&o);
+        }
+    }
+
+    /// The source `conn`'s main layer waits for, if any (`state`'s `pending`).
+    pub(crate) fn pending_on(&self, conn: &str) -> Option<&str> {
+        self.pending_show
+            .iter()
+            .find(|(_, cs)| cs.contains(conn))
+            .map(|(id, _)| id.as_str())
+    }
+
+    /// The graph's copy (`cur:`, `srcs:`).
+    fn mirror_pending(&mut self) {
+        let by_conn = self
+            .pending_show
+            .iter()
+            .flat_map(|(id, cs)| cs.iter().map(move |c| (c.clone(), id.clone())))
+            .collect();
+        self.graph.set_pending_show(by_conn);
+    }
+
+    /// These connectors' layers stop waiting. Returns the sources no layer waits for any more
+    /// (the caller retires, parks or keeps them).
+    fn unpend(&mut self, conns: &BTreeSet<String>) -> Vec<String> {
+        if self.pending_show.is_empty() {
+            return Vec::new();
+        }
+        let mut orphans = Vec::new();
+        self.pending_show.retain(|id, cs| {
+            cs.retain(|c| !conns.contains(c));
+            if cs.is_empty() {
+                orphans.push(id.clone());
+            }
+            !cs.is_empty()
+        });
+        self.mirror_pending();
+        orphans
+    }
+
+    /// A `set` of these connectors' layers' `content` took them over: they stop waiting, and a
+    /// source no layer waits for any more goes — it never pops in after the newer request.
+    pub(crate) fn drop_pending(&mut self, conns: impl IntoIterator<Item = String>) {
+        let conns: BTreeSet<String> = conns.into_iter().collect();
+        let orphans = self.unpend(&conns);
+        self.retire_dropped(orphans, &conns);
+    }
+
+    fn retire_dropped(&mut self, orphans: Vec<String>, conns: &BTreeSet<String>) {
+        for id in orphans {
+            log::event(
+                "snapshot",
+                Level::Info,
+                "snapshot.pending_dropped",
+                None,
+                json!({ "id": id, "outputs": conns }),
+            );
+            self.retire_unused(&id);
+        }
+    }
+
+    /// A switch on `outputs` (`start` runs `Transitions::start`) over layers that may still wait
+    /// for a restored source. An `align: end` request keeps a waiting video as its A: it shows at
+    /// its `Ready` and the switch waits for its end, as it would have before the restart. Any
+    /// other request — and an `align: end` one whose waiting A never ends (a scene or a still,
+    /// which starts at once) — takes the layers over: the wait ends before the recipe looks for
+    /// an A (no picture yet, so none: a cut), and a source no layer waits for any more goes once
+    /// the request is accepted, never popping in after it. A refused request changes nothing.
+    pub(crate) fn start_switch<T>(
+        &mut self,
+        outputs: &str,
+        align_end: bool,
+        start: impl FnOnce(&mut Runtime) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        let conns: BTreeSet<String> = self
+            .connectors_of(outputs)
+            .into_iter()
+            .filter(|c| self.pending_on(c).is_some())
+            .collect();
+        let keep = align_end
+            && conns.iter().all(|c| {
+                self.pending_on(c).is_some_and(|id| {
+                    !crate::recipes::transition::never_ends(&self.graph, id)
+                })
+            });
+        if conns.is_empty() || keep {
+            return start(self);
+        }
+        let saved = self.pending_show.clone();
+        let orphans = self.unpend(&conns);
+        let res = start(self);
+        if res.is_err() {
+            self.pending_show = saved;
+            self.mirror_pending();
+        } else {
+            self.retire_dropped(orphans, &conns);
+        }
+        res
+    }
+
+    /// Waits that no longer apply: the source or the output is gone, or something else is on
+    /// that layer now (a hotplug's adopted transition, a direct `set`).
+    fn prune_pending(&mut self) {
+        let mut stale = BTreeSet::new();
+        for (id, cs) in &self.pending_show {
+            let gone = self.graph.kind_of(id) != Some(NodeKind::Source);
+            for c in cs {
+                if gone
+                    || self.graph.kind_of(&format!("out:{c}")).is_none()
+                    || !self.str_prop(&format!("lay:{c}:main"), "content").is_empty()
+                {
+                    stale.insert(c.clone());
+                }
+            }
+        }
+        if !stale.is_empty() {
+            self.drop_pending(stale);
+        }
+    }
+
+    /// The waiting sources whose first frame came show on every layer waiting for them; one
+    /// that failed instead (`Error`: a scene past its restart budget, a file that won't open)
+    /// leaves those layers empty and goes — what shows then is the backend's call, as for any
+    /// broken source.
+    fn show_pending(&mut self, evs: &[(String, SourceEvent)]) {
+        if self.pending_show.is_empty() {
+            return;
+        }
+        let failed: Vec<String> = evs
+            .iter()
+            .filter(|(id, ev)| {
+                matches!(ev, SourceEvent::Error { .. }) && self.pending_show.contains_key(id)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in failed {
+            let Some(conns) = self.pending_show.remove(&id) else {
+                continue;
+            };
+            self.mirror_pending();
+            log::event(
+                "snapshot",
+                Level::Warn,
+                "snapshot.pending_failed",
+                None,
+                json!({ "id": id, "outputs": conns }),
+            );
+            self.retire_unused(&id);
+        }
+        let ready: Vec<String> = self
+            .pending_show
+            .keys()
+            .filter(|id| self.bool_prop(id, "ready"))
+            .cloned()
+            .collect();
+        if ready.is_empty() {
+            return;
+        }
+        for id in ready {
+            let conns = self.pending_show.remove(&id).unwrap_or_default();
+            for c in &conns {
+                let _ = self.graph.set(
+                    &p(&format!("lay:{c}:main.content")),
+                    PropValue::Str(id.clone()),
+                );
+            }
+            log::event(
+                "snapshot",
+                Level::Info,
+                "snapshot.pending_shown",
+                None,
+                json!({ "id": id, "outputs": conns }),
+            );
+        }
+        self.mirror_pending();
+    }
+
+    /// Retire `id` unless something still uses it: a layer shows it, a layer waits for it,
+    /// it is parked, or a transition holds it.
+    fn retire_unused(&mut self, id: &str) {
+        if self.graph.kind_of(id) != Some(NodeKind::Source)
+            || self.shown_anywhere(id)
+            || self.pending_show.contains_key(id)
+            || self.parked.as_ref().is_some_and(|pk| pk.id == id)
+        {
+            return;
+        }
+        let (held, graves) = self.tr.held_sources();
+        if graves.contains(id) || held.values().any(|s| s.contains(id)) {
+            return;
+        }
+        self.retire(id);
+    }
+
+    /// The connectors of the outputs `alias` names (`out:*`, `out:<c>`).
+    fn connectors_of(&self, alias: &str) -> Vec<String> {
+        self.graph
+            .resolve(alias)
+            .iter()
+            .filter_map(|o| o.strip_prefix("out:"))
+            .map(str::to_string)
+            .collect()
     }
 
     /// What a newly added output shows: `cur:` of the first output that has one.
@@ -4019,6 +4256,8 @@ impl Runtime {
         let corr = log::new_corr("stop");
         self.parked = None;
         self.graph.set_parked(None);
+        self.pending_show.clear();
+        self.mirror_pending();
         if instant {
             for id in &ids {
                 let path = p(&format!("{id}.gain.anticlick"));
@@ -4255,6 +4494,7 @@ impl Runtime {
                 connector: pk.connector.clone(),
             }),
             remembered: &self.out_props,
+            pending: &self.pending_show,
         });
         snap.programs = self.programs.snaps();
         snap
@@ -4352,8 +4592,10 @@ impl Runtime {
             .filter_map(|o| o.strip_prefix("out:"))
             .map(str::to_string)
             .collect();
-        let empty =
-            |rt: &Runtime, c: &str| rt.str_prop(&format!("lay:{c}:main"), "content").is_empty();
+        let empty = |rt: &Runtime, c: &str| {
+            rt.str_prop(&format!("lay:{c}:main"), "content").is_empty()
+                && !rt.pending_show.values().any(|cs| cs.contains(c))
+        };
         let mut made: BTreeMap<String, String> = BTreeMap::new();
         let mut outputs = Vec::new();
         let mut missing = Vec::new();
@@ -4372,9 +4614,7 @@ impl Runtime {
             if let Some(c) = &o.content
                 && let Some(id) = self.restored_source(&snap, c, &mut made)
             {
-                let _ = self
-                    .graph
-                    .set(&p(&format!("lay:{conn}:main.content")), PropValue::Str(id));
+                self.show_when_ready(conn, &id);
             }
             outputs.push(conn.clone());
         }
@@ -4405,10 +4645,7 @@ impl Runtime {
             if !blank.is_empty() {
                 if let Some(id) = self.restored_source(&snap, &pk.id, &mut made) {
                     for c in blank {
-                        let _ = self.graph.set(
-                            &p(&format!("lay:{c}:main.content")),
-                            PropValue::Str(id.clone()),
-                        );
+                        self.show_when_ready(&c, &id);
                     }
                 }
             } else if self.parked.is_none() {
@@ -4424,9 +4661,7 @@ impl Runtime {
                 && empty(self, conn)
                 && let Some(cur) = self.current_wallpaper()
             {
-                let _ = self
-                    .graph
-                    .set(&p(&format!("lay:{conn}:main.content")), PropValue::Str(cur));
+                self.show_when_ready(conn, &cur);
             }
         }
         if !dropped.is_empty() {
@@ -5502,6 +5737,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         supervised: opts.supervised.clone(),
         restart_event,
         fade_in: BTreeMap::new(),
+        pending_show: BTreeMap::new(),
         player_paused: false,
         play_clock: Excised::default(),
         rotation_clock: Excised::default(),
