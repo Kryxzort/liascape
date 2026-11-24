@@ -46,8 +46,8 @@ Setup takes 83–93 ms on the private test PipeWire; a normal session start is w
 The bus follows `default.audio.sink` the way pavucontrol moves a stream: default-metadata `target.node` (id) and
 `target.object` (serial) on the playback node, which beats the node's own `node.target`. A default naming the bus
 itself is ignored. Retargeting is driven by "last requested vs default", never by the momentary link set: links
-churn while WirePlumber relinks, and other clients' captures of the playback are links too (the legacy engine's
-`parec` re-triggered retargets in a loop until only `Audio/Sink` targets were counted).
+churn while WirePlumber relinks, and other clients' captures of the playback are links too (a `parec`
+monitor re-triggered retargets in a loop until only `Audio/Sink` targets were counted).
 
 Session policies win and are never fought: EasyEffects ("process all output streams") rewrites `target.object` on
 every output stream the moment anyone moves it, and re-issuing oscillated. The bus tracks every `target.object`

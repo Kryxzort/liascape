@@ -6,9 +6,10 @@
 //! to `hermetic-sink`.
 //!
 //! `measure_automute_latency` (ignored; `scripts/measure-automute-latency.py` runs it) times
-//! both engines in the same harness: the Signal, and a faithful port of today's backend
-//! `AudioMonitor` (`pactl subscribe` + `pactl list sink-inputs` classification + one `parec
-//! --monitor-stream --latency-msec=10` per sink-input, 20 ms chunks, a 20 ms poll loop, then the
+//! both engines in the same harness: the Signal, and a faithful port of `AudioMonitor`, the
+//! backend's auto-mute for a player without the `automute` capability (`pactl subscribe` + `pactl
+//! list sink-inputs` classification + one `parec --monitor-stream --latency-msec=10` per
+//! sink-input, 20 ms chunks, a 20 ms poll loop, then the
 //! adapter's `animate <id>.gain.mute` over 30 ms) on a private `pipewire-pulse`. An in-test
 //! observer captures both sinks' monitors on one PipeWire connection, so the first audible
 //! foreign sample and the wallpaper's silence are timed on the same graph cycles.
@@ -1233,15 +1234,15 @@ fn observe(remote: &str, quit: &AtomicBool, f: &Blocks, w: &Blocks, ready: &Arc<
     }
 }
 
-/// Faithful port of the backend's `AudioMonitor` (src/backend/Helpers/AudioMonitor.cs) against
-/// the private pipewire-pulse, muting through the player's API like the adapter
+/// Faithful port of `AudioMonitor` (src/backend/Helpers/AudioMonitor.cs), the backend's fallback
+/// auto-mute, against the private pipewire-pulse, muting through the player's API like the adapter
 /// (`animate <id>.gain.mute` over 30 ms per source).
-struct Legacy {
+struct FallbackMonitor {
     quit: Arc<AtomicBool>,
     threads: Vec<std::thread::JoinHandle<()>>,
 }
 
-impl Legacy {
+impl FallbackMonitor {
     fn start(
         pw: &PrivatePw,
         sock: &Path,
@@ -1249,7 +1250,7 @@ impl Legacy {
         mute_ms: u64,
         unmute_ms: u64,
         thr_db: f64,
-    ) -> Legacy {
+    ) -> FallbackMonitor {
         let quit = Arc::new(AtomicBool::new(false));
         let above = Arc::new(AtomicI64::new(0));
         let mut threads = Vec::new();
@@ -1275,7 +1276,7 @@ impl Legacy {
                 }
             };
             threads.push(std::thread::spawn(move || {
-                legacy_streams(mk, player_pid, thr_db, &q, &a)
+                fallback_streams(mk, player_pid, thr_db, &q, &a)
             }));
         }
         // WatchMuteAsync
@@ -1332,11 +1333,11 @@ impl Legacy {
                 }
             }));
         }
-        Legacy { quit, threads }
+        FallbackMonitor { quit, threads }
     }
 }
 
-impl Drop for Legacy {
+impl Drop for FallbackMonitor {
     fn drop(&mut self) {
         self.quit.store(true, Ordering::SeqCst);
         for t in self.threads.drain(..) {
@@ -1346,21 +1347,13 @@ impl Drop for Legacy {
 }
 
 /// `AudioMonitor.ParseStreams` + `LiascapePlayerMedia.IsOwnStream`: (listed, foreign).
-fn legacy_parse(out: &str, pid: u32, bus: Option<&str>) -> (BTreeSet<u32>, BTreeSet<u32>) {
+fn fallback_parse(out: &str, pid: u32, bus: Option<&str>) -> (BTreeSet<u32>, BTreeSet<u32>) {
     let (mut listed, mut foreign) = (BTreeSet::new(), BTreeSet::new());
     for block in out.split("Sink Input #").filter(|b| !b.is_empty()) {
         let Some(id) = block.lines().next().and_then(|l| l.trim().parse::<u32>().ok()) else {
             continue;
         };
         listed.insert(id);
-        let has = |s: &str| block.contains(s);
-        if has("application.process.binary = \"mpv\"")
-            || has("application.name = \"mpv\"")
-            || has("application.process.binary = \"linux-wallpaperengine\"")
-            || has("application.name = \"linux-wallpaperengine\"")
-        {
-            continue;
-        }
         let own = block.lines().any(|raw| {
             let t = raw.trim();
             let q = |k: &str| {
@@ -1380,7 +1373,7 @@ fn legacy_parse(out: &str, pid: u32, bus: Option<&str>) -> (BTreeSet<u32>, BTree
     (listed, foreign)
 }
 
-fn legacy_list(mk: &impl Fn(&str) -> Command, pid: u32) -> (BTreeSet<u32>, BTreeSet<u32>) {
+fn fallback_list(mk: &impl Fn(&str) -> Command, pid: u32) -> (BTreeSet<u32>, BTreeSet<u32>) {
     // the listing and the bus index concurrently, like ListStreamsAsync
     let bus_t = {
         let mut c = mk("pactl");
@@ -1402,10 +1395,10 @@ fn legacy_list(mk: &impl Fn(&str) -> Command, pid: u32) -> (BTreeSet<u32>, BTree
                     .then(|| cols[0].trim().to_string())
             })
         });
-    legacy_parse(&out, pid, bus.as_deref())
+    fallback_parse(&out, pid, bus.as_deref())
 }
 
-fn legacy_streams(
+fn fallback_streams(
     mk: impl Fn(&str) -> Command + Send + Sync + 'static,
     pid: u32,
     thr_db: f64,
@@ -1491,7 +1484,7 @@ fn legacy_streams(
                     if attempt > 0 {
                         std::thread::sleep(Duration::from_millis(50));
                     }
-                    let (listed, foreign) = legacy_list(&*mk, pid);
+                    let (listed, foreign) = fallback_list(&*mk, pid);
                     if !listed.contains(&id) {
                         continue;
                     }
@@ -1509,7 +1502,7 @@ fn legacy_streams(
             });
         }
     };
-    let (listed, foreign) = legacy_list(&*mk, pid);
+    let (listed, foreign) = fallback_list(&*mk, pid);
     for id in listed {
         if foreign.contains(&id) {
             on_stream(id, Some(true));
@@ -1651,11 +1644,11 @@ fn measure_automute_latency() {
     for &d in &delays {
         let tone_ms = d as u32 + 700;
         let wav = rig.wav(&format!("m{d}"), lead, tone_ms, -20.0);
-        let legacy = if signal {
+        let fallback = if signal {
             automute_on(&mut c, d as f64, d as f64);
             None
         } else {
-            Some(Legacy::start(&rig.pw, &rig.sock, rig.pid(), d, d, -70.0))
+            Some(FallbackMonitor::start(&rig.pw, &rig.sock, rig.pid(), d, d, -70.0))
         };
         std::thread::sleep(Duration::from_millis(500));
         let mut rows = Vec::new();
@@ -1721,7 +1714,7 @@ fn measure_automute_latency() {
             }
             rows.push(t);
         }
-        drop(legacy);
+        drop(fallback);
         if signal {
             c.set("player.automute", json!(false));
         }
@@ -1756,11 +1749,11 @@ fn measure_automute_latency() {
 }
 
 #[test]
-fn legacy_parse_matches_the_backend() {
+fn fallback_parse_matches_the_backend() {
     let out = "Sink Input #12\n\tSink: 3\n\tProperties:\n\t\tapplication.name = \"paplay\"\n\t\tapplication.process.id = \"500\"\nSink Input #13\n\tSink: 7\n\tProperties:\n\t\tapplication.name = \"liascape-player\"\nSink Input #14\n\tSink: 7\n\tProperties:\n\t\tapplication.name = \"x\"\nSink Input #15\n\tSink: 3\n\tProperties:\n\t\tapplication.name = \"mpv\"\n";
-    let (l, f) = legacy_parse(out, 100, Some("7"));
+    let (l, f) = fallback_parse(out, 100, Some("7"));
     assert_eq!(l, [12, 13, 14, 15].into());
-    assert_eq!(f, [12].into(), "own by name / bus sink; mpv by name (the old bug)");
+    assert_eq!(f, [12, 15].into(), "own by name / bus sink; a user's own mpv counts");
 }
 
 /// utime + stime of `pid` in clock ticks (`/proc/<pid>/stat` fields 14 + 15).
@@ -1817,7 +1810,7 @@ fn measure_automute_cpu() {
     std::thread::sleep(Duration::from_secs_f64(secs));
     let pulse_idle_ms = (cpu_ticks(pulse.id()) - pa_idle0) as f64 / hz * 1000.0 / secs;
     let list = pw_cmd(&rig.pw, "pactl", &["list", "sink-inputs"]);
-    let (_, foreign) = legacy_parse(&String::from_utf8_lossy(&list.stdout), pid, None);
+    let (_, foreign) = fallback_parse(&String::from_utf8_lossy(&list.stdout), pid, None);
     let mut parecs: Vec<Child> = foreign
         .iter()
         .map(|id| {
@@ -1849,7 +1842,7 @@ fn measure_automute_cpu() {
         json!({"player_off_ms_per_s": off, "player_on_ms_per_s": on,
                "added_ms_per_s": on - off, "parecs": pids.len(),
                "parec_total_ms_per_s": parec_ms, "pipewire_pulse_ms_per_s": pulse_ms, "pipewire_pulse_idle_ms_per_s": pulse_idle_ms,
-               "legacy_added_ms_per_s": parec_ms + pulse_ms - pulse_idle_ms,
+               "audiomonitor_added_ms_per_s": parec_ms + pulse_ms - pulse_idle_ms,
                "clk_tck": hz, "window_s": secs})
     );
     for p in parecs.iter_mut() {

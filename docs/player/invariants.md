@@ -7,7 +7,7 @@ The numbered rules the player must never violate, each with why and what guards 
 ## 1. Never hand off an audible or visible stream between owners
 
 Closing one decoder or output while opening its replacement always leaves a moment where "nothing plays yet" or
-"the old one already stopped" has to be hidden by timing — the legacy engine's silence gaps and frozen frames. Only
+"the old one already stopped" has to be hidden by timing, and shows as silence gaps and frozen frames. Only
 ramping gain and opacity on streams that keep running removes the seam: B is created paused at −96 dB and only ramps
 up; a source is destroyed only after its gain reached −96 dB (or it was paused), never while a layer shows it.
 Guards: `tests/transition.rs` `cut_without_effect`, `handoff_no_seam`, `rapid_interrupt_chain`,
@@ -51,7 +51,7 @@ holds a snapshot copy. A source a layer still shows is never left paused or sile
 
 ## 6. A new transition commits the in-flight one: never park, never stack
 
-A transition left half-done (the legacy engine's paused, silent overlay) and stacked effects are the failures to
+A transition left half-done (a paused, silent overlay) and stacked effects are the failures to
 prevent. A new request on an overlapping output resolves the in-flight one at once: still waiting → superseded (B
 destroyed, A restored exactly); running → committed (B current, A ramped out). A B that fails before handoff snaps
 back to A with `transition.failed`, so a bad file never leaves the screen black or silent. The graveyard keeps at most
@@ -132,7 +132,7 @@ and no rule starts a switch under a hold. With no output it does what `while_par
 
 ## 13. One owner of a session's schedule: the player; the backend only requests
 
-Two schedulers caused the legacy engine's double switches. The backend loads a program, edits its properties, sends
+Two schedulers switch twice. The backend loads a program, edits its properties, sends
 verbs and mirrors `program.current`; it never decides a switch is due, so closing the app changes nothing about a
 rotation. Guard: the adapter integration test's origin check (every switch of a session is `origin:
 program:prog:main`).

@@ -4,14 +4,14 @@
 own and `LICENSE.upstream-MIT` can go. Owner request, 2026-10-28 ("our project has become something different
 entirely").
 
-**When:** after Phase 3 deletes the legacy engine — about a third of the remaining upstream lines sit in
-`PlayerHelper.cs`'s legacy mpvpaper paths and disappear with it for free.
+**When:** now. The switch-over deleted the old engine's launch paths in `PlayerHelper.cs`, about a third of the
+upstream lines counted below; the switch-over plan's Tasks 9–11 count and rewrite the rest.
 
 **Measured 2026-10-28** (`git blame -w -M -C`, `src` + `app` + `scripts`): 1,837 of ~96,000 lines are upstream's.
 
 | File | Upstream lines |
 |---|---|
-| `src/backend/Helpers/PlayerHelper.cs` | 601 (mostly legacy) |
+| `src/backend/Helpers/PlayerHelper.cs` | 601 (mostly launch paths the switch-over deleted) |
 | `src/backend/Scrapers/MotionBgsScraper.cs` | 231 |
 | `src/backend/Helpers/ImportService.cs` | 112 |
 | `src/backend/Scrapers/MoewallsScraper.cs` | 92 |

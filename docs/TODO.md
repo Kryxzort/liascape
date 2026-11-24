@@ -5,17 +5,14 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, now** — the
-       owner waived the rest of the bar (`docs/player/reports/switch-over.md`). Right after #114 lands, in order:
-       a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,
-       probes, `scripts/install.sh`, flake, PKGBUILD), with mpvpaper, the LWE launcher path, `src/native/`
-       (`liascape-transition`, `liascape-audio`), the legacy engine's rule file and its decision
-       entries; the § Switch-over bar items below are closed by it.
+0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, the rest** —
+       liascape-player is the only engine; the owner waived the rest of the bar (`docs/player/reports/switch-over.md`).
+       In order (a, the only engine, is done):
        b) The start-up seam: the restored wallpaper's layer waits for its source's `Ready` (owner's pick of § 5).
        c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
        `LICENSE.upstream-MIT` and the README's fork line go.
        Not blocking, run at night: the crash-isolation re-run (`scenes.sh crash`, `programs.sh crash`) and the 8 h soak
-       (`scenes.sh soak --minutes 480`); a regression they find is a bug to fix, not a reason to keep legacy.
+       (`scenes.sh soak --minutes 480`); a regression they find is a bug to fix.
        Frozen-onset micro-gaps (2–10 ms) don't count as failures unless the owner hears them.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
@@ -31,9 +28,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        403, 452 → 455 ms; fastest build 289 / 288, 220 / 222, 269 / 267). Likely the render thread then just waits
        longer for the texture uploads at the first frame (inferred, not measured). Worth retrying only once those stop
        being the build's tail.
-88. [ ] (owner) The switch-over: liascape-player becomes the only engine and the legacy path goes (§ Switch-over bar
-       below). Left before the flip: the owner's own checks (watch switches; listen to frozen onsets; every setting by
-       eye) and the § 5 calls in `docs/player/reports/switch-over.md`; crash isolation and the soak pass as of 2026-11-17.
 97. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
@@ -116,7 +110,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       scene, nothing read from a build tree or a source cache. Left:
       - [ ] Publish `liascape-git` to the AUR (first drop `zlib` from its depends if still nothing links it: `namcap`
             flags it).
-      - [ ] After the switch-over, rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
+      - [ ] Rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
             from install.sh's staged tree on an old glibc (an Ubuntu 22.04 container); bundle libmpv and its FFmpeg,
             libplacebo, libass, SDL2, harfbuzz/freetype, lz4, libxkbcommon and static `ffmpeg`/`ffprobe`; take glibc,
             GL/EGL/Vulkan (glvnd), libwayland, PipeWire/libpulse, libva, fontconfig and libcuda from the host; give every
@@ -198,24 +192,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       unmute delay stops it.
 
 ## Switch-over bar
-- [ ] Resume the switch-over check (`docs/player/architecture.md` § Not built: liascape-player becomes the default and the legacy path goes only when
-      the bar holds on the owner's machine). The stopped 2026-11-05 draft is committed as WIP on local branch
-      `switchover` (cce3d982, worktree `.claude/worktrees/switchover`): the seam probe, test hardening, and the
-      checklist report `docs/player/reports/switch-over.md` with placeholder results. Rebase onto lp-player, measure,
-      fill the report; owner-only rows go to "Waiting on owner".
-      **2026-11-11 measured, report filled** (`docs/player/reports/switch-over.md`): C1 pass bar the `frozen` onset
-      micro-gaps (1075 switches, 15 modes, 0 real drops, 0 seams in 475 with the probe; 16 micro-gaps of 2–10 ms, all
-      at a frozen B's onset, the sink recording can't tell them from unflagged ones); C2 pass (11-10 runs); C3 pass on
-      pre-WE-port code; C4 never run at 8 h; C5 pass. Recommendation: not yet — the report's "Waiting on owner" list:
-      watch switches (a late heavy scene makes the old clip hold its last frame up to ~2.5 s), listen to frozen onsets,
-      every setting by eye, the 8 h soak (`scenes.sh soak --minutes 480`), crash isolation re-run (`scenes.sh crash`,
-      `programs.sh crash`), and the owner's calls in § 5 (count frozen onsets? start-up seam? Phase 4 vs 5?).
-      Fixed on the way: the battery's late-B "handoff" check (the test) and the dropout probe's ended-A snapshot
-      (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
-      - [ ] After the flip, the upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`):
-            no upstream livepaper line left in the tree, then `LICENSE.upstream-MIT` and the README's fork line go
-            (history stays). About 1,600 lines left: `PlayerHelper.cs` (~580, mostly legacy, goes with the flip),
-            the four scrapers (~480), `ImportService.cs`, `DownloadHelper.cs`, `PlaylistService.cs` and small pieces.
 - [ ] Seam probe at start-up: the restored wallpaper's layer points at its source before its first frame (4 frames per
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
@@ -293,10 +269,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       reason "sources play on mpv's default device" / unknown; summary only, no setting row), adapter IT + self-test +
       probe-health guard it. **Still open:** Intel GPUs have no VRAM probe at all (an Intel-specific one would make the VRAM
       rules work there).
-- [ ] Remaining player phases (the web worker; the switch-over bar; the ongoing scene-compatibility programme). Roadmap:
+- [ ] Remaining player phases (the web worker; the ongoing scene-compatibility programme). Roadmap:
       `docs/player/architecture.md` § Not built.
   - [ ] Pause-when-covered has only the pause action; Wallpaper Engine's "Mute" and "Stop" variants of the cover action are not built.
-  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): all tasks done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): **flipped 2026-11-02** after the on-machine parity run (§ 7, owner-approved; criterion 9 read as "reasonable"): the player's Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` = off), `AudioMonitor.AutoMuteParityPassed` is gone, `monitor-daemon` is retired under liascape-player, `FeatureHealth` reports the Signal's needs. Still open: criterion 3 for a new stream under full CPU saturation (harness only, `lia-sysmon` lag, not traced); MPRIS through the backend with a Playing player and a Flatpak player untested; a player without the capability has no auto-mute with the app closed (accepted: the escape hatch / a bus-down player).
+  - Phase 3 Programs and Signals (rotation, history, restore, pause-when-covered in the player; daemons retired): all tasks done; on-machine numbers and findings in `docs/player/reports/phase3.md`. Task 14 (in-player auto-mute): **flipped 2026-11-02** after the on-machine parity run (§ 7, owner-approved; criterion 9 read as "reasonable"): the player's Signal is on by default (`LIASCAPE_PLAYER_AUTOMUTE=0` = off), `AudioMonitor.AutoMuteParityPassed` is gone, `FeatureHealth` reports the Signal's needs. Still open: criterion 3 for a new stream under full CPU saturation (harness only, `lia-sysmon` lag, not traced); MPRIS through the backend with a Playing player and a Flatpak player untested; a player without the capability has no auto-mute with the app closed (accepted: the escape hatch / a bus-down player).
   - Phase 2 scene worker: **all tasks done**. The on-machine battery ran 2026-10-29: `docs/player/reports/phase2.md` (`src/player/tests/onmachine/scenes.sh`,
     also `battery.sh scenes`); bar the owner's VT-switch/suspend check (Waiting on owner) only the findings below
     are open.
@@ -506,7 +482,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       and one with its own override, the playlist's "Override global rotation" both ways while armed;
       Normalize audio (on / off / target preset / switched on unmeasured / then next / across a NoAudio round
       trip — the oracle now checks every live source runs ITS OWN item's loudnorm); appearance (theme, aspect,
-      card size, gifs, live bg) and the legacy-only leak-restart, every source sampled back to back while the
+      card size, gifs, live bg), every source sampled back to back while the
       change saves (nothing may move, even for a moment); auto-mute against a PRIVATE PulseAudio the script
       starts (own socket under the stack's runtime dir, one null sink, no device / D-Bus / autospawn — the
       session's audio server is never seen; no pulseaudio → the cells SKIP): a synthetic stream mutes every
@@ -534,11 +510,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       outside `LibraryStore`'s lock — over an override saved meanwhile. `race:indexLostUpdate` (40 k1 volume saves
       while k4 is trashed + undone ×15): RED 3/40 and 2/40 lost; every index write now goes through
       `SetMeta`/`Remove`/`UpdateIndex` under the one lock (`SaveIndex` private) — GREEN 3/3 runs.
-      **Not covered yet:** the legacy engine (mpvpaper needs a real Wayland output), scenes (liascape-player plays
+      **Not covered yet:** scenes (liascape-player plays
       them since Phase 2 Task 11 — the matrix cells are Task 12), Browse/download/Steam (network + accounts), per-monitor content (no per-output wallpapers in the
       backend yet), auto-mute's "Only if MPRIS player active" (needs an MPRIS player on a session bus — a
-      private dbus-daemon + a fake player would make it hermetic; not built), Settings → Player engine (to
-      legacy) / Clear settings / Autostart / Resume from last / Debug mode, a shuffle with advance-on-end (the
+      private dbus-daemon + a fake player would make it hermetic; not built), Settings → Clear settings / Autostart / Resume from last / Debug mode, a shuffle with advance-on-end (the
       program's own next; 12 plays of ≥ 10 s clips is too slow for a cell), deleting a saved playlist (no
       UI for it).
 - [ ] **Speed storm leftovers** (`src/player/tests/onmachine/speedstorm.py` — live, bus muted; fixed in the same

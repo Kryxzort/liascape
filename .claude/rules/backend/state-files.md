@@ -17,7 +17,7 @@ paths:
 
 Files: `~/.config/liascape/settings.json` (`AppSettings`), `playlist_state.json` (the playlist bar, `CustomPlaylist`),
 named playlists in `~/.local/share/liascape/playlists/`, per-source library `index.json` (`.claude/rules/backend/library.md`).
-The CLI, the daemons, `serve` and the player-side processes all read and write them concurrently.
+The CLI, `serve` and the player-side processes all read and write them concurrently.
 
 ## Writing
 - Every settings write is field-level: `SettingsService.Update(s => s.Field = …)` or `Patch`. `Save` is private; never load, change and save a whole copy (it reverts what another writer saved meanwhile).
@@ -27,8 +27,8 @@ The CLI, the daemons, `serve` and the player-side processes all read and write t
 - Formats may change freely before the first release (`CLAUDE.md` § Hard rules): no migration or compatibility code. A removed setting's key loads as an unknown one and disappears on the next save.
 
 ## Secrets
-- `settings.json` holds no secrets. The Steam sign-in's tokens live in `Helpers/SecretStore.cs` (keyring, else `steam-auth.json`; `.claude/rules/backend/sources-steam.md`). `AppSettings` keeps the old token keys only for reading (`Legacy*`), and `SecretStore` moves them out.
-- `GET /settings` returns `SettingsService.Redacted`; `settings.json` and `steam-auth.json` are 0600.
+- `settings.json` holds no secrets. The Steam sign-in's tokens live in `Helpers/SecretStore.cs` (keyring, else `steam-auth.json`; `.claude/rules/backend/sources-steam.md`).
+- `settings.json` and `steam-auth.json` are 0600 (`AtomicFile.WritePrivate`).
 
 ## Settings semantics that aren't obvious from the model
 - Per-item volume/speed overrides live in the library index, not in settings (absent = follow the global).
@@ -37,6 +37,6 @@ The CLI, the daemons, `serve` and the player-side processes all read and write t
 - `PauseWhenCovered`, `GlobalPlaylistStart` / `PlaylistStart`, `RotateWhileParked`, the GPU/VRAM settings and `SceneMonitors` fps are liascape-player props, all live.
 
 ## `LastSession`
-- Written by `AppOps` on apply / random / next / play-playlist; replayed by `liascape restore` (under liascape-player only when the player shows nothing).
+- Written by `AppOps` on apply / random / next / play-playlist; replayed by `liascape restore` only when the player shows nothing.
 - `POST /settings` preserves `LastSession` from disk whatever the body says (the UI posts a stale copy). `WatchedFolders` likewise: only `/library/watched` and `/library/import-found` edit it (`Web/FolderImportOps.cs`).
 - The maximum play time and scene timing are not in `LastSession`; a session reads them from the current playlist state + settings at start / restore.

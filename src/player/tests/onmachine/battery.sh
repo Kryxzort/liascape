@@ -705,15 +705,11 @@ EOF
 # natural end, which an image never reaches, so they are video-only by construction here).
 # ==================================================================
 VIDEOS=(); IMAGES=(); SHORT_VIDEOS=()
-# battery-script fix (found analysing task20-final-run, all 3 wait-for-end cells: tr-136/324/515,
-# every one "scheduled" with align:end then "cancelled" by LiascapePlayerMedia.SwitchAndWait's own
-# AlignBackstopSlackSec=15s backstop ~15.5-16s later -- see LiascapePlayerMedia.cs's AlignBackstopSlackSec). term_timeout() below is EFFECT_DURATION_MS-based,
-# which bounds a plain cut/effect switch fine but has NOTHING to do with how long an align:"end"
-# wait-for-the-video's-real-end switch can legitimately take -- that's bounded by the CLIP's own
-# remaining play time (+ the player's own 10 s align_fallback, behind which sits the adapter's own
-# 15 s backstop). MAX_SHORT_VIDEO_MS is the longest of the real SHORT_VIDEOS clips used by
-# advance-on-end/wait-for-end, so a term_timeout for those two modes can safely bound "the clip plays
-# all the way to its own end" without mistaking that for "the switch never completed".
+# term_timeout() below is EFFECT_DURATION_MS-based: it bounds a plain cut/effect switch, not an
+# align:"end" switch, which waits for the clip's own end (bounded by the clip's remaining play time,
+# then the player's `transition.align_fallback`). MAX_SHORT_VIDEO_MS is the longest of the
+# SHORT_VIDEOS clips, so a timeout built from it bounds "the clip plays to its own end" without
+# mistaking that for "the switch never completed".
 MAX_SHORT_VIDEO_MS=0
 
 ffprobe_duration_ms() {
@@ -921,15 +917,12 @@ run_cell() {
       post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
       sleep 1.5
       local auto_timeout; auto_timeout=$(python3 -c "print(int($interval) + 15)")
-      # battery-script fix (task20-final-run: full-live/reveal/frozen wait-for-end ALL failed their
-      # very first switch, "transition did not reach a terminal state", tr-136/324/515 -- confirmed
-      # via events.jsonl: each was scheduled align:"end" then genuinely CANCELLED ~15.5-16s later by
-      # LiascapePlayerMedia.SwitchAndWait's own AlignBackstopSlackSec=15s backstop, not by this script's own /stop -- i.e. the switch was still correctly
-      # in flight, this script just stopped watching too early). An end-of-video switch waits for
-      # the clip's end, so its real per-switch bound is the CLIP's own remaining play time, not
-      # EFFECT_DURATION_MS -- use MAX_SHORT_VIDEO_MS (+ the player's 10s align_fallback / adapter's
-      # 15s backstop + margin) for both end-aligned modes: advance-on-end has no maximum (0 = off), so
-      # its clip also plays to its end after the minimum and needs the same bound. timed-interval keeps term().
+      # Both end-of-video modes run with "Switch when video ends" on: IntervalSeconds is the
+      # minimum play time and no maximum is set (.claude/rules/backend/player-adapter.md § Rotation); each switch is
+      # armed align:"end" in the loop that reaches the minimum, then starts at that loop's end -- up to a whole clip
+      # after it was armed (wait-for-end, minimum 2 s, is armed as each clip starts; advance-on-end, minimum 8 s,
+      # in the loop that reaches 8 s, and a live clip can run far past that). Both wait MAX_SHORT_VIDEO_MS + margin;
+      # timed-interval keeps term().
       local term_this="$term"
       [ "$mode" != timed-interval ] && term_this=$(python3 -c "print(int($MAX_SHORT_VIDEO_MS/1000) + 30)")
       prev=$(last_corr)
