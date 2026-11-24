@@ -87,7 +87,7 @@ The rest you'll learn by using Liascape.
 As with any other application, Liascape depends on 23 packages (and 364 more that npm and Cargo fetch for you while it builds).
 
 **You'll need:**
-- A Wayland compositor that supports wlr-layer-shell, such as Hyprland, Sway or KDE Plasma. GNOME doesn't(Deserved af, stop using GNOME), so Liascape can't draw a wallpaper there.
+- A Wayland compositor that supports wlr-layer-shell, such as Hyprland, Sway or KDE Plasma. GNOME doesn't (deserved af, stop using GNOME), so Liascape can't draw a wallpaper there.
 - An x86-64 machine.
 
 **Optional, for the features that use them:**
