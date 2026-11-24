@@ -92,7 +92,8 @@ You'll need:
 - PipeWire, for auto-mute;
 - Steam, for Workshop downloads, and Wallpaper Engine installed through it, for scenes.
 
-### NixOS and Nix
+<details>
+<summary><b>NixOS and Nix</b></summary>
 
 The flake brings everything with it, Electron and ffmpeg included. You need flakes enabled
 (`nix.settings.experimental-features = [ "nix-command" "flakes" ];`).
@@ -115,7 +116,10 @@ environment.systemPackages = [ inputs.liascape.packages.${pkgs.system}.default ]
 To build it by hand instead, `nix develop` in the cloned repo gives you a shell with every build dependency, and
 `bash scripts/install.sh` builds from there.
 
-### Arch
+</details>
+
+<details>
+<summary><b>Arch</b></summary>
 
 ```bash
 sudo pacman -S --needed base-devel rust clang cmake git wayland wayland-protocols libglvnd mpv libpulse pipewire \
@@ -129,7 +133,12 @@ Optional, for scenes that use Windows fonts (look-alikes, then the real ones):
 paru -S --needed ttf-liberation ttf-carlito ttf-caladea ttf-cascadia-code ttf-selawik ttf-comic-neue ttf-tahoma ttf-ms-fonts
 ```
 
-### Debian / Ubuntu
+Then [build it](#then-build-it).
+
+</details>
+
+<details>
+<summary><b>Debian / Ubuntu</b></summary>
 
 ```bash
 sudo apt install build-essential cargo rustc libclang-dev libwayland-bin libwayland-dev libegl-dev libgles-dev \
@@ -140,7 +149,16 @@ sudo apt install build-essential cargo rustc libclang-dev libwayland-bin libwayl
 
 Liascape needs Rust 1.85 or newer. If your release's `rustc` is older, install Rust with [rustup](https://rustup.rs) instead.
 
-### Fedora
+There's no Electron package here: put an `electron45` or `electron` binary on your `PATH`, or point
+`LIASCAPE_ELECTRON` at one. If there's no .NET 10 package, Microsoft's `dotnet-install.sh` installs the SDK for your
+user.
+
+Then [build it](#then-build-it).
+
+</details>
+
+<details>
+<summary><b>Fedora</b></summary>
 
 ```bash
 sudo dnf install gcc make cargo rust clang-devel wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel \
@@ -148,9 +166,13 @@ sudo dnf install gcc make cargo rust clang-devel wayland-devel mesa-libEGL-devel
   harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel ffmpeg-free libglvnd-devel dotnet-sdk-10.0 nodejs npm
 ```
 
-On Debian, Ubuntu and Fedora there's no Electron package: put an `electron45` or `electron` binary on your `PATH`, or
-point `LIASCAPE_ELECTRON` at one. If your distro has no .NET 10 package, Microsoft's `dotnet-install.sh` installs the
-SDK for your user.
+There's no Electron package here: put an `electron45` or `electron` binary on your `PATH`, or point
+`LIASCAPE_ELECTRON` at one. If there's no .NET 10 package, Microsoft's `dotnet-install.sh` installs the SDK for your
+user.
+
+Then [build it](#then-build-it).
+
+</details>
 
 ### Then build it
 
