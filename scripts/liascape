@@ -3,7 +3,7 @@
 # the PKGBUILD and the AppImage through it, the Nix flake); it finds everything relative to itself:
 #
 #   <prefix>/bin/liascape                          this launcher
-#   <prefix>/libexec/liascape/liascape-backend     the C# backend: serve (the app's API), the CLI, the daemons
+#   <prefix>/libexec/liascape/liascape-backend     the C# backend: serve (the app's API) and the CLI
 #   <prefix>/libexec/liascape/liascape-player      the Rust compositor (`liascape ctl …` talks to it)
 #   <prefix>/libexec/liascape/liascape-scene-worker  one per Wallpaper Engine scene (the player starts them)
 #   <prefix>/lib/liascape/{ui,shell,transitions}   the React UI, the Electron shell, the effect catalogue
