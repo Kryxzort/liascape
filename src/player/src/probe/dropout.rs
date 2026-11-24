@@ -1,5 +1,5 @@
 //! The reference-based dropout detector (spec §5.3, §9 "debug mode"): a port of
-//! the `scripts/liascape_audiowatch.py` monitor (the bug classes it finds are listed in
+//! the `refcheck` reference-based sink monitor (the bug classes it finds are listed in
 //! `docs/player/debugging.md`). It compares what the player's audio bus actually output
 //! (the 1 ms [`crate::audio::meter::Meter`] window) against what it SHOULD have
 //! output (the transition's sources, decoded from their logged positions, weighted by the
@@ -35,8 +35,8 @@
 //!
 //! **Mean, not median, dB error.** [`DropoutReport::fit_db`] is the **mean**
 //! (power-domain-correct arithmetic mean of `|observed − expected − offset|` over the
-//! qualifying bins) — exact parity with the `liascape_audiowatch.py` reference
-//! (`refcheck`'s `err = sum(...) / len(pairs)`). `offset_db` is the one place a *median* is
+//! qualifying bins) — exact parity with the `refcheck` reference
+//! (its `err = sum(...) / len(pairs)`). `offset_db` is the one place a *median* is
 //! used (robust against one outlier bin). Don't "fix" `fit_db` to a median.
 //!
 //! **The lag-search guard scales with the window, not a bare constant.** A small fixed
@@ -243,7 +243,7 @@ pub struct DropoutReport {
     /// steps ([`analyse`]).
     pub lag_ms: u32,
     /// Mean absolute dB error at that lag, after `offset_db` — how good the fit is. The
-    /// **mean**, not the median — exact parity with `liascape_audiowatch.py`'s `refcheck`.
+    /// **mean**, not the median — exact parity with `refcheck`.
     /// See the module docs.
     pub fit_db: f64,
     /// Median `observed − expected` at the chosen lag (a level mismatch, e.g. a
@@ -285,7 +285,7 @@ fn offset_ms(t: Duration, ms: i64) -> Option<Duration> {
     }
 }
 
-/// Port of `liascape_audiowatch.py`'s `refcheck` (the reference-based half): aligns `observed`
+/// Port of `refcheck` (the reference-based half): aligns `observed`
 /// (raw, ~1 ms-resolution bus-meter samples) against `expected` (10 ms power bins, e.g.
 /// from [`expected_envelope`]) by searching a 0–250 ms lag, then flags both coarse
 /// (10 ms-bin) drops and fine (sub-bin) micro-gaps against that same coarse `expected` —
@@ -801,8 +801,7 @@ fn gain_lin_interp_at(track: Option<&GainTrack>, t: Duration) -> f64 {
     a0 + (a1 - a0) * frac
 }
 
-/// `ffmpeg` resolved from `PATH` (never a hard-coded store path — same rule as
-/// `scripts/liascape_audiowatch.py`).
+/// `ffmpeg` resolved from `PATH` (never a hard-coded store path).
 const FFMPEG: &str = "ffmpeg";
 
 /// util-linux's `setpriv`, from `PATH`, put in front of every decode for its
@@ -1156,7 +1155,7 @@ pub fn expected_envelope(
 /// Decodes each source once (`ffmpeg -ss <pos> -t <len>`; `<pos>`/`<len>` are
 /// FILE-time, scaled by the source's own `speed` and wrapped at `duration` when
 /// `looped`), multiplies each by `db_to_lin(gain)²` per source per bin and sums — same
-/// as `liascape_audiowatch.py`'s `refcheck` — and returns BOTH the coarse (10 ms; lag search +
+/// as `refcheck` — and returns BOTH the coarse (10 ms; lag search +
 /// `drops`) and fine (1 ms; the micro-gap pass) expected envelopes from that one
 /// decode.
 pub fn expected_envelopes(

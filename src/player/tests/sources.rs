@@ -815,7 +815,7 @@ fn property_map_reaches_mpv() {
     assert_eq!(s(&src, "vf"), "");
     ap(&mut src, "cache", PropValue::Bool(false));
     assert_eq!(s(&src, "cache"), "no");
-    // `cache: true` = mpv's normal policy (`auto`, the legacy engine's DisableCache=false),
+    // `cache: true` = mpv's normal policy (`auto`, the `DisableCache=false` setting),
     // not a forced `yes` (which would RAM-cache every local wallpaper).
     ap(&mut src, "cache", PropValue::Bool(true));
     assert_eq!(s(&src, "cache"), "auto");
@@ -828,7 +828,7 @@ fn property_map_reaches_mpv() {
     assert_eq!(
         src.mpv_get_f64("demuxer-max-bytes"),
         Some(150.0 * 1048576.0),
-        "0 = unset → mpv's default (legacy convention)"
+        "0 = unset → mpv's default"
     );
     ap(&mut src, "demuxer_back_mib", PropValue::F64(8.0));
     assert_eq!(

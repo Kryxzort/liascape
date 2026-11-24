@@ -280,7 +280,7 @@ be_settings_init() { # the private settings.json — deliberately WITHOUT PauseW
     [[ -s $f ]] && return 0
     mkdir -p "$(dirname "$f")"
     cat >"$f" <<'EOF'
-{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":80,"GlobalTransitionEnabled":true,
+{"NoAudio":false,"Volume":80,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1000,"TransitionMethod":"full-live",
  "GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":1800,"AutoMute":false}
 EOF
@@ -311,8 +311,8 @@ be_up() {
     for ((i = 0; i < 100; i++)); do bcurl -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
     local eng
     eng=$(bcurl -m 5 "$API/player-engine") || die "GET /player-engine failed (log $RESULTS/backend-$STEP.log)"
-    [[ $(jq -r .active <<<"$eng") == liascape-player ]] ||
-        die "the private backend is not on liascape-player: $(jq -c '{engine, active, available, reason}' <<<"$eng")"
+    [[ $(jq -r .available <<<"$eng") == true ]] ||
+        die "the private backend has no liascape-player binary: $(jq -c '{available, binary, reason}' <<<"$eng")"
     say "private backend up: pid $BE_PID, $API"
 }
 be_down() { # "the app closes": TERM, as the shell's quit does
@@ -332,10 +332,6 @@ be_procs() { # pids of THIS run's backend (serve or CLI): /proc cmdline holds ou
         tr '\0' ' ' <"$p/cmdline" 2>/dev/null | grep -qF "$DLL" || continue
         tr '\0' '\n' <"$p/environ" 2>/dev/null | grep -qxF "HOME=$BE/home" && echo "${p#/proc/}"
     done
-}
-legacy_daemons() { # a timer-daemon / restart-daemon of this run (never expected)
-    local p
-    for p in $(be_procs); do tr '\0' ' ' <"/proc/$p/cmdline" | grep -qE 'timer-daemon|restart-daemon' && echo "$p"; done
 }
 bcurl() { curl -sf -H "X-Liascape-Token: $API_TOKEN" "$@"; }
 bpost() { bcurl -m 30 -X POST -H 'Content-Type: application/json' -d "$2" "$API$1"; }

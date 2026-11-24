@@ -244,6 +244,6 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 ## Corpus and health tooling
 - Run `src/player/tests/onmachine/scene_corpus.sh` / `scene_health.sh` on a private headless player; they
   refuse the steamcmd cache. Never commit captures; reports go to `docs/player/reports/scene-corpus.md` and
-  `docs/player/reports/scene-health.md`. `--ab-legacy` draws on a real output: owner-run only.
+  `docs/player/reports/scene-health.md`.
 - Reproduce an LWE failure with `liascape-scene-worker --lwe-smoke <scene> --assets <dir> --out <dir>`
   (writes `health.json`); under gdb ignore throws in `Configuration::detectSteamDir`.

@@ -283,8 +283,8 @@ async function loadUi() {
 }
 const ui = (code) => js(`(async () => { const m = window.__mx; ${code} })()`);
 
-// per-cell log excerpts (backend + adapter + the backend's transition/rotation log), attached to a FAIL
-const LOGS = [E.LIASCAPE_BACKEND_LOG, E.LIASCAPE_ADAPTER_LOG, E.LIASCAPE_ADAPTER_LOG && path.join(path.dirname(E.LIASCAPE_ADAPTER_LOG), "liascape-transition.log")].filter(Boolean);
+// per-cell log excerpts (backend + adapter), attached to a FAIL
+const LOGS = [E.LIASCAPE_BACKEND_LOG, E.LIASCAPE_ADAPTER_LOG].filter(Boolean);
 const logSizes = () => LOGS.map((f) => { try { return fs.statSync(f).size; } catch { return 0; } });
 function logsSince(at) {
   return LOGS.map((f, i) => { try { const b = fs.readFileSync(f); return b.subarray(at[i]).toString().split("\n").filter((l) => l.trim() && !/SteamRefreshToken/.test(l)).slice(-25); } catch { return []; } }).flat();

@@ -111,7 +111,7 @@ pub(crate) fn set_optional(handle: &Handle, opts: &[(&str, &str)]) -> Vec<String
 }
 
 /// mpv's own defaults, restored when a `demuxer_*_mib` property is set to 0 ("unset" —
-/// the legacy engine's convention: `AppSettings` only passes `--demuxer-max-*` when > 0).
+/// a 0 in the `DemuxerMaxMib` / `DemuxerMaxBackMib` settings means mpv's default).
 const DEMUXER_MAX_DEFAULT: &str = "150MiB";
 const DEMUXER_BACK_DEFAULT: &str = "50MiB";
 
@@ -2480,8 +2480,8 @@ impl Source for MpvSource {
             // `vf` `fps=<n>` — never on a still (`want_vf`); the prop keeps the value, and it
             // applies if the load turns out to move.
             "fps_cap" => self.push_vf(),
-            // `true` = mpv's normal caching policy (`auto`, what the legacy engine runs
-            // with DisableCache=false); `false` = forced off (legacy DisableCache=true).
+            // `true` = mpv's normal caching policy (`auto`, the `DisableCache=false`
+            // setting); `false` = forced off (`DisableCache=true`).
             "cache" => self.set(prop, "cache", if b { "auto" } else { "no" }),
             "demuxer_max_mib" | "demuxer_back_mib" => {
                 let n = num(v);
@@ -2516,7 +2516,7 @@ impl Source for MpvSource {
             // A scene's still image and user properties; stored (a global `set`
             // never fails here).
             "preview" | "scene_props" | "scene_dir" | "loudness_seed" | "loudness_key" => Ok(()),
-            // `auto` re-inits the AO even after a no-audio start (legacy engine finding).
+            // `auto` re-inits the AO even after a no-audio start.
             "no_audio" => self.set(prop, "aid", if b { "no" } else { "auto" }),
             // The graph value is the user's offset; the bus compensation is added to it.
             "audio_delay" => {
@@ -2617,7 +2617,7 @@ impl Drop for MpvSource {
             return;
         }
         // 1. Render context + our FBOs/textures, with the GL context current
-        //    (liascape-transition gotcha). `gl` keeps the EGL context alive even if the Gfx is
+        //    (spec §5.1). `gl` keeps the EGL context alive even if the Gfx is
         //    already gone, and the guard restores whatever was current before.
         let cur = self.gl.make_current();
         if cur.is_current() {

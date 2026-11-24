@@ -163,31 +163,6 @@ PY
     destroy "$bk"
     serve_down
 
-    # For scale: the legacy engine (the installed linux-wallpaperengine, which renders and
-    # presents in one process) on the same scenes, on DP-1 alone, silent (+ SDL's dummy audio
-    # driver: nothing can reach the speakers), CPU over 5 s after 6 s of warm-up.
-    local lwe lpid lc fps
-    lwe=$(command -v linux-wallpaperengine) || { note "no linux-wallpaperengine installed: legacy CPU not measured"; step_end; return; }
-    for name in emilia-1726902114 kimi-2371103399 bunk-2134765860; do
-        path=$WS/${name#*-}
-        for fps in 30 144; do
-            SDL_AUDIODRIVER=dummy prlimit --core=1:1 "$lwe" --silent --noautomute --no-fullscreen-pause --fps "$fps" \
-                --assets-dir "$(lp scene-check | jq -r .assets_dir)" \
-                --screen-root $OUT_A --bg "$path" >"$RESULTS/outputs-legacy-$name-$fps.log" 2>&1 &
-            lpid=$!
-            sleep 6
-            if kill -0 "$lpid" 2>/dev/null; then
-                lc=$(cpu_pct "$lpid" 5)
-                note "legacy linux-wallpaperengine $name at --fps $fps on $OUT_A: $lc % CPU (one process: render + present)"
-            else
-                note "legacy linux-wallpaperengine $name at --fps $fps exited early"
-            fi
-            kill "$lpid" 2>/dev/null
-            for _ in $(seq 30); do kill -0 "$lpid" 2>/dev/null || break; sleep 0.1; done
-            kill -KILL "$lpid" 2>/dev/null
-            wait "$lpid" 2>/dev/null
-        done
-    done
     step_end
 }
 
