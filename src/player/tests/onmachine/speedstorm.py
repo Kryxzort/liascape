@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Speed storm: hammer playback speed on the LIVE session (PlayerEngine=liascape-player) the way the UI
+"""Speed storm: hammer playback speed on the LIVE session the way the UI
 does — per-item drag (/preview ~11/s + /library/speed persist), the global slider (/settings), and a
 raw flood (/preview 50/s) — while /next forces a transition every few seconds, so many speed
 changes land mid-transition. Records every player event, loop/frame health and the bus meter, then
@@ -84,7 +84,7 @@ def rec(**kw):
 
 # ---------------------------------------------------------------- preflight + originals
 eng = json.loads(http("GET", "/player-engine")[1])
-assert eng.get("active") == "liascape-player", f"engine is {eng.get('active')}, not liascape-player"
+assert eng.get("available"), f"no liascape-player binary: {eng.get('reason')}"
 cur = json.loads(http("GET", "/current")[1])
 assert cur.get("path"), "nothing playing"
 st = json.loads(http("GET", "/playlist/state")[1]) or {}

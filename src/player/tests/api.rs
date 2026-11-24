@@ -3757,7 +3757,7 @@ fn c1_long_run_switches_stay_bounded() {
 }
 
 /// `stop` ends the session's pause — pause → stop → a new switch plays
-/// and is audible (legacy semantics), and the stop's teardown finishes while paused.
+/// and is audible, and the stop's teardown finishes while paused.
 #[test]
 fn i1_pause_stop_then_switch_plays() {
     let Some(srv) = real_serve(&[]) else { return };

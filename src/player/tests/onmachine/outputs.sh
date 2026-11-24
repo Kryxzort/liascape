@@ -16,7 +16,6 @@
 # - disables DP-1 with `hyprctl eval hl.monitor{…disabled=true}` and re-enables it with the
 #   EXACT recorded mode/position/scale (never `preferred,auto`); a trap restores the recorded
 #   layout on any exit (failure, Ctrl-C) and verifies `hyprctl monitors -j` matches it;
-# - stops the legacy wallpaper (mpvpaper) first and leaves it stopped;
 # - runs its own `liascape-player serve` (supervised: SERVE_PID is the supervisor, PLAYER_PID the
 #   compositor child that owns the surfaces) with a private XDG_RUNTIME_DIR (socket +
 #   instance lock — other lanes' headless servers are unaffected) and RLIMIT_CORE 1 (the
@@ -195,16 +194,6 @@ done
 
 OTHER=$(hyprctl layers -j | jq -c '[.. | objects | select(.namespace? == "liascape-player") | .pid] | unique')
 [[ $OTHER == "[]" ]] || fail "another liascape-player (pid $OTHER) already draws on this session; quit it first (ctl quit)"
-
-if pgrep -x mpvpaper >/dev/null; then
-    say "stopping the legacy wallpaper (mpvpaper)"
-    # The owner's dev backend (:5174) wants its per-run token (X-Liascape-Token, serve.token beside serve.port).
-    stop_code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST \
-        -H "X-Liascape-Token: $(cat "${XDG_CONFIG_HOME:-$HOME/.config}/liascape/serve.token" 2>/dev/null)" 127.0.0.1:5174/stop)
-    [[ $stop_code == 2* ]] || printf '[outputs] WARN: POST /stop on the dev backend answered %s (not 2xx); mpvpaper may not stop\n' "$stop_code" >&2
-    for _ in $(seq 1 50); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
-    pgrep -x mpvpaper >/dev/null && fail "mpvpaper still running after /stop"
-fi
 
 if [[ -z ${LIASCAPE_PLAYER_BIN:-} ]]; then
     say "building liascape-player (release)"

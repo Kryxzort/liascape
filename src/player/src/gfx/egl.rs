@@ -633,7 +633,7 @@ impl Drop for WindowTarget {
 /// context current and delete GL objects in it. Built by [`Gfx::keep_alive`].
 ///
 /// Exists for the libmpv sources: `mpv_render_context_free` must run with the GL
-/// context it was created on current (liascape-transition gotcha, spec §5.1), and the source's
+/// context it was created on current (spec §5.1), and the source's
 /// FBO/texture must be deleted in that context too — regardless of whether the owning
 /// `Gfx` was dropped first. Holding this makes the drop order irrelevant: the EGL context
 /// can't be torn down while a source still owns objects in it.

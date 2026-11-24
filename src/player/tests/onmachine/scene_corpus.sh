@@ -7,8 +7,7 @@
 #
 #   bash src/player/tests/onmachine/scene_corpus.sh                 # the whole 431960 folder
 #   bash src/player/tests/onmachine/scene_corpus.sh --only 2371103399,1726902114
-#   bash src/player/tests/onmachine/scene_corpus.sh --ab-legacy --legacy-output DP-1 \
-#        --reuse /tmp/liascape-scene-corpus-<stamp>                        # owner-run, see below
+#   bash src/player/tests/onmachine/scene_corpus.sh --reuse /tmp/liascape-scene-corpus-<stamp>   # re-report
 #
 # Options:
 #   --dir DIR            Workshop content folder (default
@@ -26,15 +25,7 @@
 #   --bin DIR            dir holding liascape-player + liascape-scene-worker (default: build
 #                        <crate>/target/release with `cargo build --release` in the devShell)
 #   --no-build           use --bin / target/release as is
-#   --reuse DIR          skip liascape-player's run; reuse DIR's records (for --ab-legacy / re-reports)
-#   --ab-legacy          ALSO run the installed `linux-wallpaperengine` on each scene and screenshot
-#                        it (`--screenshot`), then list the scenes that start there but not here.
-#                        THIS DRAWS ON THE REAL OUTPUT NAMED BY --legacy-output (it takes over the
-#                        desktop session for ~20 s per scene): owner-run only, never in a test lane.
-#                        Stop the app's own wallpaper first (`liascape kill`); the runner kills
-#                        each LWE it started and nothing else.
-#   --legacy-output NAME the output LWE draws on (required with --ab-legacy, e.g. DP-1)
-#   --legacy-delay N     LWE's --screenshot-delay in frames (default 120 = 4 s at 30 fps)
+#   --reuse DIR          skip liascape-player's run; reuse DIR's records (re-reports)
 #
 # Isolation (liascape-player's run): its own XDG_RUNTIME_DIR / XDG_STATE_HOME / XDG_CACHE_HOME /
 # socket under the results dir, `serve --no-supervise --headless --outputs 1920x1080@60 --clock
@@ -66,9 +57,6 @@ ASSETS=
 BIN=
 BUILD=1
 REUSE=
-AB_LEGACY=0
-LEGACY_OUTPUT=
-LEGACY_DELAY=120
 
 die() {
     echo "scene_corpus: $*" >&2
@@ -91,9 +79,6 @@ while (($#)); do
     --bin) BIN=$2; shift ;;
     --no-build) BUILD=0 ;;
     --reuse) REUSE=$2; shift ;;
-    --ab-legacy) AB_LEGACY=1 ;;
-    --legacy-output) LEGACY_OUTPUT=$2; shift ;;
-    --legacy-delay) LEGACY_DELAY=$2; shift ;;
     -h | --help) usage 0 ;;
     *) echo "unknown option $1" >&2; usage 2 ;;
     esac
@@ -117,7 +102,6 @@ if forbidden_path "$DIR"; then
 fi
 [[ -d $DIR ]] || die "no such folder: $DIR"
 DIR=$(realpath -- "$DIR")
-((AB_LEGACY)) && [[ -z $LEGACY_OUTPUT ]] && die "--ab-legacy needs --legacy-output <output name> (it draws there)"
 [[ -n $REUSE && ! -f $REUSE/records.jsonl ]] && die "--reuse $REUSE: no records.jsonl there"
 
 # ---------------------------------------------------------------- the scene list
@@ -158,10 +142,9 @@ unset LD_LIBRARY_PATH # the stray one on this machine breaks native links (.clau
 # ---------------------------------------------------------------- cleanup (our pids only)
 SERVE_PID=
 SUB_PID=
-LWE_PID=
 cleanup() {
     local p
-    for p in $LWE_PID $SUB_PID; do
+    for p in $SUB_PID; do
         kill "$p" 2>/dev/null
     done
     if [[ -n $SERVE_PID ]] && kill -0 "$SERVE_PID" 2>/dev/null; then
@@ -341,58 +324,7 @@ sleep_until() { # $1 = unix ms
     ((d > 0)) && sleep "$(awk -v d="$d" 'BEGIN { printf "%.3f", d / 1000 }')"
 }
 
-# ---------------------------------------------------------------- the legacy A/B (owner-run)
-run_legacy() {
-    local lwe assets
-    lwe=$(command -v linux-wallpaperengine) || die "--ab-legacy: linux-wallpaperengine is not installed"
-    [[ -n ${WAYLAND_DISPLAY:-} ]] || die "--ab-legacy runs in the desktop session (no WAYLAND_DISPLAY)"
-    assets=${ASSETS:-$(jq -r '.assets_dir // empty' "$RESULTS/scene-check.json" 2>/dev/null)}
-    [[ -n $assets ]] || die "--ab-legacy: no WE assets dir (pass --assets)"
-    echo "scene_corpus: --ab-legacy: linux-wallpaperengine draws on $LEGACY_OUTPUT for each scene" >&2
-    # A fresh folder per run: a screenshot left by an earlier run can't pass for this one's.
-    LEG=$RESULTS/legacy-$(date +%Y%m%d-%H%M%S)
-    mkdir -p "$LEG"
-    : >"$RESULTS/legacy.jsonl"
-    local wid png t0 status code
-    for wid in "${ITEMS[@]}"; do
-        png=$LEG/$wid.png
-        t0=$(now_ms)
-        prlimit --core=1:1 "$lwe" --silent --noautomute --no-fullscreen-pause --fps 30 --assets-dir "$assets" \
-            --screenshot "$png" --screenshot-delay "$LEGACY_DELAY" \
-            --screen-root "$LEGACY_OUTPUT" --bg "$DIR/$wid" >"$LEG/$wid.log" 2>&1 &
-        LWE_PID=$!
-        status=timeout
-        code=
-        while (($(now_ms) - t0 < READY_TIMEOUT * 1000)); do
-            if [[ -s $png ]]; then sleep 0.5; status=screenshot; break; fi
-            if ! kill -0 "$LWE_PID" 2>/dev/null; then
-                wait "$LWE_PID"
-                code=$?
-                status=exited
-                [[ -s $png ]] && status=screenshot
-                break
-            fi
-            sleep 0.1
-        done
-        if kill -0 "$LWE_PID" 2>/dev/null; then
-            kill "$LWE_PID"
-            for _ in $(seq 30); do kill -0 "$LWE_PID" 2>/dev/null || break; sleep 0.1; done
-            kill -KILL "$LWE_PID" 2>/dev/null
-            wait "$LWE_PID" 2>/dev/null
-        fi
-        LWE_PID=
-        jq -nc --arg wid "$wid" --arg status "$status" --argjson code "${code:-null}" \
-            --argjson ms "$(($(now_ms) - t0))" \
-            --arg png "$([[ -s $png ]] && echo "$png")" \
-            --argjson tail "$(tail -n 30 "$LEG/$wid.log" | jq -R . | jq -sc .)" \
-            '{id:$wid, status:$status, code:$code, ms:$ms,
-              screenshot:(if $png == "" then null else $png end), log_tail:$tail}' >>"$RESULTS/legacy.jsonl"
-        echo "scene_corpus: legacy $wid → $status" >&2
-    done
-}
-
 [[ -z $REUSE ]] && run_player
-((AB_LEGACY)) && run_legacy
 
 REPORT_ARGS=(--results "$RESULTS" --dir "$DIR")
 [[ $REPORT_DIR != - ]] && REPORT_ARGS+=(--report-dir "$REPORT_DIR")

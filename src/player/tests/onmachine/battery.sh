@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Temp folder: removed on exit; LIASCAPE_KEEP_TMP=1 keeps it; a failed run keeps only its logs and prints where (last line).
-# liascape-player Phase 1 on-machine battery. Drives the REAL C# backend (`liascape serve`, PlayerEngine=liascape-player) over
+# liascape-player Phase 1 on-machine battery. Drives the REAL C# backend (`liascape serve`) over
 # HTTP exactly like the owner's UI would, and inspects the result with `liascape-player ctl` directly —
 # same split as `scripts/test-liascape-player-adapter.sh` (§ Integration test) and
 # `src/player/tests/onmachine/bus.sh`, whose patterns this reuses (temp dirs for --hermetic, a
@@ -100,14 +100,13 @@
 # run happens later, after the controller merges the audio work").
 #
 # Owner-environment safety (brief, owner-approved -- only active without --hermetic):
-#   - Legacy wallpaper is stopped first (global-constraints.md) and left stopped at the end.
 #   - The liascape-player bus playback stream (sink-input node.name=liascape-player-bus.playback) is held at
 #     0% volume throughout (re-applied if PipeWire recreates it) and restored on exit -- audio is
 #     silenced for the owner but the bus's own meter (what the dropout detector reads) sits
 #     upstream of that stream, so measurement is unaffected. The claim itself is checked in the
 #     first minute of a live run (see check_mute_does_not_blind_meter()).
-#   - Every AppSettings field we touch (PlayerEngine, TransitionMethod, GlobalTransitionEnabled,
-#     GlobalTransitionEffectIds, GlobalTransitionDurationMs, AutoMute) is snapshotted before the
+#   - Every AppSettings field we touch (TransitionMethod, GlobalTransitionEnabled, GlobalTransitionEffectIds,
+#     GlobalTransitionDurationMs, AutoMute) is snapshotted before the
 #     first change and restored at the end via a FRESH GET -> set just those fields back -> POST the
 #     full object (never a stale start-of-run snapshot -- the owner may change something else of
 #     their own while this runs; global-constraints.md's POST-replaces-the-whole-object hazard). The
@@ -117,7 +116,7 @@
 #     (its own comment: "mutated backend-side... clobbered by [a] stale copy... never edited through
 #     this form") -- confirmed empirically while building this script (a round-tripped LastSession
 #     change via /settings silently didn't take). LastSession ends the run as whatever OUR last
-#     /apply left it, which is harmless: the legacy wallpaper itself still ends STOPPED (see below),
+#     /apply left it, which is harmless: the wallpaper itself still ends STOPPED (cleanup POSTs /stop),
 #     so nothing auto-replays it; the owner's own next manual pick is unaffected. Flagged in the
 #     report for the controller's awareness, not fixed here -- fixing it would mean writing
 #     settings.json directly, fighting a deliberate backend protection.
@@ -476,35 +475,22 @@ observe_switch() {
 # Owner-environment safety (live mode only -- every function here is a no-op under --hermetic)
 # ==================================================================
 
-stop_legacy_wallpaper() {
-  [ "$HERMETIC" = 1 ] && return 0
-  # Exact owner instruction (global-constraints.md): stop legacy before any on-machine measurement.
-  # the owner's dev backend wants its per-run token (serve.token beside serve.port)
-  local stop_code
-  stop_code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST \
-    -H "X-Liascape-Token: $(cat "${XDG_CONFIG_HOME:-$HOME/.config}/liascape/serve.token" 2>/dev/null)" 127.0.0.1:5174/stop)
-  [[ $stop_code == 2* ]] || warn "POST /stop on the dev backend answered ${stop_code:-nothing} (not 2xx); mpvpaper may not stop"
-  for _ in $(seq 1 30); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
-  pgrep -x mpvpaper >/dev/null && warn "mpvpaper still running after /stop -- continuing anyway"
-  return 0
-}
-
 snapshot_owner_settings() {
   [ "$HERMETIC" = 1 ] && return 0
   local f
   # NOTE (battery-script fix): the backend serializes /settings with camelCase keys
-  # (confirmed live: GET /settings | jq keys -> "playerEngine", "transitionMethod", ... --
+  # (confirmed live: GET /settings | jq keys -> "transitionMethod", "autoMute", ... --
   # never the PascalCase C# property names). jq field access is case-sensitive, so a
   # PascalCase filter here would silently read/write a DIFFERENT, brand-new key than the
   # real one -- and since .NET's deserializer IS case-insensitive (verified live: POSTing
   # both "transitionMethod" and a differently-cased "TransitionMethod" in one object has
   # the LAST one win), restore_owner_settings below would have ended every live run by
   # POSTing a real field's value as the jq-appended PascalCase key's (always-null, because
-  # the snapshot read was equally broken) value -- silently NULLING playerEngine/
+  # the snapshot read was equally broken) value -- silently NULLING
   # transitionMethod/globalTransitionEnabled/globalTransitionEffectIds/
   # globalTransitionDurationMs/autoMute instead of restoring them. Fixed by using the
   # real camelCase names throughout this script's /settings GET->modify->POST paths.
-  for f in playerEngine transitionMethod globalTransitionEnabled globalTransitionEffectIds \
+  for f in transitionMethod globalTransitionEnabled globalTransitionEffectIds \
            globalTransitionDurationMs autoMute lastSession; do
     ORIG_FIELDS["$f"]=$(settings_get | jq -c ".$f")
   done
@@ -604,9 +590,8 @@ assert_default_sink_unchanged() {
 
 # ==================================================================
 # Cleanup -- runs on every exit path (EXIT/INT/TERM/HUP), in both modes. Order matters: stop
-# anything we're driving BEFORE restoring settings (switching PlayerEngine back to legacy while
-# something is still "playing" would replay it on legacy -- see player-adapter.md SwitchEngineLive;
-# we want "nothing playing" at the moment of the switch so legacy comes back stopped, as found).
+# anything we're driving BEFORE restoring settings: settings apply live, so the owner's restored
+# transition / auto-mute fields land on a stopped player, and nothing replays (as found).
 # ==================================================================
 cleanup() {
   local rc=$?
@@ -647,16 +632,15 @@ setup_live_backend() {
   ENFORCE_FRAME_TIMING=1
   ORIG_DEFAULT_SINK=$(pactl get-default-sink 2>/dev/null || true)
   log "default sink before: ${ORIG_DEFAULT_SINK:-unknown}"
-  stop_legacy_wallpaper
   local portfile="$HOME/.config/liascape/serve.port"
   [ -s "$portfile" ] || { err "no $portfile -- is the owner's backend (liascape-watch) running?"; exit 1; }
   API="http://127.0.0.1:$(cat "$portfile")"
   API_TOKEN_FILE="$(dirname "$portfile")/serve.token"
   curl -sf -m 5 "$API/health" >/dev/null || { err "backend at $API not responding"; exit 1; }
   snapshot_owner_settings
-  setting_set ".playerEngine = \"liascape-player\" | .autoMute = false | .globalTransitionEnabled = true | .globalTransitionEffectIds = [\"$EFFECT_ID\"] | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
+  setting_set ".autoMute = false | .globalTransitionEnabled = true | .globalTransitionEffectIds = [\"$EFFECT_ID\"] | .globalTransitionDurationMs = $EFFECT_DURATION_MS"
   sleep 1
-  [ "$(get /player-engine | jq -r .active)" = "liascape-player" ] || { err "backend did not switch to liascape-player -- aborting before touching any playback"; exit 1; }
+  [ "$(get /player-engine | jq -r .available)" = true ] || { err "backend has no liascape-player binary -- aborting before touching any playback"; exit 1; }
   PLAYER_SP=$(sup_pid)
   start_bus_mute_watcher
   sleep 1.5
@@ -687,9 +671,9 @@ setup_hermetic_backend() {
   unset LIASCAPE_PLAYER_SOCKET WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 
   cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
-{"PlayerEngine":"liascape-player","NoAudio":false,"Loop":true,"Volume":100,"GlobalTransitionEnabled":true,
+{"NoAudio":false,"Volume":100,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["$EFFECT_ID"],"GlobalTransitionDurationMs":$EFFECT_DURATION_MS,"TransitionMethod":"full-live",
- "GlobalSwitchWhenVideoEnds":false,"GlobalWaitForVideoEnd":false,"GlobalIntervalSeconds":1800,"RestartMpvpaperEverySeconds":600,"AutoMute":false}
+ "GlobalSwitchWhenVideoEnds":false,"GlobalIntervalSeconds":1800,"AutoMute":false}
 EOF
 
   OUTA=VIRTUAL-1; OUTB=VIRTUAL-2
@@ -705,7 +689,7 @@ EOF
   API="http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")"
   API_TOKEN_FILE="$XDG_CONFIG_HOME/liascape/serve.token"
   for _ in $(seq 1 50); do curl -sf -m 2 "$API/health" >/dev/null && break; sleep 0.1; done
-  [ "$(get /player-engine | jq -r .active)" = "liascape-player" ] || { err "hermetic backend not on liascape-player"; exit 1; }
+  [ "$(get /player-engine | jq -r .available)" = true ] || { err "hermetic backend sees no liascape-player binary"; exit 1; }
   log "hermetic: player pid $(comp_pid) (supervisor $PLAYER_SP), backend $API"
 }
 
@@ -847,25 +831,8 @@ restore_cli_invoke() {
   if [ "$HERMETIC" = 1 ]; then
     "$DOTNET" "$DLL" restore > "$HERMETIC_T/restore-$(date +%s%N).log" 2>&1
   else
-    # battery-script fix (task20-final-run: restore-replay failed its FIRST switch in all 3
-    # methods, "no new transition corr observed", every time). Root cause confirmed live, in two
-    # steps: first, `strace`'d the owner's INSTALLED `liascape` (what `command -v liascape`
-    # resolves to, what this used to invoke) running `LIASCAPE_PLAYER_BIN=<repo liascape-player> liascape
-    # --restore` -- the env var DID reach the final managed process (verified: present in that
-    # exact execve's own environ via `strace -v`), yet it still ran the legacy path (`Apply()` ->
-    # `SwitchToFile` -> `setsid mpvpaper ...`). That ruled out a missing-env-var/PATH problem, so
-    # second: `strings -el` (UTF-16, .NET string literals) on the installed package's
-    # `liascape-backend.dll` for "LIASCAPE_PLAYER_BIN"/"PlayerEngine" found ZERO matches, while the SAME search
-    # on this worktree's own dev build (`$DLL`, what `liascape-watch`/dotnet watch actually runs)
-    # finds both -- the NixOS-packaged `liascape` is a STALE BUILD that predates liascape-player/
-    # PlayerEngine existing in the C# source AT ALL, not a binary-resolution gap `LIASCAPE_PLAYER_BIN`
-    # could ever have fixed. Confirmed the actual fix: priming the SAME session then invoking
-    # `$DOTNET $DLL restore` (the current dev build, what serve itself runs) produces a real
-    # new transition.scheduled corr immediately. This is a packaging/deployment gap (the owner's
-    # installed system package needs rebuilding from this branch) -- not a bug in the restore
-    # mechanism, this script's corr-detection, or anything fixable by this script choosing a
-    # different binary on PATH. Using the dev build here is what actually exercises what this
-    # cell is supposed to test; flagged for the owner in docs/player/reports/phase1.md + TODO.md.
+    # The dev build (`$DLL`, what serve itself runs), never the `liascape` on PATH: an installed
+    # package can be an older build than this checkout, and this cell tests the checkout's restore.
     "$DOTNET" "$DLL" restore >/dev/null 2>&1
   fi
 }
@@ -933,15 +900,15 @@ run_cell() {
       ;;
 
     timed-interval|advance-on-end|wait-for-end)
-      local paths=() settings interval=5 advance=false wait_end=false
+      local paths=() settings interval=5 advance=false
       case "$mode" in
-        timed-interval) build_alt_targets; paths=("${ALT_TARGETS[@]}"); interval=5; advance=false; wait_end=false ;;
-        advance-on-end) paths=("${SHORT_VIDEOS[@]}"); interval=8; advance=true; wait_end=false ;;
-        wait-for-end)   paths=("${SHORT_VIDEOS[@]}"); interval=2; advance=true; wait_end=true ;;
+        timed-interval) build_alt_targets; paths=("${ALT_TARGETS[@]}"); interval=5; advance=false ;;
+        advance-on-end) paths=("${SHORT_VIDEOS[@]}"); interval=8; advance=true ;;
+        wait-for-end)   paths=("${SHORT_VIDEOS[@]}"); interval=2; advance=true ;;
       esac
       [ "${#paths[@]}" -ge 2 ] || { err "cell $cell: fewer than 2 media paths available"; return 1; }
-      settings=$(jq -nc --argjson iv "$interval" --argjson adv "$advance" --argjson w "$wait_end" \
-        '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, SwitchWhenVideoEnds:$adv, WaitForVideoEnd:$w}')
+      settings=$(jq -nc --argjson iv "$interval" --argjson adv "$advance" \
+        '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, SwitchWhenVideoEnds:$adv}')
       post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
       sleep 1.5
       local auto_timeout; auto_timeout=$(python3 -c "print(int($interval) + 15)")
@@ -990,7 +957,7 @@ run_realism_cell() {
   term=$(term_timeout)
   build_alt_targets
   paths=("${ALT_TARGETS[@]}")
-  settings=$(jq -nc '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:5, SwitchWhenVideoEnds:false, WaitForVideoEnd:false}')
+  settings=$(jq -nc '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:5, SwitchWhenVideoEnds:false}')
   post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
   sleep 1.5
   local prev cell_failed=0 i
@@ -1047,7 +1014,7 @@ run_extra_cell() {
       fi
       # interval (35 s) > the 30 s effect so every tick's transition actually completes before
       # the next one fires, instead of racing R35/R36's commit path (that's long-interrupt's job).
-      settings=$(jq -nc --argjson adv "$advance" '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:35, SwitchWhenVideoEnds:$adv, WaitForVideoEnd:false}')
+      settings=$(jq -nc --argjson adv "$advance" '{Order:0, OverrideGlobalSettings:true, IntervalSeconds:35, SwitchWhenVideoEnds:$adv}')
       post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${paths[@]}")" --argjson s "$settings" '{paths:$p, settings:$s}')" >/dev/null
       sleep 1.5
       prev=$(last_corr)
@@ -1167,7 +1134,7 @@ OUTA=""; OUTB=""   # set by setup_*_backend (hermetic: VIRTUAL-1/2) or hardcoded
 # ==================================================================
 # permonitor (brief step 3): a different clip on each output, a transition on ONE output alone ->
 # the other's frames+audio unaffected, and a span of one source across both. "Via `ctl` only" means
-# the ASSERTIONS below are plain graph/probe reads -- HTTP is used only to get PlayerEngine=liascape-player
+# the ASSERTIONS below are plain graph/probe reads -- HTTP is used only to get liascape-player
 # running in the first place, same as every other subcommand.
 # ==================================================================
 run_permonitor() {
@@ -1178,7 +1145,7 @@ run_permonitor() {
   log "permonitor: $OUTA <- $tA, $OUTB <- $tB, then a transition on $OUTA alone -> $tC"
 
   # battery-script fix (found running this live -- first real exercise per Stage 1's own notes):
-  # `setup_live_backend` only flips the `PlayerEngine` SETTING; player-adapter.md's
+  # `setup_live_backend` never switches; player-adapter.md's
   # `EnsureRunning()` is explicit that "only a switch calls it -- queries/sets never spawn" --
   # so without an actual HTTP switch first, no `liascape-player serve` process (and no socket) exists
   # yet when the raw `ctl` calls below run, and every one of them failed with `io`/"can't
@@ -1267,7 +1234,7 @@ run_soak() {
   # battery-script fix (found running permonitor live, same root cause applies here): `ctl
   # hello`/`comp_pid` needs the liascape-player SOCKET, which only exists once something actually
   # switches (player-adapter.md: "EnsureRunning()... only a switch calls it -- queries/sets
-  # never spawn"). setup_live_backend only flips the PlayerEngine SETTING, so checking comp_pid
+  # never spawn"). setup_live_backend never switches, so checking comp_pid
   # THIS early (before the playlist below ever issues its first real switch) failed every time
   # live. Moved past the `/playlist/play` call, which is this subcommand's own first real switch
   # (hermetic's setup_hermetic_backend starts `liascape-player serve` directly, so it never had this
@@ -1289,7 +1256,7 @@ run_soak() {
     log "soak (hermetic): ${#soak[@]} 1080p clips, a switch every ${SOAK_INTERVAL}s, HwDec=$SOAK_HWDEC"
     post /playlist/play "$(jq -nc --argjson p "$(json_str_array "${soak[@]}")" --argjson iv "$SOAK_INTERVAL" \
       '{paths:$p, settings:{Order:0, OverrideGlobalSettings:true, IntervalSeconds:$iv, SwitchWhenVideoEnds:false,
-        WaitForVideoEnd:false, TransitionEnabled:true, TransitionEffectIds:["fade","crosswarp","dissolve","wind"],
+        TransitionEnabled:true, TransitionEffectIds:["fade","crosswarp","dissolve","wind"],
         TransitionDurationMs:1000}}')" >/dev/null
   else
     local names; names=$(get /playlist/names | jq -r '.[]?' 2>/dev/null)

@@ -110,15 +110,6 @@ fi
 [[ -x $BIN ]] || fail "no binary at $BIN"
 for t in pactl pw-link pw-dump jq ffmpeg; do command -v "$t" >/dev/null || fail "missing $t"; done
 
-# The legacy wallpaper must not play during the run (owner instruction); leave it stopped.
-if pgrep -x mpvpaper >/dev/null; then
-    # The owner's dev backend (:5174) wants its per-run token (X-Liascape-Token, serve.token beside serve.port).
-    stop_code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST \
-        -H "X-Liascape-Token: $(cat "${XDG_CONFIG_HOME:-$HOME/.config}/liascape/serve.token" 2>/dev/null)" 127.0.0.1:5174/stop)
-    [[ $stop_code == 2* ]] || printf '[bus] WARN: POST /stop on the dev backend answered %s (not 2xx); mpvpaper may not stop\n' "$stop_code" >&2
-    for _ in $(seq 30); do pgrep -x mpvpaper >/dev/null || break; sleep 0.1; done
-fi
-pgrep -x mpvpaper >/dev/null && fail "legacy mpvpaper still running"
 [[ $(sink_count) == 0 ]] || fail "an liascape-player-bus sink already exists (another player?)"
 
 ORIG=$(pactl get-default-sink)

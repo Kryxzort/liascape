@@ -477,7 +477,7 @@ impl Seen {
     }
 
     /// Sinks (`Audio/Sink` nodes) the bus playback is linked to, by name. Only sinks: other
-    /// clients' captures of the playback (e.g. the legacy AudioMonitor's `parec`) are links
+    /// clients' captures of the playback (e.g. the backend AudioMonitor's `parec`) are links
     /// too, and counting them made a relink look like "linked to nothing but parec" — which
     /// re-issued the retarget (found on this machine).
     fn linked_targets(&self, pb: u32) -> Vec<String> {

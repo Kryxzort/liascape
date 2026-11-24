@@ -4,9 +4,8 @@
     python3 -I scene_corpus_report.py --results /tmp/liascape-scene-corpus-<stamp> \
         [--dir <workshop folder>] [--report-dir docs/player/reports] [--notes <notes.json>]
 
-Reads the results dir (records.jsonl, events.jsonl, captures/, scene-check.json, hello.json and,
-after an owner-run `--ab-legacy`, legacy.jsonl + its screenshots) and writes
-scene-corpus.{json,md} into the results dir and, with --report-dir, there too.
+Reads the results dir (records.jsonl, events.jsonl, captures/, scene-check.json, hello.json)
+and writes scene-corpus.{json,md} into the results dir and, with --report-dir, there too.
 
 Classes, first match wins:
   load_failed      the worker's fatal `load failed: …` (or the source never opened)
@@ -235,14 +234,6 @@ def classify(rec, events_by_src, caps_dir):
     return out
 
 
-def legacy_started(rec):
-    png = rec.get("screenshot")
-    if rec.get("status") != "screenshot" or not png or not os.path.exists(png):
-        return False, None
-    st, _ = image_stats(png)
-    return not is_blank(st), st
-
-
 def env_info(results):
     def run(cmd):
         try:
@@ -384,37 +375,6 @@ def write_md(rep, path):
                 a(l[:300])
             a("```")
         a("")
-    a("## A/B against the legacy engine (`--ab-legacy`)")
-    a("")
-    lg = rep.get("legacy")
-    if not lg:
-        a("Not run yet — it takes over the desktop session (the installed `linux-wallpaperengine` draws")
-        a("each scene on a real output for ~20 s), so the owner runs it:")
-        a("")
-        a("```sh")
-        a("liascape kill   # stop the app's own wallpaper first")
-        a("bash src/player/tests/onmachine/scene_corpus.sh --ab-legacy --legacy-output DP-1 \\")
-        a("     --reuse /tmp/liascape-scene-corpus-<stamp>   # reuse this run's liascape-player half (or omit to redo it)")
-        a("```")
-        a("")
-        a("It screenshots each scene with LWE's own `--screenshot` (`--screenshot-delay 120` frames),")
-        a("classifies a screenshot that isn't blank as \"starts\", rewrites this report with the lists")
-        a("below, and kills each LWE it started. Until then **every non-ok scene above counts as")
-        a("possibly newly failing** and has a Phase 6 entry in `docs/TODO.md` (§11.5 acceptance).")
-    else:
-        a(f"Legacy started {lg['started']} of {lg['scenes']}.")
-        a("")
-        a(f"**Start under legacy but not here ({len(lg['newly_failing'])}):** "
-          + (", ".join(lg["newly_failing"]) or "none"))
-        a("")
-        a(f"**Start here but not under legacy ({len(lg['newly_working'])}):** "
-          + (", ".join(lg["newly_working"]) or "none"))
-        a("")
-        a("| id | legacy | here |")
-        a("|---|---|---|")
-        for r in lg["rows"]:
-            a(f"| {r['id']} | {r['legacy']} | {r['here']} |")
-    a("")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(L))
 
@@ -477,22 +437,6 @@ def main():
         "summary": summary,
         "scenes": scenes,
     }
-    legacy = read_jsonl(os.path.join(res, "legacy.jsonl"))
-    if legacy:
-        here = {x["id"]: x["class"] for x in scenes}
-        rows = []
-        for r in legacy:
-            started, _ = legacy_started(r)
-            rows.append({"id": r["id"], "legacy": "starts" if started else r.get("status"),
-                         "here": here.get(r["id"], "–"), "legacy_log_tail": r.get("log_tail")})
-        ours_start = {"ok", "static"}
-        rep["legacy"] = {
-            "scenes": len(rows),
-            "started": sum(1 for r in rows if r["legacy"] == "starts"),
-            "newly_failing": [r["id"] for r in rows if r["legacy"] == "starts" and r["here"] not in ours_start],
-            "newly_working": [r["id"] for r in rows if r["legacy"] != "starts" and r["here"] in ours_start],
-            "rows": rows,
-        }
     for d in [res] + ([os.path.abspath(args.report_dir)] if args.report_dir else []):
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "scene-corpus.json"), "w", encoding="utf-8") as f:

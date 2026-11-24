@@ -1,5 +1,5 @@
 //! The reference-based dropout detector — synthetic-envelope tests of
-//! [`analyse`] (port of `scripts/liascape_audiowatch.py`'s `refcheck`), plus one integration
+//! [`analyse`] (port of the `refcheck` reference algorithm), plus one integration
 //! test of [`expected_envelope`]'s `ffmpeg` decode path against a real synthetic clip.
 //! Pure-function unit tests of the gain-weighting math (`mix_envelope`, `gain_at`) and the
 //! runtime-wiring pieces (`GainHistory`, `PendingWindows`) live in
@@ -491,7 +491,7 @@ fn ffmpeg_decode_reads_the_sine_tones_true_level() {
     // pre-downmix stream, the mono decode's peak comes out at `0.1*√2`, i.e. **+3.01 dB**
     // over the stereo peak — so the 10 ms power bin reads ≈ the ORIGINAL −20 dBFS peak's
     // own RMS, not −23. This is the exact `ffmpeg … -ac 1 …` command
-    // `scripts/liascape_audiowatch.py` specifies (no extra `-af pan=…`), so the level is kept
+    // `refcheck` uses (no extra `-af pan=…`), so the level is kept
     // as ffmpeg really produces it rather than papering over the downmix with a filter
     // the ported reference doesn't use.
     let path = ensure_clip(

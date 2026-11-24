@@ -3975,7 +3975,7 @@ impl Runtime {
     /// "stopped"}`), every layer emptied, every source ramped to silence over 30 ms
     /// (invariant #4) and then destroyed — a source the player pause holds paused is
     /// silent and goes at once. Then `player.paused` is cleared:
-    /// as with legacy, a stop ends the session and the next wallpaper starts playing.
+    /// a stop ends the session, so the next wallpaper starts playing.
     /// `instant` (stepped clock / quit): silence and destroy now — virtual time won't move
     /// on by itself.
     pub(crate) fn stop_all(&mut self, instant: bool) -> Vec<String> {
