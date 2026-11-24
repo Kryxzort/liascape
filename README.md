@@ -86,11 +86,20 @@ The rest you'll learn by using Liascape.
 
 As with any other application, Liascape depends on 25 packages (and 364 more that npm and Cargo fetch for you while it builds).
 
-You'll need:
-- a Wayland compositor that supports wlr-layer-shell, such as Hyprland, Sway or KDE Plasma (GNOME doesn't);
-- an x86-64 machine;
-- PipeWire, for auto-mute;
-- Steam, for Workshop downloads, and Wallpaper Engine installed through it, for scenes.
+**You'll need:**
+- A Wayland compositor that supports wlr-layer-shell, such as Hyprland, Sway or KDE Plasma. GNOME doesn't, so Liascape can't draw a wallpaper there.
+- An x86-64 machine.
+
+**Optional, for the features that use them:**
+- **Wallpaper Engine** (bought on Steam and installed): needed for its scenes and for Workshop downloads. Videos, GIFs, pictures, MoeWalls and DesktopHut work without it.
+- **Steam**: for Workshop downloads.
+- **PipeWire**: for auto-mute. Most current distros use it already.
+- **playerctl**: for "Only mute for media players".
+- **xdg-utils**: to open a wallpaper in your default app.
+- **libsecret** (`secret-tool`): keeps your Steam sign-in in the system keyring instead of a file only you can read.
+- **Windows fonts or their look-alikes**: for scenes that use them (see Quirks).
+
+If something a feature needs is missing, Settings tells you at the top: what doesn't work and why.
 
 <details>
 <summary><b>NixOS and Nix</b></summary>
