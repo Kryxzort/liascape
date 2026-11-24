@@ -20,7 +20,7 @@ and `Player/PlayerStatus.cs` says where its binary is and why nothing or no scen
 - The stall breaker opens for 3 s after a timeout. A STARTING player is not stalled: until it answered once, a request waits up to `StartGraceMs` (5 s after the socket's bind). Guard: self-test `StartupGraceAssertions`.
 
 ## Process lifecycle
-- A session an older build left running (its wallpaper processes, matched by name and this HOME, never another session's; its `timer-daemon` / `restart-daemon` / `monitor-daemon`, verified by command line) is stopped at `serve` start and `restore`, the daemons at `stop` too (`src/backend/Helpers/LegacyTakeover.cs`): SIGTERM, then SIGKILL after 2 s; `serve` then replays the session on the player (`Restore`). Guard: `scripts/test-player-binary.sh` § a legacy settings file.
+- A session an older build left running (its wallpaper processes, matched by name and this HOME, never another session's; its `timer-daemon` / `restart-daemon` / `monitor-daemon`, verified by command line) is stopped at `serve` start and `restore`, the daemons at `stop` too (`src/backend/Helpers/LegacyTakeover.cs`): SIGTERM with its process tree, then SIGKILL after 2 s, each process known by its pid + start time; `serve` then replays the session on the player (`Restore`). Guard: `scripts/test-player-binary.sh` § a legacy settings file.
 - A missing binary: every switch looks for it again (`PlayerStatus.MissingReason`) and refuses with the reason; the log says why once per reason, not once per attempt. Guard: `scripts/test-player-binary.sh` § missing.
 - Only a switch spawns the player (`EnsureRunning`); queries and sets never do. It runs detached (`setsid`), stdio to `~/.cache/liascape/liascape-player-serve.log` — the player outlives the backend on purpose.
 - `setsid` doesn't leave the backend's cgroup: when the user manager of `$XDG_RUNTIME_DIR` answers, the player starts in its own transient scope (`src/backend/Helpers/UserScope.cs`: `setsid systemd-run --user --scope --collect --unit=liascape-player-<random>.scope -- sh -c 'exec …'`), so stopping a unit the backend runs in (KillMode=control-group) leaves it playing. Every wrapper execs: the spawned pid is the supervisor's. Decided once per process by a real probe scope; no manager, no `systemd-run` or a refusal → started as before, logged once. Never via the session bus's manager (a test's private runtime dir must not reach the desktop's). Adoption is unchanged (the socket). Guard: `scripts/test-backend-stop.sh` § unit.
@@ -37,7 +37,7 @@ and `Player/PlayerStatus.cs` says where its binary is and why nothing or no scen
 - `/preview` names the edited items' paths and moves only their sources (mid-transition "the playing item" is B). `{global: true}` moves every source WITHOUT its own override.
 - The source-map cache is trusted only while the event connection is live (`EventsLive`); invalidate it on our own switch/stop/cancel/upgrade and on `transition.*`, `player.stopped`, `source.retire` events.
 - `gain.mute` goes as a 30 ms `animate`, always sent on change (`Force`); `gain.normalize` as a 500 ms `animate`.
-- Not resolved: `loop` (`SetLoop`, single non-timed wallpaper only) and `player.paused`.
+- Not resolved: `loop` (a single wallpaper's source is created with `loop: true`; under a rotation the program owns it) and `player.paused`.
 
 ## Pause
 - The player owns pause (`player.paused`, kept in its snapshot). Keep no copy: `TogglePause` reads `get player.paused` and sets the opposite; R81 never re-asserts it.
@@ -47,7 +47,7 @@ and `Player/PlayerStatus.cs` says where its binary is and why nothing or no scen
 ## Reconnection (R81) and switches the player missed
 - `Restarted` (new compositor pid) and `Recovered` (breaker closed) both queue `ReapplyAll` — a Fresh resolver pass — fire-and-forget; never `Drain().Wait()` inside the client's callback.
 - `ReconcileShown` (essential, before failing pending waits): if the screen lacks `_intent`'s path, cut to it; after our own `stop`, stop again. `_intent` is unknown after a failed/cancelled switch or a `transition.scheduled` for a path we didn't request (another client).
-- A switch or stop lost to a stall becomes `_intent` and is put on screen when the player answers (`ProbeUntilAnswered` → `ReconcileAfterStall`). Aligned switches are retried by their caller instead.
+- A switch or stop lost to a stall becomes `_intent` and is put on screen when the player answers (`ProbeUntilAnswered` → `ReconcileAfterStall`). A rotation's aligned switches are the player's program's to recover.
 
 ## Events and the outbox
 - Subscribe only to the kinds consumed (`LiascapePlayerClient.Topics`); never `source.` as a whole (it streams `source.position`).

@@ -146,8 +146,13 @@ fake() { exec -a "$1" bash -c "trap 'echo TERM >> \"$T/term-$1\"; $2' TERM; whil
 (fake mpvpaper 'exit 0') & MP_OURS=$!
 (fake linux-wallpaperengine :) & LWE_OURS=$!
 (export HOME=$T/other-home; fake mpvpaper 'exit 0') & MP_OTHER=$!
-disown $MP_OURS $LWE_OURS $MP_OTHER   # their kills below are the point: no job notices
+# an older build's timer-daemon with a child of its own (its pid file names it): the stop takes its process tree
+(exec -a liascape-backend bash -c 'sleep 300 & wait' liascape-backend timer-daemon) & TD=$!
+echo "$TD" > "$XDG_CONFIG_HOME/liascape/timer.pid"
+disown $MP_OURS $LWE_OURS $MP_OTHER $TD   # their kills below are the point: no job notices
 sleep 0.3
+TD_CHILD=$(for p in /proc/[0-9]*; do [ "$(awk '{print $4}' "$p/stat" 2>/dev/null)" = "$TD" ] && basename "$p"; done | head -1)
+[ -n "$TD_CHILD" ] || bad "precondition: the fake timer-daemon has no child — this proved nothing"
 [ "$(named_with_home mpvpaper "$HOME")" = "$MP_OURS" ] && [ "$(named_with_home mpvpaper "$T/other-home")" = "$MP_OTHER" ] \
   || bad "precondition: the fake mpvpapers aren't what this run sees ($(named_with_home mpvpaper "$HOME") / $(named_with_home mpvpaper "$T/other-home")) — this proved nothing"
 startbe
@@ -161,6 +166,10 @@ for _ in $(seq 1 50); do kill -0 "$MP_OURS" 2>/dev/null || kill -0 "$LWE_OURS" 2
 [ -s "$T/term-mpvpaper" ] && [ -s "$T/term-linux-wallpaperengine" ] \
   && ok "…each was asked with SIGTERM first (the one that ignored it was killed after the wait)" \
   || bad "the reap sent no SIGTERM first: mpvpaper $([ -s "$T/term-mpvpaper" ] && echo TERM || echo none), LWE $([ -s "$T/term-linux-wallpaperengine" ] && echo TERM || echo none)"
+for _ in $(seq 1 50); do kill -0 "$TD" 2>/dev/null || kill -0 "$TD_CHILD" 2>/dev/null || break; sleep 0.1; done
+! kill -0 "$TD" 2>/dev/null && ! kill -0 "$TD_CHILD" 2>/dev/null && [ ! -e "$XDG_CONFIG_HOME/liascape/timer.pid" ] \
+  && ok "…a leftover timer-daemon stopped with its child (its process tree), timer.pid gone" \
+  || bad "leftover timer-daemon: daemon $(kill -0 "$TD" 2>/dev/null && echo alive || echo gone), its child $(kill -0 "$TD_CHILD" 2>/dev/null && echo alive || echo gone), timer.pid $([ -e "$XDG_CONFIG_HOME/liascape/timer.pid" ] && echo there || echo gone)"
 kill -0 "$MP_OTHER" 2>/dev/null && ok "…another HOME's mpvpaper is left alone" || bad "serve start killed another HOME's mpvpaper"
 waitcur "$V1" 300 && ok "…and the last session (v1.mp4) plays on liascape-player in its place" || bad "the last session didn't come back on the player: /current $(current)"
 code=$(api -o "$T/apply.txt" -w '%{http_code}' -X POST "$U/apply" -d "{\"path\":\"$V2\"}")
