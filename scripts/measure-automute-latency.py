@@ -8,8 +8,8 @@ Usage:
   scripts/measure-automute-latency.py --parec-first-data [trials]   (parec's time to first data)
 
 The default mode runs `src/player/tests/automute.rs::measure_automute_latency` (cargo, ignored test)
-once per engine. Each run starts a PRIVATE PipeWire + WirePlumber (+ pipewire-pulse for the legacy
-engine) — the owner's audio is never touched — with two null sinks: the player's bus forwards its
+once per engine. Each run starts a PRIVATE PipeWire + WirePlumber (+ pipewire-pulse for
+`audiomonitor`) — the owner's audio is never touched — with two null sinks: the player's bus forwards its
 wallpaper (a -20 dBFS tone) to `hermetic-sink`; every foreign test stream (a synthetic 1 kHz
 -20 dBFS tone, `pw-cat`) plays to `foreign-sink`. An in-test observer captures both sinks'
 monitors on one PipeWire connection (same graph cycles, `pw_buffer.time`), in 1 ms peak blocks:

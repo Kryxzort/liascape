@@ -117,8 +117,8 @@ rarely come back to it ("they just put a playlist on them and rarely open it"). 
   - Real failures keep the existing error modal.
 
 ## Decisions from the builder check (owner's answers marked; the rest are the writer's calls)
-- **Legacy engine (writer):** multi-monitor is liascape-player only; Settings' "Scene monitors" section stays for legacy until
-  the switch-over (queued before this work), then goes with it.
+- **Scene monitors (writer):** Settings' "Scene monitors" section (per-output scene fps) stays until this work replaces it
+  with the per-screen settings.
 - **How per-screen values combine (owner):** specificity wins, nothing multiplies — the wallpaper's own value > the
   screen's > the global, for volume, speed, fit and FPS. A wallpaper's own settings (its volume, speed, scene
   properties) are either the same on every screen or set per screen — a choice in the item sidebar; per screen adds
@@ -142,7 +142,6 @@ rarely come back to it ("they just put a playlist on them and rarely open it"). 
   programs and span are new work in the backend and the player.
 - Settings apply live, features compose, UI design checklist (`CLAUDE.md` hard rules, `.claude/rules/ui/design.md`).
 - Pre-release: no migration of old settings needed (the old "Scene monitors" list may simply be replaced).
-- Legacy engine: new features are liascape-player only.
 
 ## Left to the builder
 - Data model for per-screen state (follower / own, its playlist, its settings); API shape between UI, backend and player; how

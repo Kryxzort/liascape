@@ -13,7 +13,7 @@ paths:
 
 # Backend web API (`liascape-backend serve`)
 
-`Web/` wraps the scrapers, helpers and daemons for the Electron/React UI. Kestrel binds a free `127.0.0.1` port P (or
+`Web/` wraps the scrapers and helpers for the Electron/React UI. Kestrel binds a free `127.0.0.1` port P (or
 `LIASCAPE_PORT`) for the API and P + 1 for media (`ApiSecurity.PickPorts`), writes `serve.token` then `serve.port` (P) to `~/.config/liascape/`. Endpoint list: read
 `ServerHost.cs`. Why behind the choices here: `docs/decisions.md` § Backend/API.
 
@@ -34,9 +34,9 @@ paths:
 ## Endpoint conventions
 - Keep endpoints thin: logic goes in `AppOps` / `SteamOps` / helpers, not lambdas.
 - A throwing endpoint still answers: the middleware after the guard logs `error: <METHOD> <path>: …` and returns JSON `{error}` 500 (`SteamCooldownException` → 429), keeping the CORS header. Drop an aborted request quietly.
-- `SettingsService.Load()` per request; never cache settings (daemons and the CLI write the file).
+- `SettingsService.Load()` per request; never cache settings (the CLI writes the file too).
 - Never bind a whole `AppSettings` from a body: `POST /settings` is PATCH (`SettingsService.Patch`), `/playlist/state` merges (`JsonMerge.Over`). A bad value → 400 that saves nothing. `LastSession` and the Steam sign-in fields keep their saved values whatever the body says. Guard: `scripts/test-settings-merge.sh`.
-- `/settings` applies the EFFECTIVE value (`override ?? global`) live, through `PlayerHelper.ApplyEffectiveLive` under liascape-player. A new setting must get its live path too.
+- `/settings` applies the EFFECTIVE value (`override ?? global`) live, through `PlayerHelper.ApplyEffectiveLive`. A new setting must get its live path too.
 - `POST /cache/clear {ids}` deletes only the regular files directly in each named category's folder (`AppOps.CacheCategories`, the folder its writer uses), never a symlink, a subfolder, a folder that is a link or a writer's file in progress (`Busy`); an unknown or empty id list → 400 that deletes nothing. Guard: `scripts/test-cache-clear.sh`.
 - A no-op `/settings` must stay cheap: run library-wide work off the request thread (`KickLoudnessBackfill`). Guard: `scripts/test-settings-latency.sh`.
 - `/next` `/prev` `/random` with nothing playable → 409 `{error}`, never 500.

@@ -14,7 +14,7 @@ public static class SettingsService
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "liascape", "settings.json");
 
-    // Every request, the adapter and the daemons load + save this file concurrently. A save that
+    // Every request, the adapter and the CLI load + save this file concurrently. A save that
     // truncates it and writes in place lets a load landing mid-write parse nothing and get the C# defaults
     // (NoAudio on, volume 100) — applied live, and saved back over everything by whoever
     // saves next (`/settings` itself: its `prev` becomes the defaults, the Steam tokens
@@ -70,7 +70,7 @@ public static class SettingsService
     {
         lock (PatchLock)
         {
-            using var _ = FileLock.Hold(ConfigPath); // and every other liascape process (the CLI, the daemons)
+            using var _ = FileLock.Hold(ConfigPath); // and every other liascape process (the CLI)
             var s = Load();
             mutate(s);
             Save(s);
