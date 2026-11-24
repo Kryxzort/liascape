@@ -107,14 +107,14 @@ for f in $FILES; do
     app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/SideTitle.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
       add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre / side:title*; probe-steam.js side:browseTitle, lib:ws:; probe-layout.js perf:sidebar)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts|app/ui/src/hooks/useBarFold.ts)
-      add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-layout.js dock:, scroll:, look:plFold, perf:tabs, perf:plFold, perf:dockRepaint)" ;;
+      add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-presence.js bar:remove; probe-layout.js dock:, scroll:, look:plFold, perf:tabs, perf:plFold, perf:dockRepaint)" ;;
     # the segmented control: the playlist modal's order / start switches, the sidebar's preview strip (the level picker is in App.tsx)
     app/ui/src/components/Segmented.tsx)
       add "$PL|plStart|$MODAL|sceneProp|appear" "$f (+ --probe probe-layout.js seg:, probe-sidebar.js look:strip, probe-expert.js)" ;;
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart|plTr|travel:|global:sceneTiming|playlist:sceneTiming" "$f" ;;
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
-    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:|appear|clip:" "$f (+ --probe probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs; probe-sidebar.js lib:preset:badge; probe-steam.js — lib:yours:)" ;;
+    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:|appear|clip:" "$f (+ --probe probe-presence.js lib:; probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs; probe-sidebar.js lib:preset:badge; probe-steam.js — lib:yours:)" ;;
     # a scene that presets play: the question before it goes (the Library's and the Browse sidebar's deletes / unsubscribes)
     app/ui/src/components/baseConfirm.ts|app/ui/src/components/BaseSceneConfirm.tsx) add "$CARD|$KEYS" "$f (+ --probe probe-sidebar.js — lib:baseDelete*, lib:preset:*)" ;;
     # what a card shows hovered and not ("On hover" / "Not hovered"), the list control that orders them, the on-screen gating
@@ -126,7 +126,9 @@ for f in $FILES; do
     src/backend/Web/PreviewBackfill.cs|app/ui/src/components/previewQueue.ts) add "appear:(previewOrder|gifResume|gifVideo)\$|cardApply\$" "$f (+ bash scripts/test-preview-backfill.sh, --probe probe-libops.js libops:backfill)" ;;
     # Settings' live card preview: the real cards on the Settings tab (the cells that toggle the card settings there)
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
-    app/shell/probe-cardpreview.js|app/shell/probe-libops.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
+    # cards leaving and joining the Library / Browse grids and the playlist bar (hooks/usePresence.ts)
+    app/ui/src/hooks/usePresence.ts) add "$CARD|$PL|browse:" "$f (+ --probe probe-presence.js; probe-plbar.js; probe-layout.js tabs:keep, tabs:browse, perf:tabs)" ;;
+    app/shell/probe-cardpreview.js|app/shell/probe-libops.js|app/shell/probe-presence.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     # the shell itself: no matrix cell loads main.js; probe-recover.js runs it as a child per cell
     app/shell/main.js|app/shell/renderer-recovery.js|app/shell/probe-recover.js) echo "  $f → nothing in the matrix (--probe probe-recover.js)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
@@ -145,7 +147,7 @@ for f in $FILES; do
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/WsSetLoad.tsx|app/ui/src/views/localSet.ts|app/ui/src/components/facets.ts|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
-      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:, yours:; --probe probe-filters.js — the Workshop filter column, filter:preset:badge; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
+      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-presence.js browse:filter; --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:, yours:; --probe probe-filters.js — the Workshop filter column, filter:preset:badge; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts|app/ui/src/components/SortFilterButton.tsx|app/ui/src/hooks/filterMorph.ts)

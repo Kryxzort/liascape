@@ -39,7 +39,7 @@ export const LibraryCard = memo(function LibraryCard({
   // class, never a mount animation: the page is hidden and shown again by <Activity>, which would replay one)
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed && !reason ? " crashed" : ""}${reason ? " unplayable" : ""}`;
   return (
-    <div className={cls}>
+    <div className={cls} data-key={item.videoPath}>
       {/* right-click = the item sidebar on this card WITHOUT applying it, a click = apply only (docs/decisions.md § "Left click
           does the tab's main action, right click opens the item sidebar"); the sidebar has Open in file manager / Delete / Delete from
           source. Library.tsx keeps the card where it was while the docked sidebar re-fits the grid (gridKeys.ts keepCardInView). */}

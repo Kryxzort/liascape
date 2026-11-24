@@ -46,7 +46,7 @@ export const Card = memo(function Card({
     return () => { for (const i of wrap?.querySelectorAll("img") ?? []) if (!i.complete) i.removeAttribute("src"); };
   }, []);
   return (
-    <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}`}>
+    <div className={`card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}`} data-key={w.pageUrl}>
       <div className="thumb-wrap" ref={wrapRef} data-morph-id={`br-${w.pageUrl}`}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         onClick={(e) => onClick(e, w)}

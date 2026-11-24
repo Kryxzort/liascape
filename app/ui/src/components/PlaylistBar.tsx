@@ -25,6 +25,7 @@ import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useDockLift, dockOwnsFrame } from "../hooks/useDockLift";
 import { useBarFold } from "../hooks/useBarFold";
 import { useMotion } from "./motion";
+import { usePresence } from "../hooks/usePresence";
 import { revealCard } from "../hooks/gridKeys";
 
 // The hovered item is the ROW's state (the hover must survive the gaps between playlist items):
@@ -99,7 +100,7 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
   // source but keep it mounted so the sortable still reserves its gap.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   return (
-    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-morph-id={`pl-${path}`} data-title={item?.title}
+    <div ref={(n) => { boxRef.current = n; setNodeRef(n); }} style={style} className={`pl-item${playing ? " playing" : ""}${hover ? " hov" : ""}`} data-key={path} data-morph-id={`pl-${path}`} data-title={item?.title}
       {...attributes} {...listeners} onClick={() => playFrom(index)}
       onMouseEnter={onEnter}
       // right-click = the item's Library sidebar, the grid's card scrolled into view; nothing plays (docs/decisions.md § "Left
@@ -110,7 +111,8 @@ const PlItem = memo(function PlItem({ path, item, index, playing, hv }:
       {/* #99000000 title bar, 10px white ellipsis */}
       <div className="pl-title">{item?.title ?? ""}</div>
       <button className="pl-remove" aria-label="Remove from playlist"
-        onClick={(e) => { e.stopPropagation(); removeFromPlaylist(path); }}><X size={21} /></button>
+        // the hover goes with it: no glow or remove button rides its exit (hooks/usePresence.ts)
+        onClick={(e) => { e.stopPropagation(); hv.set(null); removeFromPlaylist(path); }}><X size={21} /></button>
       {hover && glows && !playing && !isDragging && createPortal(<div className="pl-hover-glow" ref={glowRef} />, document.body)}
     </div>
   );
@@ -139,6 +141,7 @@ function setBarH(h: number) {
 // activators, re-rendering every item (each useSortable reads that context) on any render of the bar — a fold, a setting,
 // a modal opening. Guard: probe-layout perf:plFold
 const SENSOR_OPTS = { activationConstraint: { distance: 6 } };
+const keyOfPath = (p: string) => p;
 
 export function PlaylistBar() {
   const playlist = useStore((s) => s.playlist);
@@ -168,6 +171,10 @@ export function PlaylistBar() {
   const rowSmooth = useSmoothScroll(rowRef, "x");
   const [hv] = useState(hoverStore);
   const motion = useMotion();
+  // an item removed (its ×, the card's toggle, a delete) leaves in motion and its neighbours close the gap; one added or brought
+  // back by Undo grows in (hooks/usePresence.ts). Guard: probe-presence bar:remove
+  const { list: shown, leaving } = usePresence(playlist, keyOfPath, rowRef, motion, "self");
+  const indexOf = useMemo(() => new Map(playlist.map((p, i) => [p, i])), [playlist]);
   // the dock magnification follows the pointer's x (hooks/useDockLift.ts); the hovered item (above) only drives the glow,
   // the remove button and the preview (with motion off, the glow alone: nothing lifts)
   useDockLift(rowRef, motion, !!dragId, [rowShown, playlist.length]);
@@ -238,14 +245,14 @@ export function PlaylistBar() {
 
       {/* PERF: kept mounted while folded (index.css hides it once the fold has played, hooks/useBarFold.ts): a click
           neither tears down nor builds the items. Guard: probe-layout perf:plFold */}
-      <div className="pl-body" ref={bodyRef}>{playlist.length === 0 ? (
+      <div className="pl-body" ref={bodyRef}>{shown.length === 0 ? (
         <div className="playlist-bar-empty">Add wallpapers with the toggle on library cards</div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>
           <SortableContext items={playlist} strategy={horizontalListSortingStrategy}>
             <div className="playlist-bar-row" ref={rowSmooth} onMouseMove={onRowMove} onMouseLeave={() => hv.set(null)}>
-              {playlist.map((p, i) => <PlItem key={p} path={p} item={byPath[p]} index={i} playing={p === playingPath} hv={hv} />)}
+              {shown.map((p) => <PlItem key={p} path={p} item={byPath[p]} index={leaving(p) ? -1 : indexOf.get(p) ?? -1} playing={p === playingPath} hv={hv} />)}
             </div>
           </SortableContext>
           {/* DragOverlay portal'd to <body> → the picked-up item floats ABOVE all UI (the playlist bar's

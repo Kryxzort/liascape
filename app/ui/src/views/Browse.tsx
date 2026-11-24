@@ -19,6 +19,7 @@ import { useKeptScroll } from "../hooks/useKeptScroll";
 import { useStableFn } from "../hooks/useStableFn";
 import { useMarquee } from "../hooks/useMarquee";
 import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
+import { usePresence } from "../hooks/usePresence";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper, WorkshopFilter } from "../api/client";
@@ -46,6 +47,7 @@ const TYPE_TAGS = new Set(WF_GROUPS.find((g) => g.id === "type")!.subs[0].tags.m
 const withoutType = (f: WorkshopFilter): WorkshopFilter =>
   ({ ...f, include: f.include.filter((t) => !TYPE_TAGS.has(t)), exclude: f.exclude.filter((t) => !TYPE_TAGS.has(t)) });
 const NO_IDS = new Set<string>();
+const keyOfWallpaper = (w: Wallpaper) => w.pageUrl;
 // the favourites' count check while Browse shows (the backend asks Steam at most every 50 s of these)
 const FAV_CHECK_MS = 60_000;
 const isYours = (t: string) => t === LIBRARY_TAG || t === FAVORITES_TAG;
@@ -137,6 +139,11 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     : setOn ? JSON.stringify([browseFilter.include, browseFilter.exclude, browseFilter.featureMatch, browseFilter.genreMatch, query, localSort, wsList && [wsList.kind, "id" in wsList ? wsList.id : null]])
     : ws ? JSON.stringify(modes) : "";
   useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}|${localView}`);
+  // the grid's cards leave and join in motion: a filter, a search, a set's star or library mark, a list replaced (another
+  // source: the old cards fade as the new come). The page's first list just shows. After useKeptScroll: its layout effect
+  // puts a new view at the top before this one reads where the cards went. Guard: probe-presence browse:filter
+  const gridRef = useRef<HTMLDivElement>(null);
+  const { list: gridItems } = usePresence(sorted, keyOfWallpaper, gridRef, motion);
 
   // any placeholder near the view asks for the next page, not only the first: a jump past it (End, the scrollbar dragged
   // to the bottom) lands among the later ones, and the first would never come into range. Observing fires an initial
@@ -255,8 +262,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
       {setEmpty && <NoMatch kind="set" text="Nothing here matches" clear={setClear} onClear={clearOthers} />}
       <WsListNote />
-      <div className="grid">
-          {sorted.map((w) => (
+      <div className="grid" ref={gridRef}>
+          {gridItems.map((w) => (
             <Card key={w.pageUrl} w={w} playing={w.pageUrl === playingPath}
               selected={sel.has(w.pageUrl)} focused={w.pageUrl === browseFocus} inLibrary={inLibrary(libKeys, w)}
               progress={downloads[w.pageUrl]}

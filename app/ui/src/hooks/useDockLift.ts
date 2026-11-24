@@ -84,7 +84,9 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
     });
     ro.observe(row);
     const measure = (): Geo => {
-      const els = [...row.children] as HTMLElement[];
+      // an item leaving (hooks/usePresence.ts: out of the flow, fading where it was) is no longer one of the row's: it keeps the
+      // magnification it had and the others close the gap
+      const els = ([...row.children] as HTMLElement[]).filter((el) => el.dataset.leaving == null);
       for (const el of els) if (!sizes.has(el)) ro.observe(el);
       const r = row.getBoundingClientRect(), cs = getComputedStyle(row);
       const widths = els.map((el) => el.offsetWidth);
@@ -96,7 +98,7 @@ export function useDockLift(rowRef: RefObject<HTMLElement | null>, enabled: bool
     const geom = () => (geo ??= measure());
     const stale = () => { geo = null; };
     const mo = new MutationObserver(stale);
-    mo.observe(row, { childList: true });
+    mo.observe(row, { childList: true, attributes: true, subtree: true, attributeFilter: ["data-leaving"] });
 
     const frame = (t: number) => {
       raf = 0; st.pending = false; st.at = t;

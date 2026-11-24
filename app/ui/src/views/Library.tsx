@@ -16,6 +16,7 @@ import { useTravelToPlaying } from "../hooks/travelToPlaying";
 import { useStableFn } from "../hooks/useStableFn";
 import { useResetOnLeave } from "../hooks/useResetOnLeave";
 import { useMarquee } from "../hooks/useMarquee";
+import { usePresence } from "../hooks/usePresence";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
@@ -23,6 +24,8 @@ import { unsubBlocked } from "../components/subscribeMode";
 import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
 import { confirmBaseRemoval } from "../components/baseConfirm";
 import { CRASHED_TAG, byFavorites, setModesOf } from "./localSet";
+
+const keyOfItem = (i: LibraryItem) => i.videoPath;
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -142,6 +145,12 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     setSel((x) => { const n = new Set([...x].filter((p) => vis.has(p))); return n.size === x.size ? x : n; });
     if (anchor.current && !vis.has(anchor.current)) anchor.current = null;
   }, [filterKey, favSet, crashSig, filtered]);
+
+  // the grid's cards leave and join in motion: a delete, an unsubscribe, a filter or search, and Undo bringing one back
+  // (hooks/usePresence.ts; a card still leaving renders in its old place, everything else reads `filtered`). After the filter's
+  // scroll reset above: its layout effect runs first. Guard: probe-presence lib:*
+  const gridRef = useRef<HTMLDivElement>(null);
+  const { list: gridItems } = usePresence(filtered, keyOfItem, gridRef, motion);
 
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
   // the order the backend makes the cards' missing previews in: the sidebar's item, the cards on screen, then this
@@ -285,8 +294,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       <WsSetLoad scope="library" />
       {(match || favSet || crashMode) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
-      <div className="grid">
-        {filtered.map((it) => (
+      <div className="grid" ref={gridRef}>
+        {gridItems.map((it) => (
           <LibraryCard key={it.videoPath} item={it}
             playing={it.videoPath === playingPath}
             selected={sel.has(it.videoPath)}

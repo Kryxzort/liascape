@@ -242,7 +242,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .lib-scroll { margin-bottom: var(--playlist-bar-h, 60px); padding-bottom: 16px; }
 /* --cols is set per scroll container by useGridFit (derived from window size + target count + aspect)
    so visible count stays ~constant on resize while cards keep --thumb-aspect. */
-.grid { display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: var(--gap); }
+/* positioned: a card leaving is pinned inside it where it was while it fades out (hooks/usePresence.ts) */
+.grid { position: relative; display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: var(--gap); }
 
 .card {
   position: relative; background: var(--surface0); border-radius: 12px; overflow: hidden;
@@ -349,8 +350,10 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    thread, so it forces a main frame every refresh, and each main frame restyles every running animation on the page —
    Browse's 72 placeholder shimmers among them — though they run on the compositor. The layer is two 200 % tiles wide and
    travels one tile a second: the same sweep the tiled background made. Guard: probe-layout perf:skeleton */
-/* it lies over the top bar's bottom border (its first px, above the bar: z 6 > 5); the border itself goes while it runs (below) */
-.loadbar { height: 3px; position: relative; z-index: 6; margin-top: -1px; overflow: hidden; }
+/* it lies over the top bar's bottom border (its first px, above the bar: z 6 > 5); the border itself goes while it runs (below).
+   It takes no room (the bottom margin gives back its other 2 px, over the page's top padding): coming and going it never moves
+   the grid under it (a search's cards glide from where they were seen: hooks/usePresence.ts). Guard: probe-presence browse:filter (its motion-off cell) */
+.loadbar { height: 3px; position: relative; z-index: 6; margin-top: -1px; margin-bottom: -2px; overflow: hidden; }
 .loadbar::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 400%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 50% 100%;
   animation: slide 1s linear infinite; }

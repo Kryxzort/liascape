@@ -75,10 +75,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
-119. [ ] (owner) Animate cards leaving and joining: a playlist item removed from the bar, a Library item deleted,
-       trashed or unsubscribed, and cards filtered in or out all move instead of jumping. Neighbours glide into the
-       gap, the leaving card fades and shrinks out, a joining one fades in, and Undo plays it in reverse. Reuse the
-       grid's existing layout motion and the sidebar's motion E timings; follow `no-motion`.
 121. [ ] (owner) Starting a playlist, and applying a wallpaper, take too long before the wallpaper shows. Measure
        click → first frame per step (UI post, backend `PlayFrom` / apply, player command, source `Ready`, transition),
        video and scene, on a private player. Then cut the largest step.
