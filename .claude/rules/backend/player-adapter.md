@@ -82,7 +82,7 @@ Every rule runs in the player's program `prog:main` (`.claude/rules/player/runti
 - Load via `BuildSpec` + `Load` (essential); reuse an existing `prog:main` (`set key` first, so the old playlist keeps its resume point). A single `Apply` destroys `prog:main` first.
 - Verbs: next/prev/random → `program.next|prev|random`.
 - A `timed_state.json` or `pending_action.txt` an older build left in the config dir is never read. Guard: adapter IT § "a legacy rotation's files".
-- Restore (`liascape restore`, `play`, `toggle-play` from stopped): start `serve --restore --session-start`; replay `LastSession` only when the player shows nothing.
+- Restore (`liascape restore`, `play`, `toggle-play` from stopped): start `serve --restore --session-start`; replay `LastSession` only when the player shows nothing. A layer waiting for its restored source's `Ready` (`state.outputs[].pending`) shows something (`ShownOrIncoming`). Guard: adapter IT § "restore during the wait".
 - Trash of the shown/incoming item: `SetItems` with the bar's survivors, then `program.next`.
 
 ## Scenes and loudness (adapter side)

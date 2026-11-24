@@ -162,6 +162,12 @@ you touch before changing a recipe, a source or the runtime.
   aside, start empty. Restore the exact saved position (no elapsed-time compensation).
 - A restored playing video starts at `gain.anticlick` −96 with a not-yet-started ramp (corr `restore-fade`)
   re-added at `source.ready` — invariant #8. Restored ids are fresh; never assume saved ids survive.
+- Put restored content on its layer only at the source's `Ready` (`Runtime::show_when_ready` / `pending_show`),
+  never at once; a scene restored `broken` shows its preview at once. Count a waiting layer as showing its source
+  (`cur:`, `srcs:`, `state.outputs[].pending`, the snapshot); a `transition` (`Runtime::start_switch`; an
+  `align: end` one keeps a waiting video as its A), a `content` set, `stop` or the output going ends the wait and
+  retires a source no layer waits for. Guards: `src/player/tests/api.rs`
+  `restore_waits_for_ready_no_seam`, `restore_pending_is_cancelled_by_a_switch`, `restore_pending_dropped_on_error`.
 - `Writer::runner()` queues other jobs (outbox compaction) on the same thread; `finish` sends an explicit `Stop`.
 - Test knob `LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS` slows every write deterministically.
 

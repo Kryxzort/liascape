@@ -497,8 +497,10 @@ fn crash_restores() {
     let pos = node["time_pos"].as_f64().unwrap();
     println!("restored {nid}: time_pos {pos:.3} s (saved position ≥ 2.0)");
     assert!(pos >= 2.0, "position {pos} < 2.0: {node}");
+    // A restored layer shows its source from its `Ready` on (the tick after it, at most).
     let st = wait_state(&mut c, Duration::from_secs(20), |st| {
         st["graph"][&nid]["ready"] == json!(true)
+            && ["VIRTUAL-1", "VIRTUAL-2"].iter().all(|o| content(st, o) == nid)
     });
     let node = st["graph"][&nid].clone();
     assert_eq!(node["paused"], json!(false));
@@ -1017,9 +1019,9 @@ fn transition_in_flight_restores_as_b() {
 
     let mut c = sup.client();
     let st = wait_state(&mut c, Duration::from_secs(5), |st| {
-        sources(st)
-            .iter()
-            .any(|(_, n)| n["path"] == s(&clip) && n["ready"] == json!(true))
+        sources(st).iter().any(|(id, n)| {
+            n["path"] == s(&clip) && n["ready"] == json!(true) && content(st, "VIRTUAL-1") == *id
+        })
     });
     assert_eq!(st["transitions"], json!([]), "nothing in flight");
     assert!(
@@ -1070,9 +1072,12 @@ fn parked_restores_parked() {
     drop(c);
     sup.crash(libc::SIGSEGV);
 
-    // VIRTUAL-3 isn't there after the restart: its green is parked, for VIRTUAL-3.
+    // VIRTUAL-3 isn't there after the restart: its green is parked, for VIRTUAL-3. The others
+    // show the clip from its `Ready` on.
     let mut c = sup.client();
-    let st = c.state();
+    let st = wait_state(&mut c, Duration::from_secs(10), |st| {
+        !content(st, "VIRTUAL-1").is_empty()
+    });
     let green = |n: &Value| n["kind"] == "color" && n["color"] == json!([0.0, 255.0, 0.0]);
     let (xp, xnode) = sources(&st)
         .into_iter()
@@ -1112,7 +1117,10 @@ fn parked_restores_parked() {
     drop(c);
     sup.crash(libc::SIGSEGV);
     let mut c = sup.client();
-    let st = c.state();
+    // The outputs show it from its `Ready` on.
+    let st = wait_state(&mut c, Duration::from_secs(5), |st| {
+        !content(st, "VIRTUAL-1").is_empty()
+    });
     assert_eq!(
         st["parked"],
         Value::Null,
@@ -1224,9 +1232,9 @@ fn scene_snapshot_restores_at_position() {
     println!("restart latency {latency:?}; saved scene position {saved_pos:.3}");
     let mut c = sup.client();
     let st = wait_state(&mut c, Duration::from_secs(10), |st| {
-        sources(st)
-            .iter()
-            .any(|(_, n)| n["path"] == s_json(&dir) && n["ready"] == json!(true))
+        sources(st).iter().any(|(id, n)| {
+            n["path"] == s_json(&dir) && n["ready"] == json!(true) && content(st, "VIRTUAL-2") == *id
+        })
     });
     let (nid, node) = sources(&st)
         .into_iter()
@@ -1302,9 +1310,11 @@ fn scene_dir_survives_a_restore() {
     println!("restart latency {latency:?}");
     let mut c = sup.client();
     let st = wait_state(&mut c, Duration::from_secs(10), |st| {
-        sources(st)
-            .iter()
-            .any(|(_, n)| n["path"] == s_json(&preset) && n["ready"] == json!(true))
+        sources(st).iter().any(|(id, n)| {
+            n["path"] == s_json(&preset)
+                && n["ready"] == json!(true)
+                && content(st, "VIRTUAL-2") == *id
+        })
     });
     let (nid, node) = sources(&st)
         .into_iter()
@@ -1549,7 +1559,7 @@ fn restored_armed_program_rearms_at_a_end() {
         .find(|(_, n)| n["path"] == items[0])
         .expect("A");
     let st = wait_state(&mut c, Duration::from_secs(5), |st| {
-        st["graph"][&nid]["ready"] == json!(true)
+        st["graph"][&nid]["ready"] == json!(true) && content(st, "VIRTUAL-1") == nid
     });
     let node = st["graph"][&nid].clone();
     let sch = c.logs("transition.scheduled");

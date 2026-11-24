@@ -4233,7 +4233,7 @@ fn i2_switch_while_gated_never_leaves_a_playing_source_silent() {
 
 /// With no output at all, `transition` is accepted — each target
 /// replaces the parked wallpaper — and when an output comes back the LAST target is shown
-/// and plays; an `align: end` request made meanwhile hands off only then.
+/// (from its first frame on) and plays; an `align: end` request made meanwhile hands off only then.
 #[test]
 fn i4_transitions_while_no_output_replace_the_parked_wallpaper() {
     let Some(srv) = real_serve(&[]) else { return };
@@ -4288,7 +4288,12 @@ fn i4_transitions_while_no_output_replace_the_parked_wallpaper() {
         "headless.add_output",
         json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
     );
-    assert_eq!(content(&mut c, "VIRTUAL-3"), last);
+    // It counts as shown at once and goes on the layer at its first frame (never a hole).
+    let cur = c.ok("get", json!({"path": "cur:VIRTUAL-3.path"}))["value"].clone();
+    assert_eq!(cur, json!(blue), "cur:VIRTUAL-3");
+    wait_for(Duration::from_secs(5), "the layer shows it", || {
+        (content(&mut c, "VIRTUAL-3") == last).then_some(())
+    });
     wait_playing(&mut c, &last, 0.3);
     wait_for(Duration::from_secs(2), "audible", || {
         let st = c.ok("state", json!({}));
@@ -12238,6 +12243,276 @@ fn switches_never_compose_a_hole() {
         assert!(t.elapsed() < Duration::from_secs(5), "{logs}");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+// ---------------------------------------------------------------- a restored layer waits for `Ready`
+
+/// A restored scene's load in these tests: long enough to look at the player before its first
+/// frame on a busy box, well short of the worker's load timeout.
+const RESTORE_LOAD_MS: u64 = 2500;
+
+/// The source node playing `dir` in `state` (a restore mints fresh ids), if any.
+fn scene_of(st: &Value, dir: &Path) -> Option<(String, Value)> {
+    st["graph"]
+        .as_object()?
+        .iter()
+        .find(|(_, n)| n.get("gain_effective_db").is_some() && n["path"] == s(dir))
+        .map(|(id, n)| (id.clone(), n.clone()))
+}
+
+/// `state`'s `outputs` entry for `name`.
+fn state_output(st: &Value, name: &str) -> Value {
+    st["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["name"] == name)
+        .cloned()
+        .unwrap_or_else(|| panic!("no output {name}: {st}"))
+}
+
+/// A synthetic scene `name` on every output; `before_quit` runs once it shows; `quit` saves it;
+/// then `serve --restore` with the scene folder's spec swapped for `restored` (same folder, so
+/// the snapshot's path still names it). Returns the server, the folder and the restored
+/// source's id, read at once (before its `Ready` when `restored` loads slowly).
+fn restore_scene(
+    name: &str,
+    restored: SyntheticSpec,
+    before_quit: impl FnOnce(&mut Client),
+) -> Option<(Serve, PathBuf, String)> {
+    let mut srv = scene_serve(&["--clock", "real"])?;
+    let dir = common::synthetic_scene(name, &synth(Pattern::FrameIndex));
+    let mut c = srv.client();
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(&mut c, &id);
+    wait_for(Duration::from_secs(20), "the scene's first frame", || {
+        (c.ok("get", json!({"path": format!("{id}.ready")}))["value"] == json!(true)).then_some(())
+    });
+    before_quit(&mut c);
+    c.ok("quit", json!({}));
+    drop(c);
+    assert!(srv.wait_exit(Duration::from_secs(30)).is_some(), "quit");
+    let snap: Value = serde_json::from_slice(
+        &std::fs::read(srv.path("state/liascape/liascape-player/snapshot.json")).unwrap(),
+    )
+    .unwrap();
+    let saved = snap["outputs"]["VIRTUAL-1"]["content"].as_str().unwrap_or("");
+    assert_eq!(snap["sources"][saved]["path"], json!(s(&dir)), "{snap}");
+    common::synthetic_scene(name, &restored);
+    srv.respawn(
+        &["--clock", "real", "--restore"],
+        &[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))],
+    );
+    let mut c = srv.client();
+    let (rid, _) = scene_of(&c.ok("state", json!({})), &dir).expect("the restored scene");
+    Some((srv, dir, rid))
+}
+
+fn slow_scene() -> SyntheticSpec {
+    SyntheticSpec {
+        load_ms: RESTORE_LOAD_MS,
+        ..synth(Pattern::FrameIndex)
+    }
+}
+
+/// Precondition of the before-`Ready` checks: the restored source hasn't shown its first frame.
+fn not_ready_yet(st: &Value, id: &str) {
+    assert_eq!(
+        st["graph"][id]["ready"],
+        json!(false),
+        "precondition: the restored scene loads for {RESTORE_LOAD_MS} ms: {}",
+        st["graph"][id]
+    );
+}
+
+/// The seam probe at start-up: a restored wallpaper's layer waits for its source's first frame,
+/// as a switch's B does — every output's layer is empty until `source.ready`, shows the source
+/// from then on, and no output composes a hole (`seam_frames` 0) through the second after.
+#[test]
+fn restore_waits_for_ready_no_seam() {
+    let Some((srv, _dir, id)) = restore_scene("api-restore-seam", slow_scene(), |_| {}) else {
+        return;
+    };
+    let mut c = srv.client();
+    let st = c.ok("state", json!({}));
+    not_ready_yet(&st, &id);
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(
+            st["graph"][format!("lay:{o}:main")]["content"],
+            json!(""),
+            "{o} shows the restored scene before its first frame"
+        );
+    }
+    wait_for(Duration::from_secs(20), "source.ready", || {
+        logs_of(&mut c, "source.ready")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        wait_for(Duration::from_secs(2), "the layer shows it", || {
+            (content(&mut c, o) == id).then_some(())
+        });
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    let seams = c.ok("logs", json!({"kind_prefix": "output.seam"}));
+    for (name, n, what) in seam_totals(&mut c) {
+        assert_eq!(n, 0, "{name}: {n} seam frames, last {what}; {seams}");
+    }
+}
+
+/// While a restored layer waits, the player counts it as shown: `cur:` names the source, `state`
+/// reports each output's `pending`, and an output plugged in meanwhile waits for it too (no hole
+/// there either), then every output shows it.
+#[test]
+fn restore_pending_layer_counts_as_shown() {
+    let Some((srv, dir, id)) = restore_scene("api-restore-shown", slow_scene(), |_| {}) else {
+        return;
+    };
+    let mut c = srv.client();
+    let st = c.ok("state", json!({}));
+    not_ready_yet(&st, &id);
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(state_output(&st, o)["pending"], json!(id), "{st}");
+        assert_eq!(
+            c.ok("get", json!({"path": format!("cur:{o}.path")}))["value"],
+            json!(s(&dir)),
+            "cur:{o}"
+        );
+    }
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180}),
+    );
+    let st = c.ok("state", json!({}));
+    not_ready_yet(&st, &id);
+    assert_eq!(state_output(&st, "VIRTUAL-3")["pending"], json!(id), "{st}");
+    assert_eq!(st["graph"]["lay:VIRTUAL-3:main"]["content"], json!(""), "{st}");
+    for o in ["VIRTUAL-1", "VIRTUAL-2", "VIRTUAL-3"] {
+        wait_for(Duration::from_secs(20), "the layer shows it", || {
+            (content(&mut c, o) == id).then_some(())
+        });
+    }
+    let st = c.ok("state", json!({}));
+    for o in ["VIRTUAL-1", "VIRTUAL-2", "VIRTUAL-3"] {
+        assert_eq!(state_output(&st, o)["pending"], Value::Null, "{st}");
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    for (name, n, what) in seam_totals(&mut c) {
+        assert_eq!(n, 0, "{name}: {n} seam frames, last {what}");
+    }
+}
+
+/// A snapshot written while a restored layer waits still names the source on that output (a
+/// crash then restores it again, never an empty desktop).
+#[test]
+fn restore_pending_survives_a_snapshot() {
+    let Some((srv, dir, id)) = restore_scene("api-restore-snap", slow_scene(), |_| {}) else {
+        return;
+    };
+    let mut c = srv.client();
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    // A change: the debounced snapshot follows it.
+    c.ok("set", json!({"path": "player.debug", "value": true}));
+    let file = srv.path("state/liascape/liascape-player/snapshot.json");
+    let snap = wait_for(Duration::from_secs(2), "a snapshot after the restore", || {
+        let v: Value = serde_json::from_slice(&std::fs::read(&file).ok()?).ok()?;
+        (v["saved_unix_ms"].as_u64()? >= since && v["player"]["debug"] == json!(true))
+            .then_some(v)
+    });
+    not_ready_yet(&c.ok("state", json!({})), &id);
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        let saved = snap["outputs"][o]["content"].as_str().unwrap_or("");
+        assert_eq!(snap["sources"][saved]["path"], json!(s(&dir)), "{o}: {snap}");
+    }
+}
+
+/// A switch before the restored source's `Ready` wins: the new wallpaper shows, and the restored
+/// scene never pops in after it (it is retired, not left loading for nothing).
+#[test]
+fn restore_pending_is_cancelled_by_a_switch() {
+    let Some((srv, dir, id)) = restore_scene("api-restore-switch", slow_scene(), |_| {}) else {
+        return;
+    };
+    let mut c = srv.client();
+    not_ready_yet(&c.ok("state", json!({})), &id);
+    let red = ensure_clip("api_red_3s", RED_3S);
+    let corr = seam_switch(&mut c, &json!({"path": s(&red), "loop": true}), "full-live", 200, true);
+    let to = c.ok("logs", json!({"corr": corr}))["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|e| e["to"].as_str().map(str::to_string))
+        .unwrap();
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(content(&mut c, o), to, "{o} shows the switch's video");
+    }
+    // Past the scene's load: it never shows.
+    std::thread::sleep(Duration::from_millis(RESTORE_LOAD_MS + 1500));
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(content(&mut c, o), to, "{o} still shows the video");
+    }
+    let st = c.ok("state", json!({}));
+    assert!(scene_of(&st, &dir).is_none(), "the restored scene is retired: {st}");
+}
+
+/// A restored source that fails instead of becoming ready (a scene whose every worker dies
+/// before a first frame, past its restart budget) leaves its layers empty: no content is set,
+/// `source.broken` is logged, and the broken source doesn't linger unshown.
+#[test]
+fn restore_pending_dropped_on_error() {
+    let crashing = SyntheticSpec {
+        crash_after_ms: Some(0),
+        ..synth(Pattern::Solid)
+    };
+    let Some((srv, dir, id)) = restore_scene("api-restore-error", crashing, |_| {}) else {
+        return;
+    };
+    let mut c = srv.client();
+    wait_for(Duration::from_secs(30), "source.broken", || {
+        for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+            assert_eq!(content(&mut c, o), "", "{o} never shows the failing scene");
+        }
+        logs_of(&mut c, "source.broken")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let st = c.ok("state", json!({}));
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(st["graph"][format!("lay:{o}:main")]["content"], json!(""), "{st}");
+        assert_eq!(state_output(&st, o)["pending"], Value::Null, "{st}");
+    }
+    assert!(scene_of(&st, &dir).is_none(), "the broken scene is retired: {st}");
+}
+
+/// A snapshot saved in a user pause: the restored layer still gets its content at the source's
+/// `Ready` (the first frame comes while paused), and the player stays paused.
+#[test]
+fn restore_paused_still_shows_first_frame() {
+    let paused = |c: &mut Client| {
+        c.ok("set", json!({"path": "player.paused", "value": true}));
+    };
+    let Some((srv, _dir, id)) = restore_scene("api-restore-paused", slow_scene(), paused) else {
+        return;
+    };
+    let mut c = srv.client();
+    let st = c.ok("state", json!({}));
+    not_ready_yet(&st, &id);
+    assert_eq!(st["graph"]["player"]["paused"], json!(true), "{}", st["graph"]["player"]);
+    assert_eq!(st["graph"]["lay:VIRTUAL-1:main"]["content"], json!(""), "{st}");
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        wait_for(Duration::from_secs(20), "the layer shows it", || {
+            (content(&mut c, o) == id).then_some(())
+        });
+    }
+    assert_eq!(
+        c.ok("get", json!({"path": "player.paused"}))["value"],
+        json!(true),
+        "still paused"
+    );
 }
 
 /// `serve` creates NVIDIA's shader cache dir (0700) before its EGL context and mpv's, and logs

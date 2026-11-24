@@ -194,6 +194,9 @@ pub struct Capture<'a> {
     pub parked: Option<ParkedSnap>,
     /// Remembered props of connectors that are not present.
     pub remembered: &'a BTreeMap<String, Map<String, Value>>,
+    /// Restored sources → the connectors whose layer shows them at their `Ready`: saved as
+    /// those outputs' content (`Runtime::pending_show`).
+    pub pending: &'a BTreeMap<String, BTreeSet<String>>,
 }
 
 fn get_str(g: &Graph, id: &str, prop: &str) -> String {
@@ -354,7 +357,12 @@ pub fn capture(c: &Capture) -> Snapshot {
     let mut wanted: BTreeMap<String, bool> = BTreeMap::new();
     for out in g.ids_of(NodeKind::Output) {
         let conn = out.strip_prefix("out:").unwrap_or(&out).to_string();
-        let content = content_of(g, &out, c.transitions);
+        let content = content_of(g, &out, c.transitions).or_else(|| {
+            c.pending
+                .iter()
+                .find(|(id, cs)| cs.contains(&conn) && g.kind_of(id) == Some(NodeKind::Source))
+                .map(|(id, _)| (id.clone(), false))
+        });
         if let Some((id, b)) = &content {
             let e = wanted.entry(id.clone()).or_insert(false);
             *e |= *b;
@@ -731,6 +739,7 @@ mod tests {
             transitions: trs,
             parked: None,
             remembered: &BTreeMap::new(),
+            pending: &BTreeMap::new(),
         })
     }
 
@@ -972,6 +981,7 @@ mod tests {
                 connector: Some("DP-1".into()),
             }),
             remembered: &remembered,
+            pending: &BTreeMap::new(),
         });
         assert!(s.outputs.is_empty());
         assert_eq!(s.output_props["DP-1"]["layer"], json!("top"));

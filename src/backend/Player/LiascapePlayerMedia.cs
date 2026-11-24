@@ -1807,7 +1807,8 @@ public static class LiascapePlayerMedia
     }
 
     // One `state` read (no drain — ReconcileShown runs ON the queue's worker): every layer's content (an
-    // effect's `to`), each requested switch's B unless it's an aligned one waiting for A's end, and with
+    // effect's `to`) or the restored source it waits for (`outputs[].pending`), each requested switch's B
+    // unless it's an aligned one waiting for A's end, and with
     // `parked` the parked wallpaper (no output: what the next one shows). null = no answer.
     private static List<string>? ShownOrIncoming(LiascapePlayerClient client, bool parked)
     {
@@ -1828,6 +1829,11 @@ public static class LiascapePlayerMedia
         if (st.TryGetProperty("transitions", out var trs) && trs.ValueKind == JsonValueKind.Array)
             foreach (var t in trs.EnumerateArray())
                 if (Str(t, "phase") is not ("waiting_start" or "done")) Add(PathOf(Str(t, "to")));
+        // A restored wallpaper whose layer waits for its source's first frame shows it then: it counts as
+        // shown, or a `restore` during the wait would replay LastSession over it.
+        if (st.TryGetProperty("outputs", out var outs) && outs.ValueKind == JsonValueKind.Array)
+            foreach (var o in outs.EnumerateArray())
+                if (o.TryGetProperty("pending", out var pd) && pd.ValueKind == JsonValueKind.String) Add(PathOf(pd.GetString()!));
         if (parked && st.TryGetProperty("parked", out var pk) && pk.ValueKind == JsonValueKind.String) Add(PathOf(pk.GetString()!));
         return paths;
     }
