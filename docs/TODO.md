@@ -10,7 +10,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,
        probes, `scripts/install.sh`, flake, PKGBUILD), with mpvpaper, the LWE launcher path, `src/native/`
        (`liascape-transition`, `liascape-audio`), the legacy engine's rule file and its decision
-       entries; `README.md` describes liascape-player only (done); the § Switch-over bar items below are closed by it.
+       entries; the § Switch-over bar items below are closed by it.
        b) The start-up seam: the restored wallpaper's layer waits for its source's `Ready` (owner's pick of § 5).
        c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
        `LICENSE.upstream-MIT` and the README's fork line go.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Portable, single-file AppImage — bundles EVERYTHING (backend, UI, electron, native helpers) so it
+# Portable, single-file AppImage — bundles EVERYTHING (backend, UI, electron, liascape-player) so it
 # runs on any glibc distro with no install and no sandbox (unlike Flatpak, whose sandbox breaks a
 # wallpaper app's layer-shell + helper spawning). Reuses scripts/install.sh to build+stage the
 # components, then adds a bundled electron and a relocatable AppRun.
