@@ -7,14 +7,8 @@
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 
-# Native helpers are core (transitions + scene-audio crossfade), not optional — build them so dev
-# exercises them too. The dotnet-watch backend runs with WorkingDirectory=repo and auto-discovers
-# these via its repo-relative fallback (TransitionService.RepoPath / PlayerHelper cwd path), so no
-# env wiring is needed. set -e aborts loudly if the toolchain is missing (same deps as install.sh).
-echo "==> building native helpers (liascape-transition + liascape-audio)"
-make -C "$ROOT/src/native/liascape-transition" >/dev/null
-make -C "$ROOT/src/native/liascape-audio" >/dev/null
-
+# The dotnet-watch backend runs with WorkingDirectory=repo and finds this build through its repo-relative fallback
+# (PlayerStatus.ResolveBinary), so no env wiring is needed. set -e aborts loudly if the toolchain is missing.
 echo "==> building liascape-player"
 cargo build --release --manifest-path "$ROOT/src/player/Cargo.toml" >/dev/null
 

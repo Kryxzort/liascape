@@ -238,12 +238,11 @@ prepare_state() {
   # the private copies are overwritten in place (nothing deleted): the user's current files replace the last run's; files
   # only the agent backend wrote stay, and an item the user has since removed keeps a dead link
   : >"$LOG/up.log"
-  # settings: the user's, minus every way out to their Steam account (the Steam app's client library); the
-  # engine pinned to liascape-player (the legacy engine draws on the session's outputs)
+  # settings: the user's, minus every way out to their Steam account (the Steam app's client library)
   local c=$H/.config/liascape d=$H/.local/share/liascape f
   mkdir -p "$c" "$d/library"
   if [ -f "$OCFG/settings.json" ]; then
-    jq '.SteamClientLibPath = "" | .PlayerEngine = "liascape-player"' "$OCFG/settings.json" >"$c/settings.json.tmp"
+    jq '.SteamClientLibPath = ""' "$OCFG/settings.json" >"$c/settings.json.tmp"
     mv "$c/settings.json.tmp" "$c/settings.json"
   fi
   for f in playlist_state.json user_mute.state; do if [ -f "$OCFG/$f" ]; then cp -p "$OCFG/$f" "$c/$f"; fi; done

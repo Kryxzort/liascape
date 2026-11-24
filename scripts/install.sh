@@ -20,7 +20,7 @@
 # Layout (scripts/liascape finds everything relative to itself, so a staged tree works wherever it lands):
 #   $PREFIX/bin/liascape                    the one command (bare = the app, `liascape help` = the CLI)
 #   $LIBEXECDIR/liascape/                   liascape-backend (→ lib/liascape/backend/), liascape-player,
-#                                           liascape-scene-worker, liascape-transition, liascape-audio
+#                                           liascape-scene-worker
 #   $PREFIX/lib/liascape/                   backend/ ui/ shell/ transitions/ + LWE's core library
 #   $PREFIX/share/applications/liascape.desktop
 #   $PREFIX/share/icons/hicolor/scalable/apps/liascape.svg   (app/ui/public/favicon.svg: one icon for the page, the
@@ -59,7 +59,6 @@ install.sh --dry-run (PREFIX=$PREFIX${DESTDIR:+, staged under $DESTDIR}$([ "$NO_
   $S_LIBEXEC/liascape-backend -> $(realpath -ms --relative-to="$LIBEXEC" "$LIBDIR/backend/liascape-backend")
   $S_LIBEXEC/liascape-player
   $S_LIBEXEC/liascape-scene-worker$([ "$NO_SCENES" = 1 ] && echo "   (test scenes only)")
-$(for d in "$ROOT"/src/native/*/; do [ -f "${d}Makefile" ] && echo "  $S_LIBEXEC/$(basename "$d")"; done)
   $S_LIB/backend/   (dotnet publish, self-contained)
   $S_LIB/ui/  $S_LIB/shell/  $S_LIB/transitions/
 $([ "$NO_SCENES" = 0 ] && echo "  $S_LIB/liblinux-wallpaperengine-core.so*")
@@ -88,19 +87,15 @@ MSG
   exit 1
 fi
 
-# Native helpers are REQUIRED, not optional: liascape-transition renders every wallpaper switch
-# (transitions are a core feature, never a no-op) and liascape-audio gapless-crossfades scene audio.
-# Preflight the toolchain and fail loudly with a fix — never silently ship a degraded build.
-# liascape-player (Rust) links mpv/wayland/EGL/PipeWire/xkbcommon and runs bindgen (needs libclang).
-# Checked here, before any build/publish side effect below.
-echo "==> checking native build toolchain (liascape-transition + liascape-audio + liascape-player)"
+# liascape-player (Rust) links libmpv, wayland-client/-egl, EGL and PipeWire (its crates find them with pkg-config), links
+# through cc and runs bindgen (needs libclang). Preflight exactly that and fail loudly with a fix, before any
+# build/publish side effect below.
+echo "==> checking native build toolchain (liascape-player)"
 missing=""
 command -v cc            >/dev/null 2>&1 || missing="$missing cc"
-command -v make          >/dev/null 2>&1 || missing="$missing make"
 command -v pkg-config    >/dev/null 2>&1 || missing="$missing pkg-config"
-command -v wayland-scanner >/dev/null 2>&1 || missing="$missing wayland-scanner"
 if command -v pkg-config >/dev/null 2>&1; then
-  for p in wayland-client wayland-egl egl glesv2 mpv libpulse libpipewire-0.3 xkbcommon; do
+  for p in wayland-client wayland-egl egl mpv libpipewire-0.3; do
     pkg-config --exists "$p" 2>/dev/null || missing="$missing ${p}(dev)"
   done
 fi
@@ -111,10 +106,10 @@ fi
 if [ -n "$missing" ]; then
   cat >&2 <<MSG
 ERROR: missing native build dependencies:$missing
-  Transitions, scene-audio crossfade and the liascape-player compositor are core, not optional — install these and re-run:
-    Arch:   sudo pacman -S base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang
-    Debian: sudo apt install build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev
-    Fedora: sudo dnf install gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel
+  liascape-player (the Wayland wallpaper compositor) is built from source — install these and re-run:
+    Arch:   sudo pacman -S base-devel wayland libglvnd mpv pipewire clang
+    Debian: sudo apt install build-essential pkg-config libwayland-dev libegl-dev libmpv-dev libpipewire-0.3-dev libclang-dev
+    Fedora: sudo dnf install gcc pkgconf wayland-devel mesa-libEGL-devel mpv-libs-devel pipewire-devel clang-devel
     NixOS:  use the flake instead — 'nix run github:Kryxzort/liascape' (all deps handled)
 MSG
   exit 1
@@ -149,18 +144,6 @@ while read -r f; do install -Dm644 "$ROOT/app/shell/$f" "$S_LIB/shell/$f"; done 
 
 echo "==> staging transition assets (shaders + manifest + preview frames)"
 rm -rf "$S_LIB/transitions"; mkdir -p "$S_LIB/transitions"; cp -r "$ROOT/transitions/." "$S_LIB/transitions/"
-
-# Auto-discover every native helper (src/native/<name>/ with a Makefile producing a binary named
-# <name>) — adding a new one needs NO edit here. Each Makefile owns its own source list, so new .c
-# files are picked up automatically too. set -e aborts loudly on any build failure.
-echo "==> building native helpers (src/native/*) → $LIBEXEC"
-for d in "$ROOT"/src/native/*/; do
-  [ -f "${d}Makefile" ] || continue
-  name="$(basename "$d")"
-  echo "    - $name"
-  make -C "$d" >/dev/null
-  install -Dm755 "${d}${name}" "$S_LIBEXEC/$name"
-done
 
 if [ "$NO_SCENES" = 0 ]; then
   # fetched into ~/.cache/liascape/src (git clone, once per pin), built in $ROOT/build/

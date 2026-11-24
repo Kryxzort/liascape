@@ -32,9 +32,6 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
   work deletes it and moves its still-true facts to their homes above (git history keeps the file).
 - A zero-exception ban → a hook or a permission rule, not prose.
 - What a user needs to install, start and use the app → `README.md` (see below); never internals or a change log.
-- The README for after the switch-over (liascape-player the only player) → `docs/README-next.md`, same rules as
-  `README.md`; it replaces `README.md` in the switch-over commit (`docs/TODO.md` § Switch-over bar), and until then a
-  change that updates `README.md` updates it too wherever it still applies. This line goes with it at the flip.
 - One person's own workflow on their machine (where their notes go, their habits) → `CLAUDE.local.md` (gitignored,
   loaded like `CLAUDE.md` for that checkout only); a tracked file never points at anything that exists only locally.
 
