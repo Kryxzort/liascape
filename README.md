@@ -41,7 +41,7 @@ Everything's thought of.
 
 ### Filter through wallpapers
 
-![Filters](docs/preview/filters.gif)
+<img src="docs/preview/filters.gif" alt="Filters" height="540">
 
 ### Make it behave how you want
 
@@ -52,7 +52,7 @@ Normalize audio, auto-mute wallpapers or pause them behind windows: the choice i
 ### Tinker with your wallpapers without limits!
 
 <!-- stand-in until the sidebar rework -->
-![A scene's sidebar](docs/preview/scene-sidebar-showcase.gif)
+<img src="docs/preview/scene-sidebar-showcase.gif" alt="A scene's sidebar" height="540">
 
 ## Quirks
 
