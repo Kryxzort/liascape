@@ -495,8 +495,14 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .st-op-n { flex: none; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .st-op-more { flex: none; }
 :root.no-motion .st-layer { animation-duration: var(--fade-dur); animation-timing-function: linear; }
-@keyframes glow-pulse-k { 0%,100% { box-shadow: 0 0 0 1px var(--accent); } 50% { box-shadow: var(--glow); } }
-.glow-pulse { animation: glow-pulse-k 1.6s ease-in-out infinite; } /* COOL: undo button calls attention */
+/* COOL: the Undo / Confirm buttons call attention with a breathing glow. The button holds a steady floor (its accent ring + the
+   small glow) and a layer over it carrying the full glow fades in and out on opacity alone, so the dimmest point still reads as a
+   soft glow, never a bare outline (the pulse once ran the shadow itself down to the ring), and no blur radius animates.
+   .btn twice: above the ghost / danger hovers, which would drop the ring. Guard: probe-filters undo:glow */
+.btn.glow-pulse, .btn.glow-pulse:hover { position: relative; box-shadow: 0 0 0 1px var(--accent), var(--glow-sm); }
+.glow-pulse::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: var(--glow); opacity: 0; animation: glow-pulse-k 1.6s ease-in-out infinite; }
+@keyframes glow-pulse-k { 50% { opacity: 1; } }
 
 /* ---- library card overlays (USER-RULED FORK: compact title-overlay card) ---- */
 /* container-type so the overlay controls can scale with the card width (small windows / Small size) */
@@ -1378,7 +1384,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .card.playing::after { animation: none; opacity: .75; } /* the pulse's middle */
 :root.no-glow .pl-item.playing { box-shadow: 0 0 0 2px var(--success); }
 :root.no-glow .pl-hover-glow { display: none; }
-:root.no-glow .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent); }
+:root.no-glow :is(.btn.glow-pulse, .btn.glow-pulse:hover) { box-shadow: 0 0 0 1px var(--accent); }
+:root.no-glow .glow-pulse::after { display: none; animation: none; }
 :root.no-glow .btn.danger.glow-stop, :root.no-glow .btn.danger.glow-stop:hover,
 :root.no-glow .btn.danger:hover, :root.no-glow .btn.danger.solid:hover { box-shadow: none; }
 :root.no-glow .del:hover, :root.no-glow .pl-remove:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); }
@@ -1527,7 +1534,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .card { transition: box-shadow .2s ease; }
 :root.no-motion .ns-btn::before { transform: none; }
 /* loops stand still: the undo / confirm buttons glow without pulsing */
-:root.no-motion .glow-pulse { animation: none; box-shadow: 0 0 0 1px var(--accent), var(--glow-sm); }
+:root.no-motion .glow-pulse::after { animation: none; opacity: .5; } /* the pulse's middle, held */
 /* icon motion: no one-shot starts (iconMotion.ts), holds and the press jump, nothing pops, the magnet stays home */
 :root.no-motion svg.lucide, :root.no-motion svg.lucide > *, :root.no-motion :is(.sel-caret, .combo-caret svg, .ssection-ico, .side-sec-ico, .side-tile-ico, .wf-gico) { transition: none !important; }
 :root.no-motion :is(.ico-pop, .pl-toggle-svg) { animation: none; }

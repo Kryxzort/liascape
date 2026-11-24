@@ -79,8 +79,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        trashed or unsubscribed, and cards filtered in or out all move instead of jumping. Neighbours glide into the
        gap, the leaving card fades and shrinks out, a joining one fades in, and Undo plays it in reverse. Reuse the
        grid's existing layout motion and the sidebar's motion E timings; follow `no-motion`.
-120. [ ] (owner) The Undo button's glow keeps a floor: its pulse never dims so far that it reads as a bare outline.
-       Clamp the pulse's lowest intensity in its keyframes; `no-glow` still removes it.
 121. [ ] (owner) Starting a playlist, and applying a wallpaper, take too long before the wallpaper shows. Measure
        click → first frame per step (UI post, backend `PlayFrom` / apply, player command, source `Ready`, transition),
        video and scene, on a private player. Then cut the largest step.

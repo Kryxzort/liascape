@@ -51,6 +51,11 @@
 //                     wf-search-fold-<page>-<w>.png
 //   search:worst:<w>  761–1279 px with Undo (a trashed item) and Stop (a wallpaper playing) beside the rest, the search closed
 //                     and opened: one row, nothing out of the window or over another control, a field ≥ 120 px
+//   undo:glow         the Undo button's pulse (index.css .glow-pulse), per frame over a whole pulse: at its dimmest it keeps a soft
+//                     glow (halo = alpha × opacity × (blur + spread) ≥ 8; a bare 1 px ring is 0) and still breathes; the same
+//                     over a live wallpaper (bg-live). Close-ups wf-undo-glow-dim / -peak / -bglive.png
+//   undo:noGlow       Glow effects off: no glow on any frame, no pulse, the accent ring stays. Close-up wf-undo-noglow.png
+//   undo:noMotion     motion off: no pulse, the glow holds still at or above the floor. Close-up wf-undo-nomotion.png
 //   search:open       motion on, 800 px: a click on the magnifier opens it focused — the field's edge and the control left of
 //                     it glide (in-between frames), the split right of it never moves, only transforms / opacity / a clip
 //                     animate; a blur while empty folds it back the same way. Screenshots wf-search-open-<page>-mid/end.png
@@ -1068,6 +1073,104 @@ app.whenReady().then(async () => {
         return v;
       });
     }
+
+    // ---- the Undo button's glow pulse (index.css .glow-pulse): its dimmest point keeps a soft glow, never a bare 1 px ring ----
+    // A layer's halo = its colour's alpha × the layer's opacity × (blur + spread), the soft part the eye reads as glow; a ring
+    // (blur 0) adds nothing. The button's own shadows and its ::after's (the pulse layer) count; the frame's halo is the
+    // largest. UNDO_FLOOR: --glow-sm (12 px blur, -2 px spread) gives 10; the old pulse's 0 % frame was the ring alone (0).
+    const UNDO_FLOOR = 8;
+    const UNDO_SAMPLE = (ms) => `(async () => { const b = m.q(".topbar [aria-label=Undo]"); if (!b) return null;
+      const split = (s) => { const out = []; let d = 0, cur = ""; for (const ch of s) { if (ch === "(") d++; if (ch === ")") d--; if (ch === "," && !d) { out.push(cur); cur = ""; } else cur += ch; } if (cur.trim()) out.push(cur); return out; };
+      const halo = (bs, op) => { if (!bs || bs === "none") return 0; let best = 0;
+        for (const l of split(bs)) { const c = /rgba?\\(([^)]+)\\)/.exec(l); const p = c ? c[1].split(/[ ,/]+/).filter(Boolean) : []; const a = p.length > 3 ? +p[3] : (c ? 1 : 0);
+          const n = l.replace(/rgba?\\([^)]+\\)/, "").match(/-?[\\d.]+px/g)?.map(parseFloat) ?? []; const blur = n[2] ?? 0, spread = n[3] ?? 0;
+          if (blur > 0) best = Math.max(best, a * op * Math.max(0, blur + spread)); }
+        return best; };
+      const fr = []; const t0 = performance.now();
+      while (performance.now() - t0 < ${ms}) { await new Promise((r) => requestAnimationFrame(r));
+        const s = getComputedStyle(b), a = getComputedStyle(b, "::after");
+        const own = halo(s.boxShadow, 1), pl = a.content === "none" || a.display === "none" ? 0 : halo(a.boxShadow, +a.opacity);
+        fr.push({ t: performance.now() - t0, h: Math.max(own, pl), own: s.boxShadow, after: a.boxShadow, op: +a.opacity }); }
+      const anims = document.getAnimations().filter((x) => x.effect?.target === b && x.playState === "running").map((x) => (x.effect.pseudoElement ?? "") + ":" + x.animationName);
+      return { fr, anims }; })()`;
+    // the pulse frozen at a phase (ms into it) for a still of the button, then running again
+    const UNDO_FREEZE = (t) => `const b = m.q(".topbar [aria-label=Undo]"); for (const x of document.getAnimations().filter((x) => x.effect?.target === b)) { x.pause(); x.currentTime = ${t}; } ${NF} return true;`;
+    const UNDO_RUN = `const b = m.q(".topbar [aria-label=Undo]"); for (const x of document.getAnimations().filter((x) => x.effect?.target === b)) x.play(); return true;`;
+    const undoShot = async (name) => { const r = await page(`const b = m.q(".topbar [aria-label=Undo]")?.getBoundingClientRect(); return b ? { x: b.x, y: b.y, w: b.width, h: b.height } : null;`);
+      if (!r) return null; const pad = 28, x = Math.max(0, Math.floor(r.x - pad)), y = Math.max(0, Math.floor(r.y - pad)), w = Math.ceil(r.w + 2 * pad), h = Math.ceil(r.h + 2 * pad);
+      const img = await win.webContents.capturePage({ x, y, width: w, height: h });
+      const f = path.join(OUT, `wf-${name}.png`); fs.writeFileSync(f, img.resize({ width: w * 4 }).toPNG()); return f; };
+    const withUndo = async (fn) => {
+      const it = lib0[0]; if (!it) return ["the stack's library is empty — proved nothing"];
+      await post("/library/trash", { items: [it] });
+      try {
+        await loadUi(); await resize(1400, 900); await tab("Library");
+        for (let i = 0; i < 30 && !(await page(`return !!m.q(".topbar [aria-label=Undo]");`)); i++) await sleep(200);
+        if (!(await page(`return !!m.q(".topbar [aria-label=Undo]");`))) return ["no Undo button after a trash — proved nothing"];
+        return await fn();
+      } finally { await post("/library/undo"); }
+    };
+    // a whole pulse (1.6 s) and a bit, per frame: the dimmest frame keeps a halo ≥ UNDO_FLOOR and the pulse still breathes,
+    // on the plain background and over a live wallpaper (bg-live)
+    await cell("undo:glow", () => withUndo(async () => {
+      const v = [];
+      for (const bg of ["plain", "bg-live"]) {
+        if (bg === "bg-live") { await setSettings({ liveWallpaperBehindAllTabs: true }); await loadUi(); await tab("Library"); await sleep(800); }
+        try {
+          const r = await page(`return await ${UNDO_SAMPLE(2000)};`);
+          if (!r?.fr.length) { v.push(`${bg}: no frames sampled`); continue; }
+          const lo = r.fr.reduce((a, f) => f.h < a.h ? f : a), hi = r.fr.reduce((a, f) => f.h > a.h ? f : a);
+          console.log(`        ${bg}: ${r.fr.length} frames, halo ${lo.h.toFixed(1)}–${hi.h.toFixed(1)}; dimmest at ${lo.t.toFixed(0)} ms: ${lo.own} | ::after ${lo.after} × ${lo.op}; anims ${J(r.anims)}`);
+          if (r.fr.length < 30) v.push(`${bg}: only ${r.fr.length} frames in 2 s — proved nothing`);
+          if (lo.h < UNDO_FLOOR) v.push(`${bg}: at its dimmest (${lo.t.toFixed(0)} ms in) the Undo button's glow falls to ${lo.h.toFixed(1)} (floor ${UNDO_FLOOR}): ${lo.own} | ::after ${lo.after} × ${lo.op}`);
+          if (hi.h - lo.h < 4) v.push(`${bg}: the pulse doesn't breathe (halo ${lo.h.toFixed(1)}–${hi.h.toFixed(1)})`);
+          if (bg === "plain") {
+            // stills of the dimmest and the brightest phase (the animation's own clock, frozen there)
+            const now = await page(`const b = m.q(".topbar [aria-label=Undo]"); const a = document.getAnimations().find((x) => x.effect?.target === b); return a ? a.currentTime : null;`);
+            const tEnd = r.fr[r.fr.length - 1].t;
+            if (now != null) for (const [nm, f] of [["dim", lo], ["peak", hi]]) {
+              const at = ((now - (tEnd - f.t)) % 1600 + 1600 * 8) % 1600;
+              await page(UNDO_FREEZE(at)); await undoShot(`undo-glow-${nm}`); await page(UNDO_RUN);
+            }
+          } else await undoShot("undo-glow-bglive");
+        } finally { if (bg === "bg-live") { await setSettings({ liveWallpaperBehindAllTabs: false }); await loadUi(); await tab("Library"); } }
+      }
+      return v;
+    }));
+    // Glow effects off: no glow on any frame, no pulse; the accent ring (state, not glow) stays
+    await cell("undo:noGlow", () => withUndo(async () => {
+      const v = [];
+      await setSettings({ glows: false });
+      try {
+        await loadUi(); await tab("Library");
+        const r = await page(`return await ${UNDO_SAMPLE(1000)};`);
+        if (!r?.fr.length) return ["no frames sampled"];
+        const top = r.fr.reduce((a, f) => f.h > a.h ? f : a);
+        console.log(`        no-glow: halo max ${top.h.toFixed(1)}, ${r.fr[0].own} | ::after ${r.fr[0].after} × ${r.fr[0].op}; anims ${J(r.anims)}`);
+        if (top.h > 0.01) v.push(`Glow effects off: the Undo button still glows (halo ${top.h.toFixed(1)}: ${top.own} | ::after ${top.after})`);
+        if (r.anims.length) v.push(`Glow effects off: the Undo button still pulses (${r.anims.join(", ")})`);
+        if (!/0px 0px 0px 1px/.test(r.fr[0].own)) v.push(`Glow effects off: the Undo button lost its accent ring (${r.fr[0].own})`);
+        await undoShot("undo-noglow");
+      } finally { await setSettings({ glows: true }); await loadUi(); await tab("Library"); }
+      return v;
+    }));
+    // motion off: no loop — the glow holds still, at or above the floor
+    await cell("undo:noMotion", () => withUndo(async () => {
+      const v = [];
+      await setMotion(false);
+      try {
+        await tab("Library");
+        const r = await page(`return await ${UNDO_SAMPLE(1000)};`);
+        if (!r?.fr.length) return ["no frames sampled"];
+        const hs = r.fr.map((f) => f.h), lo = Math.min(...hs), hi = Math.max(...hs);
+        console.log(`        motion off: halo ${lo.toFixed(1)}–${hi.toFixed(1)}, ${r.fr[0].own} | ::after ${r.fr[0].after} × ${r.fr[0].op}; anims ${J(r.anims)}`);
+        if (r.anims.length) v.push(`motion off: the Undo button still pulses (${r.anims.join(", ")})`);
+        if (hi - lo > 0.5) v.push(`motion off: the glow changes (halo ${lo.toFixed(1)}–${hi.toFixed(1)})`);
+        if (lo < UNDO_FLOOR) v.push(`motion off: the steady glow is below the floor (${lo.toFixed(1)} < ${UNDO_FLOOR})`);
+        await undoShot("undo-nomotion");
+      } finally { await setMotion(true); }
+      return v;
+    }));
 
     // motion on: the click opens it — the window's edge, the control to its left pass through in-between places, the split
     // stays put; it takes the focus; only transforms / opacity / a clip animate. A blur while empty folds it the same way back.
