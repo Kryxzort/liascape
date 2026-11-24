@@ -25,7 +25,7 @@ is `scripts/liascape` (why a shell script: `docs/decisions.md` § Build & distri
 
 ## One build, one layout
 - `scripts/install.sh` is the only imperative build: `PKGBUILD` and `scripts/build-appimage.sh` run it (`DESTDIR=… PREFIX=/usr`). Add a new file, dependency or helper there, not in a package script. The flake is the one exception: it builds the same layout declaratively — change both.
-- `install.sh` preflights every toolchain before any side effect and hard-fails without the native helpers' toolchain (transitions are a core feature, never a silent no-op). `--no-scenes` is the only optional part.
+- `install.sh` preflights every toolchain before any side effect and hard-fails without liascape-player's (it plays every wallpaper: never a build without it). `--no-scenes` is the only optional part.
 - Internal executables go in `<prefix>/libexec/liascape/` (`LIBEXECDIR`; the PKGBUILD's is `/usr/lib`, so `/usr/lib/liascape/`: Arch's guidelines rule out `/usr/libexec`), never on `PATH`; only `bin/liascape` is user-facing. The launcher and the backend look in both.
 - The launcher resolves everything from its own real path (`readlink -f`) and lets an already-set `LIASCAPE_*` win; keep it relocatable (install.sh, AppImage and the flake share it).
 - CLI commands and flags (`liascape help` lists them; `Program.cs` parses them) may change freely before the first release (`CLAUDE.md` § Hard rules).

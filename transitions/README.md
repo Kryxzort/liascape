@@ -1,8 +1,8 @@
 # transitions/
 
-Shared GLSL transition assets — the single source of truth consumed by **both** the
-native renderer (`src/native/liascape-transition`) and the React UI's live previews
-(`app/ui` `TransitionPicker`). Authoring an effect once works in both places.
+Shared GLSL transition assets — the single source of truth consumed by **both**
+liascape-player (`src/player/`) and the React UI's live previews (`app/ui`
+`TransitionPicker`). Authoring an effect once works in both places.
 
 ## Layout
 - `glsl/<id>.glsl` — one transition body per effect: a `vec4 transition(vec2 uv)`

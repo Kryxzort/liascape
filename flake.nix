@@ -19,12 +19,9 @@
 
       # Runtime tools the backend shells out to. On NixOS these have no global FHS path, so we bake
       # them onto the wrapper's PATH — this is what makes liascape "just work" without the user
-      # installing ffmpeg/mpvpaper/etc. themselves.
+      # installing ffmpeg etc. themselves.
       runtimeTools = with pkgs; [
-        ffmpeg # /still thumbnail decode + frozen-frame grabs
-        mpvpaper # video wallpapers (spawned via setsid)
-        linux-wallpaperengine # Wallpaper Engine scene playback
-        mpv # mpvpaper dep + still frames
+        ffmpeg # thumbnails, imports, previews, lengths, loudness (ffmpeg + ffprobe)
         libsecret # secret-tool: the Steam sign-in in the system keyring (Helpers/SecretStore.cs; no keyring → a 0600 file)
       ];
 
@@ -110,43 +107,7 @@
         executables = [ "liascape-backend" ];
       };
 
-      # 3) Native transition renderer (wlr-layer-shell + EGL/GLES3, libmpv full-live decode).
-      # Absent → transitions no-op (instant cut); present → animated GLSL switches.
-      liascape-transition = pkgs.stdenv.mkDerivation {
-        pname = "liascape-transition";
-        inherit version;
-        src = ./src/native/liascape-transition;
-        nativeBuildInputs = [
-          pkgs.pkg-config
-          pkgs.wayland-scanner
-        ];
-        buildInputs = [
-          pkgs.wayland # wayland-client + wayland-egl
-          pkgs.libGL # egl + glesv2 (libglvnd)
-          pkgs.mpv # libmpv render API
-        ];
-        installPhase = ''
-          runHook preInstall
-          install -Dm755 liascape-transition $out/bin/liascape-transition
-          runHook postInstall
-        '';
-      };
-
-      # 3b) Scene-audio crossfade helper (persistent libpulse context — event-driven volume).
-      liascape-audio = pkgs.stdenv.mkDerivation {
-        pname = "liascape-audio";
-        inherit version;
-        src = ./src/native/liascape-audio;
-        nativeBuildInputs = [ pkgs.pkg-config ];
-        buildInputs = [ pkgs.libpulseaudio ];
-        installPhase = ''
-          runHook preInstall
-          install -Dm755 liascape-audio $out/bin/liascape-audio
-          runHook postInstall
-        '';
-      };
-
-      # 3b') LWE (linux-wallpaperengine) `next-v2` core — the scene worker's renderer.
+      # 3) LWE (linux-wallpaperengine) `next-v2` core — the scene worker's renderer.
       # third_party/lwe/PIN is the single source of truth: the owner's fork at `rev` = upstream's
       # pinned `next-v2` commit (`base`) + our patches as commits (patches/lwe/*.patch is the same set
       # as `git format-patch`; `scripts/lwe.sh verify` proves it). Fetched by hash, submodules
@@ -208,8 +169,7 @@
         '';
       };
 
-      # 3c) liascape-player (Rust): the compositor that plays wallpapers in place of mpvpaper +
-      # liascape-transition. See docs/player/architecture.md and
+      # 3b) liascape-player (Rust): the compositor that plays every wallpaper. See docs/player/architecture.md and
       # .claude/rules/player/core.md. bindgenHook + pkg-config: the libmpv FFI.
       liascape-player = pkgs.rustPlatform.buildRustPackage {
         pname = "liascape-player";
@@ -275,8 +235,6 @@
           ln -s ${backend}/bin/liascape-backend $out/libexec/liascape/liascape-backend
           ln -s ${liascape-player}/bin/liascape-player $out/libexec/liascape/liascape-player
           ln -s ${liascape-player}/bin/liascape-scene-worker $out/libexec/liascape/liascape-scene-worker
-          ln -s ${liascape-transition}/bin/liascape-transition $out/libexec/liascape/liascape-transition
-          ln -s ${liascape-audio}/bin/liascape-audio $out/libexec/liascape/liascape-audio
 
           # the one command: bare = the app (nixpkgs' electron — the bundled prebuilt can't load its libs
           # here), `liascape <command>` = the backend's CLI, `liascape ctl …` = the player's
@@ -315,8 +273,6 @@
         inherit
           ui
           backend
-          liascape-transition
-          liascape-audio
           lwe-core
           liascape-player
           liascape
@@ -328,19 +284,15 @@
         program = "${liascape}/bin/liascape";
       };
 
-      # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + native-helper make +
-      # `cargo build` for liascape-player). `inputsFrom` the native + backend + liascape-player derivations
-      # gives this shell their EXACT build env — pkg-config path AND the stdenv cc wrapper's RPATH
-      # injection, so the make'd liascape-transition / liascape-audio actually find mpv/wayland/GL at runtime
-      # (a raw system gcc would not), and `cargo`/`rustc` resolve the same mpv-unwrapped/wayland/
-      # libGL/libxkbcommon/pipewire liascape-player links against. Plus dotnet-sdk_10 + node + the
-      # runtime tools the dev backend shells out to. On NixOS the systemd dev units run
+      # Dev shell for hot-reload (scripts/dev.sh: Vite HMR + `dotnet watch` + `cargo build` for
+      # liascape-player). `inputsFrom` the backend + liascape-player derivations gives this shell their
+      # EXACT build env — pkg-config path AND the stdenv cc wrapper's RPATH injection, so `cargo`/`rustc`
+      # resolve the same mpv-unwrapped/wayland/libGL/pipewire liascape-player links against. Plus
+      # dotnet-sdk_10 + node + the runtime tools the dev backend shells out to. On NixOS the systemd dev units run
       # `nix develop -c …`; run the whole thing with `nix develop -c bash scripts/dev.sh`.
       devShells.${system}.default = pkgs.mkShell {
         inputsFrom = [
           backend
-          liascape-transition
-          liascape-audio
           liascape-player
           lwe-core # cmake + SDL2/freetype/glm/lz4/zlib/GL: `scripts/lwe.sh build` for patch work
         ];

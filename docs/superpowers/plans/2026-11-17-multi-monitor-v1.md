@@ -316,7 +316,7 @@ UI (`app/ui/src/`):
 ### Task 9: `--screen` on the CLI and the keybind reach (backend)
 
 **Files:**
-- Modify: `src/backend/Program.cs` (`Usage`, `--screen` parsing), `src/backend/Web/ActionForward.cs` (`TryForward(action, screen, …)`), `src/backend/Web/AppOps.cs` (`RunAction(action, screen, out info)`), `src/backend/Web/ServerHost.cs` (`ActionReq(string Name, string? Screen)` for `/action`), `src/backend/Web/ScreenOps.cs` (`ScreenTarget.Resolve`), `README.md` (and `docs/README-next.md` while it exists): the command list
+- Modify: `src/backend/Program.cs` (`Usage`, `--screen` parsing), `src/backend/Web/ActionForward.cs` (`TryForward(action, screen, …)`), `src/backend/Web/AppOps.cs` (`RunAction(action, screen, out info)`), `src/backend/Web/ServerHost.cs` (`ActionReq(string Name, string? Screen)` for `/action`), `src/backend/Web/ScreenOps.cs` (`ScreenTarget.Resolve`), `README.md`: the command list
 - Modify: `src/backend/Player/LiascapePlayerSelfTest.cs` (`ScreenTargetResolveAssertions`), `scripts/test-liascape-player-adapter.sh` (the keybinds section)
 
 **Interfaces:**
@@ -417,7 +417,7 @@ Independent of screens: the Library's now-playing / status line moves into the p
 - Create: `app/ui/src/components/ScreenPopover.tsx`, `app/ui/src/components/ScreenMap.tsx`
 - Modify: `app/ui/src/components/ScreenCarousel.tsx` (the preview opens the popover), `app/ui/src/components/LibraryCard.tsx` + `app/ui/src/views/Library.tsx` (the `blocked` scene cards), `app/ui/src/store/index.ts` (`patchScreen` with a 250 ms debounce per field, `previewScreen` for sliders), `app/ui/src/views/Settings.tsx` ("Scene monitors" only when `!liascapeActive`; a "Scene frame rate" row under liascape-player), `app/ui/src/settingsLevel.ts` (`sceneFps`: standard), `app/ui/src/store/index.ts` `SETTINGS_DEFAULTS` (`sceneFps: 15`), `app/ui/src/index.css` (`.screen-pop*`, `.screen-map*`, z-index 90 like the dropdowns)
 - Modify: `app/shell/probe-screens.js`, `app/shell/probe-matrix.js` (the cell at ~3304 that sets `sceneMonitors` VIRTUAL-1 45 → the "Scene frame rate" row), `app/shell/probe-settings.js` (`levels:*` with the new row), `app/shell/probe-icons.js` (`icon:act:*` for new acting icons)
-- Modify: `README.md` + `docs/README-next.md` (multi-monitor in the feature list), `docs/TODO.md` (the "Multi-monitor management" item → what remains: span, the sound priority list, per-wallpaper-per-screen settings, "the focused screen" + `--screen focused`, per-screen scene FPS), `docs/decisions.md` (§ "A follower's sound and speed are All's: followers share one source") (dated headings, `.claude/rules/writing-rules.md` § `docs/decisions.md`); this plan file is deleted in the commit that lands Task 13 (its still-true facts moved to their homes), the spec stays while the deferred parts are open
+- Modify: `README.md` (multi-monitor in the feature list), `docs/TODO.md` (the "Multi-monitor management" item → what remains: span, the sound priority list, per-wallpaper-per-screen settings, "the focused screen" + `--screen focused`, per-screen scene FPS), `docs/decisions.md` (§ "A follower's sound and speed are All's: followers share one source") (dated headings, `.claude/rules/writing-rules.md` § `docs/decisions.md`); this plan file is deleted in the commit that lands Task 13 (its still-true facts moved to their homes), the spec stays while the deferred parts are open
 
 **Interfaces:**
 - Consumes: Tasks 8–12 (`POST /screens/{id}`, `/screens/all`, `/preview {screen}`, `ScreensView`).

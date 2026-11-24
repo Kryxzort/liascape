@@ -11,7 +11,7 @@ Environment=LIASCAPE_PORT=5174
 # DOTNET_ROOT is provided by the flake devShell (was CachyOS /usr/share/dotnet — wrong on NixOS)
 Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
 Environment=DOTNET_NOLOGO=1
-# graphical session env so the players this backend spawns (liascape-player / mpvpaper / LWE) can attach to the
+# graphical session env so the liascape-player this backend spawns can attach to the
 # compositor (else they die → no wallpaper). PassEnvironment forwards them from the user manager (which has
 # them: DISPLAY=:1 is this session's Xwayland — the old explicit DISPLAY=:0 fallback was wrong);
 # WAYLAND_DISPLAY/XDG_SESSION_TYPE keep explicit fallbacks in case they aren't imported at start.

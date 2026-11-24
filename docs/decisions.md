@@ -34,8 +34,8 @@ protected by the API token like every other write, not by an allow-list. Every s
 
 ### Report a missing dependency with a warning, never hide the control — 2026-10-28
 Owner: "make missing libraries fail loudly". `/health/features` lists each dependency that silently degrades a feature and
-the UI puts a `WarnIcon` on the affected rows, which stay usable. `wl-copy`, `grim` and `mpvpaper` are left out on
-purpose: the UI copies with `navigator.clipboard`, the other two are legacy only. `.claude/rules/backend/api.md` § Feature health.
+the UI puts a `WarnIcon` on the affected rows, which stay usable. `wl-copy` is left out on purpose: the UI copies with
+`navigator.clipboard`. `.claude/rules/backend/api.md` § Feature health.
 
 ### Default the volume keys to the playing item's own volume — 2026-10-26
 `VolumeKeyTarget=auto` moves the playing item's override when it has one, else the global. Pushing a new global onto an

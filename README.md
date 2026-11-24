@@ -13,9 +13,10 @@ animated transition between them. Once you close the window, the wallpaper keeps
 <!-- Outdated: this screenshot shows an old version of the app. A new one needs a clean, sandboxed library (no personal wallpapers or accounts in view). -->
 ![Liascape](docs/app.png)
 
-**Status: pre-release.** Video, GIF and picture wallpapers, the library, playlists, transitions and all the
-wallpaper sources work every day. Wallpaper Engine scenes are experimental. There are no packages yet: you install from source or with Nix. Settings and file formats may still
-change between versions.
+**Status: pre-release.** Video, GIF and picture wallpapers, Wallpaper Engine scenes, the library, playlists,
+transitions and all the wallpaper sources work every day. Most scenes look as they do on Windows; a few still differ.
+There are no packages yet: you install from source or with Nix. Settings and file formats may still change between
+versions.
 
 ## What it does
 
@@ -31,6 +32,9 @@ its sidebar. Getting a preset gets its scene too.
 Library tab's Import button (its arrow picks single files) or by dropping it on the window: you see what it found before
 anything lands. A folder you keep watched (Settings, Watched folders) brings in new files by itself. Click a card to apply it. Right-click it to open its sidebar, where you can set that wallpaper's own volume and speed, and change a
 scene's own options.
+
+**Plays scenes.** Liascape draws Wallpaper Engine scenes itself, with no separate program. Turn them on in Settings →
+Wallpaper Engine → Play scenes. They use the asset files of your own Wallpaper Engine install.
 
 **Rotates them.** Mark cards for the playlist and press Play. By default a video plays to its end and then the next
 one starts; scenes and pictures switch after 30 minutes. You can switch on a fixed timer instead, set a minimum and
@@ -53,6 +57,7 @@ is affected: it restarts, and after three crashes in a minute it shows a still p
 - A Wayland compositor that supports the wlr-layer-shell protocol, such as Hyprland, Sway or KDE Plasma. GNOME doesn't
   support it, so Liascape can't draw a wallpaper there.
 - An x86-64 Linux machine.
+- PipeWire as your sound server, for auto-mute. Most current distros use it already.
 - For Wallpaper Engine scenes: Wallpaper Engine installed through Steam. Liascape uses its asset files and looks for
   it in your Steam libraries.
 - For Workshop downloads: Steam. Settings → Getting Workshop wallpapers offers three ways to get them: through the
@@ -71,8 +76,8 @@ yet, and the AppImage script hasn't been updated, so use Nix or build from sourc
 
 ### NixOS and Nix
 
-The flake brings its own Electron, mpvpaper, linux-wallpaperengine and ffmpeg, so you don't install those yourself.
-You need flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];`).
+The flake brings its own Electron and ffmpeg, so you don't install those yourself. You need flakes enabled
+(`nix.settings.experimental-features = [ "nix-command" "flakes" ];`).
 
 ```bash
 nix run github:Kryxzort/liascape             # try it without installing
@@ -102,8 +107,8 @@ This builds everything and installs the `liascape` command to `~/.local/bin` wit
 build dependencies and stops with the exact package line for Arch, Debian/Ubuntu and Fedora if something is missing.
 It doesn't check for .NET or Node.js, so install those first (see below).
 
-Add `--no-scenes` to skip Wallpaper Engine scene support in `liascape-player`. That needs fewer packages and changes
-nothing else. Building with scenes downloads the linux-wallpaperengine source, so it needs network access.
+Add `--no-scenes` to build without Wallpaper Engine scenes. That needs fewer packages and changes nothing else.
+Building with scenes downloads the linux-wallpaperengine source, so it needs network access.
 
 The script doesn't install Electron, which runs Liascape's window. Put an `electron45` or `electron` binary on your
 `PATH` (on Arch, `electron45-bin` from the AUR) or point `LIASCAPE_ELECTRON` at one. Liascape targets Electron 45; versions older than 42
@@ -115,7 +120,7 @@ are known to crash on NVIDIA. Only the window needs Electron: the commands work 
 | For | Arch | Debian / Ubuntu | Fedora |
 |---|---|---|---|
 | Rust (edition 2024) | `rust` | `cargo rustc` | `cargo rust` |
-| Native toolchain and headers | `base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang` | `build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev` | `gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel` |
+| Native toolchain and headers | `base-devel wayland libglvnd mpv pipewire clang` | `build-essential pkg-config libwayland-dev libegl-dev libmpv-dev libpipewire-0.3-dev libclang-dev` | `gcc pkgconf wayland-devel mesa-libEGL-devel mpv-libs-devel pipewire-devel clang-devel` |
 | Wallpaper Engine scenes (skip with `--no-scenes`) | `cmake git sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg libglvnd` | `cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libgl-dev` | `cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel libglvnd-devel` |
 | .NET 10 SDK | `dotnet-sdk aspnet-targeting-pack` (10.x) | `dotnet-sdk-10.0` | `dotnet-sdk-10.0` |
 | Node.js and npm | `nodejs npm` | `nodejs npm` | `nodejs npm` |
@@ -212,7 +217,7 @@ Liascape is licensed under the [GNU GPL v3.0](LICENSE). It started as a fork of
 [`LICENSE.upstream-MIT`](LICENSE.upstream-MIT).
 
 Scenes are drawn by a fork of [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine)
-(GPL-3.0). `liascape-player` reuses techniques from [mpvpaper](https://github.com/GhostNaN/mpvpaper) (GPL-3.0), and the
+(GPL-3.0). Liascape's player reuses techniques from [mpvpaper](https://github.com/GhostNaN/mpvpaper) (GPL-3.0), and the
 transition effects come from [gl-transitions](https://github.com/gl-transitions/gl-transitions) (MIT).
 [`CREDITS.md`](CREDITS.md) lists what came from where, and [`UPSTREAM.md`](UPSTREAM.md) how each is tracked.
 

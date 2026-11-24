@@ -9,7 +9,7 @@
 
 ## Checklist
 
-- [ ] A user-visible change updates `README.md` (and `docs/README-next.md`) where they already describe it
+- [ ] A user-visible change updates `README.md` where it already describes it
 - [ ] A new setting applies live to the playing wallpaper
 - [ ] A new UI element follows the checklist at the top of `.claude/rules/ui/design.md` (theme, glow, motion off, translucency)
 - [ ] Commit titles are short and Title-Case, no period

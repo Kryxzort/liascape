@@ -2,7 +2,7 @@
 
 Liascape is a live-wallpaper manager for Wayland: an Electron + React UI (`app/`) over a headless C# backend
 (`src/backend/`, the CLI and a loopback web API). Wallpapers play in `liascape-player`, a Rust compositor
-(`src/player/`), the only engine; the legacy engine's native helpers (`src/native/`) are unreachable and going.
+(`src/player/`), the only engine.
 Users type one command, `liascape` (`scripts/liascape`): bare = the app, `liascape <command>` = the CLI, `liascape ctl …` = the player's socket.
 
 ## Verify your work
@@ -43,7 +43,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Every new UI element follows the app's design and its toggles (theme, glow / `no-glow`, motion / `no-motion`, translucency / `bg-live`, themed controls, a probe): the checklist at the top of `.claude/rules/ui/design.md`. Put it in every UI agent's brief.
 - Commit messages: short, title-case, no period (`Fix App Name`, `Add Shuffle Toggle`); the story (what broke, who asked, dates) goes in the body. `scripts/git-hooks/commit-msg` checks the title and the trailer below (once per clone: `git config core.hooksPath scripts/git-hooks`).
 - Every commit names each Claude that wrote part of it, one trailer per model and effort: `Claude-Agent: <model id>, effort <low|medium|high|xhigh|max|unknown>, <role>` (e.g. `Claude-Agent: claude-opus-5-5, effort medium, comment sweep (src/player)`); the effort its starter set (agents), else `unknown` — a session can't see its own effort, so never guess one. A subagent reports its model and effort with its work so the committer can name it.
-- A change to something `README.md` already says (install, a command, a feature, a setting it names) updates it (and `docs/README-next.md` while it exists) in the same commit; it never lists every change (`.claude/rules/writing-rules.md` § README.md).
+- A change to something `README.md` already says (install, a command, a feature, a setting it names) updates it in the same commit; it never lists every change (`.claude/rules/writing-rules.md` § README.md).
 - Code comments say why, never history — no dates, owner quotes or R/Phase/Task numbers: `.claude/rules/writing-rules.md` § Code comments.
 
 ## Where the rule for X lives

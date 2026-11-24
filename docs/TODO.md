@@ -10,7 +10,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        a) liascape-player becomes the only engine: `PlayerEngine` and every `legacy` branch go (backend, UI, settings,
        probes, `scripts/install.sh`, flake, PKGBUILD), with mpvpaper, the LWE launcher path, `src/native/`
        (`liascape-transition`, `liascape-audio`), the legacy engine's rule file and its decision
-       entries; `docs/README-next.md` replaces `README.md`; the § Switch-over bar items below are closed by it.
+       entries; `README.md` describes liascape-player only (done); the § Switch-over bar items below are closed by it.
        b) The start-up seam: the restored wallpaper's layer waits for its source's `Ready` (owner's pick of § 5).
        c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
        `LICENSE.upstream-MIT` and the README's fork line go.
@@ -113,9 +113,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `liblttng-ust`, "unused" libc stubs in .NET's own libraries, run-time-only depends it can't see), and the package
       passed an install test as a throwaway user: `liascape help`, the app under a headless sway, a video (NVDEC) and a
       scene, nothing read from a build tree or a source cache. Left:
-      - [ ] At the switch-over: drop the `mpvpaper` / `linux-wallpaperengine` optdepends (and `libpulse` if nothing
-            calls `pactl`/`parec` any more), and `libxkbcommon` / `zlib` if still nothing links them (`namcap` flags both;
-            install.sh still preflights xkbcommon), then publish `liascape-git` to the AUR.
+      - [ ] Publish `liascape-git` to the AUR (first drop `zlib` from its depends if still nothing links it: `namcap`
+            flags it).
       - [ ] After the switch-over, rebuild the AppImage (`scripts/build-appimage.sh`, still bundling only Electron): build
             from install.sh's staged tree on an old glibc (an Ubuntu 22.04 container); bundle libmpv and its FFmpeg,
             libplacebo, libass, SDL2, harfbuzz/freetype, lz4, libxkbcommon and static `ffmpeg`/`ffprobe`; take glibc,
@@ -176,7 +175,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] **A tray icon** (owner): a StatusNotifierItem with the controls on right-click (play / pause, next, previous,
       mute and volume, the playlist on/off and which playlist, a recent-wallpapers submenu, open Liascape, quit) and
       left-click opening the app. It must cost next to nothing while the window is closed: Electron's `Tray` keeps the
-      whole Electron main process alive (100+ MB), so prefer a small native helper (like `src/native/liascape-audio`)
+      whole Electron main process alive (100+ MB), so prefer a small native helper
       that speaks SNI + dbusmenu itself and drives the backend's API / `liascape ctl`, idle on D-Bus with no polling
       (it listens for the backend's change events), and a setting to turn it off. Its icon can follow the system's
       light / dark preference (Lavender / Night). Check how Hyprland bars (waybar, DMS, noctalia) render SNI menus
@@ -212,9 +211,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `programs.sh crash`), and the owner's calls in § 5 (count frozen onsets? start-up seam? Phase 4 vs 5?).
       Fixed on the way: the battery's late-B "handoff" check (the test) and the dropout probe's ended-A snapshot
       (`started_snapshot_of_a_long_ended_a_is_past_its_end`).
-      - [ ] At the flip, `docs/README-next.md` replaces `README.md` (fix its relative links if any changed meanwhile),
-            and its line in `.claude/rules/writing-rules.md` § Where a new fact goes goes away; the Debian/Fedora/Arch
-            lines in `scripts/install.sh`'s native-toolchain check drop the legacy-only packages to match its table.
       - [ ] After the flip, the upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`):
             no upstream livepaper line left in the tree, then `LICENSE.upstream-MIT` and the README's fork line go
             (history stays). About 1,600 lines left: `PlayerHelper.cs` (~580, mostly legacy, goes with the flip),
