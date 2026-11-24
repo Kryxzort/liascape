@@ -320,7 +320,7 @@ public static class PresetBases
         }
     }
 
-    // every library preset → its state with the Liascape player (the engine changes nothing about where its base is)
+    // every library preset → its state
     static Dictionary<string, (PresetProblem, string?)> Snapshot()
     {
         var map = new Dictionary<string, (PresetProblem, string?)>(StringComparer.Ordinal);

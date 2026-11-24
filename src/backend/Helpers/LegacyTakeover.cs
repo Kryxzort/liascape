@@ -35,7 +35,7 @@ public static class LegacyTakeover
     // outlives a reboot: its number may belong to anything by now); its pid file goes with it.
     public static void StopDaemons()
     {
-        var stopping = new List<(int pid, string what)>();
+        var stopping = new List<(int pid, ulong start, string what)>();
         foreach (var (pidFile, verb) in new[] { (ConfigFile("timer.pid"), "timer-daemon"), (ConfigFile("restart.pid"), "restart-daemon"), (ConfigFile("monitor.pid"), "monitor-daemon") })
         {
             try
@@ -45,7 +45,8 @@ public static class LegacyTakeover
                 {
                     string[] argv = [];
                     try { argv = File.ReadAllText($"/proc/{pid}/cmdline").Split('\0'); } catch { }
-                    if (argv.Contains(verb) && argv.Any(a => a.Contains("liascape"))) stopping.Add((pid, $"a leftover {verb}"));
+                    if (argv.Contains(verb) && argv.Any(a => a.Contains("liascape")) && Stat(pid) is { } st)
+                        stopping.Add((pid, st.start, $"a leftover {verb}"));
                 }
                 File.Delete(pidFile);
             }
@@ -69,7 +70,7 @@ public static class LegacyTakeover
             if (n.StartsWith('.') && n.EndsWith("-wrapped")) n = n[1..^"-wrapped".Length];
             return n;
         }
-        var stopping = new List<(int pid, string what)>();
+        var stopping = new List<(int pid, ulong start, string what)>();
         foreach (var dir in Directory.EnumerateDirectories("/proc"))
         {
             if (!int.TryParse(Path.GetFileName(dir), out int pid) || pid == Environment.ProcessId) continue;
@@ -82,7 +83,7 @@ public static class LegacyTakeover
                 if (name == null) continue;
                 var env = File.ReadAllText(Path.Combine(dir, "environ")).Split('\0');
                 if (!env.Contains("HOME=" + home)) continue;
-                stopping.Add((pid, $"a legacy wallpaper process: {name}"));
+                if (Stat(pid) is { } st) stopping.Add((pid, st.start, $"a legacy wallpaper process: {name}"));
             }
             catch { } // gone meanwhile, or not ours to read
         }
@@ -90,39 +91,66 @@ public static class LegacyTakeover
         return stopping.Count;
     }
 
-    // SIGTERM each (a clean exit: mpvpaper and LWE release their outputs and audio streams), then SIGKILL whatever is
-    // still there once the grace ran out.
-    private static void Stop(List<(int pid, string what)> procs)
+    // SIGTERM each with its process tree (a daemon's children, a wallpaper's helpers — a whole-tree kill, as the build
+    // that started them did), then SIGKILL whatever is still there once the grace ran out. Each process is known by its
+    // pid AND its start time (`/proc/<pid>/stat` field 22) from the moment it was matched: a pid that exited and was
+    // reused meanwhile is never signalled. Guard: scripts/test-player-binary.sh § a legacy settings file
+    private static void Stop(List<(int pid, ulong start, string what)> procs)
     {
         if (procs.Count == 0) return;
-        foreach (var (pid, what) in procs)
+        var targets = new List<(int pid, ulong start)>();
+        var all = Snapshot();
+        foreach (var (pid, start, what) in procs)
         {
-            kill(pid, SIGTERM);
-            LiascapePlayerClient.Log($"stopped {what} (pid {pid})");
+            if (!all.TryGetValue(pid, out var root) || root.start != start) continue; // gone already (or its pid reused)
+            var tree = new List<(int pid, ulong start)> { (pid, start) };
+            for (int i = 0; i < tree.Count; i++)
+                foreach (var (child, st) in all)
+                    if (st.ppid == tree[i].pid && !tree.Any(t => t.pid == child)) tree.Add((child, st.start));
+            foreach (var t in tree) if (Same(t)) kill(t.pid, SIGTERM);
+            targets.AddRange(tree);
+            LiascapePlayerClient.Log($"stopped {what} (pid {pid}){(tree.Count > 1 ? $" with {tree.Count - 1} child process(es)" : "")}");
         }
         var deadline = Environment.TickCount64 + TermGraceMs;
-        var left = procs.Select(p => p.pid).ToList();
+        var left = targets.Where(Same).ToList();
         while (left.Count > 0 && Environment.TickCount64 < deadline)
         {
             Thread.Sleep(50);
-            left.RemoveAll(Gone);
+            left.RemoveAll(t => !Same(t));
         }
-        foreach (var pid in left)
+        foreach (var t in left)
         {
-            kill(pid, SIGKILL);
-            LiascapePlayerClient.Log($"pid {pid} ignored SIGTERM for {TermGraceMs} ms — SIGKILL");
+            if (!Same(t)) continue;
+            kill(t.pid, SIGKILL);
+            LiascapePlayerClient.Log($"pid {t.pid} ignored SIGTERM for {TermGraceMs} ms — SIGKILL");
         }
     }
 
-    // exited, or a zombie its parent hasn't reaped yet (it holds nothing any more)
-    private static bool Gone(int pid)
+    // Every live process: its parent and start time (zombies and exiting ones left out: they hold nothing any more).
+    private static Dictionary<int, (int ppid, ulong start)> Snapshot()
+    {
+        var d = new Dictionary<int, (int, ulong)>();
+        foreach (var dir in Directory.EnumerateDirectories("/proc"))
+            if (int.TryParse(Path.GetFileName(dir), out int pid) && pid != Environment.ProcessId && Stat(pid) is { } st)
+                d[pid] = st;
+        return d;
+    }
+
+    // still the process matched (same start time) and alive
+    private static bool Same((int pid, ulong start) t) => Stat(t.pid) is { } st && st.start == t.start;
+
+    // `/proc/<pid>/stat`: fields after the `(comm)` — state (3), ppid (4), start time (22); null when gone or a zombie
+    private static (int ppid, ulong start)? Stat(int pid)
     {
         try
         {
             var stat = File.ReadAllText($"/proc/{pid}/stat");
             int close = stat.LastIndexOf(')');
-            return close < 0 || close + 2 >= stat.Length || stat[close + 2] is 'Z' or 'X';
+            if (close < 0) return null;
+            var f = stat[(close + 2)..].Split(' ');
+            if (f.Length < 20 || f[0] is "Z" or "X") return null;
+            return (int.Parse(f[1]), ulong.Parse(f[19]));
         }
-        catch { return true; }
+        catch { return null; }
     }
 }

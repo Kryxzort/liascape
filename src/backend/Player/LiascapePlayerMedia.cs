@@ -1286,8 +1286,8 @@ public static class LiascapePlayerMedia
     //   no_audio, hwdec, fps_cap, cache, demuxer_max_mib, demuxer_back_mib = the global settings
     //   gain.mute = −96 when muted, else 0
     //   + the layer: lay:*:main.fit = VideoScale (Fresh passes only; one `set` if any main layer differs)
-    //   Not resolved: `loop` (the recipe owns A's loop under rotation — `SetLoop`, single wallpaper only)
-    //   and `player.paused` (the player is its authority, I3).
+    //   Not resolved: `loop` (a single wallpaper's source is created with loop: true; under a rotation the program
+    //   owns it) and `player.paused` (the player is its authority, I3).
     // DIFF: each desired value against what the source runs — the graph values of a `state` read (Fresh)
     //   or the value cache (the last read + every `set` made since, dropped with the map). Numbers within
     //   1e-4, strings/bools exact; only a differing value is sent: `set <id>.<prop>`, one per source —

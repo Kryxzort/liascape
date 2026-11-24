@@ -369,6 +369,12 @@ public static class LiascapePlayerSelfTest
         // a scene worker's own stream (its own process, its own app name here) — by node name
         Own("scene worker stream", Block("x", "1", "liascape-player-scene.src4", "12"), true);
         Own("another app", Block("Firefox", "1", "Firefox", "12"), false);
+        // AudioMonitor counts every stream that isn't ours: a user's own mpv is foreign like any other app, ours by
+        // ownership only. Guard for AudioMonitor.ParseStreams
+        var listing = "Sink Input #" + Block("mpv", "77", "mpv", "12") + "Sink Input #" + Block("mpv", "4242", "mpv", "12").Replace("7\n", "8\n");
+        var (listed, foreignIds) = AudioMonitor.ParseStreams(listing, b => LiascapePlayerMedia.IsOwnStream(b, playerPid: 4242, busSinkIndex: "57"));
+        if (string.Join(",", listed.Order()) != "7,8" || string.Join(",", foreignIds) != "7")
+            fails.Add($"ParseStreams: listed [{string.Join(",", listed.Order())}], foreign [{string.Join(",", foreignIds)}], want listed [7,8], foreign [7] (a user's mpv counts, the player's own doesn't)");
     }
 
     // ---- scenes under liascape-player (pure decisions + a scene's create props) ---------------------

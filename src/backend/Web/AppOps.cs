@@ -161,7 +161,7 @@ public static class AppOps
 
     // GET /library/scene-props: the scene's properties in display order, each with its effective value, default,
     // whether it's overridden and visible (its `condition` over the effective values). A change reaches the playing
-    // scene at once. Guard: scripts/test-liascape-player-adapter.sh § scene props ("no engine / note / live")
+    // scene at once. Guard: scripts/test-liascape-player-adapter.sh § Phase 2 ("GET /library/scene-props")
     public static object SceneProps(string path)
     {
         object props = IsSceneItem(path) ? SceneProperties.Describe(path, LibraryService.ReadSceneProps(path)) : Array.Empty<object>();

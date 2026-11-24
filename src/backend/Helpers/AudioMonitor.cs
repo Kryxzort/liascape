@@ -450,8 +450,6 @@ public static class AudioMonitor
         {
             if (!uint.TryParse(block.Split('\n')[0].Trim(), out uint blockId)) continue;
             listed.Add(blockId);
-            if (block.Contains("application.process.binary = \"mpv\"")) continue;
-            if (block.Contains("application.name = \"mpv\"")) continue;
             if (isOwn != null && isOwn(block)) continue;
             result.Add(blockId);
         }

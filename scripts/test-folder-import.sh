@@ -365,8 +365,7 @@ echo "== presets: a preset folder is its own preset item and brings its base sce
 # Wallpaper Engine's own preset files (scripts/test-fixtures/presets: real Workshop ids), each with a synthetic preview.
 # Their bases are synthetic: 2932157836 a scene in another folder of the tree, 3419466417 a web wallpaper there (its
 # project.json names its id), 3354740764 a scene there too (the user unticks it) and, later, in a watched folder. The
-# engine is liascape-player through a stub binary that never plays (presets play only there); the legacy engine's reason
-# at the end.
+# player is a stub binary that never plays; a legacy settings file (ignored) at the end.
 FX=$ROOT/scripts/test-fixtures/presets
 PT=$T/presets-tree
 fxcopy() {   # $1 = fixture id, $2 = destination folder: the fixture with a preview of its own type

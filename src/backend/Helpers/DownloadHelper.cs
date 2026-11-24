@@ -82,8 +82,8 @@ public static class DownloadHelper
             {
                 WriteIndex(isScene: true);
                 progress?.Report(1.0);
-                // folder-based scene: VideoPath IS the item folder (local/ symlink, or owned workshop/ copy).
-                // LWE launches a local item by id, an owned copy by dir path — PlayerHelper derives both.
+                // folder-based scene: VideoPath IS the item folder (local/ symlink, or owned workshop/ copy);
+                // the player loads the item folder (VideoPath).
                 return Result(itemDir, true, FindInDir(itemDir, "preview.jpg", "preview.png"), FindInDir(itemDir, "preview.gif", "preview.webp"),
                     copiedSceneDir: source == LibraryStore.Workshop ? itemDir : null);
             }
