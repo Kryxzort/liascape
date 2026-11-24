@@ -1,90 +1,101 @@
 <p align="center"><img src="app/icon/liascape-night.svg" alt="" width="128"></p>
 
-<h1 align="center">Liascape</h1>
+# Liascape
 
-Liascape puts live wallpapers on your Wayland desktop. It plays videos, GIFs, pictures and Wallpaper Engine
-wallpapers, including Wallpaper Engine's interactive scenes, and gives you one place to find them, keep them and
-rotate through them.
+Liascape is a Linux app that puts wallpapers on your Wayland desktop.
+The idea may sound simple, but the execution isn't.
+Liascape goes further than any wallpaper app has gone. Ever.
 
-You browse a few wallpaper sites and the Steam Workshop from inside the app, download what you like into your library,
-and apply it with a click. Build a playlist and Liascape switches wallpapers on a timer or when a video ends, with an
-animated transition between them. Once you close the window, the wallpaper keeps playing.
+**Liascape supports:**
+- Videos
+- GIFs
+- Pictures
+- Wallpaper Engine scenes
+- Wallpaper Engine and Lively Wallpaper web wallpapers (coming soon)
 
-<!-- Outdated: this screenshot shows an old version of the app. A new one needs a clean, sandboxed library (no personal wallpapers or accounts in view). -->
-![Liascape](docs/app.png)
+## This is the last wallpaper app you'll ever need
 
-**Status: pre-release.** Video, GIF and picture wallpapers, the library, playlists, transitions and all the
-wallpaper sources work every day. The new built-in player (`liascape-player`) and Wallpaper Engine scenes on it are
-experimental. There are no packages yet: you install from source or with Nix. Settings and file formats may still
-change between versions.
+The sheer overengineering has already added everything.
 
-## What it does
+Browse and download from Wallpaper Engine's Workshop, MoeWalls, DesktopHut and more!
 
-**Finds wallpapers.** The Browse tab searches MotionBgs, Moewalls, Desktophut and the Wallpaper Engine Steam
-Workshop. You can browse the Workshop without signing in: filter by tags and age rating, sort the way Steam does, read
-comments, and see a creator's other wallpapers. Your local Wallpaper Engine folder shows up as a source too.
-Wallpaper Engine's web and application wallpapers don't play, so Browse leaves them out. Presets (someone's saved
-settings for a scene) play over their scene in liascape-player: tick Preset in the Workshop's Type filter, or open a
-scene's Presets from its sidebar. Getting a preset gets its scene too.
+![Browsing the Wallpaper Engine Workshop](docs/preview/browse-Wallpaper-engine-workshop.png)
 
-**Keeps a library.** Downloads land in your library, and so does anything new in your Wallpaper Engine Workshop folder
-(you can turn that off). Import a folder of your own videos, GIFs and pictures, or a backed-up Workshop folder, with the
-Library tab's Import button (its arrow picks single files) or by dropping it on the window: you see what it found before
-anything lands. A folder you keep watched (Settings, Watched folders) brings in new files by itself. Click a card to apply it. Right-click it to open its sidebar, where you can set that wallpaper's own volume and speed, and change a
-scene's own options.
+### Want cool transitions?
 
-**Rotates them.** Mark cards for the playlist and press Play. By default a video plays to its end and then the next
-one starts; scenes and pictures switch after 30 minutes. You can switch on a fixed timer instead, set a minimum and
-maximum play time, shuffle, and save and load named playlists. Any playlist can override the global rotation settings.
+Sure, 122 of them.
+Unlike Wallpaper Engine, ours don't freeze the current wallpaper on its last frame.
+Unlike other Linux wallpaper apps, you don't need a PNG: use them on scenes, videos, GIFs or whatever your heart desires.
 
-**Switches smoothly.** Turn on transitions (Settings → Playlist & rotation → Transitions) and pick from over a hundred animated
-effects from the [gl-transitions](https://github.com/gl-transitions/gl-transitions) collection. The sound crossfades
-too.
+![Transitions](docs/preview/transitions.gif)
 
-**Minds the sound.** Audio normalization evens out loudness between wallpapers. Auto-mute quiets the wallpaper while
-another app plays sound, and can be limited to media players such as Spotify or a browser. Both start off; turn them
-on in Settings → Sound and Settings → Auto-mute.
+### Make playlists
 
-**Stays out of the way.** With `liascape-player`, the wallpaper pauses while a maximized or fullscreen window covers
-it, eases off a scene that makes your GPU stutter, and can stop scenes that use too much video memory. If a scene
-crashes, only that scene is affected: it restarts, and after three crashes in a minute it shows a still picture.
+<!-- stand-in until the animations are refined further -->
+![The playlist bar](docs/preview/playlist-bar.gif)
 
-## Two players
+The playlist bar has a macOS dock-like animation, so you can look cool while changing your wallpaper.
+Create, save and load playlists, and override the global settings with per-playlist ones!
+Find the wallpaper that's playing with the click of a button.
+Everything's thought of.
 
-Liascape has two ways to draw the wallpaper. You choose in Settings → Under the hood → Player engine (set the
-settings level at the top to Advanced to see it). It switches live.
+### Filter through wallpapers
 
-- **Legacy** is the default today. It plays videos with [mpvpaper](https://github.com/GhostNaN/mpvpaper) and scenes
-  with [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine), which you install yourself.
-- **liascape-player** is the new all-in-one player, built with Liascape. It plays videos, pictures and scenes itself
-  (scenes need no separate program) and adds pausing behind windows, the GPU and video memory settings, and Windows
-  fonts in scenes. It's marked experimental and will replace the legacy player.
+![Filters](docs/preview/filters.gif)
 
-## What you need
+### Make it behave how you want
 
-- A Wayland compositor that supports the wlr-layer-shell protocol, such as Hyprland, Sway or KDE Plasma. GNOME doesn't
-  support it, so Liascape can't draw a wallpaper there.
-- An x86-64 Linux machine.
-- For Wallpaper Engine scenes: Wallpaper Engine installed through Steam. Liascape uses its asset files and looks for
-  it in your Steam libraries.
-- For Workshop downloads: Steam. Settings → Getting Workshop wallpapers offers three ways to get them: through the
-  running Steam app, by opening the item's page in Steam, or by subscribing with a Steam login inside Liascape (the
-  default).
+Normalize audio, auto-mute wallpapers or pause them behind windows: the choice is yours.
 
-Scenes that name a Windows font (Arial, Consolas and so on) use your installed fonts, like any app. The packages bring
-open look-alikes (Liberation, Cascadia Mono, Selawik, Comic Neue and others), and the real Arial, Verdana, Comic Sans and
-the other core web fonts come from your distro's package (`ttf-ms-fonts` from the AUR, `corefonts` in the Nix package).
-When a scene's font isn't installed, its sidebar says which one stands in for it.
+![Settings](docs/preview/settings-top-expert.png)
+
+### Tinker with your wallpapers without limits!
+
+<!-- stand-in until the sidebar rework -->
+![A scene's sidebar](docs/preview/scene-sidebar-showcase.gif)
+
+## Quirks
+
+Uh, some things do get a bit quirky sometimes, but do I blame them? No.
+
+- **Scene compatibility isn't perfect.**
+  A lot of effort has gone into making it better than the upstream [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine), but I can't guarantee perfection.
+  If you notice a difference between how Wallpaper Engine renders a scene and how Liascape does, please open an issue. I'd love to fill in the gaps.
+- **Windows fonts don't look perfect by default.**
+  I can't legally ship Windows fonts in the repo, so you'll have to get them yourself in **very legal and ethical ways!**
+  If Liascape can't find a Windows font on your computer, it uses a look-alike with a similar feel.
+- **Steam shows you as playing Wallpaper Engine.**
+  Workshop downloads through the Steam app need you to own Wallpaper Engine, because Liascape poses as Wallpaper Engine to make Steam download the wallpapers. While it does that, Steam also shows you as playing it.
+  The status lasts from your first Workshop download until 60 seconds after you leave the Browse tab.
+
+## Okay, but how do I use it!?
+
+Simple:
+
+1. [Install Liascape](#install).
+2. Embrace the beautiful UI.
+3. Go to the Browse tab and download your cute wallpapers.
+4. Tinker with the wallpapers to your heart's content.
+5. Set Liascape's settings however you see fit.
+6. Add `liascape restore` to your compositor's startup (`exec-once = liascape restore` in Hyprland, `exec liascape restore` in Sway).
+7. Done!
+
+The rest you'll learn by using Liascape.
 
 ## Install
 
-There's no AUR package or AppImage yet. `scripts/PKGBUILD` builds the current app but hasn't been tested on Arch
-yet, and the AppImage script hasn't been updated, so use Nix or build from source.
+As with any other application, Liascape depends on 25 packages (and 364 more that npm and Cargo fetch for you while it builds).
+
+You'll need:
+- a Wayland compositor that supports wlr-layer-shell, such as Hyprland, Sway or KDE Plasma (GNOME doesn't);
+- an x86-64 machine;
+- PipeWire, for auto-mute;
+- Steam, for Workshop downloads, and Wallpaper Engine installed through it, for scenes.
 
 ### NixOS and Nix
 
-The flake brings its own Electron, mpvpaper, linux-wallpaperengine and ffmpeg, so you don't install those yourself.
-You need flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];`).
+The flake brings everything with it, Electron and ffmpeg included. You need flakes enabled
+(`nix.settings.experimental-features = [ "nix-command" "flakes" ];`).
 
 ```bash
 nix run github:Kryxzort/liascape             # try it without installing
@@ -101,7 +112,47 @@ inputs.liascape.url = "github:Kryxzort/liascape";
 environment.systemPackages = [ inputs.liascape.packages.${pkgs.system}.default ];
 ```
 
-### Other distros: build from source
+To build it by hand instead, `nix develop` in the cloned repo gives you a shell with every build dependency, and
+`bash scripts/install.sh` builds from there.
+
+### Arch
+
+```bash
+sudo pacman -S --needed base-devel rust clang cmake git wayland wayland-protocols libglvnd mpv libpulse pipewire \
+  libxkbcommon sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg dotnet-sdk aspnet-targeting-pack nodejs npm
+paru -S --needed electron45-bin   # or any AUR helper
+```
+
+Optional, for scenes that use Windows fonts (look-alikes, then the real ones):
+
+```bash
+paru -S --needed ttf-liberation ttf-carlito ttf-caladea ttf-cascadia-code ttf-selawik ttf-comic-neue ttf-tahoma ttf-ms-fonts
+```
+
+### Debian / Ubuntu
+
+```bash
+sudo apt install build-essential cargo rustc libclang-dev libwayland-bin libwayland-dev libegl-dev libgles-dev \
+  libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev cmake git libsdl2-dev libfreetype-dev \
+  libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev \
+  libswresample-dev libswscale-dev libavutil-dev libgl-dev ffmpeg dotnet-sdk-10.0 nodejs npm
+```
+
+Liascape needs Rust 1.85 or newer. If your release's `rustc` is older, install Rust with [rustup](https://rustup.rs) instead.
+
+### Fedora
+
+```bash
+sudo dnf install gcc make cargo rust clang-devel wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel \
+  pulseaudio-libs-devel pipewire-devel libxkbcommon-devel cmake git SDL2-devel freetype-devel fontconfig-devel \
+  harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel ffmpeg-free libglvnd-devel dotnet-sdk-10.0 nodejs npm
+```
+
+On Debian, Ubuntu and Fedora there's no Electron package: put an `electron45` or `electron` binary on your `PATH`, or
+point `LIASCAPE_ELECTRON` at one. If your distro has no .NET 10 package, Microsoft's `dotnet-install.sh` installs the
+SDK for your user.
+
+### Then build it
 
 ```bash
 git clone https://github.com/Kryxzort/liascape.git
@@ -109,126 +160,9 @@ cd liascape
 bash scripts/install.sh
 ```
 
-This builds everything and installs the `liascape` command to `~/.local/bin` with a desktop entry, so make sure
-`~/.local/bin` is on your `PATH`. Before building, the script checks the Rust and native toolchains and the scene
-build dependencies and stops with the exact package line for Arch, Debian/Ubuntu and Fedora if something is missing.
-It doesn't check for .NET or Node.js, so install those first (see below).
+This installs the `liascape` command to `~/.local/bin` with a desktop entry, so make sure `~/.local/bin` is on your
+`PATH`. If a package is missing, the script stops and prints the exact line to install it.
 
-Add `--no-scenes` to skip Wallpaper Engine scene support in `liascape-player`. That needs fewer packages and changes
-nothing else. Building with scenes downloads the linux-wallpaperengine source, so it needs network access.
+[contribution, issues and license section not written yet]
 
-The script doesn't install Electron, which runs Liascape's window. Put an `electron45` or `electron` binary on your
-`PATH` (on Arch, `electron45-bin` from the AUR) or point `LIASCAPE_ELECTRON` at one. Liascape targets Electron 45; versions older than 42
-are known to crash on NVIDIA. Only the window needs Electron: the commands work without it.
-
-<details>
-<summary>Build dependencies</summary>
-
-| For | Arch | Debian / Ubuntu | Fedora |
-|---|---|---|---|
-| Rust (edition 2024) | `rust` | `cargo rustc` | `cargo rust` |
-| Native toolchain and headers | `base-devel wayland wayland-protocols libglvnd mpv libpulse pipewire libxkbcommon clang` | `build-essential libwayland-bin libwayland-dev libegl-dev libgles-dev libmpv-dev libpulse-dev libpipewire-0.3-dev libxkbcommon-dev libclang-dev` | `gcc make wayland-devel mesa-libEGL-devel mesa-libGLES-devel mpv-libs-devel pulseaudio-libs-devel pipewire-devel libxkbcommon-devel clang-devel` |
-| Wallpaper Engine scenes (skip with `--no-scenes`) | `cmake git sdl2 freetype2 fontconfig harfbuzz glm lz4 zlib ffmpeg libglvnd` | `cmake git libsdl2-dev libfreetype-dev libfontconfig-dev libharfbuzz-dev libglm-dev liblz4-dev zlib1g-dev libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev libgl-dev` | `cmake git SDL2-devel freetype-devel fontconfig-devel harfbuzz-devel glm-devel lz4-devel zlib-devel ffmpeg-free-devel libglvnd-devel` |
-| .NET 10 SDK | `dotnet-sdk aspnet-targeting-pack` (10.x) | `dotnet-sdk-10.0` | `dotnet-sdk-10.0` |
-| Node.js and npm | `nodejs npm` | `nodejs npm` | `nodejs npm` |
-
-If your distro has no .NET 10 package, Microsoft's `dotnet-install.sh` installs the SDK for your user.
-`bash scripts/lwe.sh deps` checks the scene row on its own.
-
-</details>
-
-<details>
-<summary>Programs Liascape uses at run time</summary>
-
-- `ffmpeg` (with `ffprobe`): thumbnails, imports, video previews, video lengths and loudness measuring.
-- Legacy player only: `mpvpaper` and `mpv` for videos, `linux-wallpaperengine` for scenes, `pactl` and `parec`
-  (from `libpulse` or `pipewire-pulse`) for auto-mute, and `playerctl` for "Only mute for media players".
-  `liascape-player` needs none of these.
-- Optional: `secret-tool` (libsecret) keeps your Steam sign-in in the system keyring. Without it, the sign-in is kept
-  in `~/.config/liascape/steam-auth.json`, readable only by you.
-
-If something a feature you use needs is missing, Settings says so at the top: what doesn't work and why.
-
-</details>
-
-## Using it
-
-Run `liascape` or open Liascape from your app launcher. The app has three tabs: **Browse**, **Library** and
-**Settings**.
-
-Settings has four levels, picked at the top while the Settings tab is open: Basic, Standard (the default), Advanced
-and Expert. Each level shows more settings. A setting you changed keeps working when its level is hidden, and a note
-at the top of Settings tells you about it.
-
-### Restore your wallpaper at login
-
-Add `liascape restore` to your compositor's startup. It puts back what was playing without opening the window.
-
-```ini
-# Hyprland (hyprland.conf)
-exec-once = liascape restore
-
-# Sway (config)
-exec liascape restore
-```
-
-### Keybinds
-
-Every action is a command you can bind to a key. When the app is open, the command goes to it; otherwise it runs on
-its own.
-
-```text
-liascape next | previous     the next or previous wallpaper
-liascape random              a random wallpaper from the playing playlist, else your library
-liascape play | stop | toggle-play
-liascape toggle-pause        pause or resume (the rotation timer pauses too)
-liascape toggle-mute
-liascape volume up | down    5 steps; the global volume or the playing wallpaper's own
-liascape toggle-loop-current keep the current wallpaper looping, no rotation; again to rotate
-liascape kill                stop the wallpaper without asking the open app
-liascape help                every command
-```
-
-For example, in Hyprland:
-
-```ini
-bind = SUPER, N, exec, liascape next
-bind = SUPER, M, exec, liascape toggle-mute
-bind = SUPER, P, exec, liascape toggle-pause
-```
-
-Settings → Keyboard shortcuts lists each command with a Copy button.
-
-### Where your things are kept
-
-- Your library: `~/.local/share/liascape/library/`
-- Saved playlists: `~/.local/share/liascape/playlists/`
-- Settings: `~/.config/liascape/`
-
-Wallpapers from your Workshop folder are linked into the library, not copied, unless you turn on "Copy files instead
-of linking".
-
-## Reporting a problem
-
-A scene that won't load or doesn't look like it does in Wallpaper Engine? Open an issue with the
-"A scene looks wrong" form: the Workshop link and a screenshot are all it needs. For anything else, use
-"Something's broken" or "Idea or request".
-
-## Contributing and building
-
-`CLAUDE.md` lists how to build, run and test each part. The player's design is in
-[`docs/player/architecture.md`](docs/player/architecture.md), and [`docs/decisions.md`](docs/decisions.md) explains
-choices that might look odd.
-
-## License and credits
-
-Liascape is licensed under the [GNU GPL v3.0](LICENSE). It started as a fork of
-[sunwoo101/livepaper](https://github.com/sunwoo101/livepaper); the parts that come from it keep their MIT notice in
-[`LICENSE.upstream-MIT`](LICENSE.upstream-MIT).
-
-Scenes are drawn by a fork of [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine)
-(GPL-3.0). `liascape-player` reuses techniques from [mpvpaper](https://github.com/GhostNaN/mpvpaper) (GPL-3.0), and the
-transition effects come from [gl-transitions](https://github.com/gl-transitions/gl-transitions) (MIT).
-[`CREDITS.md`](CREDITS.md) lists what came from where, and [`UPSTREAM.md`](UPSTREAM.md) how each is tracked.
-
-Liascape isn't affiliated with Wallpaper Engine or Valve.
+This README was written by an Emilia-obsessed meat bag, not a clanker. The same can't be guaranteed for the codebase (^﹏^)
