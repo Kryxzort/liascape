@@ -56,7 +56,7 @@ public static class SteamAuthService
             catch (Exception ex) { tcs.TrySetException(ex); }
         }
 
-        steamClient.Connect();
+        SteamAnonymous.Connect(steamClient); // Steam's CM servers (a test: its stand-in)
         using var reg = ct.Register(() => tcs.TrySetCanceled());
         _ = Task.Run(() =>
         {
@@ -132,7 +132,7 @@ public static class SteamAuthService
             catch (Exception e) { tcs.TrySetException(new SteamLoginException($"The sign-in failed: {e.Message}")); }
         }
 
-        steamClient.Connect();
+        SteamAnonymous.Connect(steamClient); // Steam's CM servers (a test: its stand-in)
         using var reg = ct.Register(() => tcs.TrySetCanceled());
         _ = Task.Run(() =>
         {
@@ -378,7 +378,8 @@ public static class SteamAuthService
         var manager = new CallbackManager(steamClient);
         var steamUser = steamClient.GetHandler<SteamUser>()!;
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(SteamAnonymous.Stopping); // `serve` stopping ends it
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
 
         manager.Subscribe<SteamClient.ConnectedCallback>(cb =>
             steamUser.LogOn(new SteamUser.LogOnDetails { Username = accountName, AccessToken = refreshToken }));
@@ -397,7 +398,7 @@ public static class SteamAuthService
             catch { tcs.TrySetResult(null); }
         }
 
-        steamClient.Connect();
+        SteamAnonymous.Connect(steamClient); // Steam's CM servers (a test: its stand-in)
         using var reg = timeout.Token.Register(() => tcs.TrySetResult(null));
         _ = Task.Run(() =>
         {

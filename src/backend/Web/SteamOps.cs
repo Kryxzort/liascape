@@ -37,7 +37,7 @@ public static class SteamOps
     public static void StartQr()
     {
         _qrCts?.Cancel();
-        _qrCts = new CancellationTokenSource();
+        _qrCts = CancellationTokenSource.CreateLinkedTokenSource(SteamAnonymous.Stopping); // `serve` stopping ends it
         var ct = _qrCts.Token;
         _ = Task.Run(async () =>
         {
@@ -98,7 +98,8 @@ public static class SteamOps
         {
             if (_pwPrompt is { } old) { old.UserCancelled = true; old.Replaced = true; } // a replaced sign-in ends quietly (its events would land in the new one)
             _pwCts?.Cancel();
-            _pwCts = cts = new CancellationTokenSource(LoginTimeout);
+            _pwCts = cts = CancellationTokenSource.CreateLinkedTokenSource(SteamAnonymous.Stopping); // `serve` stopping ends it
+            cts.CancelAfter(LoginTimeout);
             _pwPrompt = prompt = new LoginPrompt(cts.Token);
         }
         var driver = LoginDriver;
@@ -118,7 +119,7 @@ public static class SteamOps
             }
             catch (OperationCanceledException)
             {
-                if (prompt.Replaced) { }
+                if (prompt.Replaced || SteamAnonymous.Stopping.IsCancellationRequested) { }
                 else if (prompt.UserCancelled) EventBus.Broadcast("steam-login-cancelled");
                 else Fail("The sign-in timed out — start again.", false);
             }

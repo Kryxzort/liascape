@@ -23,7 +23,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Presets: their base scene, layered properties, the base's delete (fake Steam servers, no network): `bash scripts/test-presets.sh`
 - Preview clips following "Video preview quality" (debounce, up / down, cancel, restart): `bash scripts/test-clip-sweep.sh`
 - Previews made ahead of their cards (on-screen first, failures remembered, the hold, restart, live preview settings): `bash scripts/test-preview-backfill.sh`
-- `serve` exits within 3 s of SIGTERM (idle, an open page's WebSocket, playing, a stalled /media download, the clip sweep): `bash scripts/test-backend-stop.sh`
+- `serve` exits within 3 s of SIGTERM (idle, an open page's WebSocket, playing, a stalled /media download, the clip sweep, a Steam session open): `bash scripts/test-backend-stop.sh`
 - The sidebar's crash-mark Clear and "open in your default app" (a stub xdg-open; what /open/media refuses): `bash scripts/test-item-actions.sh`
 - Folder import and watched folders (the scan, link / copy, live pickup, removals; sources never touched): `bash scripts/test-folder-import.sh`
 - Settings' cache clear (per-category sizes, 400s, nothing outside the ticked folders deleted): `bash scripts/test-cache-clear.sh`

@@ -139,6 +139,7 @@ public static class ServerHost
             AudioMonitor.Shutdown();
             FolderWatch.Stop(); // no pass starts while the app stops
             SteamClientHold.Shutdown(); // "Playing Wallpaper Engine" ends with the app, not after the linger
+            SteamAnonymous.Shutdown(); // every Steam client session: an open one keeps the process alive (its thread)
         });
 
         // WE auto-import on startup, off-thread so the API is up immediately;
