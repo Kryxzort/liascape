@@ -12335,19 +12335,26 @@ fn state_output(st: &Value, name: &str) -> Value {
         .unwrap_or_else(|| panic!("no output {name}: {st}"))
 }
 
-/// A synthetic scene `name` on every output; `before_quit` runs once it shows; `quit` saves it;
-/// then `serve --restore` with the scene folder's spec swapped for `restored` (same folder, so
-/// the snapshot's path still names it). Returns the server, the folder and the restored
-/// source's id, read at once (before its `Ready` when `restored` loads slowly).
+/// A synthetic scene `name` (source `props` merged) on every output; `before_quit` runs once it
+/// shows; `quit` saves it; then `serve --restore` (`env` added) with the scene folder's spec
+/// swapped for `restored` (same folder, so the snapshot's path still names it). Returns the
+/// server, the folder and the restored source's id, read at once (before its `Ready` when
+/// `restored` loads slowly).
 fn restore_scene(
     name: &str,
     restored: SyntheticSpec,
+    props: Value,
+    env: &[(&str, &Path)],
     before_quit: impl FnOnce(&mut Client),
 ) -> Option<(Serve, PathBuf, String)> {
     let mut srv = scene_serve(&["--clock", "real"])?;
     let dir = common::synthetic_scene(name, &synth(Pattern::FrameIndex));
     let mut c = srv.client();
-    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    let mut create = json!({"kind": "scene", "path": s(&dir)});
+    for (k, v) in props.as_object().cloned().unwrap_or_default() {
+        create[k] = v;
+    }
+    let id = create_src(&mut c, create);
     show_all(&mut c, &id);
     wait_for(Duration::from_secs(20), "the scene's first frame", || {
         (c.ok("get", json!({"path": format!("{id}.ready")}))["value"] == json!(true)).then_some(())
@@ -12363,10 +12370,9 @@ fn restore_scene(
     let saved = snap["outputs"]["VIRTUAL-1"]["content"].as_str().unwrap_or("");
     assert_eq!(snap["sources"][saved]["path"], json!(s(&dir)), "{snap}");
     common::synthetic_scene(name, &restored);
-    srv.respawn(
-        &["--clock", "real", "--restore"],
-        &[("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))],
-    );
+    let mut envs = vec![("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1"))];
+    envs.extend_from_slice(env);
+    srv.respawn(&["--clock", "real", "--restore"], &envs);
     let mut c = srv.client();
     let (rid, _) = scene_of(&c.ok("state", json!({})), &dir).expect("the restored scene");
     Some((srv, dir, rid))
@@ -12394,7 +12400,7 @@ fn not_ready_yet(st: &Value, id: &str) {
 /// from then on, and no output composes a hole (`seam_frames` 0) through the second after.
 #[test]
 fn restore_waits_for_ready_no_seam() {
-    let Some((srv, _dir, id)) = restore_scene("api-restore-seam", slow_scene(), |_| {}) else {
+    let Some((srv, _dir, id)) = restore_scene("api-restore-seam", slow_scene(), json!({}), &[], |_| {}) else {
         return;
     };
     let mut c = srv.client();
@@ -12429,7 +12435,7 @@ fn restore_waits_for_ready_no_seam() {
 /// there either), then every output shows it.
 #[test]
 fn restore_pending_layer_counts_as_shown() {
-    let Some((srv, dir, id)) = restore_scene("api-restore-shown", slow_scene(), |_| {}) else {
+    let Some((srv, dir, id)) = restore_scene("api-restore-shown", slow_scene(), json!({}), &[], |_| {}) else {
         return;
     };
     let mut c = srv.client();
@@ -12470,7 +12476,7 @@ fn restore_pending_layer_counts_as_shown() {
 /// crash then restores it again, never an empty desktop).
 #[test]
 fn restore_pending_survives_a_snapshot() {
-    let Some((srv, dir, id)) = restore_scene("api-restore-snap", slow_scene(), |_| {}) else {
+    let Some((srv, dir, id)) = restore_scene("api-restore-snap", slow_scene(), json!({}), &[], |_| {}) else {
         return;
     };
     let mut c = srv.client();
@@ -12497,7 +12503,7 @@ fn restore_pending_survives_a_snapshot() {
 /// scene never pops in after it (it is retired, not left loading for nothing).
 #[test]
 fn restore_pending_is_cancelled_by_a_switch() {
-    let Some((srv, dir, id)) = restore_scene("api-restore-switch", slow_scene(), |_| {}) else {
+    let Some((srv, dir, id)) = restore_scene("api-restore-switch", slow_scene(), json!({}), &[], |_| {}) else {
         return;
     };
     let mut c = srv.client();
@@ -12522,26 +12528,72 @@ fn restore_pending_is_cancelled_by_a_switch() {
     assert!(scene_of(&st, &dir).is_none(), "the restored scene is retired: {st}");
 }
 
-/// A restored source that fails instead of becoming ready (a scene whose every worker dies
-/// before a first frame, past its restart budget) leaves its layers empty: no content is set,
-/// `source.broken` is logged, and the broken source doesn't linger unshown.
+/// A restored scene whose every worker dies before a first frame (past its restart budget,
+/// `source.broken`) shows its preview, as a broken scene does: the layer gets it once the
+/// preview is on screen (never a hole), and the next snapshot saves it `broken` on that output,
+/// so a restart brings it back as its preview without a worker.
 #[test]
-fn restore_pending_dropped_on_error() {
+fn restore_broken_scene_shows_its_preview() {
+    let png = common::solid_png("api-restore-broken-preview", [0, 255, 0]);
     let crashing = SyntheticSpec {
         crash_after_ms: Some(0),
         ..synth(Pattern::Solid)
     };
-    let Some((srv, dir, id)) = restore_scene("api-restore-error", crashing, |_| {}) else {
+    let props = json!({"preview": s(&png)});
+    let Some((srv, dir, id)) = restore_scene("api-restore-broken", crashing, props, &[], |_| {})
+    else {
         return;
     };
     let mut c = srv.client();
     wait_for(Duration::from_secs(30), "source.broken", || {
-        for o in ["VIRTUAL-1", "VIRTUAL-2"] {
-            assert_eq!(content(&mut c, o), "", "{o} never shows the failing scene");
-        }
         logs_of(&mut c, "source.broken")
             .into_iter()
             .find(|e| e["id"] == json!(id))
+    });
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        wait_for(Duration::from_secs(5), "the layer shows it", || {
+            (content(&mut c, o) == id).then_some(())
+        });
+    }
+    let shot = srv.path("restore-broken.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+    near(png_pixel(&shot, 320, 180), [0, 255, 0], 3, "the preview");
+    let file = srv.path("state/liascape/liascape-player/snapshot.json");
+    wait_for(Duration::from_secs(5), "a snapshot saving it broken", || {
+        let v: Value = serde_json::from_slice(&std::fs::read(&file).ok()?).ok()?;
+        let saved = v["outputs"]["VIRTUAL-1"]["content"].as_str()?.to_string();
+        (v["sources"][&saved]["path"] == json!(s(&dir)) && v["sources"][&saved]["broken"] == true)
+            .then_some(())
+    });
+    for (name, n, what) in seam_totals(&mut c) {
+        assert_eq!(n, 0, "{name}: {n} seam frames, last {what}");
+    }
+}
+
+/// A restored source that fails with no picture (a video whose file is gone) leaves its layers
+/// empty: no content is set, the wait ends (`snapshot.pending_failed`) and the source goes.
+#[test]
+fn restore_pending_dropped_on_error() {
+    let Some(mut srv) = scene_serve(&["--clock", "real"]) else {
+        return;
+    };
+    let clip = srv.path("restore-dead.mp4");
+    std::fs::copy(ensure_clip("api_red_3s", RED_3S), &clip).unwrap();
+    let mut c = srv.client();
+    let id = create_src(&mut c, json!({"path": s(&clip), "loop": true}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    c.ok("quit", json!({}));
+    drop(c);
+    assert!(srv.wait_exit(Duration::from_secs(30)).is_some(), "quit");
+    std::fs::remove_file(&clip).unwrap();
+    srv.respawn(&["--clock", "real", "--restore"], &[]);
+    let mut c = srv.client();
+    let failed = wait_for(Duration::from_secs(10), "snapshot.pending_failed", || {
+        for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+            assert_eq!(content(&mut c, o), "", "{o} never shows the dead file");
+        }
+        logs_of(&mut c, "snapshot.pending_failed").into_iter().next()
     });
     std::thread::sleep(Duration::from_millis(300));
     let st = c.ok("state", json!({}));
@@ -12549,7 +12601,75 @@ fn restore_pending_dropped_on_error() {
         assert_eq!(st["graph"][format!("lay:{o}:main")]["content"], json!(""), "{st}");
         assert_eq!(state_output(&st, o)["pending"], Value::Null, "{st}");
     }
-    assert!(scene_of(&st, &dir).is_none(), "the broken scene is retired: {st}");
+    assert!(scene_of(&st, &clip).is_none(), "the dead source is retired ({failed}): {st}");
+}
+
+/// A restored source that never gets a picture within the wait's timeout (here shortened by
+/// `LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS`) is given up like a failed one: its layers stay
+/// empty, `snapshot.pending_timeout` is logged and the source goes.
+#[test]
+fn restore_pending_times_out() {
+    let never = SyntheticSpec {
+        load_ms: 20_000,
+        ..synth(Pattern::FrameIndex)
+    };
+    let env = [("LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS", Path::new("1500"))];
+    let Some((srv, dir, id)) = restore_scene("api-restore-timeout", never, json!({}), &env, |_| {})
+    else {
+        return;
+    };
+    let mut c = srv.client();
+    let t = Instant::now();
+    let ev = wait_for(Duration::from_secs(10), "snapshot.pending_timeout", || {
+        logs_of(&mut c, "snapshot.pending_timeout")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    assert!(t.elapsed() >= Duration::from_millis(1000), "not before the timeout: {ev}");
+    std::thread::sleep(Duration::from_millis(300));
+    let st = c.ok("state", json!({}));
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(st["graph"][format!("lay:{o}:main")]["content"], json!(""), "{st}");
+        assert_eq!(state_output(&st, o)["pending"], Value::Null, "{st}");
+    }
+    assert!(scene_of(&st, &dir).is_none(), "the source is retired: {st}");
+}
+
+/// A restored scene whose worker dies during its load shows its preview while the next worker
+/// loads (as a scene shown before its first frame does): the layer gets it at the preview,
+/// before `Ready`, and keeps it once the restarted worker's first frame comes.
+#[test]
+fn restore_preview_shows_while_the_worker_restarts() {
+    let png = common::solid_png("api-restore-restart-preview", [0, 0, 255]);
+    let props = json!({"preview": s(&png)});
+    let Some((srv, _dir, id)) =
+        restore_scene("api-restore-restart", slow_scene(), props, &[], |_| {})
+    else {
+        return;
+    };
+    let mut c = srv.client();
+    not_ready_yet(&c.ok("state", json!({})), &id);
+    let pid = wait_for(Duration::from_secs(10), "the restored scene's worker", || {
+        worker_of(&mut c, &id)["pid"].as_u64()
+    });
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        wait_for(Duration::from_secs(5), "the layer shows its preview", || {
+            (content(&mut c, o) == id).then_some(())
+        });
+    }
+    let st = c.ok("state", json!({}));
+    not_ready_yet(&st, &id);
+    let shot = srv.path("restore-restart.png");
+    c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": s(&shot)}));
+    near(png_pixel(&shot, 320, 180), [0, 0, 255], 3, "the preview");
+    wait_for(Duration::from_secs(20), "the restarted worker's first frame", || {
+        (c.ok("get", json!({"path": format!("{id}.ready")}))["value"] == json!(true)).then_some(())
+    });
+    assert_eq!(content(&mut c, "VIRTUAL-1"), id);
+    for (name, n, what) in seam_totals(&mut c) {
+        assert_eq!(n, 0, "{name}: {n} seam frames, last {what}");
+    }
 }
 
 /// A snapshot saved in a user pause: the restored layer still gets its content at the source's
@@ -12559,7 +12679,7 @@ fn restore_paused_still_shows_first_frame() {
     let paused = |c: &mut Client| {
         c.ok("set", json!({"path": "player.paused", "value": true}));
     };
-    let Some((srv, _dir, id)) = restore_scene("api-restore-paused", slow_scene(), paused) else {
+    let Some((srv, _dir, id)) = restore_scene("api-restore-paused", slow_scene(), json!({}), &[], paused) else {
         return;
     };
     let mut c = srv.client();

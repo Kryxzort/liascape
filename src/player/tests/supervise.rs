@@ -1340,6 +1340,93 @@ fn scene_dir_survives_a_restore() {
     }
 }
 
+/// The fake VRAM sampler's next reading (`LIASCAPE_PLAYER_VRAM_PROBE=fake:<file>`): an 8 GiB card
+/// with `free` MiB free, written via a rename (a sample never reads half a file).
+fn write_vram(file: &Path, free: f64) {
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, json!({"total_mib": 8192, "free_mib": free, "procs": {}}).to_string())
+        .unwrap();
+    std::fs::rename(&tmp, file).unwrap();
+}
+
+/// A low-VRAM hold that engages while a restored layer waits for its scene keeps the wait
+/// alive (its time doesn't count toward the wait's timeout, shortened here to 1.5 s): the layer
+/// stays empty through the hold and fills once the hold releases and the scene's first frame
+/// comes.
+#[test]
+fn restore_wait_survives_a_low_vram_hold() {
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    if !can_run() {
+        return;
+    }
+    let root = new_root();
+    let file = root.join("vram.json");
+    write_vram(&file, 6000.0);
+    let probe = format!("fake:{}", file.display());
+    let mut sup = Sup::spawn_in(
+        root,
+        &[],
+        &[
+            ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", "1"),
+            ("LIASCAPE_PLAYER_VRAM_PROBE", &probe),
+            ("LIASCAPE_PLAYER_VRAM_TIMING", "50,300,600,200,1000"),
+            ("LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS", "1500"),
+        ],
+        Some(serial),
+        true,
+    );
+    use liascape_player::scene::synthetic::SyntheticSpec;
+    let dir = common::synthetic_scene("sup-restore-vram", &SyntheticSpec::default());
+    let mut c = sup.client();
+    let id = c.create(json!({"kind": "scene", "path": s(&dir)}));
+    c.ok("set", json!({"path": "lay:*:main.content", "value": id}));
+    wait_state(&mut c, Duration::from_secs(10), |st| {
+        st["graph"][&id]["ready"] == json!(true)
+    });
+    sup.wait_snapshot(SNAPSHOT_WAIT, |sn| snap_has_path(sn, s(&dir)));
+    drop(c);
+    // The restarted player's load is slow, and VRAM is low from its start.
+    common::synthetic_scene(
+        "sup-restore-vram",
+        &SyntheticSpec {
+            load_ms: 2000,
+            ..Default::default()
+        },
+    );
+    write_vram(&file, 300.0);
+    sup.crash(libc::SIGSEGV);
+    let mut c = sup.client();
+    let st = wait_state(&mut c, Duration::from_secs(10), |st| !st["vram_hold"].is_null());
+    let (nid, _) = sources(&st)
+        .into_iter()
+        .find(|(_, n)| n["path"] == s_json(&dir))
+        .expect("the restored scene");
+    let pending = |st: &Value| {
+        st["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|o| o["pending"] == json!(nid))
+    };
+    assert!(pending(&st), "it waits through the hold: {st}");
+    // Past the wait's timeout and the scene's load: still waiting, nothing shown.
+    std::thread::sleep(Duration::from_millis(3000));
+    let st = c.state();
+    assert!(pending(&st), "still waiting: {st}");
+    assert_eq!(content(&st, "VIRTUAL-1"), "", "{st}");
+    assert!(c.logs("snapshot.pending_timeout").is_empty(), "the hold's time counted");
+    write_vram(&file, 6000.0);
+    let st = wait_state(&mut c, Duration::from_secs(20), |st| {
+        st["vram_hold"].is_null()
+            && st["graph"][&nid]["ready"] == json!(true)
+            && ["VIRTUAL-1", "VIRTUAL-2"].iter().all(|o| content(st, o) == nid)
+    });
+    assert!(
+        st["outputs"].as_array().unwrap().iter().all(|o| o["pending"].is_null()),
+        "{st}"
+    );
+}
+
 fn s_json(p: &Path) -> Value {
     json!(s(p))
 }

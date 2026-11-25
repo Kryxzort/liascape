@@ -98,6 +98,24 @@ const TICK_HISTORY: usize = 64;
 
 /// A synchronous loop stretch at least this long is logged (`loop.long_busy`, debug).
 const LONG_BUSY: Duration = Duration::from_millis(50);
+/// How long a restored layer waits for its source's picture (`Runtime::show_pending`): a
+/// switch's B gets as long (`READY_TIMEOUT`, `LOADING_READY_TIMEOUT` while a scene's worker
+/// reports its load). `LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS` replaces both (tests).
+fn pending_timeout(loading: bool) -> Duration {
+    static TEST: std::sync::OnceLock<Option<Duration>> = std::sync::OnceLock::new();
+    let test = TEST.get_or_init(|| {
+        std::env::var("LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(Duration::from_millis)
+    });
+    test.unwrap_or(if loading {
+        crate::recipes::transition::LOADING_READY_TIMEOUT
+    } else {
+        crate::recipes::transition::READY_TIMEOUT
+    })
+}
+
 /// The corr of a restored source's pending fade-in (`Runtime::fade_in`).
 const RESTORE_FADE: &str = "restore-fade";
 
@@ -798,11 +816,15 @@ pub struct Runtime {
     /// recipe recording its gains sees the 0 dB it is heading to.
     fade_in: BTreeMap<String, FadeWait>,
     /// Restored sources (and a not-yet-ready one a plugged-in output takes over) → the
-    /// connectors whose main layer shows them at their `Ready` (`Runtime::show_when_ready`),
-    /// never before: a layer must not compose a hole. `cur:`, `srcs:`, `state` and the
-    /// snapshot count them as shown meanwhile. A command that changes the layer, the output
-    /// going or the source failing ends the wait. `docs/player/modules/persistence.md` § Snapshot.
+    /// connectors whose main layer shows them once they have a picture
+    /// (`Runtime::show_when_ready`), never before: a layer must not compose a hole. `cur:`,
+    /// `srcs:`, `state` and the snapshot count them as shown meanwhile. A command that changes
+    /// the layer, the output going, the source failing or the timeout ends the wait.
+    /// `docs/player/modules/persistence.md` § Snapshot.
     pub(crate) pending_show: BTreeMap<String, BTreeSet<String>>,
+    /// When each `pending_show` entry started waiting (moved on while a hold keeps sources
+    /// from loading): past `pending_timeout` it is given up.
+    pending_since: BTreeMap<String, Instant>,
     /// The last `player.paused` [`Runtime::sync_sources`] saw — mirrors
     /// the graph's `player.paused` so [`Runtime::now`] and `SourceHost` don't have to
     /// read the graph on every call.
@@ -1090,6 +1112,7 @@ impl Runtime {
             "onsets": self.onsets.len(),
             "fade_in": self.fade_in.len(),
             "pending_show": self.pending_show.len(),
+            "pending_since": self.pending_since.len(),
             "dropout_windows": self.dropout_windows.len(),
             "dropout_due": self.dropout_due.len(),
             "pause_gates": self.pause_gates.len(),
@@ -3571,22 +3594,21 @@ impl Runtime {
             .any(|l| self.shown_by(l).contains(id))
     }
 
-    /// Show source `id` on `conn`'s main layer: now if it has a picture (it is `Ready`, or a
-    /// scene restored broken shows its preview), else at its `Ready` (`pending_show`) — a layer
-    /// never composes a source before its first frame, as a switch's B never does.
+    /// Show source `id` on `conn`'s main layer: now if it has a picture (`has_picture`, or a
+    /// scene restored broken, which shows its preview), else once it has one (`pending_show`,
+    /// `show_pending`) — a layer never composes a source with nothing to draw, as a switch's B
+    /// never shows before its first frame.
     fn show_when_ready(&mut self, conn: &str, id: &str) {
         let conns = BTreeSet::from([conn.to_string()]);
         let orphans = self.unpend(&conns);
-        let has_picture = self.graph.kind_of(id) != Some(NodeKind::Source)
-            || self.bool_prop(id, "ready")
-            || self.bool_prop(id, "broken");
-        if has_picture {
+        if self.has_picture(id) || self.bool_prop(id, "broken") {
             let _ = self.graph.set(
                 &p(&format!("lay:{conn}:main.content")),
                 PropValue::Str(id.to_string()),
             );
         } else {
             self.pending_show.entry(id.to_string()).or_default().insert(conn.to_string());
+            self.pending_since.entry(id.to_string()).or_insert_with(Instant::now);
             self.mirror_pending();
         }
         for o in orphans.into_iter().filter(|o| o != id) {
@@ -3602,8 +3624,16 @@ impl Runtime {
             .map(|(id, _)| id.as_str())
     }
 
+    /// `id` would draw something now: not a source, or the host has its texture (a frame, the
+    /// preview a scene shows while its worker restarts or once it broke, a low-VRAM still).
+    fn has_picture(&self, id: &str) -> bool {
+        self.graph.kind_of(id) != Some(NodeKind::Source) || self.host.texture(id).is_some()
+    }
+
     /// The graph's copy (`cur:`, `srcs:`).
     fn mirror_pending(&mut self) {
+        let waiting = &self.pending_show;
+        self.pending_since.retain(|id, _| waiting.contains_key(id));
         let by_conn = self
             .pending_show
             .iter()
@@ -3710,45 +3740,62 @@ impl Runtime {
         }
     }
 
-    /// The waiting sources whose first frame came show on every layer waiting for them; one
-    /// that failed instead (`Error`: a scene past its restart budget, a file that won't open)
-    /// leaves those layers empty and goes — what shows then is the backend's call, as for any
-    /// broken source.
+    /// Resolve the waits, once per tick:
+    /// - a source with a picture (`has_picture`) shows on every layer waiting for it;
+    /// - a scene past its restart budget (`broken`) whose preview isn't still coming shows its
+    ///   broken display (the preview, or nothing when it has none): it stays referenced, so the
+    ///   next snapshot saves it `broken` and a restart restores it without a worker;
+    /// - one that failed with no picture (`Error`: a file that won't open, a VRAM stop) leaves
+    ///   its layers empty and goes — what shows then is the backend's call;
+    /// - one that took longer than `pending_timeout` is given up the same way. A hold (low
+    ///   VRAM, covered) keeps sources from loading, so its time doesn't count.
     fn show_pending(&mut self, evs: &[(String, SourceEvent)]) {
         if self.pending_show.is_empty() {
             return;
         }
-        let failed: Vec<String> = evs
+        let now = Instant::now();
+        if self.held() {
+            for t in self.pending_since.values_mut() {
+                *t = now;
+            }
+        }
+        let errored: BTreeSet<&String> = evs
             .iter()
-            .filter(|(id, ev)| {
-                matches!(ev, SourceEvent::Error { .. }) && self.pending_show.contains_key(id)
-            })
-            .map(|(id, _)| id.clone())
+            .filter(|(_, ev)| matches!(ev, SourceEvent::Error { .. }))
+            .map(|(id, _)| id)
             .collect();
-        for id in failed {
-            let Some(conns) = self.pending_show.remove(&id) else {
-                continue;
-            };
+        let mut show = Vec::new();
+        let mut give_up = Vec::new();
+        for id in self.pending_show.keys() {
+            let broken = self.bool_prop(id, "broken");
+            let preview_coming = self.host.scene(id).is_some_and(|sc| sc.preview_coming());
+            let loading = self.bool_prop(id, "loading");
+            let waited = self.pending_since.get(id).map_or(Duration::ZERO, |t| now - *t);
+            if self.has_picture(id) || (broken && !preview_coming) {
+                show.push(id.clone());
+            } else if errored.contains(id) && !broken {
+                give_up.push((id.clone(), "snapshot.pending_failed", waited, loading));
+            } else if waited > pending_timeout(loading) {
+                give_up.push((id.clone(), "snapshot.pending_timeout", waited, loading));
+            }
+        }
+        for (id, kind, waited, loading) in give_up {
+            let conns = self.pending_show.remove(&id).unwrap_or_default();
             self.mirror_pending();
             log::event(
                 "snapshot",
                 Level::Warn,
-                "snapshot.pending_failed",
+                kind,
                 None,
-                json!({ "id": id, "outputs": conns }),
+                json!({ "id": id, "outputs": conns, "loading": loading,
+                        "waited_ms": waited.as_secs_f64() * 1000.0 }),
             );
             self.retire_unused(&id);
         }
-        let ready: Vec<String> = self
-            .pending_show
-            .keys()
-            .filter(|id| self.bool_prop(id, "ready"))
-            .cloned()
-            .collect();
-        if ready.is_empty() {
+        if show.is_empty() {
             return;
         }
-        for id in ready {
+        for id in show {
             let conns = self.pending_show.remove(&id).unwrap_or_default();
             for c in &conns {
                 let _ = self.graph.set(
@@ -3761,7 +3808,8 @@ impl Runtime {
                 Level::Info,
                 "snapshot.pending_shown",
                 None,
-                json!({ "id": id, "outputs": conns }),
+                json!({ "id": id, "outputs": conns, "ready": self.bool_prop(&id, "ready"),
+                        "broken": self.bool_prop(&id, "broken") }),
             );
         }
         self.mirror_pending();
@@ -5738,6 +5786,7 @@ pub fn serve(opts: ServeOpts) -> Result<(), ServeError> {
         restart_event,
         fade_in: BTreeMap::new(),
         pending_show: BTreeMap::new(),
+        pending_since: BTreeMap::new(),
         player_paused: false,
         play_clock: Excised::default(),
         rotation_clock: Excised::default(),

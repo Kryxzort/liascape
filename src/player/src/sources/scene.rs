@@ -2209,6 +2209,12 @@ impl SceneSource {
         }
     }
 
+    /// The preview should show and still can, but isn't on screen yet (a restored layer waits
+    /// for it: `Runtime::show_pending`).
+    pub fn preview_coming(&self) -> bool {
+        self.preview_pending()
+    }
+
     /// The preview image is what [`texture`](Self::texture) shows.
     pub fn preview_shown(&self) -> bool {
         self.latch.current().is_none()
