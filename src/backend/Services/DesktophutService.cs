@@ -5,19 +5,10 @@ using Liascape.Scrapers;
 
 namespace Liascape.Services;
 
-public class DesktophutService : IBgsProvider
+// The desktophut Browse source: its animated-wallpapers category and its search share one page layout (DesktophutScraper)
+public sealed class DesktophutService() : WebSource("Desktophut")
 {
-    public string Name => "Desktophut";
-    public bool SupportsSearch => true;
-    public bool SupportsPagination => true;
-    public bool SupportsSorting => false;
-
-    public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
-        => DesktophutScraper.GetLatestAsync(page);
-
-    public Task<List<WallpaperResult>> SearchAsync(string query, int page = 1)
-        => DesktophutScraper.SearchAsync(query, page);
-
-    public Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
-        => DesktophutScraper.GetDetailAsync(result);
+    public override Task<List<WallpaperResult>> GetLatestAsync(int page) => DesktophutScraper.ListAsync(page, null);
+    public override Task<List<WallpaperResult>> SearchAsync(string query, int page) => DesktophutScraper.ListAsync(page, query);
+    public override Task<WallpaperDetail> GetDetailAsync(WallpaperResult result) => DesktophutScraper.DetailAsync(result);
 }

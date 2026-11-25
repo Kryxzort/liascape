@@ -1,231 +1,133 @@
 using System;
 using System.Collections.Generic;
-using System.Net;
-using System.Net.Http;
+using System.Linq;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
 using Liascape.Models;
 
 namespace Liascape.Scrapers;
 
-public static class MotionBgsScraper
+// motionbgs.com, read from its pages (fixtures: scripts/test-fixtures/scrapers/motionbgs/). Two page shapes carry cards:
+//   - a page whose every link may be a card: the latest list (/hx2/latest/<n>/, the fragment the site's home page loads)
+//     and a tag's pages (/tag:<name>/, /tag:<name>/<n>/), where the header, related tags and paging are links too;
+//   - the search results (/search?q=…&page=<n>), where only the links in div.tmb are results.
+// A search for a word that names a tag is redirected to that tag's page, so its later pages are the tag's, not the search's.
+// The site now serves from motionbgs.com and redirects www to it; the www addresses stay because a downloaded item's
+// source id is its page address (DownloadHelper's de-duplication).
+internal static class MotionBgsScraper
 {
-    private const string Base = "https://www.motionbgs.com";
+    private const string Site = "https://www.motionbgs.com";
 
-    public static async Task<List<WallpaperResult>> GetLatestAsync(int page)
+    public static async Task<List<WallpaperResult>> LatestAsync(int page)
     {
-        string url = $"{Base}/hx2/latest/{page}/";
-        var html = await FetchAsync(url);
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-        return ParseLinks(doc);
+        var (doc, _) = await SitePage.GetAsync($"{Site}/hx2/latest/{page}/");
+        return LinkCards(doc);
     }
 
-    // Returns results + the tag path if the site redirected (e.g. "/tag:car/"), null if regular search.
-    public static async Task<(List<WallpaperResult> Results, string? TagPath)> SearchAsync(string query)
+    // Page 1 of a search; TagPath is the tag's path ("/tag:car/") when the site redirected the query to a tag's page.
+    public static async Task<(List<WallpaperResult> Cards, string? TagPath)> SearchFirstAsync(string query)
     {
-        string url = $"{Base}/search?q={Uri.EscapeDataString(query)}&page=1";
-        var (html, finalUrl) = await FetchWithFinalUrlAsync(url);
-
-        string? tagPath = DetectTagPath(finalUrl);
-
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-
-        var results = tagPath != null ? ParseLinks(doc) : ParseSearchDivs(doc);
-        return (results, tagPath);
+        var (doc, servedFrom) = await SitePage.GetAsync(SearchUrl(query, 1));
+        string path = servedFrom.AbsolutePath;
+        return path.Contains("/tag:", StringComparison.Ordinal) ? (LinkCards(doc), path) : (ResultCards(doc), null);
     }
 
-    public static async Task<List<WallpaperResult>> GetTagPageAsync(string tagPath, int page)
+    public static async Task<List<WallpaperResult>> SearchPageAsync(string query, int page)
     {
-        // tagPath is like "/tag:car/" — page 1 is the base, page 2+ appends the number
-        string url = page == 1 ? $"{Base}{tagPath}" : $"{Base}{tagPath}{page}/";
-        var html = await FetchAsync(url);
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-        return ParseLinks(doc);
+        var (doc, _) = await SitePage.GetAsync(SearchUrl(query, page));
+        return ResultCards(doc);
     }
 
-    public static async Task<List<WallpaperResult>> GetSearchPageAsync(string query, int page)
+    // A later page (2+) of a tag's list
+    public static async Task<List<WallpaperResult>> TagPageAsync(string tagPath, int page)
     {
-        string url = $"{Base}/search?q={Uri.EscapeDataString(query)}&page={page}";
-        var html = await FetchAsync(url);
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-        return ParseSearchDivs(doc);
+        var (doc, _) = await SitePage.GetAsync($"{Site}{tagPath}{page}/");
+        return LinkCards(doc);
     }
 
-    public static async Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
+    // The wallpaper's page: the preview <video>'s mp4 and the first download link (the largest size the site offers)
+    public static async Task<WallpaperDetail> DetailAsync(WallpaperResult card)
     {
-        var html = await FetchAsync(result.PageUrl);
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-
-        string preview = Base + doc.DocumentNode
-            .SelectSingleNode("//source[@type='video/mp4']")!
-            .GetAttributeValue("src", "");
-
-        string download = Base + doc.DocumentNode
-            .SelectSingleNode("//div[@class='download']//a")!
-            .GetAttributeValue("href", "");
-
+        var (doc, _) = await SitePage.GetAsync(card.PageUrl);
+        var video = SitePage.Needed(doc, "//source[@type='video/mp4']", "the preview video", card.PageUrl);
+        var download = SitePage.Needed(doc, $"//div[{Class("download")}]//a[@href]", "the download link", card.PageUrl);
         return new WallpaperDetail
         {
-            Title = result.Title,
-            PreviewUrl = preview,
-            DownloadUrl = download,
-            NeedsReferrer = false
+            Title = card.Title,
+            PreviewUrl = SitePage.OnSite(Site, SitePage.Attr(video, "src")),
+            DownloadUrl = SitePage.OnSite(Site, SitePage.Attr(download, "href")),
         };
     }
 
-    // Parses //a tags — used by the latest HTMX endpoint and tag pages.
-    // Handles both span-based titles (HTMX) and alt-based titles (tag pages),
-    // and Cloudflare lazy-loaded images (data-cfsrc takes priority over src).
-    private static List<WallpaperResult> ParseLinks(HtmlDocument doc)
-    {
-        var results = new List<WallpaperResult>();
-        var links = doc.DocumentNode.SelectNodes("//a");
-        if (links == null) return results;
+    private static string SearchUrl(string query, int page) => $"{Site}/search?q={Uri.EscapeDataString(query)}&page={page}";
 
-        foreach (var a in links)
+    // XPath for "has this class among its classes"
+    private static string Class(string name) => $"contains(concat(' ', normalize-space(@class), ' '), ' {name} ')";
+
+    // Every link on the page that is a wallpaper: a picture with a title, pointing at a wallpaper's page — not the home
+    // page, a tag or a search. The picture sits in the link, or (an older layout) right before it; the title is the card's
+    // span.ttl, else the picture's alt text.
+    private static List<WallpaperResult> LinkCards(HtmlDocument doc)
+    {
+        var cards = new List<WallpaperResult>();
+        foreach (var a in doc.DocumentNode.SelectNodes("//a") ?? Enumerable.Empty<HtmlNode>())
         {
-            var imgNode = a.SelectSingleNode(".//img");
+            var picture = a.SelectSingleNode(".//img") ?? PictureBefore(a);
+            string thumb = PictureAddress(picture);
+            var ttl = a.SelectSingleNode($".//span[{Class("ttl")}]");
+            string title = ttl != null ? SitePage.Text(ttl)! : SitePage.Attr(picture, "alt").Trim();
+            string href = SitePage.Attr(a, "href");
+            if (thumb.Length == 0 || title.Length == 0 || href.Length == 0) continue;
 
-            // If not inside the <a>, check for a preceding sibling <img>
-            if (imgNode == null)
-            {
-                var sibling = a.PreviousSibling;
-                while (sibling != null && sibling.NodeType != HtmlAgilityPack.HtmlNodeType.Element)
-                    sibling = sibling.PreviousSibling;
-                if (sibling?.Name == "img")
-                    imgNode = sibling;
-            }
-
-            // Cloudflare lazy loading puts the real URL in data-cfsrc; src may be a placeholder
-            string img = imgNode?.GetAttributeValue("data-cfsrc", "") ?? "";
-            if (string.IsNullOrEmpty(img))
-                img = imgNode?.GetAttributeValue("src", "") ?? "";
-
-            string? title = WebUtility.HtmlDecode(
-                a.SelectSingleNode(".//span[@class='ttl']")?.InnerText?.Trim()
-                ?? imgNode?.GetAttributeValue("alt", "")?.Trim()
-                ?? a.GetAttributeValue("title", "")?.Trim());
-            string? resolution = a.SelectSingleNode(".//span[@class='frm']")?.InnerText?.Trim();
-            string href = a.GetAttributeValue("href", "");
-
-            if (string.IsNullOrEmpty(img) || string.IsNullOrEmpty(title) || string.IsNullOrEmpty(href))
+            href = SitePage.OnSite(Site, href);
+            if (!Uri.TryCreate(href, UriKind.Absolute, out var target)) continue;
+            string path = target.AbsolutePath.Trim('/');
+            if (path.Length == 0 || path.StartsWith("tag:", StringComparison.Ordinal) || path.StartsWith("search", StringComparison.Ordinal))
                 continue;
-
-            if (!img.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                img = Base + img;
-
-            if (!href.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                href = Base + href;
-
-            // Skip non-wallpaper links (homepage, tag index, etc.)
-            var path = new Uri(href).AbsolutePath.Trim('/');
-            if (string.IsNullOrEmpty(path) || path.StartsWith("tag:") || path.StartsWith("search"))
-                continue;
-
-            results.Add(new WallpaperResult
-            {
-                Title = title,
-                ThumbnailUrl = img,
-                PageUrl = href,
-                Resolution = resolution
-            });
+            cards.Add(Card(title, SitePage.OnSite(Site, thumb), href, a));
         }
-        return results;
+        return cards;
     }
 
-    // Parses .tmb divs — used by the search results page.
-    private static List<WallpaperResult> ParseSearchDivs(HtmlDocument doc)
+    // The search page's results: every link in div.tmb with a title (its span.ttl, else the link's own title) is one, with
+    // or without a picture (lazy loading may hide it in a <noscript>).
+    private static List<WallpaperResult> ResultCards(HtmlDocument doc)
     {
-        var results = new List<WallpaperResult>();
-        var tmbDivs = doc.DocumentNode.SelectNodes("//div[contains(@class,'tmb')]");
-        if (tmbDivs == null) return results;
-
-        foreach (var div in tmbDivs)
+        var cards = new List<WallpaperResult>();
+        foreach (var a in doc.DocumentNode.SelectNodes("//div[contains(@class,'tmb')]//a") ?? Enumerable.Empty<HtmlNode>())
         {
-            var aLinks = div.SelectNodes(".//a");
-            if (aLinks == null) continue;
-
-            foreach (var a in aLinks)
-            {
-                var imgNode = a.SelectSingleNode(".//img");
-                string img = "";
-                if (imgNode != null)
-                {
-                    img = imgNode.GetAttributeValue("data-cfsrc", "");
-                    if (string.IsNullOrEmpty(img))
-                        img = imgNode.GetAttributeValue("src", "");
-                }
-
-                if (string.IsNullOrEmpty(img))
-                {
-                    var noscript = a.SelectSingleNode(".//noscript");
-                    if (noscript != null)
-                    {
-                        var inner = new HtmlDocument();
-                        inner.LoadHtml(noscript.InnerHtml);
-                        img = inner.DocumentNode.SelectSingleNode(".//img")?.GetAttributeValue("src", "") ?? "";
-                    }
-                }
-
-                if (!img.StartsWith("http", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(img))
-                    img = Base + (img.StartsWith('/') ? img : "/" + img);
-
-                bool validImg = img.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
-                             || img.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
-                             || img.EndsWith(".png", StringComparison.OrdinalIgnoreCase);
-
-                string? title = WebUtility.HtmlDecode(
-                    a.SelectSingleNode(".//span[@class='ttl']")?.InnerText?.Trim()
-                    ?? a.GetAttributeValue("title", ""));
-                string? resolution = a.SelectSingleNode(".//span[@class='frm']")?.InnerText?.Trim();
-                string href = a.GetAttributeValue("href", "");
-
-                if (string.IsNullOrEmpty(title) || string.IsNullOrEmpty(href)) continue;
-
-                if (!href.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                    href = Base + (href.StartsWith('/') ? href : "/" + href);
-
-                results.Add(new WallpaperResult
-                {
-                    Title = title,
-                    ThumbnailUrl = img,
-                    PageUrl = href,
-                    Resolution = resolution
-                });
-            }
+            string thumb = PictureAddress(a.SelectSingleNode(".//img"));
+            // HtmlAgilityPack keeps a <noscript>'s content as text: parse it to reach its <img>
+            if (thumb.Length == 0 && a.SelectSingleNode(".//noscript") is { } noscript)
+                thumb = SitePage.Attr(SitePage.Parse(noscript.InnerHtml).DocumentNode.SelectSingleNode("//img"), "src");
+            var ttl = a.SelectSingleNode($".//span[{Class("ttl")}]");
+            string title = ttl != null ? SitePage.Text(ttl)! : SitePage.Attr(a, "title").Trim();
+            string href = SitePage.Attr(a, "href");
+            if (title.Length == 0 || href.Length == 0) continue;
+            cards.Add(Card(title, SitePage.OnSite(Site, thumb), SitePage.OnSite(Site, href), a));
         }
-        return results;
+        return cards;
     }
 
-    private static string? DetectTagPath(string? finalUrl)
+    private static WallpaperResult Card(string title, string thumb, string page, HtmlNode link) => new()
     {
-        if (finalUrl == null) return null;
-        var path = new Uri(finalUrl).AbsolutePath;
-        return path.Contains("/tag:") ? path : null;
+        Title = title,
+        ThumbnailUrl = thumb,
+        PageUrl = page,
+        Resolution = SitePage.Text(link.SelectSingleNode($".//span[{Class("frm")}]")) is { Length: > 0 } size ? size : null,
+    };
+
+    // Cloudflare's lazy loading puts the real address in data-cfsrc and a placeholder in src
+    private static string PictureAddress(HtmlNode? img)
+    {
+        string lazy = SitePage.Attr(img, "data-cfsrc");
+        return lazy.Length > 0 ? lazy : SitePage.Attr(img, "src");
     }
 
-    private static async Task<(string Html, string? FinalUrl)> FetchWithFinalUrlAsync(string url)
+    private static HtmlNode? PictureBefore(HtmlNode a)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-        var resp = await HttpClientProvider.Client.SendAsync(req);
-        resp.EnsureSuccessStatusCode();
-        string html = await resp.Content.ReadAsStringAsync();
-        string? finalUrl = resp.RequestMessage?.RequestUri?.ToString();
-        return (html, finalUrl);
-    }
-
-    private static async Task<string> FetchAsync(string url)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-        var resp = await HttpClientProvider.Client.SendAsync(req);
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadAsStringAsync();
+        var node = a.PreviousSibling;
+        while (node != null && node.NodeType != HtmlNodeType.Element) node = node.PreviousSibling;
+        return node?.Name == "img" ? node : null;
     }
 }

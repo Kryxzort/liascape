@@ -99,7 +99,7 @@ const stub = () => `(() => { window.__dl = []; const items = ${J(Array.from({ le
     const ok = (b) => Promise.resolve(new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } }));
     const m = (o?.method || "GET") === "POST";
     if (p === "/browse" && m) { const b = JSON.parse(o.body); return ok(b.page > 1 ? [] : items); }
-    if (p === "/detail" && m) { const b = JSON.parse(o.body); return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
+    if (p === "/detail" && m) { const b = JSON.parse(o.body); return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "" }); }
     if (p === "/download" && m) { const b = JSON.parse(o.body); window.__dl.push(b.result.pageUrl); return ok({ skipped: true }); }
     // signed in: under "Subscribe with Steam login" (the default) a signed-out page disables every Workshop download
     // (components/subscribeMode.ts actionBlocked), and these cells test the selection, not Steam

@@ -20,7 +20,7 @@ namespace Liascape.Services;
 // takes the user's browser with it. Scraping stays as the FALLBACK, when Steam's
 // servers can't be reached / refuse (FallbackPagesPerLoad pages, no prefetch, through SteamGate; its cooldown → 429).
 // LIASCAPE_WORKSHOP_FALLBACK=1 forces the fallback (testing).
-public class SteamWorkshopService : IBgsProvider
+public class SteamWorkshopService : IBrowseSource
 {
     private const int CmPageSize = 100; // QueryFiles' numperpage cap (measured: asked for 200 or 500, Steam returns 100)
     // the fallback: two 30-item pages per app page — two SteamGate-spaced requests a scroll on a per-IP-limited host
@@ -243,7 +243,6 @@ public class SteamWorkshopService : IBgsProvider
             Title = result.Title,
             PreviewUrl = result.ThumbnailUrl,
             DownloadUrl = result.PageUrl,
-            NeedsReferrer = false,
             IsScene = result.IsScene,
             WorkshopId = result.WorkshopId,
             IsWorkshopAcquire = true,

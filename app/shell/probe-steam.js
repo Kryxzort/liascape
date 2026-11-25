@@ -426,7 +426,7 @@ const STUB = `(() => {
       if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
         pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
     }
-    if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "", needsReferrer: false });
+    if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "" });
     if (p === "/download" && m === "POST") {
       return new Promise((resolve, reject) => {
         st.dl = { body: JSON.parse(o.body), aborted: false, resolve };

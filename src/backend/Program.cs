@@ -51,6 +51,10 @@ sealed class Program
             case "steam-selftest":
                 Environment.Exit(Liascape.Web.SteamSelfTest.Run());
                 return;
+            // hidden: Browse's sources against saved pages and a fake Wallpaper Engine folder (scripts/test-fixtures/scrapers/)
+            case "scraper-selftest":
+                Environment.Exit(Liascape.Scrapers.ScraperSelfTest.Run(args.Skip(1).ToArray()));
+                return;
             // hidden: the Workshop through the running Steam client as Wallpaper Engine (Helpers/SteamClientUgc.cs) — the
             // backend's child (`session`: JSON commands on stdin, JSON lines on stdout; `probe`); never run by hand
             case "steam-ugc":

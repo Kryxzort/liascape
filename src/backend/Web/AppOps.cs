@@ -259,7 +259,7 @@ public static class AppOps
                 }
                 // animated preview lives in the acquired workshop folder (preview.gif/webp)
                 anim = ResolveLocalAnimatedPreview(dir) ?? anim;
-                dl = new WallpaperDetail { Title = detail.Title, PreviewUrl = thumbnailUrl, DownloadUrl = url, IsScene = detail.IsScene, WorkshopId = detail.WorkshopId, NeedsReferrer = false,
+                dl = new WallpaperDetail { Title = detail.Title, PreviewUrl = thumbnailUrl, DownloadUrl = url, IsScene = detail.IsScene, WorkshopId = detail.WorkshopId,
                     Resolution = detail.Resolution, AgeRating = detail.AgeRating, YoutubeUrl = detail.YoutubeUrl,
                     PageUrl = detail.PageUrl, AuthorName = detail.AuthorName, Description = detail.Description,
                     FileSizeBytes = detail.FileSizeBytes, Subscriptions = detail.Subscriptions,

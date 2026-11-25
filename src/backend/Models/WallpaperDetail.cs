@@ -1,26 +1,15 @@
 namespace Liascape.Models;
 
-public class WallpaperDetail
+// A result's detail (IBrowseSource.GetDetailAsync): what the sidebar previews and what a download fetches.
+public sealed class WallpaperDetail : WallpaperFacts
 {
-    public required string Title { get; init; }
+    // the sidebar's preview: the site's preview video, or the local card's still
     public required string PreviewUrl { get; init; }
+    // the file a download fetches, or the local video file / item folder an import takes
     public required string DownloadUrl { get; init; }
-    public bool NeedsReferrer { get; init; }
+    // the Referer the download must send, null = none (moewalls refuses its files without the wallpaper's page)
     public string? Referrer { get; init; }
-    public bool IsScene { get; init; }
-    public string? WorkshopId { get; init; }
     // True when DownloadUrl is a local workshop dir acquired via WorkshopDownloader
     public bool IsWorkshopAcquire { get; init; }
-
-    // Rich metadata (carried through download → persisted on the LibraryItem). All optional.
-    public string? Resolution { get; init; }
-    public string? AgeRating { get; init; }
-    public string? YoutubeUrl { get; init; }
     public string? PageUrl { get; init; }
-    public string? AuthorName { get; init; }
-    public string? Description { get; init; }
-    public long? FileSizeBytes { get; init; }
-    public long? Subscriptions { get; init; }
-    public long? Favorites { get; init; }
-    public string[]? Tags { get; init; }
 }

@@ -89,7 +89,7 @@ const STUB = `(() => {
       return res(r); }
     if (p.startsWith("/workshop/") && m === "POST") return res({ subscribed: false, inSteamTodo: true, message: "" });
     if (p === "/browse" && m === "POST") { const b = JSON.parse(o.body); if (b.filter) return res(b.page > 1 ? [] : items); }
-    if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "", needsReferrer: false });
+    if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "" });
     if ((p === "/download" || p === "/open") && m === "POST") return new Promise(() => {});
     return f(u, o);
   };
