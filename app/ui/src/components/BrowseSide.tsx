@@ -16,6 +16,7 @@ import { SizePill, StatPills } from "./sidePills";
 import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { menuAt, oneOffMenuItem } from "./menuItems";
 import { FADE, useMotion } from "./motion";
+import { TypeBadge } from "./TypeBadge";
 
 // how long an asked "Download without subscribing" route stays good when nothing it hangs on changed here (a settings change in
 // another window moves it)
@@ -131,7 +132,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             </span>
           )}
           {/* says what its card's badge says (Card.tsx). Guard: probe-filters filter:preset:badge */}
-          {w.isScene && <span className="side-chip accent">{w.isPreset ? "PRESET" : "SCENE"}</span>}
+          {w.isScene && <TypeBadge chip preset={w.isPreset} />}
           {w.resolution && <span className="side-pill"><Monitor size={13} /> {w.resolution}</span>}
           {/* Steam's current counts, the Library sidebar's own pills (components/sidePills.tsx). Guard: probe-steam ws:counts */}
           <StatPills subscriptions={w.subscriptions} favorites={w.favorites} />

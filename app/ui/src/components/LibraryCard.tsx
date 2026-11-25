@@ -6,6 +6,7 @@ import { MotionThumb } from "./MotionThumb";
 import { usePreviewKinds } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 import { useSeenCard } from "./previewQueue";
+import { TypeBadge } from "./TypeBadge";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
@@ -50,7 +51,7 @@ export const LibraryCard = memo(function LibraryCard({
         <MotionThumb item={item} hover={hover} hoverKind={hoverKind} idleKind={idleKind} autoVideo={autoVideo} />
         {/* a preset is a scene for everything else (greying, "Play scenes" off); only its badge names it. Guard: probe-sidebar
             lib:preset:badge */}
-        {item.isScene && <span className="badge">{item.isPreset ? "PRESET" : "SCENE"}</span>}
+        {item.isScene && <TypeBadge preset={item.isPreset} />}
         {/* Guard: probe-sidebar lib:preset:needsBase, lib:preset:legacy, lib:scenesBlocked (a scene's too) */}
         {(item.isPreset || item.isScene) && <span className={`warn preset${reason ? " on" : ""}`} data-card-reason={reason ?? ""} title={reason ?? undefined}
           aria-hidden={reason ? undefined : true}><Unplug size={15} /></span>}

@@ -86,7 +86,8 @@
 //   lib:presets:scene    a Library scene with a Workshop id: "Presets" lists its presets on the Browse tab (the CM fixture's
 //                        two, marked In library); none on a preset; the Library's Preset filter keeps exactly the presets
 //   lib:preset:badge     a preset's card and its sidebar's chip say PRESET, its base's and a plain scene's SCENE: the same
-//                        badge, corner and look, two themes × glow on / off. Shot side-preset-badge.png
+//                        badge in the same corner, the preset's told apart by at least two of fill / letters / ring / glyph,
+//                        two themes × glow on / off, its chip's own fill under bg-live. Shots side-preset-badge*.png
 //   lib:preset:needsBase[Off]  the base goes with the preset's sidebar open: the cards grey out (status icon fading in, the
 //                        reason as its tooltip), the notice (the crash notice's block, --warn) rises in (Off: fades); a click
 //                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
@@ -2521,18 +2522,20 @@ app.whenReady().then(async () => {
     }));
 
     // lib:preset:badge — side by side in the Library, a preset's card (pp1) says PRESET and its base (pb) and a plain scene
-    // (s1) SCENE: one `.badge` in the same corner with the same look (LibraryCard.tsx), under two themes with glow on and off
+    // (s1) SCENE: one `.badge` in the same corner and type (TypeBadge.tsx), the preset's look apart from the scenes' in at
+    // least two of fill, letters, ring and glyph, under two themes with glow on and off
     await cell("lib:preset:badge", async () => {
-      const v = [], J = JSON.stringify;
+      const v = [], J = JSON.stringify, APART = ["bg", "fg", "ring", "svg"]; // what a glance tells a tag by
       const s0 = await getSettings(), themes = (await http("GET", "/themes")).json ?? [];
-      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name;
+      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name, light = themes.find((t) => /latte/i.test(t.name) && t.name !== t0)?.name; // a light theme too: the hollow badge on a light fill
       if (!t0 || !t1) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
       const read = () => page(`return ["pp1", "pb", "s1"].map((t) => { const c = m.card(t), b = c?.querySelector(".thumb-wrap > .badge"); if (!b) return { t, text: null };
         const s = getComputedStyle(b), w = c.querySelector(".thumb-wrap").getBoundingClientRect(), r = b.getBoundingClientRect();
         return { t, text: b.textContent.trim(), cls: b.className, dx: Math.round(r.left - w.left), dy: Math.round(r.top - w.top), h: Math.round(r.height),
-          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | ") }; });`);
+          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | "),
+          bg: s.backgroundColor, fg: s.color, ring: /inset/.test(s.boxShadow), svg: !!b.querySelector("svg"), type: [s.fontSize, s.fontWeight, s.letterSpacing, s.borderRadius].join(" ") }; });`);
       try {
-        for (const theme of [t0, t1]) for (const glows of [true, false]) await withPresets(async () => {
+        for (const theme of [t0, t1, light].filter(Boolean)) for (const glows of [true, false]) await withPresets(async () => {
           const tag = `${theme}${glows ? "" : " no-glow"}`;
           if (!(await page(`return !!m.card("pp1") && !!m.card("pb") && !!m.card("s1");`))) { v.push(`${tag}: pp1 / pb / s1 not all in the Library — proved nothing`); return; }
           const [pre, base, plain] = await read();
@@ -2540,21 +2543,48 @@ app.whenReady().then(async () => {
           if (pre.text !== "PRESET") v.push(`${tag}: pp1 (a preset) says ${J(pre.text)}, want PRESET`);
           if (base.text !== "SCENE") v.push(`${tag}: pb (its base) says ${J(base.text)}, want SCENE`);
           if (plain.text !== "SCENE") v.push(`${tag}: s1 (a plain scene) says ${J(plain.text)}, want SCENE`);
-          for (const x of [pre, base]) if (x.text) for (const k of ["cls", "dx", "dy", "h", "look"]) if (x[k] !== plain[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ s1's ${J(plain[k])}`);
+          if (base.text) for (const k of ["cls", "dx", "dy", "h", "look"]) if (base[k] !== plain[k]) v.push(`${tag}: pb's badge ${k} ${J(base[k])} ≠ s1's ${J(plain[k])}`);
+          if (pre.text) {
+            for (const k of ["dx", "dy", "type"]) if (pre[k] !== plain[k]) v.push(`${tag}: pp1's badge ${k} ${J(pre[k])} ≠ s1's ${J(plain[k])}`);
+            const d = APART.filter((k) => pre[k] !== plain[k]);
+            if (d.length < 2) v.push(`${tag}: pp1's badge differs from a scene's only in ${J(d)} — want two of ${J(APART)} (${pre.look} vs ${plain.look})`);
+          }
           const sh = plain.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
           if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${plain.look})`);
           // the sidebar's hero chip says the same as the card (LibrarySide.tsx)
           const chips = [];
           for (const t of ["pp1", "pb", "s1"]) chips.push(await page(`await m.closeAll(); await m.openSide(${J(t)});
             const c = m.side().querySelector(".side-hero > .side-chip.accent:not([data-side-looping])"); if (!c) return { t: ${J(t)}, text: null };
-            const s = getComputedStyle(c); return { t: ${J(t)}, text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | ") };`));
+            const s = getComputedStyle(c); return { t: ${J(t)}, text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | "),
+              bg: s.backgroundColor, fg: s.color, ring: s.boxShadow, svg: !!c.querySelector("svg"), type: s.fontSize };`));
           await page(`await m.closeAll();`);
           console.log(`        ${tag} sidebar: ${J(chips.map((c) => c.text))}`);
           const want = { pp1: "PRESET", pb: "SCENE", s1: "SCENE" };
           for (const c of chips) if (c.text !== want[c.t]) v.push(`${tag}: ${c.t}'s sidebar chip says ${J(c.text)}, want ${want[c.t]}`);
-          for (const c of chips.slice(0, 2)) if (c.text) for (const k of ["cls", "look"]) if (c[k] !== chips[2][k]) v.push(`${tag}: ${c.t}'s sidebar chip ${k} ${J(c[k])} ≠ s1's ${J(chips[2][k])}`);
+          const [cp, cb, cs] = chips;
+          if (cb.text) for (const k of ["cls", "look"]) if (cb[k] !== cs[k]) v.push(`${tag}: pb's sidebar chip ${k} ${J(cb[k])} ≠ s1's ${J(cs[k])}`);
+          if (cp.text) {
+            if (cp.type !== cs.type) v.push(`${tag}: pp1's sidebar chip size ${J(cp.type)} ≠ s1's ${J(cs.type)}`);
+            const d = APART.filter((k) => cp[k] !== cs[k]);
+            if (d.length < 2) v.push(`${tag}: pp1's sidebar chip differs from a scene's only in ${J(d)} — want two of ${J(APART)} (${cp.look} vs ${cs.look})`);
+          }
+          // pp1's sidebar open beside its card and pb's, one shot per theme and glow
+          await page(`await m.openSide("pp1"); await m.sleep(400);`);
+          await shot(`preset-badge-${theme.replace(/\W+/g, "-").toLowerCase()}${glows ? "" : "-noglow"}`);
           if (theme === t1 && glows) await shot("preset-badge");
+          await page(`await m.closeAll();`);
         }, { theme, glows });
+        // bg-live: the docked sidebar has no fill of its own, so the hollow chip's own dark fill must carry it
+        await withPresets(async () => {
+          const c = await page(`await m.closeAll(); await m.openSide("pp1"); document.documentElement.classList.add("bg-live"); await m.sleep(400);
+            const c = m.side().querySelector(".side-hero > .side-chip.accent.preset"); if (!c) return null;
+            const s = getComputedStyle(c); return { bg: s.backgroundColor, svg: !!c.querySelector("svg"), live: document.documentElement.classList.contains("bg-live") };`);
+          console.log(`        bg-live sidebar: ${J(c)}`);
+          if (!c?.live) v.push(`bg-live: :root.bg-live not set — proved nothing`);
+          else if (!c.svg || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(c.bg)) v.push(`bg-live: pp1's chip ${J(c)} — want its glyph and a fill of its own`);
+          await shot("preset-badge-bglive");
+          await page(`document.documentElement.classList.remove("bg-live"); await m.closeAll();`);
+        });
       } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); }
       return v;
     });

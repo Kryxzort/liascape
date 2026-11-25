@@ -4,6 +4,7 @@ import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client"
 import { useStore } from "../store";
 import { shortDownloadStatus } from "./downloadStatus";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
+import { TypeBadge } from "./TypeBadge";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions (docs/decisions.md § "Left click does the tab's main action, right click opens the item
@@ -63,7 +64,7 @@ export const Card = memo(function Card({
         )}
         {/* a Workshop preset is a scene for everything else (greying, "Play scenes" off); only its badge names it. Guard:
             probe-filters filter:preset:badge */}
-        {w.isScene && <span className="badge">{w.isPreset ? "PRESET" : "SCENE"}</span>}
+        {w.isScene && <TypeBadge preset={w.isPreset} />}
         {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
         {inLibrary && <span className="badge inlib ico" data-in-library><Check size={11} strokeWidth={3} />In library</span>}
         {/* hover download button (bottom-right, the Library card's trash spot): a solid accent arrow on a dark round chip (index.css

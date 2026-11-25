@@ -323,6 +323,14 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* Browse: already in the library — the success colour, not the accent (it isn't a state of the card, it's a fact) */
 .badge.inlib { left: auto; right: 8px; gap: 3px; align-items: center;
   background: color-mix(in srgb, var(--success) 82%, black); color: #fff; box-shadow: none; }
+/* a preset (TypeBadge.tsx): SCENE's tag turned hollow — the theme's darkest fill (dense enough to read on any picture),
+   the accent as its ring and letters, the presets' glyph in front — so fill, edge and shape all differ from SCENE's solid
+   accent chip, at small size and out of the corner of the eye. The glyph scales with the letters (the compact grid's 8px).
+   Guard: probe-sidebar lib:preset:badge, probe-filters filter:preset:badge */
+.badge.preset { display: flex; align-items: center; gap: 3px; padding-left: 5px;
+  background: color-mix(in srgb, var(--bg-crust) 90%, transparent); color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); }
+.badge.preset > svg { flex: none; width: 1.1em; height: 1.1em; }
 .res {
   position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 700;
   padding: 3px 6px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff;
@@ -1414,6 +1422,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-tile.danger:is(:disabled, [aria-disabled="true"]) .side-tile-ico { box-shadow: none; }
 :root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+:root.no-glow .side-chip.accent.preset { box-shadow: inset 0 0 0 1px var(--accent); }
 :root.no-glow .side-open:hover { box-shadow: none; }
 :root.no-glow :is(.ws-creator:hover:not(:disabled), .ws-pill-x:hover, .ws-post textarea:focus) { box-shadow: none; }
 :root.no-glow .side-crash::before { box-shadow: none; }
@@ -1723,6 +1732,11 @@ input[type=range]:focus-visible { outline: none; }
   border-radius: 999px; background: var(--surface0); color: var(--subtext); }
 .side-chip.accent { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 10px -4px var(--accent); }
+/* a preset's chip: the card badge's hollow look (.badge.preset) in the hero line — no accent tint, a full-accent ring,
+   the presets' glyph */
+.side-chip.accent.preset { padding-left: 7px; background: color-mix(in srgb, var(--bg-crust) 60%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent), 0 0 10px -4px var(--accent); }
+.side-chip.preset > svg { flex: none; width: 12px; height: 12px; }
 .side-chip.inlib { background: color-mix(in srgb, var(--success) 82%, black); color: #fff; }
 .side-chip.danger { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
 /* a crashed scene's notice (LibrarySide.tsx): a block of the body in the section cards' material (.side-sec: fill, edge,

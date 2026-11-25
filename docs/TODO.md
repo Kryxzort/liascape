@@ -78,8 +78,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 121. [ ] (owner) Starting a playlist, and applying a wallpaper, take too long before the wallpaper shows. Measure
        click → first frame per step (UI post, backend `PlayFrom` / apply, player command, source `Ready`, transition),
        video and scene, on a private player. Then cut the largest step.
-123. [ ] (owner) Tell scenes and presets apart at a glance: their card tags look almost the same. Give the Preset tag
-       its own look (colour, icon or shape) that still follows the theme, glow and translucency toggles.
 124. [ ] (owner) The "go to the playing wallpaper" crosshair also selects that card and opens its sidebar, as a click on
        the card would (without applying it).
 125. [ ] (owner) Import from a link: Import accepts a pasted web link (a Workshop item page, a MoeWalls or DesktopHut

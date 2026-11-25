@@ -20,6 +20,7 @@ import { BaseRow, CommentsSection, CreatorRow, FavoriteTile, PresetsRow, Worksho
 import { actionBlocked } from "./subscribeMode";
 import { revealCard } from "../hooks/gridKeys";
 import { SizePill } from "./sidePills";
+import { TypeBadge } from "./TypeBadge";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -289,7 +290,7 @@ export function LibrarySide({
         {/* the hero line: what it is (chips) and its numbers (pills) */}
         <div className="side-hero">
           {/* says what its card's badge says (LibraryCard.tsx). Guard: probe-sidebar lib:preset:badge */}
-          {item.isScene &&<span className="side-chip accent">{item.isPreset ? "PRESET" : "SCENE"}</span>}
+          {item.isScene && <TypeBadge chip preset={item.isPreset} />}
           {/* "keep playing this one" is on — the only thing the old "Playing now" pill said that nothing else does */}
           {playing && keepCurrent && <span className="side-chip accent" data-side-looping><Repeat size={12} /> Looping this one</span>}
           {/* reserved before the duration loads: the rows below don't move when it lands */}

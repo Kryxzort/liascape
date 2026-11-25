@@ -83,8 +83,8 @@
 //   filter:preset:on  ticking Preset POSTs include ["Preset"] and lists exactly the two presets
 //   filter:preset:cleared  Preset ticked, then Settings → Play scenes off: the row and the saved tag go, the list is asked
 //                     again without it and holds no preset. Screenshots wf-preset-*.png
-//   filter:preset:badge  the presets' cards and sidebar chips say PRESET, the base scene's SCENE: the same badge, corner and
-//                     look, two themes × glow on / off
+//   filter:preset:badge  the presets' cards and sidebar chips say PRESET, the base scene's SCENE: the same badge in the same
+//                     corner, the preset's told apart by at least two of fill / letters / ring / glyph, two themes × glow on / off
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
@@ -1786,20 +1786,22 @@ app.whenReady().then(async () => {
     });
 
     // filter:preset:badge — a preset's card says PRESET, its base and every other scene SCENE, in the same corner and the same
-    // look (one `.badge`, Card.tsx), under two themes with glow on and off: the default list's base (Fixture Workshop Three)
+    // type (one `.badge`, TypeBadge.tsx), the preset's look apart from the scene's in at least two of fill, letters, ring and
+    // glyph (and both presets alike), under two themes with glow on and off: the default list's base (Fixture Workshop Three)
     // against the Preset list's two presets
     await cell("filter:preset:badge", async () => {
-      const v = [];
+      const v = [], APART = ["bg", "fg", "ring", "svg"]; // what a glance tells a tag by
       const s0 = (await http("GET", "/settings")).json ?? {}, themes = (await http("GET", "/themes")).json ?? [];
-      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name;
+      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name, light = themes.find((t) => /latte/i.test(t.name) && t.name !== t0)?.name; // a light theme too: the hollow badge on a light fill
       if (!t0 || !t1) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
       const read = (titles) => page(`return ${J(titles)}.map((t) => { const c = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === t);
         const b = c?.querySelector(".thumb-wrap > .badge:not(.inlib)"); if (!b) return { t, text: null };
         const s = getComputedStyle(b), w = c.querySelector(".thumb-wrap").getBoundingClientRect(), r = b.getBoundingClientRect();
         return { t, text: b.textContent.trim(), cls: b.className, dx: Math.round(r.left - w.left), dy: Math.round(r.top - w.top), h: Math.round(r.height),
-          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | ") }; });`);
+          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | "),
+          bg: s.backgroundColor, fg: s.color, ring: /inset/.test(s.boxShadow), svg: !!b.querySelector("svg"), type: [s.fontSize, s.fontWeight, s.letterSpacing, s.borderRadius].join(" ") }; });`);
       try {
-        for (const theme of [t0, t1]) for (const glows of [true, false]) {
+        for (const theme of [t0, t1, light].filter(Boolean)) for (const glows of [true, false]) {
           const tag = `${theme}${glows ? "" : " no-glow"}`;
           await setSettings({ theme, glows });
           await realWs(true);
@@ -1811,12 +1813,18 @@ app.whenReady().then(async () => {
           if (J(p) !== J(PRESETS)) return [...v, `${tag}: Preset ticked lists ${J(p)} — proved nothing`];
           await sleep(300);
           const pres = await read(PRESETS);
+          await shot(`preset-cards-${theme.replace(/\W+/g, "-").toLowerCase()}${glows ? "" : "-noglow"}`);
           console.log(`        ${tag}: base ${J(base)} / presets ${J(pres.map((x) => x.text))}`);
           if (base.text !== "SCENE") v.push(`${tag}: the base scene's card says ${J(base.text)}, want SCENE`);
           if (vid.text != null) v.push(`${tag}: a video's card has a badge ${J(vid.text)}`);
           for (const x of pres) {
             if (x.text !== "PRESET") v.push(`${tag}: ${x.t} says ${J(x.text)}, want PRESET`);
-            else for (const k of ["cls", "dx", "dy", "h", "look"]) if (x[k] !== base[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ the scene's ${J(base[k])}`);
+            else {
+              for (const k of ["dx", "dy", "type"]) if (x[k] !== base[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ the scene's ${J(base[k])}`);
+              const d = APART.filter((k) => x[k] !== base[k]);
+              if (d.length < 2) v.push(`${tag}: ${x.t}'s badge differs from the scene's only in ${J(d)} — want two of ${J(APART)} (${x.look} vs ${base.look})`);
+              if (x.look !== pres[0].look || x.svg !== pres[0].svg) v.push(`${tag}: the presets' badges differ: ${x.look} vs ${pres[0].look}`);
+            }
           }
           const sh = base.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
           if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${base.look})`);
@@ -1829,7 +1837,8 @@ app.whenReady().then(async () => {
             for (let i = 0; i < 40 && !(await page(`return !!document.querySelector(".side-panel:not(.closing) .side-hero");`)); i++) await sleep(50);
             await sleep(250);
             const c = await page(`const c = document.querySelector(".side-panel:not(.closing) .side-hero > .side-chip.accent"); if (!c) return null;
-              const s = getComputedStyle(c); return { text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | ") };`);
+              const s = getComputedStyle(c); return { text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | "),
+                bg: s.backgroundColor, fg: s.color, ring: s.boxShadow, svg: !!c.querySelector("svg"), type: s.fontSize };`);
             await page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await m.sleep(300);`);
             return { t, text: null, ...c };
           };
@@ -1842,7 +1851,11 @@ app.whenReady().then(async () => {
           const cb = await chip("Fixture Workshop Three");
           console.log(`        ${tag} sidebar: ${J([cp.text, cb.text])}`);
           if (cb.text !== "SCENE") v.push(`${tag}: the base scene's sidebar chip says ${J(cb.text)}, want SCENE`);
-          else if (cp.text) for (const k of ["cls", "look"]) if (cp[k] !== cb[k]) v.push(`${tag}: the preset's sidebar chip ${k} ${J(cp[k])} ≠ the scene's ${J(cb[k])}`);
+          else if (cp.text) {
+            if (cp.type !== cb.type) v.push(`${tag}: the preset's sidebar chip size ${J(cp.type)} ≠ the scene's ${J(cb.type)}`);
+            const d = APART.filter((k) => cp[k] !== cb[k]);
+            if (d.length < 2) v.push(`${tag}: the preset's sidebar chip differs from the scene's only in ${J(d)} — want two of ${J(APART)} (${cp.look} vs ${cb.look})`);
+          }
           await realDone();
         }
       } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); await realDone(); }
