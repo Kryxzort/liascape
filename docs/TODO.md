@@ -98,6 +98,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        the first tick framed ~320 ms after a slow first render is reported `Hung { waited_ms: 304 }`. Find whether the
        hang watchdog now counts the first render's own time (a change in the worker's tick or the test's timing) or
        the machine got slower to schedule; fix the cause, not the threshold.
+129. [ ] The adapter IT reaches Steam's real CM servers: its backends' startup library facts log on anonymously to
+       Steam for their Workshop items, against "tests are hermetic". Point them at a stand-in (the stop suite's
+       `LIASCAPE_STEAM_CM_SERVER`, once the switch-over lands) or run the IT with no network (`unshare -n` /
+       `LIASCAPE_TEST_NO_NETWORK=1`), and fail a run that opens a real Steam session.
+130. [ ] `scripts/test-backend-stop.sh`'s systemd-unit case leaves a `/tmp/liascape-stop-*` folder per run that its own
+       cleanup can't delete (`inaccessible/*` permission denied); make the cleanup restore permissions first, and
+       clear the ones already left.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
