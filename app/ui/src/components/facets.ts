@@ -15,9 +15,11 @@ export function facetsOf(x: Facetable, path: string): Set<string> {
   f = new Set<string>();
   for (const t of x.tags ?? []) f.add(t.toLowerCase());
   if (x.ageRating) f.add(x.ageRating.toLowerCase());
-  // an image (an imported still) is neither a Video nor a Scene; a preset is both a Preset and a Scene (it plays as one)
-  if (x.isScene) f.add("scene"); else if (!IMAGE.test(path)) f.add("video");
-  if (x.isPreset) f.add("preset");
+  // an image (an imported still) is neither a Video nor a Scene. A preset is a Preset only, though it plays as a scene and Steam
+  // tags it with its base's type too: Type's Scene and Preset rows filter apart (Scene ✓ alone lists no preset, Scene ✕ keeps
+  // them), as the Workshop's own query does (the backend's WorkshopTags.Build). Guard: probe-filters lib:preset, local:wePreset
+  if (x.isPreset) { f.delete("scene"); f.delete("video"); f.add("preset"); }
+  else if (x.isScene) f.add("scene"); else if (!IMAGE.test(path)) f.add("video");
   const r = x.resolution ? RES.exec(x.resolution) : null;
   if (r) f.add(`${r[1]} x ${r[2]}`);
   facetCache.set(x, f);

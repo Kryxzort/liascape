@@ -106,7 +106,10 @@
 //   local:weFolder    Browse's "Wallpaper Engine (Local)": the column with what the folder's items know, filtered in the page
 //                     (no filter POSTed), "In my library" too (Yours holds only it), its own saved filter; its client sort in the split, no Workshop sort
 //   local:wePreset    a preset in the WE folder (scene support on, the Liascape player) is its own card there: Type offers Preset,
-//                     which lists exactly it; Scene lists it with the scene; one naming no Workshop base isn't listed
+//                     which lists exactly it; Scene and Preset act apart (Scene ✓ alone no preset, Scene ✕ keeps it); one naming no
+//                     Workshop base isn't listed
+//   lib:preset        a Workshop preset in the Library (Steam tags it Scene + Preset): Scene ✓ alone lists no preset, Preset ✓
+//                     only it, both both, Scene ✕ keeps it, Scene ✕ + Preset ✕ neither
 //   lib:steamTags     an item auto-imported from a Wallpaper Engine folder (its project.json: a genre, no resolution, no age)
 //                     gets Steam's tags from the backend's one look-up (the stack's fake Steam servers, LIASCAPE_STEAM_CM_FIXTURE —
 //                     asked for its id alone): the Library's column grows its rows (3840 x 2160, Questionable) and they filter it
@@ -2155,8 +2158,12 @@ app.whenReady().then(async () => {
         };
         await pick([["Preset", "inc"]], ["wp-preset"]);
         await shot("local-we-preset");
-        await pick([["Preset", "off"], ["Scene", "inc"]], ["wp-preset", "wp-scene"]); // a preset is a scene too (facetsOf)
-        await pick([["Preset", "exc"]], ["wp-scene"]);
+        // Scene and Preset are rows of their own: a preset is no scene to the filter (facetsOf)
+        await pick([["Preset", "off"], ["Scene", "inc"]], ["wp-scene"]);
+        await pick([["Preset", "inc"]], ["wp-preset", "wp-scene"]);
+        await pick([["Preset", "off"], ["Scene", "exc"]], ["wp-preset", "wp-video"]);
+        await pick([["Preset", "exc"]], ["wp-video"]);
+        await pick([["Scene", "off"]], ["wp-scene", "wp-video"]);
         await page(`m.q("[data-wf-clear]")?.click(); await m.sleep(300);`);
       } finally {
         await setSettings({ workshopFolder: s0.workshopFolder, allowScenes: s0.allowScenes });
@@ -2214,6 +2221,65 @@ app.whenReady().then(async () => {
         await setSettings({ workshopFolder: s0.workshopFolder });
         if (item) await post("/library/delete", item); // only the link goes; the later cells count the stack's items
         await sleep(300);
+      }
+      return v;
+    });
+
+    // lib:preset — a preset auto-imported with its base from a WE folder, Steam's tags (the stack's fixture) Scene + Preset, as
+    // the Workshop tags one: the Library's Scene and Preset rows act apart
+    await cell("lib:preset", async () => {
+      const v = [];
+      await libSetup(); await tab("Library");
+      const s0 = (await http("GET", "/settings")).json;
+      const BASE = "931000001", PRE = "931000002";
+      const fx = E.LIASCAPE_STEAM_CM_FIXTURE;
+      if (!fx) return ["no LIASCAPE_STEAM_CM_FIXTURE in the probe's environment"];
+      const fx0 = JSON.parse(fs.readFileSync(fx, "utf8"));
+      fs.writeFileSync(fx + ".tmp", JSON.stringify({ ...fx0, [BASE]: { tags: ["Scene"] }, [PRE]: { tags: ["Scene", "Preset"] } })); fs.renameSync(fx + ".tmp", fx);
+      const we = path.join(E.XDG_CACHE_HOME || path.join(OUT, ".cache"), "liascape", "lib-preset-we");
+      const put = (id, pj, files = {}) => { const d = path.join(we, id); fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, "project.json"), JSON.stringify(pj)); fs.copyFileSync(THUMBS[0], path.join(d, "preview.jpg"));
+        for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(d, n), b); };
+      put(BASE, { type: "scene", file: "scene.json", title: "lp-scene", preview: "preview.jpg" }, { "scene.pkg": Buffer.alloc(16) });
+      put(PRE, { title: "lp-preset", preview: "preview.jpg", dependency: BASE, preset: { schemecolor: "0 0 1" } });
+      await setSettings({ workshopFolder: we, allowScenes: true });
+      let items = [];
+      try {
+        await post("/library/sync");
+        // a preset's videoPath is its base's file: find the two by their Workshop ids
+        const ours = async () => (await http("GET", "/library")).json.filter((x) => x.workshopId === BASE || x.workshopId === PRE);
+        for (let i = 0; i < 60; i++) {
+          await sleep(250);
+          items = await ours();
+          if (items.length === 2 && items.every((x) => x.tags?.includes("Scene"))) break;
+        }
+        await loadUi(); await tab("Library"); await sleep(600); // the page reads the new settings (Type's Preset row) and items
+        const pre = items.find((x) => x.isPreset);
+        console.log(`        imported ${J(items.map((x) => [x.title, !!x.isPreset, x.tags]))}`);
+        if (!pre || items.length !== 2) return [`the Library holds ${J(items.map((x) => x.title))} (want lp-scene and the preset lp-preset) — proved nothing`];
+        if (!(pre.tags ?? []).includes("Scene")) v.push(`the preset's tags ${J(pre.tags)} (want Steam's Scene + Preset)`);
+        const VIDS = ["k1", "k2", "k3", "k4"], SCENES = ["lp-scene", "s1", "s2", "s3"];
+        const want = (...xs) => xs.flat().sort();
+        const steps = [
+          [["Scene", "inc"]], want(SCENES),
+          [["Preset", "inc"]], want(SCENES, "lp-preset"),
+          [["Scene", "off"]], want("lp-preset"),
+          [["Preset", "off"], ["Scene", "exc"]], want(VIDS, "lp-preset"),
+          [["Preset", "exc"]], want(VIDS),
+          [["Scene", "off"]], want(VIDS, SCENES),
+        ];
+        for (let i = 0; i < steps.length; i += 2) {
+          for (const [t, st] of steps[i]) if (!(await libSeg(t, st))) v.push(`no ${t} row in the Library's column`);
+          const got = await libTitles();
+          if (J(got) !== J(steps[i + 1])) v.push(`${steps[i].map((x) => x.join(":")).join(" + ")} → ${J(got)} (want ${J(steps[i + 1])})`);
+          if (i === 0) await shot("lib-preset-scene");
+        }
+        await libClear();
+      } finally {
+        await setSettings({ workshopFolder: s0.workshopFolder, allowScenes: s0.allowScenes });
+        for (const it of items) await post("/library/delete", it); // only the links go; the later cells count the stack's items
+        await page(`localStorage.removeItem("liascape.libFilter"); true`);
+        await loadUi(); await tab("Library"); await sleep(300);
       }
       return v;
     });
