@@ -808,13 +808,13 @@ app.whenReady().then(async () => {
       const wsName = srcs.find((x) => x.supportsTagFilter)?.name;
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
-      const tw = await page(`const t = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not(:has([data-in-library])) .thumb-wrap") ?? document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap");
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
+      const tw = await page(`const t = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]):not(:has([data-in-library])) .thumb-wrap") ?? document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap");
         t.scrollIntoView({ block: "center" }); const r = t.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
       await sleep(300);
       const mv = (x, y) => win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
       // the FIRST card's button (re-found each time — a resize moves it)
-      const btnSel = `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")`;
+      const btnSel = `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn")`;
       const measure = async (label, css) => {
         await page(`let st = document.getElementById("__dlc"); if (!st) { st = document.createElement("style"); st.id = "__dlc"; document.head.append(st); } st.textContent = ${J(css)};`);
         await sleep(450);
@@ -848,7 +848,7 @@ app.whenReady().then(async () => {
       const sizes = (E.LIASCAPE_DLC_SIZES || "1000x800,1920x1080,1600x900").split(",").map((x) => x.split("x").map(Number));
       for (const [W0, H0] of sizes) {
         win.setContentSize(W0, H0); await sleep(900);
-        const t2 = await page(`const t = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap"); t.scrollIntoView({ block: "center" });
+        const t2 = await page(`const t = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap"); t.scrollIntoView({ block: "center" });
           const r = t.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height };`);
         Object.assign(tw, t2); await sleep(300);
         mv(tw.x + 12, tw.y + 12); // on the card, off the button: the button shows (opacity 1), not hovered
@@ -876,8 +876,8 @@ app.whenReady().then(async () => {
       if (!ws) return ["no Workshop source"];
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(ws)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
-      await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap").click();`); await sleep(700);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
+      await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap").click();`); await sleep(700);
       const btn = await page(`const b = [...document.querySelectorAll(".side-go")].find((x) => x.textContent.trim() === "Download"); if (!b) return false; b.click(); return true;`);
       if (!btn) return ["no Download button in the Browse sidebar"];
       const dl = await waitFor(() => js(`window.__st.dl && window.__st.dl.body`), 2000);
@@ -1070,7 +1070,7 @@ app.whenReady().then(async () => {
     // The Browse sidebar's subscribe / unsubscribe toggle for WE-local and Workshop items, and Open on Steam opening the Steam
     // client. The toggle (components/SubToggle.tsx) per the stubbed /workshop/state; its POSTs; Open on Steam
     // → POST /steam/open-page (ok:false → the https page through window.open). Shots steam-subtoggle*.png
-    const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[${n}].click();`); await sleep(800); };
+    const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[${n}].click();`); await sleep(800); };
     const sub = () => page(`const s = document.querySelector("[data-side-sub]"); if (!s) return null; const b = s.querySelector("[data-side-sub-btn]");
       const ico = s.querySelector(".side-sub-ico");
       return { state: s.dataset.state, label: [...s.querySelectorAll("[data-side-sub-label]")].at(-1)?.textContent ?? null, hint: [...s.querySelectorAll("[data-side-sub-hint]")].at(-1)?.textContent ?? null,
@@ -1085,7 +1085,7 @@ app.whenReady().then(async () => {
       const wsName = srcs.find((s) => s.supportsTagFilter)?.name;
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await setWs("930000", { subscribed: false, pending: null, inLibrary: false, onDisk: false });
       await openSide(0);
       let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
@@ -1142,7 +1142,7 @@ app.whenReady().then(async () => {
       if (!local) return ["no Wallpaper Engine (Local) source"];
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await setWs("931000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
       await openSide(0);
       let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
@@ -1165,7 +1165,7 @@ app.whenReady().then(async () => {
       await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
       await load(SIGNED_IN); await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await js(`window.__wsState = { "931000": { subscribed: true, pending: null, inLibrary: false, onDisk: true } }; true`);
       await openSide(0);
       s = await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
@@ -1192,7 +1192,7 @@ app.whenReady().then(async () => {
     const PILL = `${SIDE} [data-side-row=workshop-id]`;
     const openLib = async (t) => {
       await tab("Library");
-      return page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="${t}"]'));
+      return page(`const c = [...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="${t}"]'));
         if (!c) return false;
         c.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
         for (let i = 0; i < 30 && document.querySelector("${SIDE} .side-title, ${SIDE} h2")?.textContent.trim() !== "${t}"; i++) await new Promise((r) => setTimeout(r, 100));
@@ -1329,7 +1329,7 @@ app.whenReady().then(async () => {
         await shot("delsource-autoimport");
       }
       await js(`localStorage.removeItem("__probe_lib_sub"); true`);
-      const plain = await page(`return [...document.querySelectorAll(".card.lib [data-title]")].map((e) => e.dataset.title).find((x) => !/^s\\d$/.test(x)) ?? null;`);
+      const plain = await page(`return [...document.querySelectorAll(".card.lib:not([data-leaving]) [data-title]")].map((e) => e.dataset.title).find((x) => !/^s\\d$/.test(x)) ?? null;`);
       if (!plain) v.push("no non-Workshop library item — proved nothing about the plain Delete");
       else if (!(await openLib(plain))) v.push(`auto-import on: no sidebar for ${plain}`);
       else {
@@ -1353,7 +1353,7 @@ app.whenReady().then(async () => {
       const wsName = srcs.find((s) => s.supportsTagFilter)?.name;
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
     };
     const btnBox = () => js(`(() => { const r = document.querySelector("[data-side-sub-btn=unsubscribe]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
     const menuState = () => page(`const m = document.querySelector(${J(MENU)}); if (!m) return null; const r = m.getBoundingClientRect(), cs = getComputedStyle(m);
@@ -1562,7 +1562,7 @@ app.whenReady().then(async () => {
       const local = (await http("GET", "/sources")).json.find((x) => /Local/i.test(x.name) && !x.supportsTagFilter)?.name;
       await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
-      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0;`), 4000);
+      await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await openSide(0);
       b = await getBox("only");
       if (!b) v.push("a WE-local item's sidebar has no Download — proved nothing");
@@ -1671,7 +1671,7 @@ app.whenReady().then(async () => {
     const sideGet = () => page(`const b = [...document.querySelectorAll("${SIDE} [data-side-get]")]; const w = document.querySelector("${SIDE} [data-side-get-why]");
       return { off: b.map((x) => x.getAttribute("aria-disabled") === "true"), why: w?.textContent ?? null, whyFilter: w ? getComputedStyle(w).filter : null,
         shadow: b.map((x) => getComputedStyle(x).boxShadow), tf: b.map((x) => getComputedStyle(x).transform) };`);
-    const cardBtn = () => page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn"); return b ? { off: b.getAttribute("aria-disabled") === "true", title: b.getAttribute("title") } : null;`);
+    const cardBtn = () => page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn"); return b ? { off: b.getAttribute("aria-disabled") === "true", title: b.getAttribute("title") } : null;`);
     const statusText = () => js(`document.querySelector(".status")?.textContent ?? ""`);
     await cell("side:blocked:download", async () => {
       const v = [];
@@ -1695,17 +1695,17 @@ app.whenReady().then(async () => {
         // the card's button: dimmed, the tooltip says why, a click posts nothing
         const cb = await cardBtn();
         if (!cb?.off || cb.title !== WHY_DL) v.push(`the card's download button: ${J(cb)}`);
-        await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")?.click();`); await sleep(300);
+        await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn")?.click();`); await sleep(300);
         // Enter on the focused card and a double-click: nothing posted, the status bar says why. The clicks above left the focus
         // on a button (where Enter is the button's own, hooks/gridKeys.ts gridOwnsKey): a click on the card gives the keys back
-        await page(`document.activeElement?.blur?.(); document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[0]?.click();`); await sleep(400);
+        await page(`document.activeElement?.blur?.(); document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[0]?.click();`); await sleep(400);
         await key("Enter"); await sleep(400);
         const st1 = await statusText();
-        await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[1]?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));`); await sleep(400);
+        await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[1]?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));`); await sleep(400);
         if (await heldDl()) v.push(`the card's button, Enter or a double-click posted ${J(await heldDl())}`);
         if (st1 !== WHY_DL) v.push(`Enter: the status bar says "${st1}"`);
         // the selection toolbar's Download N
-        await page(`for (const i of [2, 3]) document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[i]?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));`); await sleep(400);
+        await page(`for (const i of [2, 3]) document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[i]?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));`); await sleep(400);
         const tb = await page(`const b = document.querySelector(".sel-toolbar .btn.accent"); return b ? { off: b.getAttribute("aria-disabled"), title: b.getAttribute("title"), text: b.textContent } : null;`);
         await page(`document.querySelector(".sel-toolbar .btn.accent")?.click();`); await sleep(400);
         if (!tb || tb.off !== "true" || tb.title !== WHY_DL || (await heldDl())) v.push(`the selection toolbar: ${J(tb)}, posted ${J(await heldDl())}`);
@@ -1873,10 +1873,10 @@ app.whenReady().then(async () => {
     const libSub = (m) => js(`localStorage.setItem("__probe_lib_sub", ${J(J(m))}); true`);
     const dangerTiles = () => page(`return [...document.querySelectorAll("${SIDE} .side-tiles > .danger")].map((t) => ({ text: t.textContent.trim(),
       title: t.getAttribute("title"), unsub: t.dataset.unsubscribe !== undefined, icon: t.querySelector("svg.lucide")?.getAttribute("class") ?? "" }));`);
-    const cardDel = (t) => page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="${t}"]')); return c?.querySelector(".del")?.getAttribute("aria-label") ?? null;`);
-    const cardBox = (t) => page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="${t}"]')); if (!c) return null;
+    const cardDel = (t) => page(`const c = [...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="${t}"]')); return c?.querySelector(".del")?.getAttribute("aria-label") ?? null;`);
+    const cardBox = (t) => page(`const c = [...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="${t}"]')); if (!c) return null;
       c.scrollIntoView({ block: "center" }); const r = c.querySelector(".thumb-wrap").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 3 };`);
-    const plainTitle = () => page(`return [...document.querySelectorAll(".card.lib [data-title]")].map((e) => e.dataset.title).find((x) => !/^s\\d$/.test(x)) ?? null;`);
+    const plainTitle = () => page(`return [...document.querySelectorAll(".card.lib:not([data-leaving]) [data-title]")].map((e) => e.dataset.title).find((x) => !/^s\\d$/.test(x)) ?? null;`);
     const unsubBox = () => js(`(() => { const e = document.querySelector("${SIDE} [data-unsubscribe]"); if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
     const unsubDone = async () => { await libSub({}); await js(`localStorage.removeItem("__probe_lib_sub"); true`); await setSettings({ autoAddWeWallpapersToLibrary: false }); };
 
@@ -1916,7 +1916,7 @@ app.whenReady().then(async () => {
       if (!/^Unsubscribing from s1\. Undo brings it back\.$/.test(status)) v.push(`the status bar says "${status}"`);
       // the card's button the same
       n0 = (await calls()).length;
-      await page(`[...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(600);
+      await page(`[...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(600);
       got = (await calls()).slice(n0).filter((c) => c.p !== "/workshop/drain");
       if (got.length !== 1 || got[0].p !== "/workshop/delete-from-source" || J(got[0].body?.items?.map((i) => i.title)) !== J(["s1"])) v.push(`the card's Unsubscribe posted ${J(got)}`);
       // auto-import off: today's Delete + "Delete and unsubscribe", the card's plain Delete
@@ -1948,7 +1948,7 @@ app.whenReady().then(async () => {
         send({ type: "mouseDown", x: Math.round(b.x), y: Math.round(b.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(40);
         send({ type: "mouseUp", x: Math.round(b.x), y: Math.round(b.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(200);
       }
-      const nSel = await js(`document.querySelectorAll(".card.lib.selected").length`);
+      const nSel = await js(`document.querySelectorAll(".card.lib:not([data-leaving]).selected").length`);
       if (nSel !== 2) { await unsubDone(); return [`ctrl-clicks selected ${nSel} cards — proved nothing`]; }
       await openLib("s1"); await sleep(500);
       const d = await dangerTiles(); console.log(`        mixed selection: ${J(d)}`);
@@ -2124,7 +2124,7 @@ app.whenReady().then(async () => {
       } else v.push("no Unsubscribe tile to click");
       // the card's button: its name says why; a click posts nothing, the status bar says why
       const cd = await cardDel("s1");
-      await page(`[...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(500);
+      await page(`[...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(500);
       const st1 = await status();
       if (cd !== WHY || (await posted(n0)).length || st1 !== WHY) v.push(`the card's button: named "${cd}", posted ${J(await posted(n0))}, status "${st1}"`);
       // no-glow + bg-live: the tile keeps its own fill over the wallpaper, nothing glows
@@ -2247,17 +2247,17 @@ app.whenReady().then(async () => {
         await mergedSide(NOT_SUB);
         const c = await ctas(), card = await hasCard();
         // the cards' own button and the selection toolbar say the same (components/subscribeMode.ts)
-        const btn = await page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn"); return b ? { title: b.getAttribute("title"), sub: b.dataset.dlSub ?? null, arrow: b.querySelector(".dl-arrow")?.getAttribute("d") } : null;`);
+        const btn = await page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn"); return b ? { title: b.getAttribute("title"), sub: b.dataset.dlSub ?? null, arrow: b.querySelector(".dl-arrow")?.getAttribute("d") } : null;`);
         await page(`document.querySelector("${SIDE} .side-close, .side-panel .side-close")?.click();`); await sleep(300);
         for (const i of [1, 2]) {
-          const r = await page(`const t = document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[${i}]; t.scrollIntoView({ block: "center" }); const q = t.getBoundingClientRect(); return { x: q.x + q.width / 2, y: q.y + q.height / 3 };`);
+          const r = await page(`const t = document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[${i}]; t.scrollIntoView({ block: "center" }); const q = t.getBoundingClientRect(); return { x: q.x + q.width / 2, y: q.y + q.height / 3 };`);
           send({ type: "mouseDown", x: Math.round(r.x), y: Math.round(r.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(40);
           send({ type: "mouseUp", x: Math.round(r.x), y: Math.round(r.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(150);
         }
         const bulk = await js(`document.querySelector(".sel-toolbar .btn.accent")?.textContent.trim() ?? null`);
         if (merged) {
           await shot("submerge-bulk");
-          const c0 = await page(`const t = document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")[3]; const q = t.getBoundingClientRect(); return { x: q.x + q.width / 2, y: q.y + q.height / 3 };`);
+          const c0 = await page(`const t = document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[3]; const q = t.getBoundingClientRect(); return { x: q.x + q.width / 2, y: q.y + q.height / 3 };`);
           await mvTo(c0.x, c0.y, 500); await shot("submerge-card");
           await mvTo(5, 450, 200);
         }
@@ -2716,7 +2716,7 @@ app.whenReady().then(async () => {
     // with short titles. Shot steam-browse-titles.png
     await cell("look:browseTitles", async () => {
       const v = [];
-      const grid = () => js(`(() => { const cs = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)")];
+      const grid = () => js(`(() => { const cs = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])")];
         return cs.map((c) => { const r = c.getBoundingClientRect(), s = c.querySelector(".lib-title span"); const lh = s ? parseFloat(getComputedStyle(s).lineHeight) : 0;
           return { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1), lines: s ? Math.round(s.clientHeight / lh) : 0,
             clamped: s ? s.scrollHeight > s.clientHeight + 1 : false, title: s?.textContent ?? null }; }); })()`);
@@ -2982,7 +2982,7 @@ app.whenReady().then(async () => {
     // the library's k1 ----
     const PRESETS = ["Fixture Preset One", "Fixture Preset Two"];
     const PROW = `${SIDE} [data-ws-presets]`, CROW = `${SIDE} [data-ws-creator]`, BROW = `${SIDE} [data-ws-base]`;
-    const CARDS = ".scroll:not(.lib-scroll) .card:not(.skel-card)";
+    const CARDS = ".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])";
     const brTitles = () => js(`[...document.querySelectorAll(${J(CARDS + " [data-title]")})].map((e) => e.dataset.title)`);
     const presetsOn = async ({ motion = true, glows = true, live = false } = {}) => {
       await setSettings({ allowScenes: true, morphs: motion, glows, liveWallpaperBehindAllTabs: live });
@@ -3231,7 +3231,7 @@ app.whenReady().then(async () => {
         presetsPage: [yItem(930010, "ws-preset-x", { isScene: true, isPreset: true, tags: ["Preset", "Scene"], children: ["950009"] }), favs[3]] };
     };
     const BF0 = { sort: "trend", trendDays: 7, include: [], exclude: [], featureMatch: "all", genreMatch: "any" };
-    const YCARDS = ".scroll:not(.lib-scroll) .card:not(.skel-card)";
+    const YCARDS = ".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])";
     const shown = () => js(`[...document.querySelectorAll(${J(YCARDS + " [data-title]")})].map((e) => e.dataset.title)`);
     const sorted = (xs) => [...xs].sort();
     // the cards once they read `want` (in order: ordered; else as a set), else what shows after `ms`
@@ -4138,7 +4138,7 @@ app.whenReady().then(async () => {
     const LIB_ALL = T("Ember", "Glacier", "Plain", "Zephyr");
     const LIB_Y = [{ title: "Ember", workshopId: "950005" }, { title: "Glacier", workshopId: "950007" }, { title: "Zephyr", workshopId: "950008" },
       { title: "Plain", workshopId: null }];
-    const libCards = () => js(`[...document.querySelectorAll(".lib-scroll .card.lib [data-title]")].map((e) => e.dataset.title)`);
+    const libCards = () => js(`[...document.querySelectorAll(".lib-scroll .card.lib:not([data-leaving]) [data-title]")].map((e) => e.dataset.title)`);
     const libCardsAs = async (want, ordered = false, ms = 3000) => {
       const norm = (xs) => J(ordered ? xs : sorted(xs));
       return (await waitFor(async () => { const t = await libCards(); return norm(t) === norm(want) ? t : null; }, ms)) ?? await libCards();
@@ -4156,7 +4156,7 @@ app.whenReady().then(async () => {
       await load(SIGNED_OUT);
     };
     // the Library's load line / error: the cards' y moves under it, the line's box over a card
-    const libCardY = () => js(`(() => { const c = document.querySelector(".lib-scroll .card.lib"); return c ? +c.getBoundingClientRect().y.toFixed(1) : null; })()`);
+    const libCardY = () => js(`(() => { const c = document.querySelector(".lib-scroll .card.lib:not([data-leaving])"); return c ? +c.getBoundingClientRect().y.toFixed(1) : null; })()`);
 
     // lib:yours:fav — the Library's Favourites row: ✓ keeps the library's items starred on the Workshop, ✕ the rest (a non-Workshop
     // item included), – all; signed out the row is dimmed and means nothing; the Library's own sort and search still apply on top;
@@ -4331,7 +4331,7 @@ app.whenReady().then(async () => {
         if (await js(`!!document.querySelector(".lib-scroll [data-wf-none]")`)) v.push("the error: \"Nothing here matches\" shows");
         if (!(y1 > y0 + 5)) v.push(`the error took no room above the grid (the first card ${y0} → ${y1})`);
         const cov = await js(`(() => { const e = document.querySelector(${J(LINE)}); if (!e) return null; const c = e.getBoundingClientRect();
-          return [...document.querySelectorAll(".lib-scroll .card.lib")].filter((k) => { const r = k.getBoundingClientRect();
+          return [...document.querySelectorAll(".lib-scroll .card.lib:not([data-leaving])")].filter((k) => { const r = k.getBoundingClientRect();
             return Math.min(c.right, r.right) - Math.max(c.left, r.left) > 0.5 && Math.min(c.bottom, r.bottom) - Math.max(c.top, r.top) > 0.5; }).map((k) => k.querySelector("[data-title]")?.dataset.title); })()`);
         if (cov?.length) v.push(`the error covers ${J(cov)}`);
         await shot("libyours-error");
@@ -4386,7 +4386,7 @@ app.whenReady().then(async () => {
         // the Library, its line never shown: ✓ (the whole Library under the error: nothing read)
         await tab("Library");
         if (J(sorted(await libCardsAs(LIB_ALL))) !== J(LIB_ALL)) return [`the Library shows ${J(await libCards())} — proved nothing`];
-        await glideOf(".lib-scroll .card.lib", segOf("inc"), "the Library");
+        await glideOf(".lib-scroll .card.lib:not([data-leaving])", segOf("inc"), "the Library");
         await shot("yours-errorfirst-lib");
         await page(segOf("off")); await sleep(900);
         // Browse built again (a tab switch), its line never shown: ✕
@@ -4518,7 +4518,7 @@ app.whenReady().then(async () => {
         await p2(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
         let titles = [];
         for (let i = 0; i < 100; i++) {
-          titles = await p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title);`);
+          titles = await p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) [data-title]")].map((e) => e.dataset.title);`);
           if (titles.length) break;
           await sleep(100);
         }
@@ -4559,14 +4559,14 @@ app.whenReady().then(async () => {
         w2 = new BrowserWindow({ show: true, width: 1400, height: 900, webPreferences: { backgroundThrottling: false } });
         const p2 = (code) => w2.webContents.executeJavaScript(`(async () => { ${code} })()`);
         const wait2 = async (code, ms = 6000) => { for (let t = 0; t < ms; t += 100) { const r = await p2(code); if (r) return r; await sleep(100); } return p2(code); };
-        const titles2 = () => p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title);`);
+        const titles2 = () => p2(`return [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) [data-title]")].map((e) => e.dataset.title);`);
         await w2.loadURL(withToken(U + "/"));
         // every request (the page's own fetch, looked up at each call)
         await p2(`const f = window.fetch; window.__asked = []; window.fetch = (u, o) => { window.__asked.push(String(u?.url ?? u)); return f(u, o); }; return true;`);
         await wait2(`return document.querySelectorAll(".tab").length >= 3`);
         await p2(`[...document.querySelectorAll(".tab")].find((e) => e.textContent.trim() === "Browse")?.click();`); await sleep(500);
         await p2(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
-        const ws0 = await wait2(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length > 0`);
+        const ws0 = await wait2(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0`);
         if (!ws0) return [`the Workshop showed no cards ${J(await titles2())} — proved nothing`];
         // the pill's own reload settled (no new /browse for 600 ms), then only what the ✓ asks counts
         const nBrowse = () => p2(`return window.__asked.filter((u) => /\\/browse(\\?|$)/.test(u)).length;`);
@@ -4579,7 +4579,7 @@ app.whenReady().then(async () => {
         await sleep(450);
         await p2(`document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@favorites"] [data-seg="inc"]').click(); return true;`);
         const want = J([...FAVS].sort());
-        await wait2(`const t = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]")].map((e) => e.dataset.title).sort(); return JSON.stringify(t) === ${J(want)};`, 8000);
+        await wait2(`const t = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) [data-title]")].map((e) => e.dataset.title).sort(); return JSON.stringify(t) === ${J(want)};`, 8000);
         await sleep(400);
         const got = await titles2(), asked = await p2(`return window.__asked;`);
         console.log(`        Favourites ✓: ${J(got)}; asked ${J(asked.map((u) => u.replace(/^https?:\/\/[^/]+/, "").replace(/[?&]token=[^&]*/, "")))}`);
@@ -4619,7 +4619,7 @@ app.whenReady().then(async () => {
     // openLib, waiting on the title's own text: back as soon as it shows
     const openLibWs = async (t) => {
       await tab("Library");
-      return page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="${t}"]'));
+      return page(`const c = [...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="${t}"]'));
         if (!c) return false;
         c.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
         for (let i = 0; i < 30 && document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() !== "${t}"; i++) await new Promise((r) => setTimeout(r, 100));
@@ -4668,7 +4668,7 @@ app.whenReady().then(async () => {
           send({ type: "mouseDown", x: Math.round(b.x), y: Math.round(b.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(40);
           send({ type: "mouseUp", x: Math.round(b.x), y: Math.round(b.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(250);
         }
-        const multi = await page(`return { sel: document.querySelectorAll(".card.lib.selected").length, title: document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null };`);
+        const multi = await page(`return { sel: document.querySelectorAll(".card.lib:not([data-leaving]).selected").length, title: document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null };`);
         if (multi.sel !== 2 || multi.title !== "s1") v.push(`the multi-selection didn't happen: ${J(multi)} — proved nothing`);
         else { await sleep(700); const w = await js(WS_PARTS); if (Object.values(w).some((x) => x)) v.push(`a multi-selection shows Workshop pieces: ${J(w)}`); }
       } finally { await libWsDone(); }

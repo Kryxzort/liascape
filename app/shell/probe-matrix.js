@@ -210,8 +210,9 @@ const PAGE = `window.__mx = {
   click(el, what) { if (!el) throw new Error("not found: " + what); el.click(); },
   tab(name) { this.click(this.byText(".tab", name), "tab " + name); },
   // what the page shows: the Library page and the playlist bar stay in the document, hidden, while another tab shows (App.tsx),
-  // and a hidden page's marks wait for it to show again
-  shown(e) { return e.getClientRects().length > 0; },
+  // and a hidden page's marks wait for it to show again; a card or bar item that has left its list but still fades out where it
+  // was (data-leaving: app/ui/src/hooks/usePresence.ts) is gone from it
+  shown(e) { return e.getClientRects().length > 0 && !e.closest("[data-leaving]"); },
   // the Library's cards only: Browse's cards and their skeletons are \`.card.lib\` too (Card.tsx)
   cards() { return [...document.querySelectorAll(".lib-scroll .card.lib")].filter((c) => this.shown(c)); },
   // back on the Library tab with its cards up: a fuzz chain or a control can leave the page on another tab
@@ -3766,8 +3767,8 @@ function editJson(file, fn) {
 const keyIn = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.toLowerCase()) ?? name[0].toUpperCase() + name.slice(1);
 // what the page shows of the backend's data (read from the DOM, whichever tab — the cards are mounted on Library)
 // (only what shows: a page kept hidden while another tab shows is still in the document — App.tsx)
-const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib")].filter((c) => c.getClientRects().length).map((c) => c.querySelector(".lib-title")?.dataset.title).filter(Boolean).sort(),
-  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item")].filter((e) => e.getClientRects().length).map((e) => e.dataset.title),
+const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib:not([data-leaving])")].filter((c) => c.getClientRects().length).map((c) => c.querySelector(".lib-title")?.dataset.title).filter(Boolean).sort(),
+  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item:not([data-leaving])")].filter((e) => e.getClientRects().length).map((e) => e.dataset.title),
   aspect: document.documentElement.style.getPropertyValue("--thumb-aspect") })`);
 const libTitles = async () => ((await http("GET", "/library")).json || []).map((i) => i.title).sort();
 // k5 (a copy of k4) leaves the library through the backend's own delete (the page's stale card is fine: the next cell reloads)

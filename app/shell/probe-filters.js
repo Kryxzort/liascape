@@ -168,9 +168,10 @@ const PAGE = `window.__wf = {
   byText(sel, text) { return [...document.querySelectorAll(sel)].find((e) => e.textContent.trim() === text); },
   rect(el) { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, r: b.right, b: b.bottom }; },
   // the first match that shows: the Library page stays in the document, hidden, once shown (App.tsx <Activity>) — with its
-  // own filter column, pill and grid
-  q(sel) { return [...document.querySelectorAll(sel)].find((e) => e.checkVisibility()) ?? null; },
-  qa(sel) { return [...document.querySelectorAll(sel)].filter((e) => e.checkVisibility()); },
+  // own filter column, pill and grid. A card that has left its list but still fades out where it was (data-leaving:
+  // app/ui/src/hooks/usePresence.ts) is gone from it, and so is everything in it
+  q(sel) { return [...document.querySelectorAll(sel)].find((e) => e.checkVisibility() && !e.closest("[data-leaving]")) ?? null; },
+  qa(sel) { return [...document.querySelectorAll(sel)].filter((e) => e.checkVisibility() && !e.closest("[data-leaving]")); },
   col() { return this.q(".wf-col:not(.closing)"); },
   // the top bar's split button (one: the shown page's) and its filter toggle
   split() { return this.q("[data-sortsplit]"); },
@@ -194,7 +195,7 @@ const PAGE = `window.__wf = {
   async settle(n0, ms = 1500) { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (window.__browse.length > n0) break; await this.sleep(30); }
     await this.sleep(380); return window.__browse.length > n0 ? this.last() : null; },
   // Browse's cards (the Library's grid stays in the document, hidden, once shown: App.tsx)
-  cards() { return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card)").length; },
+  cards() { return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length; },
 }; true`;
 const page = (code) => js(`(async () => { const m = window.__wf; ${code} })()`);
 
@@ -517,7 +518,7 @@ app.whenReady().then(async () => {
         const n0 = await page(`return window.__browse.length;`);
         const name = `m.q('[data-wf-tag="@library"] .wf-name').click(); await m.sleep(450);`;
         await page(name); // · → ✓ (the name toggles include)
-        const only = await page(`return { titles: m.qa(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]").map((e) => e.dataset.title).sort(),
+        const only = await page(`return { titles: m.qa(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) [data-title]").map((e) => e.dataset.title).sort(),
           owned: m.qa(".card [data-in-library]").length, skel: m.qa(".skel-card").length };`);
         if (J(only.titles) !== J(libWs) || only.owned !== libWs.length) v.push(`✓ In my library: ${J(only.titles)}, ${only.owned} owned (want the library's Workshop items ${J(libWs)}, all owned)`);
         if (only.skel) v.push(`✓ In my library: ${only.skel} placeholder cards`);
@@ -1695,7 +1696,7 @@ app.whenReady().then(async () => {
     // ---- Browse's Preset option (workshopFilter.ts groupsFor / usePresetsOn): the stack's own backend answers the Workshop
     // from its fake Steam servers ("@query": three items + two presets of the scene 910000003, scripts/test-ui-matrix.sh) ----
     const s0Scenes = (await http("GET", "/settings")).json?.allowScenes ?? false;
-    const wsTitles = () => page(`return m.qa(".scroll:not(.lib-scroll) .card:not(.skel-card) [data-title]").map((e) => e.dataset.title).sort();`);
+    const wsTitles = () => page(`return m.qa(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) [data-title]").map((e) => e.dataset.title).sort();`);
     const waitTitles = async (ok) => { let t = []; for (let i = 0; i < 50; i++) { t = await wsTitles(); if (ok(t)) break; await sleep(100); } return t; };
     const typeRows = () => page(`await m.ensure(); return [...(m.grp("type")?.querySelectorAll(".wf-row") ?? [])].map((r) => r.dataset.wfTag + ":" + r.dataset.state);`);
     const realWs = async (scenes) => {
@@ -2250,14 +2251,15 @@ app.whenReady().then(async () => {
         const rc = await page(`const r = [...m.q('.wf-col[data-wf-page="library"]').querySelectorAll(".wf-row")].find((x) => x.dataset.wfTag === "Nature");
           window.__rc = { rendered: 0, mounted: 0, unmounted: 0 }; window.__rcWho = {};
           r.querySelector('[data-seg="exc"]').click(); await new Promise((res) => setTimeout(res, 0));
-          return { ...window.__rc, who: Object.entries(window.__rcWho).sort((a, b) => b[1] - a[1]) };`);
+          return { ...window.__rc, leaving: document.querySelectorAll(".lib-scroll [data-leaving]").length, who: Object.entries(window.__rcWho).sort((a, b) => b[1] - a[1]) };`);
         console.log(`        hide Nature over ${nCards} cards: ${J(rc)}`);
         // the Library, its column (the changed row, the groups) and App's own whole-store render (its top bar's icons) — a
         // count that doesn't grow with the grid; a re-rendered card would show as div.card
         const cards = rc.who.filter(([k]) => k.startsWith("div.card")).reduce((a, [, n]) => a + n, 0);
         if (cards) v.push(`hiding one card re-rendered ${cards} kept card(s) (want none) — ${J(rc.who.slice(0, 6))}`);
         if (rc.rendered > 60) v.push(`hiding one card re-rendered ${rc.rendered} components (≤ 60, whatever the grid holds) — ${J(rc.who.slice(0, 6))}`);
-        if (rc.unmounted < 1) v.push("hiding Nature unmounted nothing — the render count proved nothing");
+        // a hidden card on screen stays mounted while it fades out (app/ui/src/hooks/usePresence.ts), one off screen unmounts
+        if (rc.unmounted < 1 && rc.leaving < 1) v.push("hiding Nature unmounted nothing and left nothing leaving — the render count proved nothing");
         await libSeg("Nature", "off");
       }
       const key = async (k, mods = []) => { send({ type: "keyDown", keyCode: k, modifiers: mods }); await sleep(40); send({ type: "keyUp", keyCode: k, modifiers: mods }); await sleep(200); };
