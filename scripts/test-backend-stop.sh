@@ -5,7 +5,9 @@
 # parsable, and leave the player as it was (it outlives the backend on purpose: .claude/rules/backend/player-adapter.md):
 #  idle · a WebSocket client on /events (an open app page; it must be sent a close frame, 1001) · a wallpaper playing in a
 #  private headless liascape-player with a page connected · a /media download whose reader stopped reading (a paused
-#  <video>) · the library's clip sweep encoding (its nice'd ffmpeg children stopped with it) · the backend in a systemd
+#  <video>) · the library's clip sweep encoding (its nice'd ffmpeg children stopped with it) · a Steam client session open
+#  (the anonymous one a Workshop item's facts open, a QR sign-in waiting for the phone: a stand-in CM on loopback, whose
+#  TCP session SteamKit2 runs on a foreground thread) · the backend in a systemd
 #  unit (KillMode=control-group) that spawned the player itself: `systemctl stop` of that unit leaves the player playing,
 #  and a second backend adopts it rather than starting another (Helpers/UserScope.cs).
 # Runs in its own user, network, cgroup and mount namespaces (`unshare -rnCm`), a temp HOME + XDG dirs, its own backend,
@@ -74,10 +76,10 @@ T=$LIASCAPE_STOP_T
 DLL=$T/backend/liascape-backend.dll
 B=$T/bin/liascape-player
 BUDGET_MS=3000
-BP=""; WP=""; SP=""; MP=""; MGR=""
+BP=""; WP=""; SP=""; MP=""; MGR=""; CMP=""
 gentle() { [ -n "$1" ] || return 0; kill -TERM "$1" 2>/dev/null; for _ in $(seq 1 50); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done; kill -9 "$1" 2>/dev/null; }
 teardown() {
-  gentle "$WP"; gentle "$MP"; gentle "$BP"
+  gentle "$WP"; gentle "$MP"; gentle "$BP"; gentle "$CMP"
   [ -n "$MGR" ] && for u in liascape-stop-be1.service liascape-stop-be2.service; do timeout 15 systemctl --user stop "$u" >/dev/null 2>&1; done
   "$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1   # a clean quit ends the supervisor too
   gentle "$SP"
@@ -115,7 +117,9 @@ cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
  "GlobalTransitionEnabled":false,"AutoMute":false,"VideoPreviewQuality":"high"}
 EOF
 
-alive() { [ -r "/proc/$1/stat" ] && [ "$(awk '{print $3}' "/proc/$1/stat" 2>/dev/null)" != Z ]; }
+# one read of the state (after the comm's ")"): a test of the file and then a read of it races the exit — a zombie reaped
+# in between reads as "", which would count a backend gone in 2 s as one that never exited
+alive() { local st; st=$(sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f1); [ -n "$st" ] && [ "$st" != Z ] && [ "$st" != X ]; }
 ms() { date +%s%3N; }
 start() {   # $1 = log name
   LOG=$T/$1.log
@@ -238,6 +242,44 @@ check "libop: an encode runs (else this proved nothing)" "$(pgrep -f "ffmpeg .*$
 took=$(stop_ms); judge "libop" "$took"
 for _ in $(seq 1 30); do pgrep -f "ffmpeg .*$T/" >/dev/null || break; sleep 0.1; done
 check "libop: no encode outlived the backend" "$(pgrep -fc "ffmpeg .*$T/")" 0
+
+# A stand-in for Steam's CM servers (LIASCAPE_STEAM_CM_SERVER, Helpers/SteamAnonymous.cs Connect): it accepts the TCP
+# connection and never answers, so the backend's Steam session stays open (connecting) as long as the backend keeps it.
+python3 -I - "$T/cm" <<'PY' & CMP=$!
+import socket, sys, threading
+out = sys.argv[1]
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", 0)); s.listen(8)
+open(out + ".port", "w").write(str(s.getsockname()[1]))
+def hold(c):
+    while c.recv(4096): pass
+    open(out + ".closed", "a").write("x")
+while True:
+    c, _ = s.accept(); open(out + ".accepted", "a").write("x")
+    threading.Thread(target=hold, args=(c,), daemon=True).start()
+PY
+for _ in $(seq 1 50); do [ -s "$T/cm.port" ] && break; sleep 0.1; done
+cm_n() { if [ -e "$T/cm.accepted" ]; then wc -c < "$T/cm.accepted"; else echo 0; fi; }
+cm_opened() { [ "$(cm_n)" -gt "$1" ]; }
+export LIASCAPE_STEAM_CM_SERVER=127.0.0.1:$(cat "$T/cm.port")
+
+echo "== a Steam session open: the anonymous one a Workshop item's facts open"
+mkdir -p "$LIB/workshop/900000001"; cp "$W" "$LIB/workshop/900000001/w.mp4"
+printf '{"900000001":{"title":"w"}}' > "$LIB/workshop/index.json"
+n0=$(cm_n)
+start steam
+for _ in $(seq 1 100); do cm_opened "$n0" && break; sleep 0.1; done
+check "steam: the backend opened a Steam session (else this proved nothing)" "$(cm_opened "$n0" && echo yes || echo no)" yes
+took=$(stop_ms); judge "steam" "$took"
+rm -rf "$LIB/workshop"
+
+echo "== a Steam session open: a QR sign-in waiting for the phone"
+n0=$(cm_n)
+start qr
+api -X POST "$U/steam/qr/start" >/dev/null
+for _ in $(seq 1 100); do cm_opened "$n0" && break; sleep 0.1; done
+check "qr: the sign-in opened a Steam session (else this proved nothing)" "$(cm_opened "$n0" && echo yes || echo no)" yes
+took=$(stop_ms); judge "qr" "$took"
+unset LIASCAPE_STEAM_CM_SERVER; gentle "$CMP"; CMP=""
 
 echo "== the backend in a systemd unit (a private user manager), the player started by it"
 # A unit's stop (KillMode=control-group) signals every process in its cgroup; `setsid` doesn't leave it. The player the

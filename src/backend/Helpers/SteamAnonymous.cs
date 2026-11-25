@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,10 @@ namespace Liascape.Helpers;
 //     again for RetryAfterFailSeconds (each caller would otherwise wait its whole deadline before falling back).
 //   - Warm() connects ahead of a Browse request the UI expects (the Browse tab or the Workshop pill hovered), so that
 //     request skips the connect + logon; Warm says what keeps it cheap and quiet.
+//   - `serve` stopping closes it and opens no other (Shutdown): SteamKit2 runs a TCP session's network loop on a
+//     foreground thread, so an open session keeps a SIGTERMed backend alive past its host's stop until the idle
+//     disconnect (up to IdleMinutes), far beyond a service manager's stop timeout.
+//     Guard: scripts/test-backend-stop.sh "steam", "qr".
 public static class SteamAnonymous
 {
     private const int IdleMinutes = 3, RetryAfterFailSeconds = 60, WarmBackoffMinutes = 5;
@@ -48,7 +53,7 @@ public static class SteamAnonymous
             // the callback pump: lives as long as the connection
             new Thread(() => { while (!Dead) Manager.RunWaitCallbacks(TimeSpan.FromMilliseconds(250)); })
             { IsBackground = true, Name = "lia-steam-cm" }.Start();
-            Client.Connect();
+            Connect(Client);
         }
 
         public void Close()
@@ -56,14 +61,42 @@ public static class SteamAnonymous
             if (Dead) return;
             try { User.LogOff(); Client.Disconnect(); } catch { }
             Dead = true;
+            Ready.TrySetResult(false); // a connect still waiting for its logon ends now (the pump may stop before the callback)
         }
     }
 
+    // Every SteamKit2 client's connect (this session, the sign-in's): Steam's CM servers, or in a test the stand-in CM that
+    // LIASCAPE_STEAM_CM_SERVER names (a loopback ip:port, reached over TCP like a real CM; nothing else is accepted), so a
+    // test can hold a session open without reaching Steam.
+    internal static void Connect(SteamClient client)
+    {
+        if (Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_SERVER") is { Length: > 0 } v
+            && IPEndPoint.TryParse(v, out var ep) && IPAddress.IsLoopback(ep.Address))
+            client.Connect(SteamKit2.Discovery.ServerRecord.CreateSocketServer(ep));
+        else client.Connect();
+    }
+
     private static readonly SemaphoreSlim _one = new(1, 1);
+    private static readonly object _gate = new(); // a new session vs Shutdown
+    private static bool _stopped;
+    private static readonly CancellationTokenSource _stopping = new();
+    internal static CancellationToken Stopping => _stopping.Token; // cancelled by Shutdown
     private static Conn? _conn;
     private static long _lastUse, _failedAt = long.MinValue / 2, _warmFailedAt = long.MinValue / 2; // Environment.TickCount64
     private static int _warming;
     private static readonly Timer _idle = new(_ => CloseIfIdle(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+
+    // `serve` is stopping (ServerHost's ApplicationStopping): the session goes now, no request or warm-up opens another, and
+    // every other Steam client session ends too — the sign-ins' and the token renewal's tokens link Stopping (SteamOps,
+    // SteamAuthService): each holds the same kind of TCP session, and a QR sign-in waits for the phone without end.
+    public static void Shutdown()
+    {
+        Conn? c;
+        lock (_gate) { _stopped = true; c = _conn; _conn = null; }
+        _idle.Change(Timeout.Infinite, Timeout.Infinite);
+        c?.Close();
+        _stopping.Cancel();
+    }
 
     private static void CloseIfIdle()
     {
@@ -111,7 +144,11 @@ public static class SteamAnonymous
         if (c is { Dead: false }) return c;
         try { TestNetwork.Check($"steam-cm: connect to Steam's client protocol{(warm ? " (warm-up)" : "")}"); }
         catch (System.Net.Http.HttpRequestException) { return null; }
-        c = _conn = new Conn();
+        lock (_gate)
+        {
+            if (_stopped) return null;
+            c = _conn = new Conn();
+        }
         var t0 = Environment.TickCount64;
         bool ok;
         try { ok = await c.Ready.Task.WaitAsync(deadline).ConfigureAwait(false); }

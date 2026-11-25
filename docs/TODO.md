@@ -562,6 +562,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       type (or generate the C# types from it). Same idea later for the UI's `api/client.ts` vs the backend's web API.
 
 ## Older backlog
+- [ ] `scripts/test-backend-stop.sh` § libop flakes on its "proved nothing" guard ("libop: an encode runs … got no";
+      2 of 6 runs on switch-flip, 1 of 1 on lp-player, 2026-11-26 night): the High clip of a 60 s 1080p fixture
+      now encodes in ~2 s, and the four `/clip?info=1` calls before the `pgrep` check can outlast it (the log shows
+      a.mp4's clip made, the second job's ffmpeg never seen in the 10 s window). Make the fixtures' encode outlast the
+      requests (longer or larger fixtures, or check after the first request), not a longer wait.
 - [ ] `scripts/lwe.sh --nix` loses the caller's `LIASCAPE_LWE_CORE_DIR`: the devShell sets it to the store core,
       so `build` tries to install into the read-only store. Workaround: `nix develop -c env
       LIASCAPE_LWE_CORE_DIR=<dir> bash scripts/lwe.sh build …`. Fix: carry the caller's value (or the
