@@ -2,7 +2,7 @@ src/backend/bin/
 src/backend/obj/
 publish/
 AppDir/
-node_modules/
+node_modules
 app/ui/dist/
 demos/
 scripts/appimagetool
@@ -28,3 +28,4 @@ scripts/gl-transitions/
 # Personal, this checkout only: Claude instructions for one person, and their night-run notes
 CLAUDE.local.md
 docs/NIGHT-NOTES.md
+__pycache__/
