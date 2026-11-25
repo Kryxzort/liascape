@@ -82,6 +82,22 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 121. [ ] (owner) Starting a playlist, and applying a wallpaper, take too long before the wallpaper shows. Measure
        click → first frame per step (UI post, backend `PlayFrom` / apply, player command, source `Ready`, transition),
        video and scene, on a private player. Then cut the largest step.
+122. [ ] (owner) Presets still show while a filter keeps only scenes: the Scene type row (and any filter that means
+       "scenes only") must leave presets out unless the Preset row is ticked too. Find whether presets carry the
+       Scene tag or the type filter treats `isPreset` as a scene, and make the rows independent. Guard: probe-filters.
+123. [ ] (owner) Tell scenes and presets apart at a glance: their card tags look almost the same. Give the Preset tag
+       its own look (colour, icon or shape) that still follows the theme, glow and translucency toggles.
+124. [ ] (owner) The "go to the playing wallpaper" crosshair also selects that card and opens its sidebar, as a click on
+       the card would (without applying it).
+125. [ ] (owner) Import from a link: Import accepts a pasted web link (a Workshop item page, a MoeWalls or DesktopHut
+       page, or a direct video / picture URL) and downloads it through the matching source's own download path; an
+       unknown site says it isn't supported.
+126. [ ] (owner) An opening animation for the app window built from the app logo, short and skippable, following
+       `no-motion` (a plain fade).
+127. [ ] (owner) A native "Start with your desktop" setting: Liascape adds its own autostart entry (XDG autostart
+       `.desktop` running `liascape restore`) and detects when that entry won't run — e.g. Hyprland or Sway started
+       without a session manager that reads XDG autostart (no uwsm / systemd user session) — and then says what to
+       add to the compositor's config instead (`exec-once = liascape restore`), with a copy button.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
