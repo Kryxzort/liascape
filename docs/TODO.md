@@ -94,6 +94,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `.desktop` running `liascape restore`) and detects when that entry won't run — e.g. Hyprland or Sway started
        without a session manager that reads XDG autostart (no uwsm / systemd user session) — and then says what to
        add to the compositor's config instead (`exec-once = liascape restore`), with a copy button.
+128. [ ] `worker::slow_first_render_is_not_a_hang` fails every run (5/5 on lp-player, 5/5 on the switch-over branch):
+       the first tick framed ~320 ms after a slow first render is reported `Hung { waited_ms: 304 }`. Find whether the
+       hang watchdog now counts the first render's own time (a change in the worker's tick or the test's timing) or
+       the machine got slower to schedule; fix the cause, not the threshold.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
