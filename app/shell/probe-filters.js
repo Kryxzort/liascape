@@ -217,7 +217,7 @@ async function loadUi(lsInit) {
       // recorded
       if (p === "/browse" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (b.filter) { (b.page > 1 ? window.__more : window.__browse).push(b);
         return localStorage.getItem("__probe_ws_real") === "1" ? f(u, o) : ok(b.page > 1 ? [] : items); } }
-      if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
+      if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "" }); }
       return f(u, o); }; })(); true`;
   if (lsInit) { await js(lsInit); await win.loadURL(withToken(U + "/")); }
   await js(stub);

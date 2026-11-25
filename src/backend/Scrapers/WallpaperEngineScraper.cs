@@ -11,195 +11,134 @@ using Liascape.Models;
 
 namespace Liascape.Scrapers;
 
-public static class WallpaperEngineScraper
+// The local Wallpaper Engine folder as a Browse source (Services/WallpaperEngineService.cs): one card per item folder
+// (<folder>/<workshop id>/), its kind from project.json (fixtures: scripts/test-fixtures/scrapers/wallpaper-engine/):
+//   - "video" with its file present → a video card, the file as its page; any container mpv plays, so the file's
+//     extension is never checked;
+//   - "scene", or no readable project.json but a scene.pkg → a scene card (scene support on), the folder as its page;
+//   - no type but a preset naming its Workshop base (Presets.Read) → a preset card (presets playable), the folder as its
+//     page, as the Workshop lists them; one naming no base isn't a subscription's preset (the WE auto-import's rule).
+//     Guard: probe-filters local:wePreset;
+//   - anything else (web, application, a missing video file, no project.json) → no card.
+// A query keeps the cards whose title contains it, any case. The title is project.json's, else the folder's name.
+internal static class WallpaperEngineScraper
 {
-    public static async Task<List<WallpaperResult>> GetAllAsync(string workshopPath, bool allowScenes = false, string query = "", int sortIndex = 0,
-        bool allowPresets = false)
+    // project.json's fields a card uses; Tags / Age feed the UI's filter column (WorkshopTags.FromProject)
+    private sealed record Project(string? Type, string? File, string? Title, string[]? Tags, string? Age);
+
+    // sortIndex: the UI's sort menu — 1 title A→Z, 2 Z→A, 3 videos first, 4 scenes first (each then by title),
+    // 5 newest folder first, 6 oldest first; anything else = the folder's own order
+    public static async Task<List<WallpaperResult>> ListAsync(string folder, bool scenes, bool presets, string? query, int sortIndex)
     {
-        var results = new List<WallpaperResult>();
+        if (!Directory.Exists(folder)) return [];
+        var cards = new List<WallpaperResult>();
+        foreach (var dir in Directory.EnumerateDirectories(folder))
+            if (await CardAsync(dir, scenes, presets, query) is { } card) cards.Add(card);
 
-        if (!Directory.Exists(workshopPath))
-            return results;
-
-        // WE workshop layout: <workshopPath>/<wallpaperId>/{project.json, <video>, preview.*, ...}
-        // Drive discovery from project.json so we pick up any video format
-        // mpv supports (mp4, webm, mov, mkv, ...) while filtering out
-        // non-video wallpaper types ("web", "application").
-        foreach (var dir in Directory.EnumerateDirectories(workshopPath))
+        var byTitle = StringComparer.OrdinalIgnoreCase;
+        return sortIndex switch
         {
-            var info = await ReadProjectAsync(dir);
-
-            string workshopId = Path.GetFileName(dir);
-            string title = (info != null && !string.IsNullOrEmpty(info.Title))
-                ? info.Title : workshopId;
-            var addedAt = Directory.GetCreationTime(dir);
-
-            // Scene detection: type == "scene" OR scene.pkg present
-            bool hasScene = File.Exists(Path.Combine(dir, "scene.pkg"));
-            bool isScene = (info != null && string.Equals(info.Type, "scene", StringComparison.OrdinalIgnoreCase))
-                || (info == null && hasScene);
-
-            if (isScene)
-            {
-                if (!allowScenes) continue;
-                results.Add(new WallpaperResult
-                {
-                    Title = title,
-                    ThumbnailUrl = FindThumbnail(dir) ?? "",
-                    PageUrl = dir,
-                    IsScene = true,
-                    WorkshopId = workshopId,
-                    AddedAt = addedAt,
-                    Tags = info?.Tags, AgeRating = info?.Age
-                });
-                continue;
-            }
-
-            if (info == null) continue;
-            // a preset (no type: Presets.Read) is its own card, a scene playing its base's folder, listed only while presets can
-            // play (WallpaperEngineService.AllowPresets), as the Workshop lists them; one naming no Workshop base isn't a
-            // subscription's preset (the WE auto-import's rule). Guard: probe-filters local:wePreset
-            if (info.Type == null && Presets.Read(dir) is { BaseId: not null })
-            {
-                if (!allowPresets) continue;
-                if (!string.IsNullOrEmpty(query) && !title.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
-                results.Add(new WallpaperResult
-                {
-                    Title = title,
-                    ThumbnailUrl = FindThumbnail(dir) ?? "",
-                    PageUrl = dir,
-                    IsScene = true,
-                    IsPreset = true,
-                    WorkshopId = workshopId,
-                    AddedAt = addedAt,
-                    Tags = info.Tags, AgeRating = info.Age
-                });
-                continue;
-            }
-            if (!string.Equals(info.Type, "video", StringComparison.OrdinalIgnoreCase)) continue;
-            if (string.IsNullOrEmpty(info.File)) continue;
-
-            if (!string.IsNullOrEmpty(query) && !title.Contains(query, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var videoPath = Path.Combine(dir, info.File);
-            if (!File.Exists(videoPath)) continue;
-
-            var (thumbnail, animatedGif) = await FindThumbnailAsync(dir);
-
-            results.Add(new WallpaperResult
-            {
-                Title = title,
-                ThumbnailUrl = thumbnail ?? "",
-                AnimatedThumbnailUrl = animatedGif,
-                PageUrl = videoPath,
-                WorkshopId = workshopId,
-                AddedAt = addedAt,
-                Tags = info.Tags, AgeRating = info.Age
-            });
-        }
-
-
-        results = sortIndex switch
-        {
-            1 => [.. results.OrderBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
-            2 => [.. results.OrderByDescending(r => r.Title, StringComparer.OrdinalIgnoreCase)],
-            3 => [.. results.OrderBy(r => r.IsScene).ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
-            4 => [.. results.OrderByDescending(r => r.IsScene).ThenBy(r => r.Title, StringComparer.OrdinalIgnoreCase)],
-            5 => [.. results.OrderByDescending(r => r.AddedAt ?? DateTime.MinValue)],
-            6 => [.. results.OrderBy(r => r.AddedAt ?? DateTime.MaxValue)],
-            _ => results
+            1 => [.. cards.OrderBy((c) => c.Title, byTitle)],
+            2 => [.. cards.OrderByDescending((c) => c.Title, byTitle)],
+            3 => [.. cards.OrderBy((c) => c.IsScene).ThenBy((c) => c.Title, byTitle)],
+            4 => [.. cards.OrderBy((c) => !c.IsScene).ThenBy((c) => c.Title, byTitle)],
+            5 => [.. cards.OrderByDescending((c) => c.AddedAt)],
+            6 => [.. cards.OrderBy((c) => c.AddedAt)],
+            _ => cards,
         };
-
-        return results;
     }
 
-    // Tags / Age: what the UI's filter column reads (WorkshopTags.FromProject)
-    private record ProjectInfo(string? Type, string? File, string? Title, string[]? Tags, string? Age);
-
-    private static async Task<ProjectInfo?> ReadProjectAsync(string dir)
+    // null: no card, or one the query leaves out — decided before any picture is looked for, so a search copies or
+    // extracts no GIF still for an item it doesn't list
+    private static async Task<WallpaperResult?> CardAsync(string dir, bool scenes, bool presets, string? query)
     {
-        string projectJson = Path.Combine(dir, "project.json");
-        if (!File.Exists(projectJson)) return null;
+        string id = Path.GetFileName(dir);
+        var project = await ReadAsync(Path.Combine(dir, "project.json"));
+        string? type = project?.Type;
+        bool scene = string.Equals(type, "scene", StringComparison.OrdinalIgnoreCase)
+            || (project == null && File.Exists(Path.Combine(dir, "scene.pkg")));
+        bool preset = !scene && project != null && type == null && Presets.Read(dir) is { BaseId: not null };
+        bool video = string.Equals(type, "video", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(project!.File);
+        if ((scene && !scenes) || (preset && !presets) || !(scene || preset || video)) return null;
+        string title = string.IsNullOrEmpty(project?.Title) ? id : project.Title;
+        if (!string.IsNullOrEmpty(query) && !title.Contains(query, StringComparison.OrdinalIgnoreCase)) return null;
 
+        string page = dir, still;
+        string? animated = null;
+        if (video)
+        {
+            page = Path.Combine(dir, project!.File!);
+            if (!File.Exists(page)) return null;
+            (still, animated) = await VideoPicturesAsync(dir, id);
+        }
+        else still = FolderPicture(dir) ?? "";
+        return new WallpaperResult
+        {
+            Title = title,
+            ThumbnailUrl = still,
+            AnimatedThumbnailUrl = animated,
+            PageUrl = page,
+            IsScene = !video,
+            IsPreset = preset,
+            WorkshopId = id,
+            AddedAt = Directory.GetCreationTime(dir),
+            Tags = project?.Tags,
+            AgeRating = project?.Age,
+        };
+    }
+
+    // null: no project.json, or one that isn't a JSON object with string fields where they're read
+    private static async Task<Project?> ReadAsync(string file)
+    {
+        if (!File.Exists(file)) return null;
         try
         {
-            using var stream = File.OpenRead(projectJson);
-            var doc = await JsonDocument.ParseAsync(stream);
-            var root = doc.RootElement;
+            await using var stream = File.OpenRead(file);
+            using var json = await JsonDocument.ParseAsync(stream);
+            var root = json.RootElement;
+            string? Field(string name) => root.TryGetProperty(name, out var v) ? v.GetString() : null;
             var (age, tags) = WorkshopTags.FromProject(root);
-            return new ProjectInfo(
-                Type: root.TryGetProperty("type", out var t) ? t.GetString() : null,
-                File: root.TryGetProperty("file", out var f) ? f.GetString() : null,
-                Title: root.TryGetProperty("title", out var ti) ? ti.GetString() : null,
-                Tags: tags.Length > 0 ? tags : null,
-                Age: age
-            );
+            return new Project(Field("type"), Field("file"), Field("title"), tags.Length > 0 ? tags : null, age);
         }
-        catch
+        catch (Exception e) when (e is JsonException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
     }
 
+    // A scene's or a preset's picture: preview.jpg, else the first GIF, PNG or JPEG in the folder
+    private static string? FolderPicture(string dir) =>
+        Existing(Path.Combine(dir, "preview.jpg")) ?? FirstOf(dir, "*.gif") ?? FirstOf(dir, "*.png") ?? FirstOf(dir, "*.jpg") ?? FirstOf(dir, "*.jpeg");
+
+    // A video's still and, when the folder has a GIF, that GIF for the card to play. A GIF's still is preview.jpg, else the
+    // GIF's first frame that isn't blank; either is kept in GifThumbCacheDir as <workshop id>.jpg. A GIF with no still to
+    // show (no preview.jpg, no frame came out) is the still itself, not animated.
+    private static async Task<(string Still, string? Animated)> VideoPicturesAsync(string dir, string id)
+    {
+        string? preview = Existing(Path.Combine(dir, "preview.jpg"));
+        if (FirstOf(dir, "*.gif") is not { } gif)
+            return (preview ?? FirstOf(dir, "*.png") ?? FirstOf(dir, "*.jpg") ?? FirstOf(dir, "*.jpeg") ?? "", null);
+
+        string cached = Path.Combine(GifThumbCacheDir, id + ".jpg");
+        Directory.CreateDirectory(GifThumbCacheDir);
+        if (!File.Exists(cached))
+        {
+            if (preview != null) File.Copy(preview, cached, overwrite: true);
+            else await ExtractGifStaticFrameAsync(gif, cached);
+        }
+        if (preview != null) return (preview, gif);
+        return File.Exists(cached) ? (cached, gif) : (gif, null);
+    }
+
+    private static string? Existing(string file) => File.Exists(file) ? file : null;
+
+    private static string? FirstOf(string dir, string pattern) =>
+        Directory.EnumerateFiles(dir, pattern, SearchOption.TopDirectoryOnly).FirstOrDefault();
+
+    // the videos' GIF stills (Settings' cache clear lists it: AppOps.CacheCategories "we-thumbs")
     internal static string GifThumbCacheDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".cache", "liascape", "we_thumbs");
-
-    // Returns (staticPath, animatedGifPath). animatedGifPath is non-null when a GIF
-    // exists in the directory. Checks for GIF before preview.jpg so videos with both
-    // get animated thumbnails.
-    private static async Task<(string? Static, string? AnimatedGif)> FindThumbnailAsync(string dir)
-    {
-        string workshopId = Path.GetFileName(dir);
-        string preview = Path.Combine(dir, "preview.jpg");
-        string? gifPath = Directory.GetFiles(dir, "*.gif", SearchOption.TopDirectoryOnly).FirstOrDefault();
-
-        if (gifPath != null)
-        {
-            string cacheDir = GifThumbCacheDir;
-            string staticCache = Path.Combine(cacheDir, $"{workshopId}.jpg");
-
-            if (File.Exists(preview))
-            {
-                // Cache preview.jpg so library cards find it in we_thumbs and show it immediately.
-                if (!File.Exists(staticCache))
-                {
-                    Directory.CreateDirectory(cacheDir);
-                    File.Copy(preview, staticCache);
-                }
-                return (preview, gifPath);
-            }
-
-            Directory.CreateDirectory(cacheDir);
-            if (!File.Exists(staticCache))
-                await ExtractGifStaticFrameAsync(gifPath, staticCache);
-            return File.Exists(staticCache) ? (staticCache, gifPath) : (gifPath, null);
-        }
-
-        if (File.Exists(preview)) return (preview, null);
-
-        foreach (string ext in new[] { "*.png", "*.jpg", "*.jpeg" })
-        {
-            var files = Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly);
-            if (files.Length > 0) return (files[0], null);
-        }
-
-        return (null, null);
-    }
-
-    private static string? FindThumbnail(string dir)
-    {
-        string preview = Path.Combine(dir, "preview.jpg");
-        if (File.Exists(preview)) return preview;
-
-        foreach (string ext in new[] { "*.gif", "*.png", "*.jpg", "*.jpeg" })
-        {
-            var files = Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly);
-            if (files.Length > 0) return files[0];
-        }
-        return null;
-    }
 
     internal static async Task ExtractGifStaticFrameAsync(string gifPath, string outputPath)
     {

@@ -107,7 +107,7 @@ public static class DownloadHelper
             if (!samePath) { if (copyLocalFiles) await Task.Run(() => File.Copy(detail.DownloadUrl, videoDest)); else File.CreateSymbolicLink(videoDest, detail.DownloadUrl); }
             progress?.Report(1.0);
         }
-        else await DownloadFileAsync(detail.DownloadUrl, videoDest, detail.NeedsReferrer ? detail.Referrer : null, progress, ct);
+        else await DownloadFileAsync(detail.DownloadUrl, videoDest, detail.Referrer, progress, ct);
 
         string? thumb = await SaveAssetAsync(thumbnailUrl, itemDir, key, ".jpg", copyLocalFiles);
         string? anim = await SaveAnimatedPreviewAsync(animatedUrl, itemDir, key, copyLocalFiles);

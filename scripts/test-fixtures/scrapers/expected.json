@@ -1,0 +1,939 @@
+{
+  "desktophut detail": {
+    "asked": [
+      "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb"
+    ],
+    "result": {
+      "downloadUrl": "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
+      "previewUrl": "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
+      "title": "Spider-Man Rain"
+    }
+  },
+  "desktophut detail without video": {
+    "asked": [
+      "https://www.desktophut.com/no-video"
+    ],
+    "result": "error"
+  },
+  "desktophut latest p2": {
+    "asked": [
+      "https://www.desktophut.com/category/Animated-Wallpapers?page=2"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb",
+        "thumbnailUrl": "https://www.desktophut.com/images/d9ot5UfEOq-spider-man-rain-live-wallpaper.webp",
+        "title": "Spider-Man Rain"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/jdm-supra-in-the-rain-live-wallpaper-96ks",
+        "thumbnailUrl": "https://www.desktophut.com/images/M7DTHBnRfJ-jdm-supra-in-the-rain-live-wallpaper.webp",
+        "title": "JDM Supra in the Rain"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/rainlink-by-hope-live-wallpaper-zh1j",
+        "thumbnailUrl": "https://www.desktophut.com/images/C4ju3oEIcb-rainlink-by-hope-live-wallpaper.webp",
+        "title": "Rainlink by Hope"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/foggy-harbour-live-wallpaper-x1y2",
+        "thumbnailUrl": "https://www.desktophut.com/images/foggy-harbour.webp",
+        "title": "Foggy Harbour \u0026 Boats"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/rain-drops-macro",
+        "thumbnailUrl": "https://www.desktophut.com/images/rain-drops-macro.webp",
+        "title": "Rain Drops Macro"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/neon-rain-street-live-wallpaper",
+        "thumbnailUrl": "",
+        "title": "Neon Rain Street"
+      }
+    ]
+  },
+  "desktophut search": {
+    "asked": [
+      "https://www.desktophut.com/search/rain?page=1"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb",
+        "thumbnailUrl": "https://www.desktophut.com/images/d9ot5UfEOq-spider-man-rain-live-wallpaper.webp",
+        "title": "Spider-Man Rain"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/jdm-supra-in-the-rain-live-wallpaper-96ks",
+        "thumbnailUrl": "https://www.desktophut.com/images/M7DTHBnRfJ-jdm-supra-in-the-rain-live-wallpaper.webp",
+        "title": "JDM Supra in the Rain"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/rainlink-by-hope-live-wallpaper-zh1j",
+        "thumbnailUrl": "https://www.desktophut.com/images/C4ju3oEIcb-rainlink-by-hope-live-wallpaper.webp",
+        "title": "Rainlink by Hope"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/foggy-harbour-live-wallpaper-x1y2",
+        "thumbnailUrl": "https://www.desktophut.com/images/foggy-harbour.webp",
+        "title": "Foggy Harbour \u0026 Boats"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/rain-drops-macro",
+        "thumbnailUrl": "https://www.desktophut.com/images/rain-drops-macro.webp",
+        "title": "Rain Drops Macro"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/neon-rain-street-live-wallpaper",
+        "thumbnailUrl": "",
+        "title": "Neon Rain Street"
+      }
+    ]
+  },
+  "desktophut search p2": {
+    "asked": [
+      "https://www.desktophut.com/search/spider%20man?page=2"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb",
+        "thumbnailUrl": "https://www.desktophut.com/images/d9ot5UfEOq-spider-man-rain-live-wallpaper.webp",
+        "title": "Spider-Man Rain"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/jdm-supra-in-the-rain-live-wallpaper-96ks",
+        "thumbnailUrl": "https://www.desktophut.com/images/M7DTHBnRfJ-jdm-supra-in-the-rain-live-wallpaper.webp",
+        "title": "JDM Supra in the Rain"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/rainlink-by-hope-live-wallpaper-zh1j",
+        "thumbnailUrl": "https://www.desktophut.com/images/C4ju3oEIcb-rainlink-by-hope-live-wallpaper.webp",
+        "title": "Rainlink by Hope"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/foggy-harbour-live-wallpaper-x1y2",
+        "thumbnailUrl": "https://www.desktophut.com/images/foggy-harbour.webp",
+        "title": "Foggy Harbour \u0026 Boats"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/rain-drops-macro",
+        "thumbnailUrl": "https://www.desktophut.com/images/rain-drops-macro.webp",
+        "title": "Rain Drops Macro"
+      },
+      {
+        "pageUrl": "https://www.desktophut.com/neon-rain-street-live-wallpaper",
+        "thumbnailUrl": "",
+        "title": "Neon Rain Street"
+      }
+    ]
+  },
+  "local details": {
+    "1001": {
+      "downloadUrl": "$WS/1001/rain.mp4",
+      "previewUrl": "$WS/1001/preview.jpg",
+      "title": "Rain Window",
+      "workshopId": "1001"
+    },
+    "1002": {
+      "downloadUrl": "$WS/1002/neon.webm",
+      "previewUrl": "$WS/1002/preview.jpg",
+      "title": "Neon Street",
+      "workshopId": "1002"
+    },
+    "1003": {
+      "downloadUrl": "$WS/1003/sea.mov",
+      "previewUrl": "$WS/1003/preview.gif",
+      "title": "Sea Rain Loop",
+      "workshopId": "1003"
+    },
+    "1005": {
+      "downloadUrl": "$WS/1005/untitled.mp4",
+      "previewUrl": "$WS/1005/thumb.png",
+      "title": "1005",
+      "workshopId": "1005"
+    },
+    "1006": {
+      "downloadUrl": "$WS/1006",
+      "isScene": true,
+      "previewUrl": "$WS/1006/preview.gif",
+      "title": "Forest Scene",
+      "workshopId": "1006"
+    },
+    "1007": {
+      "downloadUrl": "$WS/1007",
+      "isScene": true,
+      "previewUrl": "$WS/1007/preview.jpg",
+      "title": "1007",
+      "workshopId": "1007"
+    },
+    "1011": {
+      "downloadUrl": "$WS/1011",
+      "isScene": true,
+      "previewUrl": "$WS/1011/preview.jpg",
+      "title": "Forest Rain Preset",
+      "workshopId": "1011"
+    },
+    "1013": {
+      "downloadUrl": "$WS/1013",
+      "isScene": true,
+      "previewUrl": "",
+      "title": "1013",
+      "workshopId": "1013"
+    },
+    "1014": {
+      "downloadUrl": "$WS/1014",
+      "isScene": true,
+      "previewUrl": "$WS/1014/preview.png",
+      "title": "Rainy Scene",
+      "workshopId": "1014"
+    }
+  },
+  "local gif cache": [
+    "1002.jpg"
+  ],
+  "local missing folder": [],
+  "local search \u0027RAIN\u0027 page 2": [
+    {
+      "ageRating": "Everyone",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1001/rain.mp4",
+      "tags": [
+        "Nature",
+        "Approved"
+      ],
+      "thumbnailUrl": "$WS/1001/preview.jpg",
+      "title": "Rain Window",
+      "workshopId": "1001"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1003/sea.mov",
+      "thumbnailUrl": "$WS/1003/preview.gif",
+      "title": "Sea Rain Loop",
+      "workshopId": "1003"
+    },
+    {
+      "hasAddedAt": true,
+      "isPreset": true,
+      "isScene": true,
+      "pageUrl": "$WS/1011",
+      "tags": [
+        "Landscape"
+      ],
+      "thumbnailUrl": "$WS/1011/preview.jpg",
+      "title": "Forest Rain Preset",
+      "workshopId": "1011"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1014",
+      "thumbnailUrl": "$WS/1014/preview.png",
+      "title": "Rainy Scene",
+      "workshopId": "1014"
+    }
+  ],
+  "local search \u0027rain\u0027": [
+    {
+      "ageRating": "Everyone",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1001/rain.mp4",
+      "tags": [
+        "Nature",
+        "Approved"
+      ],
+      "thumbnailUrl": "$WS/1001/preview.jpg",
+      "title": "Rain Window",
+      "workshopId": "1001"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1003/sea.mov",
+      "thumbnailUrl": "$WS/1003/preview.gif",
+      "title": "Sea Rain Loop",
+      "workshopId": "1003"
+    },
+    {
+      "hasAddedAt": true,
+      "isPreset": true,
+      "isScene": true,
+      "pageUrl": "$WS/1011",
+      "tags": [
+        "Landscape"
+      ],
+      "thumbnailUrl": "$WS/1011/preview.jpg",
+      "title": "Forest Rain Preset",
+      "workshopId": "1011"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1014",
+      "thumbnailUrl": "$WS/1014/preview.png",
+      "title": "Rainy Scene",
+      "workshopId": "1014"
+    }
+  ],
+  "local search caches nothing for the items it leaves out": [],
+  "local sort 1": [
+    "1005",
+    "1007",
+    "1013",
+    "Forest Rain Preset",
+    "Forest Scene",
+    "Neon Street",
+    "Rain Window",
+    "Rainy Scene",
+    "Sea Rain Loop"
+  ],
+  "local sort 2": [
+    "Sea Rain Loop",
+    "Rainy Scene",
+    "Rain Window",
+    "Neon Street",
+    "Forest Scene",
+    "Forest Rain Preset",
+    "1013",
+    "1007",
+    "1005"
+  ],
+  "local sort 3": [
+    "1005",
+    "Neon Street",
+    "Rain Window",
+    "Sea Rain Loop",
+    "1007",
+    "1013",
+    "Forest Rain Preset",
+    "Forest Scene",
+    "Rainy Scene"
+  ],
+  "local sort 4": [
+    "1007",
+    "1013",
+    "Forest Rain Preset",
+    "Forest Scene",
+    "Rainy Scene",
+    "1005",
+    "Neon Street",
+    "Rain Window",
+    "Sea Rain Loop"
+  ],
+  "local sort 5": [
+    "Rainy Scene",
+    "1013",
+    "Forest Rain Preset",
+    "1007",
+    "Forest Scene",
+    "1005",
+    "Sea Rain Loop",
+    "Neon Street",
+    "Rain Window"
+  ],
+  "local sort 6": [
+    "Rain Window",
+    "Neon Street",
+    "Sea Rain Loop",
+    "1005",
+    "Forest Scene",
+    "1007",
+    "Forest Rain Preset",
+    "1013",
+    "Rainy Scene"
+  ],
+  "local sort 99 (unknown)": [
+    "1005",
+    "1007",
+    "1013",
+    "Forest Rain Preset",
+    "Forest Scene",
+    "Neon Street",
+    "Rain Window",
+    "Rainy Scene",
+    "Sea Rain Loop"
+  ],
+  "local videos only": [
+    {
+      "ageRating": "Everyone",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1001/rain.mp4",
+      "tags": [
+        "Nature",
+        "Approved"
+      ],
+      "thumbnailUrl": "$WS/1001/preview.jpg",
+      "title": "Rain Window",
+      "workshopId": "1001"
+    },
+    {
+      "animatedThumbnailUrl": "$WS/1002/preview.gif",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1002/neon.webm",
+      "thumbnailUrl": "$WS/1002/preview.jpg",
+      "title": "Neon Street",
+      "workshopId": "1002"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1003/sea.mov",
+      "thumbnailUrl": "$WS/1003/preview.gif",
+      "title": "Sea Rain Loop",
+      "workshopId": "1003"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1005/untitled.mp4",
+      "thumbnailUrl": "$WS/1005/thumb.png",
+      "title": "1005",
+      "workshopId": "1005"
+    }
+  ],
+  "local with scenes": [
+    {
+      "ageRating": "Everyone",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1001/rain.mp4",
+      "tags": [
+        "Nature",
+        "Approved"
+      ],
+      "thumbnailUrl": "$WS/1001/preview.jpg",
+      "title": "Rain Window",
+      "workshopId": "1001"
+    },
+    {
+      "animatedThumbnailUrl": "$WS/1002/preview.gif",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1002/neon.webm",
+      "thumbnailUrl": "$WS/1002/preview.jpg",
+      "title": "Neon Street",
+      "workshopId": "1002"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1003/sea.mov",
+      "thumbnailUrl": "$WS/1003/preview.gif",
+      "title": "Sea Rain Loop",
+      "workshopId": "1003"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1005/untitled.mp4",
+      "thumbnailUrl": "$WS/1005/thumb.png",
+      "title": "1005",
+      "workshopId": "1005"
+    },
+    {
+      "ageRating": "Mature",
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1006",
+      "tags": [
+        "Landscape",
+        "Audio responsive"
+      ],
+      "thumbnailUrl": "$WS/1006/preview.gif",
+      "title": "Forest Scene",
+      "workshopId": "1006"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1007",
+      "thumbnailUrl": "$WS/1007/preview.jpg",
+      "title": "1007",
+      "workshopId": "1007"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1013",
+      "thumbnailUrl": "",
+      "title": "1013",
+      "workshopId": "1013"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1014",
+      "thumbnailUrl": "$WS/1014/preview.png",
+      "title": "Rainy Scene",
+      "workshopId": "1014"
+    }
+  ],
+  "local with scenes and presets": [
+    {
+      "ageRating": "Everyone",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1001/rain.mp4",
+      "tags": [
+        "Nature",
+        "Approved"
+      ],
+      "thumbnailUrl": "$WS/1001/preview.jpg",
+      "title": "Rain Window",
+      "workshopId": "1001"
+    },
+    {
+      "animatedThumbnailUrl": "$WS/1002/preview.gif",
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1002/neon.webm",
+      "thumbnailUrl": "$WS/1002/preview.jpg",
+      "title": "Neon Street",
+      "workshopId": "1002"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1003/sea.mov",
+      "thumbnailUrl": "$WS/1003/preview.gif",
+      "title": "Sea Rain Loop",
+      "workshopId": "1003"
+    },
+    {
+      "hasAddedAt": true,
+      "pageUrl": "$WS/1005/untitled.mp4",
+      "thumbnailUrl": "$WS/1005/thumb.png",
+      "title": "1005",
+      "workshopId": "1005"
+    },
+    {
+      "ageRating": "Mature",
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1006",
+      "tags": [
+        "Landscape",
+        "Audio responsive"
+      ],
+      "thumbnailUrl": "$WS/1006/preview.gif",
+      "title": "Forest Scene",
+      "workshopId": "1006"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1007",
+      "thumbnailUrl": "$WS/1007/preview.jpg",
+      "title": "1007",
+      "workshopId": "1007"
+    },
+    {
+      "hasAddedAt": true,
+      "isPreset": true,
+      "isScene": true,
+      "pageUrl": "$WS/1011",
+      "tags": [
+        "Landscape"
+      ],
+      "thumbnailUrl": "$WS/1011/preview.jpg",
+      "title": "Forest Rain Preset",
+      "workshopId": "1011"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1013",
+      "thumbnailUrl": "",
+      "title": "1013",
+      "workshopId": "1013"
+    },
+    {
+      "hasAddedAt": true,
+      "isScene": true,
+      "pageUrl": "$WS/1014",
+      "thumbnailUrl": "$WS/1014/preview.png",
+      "title": "Rainy Scene",
+      "workshopId": "1014"
+    }
+  ],
+  "moewalls detail": {
+    "asked": [
+      "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/"
+    ],
+    "result": {
+      "downloadUrl": "https://go.moewalls.com/download.php?video=0Lf1N4qBnRCsXaib5HAs%2FQ1GbxbFgReOio5PB929HFq4%2BRJLCv18I3Z0pziOVguRCMDXQT%2F9GwlLcEsQwCL7ADnruiDRklhrmt5E9CWS42kKlva%2FHWYfq6L4KtA%3D",
+      "previewUrl": "https://moewalls.com/wp-content/uploads/preview/2026/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-preview.webm",
+      "referrer": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+      "title": "Gojo And Black Cat"
+    }
+  },
+  "moewalls detail without video": {
+    "asked": [
+      "https://moewalls.com/no-video/"
+    ],
+    "result": "error"
+  },
+  "moewalls latest p2": {
+    "asked": [
+      "https://moewalls.com/page/2"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-thumb-364x205.jpg",
+        "title": "Gojo And Black Cat Rainy Nights In Tokyo Jujutsu Kaisen Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/lifestyle/summer-train-by-the-sea-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/summer-train-by-the-sea-thumb-364x205.jpg",
+        "title": "Summer Train By The Sea Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/movies/spiderman-tears-in-the-rain-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/spiderman-tears-in-the-rain-thumb-364x205.jpg",
+        "title": "SpiderMan Tears In The Rain Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/lifestyle/rain-on-glass-neon-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/10/rain-on-glass-neon-thumb-364x205.jpg",
+        "title": "Rain On Glass \u0026 Neon Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/landscape/thunder-over-fields-live-wallpaper/",
+        "thumbnailUrl": "",
+        "title": "Thunder Over Fields Live Wallpaper"
+      }
+    ]
+  },
+  "moewalls search": {
+    "asked": [
+      "https://moewalls.com/page/1/?s=rain"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-thumb-364x205.jpg",
+        "title": "Gojo And Black Cat Rainy Nights In Tokyo Jujutsu Kaisen Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/lifestyle/summer-train-by-the-sea-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/summer-train-by-the-sea-thumb-364x205.jpg",
+        "title": "Summer Train By The Sea Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/movies/spiderman-tears-in-the-rain-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/spiderman-tears-in-the-rain-thumb-364x205.jpg",
+        "title": "SpiderMan Tears In The Rain Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/lifestyle/rain-on-glass-neon-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/10/rain-on-glass-neon-thumb-364x205.jpg",
+        "title": "Rain On Glass \u0026 Neon Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/landscape/thunder-over-fields-live-wallpaper/",
+        "thumbnailUrl": "",
+        "title": "Thunder Over Fields Live Wallpaper"
+      }
+    ]
+  },
+  "moewalls search p3": {
+    "asked": [
+      "https://moewalls.com/page/3/?s=black%20cat"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-thumb-364x205.jpg",
+        "title": "Gojo And Black Cat Rainy Nights In Tokyo Jujutsu Kaisen Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/lifestyle/summer-train-by-the-sea-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/summer-train-by-the-sea-thumb-364x205.jpg",
+        "title": "Summer Train By The Sea Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/movies/spiderman-tears-in-the-rain-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/11/spiderman-tears-in-the-rain-thumb-364x205.jpg",
+        "title": "SpiderMan Tears In The Rain Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/lifestyle/rain-on-glass-neon-live-wallpaper/",
+        "thumbnailUrl": "https://moewalls.com/wp-content/uploads/2026/10/rain-on-glass-neon-thumb-364x205.jpg",
+        "title": "Rain On Glass \u0026 Neon Live Wallpaper"
+      },
+      {
+        "pageUrl": "https://moewalls.com/landscape/thunder-over-fields-live-wallpaper/",
+        "thumbnailUrl": "",
+        "title": "Thunder Over Fields Live Wallpaper"
+      }
+    ]
+  },
+  "motionbgs detail": {
+    "asked": [
+      "https://www.motionbgs.com/samurai-girl-rain-lantern"
+    ],
+    "result": {
+      "downloadUrl": "https://www.motionbgs.com/dl/4k/18",
+      "previewUrl": "https://www.motionbgs.com/media/18/samurai-girl-rain-lantern.960x540.mp4",
+      "title": "Samurai Girl With Lantern"
+    }
+  },
+  "motionbgs detail without video": {
+    "asked": [
+      "https://www.motionbgs.com/no-video"
+    ],
+    "result": "error"
+  },
+  "motionbgs latest p2": {
+    "asked": [
+      "https://www.motionbgs.com/hx2/latest/2/"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/alien-skies",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/10530/alien-skies.3840x2160.jpg",
+        "title": "Alien UFO Night Sky"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/hunt-showdown-rotten-swamp",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9311/hunt-showdown-rotten-swamp.3840x2160.jpg",
+        "title": "Hunt Showdown Rotten Swamp"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/vladilena-milize-86-crimson-flowers",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/10512/vladilena-milize-86-crimson-flowers.3840x2160.jpg",
+        "title": "Vladilena Milize 86 Crimson Flowers"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/neon-rain-alley",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9001/neon-rain-alley.jpg",
+        "title": "Neon Rain Alley"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/harbour-lights",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9002/harbour-lights.jpg",
+        "title": "Harbour Lights"
+      },
+      {
+        "pageUrl": "https://motionbgs.com/quiet-lake-dawn",
+        "thumbnailUrl": "https://motionbgs.com/i/c/364x205/media/9003/quiet-lake-dawn.jpg",
+        "title": "Quiet Lake \u0026 Dawn"
+      }
+    ]
+  },
+  "motionbgs search": {
+    "asked": [
+      "https://www.motionbgs.com/search?q=girl%20rain\u0026page=1"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/samurai-girl-rain",
+        "resolution": "HD",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/19/samurai-girl-rain.1920x1080.jpg",
+        "title": "Samurai Girl"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/samurai-girl-rain-lantern",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/18/samurai-girl-rain-lantern.3840x2160.jpg",
+        "title": "Samurai Girl With Lantern"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/girl-in-the-rain-cyberpunk-2077",
+        "resolution": "HD",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/249/girl-in-the-rain-cyberpunk-2077.jpg",
+        "title": "Girl in the Rain (Cyberpunk 2077)"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/rain-over-kyoto",
+        "resolution": "HD",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9101/rain-over-kyoto.jpg",
+        "title": "Rain Over Kyoto"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/girl-under-umbrella",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9102/girl-under-umbrella.png",
+        "title": "Girl Under Umbrella"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/rainy-rooftop-cat",
+        "thumbnailUrl": "https://motionbgs.com/i/c/364x205/media/9103/rainy-rooftop-cat.webp",
+        "title": "Rainy Rooftop \u0026 Cat live wallpaper"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/storm-girl",
+        "resolution": "4K",
+        "thumbnailUrl": "",
+        "title": "Storm Girl"
+      }
+    ]
+  },
+  "motionbgs search p2": {
+    "asked": [
+      "https://www.motionbgs.com/search?q=girl%20rain\u0026page=2"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/samurai-girl-rain",
+        "resolution": "HD",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/19/samurai-girl-rain.1920x1080.jpg",
+        "title": "Samurai Girl"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/samurai-girl-rain-lantern",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/18/samurai-girl-rain-lantern.3840x2160.jpg",
+        "title": "Samurai Girl With Lantern"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/girl-in-the-rain-cyberpunk-2077",
+        "resolution": "HD",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/249/girl-in-the-rain-cyberpunk-2077.jpg",
+        "title": "Girl in the Rain (Cyberpunk 2077)"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/rain-over-kyoto",
+        "resolution": "HD",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9101/rain-over-kyoto.jpg",
+        "title": "Rain Over Kyoto"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/girl-under-umbrella",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9102/girl-under-umbrella.png",
+        "title": "Girl Under Umbrella"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/rainy-rooftop-cat",
+        "thumbnailUrl": "https://motionbgs.com/i/c/364x205/media/9103/rainy-rooftop-cat.webp",
+        "title": "Rainy Rooftop \u0026 Cat live wallpaper"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/storm-girl",
+        "resolution": "4K",
+        "thumbnailUrl": "",
+        "title": "Storm Girl"
+      }
+    ]
+  },
+  "motionbgs tag": {
+    "asked": [
+      "https://www.motionbgs.com/search?q=car\u0026page=1"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/white-toyota-drifting",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/6200/white-toyota-drifting.jpg",
+        "title": "White Toyota Drifting"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/synthwave-delorean",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9969/synthwave-delorean.3840x2160.jpg",
+        "title": "Synthwave DMC DeLorean"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/race-day",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9960/race-day.3840x2160.jpg",
+        "title": "Race Day"
+      }
+    ]
+  },
+  "motionbgs tag p1 again": {
+    "asked": [
+      "https://www.motionbgs.com/search?q=car\u0026page=1"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/white-toyota-drifting",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/6200/white-toyota-drifting.jpg",
+        "title": "White Toyota Drifting"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/synthwave-delorean",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9969/synthwave-delorean.3840x2160.jpg",
+        "title": "Synthwave DMC DeLorean"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/race-day",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9960/race-day.3840x2160.jpg",
+        "title": "Race Day"
+      }
+    ]
+  },
+  "motionbgs tag p2": {
+    "asked": [
+      "https://www.motionbgs.com/tag:car/2/"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/white-toyota-drifting",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/6200/white-toyota-drifting.jpg",
+        "title": "White Toyota Drifting"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/synthwave-delorean",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9969/synthwave-delorean.3840x2160.jpg",
+        "title": "Synthwave DMC DeLorean"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/race-day",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9960/race-day.3840x2160.jpg",
+        "title": "Race Day"
+      }
+    ]
+  },
+  "motionbgs tag p2, query not seen": {
+    "asked": [
+      "https://www.motionbgs.com/search?q=car\u0026page=1",
+      "https://www.motionbgs.com/tag:car/2/"
+    ],
+    "result": [
+      {
+        "pageUrl": "https://www.motionbgs.com/white-toyota-drifting",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/6200/white-toyota-drifting.jpg",
+        "title": "White Toyota Drifting"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/synthwave-delorean",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9969/synthwave-delorean.3840x2160.jpg",
+        "title": "Synthwave DMC DeLorean"
+      },
+      {
+        "pageUrl": "https://www.motionbgs.com/race-day",
+        "resolution": "4K",
+        "thumbnailUrl": "https://www.motionbgs.com/i/c/364x205/media/9960/race-day.3840x2160.jpg",
+        "title": "Race Day"
+      }
+    ]
+  },
+  "providers": [
+    {
+      "name": "MotionBgs",
+      "pageSizeHint": 30,
+      "supportsPagination": true,
+      "supportsSearch": true
+    },
+    {
+      "name": "Moewalls",
+      "pageSizeHint": 30,
+      "supportsPagination": true,
+      "supportsSearch": true
+    },
+    {
+      "name": "Desktophut",
+      "pageSizeHint": 30,
+      "supportsPagination": true,
+      "supportsSearch": true
+    },
+    {
+      "name": "Wallpaper Engine (Local)",
+      "pageSizeHint": 30,
+      "supportsSearch": true,
+      "supportsSorting": true
+    }
+  ]
+}

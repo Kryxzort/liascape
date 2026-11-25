@@ -5,19 +5,10 @@ using Liascape.Scrapers;
 
 namespace Liascape.Services;
 
-public class MoewallsService : IBgsProvider
+// The moewalls Browse source: its latest list and its search share one page layout (MoewallsScraper)
+public sealed class MoewallsService() : WebSource("Moewalls")
 {
-    public string Name => "Moewalls";
-    public bool SupportsSearch => true;
-    public bool SupportsPagination => true;
-    public bool SupportsSorting => false;
-
-    public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
-        => MoewallsScraper.GetLatestAsync(page);
-
-    public Task<List<WallpaperResult>> SearchAsync(string query, int page = 1)
-        => MoewallsScraper.SearchAsync(query, page);
-
-    public Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
-        => MoewallsScraper.GetDetailAsync(result);
+    public override Task<List<WallpaperResult>> GetLatestAsync(int page) => MoewallsScraper.ListAsync(page, null);
+    public override Task<List<WallpaperResult>> SearchAsync(string query, int page) => MoewallsScraper.ListAsync(page, query);
+    public override Task<WallpaperDetail> GetDetailAsync(WallpaperResult result) => MoewallsScraper.DetailAsync(result);
 }

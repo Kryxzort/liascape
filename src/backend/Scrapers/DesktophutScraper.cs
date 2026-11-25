@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Net;
-using System.Net.Http;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
@@ -9,82 +8,57 @@ using Liascape.Models;
 
 namespace Liascape.Scrapers;
 
-public static class DesktophutScraper
+// desktophut.com, read from its pages (fixtures: scripts/test-fixtures/scrapers/desktophut/). The animated-wallpapers
+// category (/category/Animated-Wallpapers?page=<n>) and a search (/search/<query>?page=<n>) are the same grid of
+// a.wallpaper-card links; a wallpaper's page has one player whose mp4 is both what the sidebar previews and what a download
+// fetches (the site offers no other file without its own download flow).
+internal static partial class DesktophutScraper
 {
-    private const string Base = "https://www.desktophut.com";
+    private const string Site = "https://www.desktophut.com";
 
-    public static Task<List<WallpaperResult>> GetLatestAsync(int page)
-        => FetchListingAsync($"{Base}/category/Animated-Wallpapers?page={page}");
-
-    public static Task<List<WallpaperResult>> SearchAsync(string query, int page)
-        => FetchListingAsync($"{Base}/search/{Uri.EscapeDataString(query)}?page={page}");
-
-    public static async Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
+    // the category's page, or a search's when `query` is set
+    public static async Task<List<WallpaperResult>> ListAsync(int page, string? query)
     {
-        var html = await FetchAsync(result.PageUrl);
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-
-        string download = doc.DocumentNode
-            .SelectSingleNode("//source[@type='video/mp4']")!
-            .GetAttributeValue("src", "");
-
-        return new WallpaperDetail
+        string url = query == null
+            ? $"{Site}/category/Animated-Wallpapers?page={page}"
+            : $"{Site}/search/{Uri.EscapeDataString(query)}?page={page}";
+        var (doc, _) = await SitePage.GetAsync(url);
+        var cards = new List<WallpaperResult>();
+        foreach (var a in doc.DocumentNode.SelectNodes("//a[contains(@class,'wallpaper-card')]") ?? Enumerable.Empty<HtmlNode>())
         {
-            Title = result.Title,
-            PreviewUrl = download,
-            DownloadUrl = download,
-            NeedsReferrer = false
-        };
-    }
-
-    private static async Task<List<WallpaperResult>> FetchListingAsync(string url)
-    {
-        var html = await FetchAsync(url);
-        var doc = new HtmlDocument();
-        doc.LoadHtml(html);
-
-        var results = new List<WallpaperResult>();
-        // Desktophut markup (2026): <a class="wallpaper-card" href="/slug" aria-label="Title"><img src=".webp"></a>
-        var links = doc.DocumentNode.SelectNodes("//a[contains(@class,'wallpaper-card')]");
-        if (links == null) return results;
-
-        foreach (var a in links)
-        {
-            try
+            string href = SitePage.Attr(a, "href");
+            // aria-label is the card's own name; the title attribute is an SEO line ("Download X live wallpaper (4K/HD)")
+            string label = SitePage.Attr(a, "aria-label").Trim();
+            if (label.Length == 0) label = SitePage.Attr(a, "title").Trim();
+            if (href.Length == 0 || label.Length == 0) continue;
+            cards.Add(new WallpaperResult
             {
-                string href = a.GetAttributeValue("href", "");
-                // aria-label is the clean title; fall back to the title attr ("Download X live wallpaper (4K/HD)")
-                string aria = WebUtility.HtmlDecode(a.GetAttributeValue("aria-label", ""));
-                string rawTitle = !string.IsNullOrWhiteSpace(aria)
-                    ? aria
-                    : WebUtility.HtmlDecode(a.GetAttributeValue("title", ""));
-                string img = a.SelectSingleNode(".//img")?.GetAttributeValue("src", "") ?? "";
-
-                if (string.IsNullOrEmpty(href) || string.IsNullOrEmpty(rawTitle)) continue;
-
-                string title = Regex.Replace(rawTitle, @"^Download\s+", "");
-                title = Regex.Replace(title, @"\s+[Ll]ive [Ww]allpaper.*$", "").Trim();
-                if (string.IsNullOrEmpty(title)) title = rawTitle;
-
-                results.Add(new WallpaperResult
-                {
-                    Title = title,
-                    ThumbnailUrl = img,
-                    PageUrl = Base + href
-                });
-            }
-            catch { }
+                Title = NameIn(label),
+                ThumbnailUrl = SitePage.Attr(a.SelectSingleNode(".//img"), "src"),
+                PageUrl = SitePage.OnSite(Site, href),
+            });
         }
-        return results;
+        return cards;
     }
 
-    private static async Task<string> FetchAsync(string url)
+    public static async Task<WallpaperDetail> DetailAsync(WallpaperResult card)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-        var resp = await HttpClientProvider.Client.SendAsync(req);
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadAsStringAsync();
+        var (doc, _) = await SitePage.GetAsync(card.PageUrl);
+        string mp4 = SitePage.OnSite(Site, SitePage.Attr(SitePage.Needed(doc, "//source[@type='video/mp4']", "the video", card.PageUrl), "src"));
+        return new WallpaperDetail { Title = card.Title, PreviewUrl = mp4, DownloadUrl = mp4 };
     }
+
+    // "Download Neon City Live Wallpaper — animated wallpaper" → "Neon City": the leading "Download" and everything from
+    // "live wallpaper" on go; a label that would end up empty stays whole
+    private static string NameIn(string label)
+    {
+        string name = SuffixRe().Replace(DownloadRe().Replace(label, ""), "").Trim();
+        return name.Length > 0 ? name : label;
+    }
+
+    [GeneratedRegex(@"^Download\s+")]
+    private static partial Regex DownloadRe();
+
+    [GeneratedRegex(@"\s+[Ll]ive [Ww]allpaper.*$")]
+    private static partial Regex SuffixRe();
 }

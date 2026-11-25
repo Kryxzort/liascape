@@ -33,7 +33,7 @@ public static class ServerHost
 
     // Order matches the UI's source pills. WE-local (index 3) is hidden when
     // AutoAddWeWallpapersToLibrary is on (its items are the library's: a subscribed one's Delete is Unsubscribe).
-    private static readonly IBgsProvider[] Providers =
+    private static readonly IBrowseSource[] Providers =
     {
         new MotionBgsService(), new MoewallsService(), new DesktophutService(),
         new WallpaperEngineService(), new SteamWorkshopService(),
@@ -176,7 +176,7 @@ public static class ServerHost
         a.Count == b.Count && a.Zip(b).All(p => p.First.Name == p.Second.Name && p.First.Fps == p.Second.Fps);
 
     // `list` (a /browse's): which Workshop items it lists — absent = the whole Workshop (a /detail leaves it as it was)
-    private static void ConfigureProvider(IBgsProvider p, AppSettings s, WorkshopFilter? filter, WorkshopList? list, bool browse = true)
+    private static void ConfigureProvider(IBrowseSource p, AppSettings s, WorkshopFilter? filter, WorkshopList? list, bool browse = true)
     {
         if (p is SteamWorkshopService ws)
         {

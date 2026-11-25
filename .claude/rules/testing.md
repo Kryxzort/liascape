@@ -7,6 +7,7 @@ paths:
   - "src/player/tests/**"
   - "src/backend/Player/LiascapePlayerSelfTest.cs"
   - "src/backend/Web/SteamSelfTest.cs"
+  - "src/backend/Scrapers/ScraperSelfTest.cs"
 ---
 
 # Writing, changing and fixing tests

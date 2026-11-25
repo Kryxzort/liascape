@@ -225,7 +225,7 @@ const BR_STUB = () => `(() => { window.__br = []; const thumbs = ${JSON.stringif
           pageUrl: "https://steamcommunity.com/sharedfiles/filedetails/?id=" + salt.length + "0" + n + "&s=" + encodeURIComponent(salt),
           resolution: "1920 x 1080", isScene: false, workshopId: id, addedAt: null, description: "probe", authorName: "probe",
           fileSizeBytes: 1000, subscriptions: n, favorites: n, views: n, tags: [] }; })); } }
-    if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "", needsReferrer: false }); }
+    if (p === "/detail" && (o?.method || "GET") === "POST") { const b = JSON.parse(o.body); if (String(b.result?.pageUrl).includes("steamcommunity")) return ok({ title: b.result.title, previewUrl: b.result.thumbnailUrl, downloadUrl: "" }); }
     return f(u, o); }; })();`;
 // where the shown Browse grid is: its offset, the first card whose bottom is below the grid's top edge (the row the eye
 // is on) and that card's place in the grid, the cards loaded, the focused card

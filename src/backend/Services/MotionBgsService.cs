@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Liascape.Models;
@@ -5,34 +6,30 @@ using Liascape.Scrapers;
 
 namespace Liascape.Services;
 
-public class MotionBgsService : IBgsProvider
+// The motionbgs Browse source. A search's later pages depend on what its first page was: the search's own pages, or a
+// tag's pages when the site redirected the query to a tag (MotionBgsScraper). Each query's answer is remembered, so page 2
+// of any query the backend has searched follows the right list; a query it hasn't (the backend restarted under an open
+// page) asks page 1 again first to find out.
+public sealed class MotionBgsService() : WebSource("MotionBgs")
 {
-    public string Name => "MotionBgs";
-    public bool SupportsSearch => true;
-    public bool SupportsPagination => true;
-    public bool SupportsSorting => false;
+    // query → the tag path it redirected to, "" = a plain search
+    private readonly ConcurrentDictionary<string, string> _listOf = new();
 
-    private string? _tagPath;    // non-null when last search redirected to a tag page
-    private string _lastQuery = "";
+    public override Task<List<WallpaperResult>> GetLatestAsync(int page) => MotionBgsScraper.LatestAsync(page);
 
-    public Task<List<WallpaperResult>> GetLatestAsync(int page = 1)
-        => MotionBgsScraper.GetLatestAsync(page);
-
-    public async Task<List<WallpaperResult>> SearchAsync(string query, int page = 1)
+    public override async Task<List<WallpaperResult>> SearchAsync(string query, int page)
     {
-        if (page == 1)
+        if (page <= 1 || !_listOf.TryGetValue(query, out var tagPath))
         {
-            var (results, tagPath) = await MotionBgsScraper.SearchAsync(query);
-            _tagPath = tagPath;
-            _lastQuery = query;
-            return results;
+            var (cards, tag) = await MotionBgsScraper.SearchFirstAsync(query);
+            if (_listOf.Count > 200) _listOf.Clear();
+            _listOf[query] = tagPath = tag ?? "";
+            if (page <= 1) return cards;
         }
-
-        return _tagPath != null
-            ? await MotionBgsScraper.GetTagPageAsync(_tagPath, page)
-            : await MotionBgsScraper.GetSearchPageAsync(_lastQuery, page);
+        return tagPath.Length > 0
+            ? await MotionBgsScraper.TagPageAsync(tagPath, page)
+            : await MotionBgsScraper.SearchPageAsync(query, page);
     }
 
-    public Task<WallpaperDetail> GetDetailAsync(WallpaperResult result)
-        => MotionBgsScraper.GetDetailAsync(result);
+    public override Task<WallpaperDetail> GetDetailAsync(WallpaperResult result) => MotionBgsScraper.DetailAsync(result);
 }

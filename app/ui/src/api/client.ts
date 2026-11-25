@@ -200,7 +200,7 @@ export interface Wallpaper {
 // (total null = not known yet), `error` = why the last load or check stopped. Signed out: signedIn false and nothing else.
 export type FavoritesState = { signedIn: boolean; version: number; loading: { done: number; total: number | null } | null; error: string | null; items: Wallpaper[] };
 export interface Detail {
-  title: string; previewUrl: string; downloadUrl: string; needsReferrer: boolean;
+  title: string; previewUrl: string; downloadUrl: string;
   referrer: string | null; isScene: boolean; workshopId: string | null; isWorkshopAcquire: boolean;
   resolution: string | null; ageRating: string | null; youtubeUrl: string | null; pageUrl: string | null;
   authorName: string | null; description: string | null; fileSizeBytes: number | null;

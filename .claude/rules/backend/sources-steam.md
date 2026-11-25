@@ -26,8 +26,10 @@ Wallpaper Engine (Local), Wallpaper Engine (Workshop). Selectors and URLs: the s
 choices here: `docs/decisions.md` § Steam & sources.
 
 ## Scrapers (HTTP + HtmlAgilityPack)
-- Send the Firefox User-Agent from `HttpClientProvider` and share one `HttpClient`; never one per request.
-- `GetAttributeValue` returns `""`, not null: test with `string.IsNullOrEmpty`, not `??` chains.
+- Fetch a site's page through `SitePage.GetAsync` (`src/backend/Scrapers/SitePage.cs`): the Firefox User-Agent from `HttpClientProvider` and its one shared `HttpClient`, never one per request.
+- `GetAttributeValue` returns `""`, not null: test with `string.IsNullOrEmpty` (or `SitePage.Attr`), not `??` chains.
+- Pin every parser with a fixture: each site's pages in `scripts/test-fixtures/scrapers/<site>/`, trimmed to the elements the parser reads (never a whole page), and what each source asks for and returns in `expected.json`. A site that changed its markup: capture its page again, trim it the same way and fix the parser until `scraper-selftest` passes; `--write` only to pin a deliberate change, after reading the diff. Guard: `scraper-selftest`.
+- Keep the web sources' page addresses as they are (motionbgs' `www.` included, though the site redirects it): a downloaded item's source id is its page address, which de-duplicates it.
 - moewalls downloads need `Referer` = the wallpaper's page URL; the `/img` proxy sends it for moewalls thumbnails.
 - Steam's Workshop page CSS classes are hashed: parse item ids from `filedetails/?id=` hrefs.
 - WE local: `project.json` `type` video → video, scene or `scene.pkg` → scene (only with `AllowScenes`), a preset naming a Workshop
@@ -97,6 +99,7 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Tests point `LIASCAPE_STEAM_COMMUNITY` / `LIASCAPE_STEAM_API` at `scripts/test-fixtures/fake-steam-community.mjs` (the sign-in's subscribe / unsubscribe, `WorkshopDownloader.SubscribeAsync`, go there too); nothing in a test favourites, posts or subscribes on Steam.
 
 ## Verify
+- `dotnet run --project src/backend -- scraper-selftest` — Browse's web sources against `scripts/test-fixtures/scrapers/` (no network) and the local Wallpaper Engine folder over a fake one (a private HOME).
 - `bash scripts/test-workshop-social.sh` — hermetic (`unshare -rn`, the fake community server, `LIASCAPE_STEAM_CM_FIXTURE` `@userfiles`); § 6 the details cache, § 7 the favourites cache (one backend restart per phase).
 - `bash scripts/test-ui-matrix.sh --probe probe-steam.js --only '^yours:stack'` — the favourites filter end to end on the matrix stack's own backend (a fake sign-in, `@userfiles`), no network.
 - `bash scripts/test-steam-app-hold.sh` — hermetic (the fake `steamclient.so`, a shortened linger and heartbeat timeout).
