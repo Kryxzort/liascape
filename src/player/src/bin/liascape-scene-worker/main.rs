@@ -348,8 +348,14 @@ fn wait_readable(fd: i32, timeout: Option<Duration>) {
 }
 
 /// `first_fault_ms` (stub): page a private 4 MiB file in from disk again and again for `ms` —
-/// each page dropped from this mapping and the page cache, then read: a major fault each time,
-/// like a cold start's on a busy disk (the host's start grace counts them).
+/// the whole file dropped from this mapping and the page cache, then one page read: a major fault
+/// each time, like a cold start's on a busy disk (the host's start grace counts them).
+///
+/// The drop covers the whole file because the page cache may hold it in large folios (btrfs does,
+/// up to 256 KiB): `POSIX_FADV_DONTNEED` evicts only folios its range covers entirely, so a
+/// page-sized drop evicts nothing there and every read is a minor fault the host rightly doesn't
+/// count. `MADV_RANDOM` stops readahead from turning each fault into a read of the whole file, and
+/// the pause keeps the disk load light: the host only needs one fault per third of a hang timeout.
 fn fault_in(ms: u64) {
     if ms == 0 {
         return;
@@ -379,13 +385,14 @@ fn fault_in(ms: u64) {
         if m == libc::MAP_FAILED {
             return warn("first_fault_ms: mmap failed");
         }
+        libc::madvise(m, LEN, libc::MADV_RANDOM);
         let mut off = 0;
         while t.elapsed() < Duration::from_millis(ms) {
-            let p = (m as *mut u8).add(off);
-            libc::madvise(p.cast(), page, libc::MADV_DONTNEED);
-            libc::posix_fadvise(fd, off as libc::off_t, page as libc::off_t, libc::POSIX_FADV_DONTNEED);
-            std::ptr::read_volatile(p);
+            libc::madvise(m, LEN, libc::MADV_DONTNEED);
+            libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_DONTNEED);
+            std::ptr::read_volatile((m as *const u8).add(off));
             off = (off + page) % LEN;
+            std::thread::sleep(Duration::from_millis(1));
         }
         libc::munmap(m, LEN);
     }
