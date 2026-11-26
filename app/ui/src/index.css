@@ -506,6 +506,32 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .st-op-n { flex: none; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .st-op-more { flex: none; }
 :root.no-motion .st-layer { animation-duration: var(--fade-dur); animation-timing-function: linear; }
+/* COOL: the low-VRAM hold's notice (TopbarStatus.tsx HoldNotice) leads the now-playing line as a pill: the feature-health
+   summary's --warn edge and fill (below, shared), the warning glyph's amber glow, and it rises in on the soft spring. Its
+   parts (the words in two halves, the numbers) are never cut: the rest of the line gives way first (it shrinks to nothing),
+   then the numbers take a second line; a slot too narrow for that (the bar's other controls leave it 70–180 px between 761
+   and 1000 px wide) shows the words alone on two lines, and one too narrow for those the glyph alone, the whole notice in
+   the line's tooltip. Two lines stay inside the bar's own row height (the negative block margin takes back the words' box
+   padding), so the bar never grows. Guard: probe-layout look:vramHold, look:vramHold:off */
+.topbar > .status { container: status / inline-size; }
+.st-layer.st-held { display: flex; align-items: center; justify-content: flex-end; overflow: visible; white-space: normal; text-align: left; margin-block: -3px; }
+.st-hold { flex: 0 0 auto; max-width: calc(100% - 10px); min-width: 0; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px 2px 7px; border-radius: 8px; font-size: 12px; line-height: 13px; color: var(--text);
+  box-shadow: 0 0 12px -4px var(--warn); animation: hold-in var(--spring-soft-dur) var(--spring-soft) both; }
+.st-hold:only-child { max-width: 100%; }
+.st-hold-ico { flex: none; color: var(--warn); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn) 60%, transparent)); }
+.st-hold-text { display: flex; flex-wrap: wrap; column-gap: .3em; min-width: 0; }
+.st-hold-lead, .st-hold-num { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container status (max-width: 230px) { .st-hold-num, .st-hold-dash { display: none; } }
+@container status (max-width: 140px) { .st-hold-text { display: none; } .st-hold { padding-inline: 7px; } }
+.st-hold-lead { color: color-mix(in srgb, var(--warn) 75%, var(--text)); font-weight: 600; }
+.st-hold-num { font-variant-numeric: tabular-nums; }
+.st-held-rest { flex: 0 1 auto; min-width: 0; margin-left: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-layer.out .st-hold { animation: hold-out .2s ease-in forwards; }
+@keyframes hold-in { from { opacity: 0; transform: translateY(5px) scale(.94); } }
+@keyframes hold-out { to { opacity: 0; transform: scale(.96); } }
+/* motion off: the line's own fade (.st-layer) brings it and takes it; the pill itself holds still */
+:root.no-motion .st-hold, :root.no-motion .st-layer.out .st-hold { animation: none; }
 /* COOL: the Undo / Confirm buttons call attention with a breathing glow. The button holds a steady floor (its accent ring + the
    small glow) and a layer over it carrying the full glow fades in and out on opacity alone, so the dimmest point still reads as a
    soft glow, never a bare outline (the pulse once ran the shadow itself down to the ring), and no blur radius animates.
@@ -1193,9 +1219,10 @@ input[type=range]:focus-visible { outline: none; }
 .s-warn-text { color: var(--warn); }
 .s-warn { display: inline-flex; margin-left: 6px; color: var(--warn); cursor: help; vertical-align: -2px;
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn) 60%, transparent)); }
-.health-sum { margin: 4px 0 14px; padding: 9px 12px; border-radius: 10px; font-size: 12px; line-height: 1.45;
-  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
-  background: color-mix(in srgb, var(--surface0) var(--tr-strong), transparent); color: var(--subtext); }
+.health-sum { margin: 4px 0 14px; padding: 9px 12px; border-radius: 10px; font-size: 12px; line-height: 1.45; color: var(--subtext); }
+/* the app's notice look: a --warn edge on a --tr-strong fill (the feature-health summary, the top bar's low-VRAM hold) */
+.health-sum, .st-hold { border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--surface0) var(--tr-strong), transparent); }
 .health-sum-head { display: flex; align-items: center; gap: 7px; color: var(--warn); font-weight: 600; }
 .health-sum ul { margin: 6px 0 0; padding-left: 20px; }
 .health-sum b { color: var(--text); font-weight: 600; }
@@ -1391,7 +1418,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .btn.danger:hover, :root.no-glow .btn.danger.solid:hover { box-shadow: none; }
 :root.no-glow .del:hover, :root.no-glow .pl-remove:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.85)); }
 :root.no-glow .pl-toggle:hover { filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
-:root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover { filter: none; }
+:root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover, :root.no-glow .st-hold-ico { filter: none; }
+:root.no-glow .st-hold { box-shadow: none; }
 :root.no-glow .settings { background-image: none; }
 :root.no-glow .ssection::before, :root.no-glow .srow::before { box-shadow: none; }
 :root.no-glow :is(.ssection-ico, .wf-gico) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
@@ -1449,7 +1477,7 @@ input[type=range]:focus-visible { outline: none; }
   .s-reset:hover, .s-warn, .s-warn-text, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
   .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title, .side-sub-ico.subscribed, .side-sub-ico.subscribing,
   .side-sub-ico.unsubscribing, .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
-  .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-msg, .st-name, .st-use,
+  .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-hold-ico, .st-hold-lead, .st-msg, .st-name, .st-use,
   .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
   .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
   .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op, .ws-creator-ico) { text-shadow: none; }

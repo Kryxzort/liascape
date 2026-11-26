@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useStore } from "../store";
 import { BUTTONS_NARROW, useNarrow } from "../hooks/useTopbarCompact";
 import { FADE_EXIT_MS, useMotion } from "./motion";
@@ -14,14 +15,47 @@ import { isSingle, opLabel, opsWords, useShownOps } from "./libraryOps";
 // what it says cross-fades in place (opacity only), a count steps in place. Guard: probe-libops libops:status,
 // libops:toggle, libops:combined, libops:single; probe-layout resize:*.
 type Line =
-  | { kind: "status" | "playing" | "hint"; key: string; text: string; title?: string }
+  | { kind: "status" | "playing" | "hint"; key: string; text: string; title?: string; hold?: string }
   | { kind: "op"; key: string; id: string; label: string; n: string; more: number; words: string; spoken: boolean };
 
 // how long a replaced line stays to fade out (index.css .st-layer.out: .2 s)
 const OUT_MS = 220;
 
+// The low-VRAM hold's notice, leading the now-playing line as a pill in the notice look (index.css .st-hold: Settings'
+// feature-health summary's edge and fill). It is three unbreakable parts, the words in two halves and the numbers, so the
+// slot lays them out whole or not at all (index.css: one line, then the numbers on a second, then the words alone, then the
+// glyph alone); what a narrow slot leaves out is in the line's tooltip. Guard: probe-layout look:vramHold
+function HoldNotice({ hold }: { hold: string }) {
+  const cut = hold.indexOf(" — ");
+  const lead = cut < 0 ? hold : hold.slice(0, cut), num = cut < 0 ? "" : hold.slice(cut + 3);
+  // the words' two halves, as even as the word breaks allow: the narrow form stacks them
+  const words = lead.split(" ");
+  let at = 1;
+  while (at < words.length - 1 && words.slice(0, at + 1).join(" ").length <= lead.length / 2) at++;
+  const parts = [words.slice(0, at).join(" "), words.slice(at).join(" ")].filter(Boolean);
+  return (
+    <span className="st-hold">
+      <AlertTriangle size={13} className="st-hold-ico" aria-hidden />
+      {/* a part's leading space keeps the notice whole for a reader (textContent); a line's start drops it, the row's gap spaces them */}
+      <span className="st-hold-text">
+        {/* the dash leads to the numbers: it goes where they do */}
+        {parts.map((p, i) => <span key={i} className="st-hold-lead">{i > 0 ? ` ${p}` : p}{num && i === parts.length - 1 && <span className="st-hold-dash"> —</span>}</span>)}
+        {num && <span className="st-hold-num">{` ${num}`}</span>}
+      </span>
+    </span>
+  );
+}
+
 function LineView({ l, narrow, out }: { l: Line; narrow: boolean; out?: boolean }) {
   const cls = `st-layer${out ? " out" : ""}`;
+  if (l.kind === "playing" && l.hold) {
+    const rest = l.text.startsWith(l.hold) ? l.text.slice(l.hold.length).replace(/^ • /, "") : l.text;
+    return (
+      <span className={`${cls} st-held`} data-st="playing" title={l.title}>
+        <HoldNotice hold={l.hold} />{rest && " "}{rest && <span className="st-held-rest">{rest}</span>}
+      </span>
+    );
+  }
   if (l.kind !== "op") return <span className={`${cls}${l.kind === "hint" ? " muted-status" : ""}`} data-st={l.kind} title={l.title}>{l.text}</span>;
   // the words are the line's (LibraryOpsLine's progressbar names every operation): the slot shows, a reader needn't hear twice.
   // Only one item's work running has no line, so then the slot speaks. A tooltip gives what the short form hides
@@ -42,10 +76,11 @@ export function TopbarStatus({ tab }: { tab: "browse" | "library" | "settings" }
   const motion = useMotion();
   const op = tab !== "browse" ? ops[0] : undefined;
   const message: Line | null = status && !isPlayingLine ? { kind: "status", key: `s:${status}`, text: status } : null;
-  // the low-VRAM hold's notice leads the now-playing line; the numbers it ends on can fall past a narrow slot's ellipsis, so
-  // the tooltip carries them
+  // the low-VRAM hold's notice leads the now-playing line (HoldNotice), under its own key so it comes and goes as a line does.
+  // Below the narrowest one-row top bar even two lines can't hold it: the tooltip carries it whole
   const vramHold = useStore((s) => s.vramHold);
-  const playing: Line | null = status && isPlayingLine ? { kind: "playing", key: "playing", text: status, title: vramHold ?? undefined } : null;
+  const playing: Line | null = status && isPlayingLine
+    ? { kind: "playing", key: vramHold ? "playing:hold" : "playing", text: status, title: vramHold ?? undefined, hold: vramHold ?? undefined } : null;
   const work: Line | null = op ? { kind: "op", key: `op:${op.id}`, id: op.id, label: isSingle(op) ? `${opLabel(op)}…` : opLabel(op), n: isSingle(op) ? "" : `${op.done} / ${op.total}`, more: ops.length - 1, words: opsWords(ops), spoken: ops.every(isSingle) } : null;
   // the user's pick between the work and the now-playing line, kept while the work runs
   const [showPlaying, setShowPlaying] = useState(false);

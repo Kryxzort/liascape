@@ -99,7 +99,7 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
     let autoRaf = 0;
     const stopScroll = () => { cancelAnimationFrame(autoRaf); autoRaf = 0; };
     const liascapeDbg = {
-      help: () => "metrics fps tab(name) source(i) cardsize(S/M/L) aspect(x) gifs(bool) ops(list) status(text) loadmore play stop next prev pause scroll(px) scrolltop scrollbottom autoscroll(pps,secs) stopscroll",
+      help: () => "metrics fps tab(name) source(i) cardsize(S/M/L) aspect(x) gifs(bool) ops(list) status(text) vramHold(text) loadmore play stop next prev pause scroll(px) scrolltop scrollbottom autoscroll(pps,secs) stopscroll",
       // overlay off → sample a second first (the meter isn't running); callers await (CDP awaitPromise, executeJavaScript)
       metrics: async () => { if (!overlayOnRef.current) await meter.current?.sample(1100); return fmt(); },
       fps: async () => { if (!overlayOnRef.current) await meter.current?.sample(1100); return `fps=${mRef.current.fps} low1%=${mRef.current.low1} ms=${mRef.current.ms}`; },
@@ -115,6 +115,8 @@ export function DebugHud({ setTab, getScroll }: { setTab: (t: string) => void; g
       ops: (list: LibraryOp[]) => { S().setLibraryOps(list); return `ops=${list.length}`; },
       // a status message in the top bar's slot, held or (timed) for its 5 s ("" clears it): probe-libops libops:status, libops:toggle
       status: (text: string, timed = false) => { S().setStatus(text, timed); return `status=${text}`; },
+      // the low-VRAM hold's notice as the backend's vram-hold event sets it (null clears it): probe-layout look:vramHold
+      vramHold: (m: string | null) => { S().setVramHold(m); return `vramHold=${m}`; },
       anim: () => `animLayers=${document.querySelectorAll("img.thumb.anim, video.thumb.anim").length}`,
       loadmore: () => { S().loadMore(); return "loadmore"; },
       play: () => { S().playPlaylist(); return "play"; },

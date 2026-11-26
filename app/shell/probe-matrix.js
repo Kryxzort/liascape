@@ -3508,13 +3508,14 @@ C["vram:exceeded"] = { states: ["sceneS"], switch: true,
 // TopbarStatus's tooltip on the line
 C["vram:held"] = { states: ["scene"],
   async run(c) {
-    const status = async () => String(await ui(`return document.querySelector(".status")?.textContent ?? "";`));
+    // the line coming in: the notice comes and goes as a line of its own, the one it replaces fading out beside it a moment
+    const status = async () => String(await ui(`return document.querySelector(".status .st-layer:not(.out)")?.textContent ?? "";`));
     c.pid = workerOf(c.before.st, SC[0])?.pid;
     vramFake({ [c.pid]: 3600 }, 300);
     c.engaged = await waitFor(async () => (c.s0 = await status()).includes("Paused: low video memory"), 8000, 100);
     vramFake({}, 3940);
     c.waits = await waitFor(async () => (c.s1 = await status()).includes("3940 MB free, needs 4368 MB"), 8000, 100);
-    c.title = await ui(`return document.querySelector(".status [data-st=playing]")?.title ?? null;`);
+    c.title = await ui(`return document.querySelector(".status [data-st=playing]:not(.out)")?.title ?? null;`);
     fs.writeFileSync(path.join(OUT, "mx-vram-held.png"), (await win.webContents.capturePage({ x: 0, y: 0, width: 1400, height: 120 })).toPNG());
     c.cur = (await http("GET", "/current")).json;
     vramFake();
