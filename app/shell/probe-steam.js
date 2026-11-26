@@ -148,11 +148,17 @@
 //                         words without unfolding, Ctrl+C copies them
 //   look:browseTitles     a Browse card's long title: two lines, clamped; every card keeps its box (the grid as with short titles)
 //   ws:favorite[Off]      the favourite tile: read state, a click POSTs, "Favourited" rolls in (Off: fades), the star fills and pops
-//                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; signed
-//                         out "Sign in to favourite", inert; no-glow + bg-live
+//                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; no-glow
+//                         + bg-live
+//   ws:favoriteSteam[Off] no usable sign-in: the tile's words roll over to "Favourite on Steam" as the state lands (Off: fade, nothing
+//                         moves), the tile keeps its box; a click opens the item's page in the Steam app (POST /steam/open-page),
+//                         sends no favourite; no-glow + bg-live
 //   ws:comments[Off]      the comments: read only once in view, 10 of 23 newest first, the creator's marked, the text plain (markup
-//                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out "Sign in to
-//                         comment"; a failed read a quiet line, Retry; bg-live
+//                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out no box;
+//                         a failed read a quiet line, Retry; bg-live
+//   ws:commentSteam[Off]  no usable sign-in: "Comment on Steam" in the box's place, rising in (Off: fading in place); a click opens
+//                         the item's page in the Steam app (POST /steam/open-page), posts nothing; signed in: the box, no button;
+//                         no-glow + bg-live
 //   ws:commentSelect      a comment's text and its commenter's name select with a drag; an old comment's date shows its year
 //                         (never 1970), one with no time shows none
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
@@ -347,7 +353,9 @@ const STUB = `(() => {
     if (p === "/workshop/creator") { st.calls.push({ p, q: String(u) }); return res(W.creator ?? { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null }); }
     // a preset's base (ws:presetBase): W.base, else Steam's "not a preset"
     if (p === "/workshop/base") { st.calls.push({ p, q: String(u) }); return W.base ? res(W.base) : res({ error: "Steam lists no base for this item: it isn't a preset" }, 404); }
-    if (p === "/workshop/favorite" && m === "GET") { st.calls.push({ p, m }); return res(W.fav ?? { signedIn: false, favorited: null }); }
+    // W.favDelay: the state's answer held that many ms (ws:favoriteSteam: the words' swap as it lands)
+    if (p === "/workshop/favorite" && m === "GET") { st.calls.push({ p, m }); const out = res(W.fav ?? { signedIn: false, favorited: null });
+      return W.favDelay ? new Promise((r) => setTimeout(() => r(out), W.favDelay)) : out; }
     if (p === "/workshop/favorite" && m === "POST") {
       const b = JSON.parse(o.body); st.calls.push({ p, m, body: b });
       if (W.favFail) return res({ error: "Steam turned that down" }, 502);
@@ -2715,8 +2723,8 @@ app.whenReady().then(async () => {
     });
 
     // the favourite: a toggle tile — signed in it reads the state (once the sidebar settles), a click favourites (POST), the star
-    // fills and pops once (never on mount), the words roll and the tile keeps its box; Steam refusing puts it back with the reason;
-    // signed out it says "Sign in to favourite" and sends nothing. Motion off: the words only fade.
+    // fills and pops once (never on mount), the words roll and the tile keeps its box; Steam refusing puts it back with the reason.
+    // Motion off: the words only fade. Signed out: ws:favoriteSteam.
     for (const motion of [true, false]) {
       await cell(`ws:favorite${motion ? "" : "Off"}`, async () => {
         const v = [];
@@ -2770,21 +2778,134 @@ app.whenReady().then(async () => {
           await shot("ws-fav-live");
           await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
         }
-        // signed out: inert, says so, sends nothing
-        await browseWs(); await openSide(0);
-        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "signed-out"`), 3000))) return [...v, "signed out: the tile never said so"];
-        const n0 = (await wsCalls("/workshop/favorite")).filter((c) => c.m === "POST").length;
-        await page(`document.querySelector(${J(FAV)}).click();`); await sleep(300);
-        const so = await page(`const t = document.querySelector(${J(FAV)}); return { text: t.querySelector(".xfade > :not([data-off])")?.textContent, disabled: t.disabled };`);
-        if (so.text !== "Sign in to favourite" || !so.disabled) v.push(`signed out: ${J(so)}`);
-        if ((await wsCalls("/workshop/favorite")).filter((c) => c.m === "POST").length !== n0) v.push("signed out: a click sent a favourite");
+        return v;
+      });
+    }
+
+    // the page opener the signed-out controls share: a click → one POST /steam/open-page {workshopId} (`want`: the rest of its
+    // body), the Steam app opening it (no browser), nothing sent to `notTo`
+    const steamOpenClick = async (sel, want, notTo) => {
+      const v = [];
+      await page(`window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; window.__replies = { ...(window.__replies || {}), "/steam/open-page": { body: { ok: true } } };`);
+      const nNot = (await wsCalls(notTo)).filter((c) => c.m === "POST" || c.body).length, nOpen = (await wsCalls("/steam/open-page")).length;
+      await page(`document.querySelector(${J(sel)}).click();`); await sleep(400);
+      const opens = (await wsCalls("/steam/open-page")).slice(nOpen);
+      if (opens.length !== 1 || J(opens[0].body) !== J({ workshopId: "930000", ...want })) v.push(`the click sent ${J(opens)} (want one POST /steam/open-page ${J({ workshopId: "930000", ...want })})`);
+      if ((await wsCalls(notTo)).filter((c) => c.m === "POST" || c.body).length !== nNot) v.push(`the click sent a POST ${notTo}`);
+      if ((await js(`window.__opened.length`)) !== 0) v.push("the browser opened the page though the Steam app could");
+      return v;
+    };
+
+    // no usable sign-in: the favourite tile becomes "Favourite on Steam" — its words roll over in their one cell as the state lands
+    // (motion off: they fade, nothing moves) and the tile keeps its box; a click opens the item's page in the Steam app (POST
+    // /steam/open-page) and sends no favourite; the tile stays as it was (Steam's own page takes the star). Shots
+    // steam-ws-fav-steam-roll.png, steam-ws-fav-steam.png, steam-ws-fav-steam-live.png
+    for (const motion of [true, false]) {
+      await cell(`ws:favoriteSteam${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        // the state answers 700 ms after it is asked (the sidebar settles 350 ms first): the swap lands well inside the sampling
+        await W({ fav: { signedIn: false, favorited: null }, favDelay: 700 });
+        const FAV = `${SIDE} [data-ws-fav]`, FACE = `${FAV} .xfade > :nth-child(3)`, OLD = `${FAV} .xfade > :nth-child(1)`;
+        await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[0].click();`);
+        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "loading"`), 2000))) return ["the tile never showed while its state was asked — proved nothing"];
+        await sleep(450); // the sidebar's open and its body's fade are over
+        const box0 = await js(`(() => { const e = document.querySelector(${J(FAV)}); return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]; })()`);
+        const smp = motion ? null : js(MO.SAMPLE({ face: FACE, old: OLD, tile: FAV }, 1100));
+        const fr = motion ? frames("", `(() => { const e = document.querySelector(${J(FAV)}), f = e.querySelector(".xfade > :nth-child(3)");
+          return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, +new DOMMatrix(getComputedStyle(f).transform).m42.toFixed(2), +(+getComputedStyle(f).opacity).toFixed(2)]; })()`, 1100) : null;
+        if (motion) { await sleep(560); await shot("ws-fav-steam-roll"); }
+        const f = motion ? await fr : null, s1 = motion ? null : await smp;
+        const t = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, text: t.querySelector(".xfade > :not([data-off])")?.textContent,
+          disabled: t.disabled, pressed: t.getAttribute("aria-pressed"), title: t.title };`);
+        if (t.state !== "signed-out" || t.text !== "Favourite on Steam" || t.disabled || t.pressed !== null || !/Steam app/.test(t.title))
+          v.push(`signed out: ${J(t)} (want "Favourite on Steam", enabled, no pressed state, the reason as its tooltip)`);
+        if (motion) {
+          const ys = f.filter((x) => x).map((x) => x[4]), ops = f.filter((x) => x).map((x) => x[5]);
+          console.log(`        "Favourite on Steam" y ${J(ys.filter((y, i, a) => i === 0 || y !== a[i - 1]).slice(0, 10))}; opacity ${J(ops.filter((o, i, a) => i === 0 || o !== a[i - 1]).slice(0, 10))}`);
+          if (!ys.length || Math.abs(ys[0]) < 1) v.push(`"Favourite on Steam" was in place before the state landed (y ${J(ys[0])}) — proved nothing`);
+          else if (between(ys, 0.5) < 2) v.push("\"Favourite on Steam\" didn't roll in (no in-between frames)");
+          if (f.some((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75))) v.push(`the tile moved or resized as its words swapped: ${J(box0)}`);
+        } else {
+          console.log(`        motion off: "Favourite on Steam" ${MO.brief(s1.face)}; "Favourite" ${MO.brief(s1.old)}`);
+          v.push(...MO.judge("motion off: \"Favourite on Steam\"", s1.face, { appear: true }), ...MO.judge("motion off: \"Favourite\"", s1.old, { leave: true }),
+            ...MO.judge("motion off: the tile", s1.tile));
+        }
+        v.push(...await steamOpenClick(FAV, {}, "/workshop/favorite"));
+        const t2 = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, pop: !!t.querySelector(".ico-pop") };`);
+        if (t2.state !== "signed-out" || t2.pop) v.push(`after the click: ${J(t2)} (want unchanged, no pop)`);
+        if (motion) {
+          await shot("ws-fav-steam");
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await W({ favDelay: 0 }); await openSide(0);
+          await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "signed-out"`), 3000); await scrollSideTo(FAV); await sleep(400);
+          const lk = await looks(FAV), ico = await looks(`${FAV} .side-tile-ico`);
+          if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the tile has no fill (${lk.bg})`);
+          if (/0px 0px 10px/.test(ico.shadow)) v.push(`no-glow: the star's chip glows (${ico.shadow})`);
+          await shot("ws-fav-steam-live");
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+        }
+        await W({ favDelay: 0 });
+        return v;
+      });
+    }
+
+    // no usable sign-in: "Comment on Steam" takes the comment box's place, rising in with the comments (motion off: fading in
+    // place); a click opens the item's page in the Steam app and posts nothing; signed in the box shows and no button. Shots
+    // steam-ws-comment-steam.png, steam-ws-comment-steam-live.png
+    for (const motion of [true, false]) {
+      await cell(`ws:commentSteam${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        await W({ comments: COMMENTS.slice(0, 3), signedIn: false });
+        win.setContentSize(1400, 560); await sleep(300); // the section below the fold: it reads (and its button appears) on the scroll
+        await openSide(0); await sleep(500);
+        const SEC = `${SIDE} [data-ws-comments]`, BTN = `${SEC} [data-ws-steam-comment]`;
+        if (await js(`!!document.querySelector(${J(BTN)})`)) { win.setContentSize(1400, 900); return ["the button was there before the comments were read — proved nothing"]; }
+        const scroll = `const e = document.querySelector(${J(SEC)}), sc = e.closest(".side-scroll"); sc.scrollTop += e.getBoundingClientRect().top - sc.getBoundingClientRect().top - 40;`;
+        const smp = motion ? null : js(MO.SAMPLE({ btn: BTN }, 700));
+        const fr = frames(scroll, `(() => { const e = document.querySelector(${J(BTN)}); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m42]; })()`, 700);
+        if (motion) { await sleep(120); await shot("ws-comment-steam-in"); }
+        const f = await fr, s1 = motion ? null : await smp;
+        await sleep(300);
+        const r = await page(`const b = document.querySelector(${J(BTN)}); return b && { text: b.textContent.trim(), box: !!document.querySelector("${SEC} textarea"),
+          icon: !!b.querySelector("svg.lucide-external-link"), title: b.title };`);
+        if (!r || r.text !== "Comment on Steam" || r.box || !r.icon || !/Steam app/.test(r.title)) v.push(`signed out: ${J(r)} (want "Comment on Steam" with its icon and reason, no box)`);
+        if (motion) {
+          const ops = f.filter((x) => x).map((x) => x[0]), ys = f.filter((x) => x).map((x) => x[1]);
+          console.log(`        "Comment on Steam": opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} y ${J(ys.slice(0, 8).map((o) => +o.toFixed(1)))}`);
+          if (between(ops, 0.05) < 2 || between(ys, 0.3) < 2) v.push("\"Comment on Steam\" popped in (no in-between frames)");
+        } else {
+          console.log(`        motion off: "Comment on Steam" ${MO.brief(s1.btn)}`);
+          v.push(...MO.judge("motion off: \"Comment on Steam\"", s1.btn, { appear: true }));
+        }
+        v.push(...await steamOpenClick(BTN, {}, "/workshop/comment"));
+        win.setContentSize(1400, 900); await sleep(300);
+        if (motion) {
+          await shot("ws-comment-steam");
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await W({ comments: COMMENTS.slice(0, 3), signedIn: false }); await openSide(0); await scrollSideTo(SEC);
+          await waitFor(() => js(`!!document.querySelector(${J(BTN)})`), 3000); await sleep(500);
+          const lk = await looks(SEC);
+          if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the section has no fill (${lk.bg})`);
+          await shot("ws-comment-steam-live");
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+          // signed in: the box, no button
+          await browseWs(); await W({ comments: COMMENTS.slice(0, 3), signedIn: true }); await openSide(0); await scrollSideTo(SEC);
+          await waitFor(() => js(`!!document.querySelector("${SEC} textarea")`), 3000);
+          if (await js(`!!document.querySelector(${J(BTN)})`)) v.push("signed in: \"Comment on Steam\" shows beside the box");
+        }
         return v;
       });
     }
 
     // the comments: read only once their section comes into view; 10 newest first, "Show older" pages, the creator's comment
-    // marked, the text plain (markup shows as typed, nothing injected); they rise in (motion off: fade); signed out "Sign in to
-    // comment"; a failed read a quiet line with Retry
+    // marked, the text plain (markup shows as typed, nothing injected); they rise in (motion off: fade); signed out no box
+    // (ws:commentSteam); a failed read a quiet line with Retry
     for (const motion of [true, false]) {
       await cell(`ws:comments${motion ? "" : "Off"}`, async () => {
         const v = [];
@@ -2810,13 +2931,13 @@ app.whenReady().then(async () => {
         const r = await page(`const s = document.querySelector(${J(SEC)}); const cs = [...s.querySelectorAll(".ws-c")];
           return { n: cs.length, count: s.querySelector("[data-ws-count]")?.textContent, first: cs[0]?.querySelector("[data-ws-text]")?.textContent,
             firstEls: cs[0]?.querySelector("[data-ws-text]")?.children.length, img: !!s.querySelector(".ws-c-text img, .ws-c-text b"), pwned: !!window.__pwned,
-            op: cs.findIndex((c) => c.querySelector(".ws-c-op")), signin: !!s.querySelector("[data-ws-signin]"), box: !!s.querySelector("textarea"),
+            op: cs.findIndex((c) => c.querySelector(".ws-c-op")), signin: !!s.querySelector("[data-ws-steam-comment]"), box: !!s.querySelector("textarea"),
             more: !!s.querySelector("[data-ws-more]"), avatars: s.querySelectorAll('[data-ws-avatar="loaded"]').length };`);
         console.log(`        ${J(r)}`);
         if (r.n !== 10 || r.count !== "23") v.push(`shown ${r.n} of ${r.count} (want 10 of 23)`);
         if (r.first !== "first line\n<b>not bold</b> <img src=x onerror=window.__pwned=1>" || r.firstEls !== 0 || r.img || r.pwned) v.push(`the text isn't plain: ${J(r)}`);
         if (r.op !== 3) v.push(`the creator's comment isn't marked (index ${r.op}, want 3)`);
-        if (!r.signin || r.box) v.push(`signed out: sign-in line ${r.signin}, box ${r.box}`);
+        if (!r.signin || r.box) v.push(`signed out: "Comment on Steam" ${r.signin}, box ${r.box}`);
         if (!r.more) v.push("no Show older");
         if (motion) {
           const ops = f.filter((x) => x).map((x) => x[0]), ys = f.filter((x) => x).map((x) => x[1]);

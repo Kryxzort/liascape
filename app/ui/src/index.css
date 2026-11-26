@@ -1569,7 +1569,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel input[type=range]::-webkit-slider-thumb { transform: none !important; }
 :root.no-motion .side-panel .side-sub-spin { animation: side-sub-spin 1s linear infinite !important; }
 /* the comments and the avatars fade in in place; the creator row doesn't lift; the creator's pill fades in and out */
-:root.no-motion .side-panel .ws-c { animation: nm-in var(--fade-dur) linear both !important; }
+:root.no-motion .side-panel :is(.ws-c, .ws-steam-comment) { animation: nm-in var(--fade-dur) linear both !important; }
 :root.no-motion .side-panel :is(.ws-avatar > img, .ws-creator-name) { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .ws-creator { transform: none !important; }
 :root.no-motion .side-hero > [data-side-row="size"]:last-child { animation: nm-in var(--fade-dur) linear !important; }
@@ -1915,7 +1915,8 @@ button.side-pill.copy { overflow: hidden; }
 .side-tile:hover .side-tile-ico { transform: translateY(-1px) scale(1.06); }
 /* ---- the Browse sidebar's Workshop community pieces (components/WorkshopSocial.tsx) ----
    The favourite: a toggle tile whose words roll (.xfade, left-aligned like every tile's label) and whose star fills and pops
-   once on a user change (.ico-pop); signed out a quiet, inert tile. Guard: probe-steam ws:favorite */
+   once on a user change (.ico-pop); signed out "Favourite on Steam", the item's page in the Steam app. Guard: probe-steam
+   ws:favorite, ws:favoriteSteam */
 .fav-tile .xfade > * { justify-content: flex-start; }
 /* the words roll inside their own slot, never over the tile's edge */
 .fav-tile > .xfade { overflow: hidden; }
@@ -1982,7 +1983,9 @@ button.side-pill.copy { overflow: hidden; }
 .ws-c-text { margin: 2px 0 0; font-size: 12.5px; line-height: 1.4; color: var(--subtext); white-space: pre-line; overflow-wrap: anywhere; user-select: text; }
 .ws-note { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; font-size: 12px; color: var(--subtext); }
 .ws-note.warn { color: var(--warn); margin: 0; }
-.ws-signin { margin: 0 0 8px; font-size: 12px; color: var(--subtext); }
+/* signed out, the comment box's place: the item's page in the Steam app, rising in with the comments (motion off: the
+   side panel's fade, below). Guard: probe-steam ws:comments, ws:commentsOff */
+.ws-steam-comment { width: 100%; justify-content: center; margin: 2px 0 8px; animation: ws-c-in .26s cubic-bezier(.2, .9, .3, 1) both; }
 .ws-more { width: 100%; justify-content: center; margin: 4px 0 8px; }
 .ws-post { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
 .ws-post textarea { resize: vertical; min-height: 52px; max-height: 200px; padding: 7px 9px; border-radius: 9px; font: inherit; font-size: 12.5px;

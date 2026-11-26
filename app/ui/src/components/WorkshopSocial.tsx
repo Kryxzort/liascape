@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
-import { Images, Layers, Library as LibraryIcon, LoaderCircle, MessageSquare, PanelRightOpen, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
+import { ExternalLink, Images, Layers, Library as LibraryIcon, LoaderCircle, MessageSquare, PanelRightOpen, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
 import { api, steamPageUrl, thumb, workshopStub, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator } from "../api/client";
 import { presetsOn, useStore } from "../store";
 import { StatPills } from "./sidePills";
@@ -8,8 +8,9 @@ import { glideFlip, snapFlip, type FlipSnap } from "./flipGlide";
 import { revealCard } from "../hooks/gridKeys";
 
 // The item sidebars' Workshop community pieces (BrowseSide.tsx, and LibrarySide.tsx for a Workshop item): the creator, the
-// favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in and say
-// "Sign in to …" without it. A failed read is a quiet line in place, never a crash or a status-bar error. Steam limits its
+// favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in: without it
+// they become "Favourite on Steam" / "Comment on Steam", which open the item's page in the Steam app (store openOnSteam, the
+// Steam page as the last resort: docs/decisions.md § "Offer two Workshop download modes, the Steam page the last resort"). A failed read is a quiet line in place, never a crash or a status-bar error. Steam limits its
 // community site per IP (every call is spaced and stops during its cooldown — Helpers/SteamGate.cs), so the sidebar asks
 // only for what the user looks at: the creator and the favourite once the sidebar has stayed on an item for SETTLE_MS (a
 // run of arrow keys asks for nothing), the comments once their section scrolls into view, and each answer is kept for the
@@ -169,8 +170,9 @@ export function BaseRow({ presetId, local, onShowInLibrary, onShowInBrowse }: {
 
 // The favourite: a toggle tile (the sidebar's tiles' material) — a star that fills when it's in the account's Steam favourites,
 // the words "Favourite" / "Favourited" sharing one cell (index.css .xfade) so the tile keeps its size; the new state's star
-// pops once on a user change, never on mount (index.css .ico-pop). Signed out it says so and does nothing.
-// Guard: probe-steam ws:favorite, ws:favoriteOff
+// pops once on a user change, never on mount (index.css .ico-pop). Without a usable sign-in it becomes "Favourite on Steam"
+// (the words roll over in the same cell as the state lands), which opens the item's page in the Steam app.
+// Guard: probe-steam ws:favorite, ws:favoriteOff, ws:favoriteSteam, ws:favoriteSteamOff
 export function FavoriteTile({ workshopId }: { workshopId: string }) {
   const settled = useSettled(workshopId);
   const [st, setSt] = useState<{ signedIn: boolean; favorited: boolean | null } | null>(() =>
@@ -187,7 +189,9 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
   }, [settled, workshopId]);
   const on = st?.favorited === true;
   const signedOut = st?.signedIn === false;
+  const openOnSteam = useStore((s) => s.openOnSteam);
   const toggle = async () => {
+    if (signedOut) { void openOnSteam(workshopId); return; }
     if (!st?.signedIn || busy) return;
     const want = !on;
     setBusy(true); setErr(null);
@@ -199,16 +203,16 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   };
-  const label = signedOut ? "Sign in to favourite" : on ? "Favourited" : "Favourite";
+  const label = signedOut ? "Favourite on Steam" : on ? "Favourited" : "Favourite";
   return (
     <button type="button" className={`side-tile fav-tile${on ? " on" : ""}`} data-ws-fav={st == null ? "loading" : signedOut ? "signed-out" : on ? "on" : "off"}
-      aria-pressed={st?.signedIn ? on : undefined} aria-busy={st == null || busy || undefined} disabled={signedOut}
-      title={signedOut ? "Sign in under Settings → Getting Workshop wallpapers" : err ?? undefined} onClick={toggle}>
+      aria-pressed={st?.signedIn ? on : undefined} aria-busy={st == null || busy || undefined}
+      title={signedOut ? "Liascape isn't signed in to Steam: favourite it on its page in the Steam app" : err ?? undefined} onClick={toggle}>
       <span className="side-tile-ico">
         <Star key={pops} size={15} fill={on ? "currentColor" : "none"} className={pops ? "ico-pop" : undefined} />
       </span>
       <span className="xfade">
-        {["Favourite", "Favourited", "Sign in to favourite"].map((t) => (
+        {["Favourite", "Favourited", "Favourite on Steam"].map((t) => (
           <span key={t} data-off={t === label ? undefined : ""} aria-hidden={t !== label}>{t}</span>
         ))}
       </span>
@@ -269,7 +273,8 @@ const rel = (t: number) => {
 
 // The comment thread: newest first, PAGE at a time ("Show older"), each comment's avatar, name (the creator's marked), time and
 // text — plain text only, as React text (the backend already took it out of Steam's HTML; nothing here is ever parsed as
-// markup). Read the first time the section comes into view; a box to post one when signed in.
+// markup). Read the first time the section comes into view; a box to post one when signed in, else "Comment on Steam" in its
+// place (the item's page in the Steam app), rising in with the comments (motion off: fading).
 // Guard: probe-steam ws:comments, ws:commentsOff, ws:commentPost
 export function CommentsSection({ workshopId, authorId }: { workshopId: string; authorId: string | null | undefined }) {
   const ref = useRef<HTMLElement>(null);
@@ -284,6 +289,7 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
   const [posting, setPosting] = useState(false);
   const [postErr, setPostErr] = useState<string | null>(null);
   const [fresh, setFresh] = useState<string | null>(null); // the comment just posted: it slides in on top
+  const openOnSteam = useStore((s) => s.openOnSteam);
   const load = async (start: number) => {
     setState("loading"); setErr(null);
     try {
@@ -322,7 +328,12 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
     <section ref={ref} className="side-sec ws-comments" data-ws-comments={total == null ? state : "loaded"}>
       <h3 className="side-sec-title"><span className="side-sec-ico"><MessageSquare size={15} /></span>Comments
         {total != null && <span className="side-sec-extra ws-count" data-ws-count={total}>{total}</span>}</h3>
-      {signedIn === false && <p className="ws-signin" data-ws-signin>Sign in to comment — Settings → Getting Workshop wallpapers</p>}
+      {signedIn === false && (
+        <button type="button" className="btn ghost ico ws-steam-comment" data-ws-steam-comment onClick={() => void openOnSteam(workshopId)}
+          title="Liascape isn't signed in to Steam: comment on its page in the Steam app">
+          <ExternalLink size={14} /> Comment on Steam
+        </button>
+      )}
       {signedIn && (
         <form className="ws-post" onSubmit={post} data-ws-post>
           <textarea value={text} maxLength={1000} rows={2} placeholder="Add a comment…" aria-label="Your comment" disabled={posting}
