@@ -219,6 +219,8 @@ const PAGE = `window.__mx = {
   async toLibrary() { if (document.querySelector(".app")?.dataset.page !== "library") this.tab("Library");
     for (let i = 0; i < 40 && !this.cards().length; i++) await this.sleep(50); await this.sleep(150); },
   card(t) { return this.cards().find((c) => c.querySelector(".lib-title")?.dataset.title === t); },
+  // Settings' card preview (components/CardPreview.tsx): the real LibraryCard outside the Library's grid, so card() never finds it
+  previewCard(t) { return [...document.querySelectorAll("[data-card-preview] .card.lib")].find((c) => this.shown(c) && c.querySelector(".lib-title")?.dataset.title === t); },
   browseCard(t) { return [...document.querySelectorAll(".br-scroll .card.lib")].find((c) => this.shown(c) && c.querySelector(".lib-title")?.dataset.title === t); },
   barItems() { return [...document.querySelectorAll(".pl-item")].filter((e) => this.shown(e)); },
   playlistBar(t) { return this.barItems().find((e) => e.dataset.title === t); },
@@ -2695,8 +2697,8 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
 // of it with the gif on every frame until the video has one (never neither); the window inactive pauses the video on the
 // frame it shows (its time and the picture hold, and the name strip over it stays as it was) and active again it goes on from
 // that time, not from 0; off: the gif is back on the next frame. Per-frame samples of what the card shows.
-const GV_SAMPLE = (ms) => `(() => new Promise((res) => { const m = window.__mx, out = [], t0 = performance.now();
-  const step = () => { const w = m.card("k1")?.querySelector(".thumb-wrap"), v = w?.querySelector("video.thumb.anim[data-gif]");
+const GV_SAMPLE = (ms, find = "card") => `(() => new Promise((res) => { const m = window.__mx, out = [], t0 = performance.now();
+  const step = () => { const w = m.${find}("k1")?.querySelector(".thumb-wrap"), v = w?.querySelector("video.thumb.anim[data-gif]");
     const g = w && [...w.querySelectorAll("img.thumb.anim")].find((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
     // a frame before the tab's page shows has no k1 card to judge: left out
     if (w) out.push({ t: +(performance.now() - t0).toFixed(1), gif: !!g, vid: !!v && v.readyState >= 2, ct: v ? +v.currentTime.toFixed(3) : null, p: v ? v.paused : null });
@@ -2723,17 +2725,17 @@ C["appear:gifVideo"] = { states: ["single"], noSwitch: true,
     c.offStrip.push(await k1Pixel(true));
     await js(`delete document.hasFocus; window.dispatchEvent(new Event("focus")); true`);
     await sleep(300);
-    // live, where it changes: its row, beside Settings' card preview (the real cards, components/CardPreview.tsx; the Library
-    // page is hidden meanwhile, so m.card finds the preview's k1): every frame from the click on, then the Library's k1 card
-    // from the frame the tab shows
+    // live, where it changes: its row, beside Settings' card preview (the real cards, components/CardPreview.tsx, found by
+    // m.previewCard: m.card reads the Library's grid only): every frame from the click on, then the Library's k1 card from
+    // the frame the tab shows
     const L = JSON.stringify("Play GIF previews as videos");
     const toggle = (ms) => ui(`m.tab("Settings"); for (let i = 0; i < 50 && !m.row(${L}); i++) await m.sleep(100);
       m.row(${L}).scrollIntoView({ block: "center" });
-      const gifUp = () => [...(m.card("k1")?.querySelectorAll("img.thumb.anim") ?? [])].some((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
-      const vidUp = () => (m.card("k1")?.querySelector("video.thumb.anim[data-gif]")?.readyState ?? 0) >= 2;
+      const gifUp = () => [...(m.previewCard("k1")?.querySelectorAll("img.thumb.anim") ?? [])].some((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
+      const vidUp = () => (m.previewCard("k1")?.querySelector("video.thumb.anim[data-gif]")?.readyState ?? 0) >= 2;
       for (let i = 0; i < 80 && !gifUp() && !vidUp(); i++) await m.sleep(100);
       await m.sleep(300);
-      const p = ${GV_SAMPLE(ms)}; await m.sleep(150); m.click(m.input(${L}), ${L}); return await p;`);
+      const p = ${GV_SAMPLE(ms, "previewCard")}; await m.sleep(150); m.click(m.input(${L}), ${L}); return await p;`);
     const toLibrary = (ms) => ui(`m.tab("Library"); return await ${GV_SAMPLE(ms)};`);
     c.pvOn = await toggle(6000);
     c.rowSaved = await waitFor(async () => (await getSettings()).gifPreviewsAsVideo === true, 4000, 100);
