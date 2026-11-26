@@ -189,8 +189,8 @@ public static class ScraperSelfTest
     }
 
     // ChildProcess, which runs the ffmpeg of a GIF still (WallpaperEngineScraper) and of an import: what a tool printed and
-    // its exit code; one past its limit killed with its own children and reaped, quickly; one that isn't installed; a
-    // cancelled caller.
+    // its exit code; one past its limit killed with its own children and reaped, quickly; one that exits leaving a child
+    // that holds its pipe open, given up on at its limit; one that isn't installed; a cancelled caller.
     private static async Task ChildProcesses(string tmp, JsonObject got)
     {
         var answered = await ChildProcess.RunAsync("sh", ["-c", "echo out; echo err >&2; exit 3"], TimeSpan.FromSeconds(10));
@@ -214,6 +214,21 @@ public static class ScraperSelfTest
             ["result"] = Node(late),
             ["killed within 5 s"] = took < 5000,
             ["its child"] = pid == null ? "never started" : state is "gone" or "Z" ? "dead" : $"still running ({state})",
+        };
+
+        // a tool that exits at once but leaves a child holding its output pipe open: the pipe never ends while the child
+        // lives, so the reads are bounded by the limit too
+        string heldFile = Path.Combine(tmp, "pipe-holder.pid");
+        clock.Restart();
+        var held = await ChildProcess.RunAsync("sh", ["-c", $"sleep 30 & echo $! > '{heldFile}'; exit 0"], TimeSpan.FromMilliseconds(500));
+        took = clock.ElapsedMilliseconds;
+        // no longer the tool's child once the tool exited (nothing finds it as such), so the test ends it itself
+        if (File.Exists(heldFile) && int.TryParse(File.ReadAllText(heldFile).Trim(), out int holder))
+            try { System.Diagnostics.Process.GetProcessById(holder).Kill(); } catch (Exception e) when (e is ArgumentException or InvalidOperationException) { }
+        got["child process: exits, its child holding the pipe"] = new JsonObject
+        {
+            ["result"] = Node(held),
+            ["returned within 5 s"] = took < 5000,
         };
 
         got["child process: not installed"] = Node(await ChildProcess.RunAsync(Path.Combine(tmp, "no-such-tool"), [], TimeSpan.FromSeconds(10)));

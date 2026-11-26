@@ -1,4 +1,11 @@
 {
+  "child process: exits, its child holding the pipe": {
+    "result": {
+      "err": "",
+      "out": ""
+    },
+    "returned within 5 s": true
+  },
   "child process: its caller cancels": "cancelled",
   "child process: not installed": {
     "err": "",
