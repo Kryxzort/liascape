@@ -186,7 +186,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `.claude/` already ships settings, skills and agents to a clone). In order:
        - A git merge driver for `docs/TODO.md` and `docs/decisions.md` (`.gitattributes`): keeps both sides' new items /
          entries, takes the target's numbering, drops what the branch deleted; a test with recorded conflicts.
-       - `scripts/land-agent.sh <worktree>`: rebase onto lp-player, builds + lint + `check-rules`, the local CodeRabbit
+       - A new script, `land-agent.sh <worktree>` in `scripts/`: rebase onto lp-player, builds + lint + `check-rules`, the local CodeRabbit
          review (findings saved for the lander to judge), `land.sh`, then the worktree and branch removed; refuses to land
          while the agent's report names an undone or follow-up part that `docs/TODO.md` doesn't carry.
        - Claude Code hooks in `.claude/settings.json`: `check-rules.sh` after an edit under `docs/` or `.claude/`, the
