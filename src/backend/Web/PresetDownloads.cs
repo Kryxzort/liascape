@@ -206,6 +206,7 @@ public static class PresetDownloads
         string page = PageUrl(baseId);
         var detail = await ServerHost.Workshop.GetDetailAsync(new WallpaperResult
         { Title = title ?? baseId, ThumbnailUrl = "", PageUrl = page, WorkshopId = baseId, IsScene = true }).ConfigureAwait(false);
+        string? delivered = null; // Steam's folder, when the route already subscribed it: imported as it is, never acquired again
         if (route == WorkshopDownloader.Route.SteamApp)
         {
             // the preset's own route: the user's switch for that to-do batch
@@ -214,22 +215,26 @@ public static class PresetDownloads
                 EventBus.Broadcast("download-progress", new { id = page, value = Math.Max(0, t.Item1), status = t.Item2 }));
             var r = await SteamClientUgc.SubscribeAsync(baseId, s, progress, CancellationToken.None).ConfigureAwait(false);
             if (r.Folder == null) throw new InvalidOperationException(SteamClientUgc.FailureMessage(r.Fallback));
+            WorkshopUnsubQueue.Unblock(baseId);
+            delivered = WorkshopDownloader.MediaOrThrow(baseId, r.Folder);
         }
         else if (route == WorkshopDownloader.Route.Page)
         {
             Console.WriteLine($"workshop: {baseId}: a preset's base — waiting for Steam to download it (its required items), no page");
             var progress = new Progress<(double, string)>(t =>
                 EventBus.Broadcast("download-progress", new { id = page, value = Math.Max(0, t.Item1), status = t.Item2 }));
-            try { await WorkshopDownloader.WaitForSteamDeliveryAsync(baseId, s, progress, WaitingForBase, CancellationToken.None).ConfigureAwait(false); }
+            try { delivered = await WorkshopDownloader.WaitForSteamDeliveryAsync(baseId, s, progress, WaitingForBase, CancellationToken.None).ConfigureAwait(false); }
             catch (TimeoutException)
             {
                 throw new InvalidOperationException("Steam didn't download its base scene. Accept the required items when Steam asks, or download the base scene itself.");
             }
+            WorkshopUnsubQueue.Unblock(baseId); // subscribed on Steam's prompt: wanted, off pending + blocked
+            delivered = WorkshopDownloader.MediaOrThrow(baseId, delivered);
         }
         else Console.WriteLine($"workshop: {baseId}: a preset's base — {(oneOff ? "downloading it without subscribing" : "downloading it")} like the preset");
-        // through the page: the folder is there now (in one of Steam's Workshop folders), so this imports it without opening
-        // anything
-        await AppOps.DownloadAsync(detail, "", page, CancellationToken.None, null, oneOff).ConfigureAwait(false);
+        // Direct: acquired like the preset was; the other routes: Steam's folder as it came, with no second subscribe through the
+        // client or the sign-in. Guard: test-steam-signin.sh § 2 "preset through its page (Use the Steam app, no client)"
+        await AppOps.DownloadAsync(detail, "", page, CancellationToken.None, null, oneOff, delivered: delivered).ConfigureAwait(false);
     }
 
     static void Done(LibraryItem preset)

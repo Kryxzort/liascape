@@ -184,7 +184,7 @@ public static class WorkshopDownloader
     }
 
     // Steam's folder for it, holding a video or a scene; else why it's no use here
-    private static string MediaOrThrow(string workshopId, string folder)
+    internal static string MediaOrThrow(string workshopId, string folder)
     {
         if (TryGetMediaPath(folder) != null) return folder;
         Console.WriteLine($"workshop: {workshopId}: Steam installed it at {folder} but there's no video or scene in it");
@@ -694,14 +694,18 @@ public static class WorkshopDownloader
 
     /// Subscribe again to items an Undo brought back after Steam had already unsubscribed them, by the fallback order
     /// (AcquireViaSubscribeAsync): the Steam client (steamapp), the sign-in when usable, else each item's page in the Steam app
-    /// through the Steam to-do. Null = all done; else what the user should know (the status bar shows it).
-    /// Guard: steam-selftest "undo's re-subscribe", test-steam-signin.sh § 3 g.
+    /// through the Steam to-do. A rate limit sends nothing more and opens no page. Null = all done; else what the user should
+    /// know (the status bar shows it).
+    /// Guard: steam-selftest "undo's re-subscribe", "undo's re-subscribe, rate-limited", test-steam-signin.sh § 3 g.
     public static async Task<string?> ResubscribeAsync(System.Collections.Generic.IReadOnlyList<string> ids, AppSettings settings, CancellationToken ct,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? titles = null)
     {
         if (ids.Count == 0) return null;
         bool signIn = SteamAuthService.HasUsableSignIn(settings);
         var toPage = new System.Collections.Generic.List<string>();
+        // Steam limiting this connection is never a reason for the page (the order's rule): what the sign-in would have sent
+        // stays unsent, and the words say so
+        var limited = new System.Collections.Generic.List<string>();
         foreach (var id in ids)
         {
             if (settings.WorkshopDownloadMode == "steamapp")
@@ -712,6 +716,7 @@ public static class WorkshopDownloader
                 if (r.Folder != null) { Console.WriteLine($"workshop: {id}: subscribed again through the Steam app (undo)"); continue; }
                 Console.WriteLine($"workshop: {id}: the Steam app couldn't subscribe it again (undo) — {r.Fallback}");
             }
+            if (signIn && limited.Count > 0) { limited.Add(id); continue; }
             if (signIn)
                 try
                 {
@@ -720,18 +725,24 @@ public static class WorkshopDownloader
                     continue;
                 }
                 catch (OperationCanceledException) { throw; }
+                catch (SteamRateLimitException) { limited.Add(id); continue; }
                 catch (Exception e) { Console.WriteLine($"workshop: {id}: re-subscribing with the sign-in failed (undo) — {e.Message}"); }
             toPage.Add(id);
         }
-        if (toPage.Count == 0) return null;
+        if (limited.Count > 0)
+            Console.WriteLine($"workshop: {string.Join(", ", limited)}: not subscribed again (undo) — Steam is limiting requests from this connection");
+        string? limitedWords = limited.Count == 0 ? null
+            : $"Undone, but Steam is limiting requests from this connection, so {(limited.Count == ids.Count ? (ids.Count == 1 ? "it isn't" : "they aren't") : limited.Count == 1 ? "1 of them isn't" : $"{limited.Count} of them aren't")} subscribed again. Subscribe later from the sidebar.";
+        if (toPage.Count == 0) return limitedWords;
         // the Steam to-do: one page at a time, Next moves on (Steam shows only one of several pages opened at once)
         foreach (var id in toPage)
             SteamTodo.EnqueueSubscribe(id, titles != null && titles.TryGetValue(id, out var t) ? t : null, hasDownload: false, out _);
         Console.WriteLine($"workshop: {string.Join(", ", toPage)}: subscribing again through the Steam page (undo)");
         // the page route can't know whether the user clicked Unsubscribe there — the words cover both
-        return toPage.Count == 1
+        string pageWords = toPage.Count == 1
             ? "Undone. To keep it subscribed, click Subscribe on the page Steam opened (if it says Subscribed, you're set), then Next."
             : $"Undone. To keep them subscribed, click Subscribe on each of the {toPage.Count} pages the Steam to-do opens (any that say Subscribed are set).";
+        return limitedWords == null ? pageWords : $"{limitedWords} {pageWords}";
     }
 
     /// The fallback order's last step for an unsubscribe: the ids Steam has in its own Workshop folders go into the Steam to-do (Web/SteamTodo.cs) — each
@@ -740,14 +751,20 @@ public static class WorkshopDownloader
     /// Workshop item is either a `local/<id>` link into Steam's folder (a subscription — its folder exists) or an owned
     /// `workshop/<id>` copy (a "Download without subscribing", never a subscription; docs/decisions.md
     /// § "Open an unsubscribe page only for items in a Steam Workshop folder"). The rest are blocked at once, no page. A queued id stays `pending` until the user's Next marks it blocked
-    /// (AutoImport keeps the folder out until Steam removes it); Skip / Stop = kept subscribed (`Unblock`).
-    private static DrainResult UnsubscribeInSteamApp(AppSettings settings, System.Collections.Generic.List<string> ids, string why)
+    /// (AutoImport keeps the folder out until Steam removes it); Skip / Stop = kept subscribed (`Unblock`). Only ids still
+    /// pending: they are claimed while they go in (the claim and Undo's Withdraw share a lock), so one an Undo took back since
+    /// the drain's snapshot gets no entry and isn't blocked. Guard: steam-selftest "unsub, an id withdrawn since the drain's snapshot".
+    internal static DrainResult UnsubscribeInSteamApp(AppSettings settings, System.Collections.Generic.List<string> ids, string why)
     {
+        ids = WorkshopUnsubQueue.Claim(ids, dueOnly: false);
         var roots = SteamWorkshopRoots(settings.WorkshopFolder);
         var inSteam = ids.FindAll(id => WorkshopFolderExists(roots, id));
         foreach (var id in ids) if (!inSteam.Contains(id)) WorkshopUnsubQueue.MarkBlocked(id); // not a subscription: nothing to click
         if (inSteam.Count == 0) return new DrainResult();
-        var (queued, openFailed) = SteamTodo.EnqueueUnsubscribes(inSteam);
+        int queued; bool openFailed;
+        // the entry exists before the claim ends: an Undo from then on drops it (AppOps.RestoreUndo → SteamTodo.DropUnsubscribe)
+        try { (queued, openFailed) = SteamTodo.EnqueueUnsubscribes(inSteam); }
+        finally { WorkshopUnsubQueue.Release(inSteam); }
         // the status bar's words: what to click (`why` goes to the log)
         string message = openFailed
             ? "The Steam app couldn't be opened. Start Steam and unsubscribe there, or sign in under Settings → Getting Workshop wallpapers."

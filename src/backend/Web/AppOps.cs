@@ -221,8 +221,10 @@ public static class AppOps
     // workshop/<id> copy, and a queued unsubscribe of it stays queued (the copy is the library's own, not a subscription's); a
     // subscription the route made only to fetch it is let go once the copy is made (or the import failed).
     // `library`: a web source's library folder (WebSource.Library), null for the rest
+    // `delivered`: Steam's folder for it, already subscribed and on disk (a preset's base that came with it): imported as it is,
+    // never acquired again (PresetDownloads.FetchAsync)
     public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string thumbnailUrl, string sourceId, CancellationToken ct, string? animatedUrl = null,
-        bool oneOff = false, string? library = null)
+        bool oneOff = false, string? library = null, string? delivered = null)
     {
         var s = SettingsService.Load();
         var progress = new Progress<double>(v =>
@@ -239,7 +241,8 @@ public static class AppOps
                 var ap = new Progress<(double, string)>(t =>
                     EventBus.Broadcast("download-progress", new { id = sourceId, value = Math.Max(0, t.Item1), status = t.Item2 }));
                 string dir;
-                if (oneOff)
+                if (delivered != null) dir = delivered;
+                else if (oneOff)
                 {
                     var got = await WorkshopDownloader.AcquireOneOffAsync(detail.WorkshopId, s, ap, ct);
                     dir = got.Dir;

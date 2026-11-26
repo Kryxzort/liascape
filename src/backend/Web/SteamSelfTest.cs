@@ -33,9 +33,12 @@ public static class SteamSelfTest
     {
         string home = Environment.GetEnvironmentVariable("HOME") ?? "";
         string? xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        if (!home.StartsWith("/tmp/", StringComparison.Ordinal) || (xdg != null && !xdg.StartsWith("/tmp/", StringComparison.Ordinal)))
+        // the cache too: a check trips SteamGate's cooldown, which lives there (steam-cooldown.json)
+        string? xdgCache = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        if (!home.StartsWith("/tmp/", StringComparison.Ordinal) || (xdg != null && !xdg.StartsWith("/tmp/", StringComparison.Ordinal))
+            || (xdgCache != null && !xdgCache.StartsWith("/tmp/", StringComparison.Ordinal)))
         {
-            Console.Error.WriteLine("steam-selftest: refusing — HOME (and XDG_CONFIG_HOME) must be a private dir under /tmp");
+            Console.Error.WriteLine("steam-selftest: refusing — HOME (and XDG_CONFIG_HOME, XDG_CACHE_HOME) must be a private dir under /tmp");
             return 2;
         }
         // the secret store may talk to a Secret Service: only ever a private one (dbus-run-session's bus under /tmp), never the user's
@@ -822,10 +825,48 @@ public static class SteamSelfTest
         SteamTodo.Stop();
         Todo();
 
+        // an id an Undo took back after the drain's snapshot (no longer pending) gets no page and no to-do entry
+        SteamOps.SignOut();
+        SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
+        Directory.CreateDirectory(Path.Combine(steamWs, "800000019"));
+        int n19 = (await Urls(0)).Count;
+        r = WorkshopDownloader.UnsubscribeInSteamApp(SettingsService.Load(), ["800000019"], "selftest: withdrawn since the snapshot");
+        await Task.Delay(300);
+        Check(r.OpenedInSteam == 0 && r.Message == null && (await Urls(0)).Count == n19 && !SteamTodo.QueuedUnsubscribes().Contains("800000019") && !Blocked("800000019"),
+            $"unsub, an id withdrawn since the drain's snapshot: no page, no to-do entry, not blocked ({r.OpenedInSteam} opened, {r.Message})");
+        SteamTodo.Stop();
+        Todo();
+
         SteamOps.SignOut();
         await ResubscribeToPage(Urls);
         SteamOps.SignOut();
+        await ResubscribeRateLimited(Urls);
+        SteamOps.SignOut();
         SettingsService.Update(x => x.WorkshopDownloadMode = "subscribe");
+    }
+
+    // Undo's re-subscribe with a usable sign-in while Steam limits this connection (SteamGate's cooldown): a rate limit is never
+    // a reason for the page (the order's rule) — nothing more is sent, no page opens, and the words say why
+    private static async Task ResubscribeRateLimited(Func<int, Task<List<string>>> urls)
+    {
+        SettingsService.Update(x => { x.WorkshopDownloadMode = "subscribe"; x.SteamId = 76561190000000001; x.SteamSignInRejected = false; });
+        SecretStore.Set(SecretStore.LoginSecure, "76561190000000001||selftest-cookie-not-real");
+        SteamGate.Trip(TimeSpan.FromMinutes(5));
+        try
+        {
+            foreach (var ids in new[] { new[] { "800000018" }, new[] { "800000018", "800000020" } })
+            {
+                int n0 = (await urls(0)).Count;
+                var msg = await WorkshopDownloader.ResubscribeAsync(ids, SettingsService.Load(), CancellationToken.None);
+                await Task.Delay(300);
+                bool quiet = SteamTodo.QueuedSubscribes().Count == 0 && (await urls(0)).Count == n0;
+                Check(quiet && msg != null && msg.StartsWith("Undone, but Steam is limiting requests from this connection")
+                    && (ids.Length == 1 ? msg.Contains("it isn't subscribed again") : msg.Contains("they aren't subscribed again")),
+                    $"undo's re-subscribe, rate-limited, {ids.Length} item(s): no page, no to-do entry, the status says Steam is limiting requests ({msg})");
+                if (!quiet) SteamTodo.Stop();
+            }
+        }
+        finally { SteamGate.ResetForSelfTest(); SecretStore.Delete(SecretStore.LoginSecure); }
     }
 
     // A Workshop item in the library (+ its Steam folder), as auto-import would have it; a plain imported one beside it

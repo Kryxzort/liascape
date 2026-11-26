@@ -84,6 +84,12 @@ public static class SteamGate
         }
     }
 
+    // steam-selftest only (a private HOME): end a cooldown it tripped, so its later checks reach the fake answers again
+    internal static void ResetForSelfTest()
+    {
+        lock (_lock) { Load(); _until = DateTimeOffset.MinValue; _strikes = 0; Save(); }
+    }
+
     private static void Succeeded()
     {
         lock (_lock) { if (_strikes == 0) return; _strikes = 0; Save(); }

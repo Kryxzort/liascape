@@ -159,7 +159,9 @@ cat > "$T/cm.json" <<'EOF'
  "910000104": {"tags": ["Preset", "Scene"], "title": "Preset, subscribed through the to-do", "children": ["900000006"]},
  "900000006": {"tags": ["Scene"], "title": "Base scene E"},
  "910000105": {"tags": ["Preset", "Scene"], "title": "Preset, download & apply", "children": ["900000007"]},
- "900000007": {"tags": ["Scene"], "title": "Base scene F"}}
+ "900000007": {"tags": ["Scene"], "title": "Base scene F"},
+ "910000106": {"tags": ["Preset", "Scene"], "title": "Preset through its page, the Steam app's mode", "children": ["900000008"]},
+ "900000008": {"tags": ["Scene"], "title": "Base scene G"}}
 EOF
 # "Download without subscribing" signed in (§ 2, one-off): the sign-in's subscribe / unsubscribe go to a fake community
 # (scripts/test-fixtures/fake-steam-community.mjs, LIASCAPE_STEAM_COMMUNITY); a made-up account and cookie token
@@ -287,7 +289,14 @@ await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "appli
   out(u1 === "steam://url/CommunityFilePage/700000012" && (status[pageUrl("700000012")] ?? []).includes("Opened in Steam: subscribe there and it downloads here"),
     "merged (auto-import on), sign-in rejected: the download opens its page with the note", `${u1} | ${(status[pageUrl("700000012")] ?? []).join(" | ")}`);
   ac1.abort(); await pm;
+  // the cancel reaches the backend: its to-do entry ends, and Steam delivering the files later imports nothing (auto-import
+  // off first, so only the download could bring it in)
   for (let i = 0; i < 40 && !todo.at(-1)?.finished; i++) await sleep(50);
+  const fin = todo.at(-1)?.finished === true;
+  await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoAddWeWallpapersToLibrary: false }) });
+  drop("700000012"); await sleep(1500);
+  out(fin && !(await inLib("700000012")), "…cancelled from the page: its to-do entry finished, nothing imported once Steam delivers",
+    `finished ${fin} | in library ${await inLib("700000012")} | ${JSON.stringify(todo.at(-1))}`);
 }
 await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoAddWeWallpapersToLibrary: false }) });
 
@@ -509,6 +518,24 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
     && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000101",
     "…a base Steam never delivers: given up (the wait's limit), the preset reads \"Needs its base scene\", no page for the base",
     `${rB?.status} | ${dlErr[pageUrl("900000001")] ?? "no error"} | ${pb?.presetReason} | ${urls().slice(n0).join(" ")}`);
+
+  // through its page under "Use the Steam app" (no Steam client here, the sign-in turned down): the base Steam delivers is
+  // imported as it is, never asked of the Steam client or the sign-in again (PresetDownloads.FetchAsync's Page route)
+  await setS({ workshopDownloadMode: "steamapp" });
+  n0 = urls().length;
+  const pH = settle(dl("910000106"));
+  await until(() => urls().slice(n0).includes("steam://url/CommunityFilePage/910000106"), 15000);
+  dropPreset("910000106", "3009121253", "900000008");
+  const rH = await pH;
+  const waitingH = await until(() => (status[pageUrl("900000008")] ?? []).includes("Waiting for Steam to download its base scene…"), 10000);
+  dropBase("900000008");
+  await until(async () => (await item("900000008")) && (await item("910000106"))?.presetReason === PLAYS, 15000);
+  const askedH = beLog().split("\n").filter((l) => /900000008: .*(the Steam app couldn't|sign-in|[Ss]ubscrib)/.test(l));
+  out(rH?.status === 200 && waitingH && !!(await item("900000008")) && (await item("910000106"))?.presetReason === PLAYS && askedH.length === 0
+    && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000106",
+    "preset through its page (Use the Steam app, no client): its delivered base imported as it is, never asked of the Steam client or the sign-in again",
+    `${rH?.status} | waited ${waitingH} | ${(await item("910000106"))?.presetReason} | ${askedH.join(" / ")} | ${urls().slice(n0).join(" ")}`);
+  await setS({ workshopDownloadMode: "subscribe" });
 
   // "Subscribe with Steam login", signed in (the fake community): the preset subscribed, then its base
   const authBefore = fs.readFileSync(af, "utf8");
