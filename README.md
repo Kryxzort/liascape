@@ -71,8 +71,7 @@ When a scene's font isn't installed, its sidebar says which one stands in for it
 
 ## Install
 
-There's no AUR package or AppImage yet. `scripts/PKGBUILD` and `scripts/build-appimage.sh` follow the current build,
-but neither has been tested end to end yet (on Arch, or as a finished AppImage), so use Nix or build from source.
+There's no AUR package or AppImage to download yet, so use Nix or build from source.
 
 ### NixOS and Nix
 
