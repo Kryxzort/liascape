@@ -281,6 +281,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `restore_waits_for_ready_no_seam`).
 
 ## UI
+- [ ] A UI matrix shard can hang for good and hold the machine-wide test lock: 2026-11-27 a shard's probe Electron sat
+      in `poll` for 90 min after `single × pause:appBg` (it ignored SIGTERM), and since the matrix takes the lock itself
+      (`scripts/test-lock.sh`'s 5400 s cap doesn't apply) every other run queued behind it. Give each cell a wall-clock
+      limit in the shard runner (an error naming the cell, the Electron killed TERM → KILL, the shard moving on), and
+      find which cell hung after `pause:appBg`. Guard: a test cell that never answers fails the run by name within
+      the limit.
 - [ ] Probe cells out of step with today's app: `probe-sidebar lib:preset:needsBase` / `needsBaseOff` still expect
       the base-scene button disabled while signed out (no download mode blocks a download now); `probe-steam
       ws:comment*` assume a window short enough for the comments to start below the fold (pass at 480 px, fail on a
