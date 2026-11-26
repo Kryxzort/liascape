@@ -2368,6 +2368,8 @@ button.side-pill.copy { overflow: hidden; }
 .imp-link-what .imp-title { font-weight: 600; font-size: 14px; }
 .imp-link-what .imp-dir { flex: none; font-size: 12px; color: var(--subtext); }
 .imp-link-why { margin: 6px 0 0; padding: 0 6px; font-size: 12px; color: var(--warn); }
+/* the last import's failure, under the item it was for (Import tries again) */
+.imp-link-failed { margin: 6px 0 0; padding: 0 6px; }
 .imp-link-dl { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 0 6px; }
 .imp-link-dl .dl-bar { flex: 1; width: auto; background: color-mix(in srgb, var(--surface1) 70%, transparent); }
 .imp-link-step { flex: none; font-size: 12px; color: var(--subtext); font-variant-numeric: tabular-nums; }

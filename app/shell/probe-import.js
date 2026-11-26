@@ -41,10 +41,12 @@
 //                       dialog leaves, the item lands with its card and the status line says "Imported: …"
 //                       (pictures import-link-found-<m>.png, import-link-progress-<m>.png)
 //   import:link:paste   a web link pasted on the Library opens the dialog on it, resolved at once; plain text, a paste in the
-//                       search field and a paste on Browse open nothing; a link the library has shows "In your library", Import off
+//                       search field and a paste on Browse open nothing; a link the library has (the cell imports its own)
+//                       shows "In your library", Import off
 //   import:link:drop    a web link dragged from a browser (text/uri-list http) opens the dialog on it
 //   import:link:close   Close while it imports: the dialog leaves at once, the import goes on and lands, the status says so
-//   import:link:error   a page served as video/mp4: the import's refusal shows in the dialog, which stays, Import off
+//   import:link:error   a page served as video/mp4: the import's refusal shows under what the link names, which stays with
+//                       Import on; Import again asks the server again and says the same; an edit of the link clears it
 //   import:link:look    the error line in --danger, where it comes from in --subtext, the chip in --accent, the progress fill
 //                       in --accent with its glow (none under no-glow), bg-live keeps the dialog's fill; pictures
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
@@ -546,6 +548,7 @@ app.whenReady().then(async () => {
     // /page a web page, /fake.mp4 a page served as video/mp4
     const srcVid = path.join(T, "served.mp4"); vid(srcVid, "purple");
     const served = fs.readFileSync(srcVid);
+    let fakeAsked = 0; // how often /fake.mp4 was asked for (import:link:error tries it twice)
     const server = require("http").createServer((req, res) => {
       const p = req.url.split("?")[0];
       if (p.startsWith("/files/")) { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": served.length }); res.end(served); }
@@ -556,7 +559,7 @@ app.whenReady().then(async () => {
         const t = setInterval(() => { res.write(served.subarray(i * step, (i + 1) * step)); if (++i >= n) { clearInterval(t); res.end(); } }, 210);
         req.on("close", () => clearInterval(t));
       } else if (p === "/page") { res.writeHead(200, { "Content-Type": "text/html" }); res.end("<!doctype html><title>a page</title>"); }
-      else if (p === "/fake.mp4") { res.writeHead(200, { "Content-Type": "video/mp4" }); res.end("<!doctype html><title>log in</title>" + " ".repeat(64)); }
+      else if (p === "/fake.mp4") { fakeAsked++; res.writeHead(200, { "Content-Type": "video/mp4" }); res.end("<!doctype html><title>log in</title>" + " ".repeat(64)); }
       else { res.writeHead(404); res.end(); }
     });
     await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -566,7 +569,7 @@ app.whenReady().then(async () => {
       return { state: d.dataset.importDialog, title: d.querySelector("h2")?.textContent, value: i?.value ?? null, focused: !!i && document.activeElement === i,
         inputOff: !!i?.disabled, line: l?.dataset.importLinkLine ?? null, text: l?.textContent.trim() ?? null,
         name: d.querySelector("[data-import-link-title]")?.textContent ?? null, where: d.querySelector("[data-import-link-where]")?.textContent ?? null,
-        have: !!d.querySelector(".imp-link-row .imp-have"), progress: !!d.querySelector("[data-import-link-progress]"),
+        have: !!d.querySelector(".imp-link-row .imp-have"), failed: d.querySelector("[data-import-link-failed]")?.textContent ?? null, progress: !!d.querySelector("[data-import-link-progress]"),
         go: d.querySelector("[data-import-go]")?.textContent.trim(), goOff: !!d.querySelector("[data-import-go]")?.disabled,
         cancel: [...d.querySelectorAll(".imp-actions .btn.ghost")].map((b) => b.textContent.trim()).find((t) => t === "Cancel" || t === "Close") }`);
     // typed as a user types: React's own value setter, then the input event
@@ -664,9 +667,11 @@ app.whenReady().then(async () => {
       await js(`[...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Browse").click(); return true`); await sleep(600);
       await paste(url); await sleep(500);
       if (await dialog()) { v.push("a paste on Browse opened the dialog"); await closeDialog(); }
-      // a link the library has: said, and Import off
+      // a link the library has (this cell's own, so the cell stands alone): said, and Import off
+      const have = `${S}/files/pastehave.mp4`;
+      if ((await http("POST", "/library/import-link", { url: have })).status !== 200) v.push("couldn't import the cell's own link through the API");
       await load();
-      await paste(`${S}/slow/lkon.mp4`);
+      await paste(have);
       if (!(await lineIs("found", 3000))) v.push("the library's own link wasn't resolved");
       else { const h = await linkState(); if (!h.have || !h.goOff) v.push(`the library's own link: ${J(h)}, want "In your library", Import off`); }
       await shot("link-have", ".imp-modal");
@@ -703,18 +708,30 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    await cell("import:link:error — the import's refusal shows in the dialog, which stays", async () => {
+    await cell("import:link:error — the import's refusal shows under the item, which stays: Import tries again, an edit clears it", async () => {
       const v = [];
       await load();
       if (!(await openLinkFromMenu())) return ["no Import from a link… in the menu"];
       await js(`${setLink(`${S}/fake.mp4`)} return true`);
       if (!(await lineIs("found"))) return [`the link: ${J(await linkState())}`];
+      const want = "The link's file isn't a video.";
+      const failedShown = () => waitFor(async () => (await linkState())?.failed === want, 8000);
       await js(`document.querySelector("[data-import-go]").click(); return true`);
-      if (!(await lineIs("error", 8000))) return [`no refusal shown: ${J(await linkState())}`];
-      await sleep(1200); // it stays: nothing asks about the link again and puts "found" back over it
+      if (!(await failedShown())) return [`no refusal shown: ${J(await linkState())}`];
+      await sleep(1200); // it stays: nothing asks about the link again or takes the note away
       const s = await linkState();
-      if (s.text !== "The link's file isn't a video." || !s.goOff || s.cancel !== "Cancel" || s.inputOff) v.push(`after the refusal: ${J(s)}`);
+      // what the link names stays, and so does Import: a failure that passes (the server was down) needs no edit to retry
+      if (s.line !== "found" || s.failed !== want || s.goOff || s.go !== "Import" || s.cancel !== "Cancel" || s.inputOff) v.push(`after the refusal: ${J(s)}`);
       await shot("link-error", ".imp-modal");
+      // Import again: it tries (the server is asked a second time) and says the same
+      await js(`document.querySelector("[data-import-go]").click(); return true`);
+      if (!(await waitFor(async () => fakeAsked >= 2, 8000))) v.push(`trying again asked the server ${fakeAsked} time(s) in all, want 2`);
+      // its end: the field back on and the refusal under the item again (an old note still fading out is no answer)
+      if (!(await waitFor(async () => { const t = await linkState(); return t.go === "Import" && !t.inputOff && t.failed === want; }, 8000)))
+        v.push(`trying again: no refusal shown (${J(await linkState())})`);
+      // an edit clears it
+      await js(`${setLink(`${S}/fake.mp4 `)} return true`); await sleep(400);
+      if ((await linkState()).failed != null) v.push(`an edit left the refusal: ${J(await linkState())}`);
       await closeDialog();
       if ((await titles()).includes("fake")) v.push("the page landed in the library");
       return v;

@@ -22,7 +22,8 @@ import { hasPicker, pickFolder } from "./importPick";
 // the same dialog with a link field: what the link names shows as soon as it is typed (POST /library/link: the item, its
 // kind and source, "In your library", the download mode's refusal, or why it can't be imported, in its own words), and
 // Import downloads it by that source's own path (Web/LinkImportOps.cs) with the progress bar a Browse card shows; Close
-// leaves it running (the top bar's words, then the status line or the error modal).
+// leaves it running (the top bar's words, then the status line or the error modal). An import that fails says why under the
+// item, which stays: Import tries again as it is (a server that was down), an edit of the link clears the note.
 // Guard: --probe probe-import.js (import:*, import:steam, import:link:*)
 const GROUPS: { kind: FoundItem["kind"]; label: string; one: string; many: string; icon: React.ReactNode }[] = [
   { kind: "video", label: "Videos", one: "video", many: "videos", icon: <Film size={14} /> },
@@ -62,10 +63,12 @@ export function ImportDialog() {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   // an import from a link: the field's text, what the backend said the trimmed text names (kept with that text: a newer text
-  // shows "Checking…" until its own answer), and the link importing now
+  // shows "Checking…" until its own answer), the link importing now, and why its last import failed (shown under what the
+  // link names, which stays: Import tries again; an edit or the next try clears it)
   const [linkText, setLinkText] = useState("");
   const [resolved, setResolved] = useState<{ text: string; target: LinkTarget | null; error: string | null } | null>(null);
   const [importing, setImporting] = useState<LinkTarget | null>(null);
+  const [importFailed, setImportFailed] = useState<string | null>(null);
   // each request starts clean (reset during render on the change: no frame shows the last one's list); `last` keeps a
   // closing dialog's request, so its exit shows what it showed. Starts at none, not at `req`: the dialog is lazy-loaded, so its
   // first mount already has the request that opened it (a pasted link's text) and must take it in like any later one
@@ -75,7 +78,7 @@ export function ImportDialog() {
     setShownReq(req);
     if (req) {
       setLast(req); setScan(null); setFailed(null); setTicked(new Set()); setCopy(copyDefault); setWatch(req.watch); setTyped(""); setBusy(false);
-      setLinkText(req.link ?? ""); setResolved(null); setImporting(null);
+      setLinkText(req.link ?? ""); setResolved(null); setImporting(null); setImportFailed(null);
     }
   }
   const isLink = req?.link !== undefined;
@@ -96,12 +99,12 @@ export function ImportDialog() {
   const goLink = async () => {
     const t = found?.target;
     if (!t || !linkReady) return;
-    setImporting(t);
+    setImporting(t); setImportFailed(null);
     const why = await useStore.getState().importLink(linkTrim, t, req);
     // closed meanwhile: the status line or the error modal said how it ended
     if (useStore.getState().importAt !== req) return;
     if (why == null) close();
-    else { setImporting(null); setResolved({ text: linkTrim, target: null, error: why }); }
+    else { setImporting(null); setImportFailed(why); }
   };
   useEffect(() => {
     if (!req?.paths.length) return;
@@ -183,8 +186,8 @@ export function ImportDialog() {
                       <p className="muted">A Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture:</p>
                       <input className="text wide" autoFocus placeholder="https://…" value={linkText} data-import-link spellCheck={false}
                         disabled={!!importing} aria-label="Link to import"
-                        onChange={(e) => setLinkText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void goLink(); }} />
-                      <LinkLine text={linkTrim} found={found} importing={importing} />
+                        onChange={(e) => { setLinkText(e.target.value); setImportFailed(null); }} onKeyDown={(e) => { if (e.key === "Enter") void goLink(); }} />
+                      <LinkLine text={linkTrim} found={found} importing={importing} failed={importFailed} />
                     </div>
                   )}
                   {state === "failed" && <p className="imp-note" data-import-failed>{failed}</p>}
@@ -240,8 +243,8 @@ function linkWhere(t: LinkTarget): string {
   const what = (t.media && MEDIA[t.media]?.word) ?? "A file";
   return t.kind === "workshop" ? `${what} on the Steam Workshop` : t.kind === "site" ? `${what} on ${t.source}` : `${what} from ${t.source}`;
 }
-function LinkLine({ text, found, importing }: {
-  text: string; found: { target: LinkTarget | null; error: string | null } | null; importing: LinkTarget | null;
+function LinkLine({ text, found, importing, failed }: {
+  text: string; found: { target: LinkTarget | null; error: string | null } | null; importing: LinkTarget | null; failed: string | null;
 }) {
   const motionOn = useMotion();
   const fadeOff = useFadeOff();
@@ -267,6 +270,13 @@ function LinkLine({ text, found, importing }: {
               {t.inLibrary && <span className="imp-have">In your library</span>}
             </div>
             {t.blocked && <p className="imp-link-why" data-import-link-blocked>{t.blocked}</p>}
+            {/* the last import's failure: under the item, which stays so Import can try again */}
+            <AnimatePresence initial={false}>
+              {failed && !importing && (
+                <motion.p key="failed" className="imp-note imp-link-failed" data-import-link-failed
+                  {...fadeOff({ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.16 } })}>{failed}</motion.p>
+              )}
+            </AnimatePresence>
             <AnimatePresence initial={false}>
               {importing && (
                 <motion.div key="dl" className="imp-link-dl" data-import-link-progress
