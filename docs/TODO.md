@@ -126,6 +126,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Guard: probe cells reading the computed `text-shadow` of those elements with the setting on and off, and
        screenshots over a light and a dark `bg-live` wallpaper.
 
+14. [ ] (owner) The window's live background (`components/WallpaperBg.tsx`, "live wallpaper behind every tab") keeps
+       showing a wallpaper that was just removed: with nothing playing it falls back to `lastPlayed`, the last video it
+       showed, even when that item was trashed or unsubscribed (seen removing downloads from Browse one after another:
+       the desktop went blank each time, the window kept the removed one). Drop `lastPlayed` once its item leaves the
+       library (trash, unsubscribe, delete) and fall to the existing fallback (a library video), or dark when the library
+       has none. Guard: a probe cell that plays an item, removes it, and finds the background no longer showing it.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
