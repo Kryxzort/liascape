@@ -182,6 +182,21 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        backlog item against the code, delete what is done or obsolete (the legacy engine, mpvpaper, LWE-subprocess
        items), merge duplicates, and say for each kept item what is still missing. Report what was cut and why.
 
+24. [ ] (owner) Automate landing an agent's branch: scripts, a merge driver, hooks and one skill (no plugin: the repo's
+       `.claude/` already ships settings, skills and agents to a clone). In order:
+       - A git merge driver for `docs/TODO.md` and `docs/decisions.md` (`.gitattributes`): keeps both sides' new items /
+         entries, takes the target's numbering, drops what the branch deleted; a test with recorded conflicts.
+       - `scripts/land-agent.sh <worktree>`: rebase onto lp-player, builds + lint + `check-rules`, the local CodeRabbit
+         review (findings saved for the lander to judge), `land.sh`, then the worktree and branch removed; refuses to land
+         while the agent's report names an undone or follow-up part that `docs/TODO.md` doesn't carry.
+       - Claude Code hooks in `.claude/settings.json`: `check-rules.sh` after an edit under `docs/` or `.claude/`, the
+         checks on a finished agent's worktree, the Queued list at session start.
+       - A `land-agent` skill: run the script, then the judgement steps (each finding real or not, code conflicts,
+         leftovers queued).
+       - The implementer agent's definition moves into the repo (`.claude/agents/`) carrying the standard brief tail
+         (the test lock in `nix develop`, never the main checkout's node_modules, CodeRabbit, the one attribution line,
+         delete the TODO item by its text, queue what's left, no push), so a brief states only the task.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
