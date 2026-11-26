@@ -46,7 +46,10 @@ chmod 755 "$APPDIR/AppRun"
 # path, and desktop integration tools put the image's own path there)
 sed 's|^Exec=.*|Exec=liascape|' "$APPDIR/usr/share/applications/liascape.desktop" > "$APPDIR/liascape.desktop"
 cp "$APPDIR/usr/share/icons/hicolor/scalable/apps/liascape.svg" "$APPDIR/liascape.svg"
-ln -sf liascape.svg "$APPDIR/.DirIcon"
+# .DirIcon (the image's own icon, what file managers show for it) must be a PNG: appimagetool reports an SVG one as an
+# error and says a later release will refuse to build with it. The icon's PNG is committed beside its SVG
+# (app/icon/generate.py draws both), so the build needs no SVG renderer.
+cp "$ROOT/app/icon/liascape-night-256.png" "$APPDIR/.DirIcon"
 
 TOOL="$(command -v appimagetool || true)"
 if [ -z "$TOOL" ]; then

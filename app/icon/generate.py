@@ -1,7 +1,12 @@
 # Generates the app icon: liascape-night.svg (the installed icon, copied to app/ui/public/favicon.svg) and
 # liascape-lavender.svg (the light variant, copied to app/ui/public/logo-lavender.svg: the window's opening on a light
 # theme). Run: python3 app/icon/generate.py (writes next to this file).
+# Also liascape-night-256.png, the Night icon at 256 px for what takes no SVG (an AppImage's .DirIcon,
+# scripts/build-appimage.sh): committed, so no build needs a renderer; this run redraws it with rsvg-convert or ImageMagick
+# when one is installed, and otherwise says the png is now behind the svg.
 import os
+import shutil
+import subprocess
 HERE = os.path.dirname(os.path.abspath(__file__))
 OTHER={"L":"#b48fd0","M":"#3a3352"}
 PAPER={"L":("#cfc6e0","#f6f3fa"),"M":("#d7c8e6","#fbf8fd")}
@@ -202,3 +207,17 @@ L = icon("#3a3352","#e9e7ec","#bcaec8","#fbefe8","#e8c6be","#f3f2f5","#6b4a96","
 M = icon("#b48fd0","#efe9f4","#d9c8e8","#f9ecd2","#c9a08f","#ffffff","#5b3f86","#ffffff","M","none","#b58b7a",fop=".4")
 open(os.path.join(HERE, "liascape-night.svg"), "w").write(L)
 open(os.path.join(HERE, "liascape-lavender.svg"), "w").write(M)
+
+def png(svg, out, size):
+    if shutil.which("rsvg-convert"):
+        cmd = ["rsvg-convert", "-w", str(size), "-h", str(size), "-o", out, svg]
+    elif shutil.which("magick"):
+        # librsvg through ImageMagick when it has it: drawn at 384 dpi (4x the 256-unit viewBox at 96), scaled down, saved as
+        # 8-bit RGBA (its default keeps 16 bits a channel: twice the bytes for nothing an icon shows)
+        cmd = ["magick", "-background", "none", "-density", "384", svg, "-resize", f"{size}x{size}", f"PNG32:{out}"]
+    else:
+        print(f"no rsvg-convert or magick: {os.path.basename(out)} was NOT redrawn and may no longer match the svg")
+        return
+    subprocess.run(cmd, check=True)
+
+png(os.path.join(HERE, "liascape-night.svg"), os.path.join(HERE, "liascape-night-256.png"), 256)
