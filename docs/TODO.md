@@ -182,6 +182,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] Turn compatibility back on: CLAUDE.md § Hard rules, `.claude/rules/backend/state-files.md` and
       `.claude/rules/build-and-packaging.md` say formats, settings and CLI flags may change freely only while no one
       else runs Liascape. At release: never break a CLI flag or a state-file format again (an old file must load).
+- [ ] Changelog from commits: at the release tag, every commit carries a `Changelog: Added|Changed|Fixed|Removed: <one
+      user-facing sentence>` trailer, or `Changelog: none` for internal work. The commit-msg hook requires it on commits
+      Claude co-wrote; CLAUDE.md's commit rule and the PR template ("What this changes" repeats the commits' lines) say
+      so. `CHANGELOG.md` (Keep a Changelog) is written from `git log <last tag>..HEAD --format='%(trailers:key=Changelog,valueonly)'`.
 
 ## Upstream PRs (once the project is done)
 - [ ] Draft PRs offering the LWE fork's patches upstream (Almamu/linux-wallpaperengine), several small focused ones.
