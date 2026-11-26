@@ -46,6 +46,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        leaves the grid it was hidden from, with Undo like a removal, and a "Hidden" filter row shows hidden items, with
        Unhide in their menu. Keep the hidden ids in a state file (field-level, atomic). Multi-select: the menu acts on
        the selection. Guards: probe cells for the menu, Hide/Undo/Unhide and the filter; a backend test for the file.
+139. [ ] (owner) Opening animation, a prototype: the logo becomes the first library cards. The tile breaks into a few
+       rounded tiles that glide to the first row's real card positions (measured once the cards are built) and hand
+       over to them; the cover dissolves behind. Same budget and rules as now (`components/Intro.tsx`: gone within
+       about 0.7 s of the window showing, never holds input, skips on any input, theme / glow / no-motion = plain
+       fade / bg-live); fewer cards than tiles, an empty library or a non-Library start tab falls back to today's lift.
+       A prototype first: a slowed recording (about 5 s) from the agent window for the owner before it lands. Guard:
+       probe-intro cells for the hand-over, the fallbacks and motion off.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
