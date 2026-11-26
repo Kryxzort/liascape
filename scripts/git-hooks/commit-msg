@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # The commit-message rules CLAUDE.md sets that a script can check: a title that starts with a capital, ends without
-# a period and fits 72 characters, and a `Claude-Agent: <model id>, effort <…>, <role>` trailer on every commit a Claude co-wrote (the trailer
-# names which model and effort wrote it; the Co-Authored-By line alone doesn't). Enable once per clone:
+# a period and fits 72 characters, and one `Co-Authored-By: Claude <Model> <version>, effort <…> <noreply@anthropic.com>`
+# line per Claude model and effort that co-wrote the commit. It also tidies what tools add on their own: a
+# `Claude-Agent: <model id>, effort <…>, <role>` line becomes that Co-Authored-By line, a plain Claude Co-Authored-By
+# line beside it goes, and `Claude-Session:` lines go. Enable once per clone:
 #   git config core.hooksPath scripts/git-hooks
 msg=$1
 title=$(grep -v '^#' "$msg" | sed -n '/./{p;q}')
@@ -9,12 +11,41 @@ fail() { echo "commit-msg: $*" >&2; echo "commit-msg: (message kept in $msg)" >&
 [ -n "$title" ] || exit 0
 # Session links point at a private chat, not at anything a reader of this public repo can open: drop them.
 sed -i '/^Claude-Session: /d' "$msg"
+EFFORTS='low|medium|high|xhigh|max|unknown'
+# Claude-Agent: claude-opus-5-5, effort high, <role> → Co-Authored-By: Claude Opus 5.5, effort high <noreply@anthropic.com>;
+# a plain Claude Co-Authored-By line (no effort) goes once an effort line exists; each line once
+awk -v efforts="^($EFFORTS)$" '
+  function name(id,   n, p, i, out, num) {
+    n = split(id, p, "-"); out = ""; num = ""
+    for (i = 1; i <= n; i++) {
+      if (p[i] ~ /^[0-9]+$/) { num = num == "" ? p[i] : num "." p[i]; continue }
+      if (num != "") { out = out " " num; num = "" }
+      out = out (out == "" ? "" : " ") toupper(substr(p[i], 1, 1)) substr(p[i], 2)
+    }
+    return num == "" ? out : out " " num
+  }
+  { line[NR] = $0 }
+  /^Claude-Agent: / {
+    s = substr($0, 15); split(s, f, /, */); e = f[2]; sub(/^effort /, "", e)
+    if (f[1] != "" && e ~ efforts) { line[NR] = "Co-Authored-By: " name(f[1]) ", effort " e " <noreply@anthropic.com>"; conv = 1 }
+  }
+  /^Co-Authored-By: Claude.*, effort / { conv = 1 }
+  END {
+    for (i = 1; i <= NR; i++) {
+      l = line[i]
+      if (conv && l ~ /^Co-Authored-By: Claude/ && l !~ /, effort /) continue
+      if (l ~ /^Co-Authored-By: / && seen[l]++) continue
+      print l
+    }
+  }' "$msg" > "$msg.tmp" && mv "$msg.tmp" "$msg"
 case "$title" in fixup!*|squash!*|amend!*|Merge\ *|Revert\ *) exit 0 ;; esac
 [[ "$title" =~ ^[A-Z0-9#] ]] || fail "the title starts with a capital: \"$title\""
 [[ "$title" == *. ]] && fail "the title ends without a period: \"$title\""
 (( ${#title} <= 72 )) || fail "the title is at most 72 characters (${#title}): \"$title\""
+grep -q '^Claude-Agent: ' "$msg" &&
+  fail "a Claude-Agent line the hook couldn't read: 'Claude-Agent: <model id>, effort <$EFFORTS>, <role>'"
 if grep -qi '^Co-Authored-By: Claude' "$msg"; then
-  grep -Eq '^Claude-Agent: [^,]+, effort (low|medium|high|xhigh|max|unknown), .+' "$msg" ||
-    fail "a commit Claude co-wrote needs 'Claude-Agent: <model id>, effort <low|medium|high|xhigh|max|unknown>, <role>'"
+  bad=$(grep -i '^Co-Authored-By: Claude' "$msg" | grep -Ev "^Co-Authored-By: Claude [A-Z][A-Za-z]* [0-9.]+, effort ($EFFORTS) <noreply@anthropic\.com>$")
+  [ -z "$bad" ] || fail "a Claude co-author line is 'Co-Authored-By: Claude <Model> <version>, effort <$EFFORTS> <noreply@anthropic.com>': $bad"
 fi
 exit 0
