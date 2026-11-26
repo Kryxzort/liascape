@@ -197,6 +197,12 @@ reverted). Unsubscribe and Hide are sidebar actions in both tabs. Hide only hide
 page URL and source), kept in `hidden.json`, undone by the removal's Undo; each grid's filter column gets a Hidden row
 (✓ shows only them, with Unhide in their sidebar), offered once something is hidden there. `scripts/test-hidden.sh`.
 
+### Let input pass through the window's opening, never end it — 2026-11-26
+The opening plays to its end while every click, key, wheel and drag reaches the page at once; no input skips it. Input
+already works through it at full speed (it never takes a pointer event, a card not shown yet can be clicked or focused),
+so a skip would only cut the library's arrival short. Guard: probe-intro intro:click, intro:key, intro:scroll
+(`components/Intro.tsx`).
+
 ### A lone video always loops — 2026-11-14
 No "Loop videos" switch: play-once-and-freeze is too niche for a global setting that freezes every other video.
 Every player path loops a lone video; there is no `Loop` setting.

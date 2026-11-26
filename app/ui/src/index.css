@@ -1436,6 +1436,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow { --glow-sm: 0 0 #0000; --glow: 0 0 #0000; }
 :root.no-glow .card.playing::after { display: none; animation: none; } /* the ring stays */
 :root.no-glow .intro-tile { box-shadow: 0 10px 34px -14px rgba(0, 0, 0, .6); } /* the depth stays, the accent halo goes */
+:root.no-glow .intro-card { box-shadow: 0 1px 3px rgba(0, 0, 0, .4); } /* the card's own depth, no halo */
 /* motion off: no loop but the spinner, so the playing card's glow holds at its middle brightness */
 :root.no-motion .card.playing::after { animation: none; opacity: .75; } /* the pulse's middle */
 :root.no-glow .pl-item.playing { box-shadow: 0 0 0 2px var(--success); }
@@ -2415,13 +2416,13 @@ button.side-pill.copy { overflow: hidden; }
 
 /* ---- the window's opening (components/Intro.tsx): the app logo at the window's centre over the page's own ground. It pops
    in on the soft spring (scale + a short fade) while one accent ring ripples off it, like Play's; at `.open` the ground
-   dissolves and the logo lifts away toward the viewer (scale up + fade), the UI showing through. Opacity / scale only, on
-   the compositor: the first data's build under it doesn't stall it. `.still` (motion off when it started): the logo fades
-   in, and at `.open` the ground and the logo fade out, opacity alone. `.skip` (a click or key): everything fades out from
-   where it is (the root's own fade). It never takes a pointer event. Over everything (dropdowns 90/91). The ground is the
+   dissolves and the logo becomes the Library's first cards (`.cards`, below), or, with none to land on, lifts away toward
+   the viewer (scale up + fade), the UI showing through. Opacity / transform only, on the compositor: the first data's build
+   under it doesn't stall it. `.still` (motion off when it started): the logo fades
+   in, and at `.open` the ground and the logo fade out, opacity alone. It never takes a pointer event and input never ends
+   it. Over everything (dropdowns 90/91). The ground is the
    body's, in the theme's colours: the window's first frames and the cover look the same. Guard: probe-intro */
 .intro { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; pointer-events: none; }
-.intro.skip { animation: nm-out var(--fade-dur) linear forwards; }
 .intro-bg { position: absolute; inset: 0; background: radial-gradient(120% 120% at 50% 0%, var(--bg-mantle), var(--bg-base) 60%); }
 .intro-logo { position: relative; width: clamp(88px, 12vmin, 128px); aspect-ratio: 1; opacity: 0; }
 .intro.started .intro-logo { opacity: 1; }
@@ -2437,5 +2438,17 @@ button.side-pill.copy { overflow: hidden; }
 @keyframes intro-pop { from { scale: .84; } }
 @keyframes intro-ring { 0% { opacity: 0; scale: .96; } 15% { opacity: .8; scale: 1.03; } 100% { opacity: 0; scale: 1.5; } }
 @keyframes intro-lift { to { scale: 1.14; opacity: 0; } }
+/* `.cards`: the logo becomes the Library's first row. Its tiles (Intro.tsx, Web Animations: from their pieces of the logo,
+   which together are the whole logo, they glide onto their cards, the piece turning into the card's picture, then fade
+   over the card) are laid out on their cards' boxes, in the card's shape, ground and depth, with a soft accent halo; the
+   logo fades out under them as they leave, with its ring. Never under `.still`. */
+.intro.open.cards:not(.still) .intro-logo { animation: nm-out .09s linear forwards; }
+/* the pieces are the whole picture from the split on: under them it would show through where a piece has already left */
+.intro.open.cards:not(.still) .intro-img { opacity: 0; }
+.intro-card { position: absolute; border-radius: 12px; /* .card's */ overflow: hidden; transform-origin: 0 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .4), 0 0 26px -8px var(--accent); }
+.intro-card-face { position: absolute; inset: 0; background: var(--bg-crust); }
+.intro-card-face > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.intro-card-logo { position: absolute; max-width: none; opacity: 0; }
 .intro.still .intro-tile { animation: nm-in var(--fade-dur) linear backwards; }
 .intro.still.open :is(.intro-bg, .intro-logo) { animation: nm-out var(--fade-dur) linear forwards; }

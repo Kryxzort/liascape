@@ -28,13 +28,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
        silent, assuming WE never plays a video texture's sound).
 
-5. [ ] (owner) Opening animation, a prototype: the logo becomes the first library cards. The tile breaks into a few
-       rounded tiles that glide to the first row's real card positions (measured once the cards are built) and hand
-       over to them; the cover dissolves behind. Same budget and rules as now (`components/Intro.tsx`: gone within
-       about 0.7 s of the window showing, never holds input, skips on any input, theme / glow / no-motion = plain
-       fade / bg-live); fewer cards than tiles, an empty library or a non-Library start tab falls back to today's lift.
-       A prototype first: a slowed recording (about 5 s) from the agent window for the owner before it lands. Guard:
-       probe-intro cells for the hand-over, the fallbacks and motion off.
 8. [ ] (owner) Scenes checked against real Wallpaper Engine, every feature, every scene, and as fast and lean as
        WE. Nothing about scenes counts as done until it matches WE's own frames
        (`docs/player/spikes/we-proton.md`: `scripts/dev/we-ref-capture.sh`, `scene_we_compare.sh`).
