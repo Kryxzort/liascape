@@ -53,6 +53,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        fade / bg-live); fewer cards than tiles, an empty library or a non-Library start tab falls back to today's lift.
        A prototype first: a slowed recording (about 5 s) from the agent window for the owner before it lands. Guard:
        probe-intro cells for the hand-over, the fallbacks and motion off.
+140. [ ] (owner) A session start always plays a wallpaper, even after `liascape stop` in the last session: `liascape
+       restore` (boot / autostart, `serve --restore --session-start`) brings the last session back whatever the user
+       stopped. `PlayerHelper.Restore` already replays `LastSession` when the player shows nothing, but every boot's log
+       says "the player shows its restored wallpaper — nothing to replay": check what a snapshot taken after `stop` holds
+       (a parked or ramped-out source that `ShowsAnything` counts as shown?) and that a session start after `stop` puts
+       a wallpaper on screen. Not `play` / `toggle-play` mid-session: a stop there still holds. Guard:
+       `scripts/test-liascape-player-adapter.sh` (stop → player restart as a session start → a wallpaper on screen).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
