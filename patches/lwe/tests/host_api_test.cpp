@@ -47,6 +47,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
 }
 
@@ -5566,6 +5567,258 @@ static bool video_texture_plays_on_the_scene_clock () {
     return true;
 }
 
+// a w×h rawvideo GRAY8 Matroska file of one frame of `value`, muxed by libavformat (no encoder needed). Its header
+// carries the size, so a frame that isn't `whole` (one byte) makes a few hundred bytes that say 7682×4320
+static bool gray_video (const std::string& path, int w, int h, bool whole, unsigned char value) {
+    AVFormatContext* oc = nullptr;
+    if (avformat_alloc_output_context2 (&oc, nullptr, "matroska", path.c_str ()) < 0 || oc == nullptr) {
+        return false;
+    }
+    AVStream* st = avformat_new_stream (oc, nullptr);
+    bool ok = st != nullptr;
+    if (ok) {
+        st->time_base = AVRational { 1, 25 };
+        st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+        st->codecpar->codec_id = AV_CODEC_ID_RAWVIDEO;
+        st->codecpar->format = AV_PIX_FMT_GRAY8;
+        // its FourCC, or it reads back as BGR24
+        st->codecpar->codec_tag = MKTAG ('Y', '8', '0', '0');
+        st->codecpar->width = w;
+        st->codecpar->height = h;
+        // Matroska stores rawvideo the VFW way only when asked
+        AVDictionary* options = nullptr;
+        av_dict_set (&options, "allow_raw_vfw", "1", 0);
+        ok = avio_open (&oc->pb, path.c_str (), AVIO_FLAG_WRITE) >= 0 && avformat_write_header (oc, &options) >= 0;
+        av_dict_free (&options);
+    }
+    if (ok) {
+        const int size = whole ? w * h : 1;
+        AVPacket* pkt = av_packet_alloc ();
+        ok = pkt != nullptr && av_new_packet (pkt, size) >= 0;
+        if (ok) {
+            memset (pkt->data, value, static_cast<size_t> (size));
+            pkt->stream_index = 0;
+            pkt->pts = pkt->dts = 0;
+            pkt->duration = 1;
+            pkt->flags |= AV_PKT_FLAG_KEY;
+            av_packet_rescale_ts (pkt, AVRational { 1, 25 }, st->time_base);
+            ok = av_interleaved_write_frame (oc, pkt) >= 0;
+        }
+        av_packet_free (&pkt);
+    }
+    ok = ok && av_write_trailer (oc) >= 0;
+    if (oc->pb != nullptr) {
+        avio_closep (&oc->pb);
+    }
+    avformat_free_context (oc);
+    return ok;
+}
+
+// a w×h MPEG-4 Part 2 file (`container`: FFmpeg's muxer name) of one grey frame (luma `value`) whose samples are `sar`
+// wide: the aspect is in the bitstream, so the decoded frames carry it (a rawvideo stream's container aspect never
+// reaches its frames)
+static bool encoded_video (const std::string& path, int w, int h, unsigned char value, AVRational sar,
+                           const char* container = "matroska") {
+    const AVCodec* codec = avcodec_find_encoder (AV_CODEC_ID_MPEG4);
+    if (codec == nullptr) {
+        return false;
+    }
+    AVFormatContext* oc = nullptr;
+    if (avformat_alloc_output_context2 (&oc, nullptr, container, path.c_str ()) < 0 || oc == nullptr) {
+        return false;
+    }
+    AVCodecContext* enc = avcodec_alloc_context3 (codec);
+    enc->width = w;
+    enc->height = h;
+    enc->pix_fmt = AV_PIX_FMT_YUV420P;
+    enc->time_base = AVRational { 1, 25 };
+    enc->sample_aspect_ratio = sar;
+    // in-band headers where the container keeps none of its own (MPEG-TS)
+    if (oc->oformat->flags & AVFMT_GLOBALHEADER) {
+        enc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+    bool ok = avcodec_open2 (enc, codec, nullptr) >= 0;
+    AVStream* st = ok ? avformat_new_stream (oc, nullptr) : nullptr;
+    ok = ok && st != nullptr && avcodec_parameters_from_context (st->codecpar, enc) >= 0;
+    if (ok) {
+        st->time_base = enc->time_base;
+        st->sample_aspect_ratio = sar;
+        ok = avio_open (&oc->pb, path.c_str (), AVIO_FLAG_WRITE) >= 0 && avformat_write_header (oc, nullptr) >= 0;
+    }
+    AVFrame* frame = av_frame_alloc ();
+    AVPacket* pkt = av_packet_alloc ();
+    if (ok) {
+        frame->width = w;
+        frame->height = h;
+        frame->format = AV_PIX_FMT_YUV420P;
+        ok = av_frame_get_buffer (frame, 0) >= 0;
+    }
+    if (ok) {
+        for (int y = 0; y < h; y++) {
+            memset (frame->data[0] + y * frame->linesize[0], value, w);
+        }
+        for (int y = 0; y < h / 2; y++) {
+            memset (frame->data[1] + y * frame->linesize[1], 128, w / 2);
+            memset (frame->data[2] + y * frame->linesize[2], 128, w / 2);
+        }
+        frame->pts = 0;
+        ok = avcodec_send_frame (enc, frame) >= 0 && avcodec_send_frame (enc, nullptr) >= 0;
+    }
+    while (ok && avcodec_receive_packet (enc, pkt) >= 0) {
+        pkt->stream_index = 0;
+        // MP4 drops a sample of no length
+        if (pkt->duration <= 0) {
+            pkt->duration = 1;
+        }
+        av_packet_rescale_ts (pkt, enc->time_base, st->time_base);
+        ok = av_interleaved_write_frame (oc, pkt) >= 0;
+    }
+    ok = ok && av_write_trailer (oc) >= 0;
+    if (oc != nullptr && oc->pb != nullptr) {
+        avio_closep (&oc->pb);
+    }
+    avformat_free_context (oc);
+    av_packet_free (&pkt);
+    av_frame_free (&frame);
+    avcodec_free_context (&enc);
+    return ok;
+}
+
+// a scenetexture value the host sets to a video file's absolute path (a WE preset's own `files/<name>.mp4`, played where
+// its base has an image slot) plays that video in the slot, looped, on the scene's clock, as a video texture inside the
+// scene does: kFourColoursMp4 (red, green, blue, white, 0.25 s each) shows red at 0.1 s, blue at 0.6 s and red again at
+// 1.1 s. A video file that doesn't load (missing, not a video), or whose header says over 8192 px a side or 7680×4320
+// px, keeps the slot's texture, the health report naming the cap; one at the side cap plays. A frame over the caps as
+// displayed (stretched by its sample aspect) is never shown: the slot stays the video's, blank. The file is streamed,
+// never read whole (a preset's video runs to hundreds of MiB), so no byte cap applies. It opens only as the containers
+// its extensions name (MP4 / QuickTime, Matroska / WebM): an MPEG-TS stream named .mp4 keeps the slot's texture, as a
+// playlist naming other files would
+static bool usertexture_plays_a_video_file () {
+    if (!script_tests_can_run ()) {
+        return true;
+    }
+    // a fresh scene (the rig deletes its scene when it closes) with the file `make` writes in its `files/` set in the slot;
+    // the slot's colour at each of `times` (the host's clock), letting the decoder catch up at each as
+    // video_texture_plays_on_the_scene_clock does; `px` gets the last read, `health` the build's health report
+    const auto play = [] (const std::string& name, const std::function<bool (const std::string&)>& make,
+                          std::initializer_list<float> times, std::string& seen, std::array<unsigned char, 4>& px,
+                          std::string& dir, std::vector<std::string>* health = nullptr) {
+        dir = camera_scene ("\"zoom\":1", b9_object (1, 16),
+            "\"picked\":{\"type\":\"scenetexture\",\"value\":\"\",\"text\":\"t\"}");
+        b9_layer (dir, "uniform sampler2D g_Texture0;\n", "gl_FragColor = vec4(texSample2D(g_Texture0, vec2(0.5, 0.5)).rgb, 1.0);");
+        write_file (dir + "/materials/b9.json", "{\"passes\":[{\"shader\":\"b9\",\"cullmode\":\"nocull\",\"depthtest\":\"disabled\","
+                                                "\"depthwrite\":\"disabled\",\"blending\":\"normal\",\"textures\":[\"util/white\"],"
+                                                "\"usertextures\":[\"picked\"]}]}\n");
+        mkdir ((dir + "/files").c_str (), 0755);
+        const std::string path = dir + "/files/" + name;
+        if (make && !make (path)) {
+            return false;
+        }
+        ScriptRig rig;
+        rig.dt = 0.0f;
+        rig.loaded = [path] (wp_project* p) { wp_project_property_set_value_by_name (p, "picked", path.c_str ()); };
+        const std::string report = dir + "/health.jsonl";
+        if (health != nullptr) {
+            setenv ("WPENGINE_HEALTH", report.c_str (), 1);
+        }
+        const bool opened = rig.open (dir);
+        unsetenv ("WPENGINE_HEALTH");
+        if (!opened) {
+            return false;
+        }
+        if (health != nullptr) {
+            *health = health_lines (report);
+        }
+        for (const float t : times) {
+            rig.dt = t - g_now;
+            rig.step ();
+            rig.dt = 0.0f;
+            for (int i = 0; i < 50; i++) {
+                usleep (10000);
+                rig.step ();
+            }
+            px = b9_pixel (rig);
+            const bool r = px[0] > 160, g = px[1] > 160, b = px[2] > 160;
+            seen += r && g && b ? 'W' : r && !g && !b ? 'R' : !r && g && !b ? 'G' : !r && !g && b ? 'B' : '?';
+            if (getenv ("VIDEO_SLOT_DEBUG")) {
+                printf ("    %s at %.2f s: %d %d %d\n", name.c_str (), t, px[0], px[1], px[2]);
+            }
+        }
+        return true;
+    };
+    const auto bytes = [] (const std::string& content) {
+        return [content] (const std::string& path) { write_file (path, content); return true; };
+    };
+    const auto gray = [] (int w, int h, bool whole) {
+        return [w, h, whole] (const std::string& path) { return gray_video (path, w, h, whole, 200); };
+    };
+    std::string dir, clip, missing, text;
+    std::array<unsigned char, 4> px {};
+    CHECK (play ("clip.mp4", bytes (std::string (kFourColoursMp4, sizeof kFourColoursMp4 - 1)), { 0.1f, 0.6f, 1.1f }, clip, px, dir),
+           "load/build of %s with the video failed", dir.c_str ());
+    CHECK (play ("none.mp4", nullptr, { 0.1f }, missing, px, dir), "load/build of %s with a missing video failed", dir.c_str ());
+    CHECK (play ("notes.mp4", bytes ("not a video"), { 0.1f }, text, px, dir), "load/build of %s with a file that isn't a video failed",
+           dir.c_str ());
+    printf ("    the video at 0.1 0.6 1.1 s: %s; a missing file %s; not a video %s\n", clip.c_str (), missing.c_str (), text.c_str ());
+    CHECK (clip == "RBR", "the slot isn't the video, looped (%s, want RBR)", clip.c_str ());
+    CHECK (missing == "W", "a missing video lost the slot's texture (%s)", missing.c_str ());
+    CHECK (text == "W", "a file that isn't a video lost the slot's texture (%s)", text.c_str ());
+
+    // grey 200, as full or limited range
+    const auto grey = [] (const std::array<unsigned char, 4>& c) {
+        return c[0] >= 190 && c[0] <= 225 && near (c[1], c[0]) && near (c[2], c[0]);
+    };
+    // FFmpeg picks a demuxer by the bytes: a playable MPEG-TS stream named .mp4 opens as nothing; the same stream muxed
+    // as MP4 plays its grey
+    std::string ts, mp4;
+    std::array<unsigned char, 4> tsPx {}, mp4Px {};
+    std::vector<std::string> tsHealth;
+    const auto muxed = [] (const char* container) {
+        return [container] (const std::string& path) {
+            return encoded_video (path, 64, 32, 200, AVRational { 1, 1 }, container);
+        };
+    };
+    CHECK (play ("stream.mp4", muxed ("mpegts"), { 0.1f }, ts, tsPx, dir, &tsHealth),
+           "load/build of %s with an MPEG-TS stream named .mp4 failed", dir.c_str ());
+    CHECK (play ("muxed.mp4", muxed ("mp4"), { 0.1f }, mp4, mp4Px, dir), "load/build of %s with an MP4 failed", dir.c_str ());
+    printf ("    an MPEG-TS stream named .mp4 %s; as MP4 %d %d %d\n", ts.c_str (), mp4Px[0], mp4Px[1], mp4Px[2]);
+    CHECK (tsPx[0] > 240 && tsPx[1] > 240 && tsPx[2] > 240, "an MPEG-TS stream named .mp4 took the slot (%d %d %d)", tsPx[0],
+           tsPx[1], tsPx[2]);
+    CHECK (health_find (tsHealth, { "missing_asset", "Not an MP4, QuickTime, Matroska or WebM video file" }),
+           "no health line says the MPEG-TS stream isn't one of the containers");
+
+    // the caps, on rawvideo files whose header says the size (Matroska, as a preset may ship); the health report says
+    // which cap refused it
+    std::string wide, many, edge, stretched;
+    std::array<unsigned char, 4> edgePx {}, stretchedPx {};
+    std::vector<std::string> wideHealth, manyHealth;
+    CHECK (play ("wide.mkv", gray (8194, 2, true), { 0.1f }, wide, px, dir, &wideHealth),
+           "load/build of %s with an 8194 px wide video failed", dir.c_str ());
+    CHECK (play ("many.mkv", gray (7682, 4320, false), { 0.1f }, many, px, dir, &manyHealth),
+           "load/build of %s with a 7682×4320 video failed", dir.c_str ());
+    CHECK (play ("edge.mkv", gray (8192, 2, true), { 0.1f }, edge, edgePx, dir),
+           "load/build of %s with an 8192 px wide video failed", dir.c_str ());
+    // 4096 px coded, 16384 px displayed: past the header's check, refused frame by frame
+    const auto fourToOne = [] (const std::string& path) { return encoded_video (path, 4096, 16, 200, AVRational { 4, 1 }); };
+    CHECK (play ("stretched.mkv", fourToOne, { 0.1f }, stretched, stretchedPx, dir),
+           "load/build of %s with a 4096 px video stretched 4:1 failed", dir.c_str ());
+    printf ("    8194 px wide %s; 7682×4320 %s; 8192 px wide %d %d %d; 4096 px stretched 4:1 %d %d %d\n", wide.c_str (),
+            many.c_str (), edgePx[0], edgePx[1], edgePx[2], stretchedPx[0], stretchedPx[1], stretchedPx[2]);
+    CHECK (wide == "W", "a video over 8192 px a side took the slot (%s)", wide.c_str ());
+    CHECK (health_find (wideHealth, { "missing_asset", "Video over 8192 px a side" }),
+           "no health line says the 8194 px video is over the side cap");
+    CHECK (many == "W", "a video over 7680×4320 px took the slot (%s)", many.c_str ());
+    CHECK (health_find (manyHealth, { "missing_asset", "Video over 7680 x 4320 px" }),
+           "no health line says the 7682×4320 video is over the pixel cap");
+    CHECK (grey (edgePx), "a video 8192 px wide isn't its grey (%d %d %d)", edgePx[0], edgePx[1], edgePx[2]);
+    CHECK (grey (mp4Px), "the MP4 stream isn't its grey (%d %d %d)", mp4Px[0], mp4Px[1], mp4Px[2]);
+    // the slot is the video's (not the slot's white) and shows no frame
+    CHECK (!grey (stretchedPx) && stretched != "W",
+           "a frame 16384 px wide as displayed was shown, or the video didn't take the slot (%d %d %d)", stretchedPx[0],
+           stretchedPx[1], stretchedPx[2]);
+    return true;
+}
+
 // IAnimationLayer on a puppet: count, by name and index (the same object), fps / frameCount / name, pause / play /
 // isPlaying, rate, a script on the animation layer's visible sees it as thisObject, createAnimationLayer /
 // destroyAnimationLayer, addEndedCallback fires as a fast loop wraps; the bones: count, index, parent, a local
@@ -8704,6 +8957,7 @@ int main (int argc, char** argv) {
     run ("string_values_set_by_name", string_values_set_by_name);
     run ("usertexture_loads_an_image_file", usertexture_loads_an_image_file);
     run ("usertexture_caps_an_image_file", usertexture_caps_an_image_file);
+    run ("usertexture_plays_a_video_file", usertexture_plays_a_video_file);
     run ("unset_slots_are_not_missing", unset_slots_are_not_missing);
     run ("effect_visible_is_live", effect_visible_is_live);
     run ("clampuvs_clamps_the_composite", clampuvs_clamps_the_composite);

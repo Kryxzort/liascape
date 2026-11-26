@@ -868,6 +868,12 @@ public static class LiascapePlayerSelfTest
             File.WriteAllBytes(Path.Combine(root, "outside.png"), [0x89]);
             File.CreateSymbolicLink(Path.Combine(files, "out.png"), Path.Combine(root, "outside.png"));
             Directory.CreateDirectory(Path.Combine(files, "dir.png"));
+            // a video where the base has an image slot (WE plays it there; the core streams it): the core's video
+            // extensions in any case, the spaces and brackets of a Workshop file name
+            File.WriteAllBytes(Path.Combine(files, "Intros [HD].mp4"), [0, 0, 0, 0x18]);
+            File.WriteAllBytes(Path.Combine(files, "loop.WebM"), [0x1a, 0x45, 0xdf, 0xa3]);
+            File.WriteAllBytes(Path.Combine(root, "outside.mp4"), [0]);
+            File.CreateSymbolicLink(Path.Combine(files, "out.mp4"), Path.Combine(root, "outside.mp4"));
             // the preset folder reached through a link (a `local/<id>` link to Steam's folder): its files are still inside it
             var link = Path.Combine(root, "link");
             File.CreateSymbolicLink(link, dir);
@@ -883,6 +889,11 @@ public static class LiascapePlayerSelfTest
             Want("through a linked preset folder", Default("\"files/tint.png\"", link), real);
             Want("a GIF (any case)", Default("\"files/Anim.GIF\"", dir), Liascape.Web.ApiSecurity.RealPath(Path.Combine(files, "Anim.GIF")));
             Want("PlayerMap sends it", Map("\"files/tint.png\"", dir), JsonSerializer.Serialize(new Dictionary<string, string> { ["tex"] = real }));
+            var video = Liascape.Web.ApiSecurity.RealPath(Path.Combine(files, "Intros [HD].mp4"))!;
+            Want("a video → its real path", Default("\"files/Intros [HD].mp4\"", dir), video);
+            Want("a WebM (any case)", Default("\"files/loop.WebM\"", dir), Liascape.Web.ApiSecurity.RealPath(Path.Combine(files, "loop.WebM")));
+            Want("PlayerMap sends the video", Map("\"files/Intros [HD].mp4\"", dir),
+                JsonSerializer.Serialize(new Dictionary<string, string> { ["tex"] = video }));
             Want("a refused tweak of the slot keeps the preset's image", Map("\"files/tint.png\"", dir, Tex("\"/etc/passwd\"")),
                 JsonSerializer.Serialize(new Dictionary<string, string> { ["tex"] = real }));
             foreach (var (json, why) in new[]
@@ -890,11 +901,24 @@ public static class LiascapePlayerSelfTest
                 ("\"files/missing.png\"", "a missing file"), ("\"files/notes.txt\"", "not an image"), ("\"files/dir.png\"", "a folder"),
                 ("\"../outside.png\"", "a path out of the folder"), ("\"files/../../outside.png\"", "a path through .."),
                 ("\"files/out.png\"", "a link out of the folder"), ($"\"{Path.Combine(root, "outside.png")}\"", "an absolute path"),
+                ("\"files/out.mp4\"", "a video linked out of the folder"), ("\"../outside.mp4\"", "a video out of the folder"),
+                ("\"files/missing.mp4\"", "a missing video"),
                 ("\"\"", "an empty value"), ("5", "a number"), ("\"files\\\\tint.png\"", "a backslash path"),
             })
             {
                 Want(why + " is not sent", Default(json, dir), null);
                 Want(why + ": PlayerMap", Map(json, dir), "{}");
+            }
+            // why each is refused: the adapter logs it beside the preset and slot (`DroppedPresetImages`)
+            foreach (var (json, want) in new[]
+            {
+                ("\"files/out.mp4\"", "outside the preset's folder"), ("\"../outside.mp4\"", "outside the preset's folder"),
+                ("\"files/missing.mp4\"", "missing"), ("\"files/notes.txt\"", "not an image or a video"),
+                ("\"files/dir.png\"", "not a file"), ("\"\"", null),
+            })
+            {
+                SceneProperties.PresetImage(dir, JsonDocument.Parse(json).RootElement, out var why);
+                Want($"why {json} is refused", why, want);
             }
             Want("without the preset's folder nothing resolves", Default("\"files/tint.png\"", null), null);
             Want("the base's own (empty) value is never sent", JsonSerializer.Serialize(SceneProperties.PlayerMap(scene, null)), "{}");

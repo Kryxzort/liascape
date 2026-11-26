@@ -957,7 +957,7 @@ public static class LiascapePlayerMedia
     {
         foreach (var (name, value, why) in SceneProperties.DroppedPresetImages(presetPath))
             if (_droppedImagesLogged.TryAdd($"{presetPath}\u001f{name}\u001f{value}\u001f{why}", 0))
-                LiascapePlayerClient.Log($"preset {Path.GetFileName(presetPath.TrimEnd('/'))}: its image for '{name}' ({value}) is {why} — that slot shows its base's own texture");
+                LiascapePlayerClient.Log($"preset {Path.GetFileName(presetPath.TrimEnd('/'))}: its file for '{name}' ({value}) is {why} — that slot shows its base's own texture");
     }
 
     // A program's `defaults`: what every new B of a rotation runs unless its

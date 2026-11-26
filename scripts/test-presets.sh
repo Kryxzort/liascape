@@ -14,8 +14,9 @@
 #     to the preset's value drops, Reset returns to it); the base's tweaks never reach the preset or the other way round;
 #     no base → no properties and a tweak is refused. Loudness per item: a preset's offline estimate runs on its base's
 #     folder with its merged map and lands under its own path (the stub player answers `scene-loudness`). A bool saved
-#     as 0 / 1 reads as false / true. Preset images: a scenetexture value `files/<name>` goes to the player as the image's
-#     real path inside the preset's own folder; a path out of it, a link out, not an image or a missing file sends nothing.
+#     as 0 / 1 reads as false / true. Preset images and videos: a scenetexture value `files/<name>` goes to the player as
+#     the image's or video's real path inside the preset's own folder (a video made with ffmpeg for WE's own preset file
+#     of 2843309472); a path out of it, a link out, not an image or a video, or a missing file sends nothing.
 #  3. the base trashed: its presets read "Needs its base scene" and the WebSocket says `library-synced`; Undo makes them
 #     playable again (playing them: the adapter IT § presets).
 # Runs in its own network namespace (`unshare -rn`) with a temp HOME + XDG dirs and a private backend whose Steam servers
@@ -423,6 +424,37 @@ check "the player's map: each preset's own images as real paths, the toggles its
 check "a value for an image slot can't be set on the card (no file picker): 400, the preset's image stays" \
   "$(setp "$F1" custom "\"$T/elsewhere/out.png\"") $(sp workshop 3583880694) $(prop "$F1" custom '.default')" \
   "400 null \"$(real "$F1/files/eeeeee.png")\""
+
+echo "== 2. preset videos: a video file in an image slot goes to the player as its real path, like an image"
+# fixture 2843309472 (Wallpaper Engine's own preset file) puts `files/All DBZ Toonami Intros [HD].mp4` in its base
+# 2388299037's `newproperty` slot, shown while `game` is 10; the base here is a synthetic stand-in with those two, and
+# the video (194 MiB in the real item) a second made here
+VB=$LIB/workshop/2388299037
+mk_base "$VB" "Video base"
+jq '.general.properties += {game: {order: 3, text: "Game", type: "combo", value: "1",
+    options: [{label: "One", value: "1"}, {label: "Ten", value: "10"}]},
+  newproperty: {order: 104, text: "Custom Video", type: "scenetexture", value: "", condition: "game.value ==10"}}' \
+  "$VB/project.json" > "$VB/p.tmp" && mv "$VB/p.tmp" "$VB/project.json"
+idx workshop '.["2388299037"] = {title: "Video base", workshopId: "2388299037", isScene: true}'
+FV=$LIB/workshop/2843309472
+VID="$FV/files/$(jq -r '.preset.newproperty | ltrimstr("files/")' "$FV/project.json")"
+mkdir -p "$FV/files"
+ffmpeg -v error -f lavfi -i color=c=red:s=64x36:r=10 -t 1 -c:v mpeg4 -y "$VID" || bad "ffmpeg couldn't make the preset's video"
+check "fixture 2843309472 plays over it; its video slot's default is the video's real path, its combo the preset's" \
+  "$(pf "$FV" '[.presetReason, .basePath]') $(prop "$FV" newproperty '.default') $(prop "$FV" game '[.default, .visible]')" \
+  "[null,\"$VB\"] \"$(real "$VID")\" [\"10\",true]"
+# a video the preset doesn't own, and one that isn't there: nothing sent, the base's own texture stays
+cp "$VID" "$T/elsewhere/out.mp4"
+VESC=$LIB/workshop/910000504
+mk_preset "$VESC" '"2388299037"' "Video escapes" '{"game":"10","newproperty":"files/out.mp4"}' ""
+mkdir -p "$VESC/files"; ln -s "$T/elsewhere/out.mp4" "$VESC/files/out.mp4"
+VGONE=$LIB/workshop/910000505
+mk_preset "$VGONE" '"2388299037"' "Missing video" '{"game":"10","newproperty":"files/none.mp4"}' ""
+: > "$T/loudness-calls"
+estimate "$FV" "$VESC" "$VGONE"
+check "the player's map: the preset's video as its real path beside its other values; a link out or a missing video sends nothing" \
+  "$(grep -F "$VB " "$T/loudness-calls" | cut -d' ' -f2- | jq -c '[.newproperty, .game]' | sort | tr '\n' ' ')" \
+  "$(printf '%s\n' "$(jq -nc --arg v "$(real "$VID")" '[$v, "10"]')" '[null,"10"]' '[null,"10"]' | sort | tr '\n' ' ')"
 stopbe
 
 # ---- 3. the base trashed (no player: the library's side) ----------------------------------------------------------------

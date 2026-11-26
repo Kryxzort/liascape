@@ -41,10 +41,11 @@ and `patches/lwe/tests/host_api_test.cpp` stays C++.
   deterministic. The offline estimate models the same rules ([scene-loudness.md](scene-loudness.md)).
 - **Video textures** decode with FFmpeg (a `wp-video` thread each, no audio) into their texture through one
   YUV → RGB draw (`GLPlayer`). They play on the scene clock (the context's render time: the host's speed and pauses),
-  loop without a gap and keep IVideoTexture's controls. Decoding starts as the build creates the texture and a
-  player's first render waits ≤ 500 ms for its first frame, so the first picture shows the videos. The worker gives
-  the core the compositor's interop (`hwdec_interop_for`) and `hwdec` list (`mpv_hwdec`), or `no` with copy modes
-  (`wp_context_set_video_hwdec`); the core opens only the devices the list leads to, once per process: CUDA on the
+  loop without a gap and keep IVideoTexture's controls. A pass plays the videos in its slots (the scene, each image's
+  own); a video file's path in a slot streams that file (MP4 or Matroska only). Decoding starts as the build creates
+  the texture and a player's first render waits ≤ 500 ms for its first frame, so the first picture shows the videos.
+  The worker gives the core the compositor's interop (`hwdec_interop_for`) and `hwdec` list (`mpv_hwdec`), or `no`
+  with copy modes (`wp_context_set_video_hwdec`); the core opens only the devices the list leads to, once per process: CUDA on the
   GPU's primary context, shared by every video. With the `cuda` interop a CUDA frame reaches the plane textures on the
   GPU (`cuGraphicsGLRegisterImage`, libcuda by soname: the worker loads it first, `cuInit` beside the build); other
   hardware frames go through memory, a stream the hardware refuses decodes in software. 3426575339 (two 1080p
@@ -130,9 +131,8 @@ characters on a line where Consolas fits 21), so the worker adds, before the bui
 Comic Neue, so an installed original still wins), and each folder of `LIASCAPE_SCENE_FONT_DIRS` as an application font
 dir (the flake's wrapper names its font packages; a distro install has them system-wide). Both live in the worker's own
 fontconfig configuration only: no other app sees them, and a spare worker started earlier carries the same ones (they
-come with the binary and the compositor's environment). fontconfig is looked up with `dlsym`, never linked (it is the
-core's dependency). Only a scene with a text object starts fontconfig (`render::SceneText`, from its `scene.json`): building
-the configuration takes about 0.17 s, which the core's own text setup would pay at that point anyway, and a scene without
+come with the binary and the compositor's environment). Only a scene with a text object starts fontconfig (`render::SceneText`, from its `scene.json`): building
+the configuration takes about 0.17 s, and a scene without
 text never touches fontconfig or its cache.
 
 After the build the worker asks fontconfig the same question for each system font the scene's text objects name
@@ -152,8 +152,7 @@ what it added (`fonts: aliases added; …`) and each stand-in (`fonts: Consolas 
   On, the core appends JSON lines naming what a scene silently loses — dropped objects and effects, shader errors
   attributed to their layer/effect/shader, missing assets, script errors with their source line, unsupported
   features, and every layer's on-canvas box at frames 1 and 31. `src/player/tests/onmachine/scene_health.sh` runs
-  `--lwe-smoke` over every library scene and ranks them by canvas share lost, tallying causes by signature so fixes
-  batch; report in `docs/player/reports/scene-health.md`.
+  `--lwe-smoke` over every library scene and ranks them by canvas share lost; report in `docs/player/reports/scene-health.md`.
 - **Corpus** (`src/player/tests/onmachine/scene_corpus.sh`): plays every library scene on a private headless player
   with no preview (a crash can't pass for a picture) and classifies it (`load_failed`, `renderer_failed`, `broken`,
   `timeout`, `crashed`, `blank`, `static`, `ok`) from captures at Ready +1 s, +2.3 s and +4 s (the off-grid middle

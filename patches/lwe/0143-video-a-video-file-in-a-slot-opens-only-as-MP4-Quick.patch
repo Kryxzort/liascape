@@ -1,0 +1,213 @@
+From c18727cce7ceff53ab8da83089e9f7a60e7346b0 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 15:30:40 +0530
+Subject: [PATCH 143/143] video: a video file in a slot opens only as MP4,
+ QuickTime, Matroska or WebM
+
+A host's video file in a texture slot (a Wallpaper Engine preset's own `files/<name>.mp4`, from someone else's Workshop
+item) went to avformat_open_input with every demuxer and protocol FFmpeg has: FFmpeg picks a demuxer by the bytes, not
+the name, so a file named .mp4 could open as any format FFmpeg reads, a playlist among them, which opens further files
+and URLs of its own.
+
+The probe in RenderContext (videoFileTexture) and the player's decoder now open such a file only with the demuxers its
+extensions name (GLPlayer::kFileFormats: mov/mp4 and matroska/webm, FFmpeg's `format_whitelist`) and the `file`
+protocol alone (`protocol_whitelist`). Anything else throws AssetLoadException "Not an MP4, QuickTime, Matroska or WebM
+video file", so the slot keeps its texture and the health report says why. A video texture inside a scene (its bytes
+from the scene's own containers) and a video wallpaper open as before.
+
+Tested by liascape's host_api_test usertexture_plays_a_video_file: a playable MPEG-4 stream muxed as MPEG-TS and named
+.mp4 keeps the slot's white with that health line, and the same stream muxed as MP4 plays its grey; red on d4d351b
+(the MPEG-TS stream took the slot: 214 214 214).
+
+Origin: ours
+Why: liascape docs/TODO.md #112 (a preset's video in a scene's texture slot plays)
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5, effort high <noreply@anthropic.com>
+---
+ src/core/WallpaperEngine/Render/CTexture.cpp  |  2 ++
+ .../WallpaperEngine/Render/RenderContext.cpp  | 22 ++++++++++++++-----
+ .../VideoPlayback/GLPlayer.cpp                |  4 +++-
+ .../WallpaperEngine/VideoPlayback/GLPlayer.h  | 11 ++++++++++
+ .../VideoPlayback/VideoDecoder.cpp            | 15 ++++++++++---
+ .../VideoPlayback/VideoDecoder.h              |  8 +++++--
+ 6 files changed, 50 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/CTexture.cpp b/src/core/WallpaperEngine/Render/CTexture.cpp
+index 71210df..1f4f007 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.cpp
++++ b/src/core/WallpaperEngine/Render/CTexture.cpp
+@@ -125,6 +125,8 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header, const bool
+ 	    );
+ 	    // the header's size was checked (RenderContext), the frames' can still grow or stretch past it
+ 	    this->m_player->setFrameCaps (GLPlayer::kFileMaxSide, GLPlayer::kFileMaxPixels);
++	    // and it opens only as the container its name says, as RenderContext checked it
++	    this->m_player->setFormats (GLPlayer::kFileFormats);
+ 	} else {
+ 	    this->m_player = std::make_unique<GLPlayer> (
+ 		this->getContext (), this->m_textureID[0],
+diff --git a/src/core/WallpaperEngine/Render/RenderContext.cpp b/src/core/WallpaperEngine/Render/RenderContext.cpp
+index d9c1ab2..b9c699b 100644
+--- a/src/core/WallpaperEngine/Render/RenderContext.cpp
++++ b/src/core/WallpaperEngine/Render/RenderContext.cpp
+@@ -163,9 +163,10 @@ bool isVideoFile (const std::string& name) {
+  * video texture inside a scene plays. GLPlayer streams the file, so it is never read whole and no byte cap applies (a
+  * preset's video runs to hundreds of MiB); a decoder holds several frames, so its size is capped below an image's:
+  * GLPlayer::kFileMaxSide a side, GLPlayer::kFileMaxPixels (8K UHD). Its container is opened and its video stream's
+- * coded size read here: a file that can't be read, has no video stream or is past a cap throws AssetLoadException,
+- * which every caller reports and survives by keeping the slot's own texture. A frame that grows or stretches past them
+- * later is not shown (GLPlayer::setFrameCaps).
++ * coded size read here, only as one of the containers its extension names (GLPlayer::kFileFormats, from this file
++ * alone, as the player opens it too): a file that can't be read, opens as anything else, has no video stream or is
++ * past a cap throws AssetLoadException, which every caller reports and survives by keeping the slot's own texture. A
++ * frame that grows or stretches past them later is not shown (GLPlayer::setFrameCaps).
+  */
+ TextureUniquePtr videoFileTexture (const std::string& path) {
+     if (!std::filesystem::is_regular_file (path)) {
+@@ -178,9 +179,19 @@ TextureUniquePtr videoFileTexture (const std::string& path) {
+ 	    "Not a video file", path, std::make_error_code (std::errc::invalid_argument)
+ 	);
+     };
++    using WallpaperEngine::VideoPlayback::GLPlayer;
++    // FFmpeg picks a demuxer by the bytes, whatever the name: a file named .mp4 opens only as MP4 / QuickTime or
++    // Matroska / WebM (GLPlayer::kFileFormats), from this file alone, never as a playlist that reads other files
++    AVDictionary* options = nullptr;
++    av_dict_set (&options, "format_whitelist", GLPlayer::kFileFormats, 0);
++    av_dict_set (&options, "protocol_whitelist", "file", 0);
+     AVFormatContext* format = nullptr;
+-    if (avformat_open_input (&format, path.c_str (), nullptr, nullptr) < 0) {
+-	throw notVideo ();
++    const int opened = avformat_open_input (&format, path.c_str (), nullptr, &options);
++    av_dict_free (&options);
++    if (opened < 0) {
++	throw WallpaperEngine::Assets::AssetLoadException (
++	    "Not an MP4, QuickTime, Matroska or WebM video file", path, std::make_error_code (std::errc::invalid_argument)
++	);
+     }
+     const std::unique_ptr<AVFormatContext*, void (*) (AVFormatContext**)> close (&format, avformat_close_input);
+     if (avformat_find_stream_info (format, nullptr) < 0) {
+@@ -195,7 +206,6 @@ TextureUniquePtr videoFileTexture (const std::string& path) {
+     if (width <= 0 || height <= 0) {
+ 	throw notVideo ();
+     }
+-    using WallpaperEngine::VideoPlayback::GLPlayer;
+     if (width > GLPlayer::kFileMaxSide || height > GLPlayer::kFileMaxSide) {
+ 	throw WallpaperEngine::Assets::AssetLoadException (
+ 	    "Video over 8192 px a side", path, std::make_error_code (std::errc::value_too_large)
+diff --git a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+index 55db271..e120a02 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+@@ -340,7 +340,7 @@ void GLPlayer::startDecoder () {
+     const auto& context = this->getContext ().getContext ();
+     HwdecChoice choice = HwdecChoice::parse (context.video_hwdec, context.video_hwdec_interop);
+     this->m_decoder = this->m_file.has_value ()
+-			? std::make_unique<VideoDecoder> (*this->m_file, std::move (choice))
++			? std::make_unique<VideoDecoder> (*this->m_file, std::move (choice), this->m_formats)
+ 			: std::make_unique<VideoDecoder> (this->m_data, this->m_size, std::move (choice));
+     this->m_decoder->setLoop (this->m_loop);
+     this->m_playedAt = std::chrono::steady_clock::now ();
+@@ -458,6 +458,8 @@ void GLPlayer::setFrameCaps (const int maxSide, const std::uint64_t maxPixels) {
+     this->m_maxPixels = maxPixels;
+ }
+ 
++void GLPlayer::setFormats (std::string formats) { this->m_formats = std::move (formats); }
++
+ bool GLPlayer::show (AVFrame* frame) {
+     if (this->m_maxSide > 0) {
+ 	const int displayed = displayWidth (frame);
+diff --git a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+index c923087..cef0345 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
++++ b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+@@ -26,6 +26,11 @@ public:
+     /** the most a host's video file in a texture slot decodes to: 8192 px a side, 8K UHD's pixels */
+     static constexpr int kFileMaxSide = 8192;
+     static constexpr std::uint64_t kFileMaxPixels = std::uint64_t (7680) * 4320;
++    /**
++     * the demuxers a host's video file in a texture slot may open with (FFmpeg's names): MP4 / QuickTime and Matroska /
++     * WebM, the containers its extensions name (RenderContext's `isVideoFile`)
++     */
++    static constexpr const char* kFileFormats = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm";
+ 
+     /** plays `file` */
+     GLPlayer (
+@@ -55,6 +60,11 @@ public:
+      * (a stream can grow mid-way, a sample aspect can stretch it). 0 = no caps
+      */
+     void setFrameCaps (int maxSide, std::uint64_t maxPixels);
++    /**
++     * Opens the file only with the demuxers `formats` names (FFmpeg's names, comma-separated) and the `file` protocol;
++     * call before the decoder starts (prefetch). Empty = any
++     */
++    void setFormats (std::string formats);
+ 
+     void setPaused ();
+     void clearPaused ();
+@@ -140,6 +150,7 @@ private:
+     const uint8_t* m_data = nullptr;
+     size_t m_size = 0;
+     std::optional<std::filesystem::path> m_file;
++    std::string m_formats;
+     std::unique_ptr<VideoDecoder> m_decoder;
+     uint32_t m_usageCount = 0;
+ 
+diff --git a/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp
+index 09b69bf..add7588 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.cpp
+@@ -120,8 +120,8 @@ VideoDecoder::VideoDecoder (const uint8_t* data, size_t size, HwdecChoice choice
+     this->start ();
+ }
+ 
+-VideoDecoder::VideoDecoder (std::filesystem::path file, HwdecChoice choice) :
+-    m_file (std::move (file)), m_choice (std::move (choice)) {
++VideoDecoder::VideoDecoder (std::filesystem::path file, HwdecChoice choice, std::string formats) :
++    m_file (std::move (file)), m_formats (std::move (formats)), m_choice (std::move (choice)) {
+     this->start ();
+ }
+ 
+@@ -229,7 +229,16 @@ bool VideoDecoder::open () {
+ 	this->m_format->pb = this->m_io;
+ 	this->m_format->flags |= AVFMT_FLAG_CUSTOM_IO;
+     }
+-    const int opened = avformat_open_input (&this->m_format, this->m_data ? nullptr : this->m_file.c_str (), nullptr, nullptr);
++    // FFmpeg picks a demuxer by the bytes, whatever the name: a host's file of someone else's opens only as what it
++    // claims to be, never as a playlist that reads other files
++    AVDictionary* options = nullptr;
++    if (this->m_data == nullptr && !this->m_formats.empty ()) {
++	av_dict_set (&options, "format_whitelist", this->m_formats.c_str (), 0);
++	av_dict_set (&options, "protocol_whitelist", "file", 0);
++    }
++    const int opened =
++	avformat_open_input (&this->m_format, this->m_data ? nullptr : this->m_file.c_str (), nullptr, &options);
++    av_dict_free (&options);
+     if (opened < 0) {
+ 	this->say ("video: cannot open the video: " + error (opened));
+ 	return false;
+diff --git a/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h
+index a9c35ac..ed88361 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h
++++ b/src/core/WallpaperEngine/VideoPlayback/VideoDecoder.h
+@@ -44,9 +44,12 @@ struct HwdecChoice {
+  */
+ class VideoDecoder {
+ public:
+-    /** decodes `size` bytes at `data` (kept alive by the caller for the decoder's life) or `file` */
++    /**
++     * decodes `size` bytes at `data` (kept alive by the caller for the decoder's life) or `file`; a file opens only with
++     * the demuxers `formats` names (FFmpeg's names, comma-separated) and the `file` protocol when it isn't empty
++     */
+     VideoDecoder (const uint8_t* data, size_t size, HwdecChoice choice);
+-    VideoDecoder (std::filesystem::path file, HwdecChoice choice);
++    VideoDecoder (std::filesystem::path file, HwdecChoice choice, std::string formats = {});
+     ~VideoDecoder ();
+ 
+     VideoDecoder (const VideoDecoder&) = delete;
+@@ -95,6 +98,7 @@ private:
+     size_t m_size = 0;
+     size_t m_position = 0;
+     std::filesystem::path m_file;
++    std::string m_formats;
+     HwdecChoice m_choice;
+ 
+     AVFormatContext* m_format = nullptr;

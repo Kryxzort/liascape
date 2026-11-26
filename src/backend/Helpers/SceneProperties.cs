@@ -45,8 +45,8 @@ public sealed record SceneProp
     public bool Fraction { get; init; } = true;
     public int? Precision { get; init; }
     public List<SceneComboOption>? Options { get; init; }
-    // a scenetexture whose Default is a preset's own image (`WithPreset`: confined to the preset's folder): the only
-    // file path PlayerMap ever sends; a scene's own default naming a file is never sent
+    // a scenetexture whose Default is a preset's own image or video (`WithPreset`: confined to the preset's folder):
+    // the only file path PlayerMap ever sends; a scene's own default naming a file is never sent
     [System.Text.Json.Serialization.JsonIgnore] public bool PresetImage { get; init; }
 }
 
@@ -101,13 +101,14 @@ public static class SceneProperties
         return props;
     }
 
-    // A preset's values over its base scene's properties (pure but for `PresetImage`'s file checks). An editable property
-    // the preset names takes the preset's value as its Default (SceneDefault keeps the scene's), when the value has the
-    // JSON type WE saves that property type in and `Coerce` accepts it (a slider clamped to its range). A scenetexture
-    // takes the preset's own image (`PresetImage` in `presetDir`) as an absolute path. Each other value drops alone and
-    // the base's default stays: a name the base no longer has, WE's own settings (`_d0`, `alignment*`, `rate`, `wec_*`),
-    // a property whose type changed, a combo option gone. The list is the base's, in its order; `sceneProps` (ForItem's
-    // cached copy, the base card's too) is never changed. Guard: player-selftest PresetLayerAssertions, PresetImageAssertions
+    // A preset's values over its base scene's properties (pure but for `PresetImage`'s file checks). An editable
+    // property the preset names takes the preset's value as its Default (SceneDefault keeps the scene's), when the
+    // value has the JSON type WE saves that property type in and `Coerce` accepts it (a slider clamped to its range). A
+    // scenetexture takes the preset's own image or video (`PresetImage` in `presetDir`) as an absolute path. Each other
+    // value drops alone and the base's default stays: a name the base no longer has, WE's own settings (`_d0`,
+    // `alignment*`, `rate`, `wec_*`), a property whose type changed, a combo option gone. The list is the base's, in
+    // its order; `sceneProps` (ForItem's cached copy, the base card's too) is never changed.
+    // Guard: player-selftest PresetLayerAssertions, PresetImageAssertions
     public static List<SceneProp> WithPreset(IReadOnlyList<SceneProp> sceneProps, IReadOnlyDictionary<string, JsonElement> presetValues,
         string? presetDir = null)
     {
@@ -123,39 +124,47 @@ public static class SceneProperties
         return list;
     }
 
-    // What the LWE core decodes as an image when a scenetexture is set to a file (stb_image; a GIF's first frame).
+    // What the LWE core loads into a slot when a scenetexture is set to a file: an image (stb_image; a GIF's first
+    // frame) or a video (FFmpeg, streamed from the file, looped on the scene's clock, silent as WE's video textures
+    // are). Keep both lists equal to the core's (RenderContext.cpp `imageFileFormat`, `isVideoFile`).
     private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp", ".tga", ".gif"];
+    private static readonly string[] VideoExtensions = [".mp4", ".m4v", ".webm", ".mkv", ".mov"];
 
     // A preset's scenetexture value (`files/<name>`, WE's path relative to the PRESET folder, never the base's) → the
-    // image's real absolute path, or null. The value comes from someone else's Workshop item and the path goes to the
-    // core as a file to read, so only a relative '/' path with no `..` naming an existing image file whose real path
-    // (links resolved) stays inside the preset's real folder is taken; anything else keeps the base's own texture.
-    // Guard: player-selftest PresetImageAssertions, scripts/test-presets.sh § 2 preset images
+    // image's or video's real absolute path, or null. The value comes from someone else's Workshop item and the path
+    // goes to the core as a file to read, so only a relative '/' path with no `..` naming an existing image or video
+    // file whose real path (links resolved) stays inside the preset's real folder is taken; anything else keeps the
+    // base's own texture. Its size is the core's to cap (an image's bytes and pixels, a video's side and pixels: the
+    // core streams a video, and a preset's runs to hundreds of MiB).
+    // Guard: player-selftest PresetImageAssertions, scripts/test-presets.sh § 2 preset images, preset videos
     internal static string? PresetImage(string presetDir, JsonElement v) => PresetImage(presetDir, v, out _);
 
-    // …and why one isn't taken (null for "" — the preset keeps the base's texture on purpose)
-    private static string? PresetImage(string presetDir, JsonElement v, out string? why)
+    // …and why one isn't taken (null for "" — the preset keeps the base's texture on purpose): the adapter's log line
+    // (`DroppedPresetImages`). Guard: player-selftest PresetImageAssertions "why"
+    internal static string? PresetImage(string presetDir, JsonElement v, out string? why)
     {
         why = null;
         if (v.ValueKind != JsonValueKind.String) { why = "not a file name"; return null; }
         if (v.GetString() is not { Length: > 0 } rel) return null;
         why = "outside the preset's folder";
         if (rel[0] == '/' || rel.Contains('\\') || rel.Contains('\0') || rel.Split('/').Contains("..")) return null;
-        why = "not an image";
-        if (!ImageExtensions.Contains(Path.GetExtension(rel).ToLowerInvariant())) return null;
+        why = "not an image or a video";
+        var ext = Path.GetExtension(rel).ToLowerInvariant();
+        if (!ImageExtensions.Contains(ext) && !VideoExtensions.Contains(ext)) return null;
         why = "missing";
         if (Liascape.Web.ApiSecurity.RealPath(presetDir) is not { } root
             || Liascape.Web.ApiSecurity.RealPath(Path.Combine(presetDir, rel)) is not { } file) return null;
         why = "outside the preset's folder";
         if (!file.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal)) return null;
-        why = "not an image file";
+        why = "not a file";
         if (!File.Exists(file)) return null;
         why = null;
         return file;
     }
 
-    // A playable preset's image values its base's slots won't show (each slot keeps the base's own texture), with why:
-    // the adapter logs them when the preset plays — the rest of the preset still plays, so it isn't greyed out.
+    // A playable preset's image / video values its base's slots won't show (each slot keeps the base's own texture),
+    // with why: the adapter logs them when the preset plays — the rest of the preset still plays, so it isn't greyed
+    // out.
     // Guard: adapter IT § presets "a preset image that doesn't load is in the adapter log"
     public static List<(string Name, string Value, string Why)> DroppedPresetImages(string presetDir)
     {
@@ -367,8 +376,9 @@ public static class SceneProperties
         var m = new SortedDictionary<string, object?>(StringComparer.Ordinal);
         foreach (var p in props)
         {
-            // a preset's own image for a scenetexture slot (its absolute path, `WithPreset`); the scene's own default is
-            // never sent, even one naming a file that exists. Re-checked here: the cached merge doesn't see the file go
+            // a preset's own image or video for a scenetexture slot (its absolute path, `WithPreset`); the scene's own
+            // default is never sent, even one naming a file that exists. The file is checked again here: the cached
+            // merge doesn't see it go
             if (p.Type == "scenetexture")
             {
                 if (p.PresetImage && Str(p.Default) is { } image && File.Exists(image)) m[p.Name] = image;

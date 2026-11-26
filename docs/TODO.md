@@ -25,14 +25,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        crash WE under Proton. Also record each scene's GPU memory while it plays (Task Manager → Details, the
        "Dedicated GPU memory" column for `wallpaper64.exe`, or `nvidia-smi`), with 2921510865 among them (3.6 GB in
        liascape-player, the heaviest seen), to compare with the player's `vram` probe per scene. And, if convenient,
-       play preset 2843309472 with its Volume up: its slot video should stay silent (#112 assumes WE never plays a
-       video texture's sound).
-112. [ ] A preset's video in a scene's texture slot plays: Workshop presets can put a video file (`files/<name>.mp4`)
-       where their base scene has an image slot, and Wallpaper Engine plays it there. Today the slot keeps the base's
-       texture and the adapter logs "is not an image" (seen on Workshop preset 2843309472). The scene renderer
-       already decodes scene video textures with FFmpeg: let a slot set to a video file's path (inside the preset's
-       folder, size-capped like images) play that video, looped and muted unless the scene's own audio says otherwise;
-       guard it in `host_api_test` and `scripts/test-presets.sh`.
+       play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
+       silent, assuming WE never plays a video texture's sound).
 
 115. [ ] Favourite and comment through Steam where Liascape has no Steam login: the sidebar's star and comment box
        become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and Liascape

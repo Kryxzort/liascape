@@ -1,7 +1,7 @@
 From 0011f3dffba812f574cb5f0f1ea9b123cabec7f5 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 10:18:58 +0530
-Subject: [PATCH 141/141] render: an image file over 64 Mpx keeps the slot's
+Subject: [PATCH 141/143] render: an image file over 64 Mpx keeps the slot's
  texture, and none is read past the cap
 
 The per-side cap still let an image decode to 16384 x 16384 = 268 Mpx, 1 GiB as RGBA8 in the worker and again as a GL

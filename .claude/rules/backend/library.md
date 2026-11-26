@@ -73,11 +73,12 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
   noise kept, `0.89999998`), `color` `"r g b"` 0–1, `combo` the option's value string, `textinput` a string.
 - A `scenetexture` value is `"files/<name>"`, relative to the preset folder (its `files/`), or `""`; resolve it
   against the preset folder, never the base's. `files/` holds only what those values name; it overlays no base file.
-  PNG, JPEG or GIF. `WithPreset` takes it only as a relative path with no `..` to an image file whose real path is
-  inside the preset's real folder, and `PlayerMap` sends that absolute path (the core loads it into the slot) and no
-  other file path (`SceneProp.PresetImage`: a scene's own default naming a file is never sent); anything else sends
-  nothing (the base's texture). Guards: player-selftest `PresetImageAssertions`, `scripts/test-presets.sh`
-  § 2 preset images.
+  PNG, JPEG or GIF, or a video (an MP4 where the base has an image slot: WE plays it there, e.g. 2843309472).
+  `WithPreset` takes it only as a relative path with no `..` to an image or video file (`ImageExtensions`,
+  `VideoExtensions`: the core's lists) whose real path is inside the preset's real folder, and `PlayerMap` sends that
+  absolute path (the core loads it into the slot; its size caps are the core's) and no other file path
+  (`SceneProp.PresetImage`: a scene's own default naming a file is never sent); anything else sends nothing (the base's
+  texture). Guards: player-selftest `PresetImageAssertions`, `scripts/test-presets.sh` § 2 preset images, preset videos.
 - `preset` also carries WE's own per-wallpaper settings that are not scene properties: `_d0` (`null`), `alignment*`,
   `rate`, `wec_*` (colour correction), and when the base supports them `audioprocessing`, `cameraparallax`, `volume`,
   `wcc_*`. A base property the preset lacks (saved against an older base) keeps the base's value.

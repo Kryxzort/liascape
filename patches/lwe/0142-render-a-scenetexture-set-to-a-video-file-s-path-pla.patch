@@ -1,0 +1,410 @@
+From d4d351b55118de49f8ab6c204121e9f8dddbcd4b Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 17:50:18 +0530
+Subject: [PATCH 142/143] render: a scenetexture set to a video file's path
+ plays that video
+
+A Wallpaper Engine preset can put a video of its own (`files/<name>.mp4`) where its base scene has an image slot, and
+WE plays it there (Workshop preset 2843309472: a 194 MiB, 17-minute H.264 clip in its base 2388299037's
+`newproperty` slot, whose project says `supportsvideo`). The core took only an image file's path (0139), so the
+slot kept its texture.
+
+RenderContext::resolveTexture now takes a name that is an absolute path ending in .mp4, .m4v, .webm, .mkv or .mov as
+a video file: libavformat opens it and reads its video stream's coded size, and it becomes a video texture of that size
+(TEXB0004, FIF_MP4, the file's path in Texture::videoFile) that GLPlayer streams from the file, as CVideo plays a
+video wallpaper: silent, looped, on the scene's clock, like a video texture inside a scene. The file is never read
+whole, so no byte cap applies (the preset's video is three times the image cap). A decoder holds several frames plus
+references and hardware surfaces, so a video is capped below an image: 8192 px a side and 7680 x 4320 px (8K UHD,
+GLPlayer::kFileMaxSide / kFileMaxPixels). A file that is missing, has no video stream or whose header is past a cap
+throws AssetLoadException, which every caller reports and survives by keeping the slot's texture. The header is no
+promise (a stream's size can change mid-way, a sample aspect stretches the output), so GLPlayer::setFrameCaps refuses
+every frame over the caps as decoded or as displayed: the last good frame stays (blank before one), logged once.
+
+A video texture also plays in any pass slot now: CPass counts every video texture its slots hold (other than its
+image's own, which the scene already plays) as used for the pass's life and advances it each time the pass draws.
+Before, only an image's own texture was ever started and updated, so a video in a usertexture slot, or a material's
+video for a slot past its first, decoded its first frame at most and never drew it.
+
+Tested by liascape's host_api_test usertexture_plays_a_video_file: kFourColoursMp4 as a file in the slot shows red at
+0.1 s, blue at 0.6 s and red again at 1.1 s (looped); a missing .mp4 and a text file named .mp4 keep the slot's
+texture; Matroska rawvideo files whose header says 8194 x 2 or 7682 x 4320 are refused with a health line naming the
+cap, 8192 x 2 plays its grey; an MPEG-4 file 4096 x 16 with 4:1 samples (16384 wide as displayed) passes the header
+and shows no frame (its grey without setFrameCaps). Without the CPass change the slot stayed the clear colour.
+
+Origin: ours
+Why: liascape docs/TODO.md #112 (a preset's video in a scene's texture slot plays)
+Status: candidate-for-upstream
+Claude-Agent: claude-opus-5-5, effort high, preset video slots (#112)
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Data/Assets/Texture.h     |  3 +
+ src/core/WallpaperEngine/Render/CTexture.cpp  | 21 ++++-
+ .../Render/Objects/Effects/CPass.cpp          | 25 +++++
+ .../Render/Objects/Effects/CPass.h            |  5 +
+ .../WallpaperEngine/Render/RenderContext.cpp  | 94 +++++++++++++++++++
+ .../VideoPlayback/GLPlayer.cpp                | 42 +++++++--
+ .../WallpaperEngine/VideoPlayback/GLPlayer.h  | 16 ++++
+ 7 files changed, 194 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Data/Assets/Texture.h b/src/core/WallpaperEngine/Data/Assets/Texture.h
+index 1e81275..8dcec4a 100644
+--- a/src/core/WallpaperEngine/Data/Assets/Texture.h
++++ b/src/core/WallpaperEngine/Data/Assets/Texture.h
+@@ -158,6 +158,9 @@ struct Texture {
+     FIF freeImageFormat = FIF_UNKNOWN;
+     /** Indicates if we have an MP4 video */
+     bool isVideoMp4 = false;
++    /** a video played from this file (a host's video file in a slot; its mipmap only gives its size), empty when the
++     * video's bytes are the mipmap's */
++    std::string videoFile {};
+     /** The amount of images in the texture file */
+     uint32_t imageCount = 0;
+     /** List of mipmaps */
+diff --git a/src/core/WallpaperEngine/Render/CTexture.cpp b/src/core/WallpaperEngine/Render/CTexture.cpp
+index 9f99c42..71210df 100644
+--- a/src/core/WallpaperEngine/Render/CTexture.cpp
++++ b/src/core/WallpaperEngine/Render/CTexture.cpp
+@@ -116,11 +116,22 @@ CTexture::CTexture (RenderContext& context, TextureUniquePtr header, const bool
+ 
+ 	const auto mipmap = *this->m_header->images.begin ()->second.begin ();
+ 
+-	// the header keeps the video's bytes for the texture's life; a video texture plays silent, on the scene's clock
+-	this->m_player = std::make_unique<GLPlayer> (
+-	    this->getContext (), this->m_textureID[0], reinterpret_cast<const uint8_t*> (mipmap->uncompressedData.get ()),
+-	    mipmap->uncompressedSize, this->m_header->textureWidth, this->m_header->textureHeight
+-	);
++	// the header keeps the video's bytes for the texture's life (a video file streams from the file); a video
++	// texture plays silent, looped, on the scene's clock
++	if (!this->m_header->videoFile.empty ()) {
++	    this->m_player = std::make_unique<GLPlayer> (
++		this->getContext (), this->m_textureID[0], std::filesystem::path (this->m_header->videoFile),
++		this->m_header->textureWidth, this->m_header->textureHeight
++	    );
++	    // the header's size was checked (RenderContext), the frames' can still grow or stretch past it
++	    this->m_player->setFrameCaps (GLPlayer::kFileMaxSide, GLPlayer::kFileMaxPixels);
++	} else {
++	    this->m_player = std::make_unique<GLPlayer> (
++		this->getContext (), this->m_textureID[0],
++		reinterpret_cast<const uint8_t*> (mipmap->uncompressedData.get ()), mipmap->uncompressedSize,
++		this->m_header->textureWidth, this->m_header->textureHeight
++	    );
++	}
+ 	this->m_player->prefetch ();
+ 	// texture is ready, nothing else to do
+ 	return;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+index 70743ce..6858b08 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.cpp
+@@ -3,6 +3,8 @@
+ 
+ #include "WallpaperEngine/Context.h"
+ 
++#include <algorithm>
++#include <ranges>
+ #include <sstream>
+ #include <utility>
+ 
+@@ -62,6 +64,9 @@ CPass::CPass (
+ }
+ 
+ CPass::~CPass () {
++    for (const auto& video : this->m_videoTextures) {
++	video->decrementUsageCount ();
++    }
+     glDeleteVertexArrays (1, &m_vao);
+     this->m_vao = GL_NONE;
+ 
+@@ -555,6 +560,11 @@ void CPass::render () {
+ 	return;
+     }
+ 
++    // the videos in its slots show the frame due now (the scene does this for each image's own texture)
++    for (const auto& video : this->m_videoTextures) {
++	video->update ();
++    }
++
+     // set the VAO for now
+     glBindVertexArray (this->m_vao);
+ 
+@@ -1076,6 +1086,21 @@ void CPass::setupTextureUniforms () {
+     }
+ 
+     this->addUniform ("g_Texture0Resolution", &this->m_texture0Resolution);
++
++    // a video in a slot plays while the pass lives: the scene plays only each image's own texture, so a video anywhere
++    // else would never show a frame
++    for (const auto& chain : this->m_textures | std::views::values) {
++	for (auto entry = chain; entry != nullptr; entry = entry->next) {
++	    const auto& candidate = entry->texture;
++	    if (candidate == nullptr || candidate->getVideoPlayer () == nullptr
++		|| candidate == this->m_renderable.getTexture ()
++		|| std::ranges::find (this->m_videoTextures, candidate) != this->m_videoTextures.end ()) {
++		continue;
++	    }
++	    candidate->incrementUsageCount ();
++	    this->m_videoTextures.push_back (candidate);
++	}
++    }
+ }
+ 
+ void CPass::setupUniforms () {
+diff --git a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+index fe62967..b3d308b 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
++++ b/src/core/WallpaperEngine/Render/Objects/Effects/CPass.h
+@@ -227,6 +227,11 @@ private:
+      * Contains the final map of textures to be used
+      */
+     std::map<int, std::shared_ptr<TextureChainEntry>> m_textures = {};
++    /**
++     * The video textures the slots hold besides the image's own (a usertexture set to a video file, a video a material
++     * names for a slot): used while the pass lives and advanced each time it draws, as the scene plays an image's own
++     */
++    std::vector<std::shared_ptr<const TextureProvider>> m_videoTextures = {};
+ 
+     Render::Shaders::Shader* m_shader = nullptr;
+ 
+diff --git a/src/core/WallpaperEngine/Render/RenderContext.cpp b/src/core/WallpaperEngine/Render/RenderContext.cpp
+index da7ca44..d9c1ab2 100644
+--- a/src/core/WallpaperEngine/Render/RenderContext.cpp
++++ b/src/core/WallpaperEngine/Render/RenderContext.cpp
+@@ -12,6 +12,10 @@
+ 
+ #include <stb_image.h>
+ 
++extern "C" {
++#include <libavformat/avformat.h>
++}
++
+ #include <algorithm>
+ #include <array>
+ #include <cctype>
+@@ -139,6 +143,87 @@ TextureUniquePtr imageFileTexture (const std::string& path, FIF format) {
+     texture->images.emplace (0, MipmapList { mipmap });
+     return texture;
+ }
++
++/**
++ * A texture name the host set to a video file's absolute path (a WE preset's own `files/<name>.mp4` where its scene has
++ * an image slot: WE plays it there), false for any other name: the containers a preset ships that FFmpeg plays.
++ */
++bool isVideoFile (const std::string& name) {
++    if (name.empty () || name.front () != '/') {
++	return false;
++    }
++    std::string extension = std::filesystem::path (name).extension ().string ();
++    std::ranges::transform (extension, extension.begin (), [] (unsigned char c) { return std::tolower (c); });
++    return extension == ".mp4" || extension == ".m4v" || extension == ".webm" || extension == ".mkv"
++	|| extension == ".mov";
++}
++
++/**
++ * The video file as a video texture of its own size, played from the file silent, looped, on the scene's clock, as a
++ * video texture inside a scene plays. GLPlayer streams the file, so it is never read whole and no byte cap applies (a
++ * preset's video runs to hundreds of MiB); a decoder holds several frames, so its size is capped below an image's:
++ * GLPlayer::kFileMaxSide a side, GLPlayer::kFileMaxPixels (8K UHD). Its container is opened and its video stream's
++ * coded size read here: a file that can't be read, has no video stream or is past a cap throws AssetLoadException,
++ * which every caller reports and survives by keeping the slot's own texture. A frame that grows or stretches past them
++ * later is not shown (GLPlayer::setFrameCaps).
++ */
++TextureUniquePtr videoFileTexture (const std::string& path) {
++    if (!std::filesystem::is_regular_file (path)) {
++	throw WallpaperEngine::Assets::AssetLoadException (
++	    "Cannot read video file", path, std::make_error_code (std::errc::no_such_file_or_directory)
++	);
++    }
++    const auto notVideo = [&path] () {
++	return WallpaperEngine::Assets::AssetLoadException (
++	    "Not a video file", path, std::make_error_code (std::errc::invalid_argument)
++	);
++    };
++    AVFormatContext* format = nullptr;
++    if (avformat_open_input (&format, path.c_str (), nullptr, nullptr) < 0) {
++	throw notVideo ();
++    }
++    const std::unique_ptr<AVFormatContext*, void (*) (AVFormatContext**)> close (&format, avformat_close_input);
++    if (avformat_find_stream_info (format, nullptr) < 0) {
++	throw notVideo ();
++    }
++    const int stream = av_find_best_stream (format, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
++    if (stream < 0) {
++	throw notVideo ();
++    }
++    const int width = format->streams[stream]->codecpar->width;
++    const int height = format->streams[stream]->codecpar->height;
++    if (width <= 0 || height <= 0) {
++	throw notVideo ();
++    }
++    using WallpaperEngine::VideoPlayback::GLPlayer;
++    if (width > GLPlayer::kFileMaxSide || height > GLPlayer::kFileMaxSide) {
++	throw WallpaperEngine::Assets::AssetLoadException (
++	    "Video over 8192 px a side", path, std::make_error_code (std::errc::value_too_large)
++	);
++    }
++    if (static_cast<std::uint64_t> (width) * static_cast<std::uint64_t> (height) > GLPlayer::kFileMaxPixels) {
++	throw WallpaperEngine::Assets::AssetLoadException (
++	    "Video over 7680 x 4320 px", path, std::make_error_code (std::errc::value_too_large)
++	);
++    }
++
++    auto mipmap = std::make_shared<Mipmap> ();
++    mipmap->width = static_cast<uint32_t> (width);
++    mipmap->height = static_cast<uint32_t> (height);
++
++    auto texture = std::make_unique<Texture> ();
++    texture->containerVersion = ContainerVersion_TEXB0004;
++    texture->format = TextureFormat_ARGB8888;
++    texture->flags = TextureFlags_ClampUVs | TextureFlags_Video;
++    texture->freeImageFormat = FIF_MP4;
++    texture->isVideoMp4 = true;
++    texture->videoFile = path;
++    texture->width = texture->textureWidth = mipmap->width;
++    texture->height = texture->textureHeight = mipmap->height;
++    texture->imageCount = 1;
++    texture->images.emplace (0, MipmapList { mipmap });
++    return texture;
++}
+ } // namespace
+ 
+ namespace WallpaperEngine::Render {
+@@ -180,6 +265,15 @@ std::shared_ptr<const TextureProvider> RenderContext::resolveTexture (const std:
+ 	    }
+ 	    return texture;
+ 	}
++	if (isVideoFile (name)) {
++	    auto texture = std::make_shared<CTexture> (*this, videoFileTexture (name), this->m_deferTextureUploads);
++	    sLog.debug ("Playing video file ", name, " as a texture");
++	    this->m_textureCache.store (name, texture);
++	    if (this->m_deferTextureUploads) {
++		this->m_deferredTextures.push_back (texture);
++	    }
++	    return texture;
++	}
+ 
+ 	const auto& locator = this->getAssetLocator ();
+ 	const auto contents = locator.texture (name);
+diff --git a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+index bcc7552..55db271 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
++++ b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.cpp
+@@ -6,6 +6,7 @@
+ #include "WallpaperEngine/Logging/Log.h"
+ 
+ #include <algorithm>
++#include <climits>
+ #include <cmath>
+ 
+ // hwcontext_cuda.h wants cuda.h for two handle types; no build dependency ships cuda.h
+@@ -24,6 +25,16 @@ extern "C" {
+ using namespace WallpaperEngine::VideoPlayback;
+ 
+ namespace {
++/** a frame's display width: its own, stretched by a non-square sample aspect as mpv's dwidth (INT_MAX at most) */
++int displayWidth (const AVFrame* frame) {
++    const AVRational sar = frame->sample_aspect_ratio;
++    if (sar.num <= 0 || sar.den <= 0 || sar.num == sar.den) {
++	return frame->width;
++    }
++    const double width = std::round (frame->width * av_q2d (sar));
++    return width >= static_cast<double> (INT_MAX) ? INT_MAX : static_cast<int> (width);
++}
++
+ /**
+  * How long a player's first render waits for its first frame (decoding starts with the scene's build, so it is
+  * usually there): a scene's first picture then shows its videos instead of their empty textures
+@@ -442,7 +453,30 @@ void GLPlayer::render () {
+     }
+ }
+ 
++void GLPlayer::setFrameCaps (const int maxSide, const std::uint64_t maxPixels) {
++    this->m_maxSide = maxSide;
++    this->m_maxPixels = maxPixels;
++}
++
+ bool GLPlayer::show (AVFrame* frame) {
++    if (this->m_maxSide > 0) {
++	const int displayed = displayWidth (frame);
++	const auto over = [this] (int width, int height) {
++	    return width > this->m_maxSide || height > this->m_maxSide
++		|| static_cast<std::uint64_t> (width) * static_cast<std::uint64_t> (height) > this->m_maxPixels;
++	};
++	if (over (frame->width, frame->height) || over (displayed, frame->height)) {
++	    if (!this->m_saidOverCaps) {
++		this->m_saidOverCaps = true;
++		sLog.error (
++		    "video: a ", frame->width, "x", frame->height, " frame (", displayed,
++		    " wide as displayed) is over ", this->m_maxSide, " px a side or ", this->m_maxPixels,
++		    " px: not shown"
++		);
++	    }
++	    return false;
++	}
++    }
+     const SavedState saved;
+     AVFrame* copied = nullptr;
+     const AVFrame* source = frame;
+@@ -659,14 +693,8 @@ void GLPlayer::sizeOutput (int width, int height) {
+ 
+ void GLPlayer::convert (const AVFrame* frame) {
+     const Layout& layout = this->m_layout;
+-    // the display size: the frame's, stretched by a non-square sample aspect as mpv's dwidth
+-    int width = frame->width;
+-    if (frame->sample_aspect_ratio.num > 0 && frame->sample_aspect_ratio.den > 0
+-	&& frame->sample_aspect_ratio.num != frame->sample_aspect_ratio.den) {
+-	width = static_cast<int> (std::lround (width * av_q2d (frame->sample_aspect_ratio)));
+-    }
+     glActiveTexture (GL_TEXTURE0);
+-    this->sizeOutput (width, frame->height);
++    this->sizeOutput (displayWidth (frame), frame->height);
+ 
+     if (this->m_program == 0) {
+ 	const GLuint vertex = compile (GL_VERTEX_SHADER, kVertex);
+diff --git a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+index 2570b34..c923087 100644
+--- a/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
++++ b/src/core/WallpaperEngine/VideoPlayback/GLPlayer.h
+@@ -5,6 +5,7 @@
+ 
+ #include <array>
+ #include <chrono>
++#include <cstdint>
+ #include <filesystem>
+ #include <glad/glad.h>
+ #include <memory>
+@@ -22,6 +23,10 @@ namespace WallpaperEngine::VideoPlayback {
+  */
+ class GLPlayer : public Helpers::ContextAware {
+ public:
++    /** the most a host's video file in a texture slot decodes to: 8192 px a side, 8K UHD's pixels */
++    static constexpr int kFileMaxSide = 8192;
++    static constexpr std::uint64_t kFileMaxPixels = std::uint64_t (7680) * 4320;
++
+     /** plays `file` */
+     GLPlayer (
+ 	RenderContext& context, GLuint outputTexture, const std::filesystem::path& file, int64_t baseWidth,
+@@ -44,6 +49,13 @@ public:
+      */
+     void prefetch ();
+ 
++    /**
++     * Shows no frame over `maxSide` a side or `maxPixels`, as decoded or as displayed (stretched by its sample aspect):
++     * the last frame within them stays, and the texture stays blank before one. The container's header gives no promise
++     * (a stream can grow mid-way, a sample aspect can stretch it). 0 = no caps
++     */
++    void setFrameCaps (int maxSide, std::uint64_t maxPixels);
++
+     void setPaused ();
+     void clearPaused ();
+ 
+@@ -115,6 +127,10 @@ private:
+     void releaseCuda ();
+     void sizeOutput (int width, int height);
+ 
++    int m_maxSide = 0;
++    std::uint64_t m_maxPixels = 0;
++    bool m_saidOverCaps = false;
++
+     bool m_doWeOwnFramebuffer;
+     GLuint m_outputTexture;
+     GLuint m_fbo = GL_NONE;
