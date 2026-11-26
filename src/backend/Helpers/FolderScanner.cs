@@ -98,7 +98,7 @@ public static class FolderScanner
         known ??= Known.Load();
         if (File.Exists(root)) { if (Identify(root, known) is { } one) r.Items.Add(one); return r; }
         if (!Directory.Exists(root)) return r;
-        var libReal = Liascape.Web.ApiSecurity.RealPath(DownloadHelper.LibraryPath) ?? DownloadHelper.LibraryPath;
+        var libReal = Liascape.Web.ApiSecurity.RealPath(LibraryStore.Root) ?? LibraryStore.Root;
         var seenDirs = new HashSet<string>(StringComparer.Ordinal);
         var seenFiles = new HashSet<string>(StringComparer.Ordinal);
         var seenIds = new HashSet<string>(StringComparer.Ordinal);

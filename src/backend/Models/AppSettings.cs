@@ -230,6 +230,4 @@ public class AppSettings
     // out of all devices"). Backend-owned (SettingsService.Patch keeps it); cleared by a new QR sign-in or a sign-out.
     public bool SteamSignInRejected { get; set; }
     public LastSession? LastSession { get; set; }
-
-    public static AppSettings Default() => new();
 }

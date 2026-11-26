@@ -215,17 +215,7 @@ public static class AudioMonitor
             else lock (gate) own.Add(id);
         }
 
-        var psi = new ProcessStartInfo("pactl")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add("subscribe");
-
-        Process? proc;
-        try { proc = Process.Start(psi); }
-        catch { return; }
+        var proc = Tool("pactl", "subscribe");
         if (proc == null) return;
 
         try
@@ -264,25 +254,11 @@ public static class AudioMonitor
     // Its level counts toward `_aboveThresholdCount` only while `watch.Foreign` (classified not ours).
     private static async Task MonitorStreamAsync(uint streamId, double thresholdDb, StreamWatch watch, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo("parec")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add($"--monitor-stream={streamId}");
-        psi.ArgumentList.Add("--format=float32le");
-        psi.ArgumentList.Add("--channels=1");
-        psi.ArgumentList.Add($"--rate={SampleRateHz}");
-        psi.ArgumentList.Add("--raw");
-        // a small fragment: parec's default buffering held the first data back ~2 s (measured 2023 ms →
-        // 65 ms first byte, 76 ms first 20 ms chunk — scripts/measure-automute-latency.py), so auto-mute
-        // reacted ~2 s late to every new stream. Only this monitor's own record stream is affected.
-        psi.ArgumentList.Add("--latency-msec=10");
-
-        Process? proc;
-        try { proc = Process.Start(psi); }
-        catch { return; }
+        // --latency-msec=10, a small fragment: parec's default buffering held the first data back ~2 s (measured 2023 ms →
+        // 65 ms first byte, 76 ms first 20 ms chunk — scripts/measure-automute-latency.py), so auto-mute reacted ~2 s late
+        // to every new stream. Only this monitor's own record stream is affected.
+        var proc = Tool("parec", $"--monitor-stream={streamId}", "--format=float32le", "--channels=1", $"--rate={SampleRateHz}", "--raw",
+            "--latency-msec=10");
         if (proc == null) return;
 
         bool isAbove = false;
@@ -376,18 +352,20 @@ public static class AudioMonitor
         }
     }
 
+    // One of the tools this monitor hears through (pactl, parec, playerctl), its output for the caller to read; null when it
+    // can't start (not installed)
+    private static Process? Tool(string file, params string[] args)
+    {
+        var start = new ProcessStartInfo(file, args) { RedirectStandardOutput = true, RedirectStandardError = true };
+        try { return Process.Start(start); }
+        catch { return null; }
+    }
+
     private static async Task<bool> IsAnyMprisPlayerActiveAsync(CancellationToken ct = default)
     {
         try
         {
-            var psi = new ProcessStartInfo("playerctl", "status")
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            };
-            using var proc = Process.Start(psi);
+            using var proc = Tool("playerctl", "status");
             if (proc == null) return false;
             using var cts = new CancellationTokenSource(500);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, cts.Token);
@@ -415,20 +393,9 @@ public static class AudioMonitor
     // trip, inside parec's own start-up).
     private static async Task<(HashSet<uint> listed, HashSet<uint> foreign)> ListStreamsAsync(CancellationToken ct)
     {
-        var psi = new ProcessStartInfo("pactl")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add("list");
-        psi.ArgumentList.Add("sink-inputs");
-
         // liascape-player: its own streams are excluded by OWNERSHIP (pid / bus node / bus sink / name)
         var isOwnTask = Task.Run<Func<string, bool>?>(Liascape.Player.LiascapePlayerMedia.OwnStreamFilter, ct);
-        Process? proc;
-        try { proc = Process.Start(psi); }
-        catch { return ([], []); }
+        var proc = Tool("pactl", "list", "sink-inputs");
         if (proc == null) return ([], []);
 
         using (proc)

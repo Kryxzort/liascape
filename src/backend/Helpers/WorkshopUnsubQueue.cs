@@ -23,9 +23,7 @@ public static class WorkshopUnsubQueue
 {
     private static readonly object _gate = new();
 
-    private static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "liascape", "workshop_unsub.json");
+    private static string FilePath => Path.Combine(AppDirs.Config, "workshop_unsub.json");
 
     private sealed class State
     {

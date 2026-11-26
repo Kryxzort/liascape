@@ -7,64 +7,51 @@ using Liascape.Models;
 
 namespace Liascape.Helpers;
 
+// The playlist bar (playlist_state.json in the config folder: its items, settings and the name it was saved under) and the
+// playlists saved by name (one <name>.json each in the data folder's playlists/). Written atomically and read with a
+// retried parse (AtomicFile): a read landing mid-save got nothing, and the page showed an empty bar with the default
+// settings. Guard: matrix race:playlistSaveLoad.
 public static class PlaylistService
 {
-    public static readonly string PlaylistsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "liascape", "playlists");
+    private static string BarFile => Path.Combine(AppDirs.Config, "playlist_state.json");
+    private static string SavedFolder => Path.Combine(AppDirs.Data, "playlists");
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
-    public static string CurrentStatePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "liascape", "playlist_state.json");
+    // null: no bar saved yet, or one that can't be read
+    public static CustomPlaylist? LoadCurrentState() => Read(BarFile);
 
-    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
-
-    // Atomic save + a retried load (AtomicFile): written in place, a read mid-save (the UI's init, a switch's
-    // transition config, /settings) got null — the UI showed an empty playlist bar with the DEFAULT playlist settings.
-    public static CustomPlaylist? LoadCurrentState()
-    {
-        try { return AtomicFile.ReadJson<CustomPlaylist>(CurrentStatePath); }
-        catch { return null; }
-    }
-
-    // Both saves normalize the rotation in the caller's copy too (SavePlaylistState applies it live from there).
+    // never throws: the bar follows what plays, and a play doesn't fail on it
     public static void SaveCurrentState(CustomPlaylist playlist)
     {
-        playlist.Settings?.NormalizeRotation();
-        try { AtomicFile.WriteAllText(CurrentStatePath, JsonSerializer.Serialize(playlist, JsonOpts)); }
+        try { Write(BarFile, playlist); }
         catch { }
     }
 
-    public static List<string> ListNames()
-    {
-        if (!Directory.Exists(PlaylistsPath)) return [];
-        return Directory.GetFiles(PlaylistsPath, "*.json")
-            .Select(Path.GetFileNameWithoutExtension)
-            .Where(n => !string.IsNullOrEmpty(n))
-            .Select(n => n!)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+    // the saved playlists' names, A to Z whatever the case
+    public static List<string> ListNames() => !Directory.Exists(SavedFolder) ? []
+        : Directory.EnumerateFiles(SavedFolder, "*.json").Select(Path.GetFileNameWithoutExtension).OfType<string>()
+            .Where((n) => n.Length > 0).Order(StringComparer.OrdinalIgnoreCase).ToList();
 
-    public static void Save(string name, CustomPlaylist playlist)
-    {
-        Directory.CreateDirectory(PlaylistsPath);
-        string path = Path.Combine(PlaylistsPath, Sanitize(name) + ".json");
-        playlist.Settings?.NormalizeRotation();
-        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(playlist, JsonOpts));
-    }
+    public static void Save(string name, CustomPlaylist playlist) => Write(SavedFile(name), playlist);
 
-    public static CustomPlaylist? Load(string name)
+    public static CustomPlaylist? Load(string name) => Read(SavedFile(name));
+
+    // a name is a file name: what a file name can't hold is left out, and a name left empty is "playlist"
+    private static string SavedFile(string name) =>
+        Path.Combine(SavedFolder, (LibraryService.SanitizeName(name) is { Length: > 0 } file ? file : "playlist") + ".json");
+
+    private static CustomPlaylist? Read(string file)
     {
-        string path = Path.Combine(PlaylistsPath, Sanitize(name) + ".json");
-        try { return AtomicFile.ReadJson<CustomPlaylist>(path); }
+        try { return AtomicFile.ReadJson<CustomPlaylist>(file); }
         catch { return null; }
     }
 
-    public static string Sanitize(string name)
+    // The rotation as every save stores it (PlaylistSettings.NormalizeRotation), in the caller's copy too: a playlist play
+    // applies it live from that copy.
+    private static void Write(string file, CustomPlaylist playlist)
     {
-        var invalid = Path.GetInvalidFileNameChars();
-        var clean = new string(name.Where(c => !invalid.Contains(c)).ToArray()).Trim();
-        return string.IsNullOrEmpty(clean) ? "playlist" : clean;
+        playlist.Settings?.NormalizeRotation();
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        AtomicFile.WriteAllText(file, JsonSerializer.Serialize(playlist, Indented));
     }
 }

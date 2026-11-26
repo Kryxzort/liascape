@@ -13,8 +13,7 @@ public class LibraryItem
     public string? SourceId { get; init; }
     public bool IsScene { get; init; }
     public string? WorkshopId { get; init; }
-    // Non-null when CopyFilesInsteadOfSymlinking=true and the scene data was copied to the library.
-    // Contains the full path to the copied workshop directory inside LibraryPath.
+    // A Workshop scene the library holds its own copy of (workshop/<id>): that folder
     public string? CopiedSceneDir { get; init; }
     public bool HasCrashed { get; init; }
     // A scene's fonts this machine showed with another family at its last load under liascape-player (LibMeta.FontStandIns;

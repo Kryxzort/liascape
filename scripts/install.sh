@@ -193,7 +193,7 @@ Exec=$BINDIR/liascape
 Icon=liascape
 Type=Application
 Categories=Utility;
-Keywords=wallpaper;live;wayland;video;
+Keywords=wallpaper;live wallpaper;animated;video;scene;Wallpaper Engine;Wayland;
 StartupWMClass=liascape
 EOF
 # only for a direct install: in a package the cache belongs to the system (its package manager rebuilds it), and a staged

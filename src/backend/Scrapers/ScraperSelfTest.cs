@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using Liascape.Helpers;
 using Liascape.Models;
 using Liascape.Services;
 
@@ -17,9 +18,10 @@ namespace Liascape.Scrapers;
 // a detail) with every page it asks for answered from `scripts/test-fixtures/scrapers/<site>/` — the trimmed elements its
 // parser reads, captured from the site — and the URLs it asked for and what it returned must equal `expected.json`. The
 // local Wallpaper Engine folder runs over a copy of `wallpaper-engine/` (fake items: video, scene, preset, the skipped kinds)
-// under a private HOME (the GIF thumbnails' cache). `--write` rewrites `expected.json` from what the code returns now —
-// only to pin a deliberate change, after reading the diff. A site that changed its markup: capture its page again, trim it
-// the same way, and fix the parser until this passes.
+// under a private HOME (the GIF thumbnails' cache), and downloads (DownloadHelper) land in a private library: a loopback
+// server stands in for the site, beside files on this PC and the fake folder's items. `--write` rewrites `expected.json`
+// from what the code returns now — only to pin a deliberate change, after reading the diff. A site that changed its
+// markup: capture its page again, trim it the same way, and fix the parser until this passes.
 public static class ScraperSelfTest
 {
     // the selftest's stand-in for the sites: a URL → the page's HTML and the URL it ended at (a redirect); null outside it
@@ -54,8 +56,12 @@ public static class ScraperSelfTest
             return 2;
         }
         string tmp = Directory.CreateTempSubdirectory("liascape-scraper-selftest-").FullName;
-        // the local folder's GIF thumbnails go to ~/.cache: a private HOME, never the user's
-        Environment.SetEnvironmentVariable("HOME", Directory.CreateDirectory(Path.Combine(tmp, "home")).FullName);
+        // the local folder's GIF thumbnails go to ~/.cache, the downloads' library and settings to the XDG dirs: a private
+        // HOME and XDG dirs, never the user's
+        string home = Directory.CreateDirectory(Path.Combine(tmp, "home")).FullName;
+        Environment.SetEnvironmentVariable("HOME", home);
+        foreach (var (name, path) in new[] { ("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_CACHE_HOME", ".cache") })
+            Environment.SetEnvironmentVariable(name, Directory.CreateDirectory(Path.Combine(home, path)).FullName);
         Environment.SetEnvironmentVariable("LIASCAPE_TEST_NO_NETWORK", "1");
         var got = new JsonObject();
         try
@@ -63,6 +69,11 @@ public static class ScraperSelfTest
             if (!WallpaperEngineScraper.GifThumbCacheDir.StartsWith(tmp, StringComparison.Ordinal))
             {
                 Console.Error.WriteLine($"scraper-selftest: refusing — the GIF thumbnail cache ({WallpaperEngineScraper.GifThumbCacheDir}) is not under the private HOME");
+                return 2;
+            }
+            if (!LibraryStore.SourceDir(LibraryStore.Imported).StartsWith(tmp, StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"scraper-selftest: refusing — the library ({LibraryStore.SourceDir(LibraryStore.Imported)}) is not under the private HOME");
                 return 2;
             }
             RunAll(dir, tmp, got).GetAwaiter().GetResult();
@@ -172,6 +183,166 @@ public static class ScraperSelfTest
         await Case(got, dh, "desktophut detail without video", () => dhs.GetDetailAsync(Result("Broken", "https://www.desktophut.com/no-video")));
 
         await LocalFolder(Path.Combine(dir, "wallpaper-engine"), tmp, got);
+        await Downloads(tmp, got);
+    }
+
+    // A download (DownloadHelper) as /download makes it — a web source's file from a loopback server standing in for the
+    // site, a local file, a Wallpaper Engine folder item — into a private library: what was asked of the server (its
+    // User-Agent and Referer), what lands in the library (files, links, the index), and the item handed back.
+    private static async Task Downloads(string tmp, JsonObject got)
+    {
+        string ws = Path.Combine(tmp, "workshop"); // LocalFolder's copy of the fixture items
+        string lib = Path.GetDirectoryName(LibraryStore.SourceDir(LibraryStore.Imported))!;
+        string config = Path.GetDirectoryName(SettingsService.FilePath)!;
+        Directory.CreateDirectory(config);
+        File.WriteAllText(Path.Combine(config, "settings.json"), JsonSerializer.Serialize(new { WorkshopFolder = ws }));
+
+        int port;
+        using (var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0))
+        { probe.Start(); port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port; }
+        string site = $"http://127.0.0.1:{port}";
+        var files = new Dictionary<string, string>
+        {
+            ["/files/neon.mp4"] = "neon video bytes", ["/files/clip.webm"] = "webm bytes",
+            ["/thumbs/neon.jpg"] = "jpg", ["/thumbs/neon.gif"] = "gif", ["/thumbs/poster"] = "poster", ["/thumbs/still.jpg"] = "still",
+        };
+        var asked = new List<JsonNode>();
+        using var server = new System.Net.HttpListener();
+        server.Prefixes.Add(site + "/");
+        server.Start();
+        _ = Task.Run(async () =>
+        {
+            while (server.IsListening)
+            {
+                System.Net.HttpListenerContext c;
+                try { c = await server.GetContextAsync(); } catch { return; }
+                string path = c.Request.Url!.AbsolutePath;
+                string? ua = c.Request.UserAgent;
+                lock (asked) asked.Add(new JsonObject
+                {
+                    ["path"] = path, ["userAgent"] = ua == HttpClientProvider.UserAgent ? "$UA" : ua, ["referer"] = c.Request.Headers["Referer"],
+                });
+                if (files.TryGetValue(path, out var body))
+                {
+                    var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+                    c.Response.ContentLength64 = bytes.Length;
+                    await c.Response.OutputStream.WriteAsync(bytes);
+                }
+                else c.Response.StatusCode = 404;
+                c.Response.Close();
+            }
+        });
+
+        // the library as it is: every entry under it (a link's target, a file's text, a source's index)
+        string Rel(string? p) => p == null ? "" : p.Replace(lib, "$LIB").Replace(ws, "$WS").Replace(tmp, "$TMP").Replace(site, "$SITE");
+        JsonObject Library()
+        {
+            var o = new JsonObject();
+            if (!Directory.Exists(lib)) return o;
+            foreach (var e in Directory.EnumerateFileSystemEntries(lib, "*", new EnumerationOptions { RecurseSubdirectories = true })
+                         .Order(StringComparer.Ordinal))
+            {
+                var fi = new FileInfo(e);
+                string key = Rel(e);
+                if (fi.LinkTarget != null) o[key] = "-> " + Rel(fi.LinkTarget);
+                else if (Directory.Exists(e)) o[key] = "dir";
+                else if (Path.GetFileName(e) == "index.json") o[key] = JsonNode.Parse(Rel(File.ReadAllText(e)));
+                else if (fi.Length < 64) o[key] = File.ReadAllText(e);
+                else o[key] = $"{fi.Length} bytes";
+            }
+            return o;
+        }
+
+        async Task Download(string name, WallpaperDetail d, string thumb = "", string? anim = null, string? sourceId = null,
+            bool copy = false, bool ownCopy = false, string? library = null)
+        {
+            lock (asked) asked.Clear();
+            var before = Library();
+            double last = -1;
+            var progress = new SyncProgress((v) => last = v);
+            JsonNode? item;
+            try
+            {
+                var i = await DownloadHelper.DownloadAsync(new DownloadHelper.Request(d, sourceId)
+                {
+                    ThumbnailUrl = thumb, AnimatedUrl = anim, Library = library, CopyLocalFiles = copy, OwnCopy = ownCopy,
+                }, progress, default);
+                item = new JsonObject
+                {
+                    ["title"] = i.Title, ["videoPath"] = Rel(i.VideoPath), ["thumbnailPath"] = Rel(i.ThumbnailPath),
+                    ["animatedThumbnailPath"] = Rel(i.AnimatedThumbnailPath), ["sourceId"] = Rel(i.SourceId), ["isScene"] = i.IsScene,
+                    ["workshopId"] = i.WorkshopId, ["copiedSceneDir"] = Rel(i.CopiedSceneDir), ["pageUrl"] = i.PageUrl, ["resolution"] = i.Resolution,
+                };
+            }
+            catch (Exception e) { item = JsonValue.Create("error: " + e.GetType().Name); }
+            JsonArray requests;
+            lock (asked) requests = new JsonArray(asked.Select((a) => a.DeepClone()).ToArray());
+            // what the download added or changed
+            var changed = new JsonObject();
+            foreach (var (key, value) in Library())
+                if (!JsonNode.DeepEquals(value, before[key])) changed[key] = value?.DeepClone();
+            got[name] = new JsonObject { ["asked"] = requests, ["item"] = item, ["progress"] = last, ["library"] = changed };
+        }
+
+        await Download("download: a web source's video", new WallpaperDetail
+        {
+            Title = "Neon Rain", PreviewUrl = site + "/files/neon.mp4", DownloadUrl = site + "/files/neon.mp4",
+            Referrer = "https://moewalls.com/neon-rain/", PageUrl = "https://moewalls.com/neon-rain/", Resolution = "4K",
+        }, thumb: site + "/thumbs/neon.jpg", anim: site + "/thumbs/neon.gif", sourceId: "https://moewalls.com/neon-rain/", library: LibraryStore.Moewalls);
+        await Download("download: the same title again", new WallpaperDetail
+        {
+            Title = "Neon Rain", PreviewUrl = "", DownloadUrl = site + "/files/neon.mp4", PageUrl = "https://moewalls.com/neon-rain-2/",
+        }, sourceId: "https://moewalls.com/neon-rain-2/", library: LibraryStore.Moewalls);
+        // a .webm keeps its extension; a still as the animated preview is none; a thumbnail URL without an extension is a .jpg
+        await Download("download: a webm, a still for the gif, a poster without an extension", new WallpaperDetail
+        {
+            Title = "Clip / Cut", PreviewUrl = "", DownloadUrl = site + "/files/clip.webm",
+        }, thumb: site + "/thumbs/poster", anim: site + "/thumbs/still.jpg", sourceId: "https://www.motionbgs.com/clip", library: LibraryStore.MotionBgs);
+        await Download("download: the site refuses the file", new WallpaperDetail
+        {
+            Title = "Gone", PreviewUrl = "", DownloadUrl = site + "/files/gone.mp4",
+        }, thumb: site + "/thumbs/neon.jpg", sourceId: "https://www.desktophut.com/gone", library: LibraryStore.Desktophut);
+        // a file on this PC (no Workshop id): linked, or copied under "Copy files instead of linking"
+        string own = Path.Combine(tmp, "own");
+        Directory.CreateDirectory(own);
+        File.WriteAllText(Path.Combine(own, "mine.mp4"), "my video");
+        File.WriteAllText(Path.Combine(own, "mine.jpg"), "my still");
+        await Download("download: a file on this PC, linked", new WallpaperDetail
+        {
+            Title = "Mine", PreviewUrl = "", DownloadUrl = Path.Combine(own, "mine.mp4"),
+        }, thumb: Path.Combine(own, "mine.jpg"), sourceId: Path.Combine(own, "mine.mp4"));
+        await Download("download: a file on this PC, copied", new WallpaperDetail
+        {
+            Title = "Mine Copied", PreviewUrl = "", DownloadUrl = Path.Combine(own, "mine.mp4"),
+        }, thumb: Path.Combine(own, "mine.jpg"), sourceId: Path.Combine(own, "mine.mp4"), copy: true);
+        // the Wallpaper Engine folder's items: linked as local/<id>; "Download without subscribing" (ownCopy) the library's own
+        // workshop/<id> copy; a folder outside the Wallpaper Engine folder always a copy
+        await Download("download: a Wallpaper Engine video", new WallpaperDetail
+        {
+            Title = "Rain Window", PreviewUrl = "", DownloadUrl = Path.Combine(ws, "1001", "rain.mp4"), WorkshopId = "1001",
+        }, sourceId: Path.Combine(ws, "1001"));
+        await Download("download: a Wallpaper Engine scene", new WallpaperDetail
+        {
+            Title = "Forest Scene", PreviewUrl = "", DownloadUrl = Path.Combine(ws, "1006"), WorkshopId = "1006", IsScene = true,
+        }, sourceId: Path.Combine(ws, "1006"));
+        await Download("download: a Wallpaper Engine scene, its own copy", new WallpaperDetail
+        {
+            Title = "Forest Scene", PreviewUrl = "", DownloadUrl = Path.Combine(ws, "1006"), WorkshopId = "1006", IsScene = true,
+        }, sourceId: Path.Combine(ws, "1006"), ownCopy: true);
+        string outside = Path.Combine(tmp, "steam-elsewhere", "1003");
+        Directory.CreateDirectory(outside);
+        foreach (var f in Directory.GetFiles(Path.Combine(ws, "1003"))) File.Copy(f, Path.Combine(outside, Path.GetFileName(f)));
+        await Download("download: a Workshop video outside the Wallpaper Engine folder", new WallpaperDetail
+        {
+            Title = "Sea Rain Loop", PreviewUrl = "", DownloadUrl = Path.Combine(outside, "sea.mov"), WorkshopId = "1003",
+        }, sourceId: "https://steamcommunity.com/sharedfiles/filedetails/?id=1003");
+        server.Stop();
+    }
+
+    // Progress<T> posts to the thread pool; a download's last report must be in before the case reads it
+    private sealed class SyncProgress(Action<double> report) : IProgress<double>
+    {
+        public void Report(double value) => report(value);
     }
 
     // the GIF still cache's files after `call`, which starts from an empty cache

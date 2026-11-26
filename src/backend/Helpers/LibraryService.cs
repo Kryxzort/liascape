@@ -496,7 +496,7 @@ public static class LibraryService
     public static List<LibraryItem> LoadAll()
     {
         var items = new List<LibraryItem>();
-        if (!Directory.Exists(DownloadHelper.LibraryPath)) return items;
+        if (!Directory.Exists(LibraryStore.Root)) return items;
 
         var ctx = new BuildContext();
         foreach (var source in LibraryStore.Sources)
@@ -890,7 +890,7 @@ public static class LibraryService
     }
 
     // ---------- trash / delete / restore ----------
-    public static string TrashPath => Path.Combine(DownloadHelper.LibraryPath, ".trash");
+    public static string TrashPath => Path.Combine(LibraryStore.Root, ".trash");
 
     public static void Trash(LibraryItem item, string batchDir)
     {
@@ -1016,7 +1016,7 @@ public static class LibraryService
 
     public static void DeleteAll()
     {
-        if (!Directory.Exists(DownloadHelper.LibraryPath)) return;
+        if (!Directory.Exists(LibraryStore.Root)) return;
         foreach (var source in LibraryStore.Sources)
         {
             var d = LibraryStore.SourceDir(source);
@@ -1044,13 +1044,6 @@ public static class LibraryService
     {
         var invalid = Path.GetInvalidFileNameChars();
         return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
-    }
-
-    internal static void CopyDirectory(string src, string dest)
-    {
-        Directory.CreateDirectory(dest);
-        foreach (var file in Directory.GetFiles(src)) File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
-        foreach (var dir in Directory.GetDirectories(src)) CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
     }
 
     // Extracts the numeric workshop item ID from a Steam community URL (?id=NNN / &id=NNN).

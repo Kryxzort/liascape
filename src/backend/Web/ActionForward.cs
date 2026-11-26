@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Liascape.Helpers;
 
 namespace Liascape.Web;
 
@@ -76,7 +77,7 @@ public static class ActionForward
     {
         try
         {
-            var f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape", "serve.port");
+            var f = Path.Combine(AppDirs.Config, "serve.port");
             return int.TryParse(File.ReadAllText(f).Trim(), out var p) && p is > 0 and < 65536 ? p : null;
         }
         catch { return null; }

@@ -857,7 +857,7 @@ step_many() {   # $1 = /next|/prev|/random, $2 = iteration count
     { [ "$p" = "$SS1" ] || [ "$p" = "$SS2" ]; } && sceneHit=1
   done
   [ "$allok" = 1 ] && ok "$n x $route all returned 200 (mixed video/scene library)" || bad "$n x $route had a non-200 response:$codes (000 = no answer within 10 s)"
-  [ "$sceneHit" = 0 ] && ok "$n x $route never landed on a scene" || bad "$route landed on a scene — TryStepLibrary/ApplyRandom didn't skip it"
+  [ "$sceneHit" = 0 ] && ok "$n x $route never landed on a scene" || bad "$route landed on a scene — StepLibrary/ApplyRandom didn't skip it"
 }
 step_many /next 20
 step_many /prev 20
@@ -2448,10 +2448,18 @@ player_quit; mv "$SNAP" "$T/snapshot-aside2.json"; restore_cli; waitfor $WAIT ev
 # a restore whose last session can't play (every item a scene, scenes off): it says why and exits 1, never a silent 0
 cli stop; waitfor $WAIT nothing_shown; player_quit
 SF=$XDG_CONFIG_HOME/liascape/settings.json; sf0=$(jq -c '{AllowScenes, LastSession}' "$SF")
-jq --arg a "$SS1" --arg b "$SS2" '.AllowScenes = false | .LastSession = {IsTimedPlaylist: true, Paths: [$a, $b], SwitchWhenVideoEnds: true}' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
+jq --arg a "$SS1" --arg b "$SS2" '.AllowScenes = false | .LastSession = {Playlist: true, Paths: [$a, $b]}' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
 LIASCAPE_PLAYER_BIN=$HB/liascape-player "$DOTNET" "$DLL" restore > "$T/restore-np.log" 2>&1; rc=$?; SP=$(sup_pid); CP=$(comp_pid)
 [ "$rc" != 0 ] && grep -q "Nothing in this playlist can play" "$T/restore-np.log" && ok "restore × a last session that can't play → exit $rc with why" || bad "restore × a last session that can't play: exit $rc, said: $(tail -c 300 "$T/restore-np.log")"
 jq --argjson o "$sf0" '. + $o' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
+# A replayed playlist rotates as it is set now (here the globals: the bar doesn't override them), never as it was when it
+# started: a change since then (applied live to the program, never to LastSession) holds across a restore
+[ "$(jq -r '.LastSession.Paths | length' "$SF")" = 3 ] || bad "precondition: LastSession $(jq -c .LastSession "$SF")"
+set_file '.GlobalIntervalSeconds = 75'
+restore_cli; waitfor $WAIT eval '[ -n "$(pst)" ]'
+prog_num interval_ms 75000 && ok "restore × a rotation changed since the playlist started → interval_ms 75000 (the setting now)" \
+  || bad "restore × a changed rotation: interval_ms $(prog interval_ms), program $(pst)"
+cli stop; waitfor $WAIT nothing_shown; set_file '.GlobalIntervalSeconds = 60'
 # A restored layer waits for its source's first frame (`state.outputs[].pending`): a `restore` during that wait (boot,
 # autostart) counts it as shown and never replays LastSession over it; once it is ready the layer shows it.
 SL=$T/slow-restore-scene; SLJ='{"pattern":"solid","rgb":[0,200,100],"native":[640,360]'

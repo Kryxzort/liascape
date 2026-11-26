@@ -14,7 +14,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - UI matrix: `bash scripts/test-ui-matrix.sh --changed` before a commit, the full run before a merge; one area: `--probe probe-<area>.js` (the bare file name, from `app/shell/`) (skill `ui-verify`)
 - Adapter integration test: `bash scripts/test-liascape-player-adapter.sh [--no-build]`
 - Adapter self-test: `LIASCAPE_PLAYER_BIN=src/player/target/debug/liascape-player dotnet run --project src/backend -- player-selftest`
-- Browse's sources against saved pages (no network): `dotnet run --project src/backend -- scraper-selftest`
+- Browse's sources against saved pages, and their downloads into a private library (no network): `dotnet run --project src/backend -- scraper-selftest`
 - Settings merge / cross-process writes / settings latency: `bash scripts/test-settings-merge.sh`, `bash scripts/test-cross-process.sh`, `bash scripts/test-settings-latency.sh`
 - liascape-player the only engine (a legacy settings file and session, a missing binary, one that appears later, the tests' stub): `bash scripts/test-player-binary.sh`
 - Steam paths (no account needed): `bash scripts/test-steam-signin.sh`; how long "Use the Steam app" stays connected: `bash scripts/test-steam-app-hold.sh`

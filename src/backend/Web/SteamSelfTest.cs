@@ -60,7 +60,7 @@ public static class SteamSelfTest
         foreach (var v in SecretValues) if (log.Contains(v)) Fails.Add("a secret value appears in the console output");
         foreach (var (t, j) in Events) foreach (var v in SecretValues) if (j.Contains(v)) Fails.Add($"a secret value appears in a WS event ({t})");
         foreach (var (t, j) in Events) if (j.Contains(Password)) Fails.Add($"the password appears in a WS event ({t})");
-        string settingsFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape", "settings.json");
+        string settingsFile = SettingsService.FilePath;
         if (File.Exists(settingsFile) && File.ReadAllText(settingsFile).Contains(Password)) Fails.Add("the password was saved in settings.json");
         Console.WriteLine("--- backend console during the test ---");
         Console.Write(log);

@@ -910,7 +910,7 @@ public static class LiascapePlayerSelfTest
     }
 
     // ---- next/prev/random's scene-skip decision point -----------------------------------------
-    // TryStepLibrary/ApplyRandom (PlayerHelper) skip a path exactly when
+    // StepLibrary/ApplyRandom (PlayerHelper) skip a path exactly when
     // `IsScenePath(path) && !PlayerStatus.ScenesPlayable(settings)` — the same formula the
     // private IsSkippedPath uses, reused here rather than invented (player-adapter.md § Scenes and loudness). Needs no
     // player and no `serve` — pure decision logic.

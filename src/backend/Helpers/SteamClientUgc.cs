@@ -199,6 +199,24 @@ public static class SteamClientUgc
         finally { WorkshopUnsubQueue.Release(ids); Turn.Release(); }
     }
 
+    // This backend again as the helper child (`steam-ugc <verb> <steamclient.so candidates…>`), Wallpaper Engine to the Steam
+    // client; null when the running executable isn't known. A published build's executable runs its own dll; under the
+    // `dotnet` host (`dotnet liascape-backend.dll`, `dotnet run`) the dll goes first.
+    internal static ProcessStartInfo? ChildStart(string verb, IEnumerable<string> libs)
+    {
+        if (Environment.ProcessPath is not { Length: > 0 } exe) return null;
+        var start = new ProcessStartInfo(exe) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        if (System.Reflection.Assembly.GetEntryAssembly()?.Location is { Length: > 0 } dll
+            && !string.Equals(Path.GetFileNameWithoutExtension(dll), Path.GetFileNameWithoutExtension(exe), StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(dll);
+        foreach (var a in new[] { "steam-ugc", verb }.Concat(libs)) start.ArgumentList.Add(a);
+        start.Environment["SteamAppId"] = WallpaperEngineAppId.ToString();
+        start.Environment["SteamGameId"] = WallpaperEngineAppId.ToString();
+        // the backend's own (a dev shell's) must not shadow the Steam client's libraries
+        start.Environment.Remove("LD_LIBRARY_PATH");
+        return start;
+    }
+
     /// Can the Steam client be used right now (running, signed in to an account that owns Wallpaper Engine)? A helper that only
     /// connects and lets go (`steam-ugc probe`) — the Steam to-do's "Let the Steam app do all N" asks before it converts
     /// anything, so a Steam that can't answer leaves the to-do as it was. Null = yes; else why not.
@@ -209,15 +227,8 @@ public static class SteamClientUgc
         if (await SteamClientHold.PingHeldAsync() == true) return null;
         var libs = Candidates(s);
         if (libs.Count == 0) return "the Steam client's steamclient.so wasn't found — is Steam installed?";
-        var self = PlayerHelper.GetSelfInvocationArgs();
-        if (self.Count == 0) return "can't start the helper";
-        var psi = new ProcessStartInfo(self[0]) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var a in self.Skip(1)) psi.ArgumentList.Add(a);
-        psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add("probe");
-        foreach (var l in libs) psi.ArgumentList.Add(l);
-        psi.Environment["SteamAppId"] = WallpaperEngineAppId.ToString();
-        psi.Environment["SteamGameId"] = WallpaperEngineAppId.ToString();
-        psi.Environment.Remove("LD_LIBRARY_PATH");
+        var psi = ChildStart("probe", libs);
+        if (psi == null) return "can't start the helper";
         using var proc = Process.Start(psi);
         if (proc == null) return "can't start the helper";
         _ = proc.StandardError.ReadToEndAsync();

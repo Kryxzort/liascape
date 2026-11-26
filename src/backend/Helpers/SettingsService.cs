@@ -10,34 +10,16 @@ namespace Liascape.Helpers;
 
 public static class SettingsService
 {
-    private static readonly string ConfigPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "liascape", "settings.json");
+    private static string ConfigPath => Path.Combine(AppDirs.Config, "settings.json");
 
-    // Every request, the adapter and the CLI load + save this file concurrently. A save that
-    // truncates it and writes in place lets a load landing mid-write parse nothing and get the C# defaults
-    // (NoAudio on, volume 100) — applied live, and saved back over everything by whoever
-    // saves next (`/settings` itself: its `prev` becomes the defaults, the Steam tokens
-    // gone). Guard: the UI matrix's race:settingsSaveLoad cell. So a save writes a temp file and renames
-    // it over (atomic: a reader sees the old file or the new one), and a load that still can't parse (a writer
-    // that isn't this code — an older build's daemon) retries before falling back to the defaults.
+    // Every request, the adapter and the CLI read this file while another of them writes it. Defaults read mid-write would
+    // be applied live and saved back over everything by the next writer (`/settings`' `prev` = the defaults), so a save
+    // is atomic and a read retries a file that doesn't parse (AtomicFile; a writer that isn't this code); a file still
+    // unreadable, or none, reads as the defaults. Guard: the UI matrix's race:settingsSaveLoad.
     public static AppSettings Load()
     {
-        for (int attempt = 0; ; attempt++)
-        {
-            try
-            {
-                if (!File.Exists(ConfigPath)) return new AppSettings();
-                var json = File.ReadAllText(ConfigPath);
-                return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-            }
-            catch (Exception e) when (e is JsonException or IOException)
-            {
-                if (attempt >= 4) return new AppSettings();
-                System.Threading.Thread.Sleep(15);
-            }
-            catch { return new AppSettings(); }
-        }
+        try { return AtomicFile.ReadJson<AppSettings>(ConfigPath) ?? new AppSettings(); }
+        catch { return new AppSettings(); }
     }
 
     // private: every write is a field-level Update or Patch (a whole copy loaded earlier reverts what changed since)

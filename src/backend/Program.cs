@@ -165,7 +165,7 @@ sealed class Program
         else PlaylistService.SaveCurrentState(state);
 
         var session = settings.LastSession;
-        if (session != null && (session.IsPlaylist || session.IsTimedPlaylist))
+        if (session is { Playlist: true })
         {
             var sessExisting = new System.Collections.Generic.HashSet<string>(session.Paths);
             var merged = new System.Collections.Generic.List<string>(session.Paths);

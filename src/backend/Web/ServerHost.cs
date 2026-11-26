@@ -47,8 +47,7 @@ public static class ServerHost
     // as application/octet-stream. Guard: scripts/test-item-actions.sh "/media serves each as its own type"
     private static readonly FileExtensionContentTypeProvider Mime = new() { Mappings = { [".mkv"] = "video/x-matroska" } };
 
-    private static string ConfigDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape");
+    private static string ConfigDir => AppDirs.Config;
 
     public static void Run(string[] args)
     {
@@ -498,7 +497,7 @@ public static class ServerHost
             // rotation (interval — the minimum play time under advance-on-end — / advance-on-end) changed →
             // live-update a running program that follows the GLOBAL settings (a playlist with its own
             // override is updated by /playlist/state instead). No replay needed.
-            if (PlayerHelper.IsTimedPlaylistActive()
+            if (Liascape.Player.LiascapePlayerProgram.IsActive
                 && (prev.GlobalIntervalSeconds != s.GlobalIntervalSeconds
                     || prev.GlobalSwitchWhenVideoEnds != s.GlobalSwitchWhenVideoEnds)
                 && !(PlaylistService.LoadCurrentState()?.Settings.OverrideGlobalSettings ?? false))
@@ -561,7 +560,7 @@ public static class ServerHost
             ClipStore.ForgetUnder(item.IsScene ? item.VideoPath : Path.GetDirectoryName(item.VideoPath) ?? item.VideoPath);
             return Results.Ok();
         });
-        app.MapPost("/library/clear", () => { LibraryService.DeleteAll(); ClipStore.ForgetUnder(DownloadHelper.LibraryPath); return Results.Ok(); });
+        app.MapPost("/library/clear", () => { LibraryService.DeleteAll(); ClipStore.ForgetUnder(LibraryStore.Root); return Results.Ok(); });
         // save the override (drops to global when == global) THEN apply it live to the playing wallpaper
         app.MapPost("/library/volume", (OverrideReq r) => { LibraryService.SaveVolumeOverride(r.Path, r.IntValue); PlayerHelper.ApplyOverrideLive(r.Path); return Results.Ok(); });
         app.MapPost("/library/speed", (OverrideReq r) => { LibraryService.SaveSpeedOverride(r.Path, r.DoubleValue); PlayerHelper.ApplyOverrideLive(r.Path); return Results.Ok(); });
@@ -632,7 +631,8 @@ public static class ServerHost
                 return Results.Json(new { error = refused }, statusCode: 400);
             var detail = await Providers[r.Source].GetDetailAsync(r.Result);
             LibraryItem item;
-            try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl, r.OneOff); }
+            try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl, r.OneOff,
+                (Providers[r.Source] as WebSource)?.Library); }
             // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (.claude/rules/backend/sources-steam.md § Workshop downloads)
             catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
             if (r.Apply)
@@ -860,7 +860,7 @@ public static class ServerHost
                 path,
                 sceneId = path != null && PlayerHelper.IsScenePath(path) ? Path.GetFileName(path.TrimEnd('/')) : null,
                 playing,
-                timed = PlayerHelper.IsTimedPlaylistActive(),
+                timed = Liascape.Player.LiascapePlayerProgram.IsActive,
                 position = PlayerHelper.QueryTimePos(), // the playing video's position → sync the in-app preview
                 keep = Liascape.Player.LiascapePlayerProgram.Kept(), // `liascape toggle-loop-current`: the rotation holds what plays
                 // the user's pause (`player.paused`; never "pause behind windows", a per-output clock): the in-app

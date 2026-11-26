@@ -35,7 +35,7 @@ public static class ApiSecurity
     public const string Header = "X-Liascape-Token";
     public const string Query = "token";
 
-    private static string ConfigDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape");
+    private static string ConfigDir => AppDirs.Config;
     public static string TokenPath => Path.Combine(ConfigDir, "serve.token");
 
     private static byte[] _token = [];
@@ -258,7 +258,7 @@ public static class ApiSecurity
         var xdgCache = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
         var roots = new List<string>
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "liascape"),
+            AppDirs.Data,
             Path.Combine(home, ".cache", "liascape"),
         };
         if (!string.IsNullOrEmpty(xdgCache)) roots.Add(Path.Combine(xdgCache, "liascape"));

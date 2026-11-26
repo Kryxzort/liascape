@@ -39,4 +39,4 @@ The CLI, `serve` and the player-side processes all read and write them concurren
 ## `LastSession`
 - Written by `AppOps` on apply / random / next / play-playlist; replayed by `liascape restore` only when the player shows nothing.
 - `POST /settings` preserves `LastSession` from disk whatever the body says (the UI posts a stale copy). `WatchedFolders` likewise: only `/library/watched` and `/library/import-found` edit it (`Web/FolderImportOps.cs`).
-- The maximum play time and scene timing are not in `LastSession`; a session reads them from the current playlist state + settings at start / restore.
+- It holds only the paths and whether they are a playlist (`Playlist`). A restored playlist takes its order, rotation, limits and transitions from the playlist bar (`playlist_state.json`) and the settings as they are then (`PlayerHelper.EffectiveRotation`), never a copy saved when it started: a live edit since changed them there. Guard: adapter IT "restore × a rotation changed since the playlist started".

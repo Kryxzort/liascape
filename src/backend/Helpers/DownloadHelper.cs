@@ -1,248 +1,220 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Models;
 
 namespace Liascape.Helpers;
 
+// What a download makes of a wallpaper Browse found (AppOps.DownloadAsync: POST /download, a preset's base scene).
+// Guard: liascape-backend scraper-selftest "download: …" cases, scripts/test-steam-signin.sh
 public static class DownloadHelper
 {
-    public static readonly string LibraryPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "liascape", "library");
-
-    // ownCopy: a Workshop item always becomes the library's own workshop/<id> copy, even from a folder under the WE dir (a
-    // one-off download: Steam's folder for it isn't a subscription and goes away)
-    public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string? thumbnailUrl, string? sourceId = null, IProgress<double>? progress = null, bool copyLocalFiles = false, CancellationToken ct = default, string? animatedUrl = null,
-        bool ownCopy = false)
+    // One download of a detail. `SourceId` is what the index keeps as the item's source (a web item's page: "already in your
+    // library"). `Library` is the web source's library folder (LibraryStore.MotionBgs, …); null = imported/.
+    public sealed record Request(WallpaperDetail Detail, string? SourceId)
     {
-        Directory.CreateDirectory(LibraryPath);
-        var settings = SettingsService.Load();
-
-        // --- classify into a source + item key (folder name) ---
-        // workshop item: the acquired Steam folder; if it lives UNDER the WE dir → local/ (symlink), else workshop/ (own copy).
-        string source, key;
-        string? weSteamDir = null;
-        if (!string.IsNullOrEmpty(detail.WorkshopId))
-        {
-            key = detail.WorkshopId!;
-            weSteamDir = detail.IsScene ? (Directory.Exists(detail.DownloadUrl) ? detail.DownloadUrl : null)
-                                        : Path.GetDirectoryName(detail.DownloadUrl);
-            // compared as REAL paths (else a duplicate copy of a whole item) — the Steam client reports an item's real folder
-            // (/mnt/Games/…/content/431960/<id>) while the WE folder setting can name it through a symlink
-            // (~/.local/share/Steam/…/content/431960 → /mnt/Games/…): as text "not under it" → an owned COPY instead of the link
-            bool underWeDir = !ownCopy && weSteamDir != null && !string.IsNullOrEmpty(settings.WorkshopFolder)
-                && IsUnder(RealPath(weSteamDir), RealPath(settings.WorkshopFolder));
-            source = underWeDir ? LibraryStore.Local : LibraryStore.Workshop;
-        }
-        else
-        {
-            source = SourceFromUrl(sourceId ?? detail.PageUrl);
-            key = UniqueKey(source, SanitizeName(detail.Title));
-        }
-
-        string sourceDir = LibraryStore.SourceDir(source);
-        Directory.CreateDirectory(sourceDir);
-        string itemDir = Path.Combine(sourceDir, key);
-
-        void WriteIndex(bool isScene) => LibraryStore.SetMeta(Path.Combine(itemDir, "_"), m =>
-        {
-            m.Title = detail.Title; m.IsScene = isScene; m.WorkshopId = detail.WorkshopId;
-            m.SourceUrl = string.IsNullOrEmpty(detail.WorkshopId) ? sourceId : null;
-            m.Resolution = detail.Resolution; m.AgeRating = detail.AgeRating; m.YoutubeUrl = detail.YoutubeUrl;
-            m.PageUrl = detail.PageUrl; m.AuthorName = detail.AuthorName; m.Description = detail.Description;
-            m.FileSizeBytes = detail.FileSizeBytes; m.Subscriptions = detail.Subscriptions;
-            m.Favorites = detail.Favorites; m.Tags = detail.Tags;
-        });
-
-        LibraryItem Result(string videoPath, bool isScene, string? thumb, string? anim, string? copiedSceneDir = null) => new()
-        {
-            Title = detail.Title, VideoPath = videoPath, ThumbnailPath = thumb, AnimatedThumbnailPath = anim,
-            SourceId = sourceId, IsScene = isScene, WorkshopId = detail.WorkshopId, CopiedSceneDir = copiedSceneDir,
-            AddedAt = System.DateTime.Now,
-            Resolution = detail.Resolution, AgeRating = detail.AgeRating, YoutubeUrl = detail.YoutubeUrl,
-            PageUrl = detail.PageUrl, AuthorName = detail.AuthorName, Description = detail.Description,
-            FileSizeBytes = detail.FileSizeBytes, Subscriptions = detail.Subscriptions,
-            Favorites = detail.Favorites, Tags = detail.Tags,
-        };
-
-        // ---- workshop / local (id-keyed Steam folder) ----
-        if (!string.IsNullOrEmpty(detail.WorkshopId) && weSteamDir != null)
-        {
-            if (source == LibraryStore.Local)                                  // subscribe / WE-dir → symlink the folder
-            { try { if (!Directory.Exists(itemDir) && !File.Exists(itemDir)) File.CreateSymbolicLink(itemDir, weSteamDir); } catch { } }
-            else                                                               // a one-off → the library's own copy
-            { if (!Directory.Exists(itemDir)) await Task.Run(() => CopyDirectory(weSteamDir, itemDir)); }
-
-            if (detail.IsScene)
-            {
-                WriteIndex(isScene: true);
-                progress?.Report(1.0);
-                // folder-based scene: VideoPath IS the item folder (local/ symlink, or owned workshop/ copy);
-                // the player loads the item folder (VideoPath).
-                return Result(itemDir, true, FindInDir(itemDir, "preview.jpg", "preview.png"), FindInDir(itemDir, "preview.gif", "preview.webp"),
-                    copiedSceneDir: source == LibraryStore.Workshop ? itemDir : null);
-            }
-            // workshop/local VIDEO: media file from project.json (already inside the folder)
-            string videoFile = detail.IsScene ? detail.DownloadUrl : (Path.GetFileName(detail.DownloadUrl));
-            string media = Path.Combine(itemDir, videoFile);
-            if (!File.Exists(media)) media = Directory.EnumerateFiles(itemDir).FirstOrDefault(IsVideoExt) ?? media;
-            WriteIndex(isScene: false);
-            progress?.Report(1.0);
-            return Result(media, false, FindInDir(itemDir, "preview.jpg", "preview.png"), FindInDir(itemDir, "preview.gif", "preview.webp"));
-        }
-
-        // ---- web / imported video → <source>/<key>/<key>.mp4 (+ thumb/anim) ----
-        Directory.CreateDirectory(itemDir);
-        string mediaExt = detail.IsScene ? ".mp4" : (Path.GetExtension(detail.DownloadUrl) is { Length: > 0 } e && IsVideoExt("x" + e) ? e : ".mp4");
-        string videoDest = Path.Combine(itemDir, key + mediaExt);
-        if (File.Exists(detail.DownloadUrl))
-        {
-            bool samePath = Path.GetFullPath(detail.DownloadUrl) == Path.GetFullPath(videoDest);
-            if (!samePath && File.Exists(videoDest)) File.Delete(videoDest);
-            if (!samePath) { if (copyLocalFiles) await Task.Run(() => File.Copy(detail.DownloadUrl, videoDest)); else File.CreateSymbolicLink(videoDest, detail.DownloadUrl); }
-            progress?.Report(1.0);
-        }
-        else await DownloadFileAsync(detail.DownloadUrl, videoDest, detail.Referrer, progress, ct);
-
-        string? thumb = await SaveAssetAsync(thumbnailUrl, itemDir, key, ".jpg", copyLocalFiles);
-        string? anim = await SaveAnimatedPreviewAsync(animatedUrl, itemDir, key, copyLocalFiles);
-        WriteIndex(isScene: false);
-        return Result(videoDest, false, thumb, anim);
+        public string? ThumbnailUrl { get; init; }
+        public string? AnimatedUrl { get; init; }
+        public string? Library { get; init; }
+        // "Copy files instead of linking": a file on this PC is copied, not linked
+        public bool CopyLocalFiles { get; init; }
+        // "Download without subscribing": a Workshop item becomes the library's own workshop/<id> copy even from the
+        // Wallpaper Engine folder (Steam's folder of a one-off isn't a subscription and goes away)
+        public bool OwnCopy { get; init; }
     }
 
-    private static readonly string[] VidExts = { ".mp4", ".webm", ".mov", ".mkv", ".avi" };
-    private static bool IsVideoExt(string p) => VidExts.Contains(Path.GetExtension(p).ToLowerInvariant());
-    private static string? FindInDir(string dir, params string[] names)
-    { foreach (var n in names) { var p = Path.Combine(dir, n); if (File.Exists(p)) return p; } return null; }
+    private static readonly string[] VideoExts = [".mp4", ".webm", ".mov", ".mkv", ".avi"];
+    private static readonly string[] AnimatedExts = [".gif", ".webp", ".apng"];
+    private static readonly object KeyGate = new();
 
-    // web source folder from the page/source URL domain; unknown → imported
-    private static string SourceFromUrl(string? url)
-    {
-        var u = (url ?? "").ToLowerInvariant();
-        if (u.Contains("motionbgs")) return LibraryStore.MotionBgs;
-        if (u.Contains("moewalls")) return LibraryStore.Moewalls;
-        if (u.Contains("desktophut")) return LibraryStore.Desktophut;
-        return LibraryStore.Imported;
-    }
+    public static Task<LibraryItem> DownloadAsync(Request r, IProgress<double>? progress, CancellationToken ct) =>
+        r.Detail.WorkshopId is { Length: > 0 } id ? Task.FromResult(FromWorkshopFolder(r, id, progress)) : FetchAsync(r, progress, ct);
 
-    private static string UniqueKey(string source, string baseName)
+    // A Workshop item already on disk (the Wallpaper Engine folder, or the folder Steam just filled): DownloadUrl is a
+    // scene's folder or a video's file in it. Inside the Wallpaper Engine folder it stays Steam's — local/<id>, a link to
+    // it — unless OwnCopy; anywhere else it becomes the library's own copy, workshop/<id>. An item already there is kept.
+    // Inside means by real paths: Steam reports an item's real folder while the setting may name it through a symlink, and
+    // compared as text that "outside" would make a second, owned copy of the whole item.
+    private static LibraryItem FromWorkshopFolder(Request r, string id, IProgress<double>? progress)
     {
-        var dir = LibraryStore.SourceDir(source);
-        for (int i = 0; i < 10000; i++)
+        var d = r.Detail;
+        string? folder = d.IsScene ? (Directory.Exists(d.DownloadUrl) ? d.DownloadUrl : null) : Path.GetDirectoryName(d.DownloadUrl);
+        if (folder == null || !Directory.Exists(folder)) throw new DirectoryNotFoundException($"the Workshop item's folder isn't there ({d.DownloadUrl})");
+        string weFolder = SettingsService.Load().WorkshopFolder;
+        bool steams = !r.OwnCopy && weFolder.Length > 0 && Within(RealPath(folder), RealPath(weFolder));
+        string source = steams ? LibraryStore.Local : LibraryStore.Workshop;
+        string item = Path.Combine(Directory.CreateDirectory(LibraryStore.SourceDir(source)).FullName, id);
+        if (!Directory.Exists(item) && !File.Exists(item))
         {
-            string k = i == 0 ? baseName : $"{baseName} ({i})";
-            if (!Directory.Exists(Path.Combine(dir, k))) return k;
+            if (steams) File.CreateSymbolicLink(item, folder);
+            else LibraryService.CopyTree(folder, item);
         }
-        return baseName + "_" + Guid.NewGuid().ToString("N");
+        Record(source, id, d, sourceUrl: null);
+        progress?.Report(1.0);
+        string? still = FirstThere(item, "preview.jpg", "preview.png"), moving = FirstThere(item, "preview.gif", "preview.webp");
+        if (d.IsScene) return Item(d, r.SourceId, item, still, moving, copiedScene: steams ? null : item);
+        string media = Path.Combine(item, Path.GetFileName(d.DownloadUrl));
+        if (!File.Exists(media)) media = Directory.EnumerateFiles(item).FirstOrDefault(IsVideo) ?? media;
+        return Item(d, r.SourceId, media, still, moving);
     }
 
-    // Persist the source's animated preview (gif/webp/apng) next to the media as <title>.<ext>.
-    // Only animated formats are saved; a static or extensionless URL → null (UI uses the video fallback).
-    // animated preview (gif/webp/apng only) → destDir/baseName.<ext>; static/extensionless URL → null
-    private static async Task<string?> SaveAnimatedPreviewAsync(string? animatedUrl, string destDir, string baseName, bool copyLocalFiles)
+    // A web source's file (fetched with its Referer) or a file on this PC (linked, or copied) → <library>/<title>/<title>.<ext>
+    // with its thumbnail and its animated preview beside it; a title already taken there gets " (n)". A download that fails
+    // leaves nothing: its new folder goes with it.
+    private static async Task<LibraryItem> FetchAsync(Request r, IProgress<double>? progress, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(animatedUrl)) return null;
-        string urlPath = Uri.TryCreate(animatedUrl, UriKind.Absolute, out var uri) ? uri.AbsolutePath : animatedUrl;
-        string ext = Path.GetExtension(urlPath).ToLowerInvariant();
-        if (ext != ".gif" && ext != ".webp" && ext != ".apng") return null;
-        return await SaveAssetAsync(animatedUrl, destDir, baseName, ext, copyLocalFiles);
-    }
-
-    // copy/symlink/download a single asset into destDir/baseName.<ext> (ext from the URL, else defaultExt)
-    private static async Task<string?> SaveAssetAsync(string? url, string destDir, string baseName, string defaultExt, bool copyLocalFiles)
-    {
-        if (string.IsNullOrEmpty(url)) return null;
-        string urlPath = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.AbsolutePath : url;
-        string ext = Path.GetExtension(urlPath);
-        if (string.IsNullOrEmpty(ext)) ext = defaultExt;
-        string dest = Path.Combine(destDir, baseName + ext);
+        var d = r.Detail;
+        string source = r.Library ?? LibraryStore.Imported;
+        string key, folder;
+        lock (KeyGate)
+        {
+            string dir = LibraryStore.SourceDir(source);
+            string name = LibraryService.SanitizeName(d.Title);
+            key = Enumerable.Range(0, int.MaxValue).Select((n) => n == 0 ? name : $"{name} ({n})")
+                .First((k) => !Directory.Exists(Path.Combine(dir, k)) && !File.Exists(Path.Combine(dir, k)));
+            folder = Directory.CreateDirectory(Path.Combine(dir, key)).FullName;
+        }
         try
         {
-            Directory.CreateDirectory(destDir);
-            if (File.Exists(url))
-            {
-                bool same = Path.GetFullPath(url) == Path.GetFullPath(dest);
-                if (!same && File.Exists(dest)) File.Delete(dest);
-                if (!same) { if (copyLocalFiles) await Task.Run(() => File.Copy(url, dest)); else File.CreateSymbolicLink(dest, url); }
-            }
-            else await DownloadFileAsync(url, dest, null);
-            return dest;
+            string ext = Path.GetExtension(d.DownloadUrl).ToLowerInvariant() is var e && VideoExts.Contains(e) ? e : ".mp4";
+            string media = Path.Combine(folder, key + ext);
+            await BringAsync(d.DownloadUrl, media, r.CopyLocalFiles, d.Referrer, progress, ct);
+            string? still = await AssetAsync(r.ThumbnailUrl, folder, key, ".jpg", r.CopyLocalFiles, ct);
+            // only an animated format is the animated preview; a still there is none (the card plays the video instead)
+            string? moving = AnimatedExts.Contains(UrlExt(r.AnimatedUrl)) ? await AssetAsync(r.AnimatedUrl, folder, key, null, r.CopyLocalFiles, ct) : null;
+            Record(source, key, d, sourceUrl: r.SourceId);
+            return Item(d, r.SourceId, media, still, moving);
         }
+        catch
+        {
+            LibraryService.TryDeleteDir(folder);
+            throw;
+        }
+    }
+
+    // `from` (a URL, or a file on this PC) → `to`. A local file is linked unless `copy`; a URL is fetched with the shared
+    // client and the Firefox User-Agent (.claude/rules/backend/sources-steam.md § Scrapers), `referer` when the site needs it.
+    private static async Task BringAsync(string from, string to, bool copy, string? referer, IProgress<double>? progress, CancellationToken ct)
+    {
+        if (File.Exists(from))
+        {
+            if (copy) await Task.Run(() => File.Copy(from, to), ct);
+            else File.CreateSymbolicLink(to, from);
+            progress?.Report(1.0);
+            return;
+        }
+        using var ask = new HttpRequestMessage(HttpMethod.Get, from);
+        ask.Headers.UserAgent.ParseAdd(HttpClientProvider.UserAgent);
+        if (!string.IsNullOrEmpty(referer)) ask.Headers.Referrer = new Uri(referer);
+        using var answer = await HttpClientProvider.Client.SendAsync(ask, HttpCompletionOption.ResponseHeadersRead, ct);
+        answer.EnsureSuccessStatusCode();
+        long? size = answer.Content.Headers.ContentLength;
+        await using var body = await answer.Content.ReadAsStreamAsync(ct);
+        await using var file = new FileStream(to, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true);
+        var chunk = new byte[1 << 16];
+        long done = 0;
+        for (int n; (n = await body.ReadAsync(chunk, ct)) > 0;)
+        {
+            await file.WriteAsync(chunk.AsMemory(0, n), ct);
+            done += n;
+            if (size > 0) progress?.Report((double)done / size.Value);
+        }
+    }
+
+    // A picture beside the media as <key><its extension> (`fallbackExt` when the URL has none); null when there is none or it
+    // couldn't be had (the card does without it)
+    private static async Task<string?> AssetAsync(string? url, string folder, string key, string? fallbackExt, bool copy, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(url)) return null;
+        string ext = Path.GetExtension(Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.AbsolutePath : url);
+        string to = Path.Combine(folder, key + (ext.Length > 0 ? ext : fallbackExt));
+        try
+        {
+            await BringAsync(url, to, copy, referer: null, progress: null, ct);
+            return to;
+        }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 
-    private static async Task DownloadFileAsync(string url, string dest, string? referrer, IProgress<double>? progress = null, CancellationToken ct = default)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Add("User-Agent", HttpClientProvider.UserAgent);
-        if (!string.IsNullOrEmpty(referrer))
-            req.Headers.Referrer = new Uri(referrer);
-
-        using var resp = await HttpClientProvider.Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-
-        resp.EnsureSuccessStatusCode();
-
-        long? total = resp.Content.Headers.ContentLength;
-        using var src = await resp.Content.ReadAsStreamAsync(ct);
-        using var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 81920);
-
-        var buffer = new byte[81920];
-        long bytesRead = 0;
-        int read;
-        while ((read = await src.ReadAsync(buffer, ct)) > 0)
+    // The item's index entry: everything the detail knows
+    private static void Record(string source, string key, WallpaperDetail d, string? sourceUrl) =>
+        LibraryStore.UpdateIndex(source, (index) =>
         {
-            await fs.WriteAsync(buffer.AsMemory(0, read), ct);
-            bytesRead += read;
-            if (total.HasValue)
-                progress?.Report((double)bytesRead / total.Value);
-        }
-    }
+            var m = index.GetValueOrDefault(key) ?? new LibMeta();
+            m.Title = d.Title;
+            m.IsScene = d.IsScene;
+            m.WorkshopId = d.WorkshopId;
+            m.SourceUrl = sourceUrl;
+            m.PageUrl = d.PageUrl;
+            m.Resolution = d.Resolution;
+            m.AgeRating = d.AgeRating;
+            m.YoutubeUrl = d.YoutubeUrl;
+            m.AuthorName = d.AuthorName;
+            m.Description = d.Description;
+            m.FileSizeBytes = d.FileSizeBytes;
+            m.Subscriptions = d.Subscriptions;
+            m.Favorites = d.Favorites;
+            m.Tags = d.Tags;
+            index[key] = m;
+            return true;
+        });
 
-    private static void CopyDirectory(string src, string dest)
+    private static LibraryItem Item(WallpaperDetail d, string? sourceId, string path, string? still, string? moving, string? copiedScene = null) => new()
     {
-        Directory.CreateDirectory(dest);
-        foreach (var file in Directory.GetFiles(src))
-            File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
-        foreach (var dir in Directory.GetDirectories(src))
-            CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
-    }
+        Title = d.Title,
+        VideoPath = path,
+        ThumbnailPath = still,
+        AnimatedThumbnailPath = moving,
+        SourceId = sourceId,
+        IsScene = d.IsScene,
+        WorkshopId = d.WorkshopId,
+        CopiedSceneDir = copiedScene,
+        AddedAt = DateTime.Now,
+        PageUrl = d.PageUrl,
+        Resolution = d.Resolution,
+        AgeRating = d.AgeRating,
+        YoutubeUrl = d.YoutubeUrl,
+        AuthorName = d.AuthorName,
+        Description = d.Description,
+        FileSizeBytes = d.FileSizeBytes,
+        Subscriptions = d.Subscriptions,
+        Favorites = d.Favorites,
+        Tags = d.Tags,
+    };
 
-    // Name files the Wallpaper Engine way (LibraryService.SanitizeName): PLAYLIST_BAR invalid chars rather than
-    // replacing them with '_', so a directly-downloaded workshop item and its later WE-dir copy share a
-    // name → the reconcile is a clean in-place backing swap, no rename/repoint.
-    private static string SanitizeName(string name)
+    private static bool IsVideo(string path) => VideoExts.Contains(Path.GetExtension(path).ToLowerInvariant());
+
+    private static string UrlExt(string? url) => string.IsNullOrEmpty(url) ? ""
+        : Path.GetExtension(Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.AbsolutePath : url).ToLowerInvariant();
+
+    private static string? FirstThere(string folder, params string[] names) =>
+        names.Select((n) => Path.Combine(folder, n)).FirstOrDefault(File.Exists);
+
+    // `path` is `folder` or inside it, by whole names (…/4319600 is not inside …/431960)
+    private static bool Within(string path, string folder)
     {
-        var invalid = Path.GetInvalidFileNameChars();
-        return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
+        folder = Path.TrimEndingDirectorySeparator(folder);
+        return path == folder || path.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
-    // `child` inside (or equal to) `dir`, by whole path segments (…/4319600 isn't under …/431960)
-    static bool IsUnder(string child, string dir)
-    {
-        dir = Path.TrimEndingDirectorySeparator(dir);
-        return child == dir || child.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.Ordinal);
-    }
-
-    // realpath(3): every symlink along the path resolved (a link's target may itself hold links); a part that doesn't
-    // exist (or can't be read) is kept as it is
+    // realpath(3): every link on the way resolved, its target's own links too (at most 40 hops, as the kernel allows); a
+    // name that isn't there, or can't be read, is kept as written
     internal static string RealPath(string path)
     {
-        var full = Path.GetFullPath(path);
-        var parts = full.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-        string cur = Path.DirectorySeparatorChar.ToString();
-        for (int i = 0, hops = 0; i < parts.Length; i++)
+        string at = Path.DirectorySeparatorChar.ToString();
+        int hops = 0;
+        foreach (var name in Path.GetFullPath(path).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
-            var next = Path.Combine(cur, parts[i]);
+            string next = Path.Combine(at, name);
             FileSystemInfo? target = null;
-            try { target = new FileInfo(next).LinkTarget != null ? new FileInfo(next).ResolveLinkTarget(true) : null; } catch { }
-            if (target != null && hops++ < 40) { cur = Path.GetFullPath(target.FullName); continue; }
-            cur = next;
+            try { target = new FileInfo(next).ResolveLinkTarget(returnFinalTarget: true); } catch { }
+            at = target != null && hops++ < 40 ? Path.GetFullPath(target.FullName) : next;
         }
-        return Path.TrimEndingDirectorySeparator(cur);
+        return Path.TrimEndingDirectorySeparator(at);
     }
 }

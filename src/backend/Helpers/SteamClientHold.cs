@@ -167,15 +167,8 @@ public static class SteamClientHold
         {
             var libs = SteamClientUgc.Candidates(s);
             if (libs.Count == 0) return (null, "the Steam client's steamclient.so wasn't found — is Steam installed?");
-            var self = PlayerHelper.GetSelfInvocationArgs();
-            if (self.Count == 0) return (null, "can't start the helper");
-            var psi = new ProcessStartInfo(self[0]) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in self.Skip(1)) psi.ArgumentList.Add(a);
-            psi.ArgumentList.Add("steam-ugc"); psi.ArgumentList.Add("session");
-            foreach (var l in libs) psi.ArgumentList.Add(l);
-            psi.Environment["SteamAppId"] = SteamClientUgc.WallpaperEngineAppId.ToString();
-            psi.Environment["SteamGameId"] = SteamClientUgc.WallpaperEngineAppId.ToString();
-            psi.Environment.Remove("LD_LIBRARY_PATH"); // the backend's (a dev shell's) must not shadow Steam's client library's
+            var psi = SteamClientUgc.ChildStart("session", libs);
+            if (psi == null) return (null, "can't start the helper");
             Process? p;
             try { p = Process.Start(psi); } catch { p = null; }
             if (p == null) return (null, "can't start the helper");

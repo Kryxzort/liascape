@@ -2,17 +2,12 @@ using System.Collections.Generic;
 
 namespace Liascape.Models;
 
+// What `liascape restore` puts back when the player shows nothing (.claude/rules/backend/state-files.md § LastSession):
+// the wallpaper last applied, or the playlist last played. A playlist's order, rotation and transitions are not kept
+// here: a restore reads them from the playlist bar and the settings as they are then, like every live edit leaves them.
 public class LastSession
 {
-    public bool IsPlaylist { get; set; }
-    public bool IsTimedPlaylist { get; set; }
-    public bool IsRandom { get; set; }
+    // the wallpaper, or the playlist's items in the bar's order
     public List<string> Paths { get; set; } = [];
-    public bool Shuffle { get; set; }
-    // Sane fallback (matches AppSettings.GlobalIntervalSeconds default) for
-    // legacy session files written before this property existed.
-    // SwitchWhenVideoEnds → TimedIntervalSeconds is the minimum play time, else the timer (PlayerHelper § Rotation)
-    public int TimedIntervalSeconds { get; set; } = 1800;
-    public bool SwitchWhenVideoEnds { get; set; }
-    public bool OverrideGlobalSettings { get; set; }
+    public bool Playlist { get; set; }
 }

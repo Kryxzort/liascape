@@ -126,6 +126,370 @@
       }
     ]
   },
+  "download: a Wallpaper Engine scene": {
+    "asked": [],
+    "item": {
+      "animatedThumbnailPath": "$LIB/local/1006/preview.gif",
+      "copiedSceneDir": "",
+      "isScene": true,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "$WS/1006",
+      "thumbnailPath": "",
+      "title": "Forest Scene",
+      "videoPath": "$LIB/local/1006",
+      "workshopId": "1006"
+    },
+    "library": {
+      "$LIB/local/1006": "-\u003E $WS/1006",
+      "$LIB/local/1006/preview.gif": "",
+      "$LIB/local/1006/project.json": "149 bytes",
+      "$LIB/local/1006/scene.pkg": "",
+      "$LIB/local/index.json": {
+        "1001": {
+          "crashed": false,
+          "isScene": false,
+          "title": "Rain Window",
+          "whitelist": false,
+          "workshopId": "1001"
+        },
+        "1006": {
+          "crashed": false,
+          "isScene": true,
+          "title": "Forest Scene",
+          "whitelist": false,
+          "workshopId": "1006"
+        }
+      }
+    },
+    "progress": 1
+  },
+  "download: a Wallpaper Engine scene, its own copy": {
+    "asked": [],
+    "item": {
+      "animatedThumbnailPath": "$LIB/workshop/1006/preview.gif",
+      "copiedSceneDir": "$LIB/workshop/1006",
+      "isScene": true,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "$WS/1006",
+      "thumbnailPath": "",
+      "title": "Forest Scene",
+      "videoPath": "$LIB/workshop/1006",
+      "workshopId": "1006"
+    },
+    "library": {
+      "$LIB/workshop": "dir",
+      "$LIB/workshop/1006": "dir",
+      "$LIB/workshop/1006/preview.gif": "",
+      "$LIB/workshop/1006/project.json": "149 bytes",
+      "$LIB/workshop/1006/scene.pkg": "",
+      "$LIB/workshop/index.json": {
+        "1006": {
+          "crashed": false,
+          "isScene": true,
+          "title": "Forest Scene",
+          "whitelist": false,
+          "workshopId": "1006"
+        }
+      },
+      "$LIB/workshop/index.json.lock": ""
+    },
+    "progress": 1
+  },
+  "download: a Wallpaper Engine video": {
+    "asked": [],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "$WS/1001",
+      "thumbnailPath": "$LIB/local/1001/preview.jpg",
+      "title": "Rain Window",
+      "videoPath": "$LIB/local/1001/rain.mp4",
+      "workshopId": "1001"
+    },
+    "library": {
+      "$LIB/local": "dir",
+      "$LIB/local/1001": "-\u003E $WS/1001",
+      "$LIB/local/1001/preview.jpg": "",
+      "$LIB/local/1001/project.json": "118 bytes",
+      "$LIB/local/1001/rain.mp4": "",
+      "$LIB/local/index.json": {
+        "1001": {
+          "crashed": false,
+          "isScene": false,
+          "title": "Rain Window",
+          "whitelist": false,
+          "workshopId": "1001"
+        }
+      },
+      "$LIB/local/index.json.lock": ""
+    },
+    "progress": 1
+  },
+  "download: a Workshop video outside the Wallpaper Engine folder": {
+    "asked": [],
+    "item": {
+      "animatedThumbnailPath": "$LIB/workshop/1003/preview.gif",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "https://steamcommunity.com/sharedfiles/filedetails/?id=1003",
+      "thumbnailPath": "",
+      "title": "Sea Rain Loop",
+      "videoPath": "$LIB/workshop/1003/sea.mov",
+      "workshopId": "1003"
+    },
+    "library": {
+      "$LIB/workshop/1003": "dir",
+      "$LIB/workshop/1003/preview.gif": "",
+      "$LIB/workshop/1003/project.json": "{\u0022type\u0022:\u0022Video\u0022,\u0022file\u0022:\u0022sea.mov\u0022,\u0022title\u0022:\u0022Sea Rain Loop\u0022}\n",
+      "$LIB/workshop/1003/sea.mov": "",
+      "$LIB/workshop/index.json": {
+        "1003": {
+          "crashed": false,
+          "isScene": false,
+          "title": "Sea Rain Loop",
+          "whitelist": false,
+          "workshopId": "1003"
+        },
+        "1006": {
+          "crashed": false,
+          "isScene": true,
+          "title": "Forest Scene",
+          "whitelist": false,
+          "workshopId": "1006"
+        }
+      }
+    },
+    "progress": 1
+  },
+  "download: a file on this PC, copied": {
+    "asked": [],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "$TMP/own/mine.mp4",
+      "thumbnailPath": "$LIB/imported/Mine Copied/Mine Copied.jpg",
+      "title": "Mine Copied",
+      "videoPath": "$LIB/imported/Mine Copied/Mine Copied.mp4",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/imported/Mine Copied": "dir",
+      "$LIB/imported/Mine Copied/Mine Copied.jpg": "my still",
+      "$LIB/imported/Mine Copied/Mine Copied.mp4": "my video",
+      "$LIB/imported/index.json": {
+        "Mine": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "$TMP/own/mine.mp4",
+          "title": "Mine",
+          "whitelist": false
+        },
+        "Mine Copied": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "$TMP/own/mine.mp4",
+          "title": "Mine Copied",
+          "whitelist": false
+        }
+      }
+    },
+    "progress": 1
+  },
+  "download: a file on this PC, linked": {
+    "asked": [],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "$TMP/own/mine.mp4",
+      "thumbnailPath": "$LIB/imported/Mine/Mine.jpg",
+      "title": "Mine",
+      "videoPath": "$LIB/imported/Mine/Mine.mp4",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/imported": "dir",
+      "$LIB/imported/Mine": "dir",
+      "$LIB/imported/Mine/Mine.jpg": "-\u003E $TMP/own/mine.jpg",
+      "$LIB/imported/Mine/Mine.mp4": "-\u003E $TMP/own/mine.mp4",
+      "$LIB/imported/index.json": {
+        "Mine": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "$TMP/own/mine.mp4",
+          "title": "Mine",
+          "whitelist": false
+        }
+      },
+      "$LIB/imported/index.json.lock": ""
+    },
+    "progress": 1
+  },
+  "download: a web source\u0027s video": {
+    "asked": [
+      {
+        "path": "/files/neon.mp4",
+        "referer": "https://moewalls.com/neon-rain/",
+        "userAgent": "$UA"
+      },
+      {
+        "path": "/thumbs/neon.jpg",
+        "referer": null,
+        "userAgent": "$UA"
+      },
+      {
+        "path": "/thumbs/neon.gif",
+        "referer": null,
+        "userAgent": "$UA"
+      }
+    ],
+    "item": {
+      "animatedThumbnailPath": "$LIB/moewalls/Neon Rain/Neon Rain.gif",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": "https://moewalls.com/neon-rain/",
+      "resolution": "4K",
+      "sourceId": "https://moewalls.com/neon-rain/",
+      "thumbnailPath": "$LIB/moewalls/Neon Rain/Neon Rain.jpg",
+      "title": "Neon Rain",
+      "videoPath": "$LIB/moewalls/Neon Rain/Neon Rain.mp4",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/moewalls": "dir",
+      "$LIB/moewalls/Neon Rain": "dir",
+      "$LIB/moewalls/Neon Rain/Neon Rain.gif": "gif",
+      "$LIB/moewalls/Neon Rain/Neon Rain.jpg": "jpg",
+      "$LIB/moewalls/Neon Rain/Neon Rain.mp4": "neon video bytes",
+      "$LIB/moewalls/index.json": {
+        "Neon Rain": {
+          "crashed": false,
+          "isScene": false,
+          "pageUrl": "https://moewalls.com/neon-rain/",
+          "resolution": "4K",
+          "sourceUrl": "https://moewalls.com/neon-rain/",
+          "title": "Neon Rain",
+          "whitelist": false
+        }
+      },
+      "$LIB/moewalls/index.json.lock": ""
+    },
+    "progress": 1
+  },
+  "download: a webm, a still for the gif, a poster without an extension": {
+    "asked": [
+      {
+        "path": "/files/clip.webm",
+        "referer": null,
+        "userAgent": "$UA"
+      },
+      {
+        "path": "/thumbs/poster",
+        "referer": null,
+        "userAgent": "$UA"
+      }
+    ],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "https://www.motionbgs.com/clip",
+      "thumbnailPath": "$LIB/motionbgs/Clip  Cut/Clip  Cut.jpg",
+      "title": "Clip / Cut",
+      "videoPath": "$LIB/motionbgs/Clip  Cut/Clip  Cut.webm",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/motionbgs": "dir",
+      "$LIB/motionbgs/Clip  Cut": "dir",
+      "$LIB/motionbgs/Clip  Cut/Clip  Cut.jpg": "poster",
+      "$LIB/motionbgs/Clip  Cut/Clip  Cut.webm": "webm bytes",
+      "$LIB/motionbgs/index.json": {
+        "Clip  Cut": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://www.motionbgs.com/clip",
+          "title": "Clip / Cut",
+          "whitelist": false
+        }
+      },
+      "$LIB/motionbgs/index.json.lock": ""
+    },
+    "progress": 1
+  },
+  "download: the same title again": {
+    "asked": [
+      {
+        "path": "/files/neon.mp4",
+        "referer": null,
+        "userAgent": "$UA"
+      }
+    ],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": "https://moewalls.com/neon-rain-2/",
+      "resolution": null,
+      "sourceId": "https://moewalls.com/neon-rain-2/",
+      "thumbnailPath": "",
+      "title": "Neon Rain",
+      "videoPath": "$LIB/moewalls/Neon Rain (1)/Neon Rain (1).mp4",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/moewalls/Neon Rain (1)": "dir",
+      "$LIB/moewalls/Neon Rain (1)/Neon Rain (1).mp4": "neon video bytes",
+      "$LIB/moewalls/index.json": {
+        "Neon Rain": {
+          "crashed": false,
+          "isScene": false,
+          "pageUrl": "https://moewalls.com/neon-rain/",
+          "resolution": "4K",
+          "sourceUrl": "https://moewalls.com/neon-rain/",
+          "title": "Neon Rain",
+          "whitelist": false
+        },
+        "Neon Rain (1)": {
+          "crashed": false,
+          "isScene": false,
+          "pageUrl": "https://moewalls.com/neon-rain-2/",
+          "sourceUrl": "https://moewalls.com/neon-rain-2/",
+          "title": "Neon Rain",
+          "whitelist": false
+        }
+      }
+    },
+    "progress": 1
+  },
+  "download: the site refuses the file": {
+    "asked": [
+      {
+        "path": "/files/gone.mp4",
+        "referer": null,
+        "userAgent": "$UA"
+      }
+    ],
+    "item": "error: HttpRequestException",
+    "library": {
+      "$LIB/desktophut": "dir"
+    },
+    "progress": -1
+  },
   "local details": {
     "1001": {
       "downloadUrl": "$WS/1001/rain.mp4",

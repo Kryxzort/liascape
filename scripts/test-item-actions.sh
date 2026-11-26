@@ -10,7 +10,9 @@
 #         .png, a GIF named .mp4, a video named .png, a link named .mp4 to a .bin, a non-media extension, a directory and a
 #         FIFO (without hanging). ApiSecurity.OpenableMedia.
 #  import: POST /library/import of a .gif, a .webm and a .MKV stores each under its own (lowercased) extension, its bytes
-#         as they were, with a thumbnail; a container the library doesn't name (.ts) as .mp4. /library lists the gif as its
+#         as they were, with a thumbnail; a container the library doesn't name (.ts) as .mp4; a .png as it is, a .jpg converted
+#         to a .png; another file under a taken title beside it as "<title> (1)", a slash left out of a name, a missing source
+#         nothing (400). /library lists the gif as its
 #         own animated preview and the videos without one, /media serves each as its own type, the gif and the mkv open in
 #         the user's app, a re-import is the same item, delete takes it away; a URL download's <key>.gif beside its video
 #         stays its preview, and never stands in for a broken video link. Helpers/ImportService.cs, LibraryService.ResolveItemMedia.
@@ -240,6 +242,22 @@ imp "$SRC/iw.webm" iw webm
 imp "$SRC/im.MKV" im mkv
 # a container the library doesn't name (LibraryService.ImportedMediaExts): .mp4, which the player plays whatever is inside
 imp "$SRC/it.ts" it mp4
+# a picture: a png as it is, any other picture converted to one (the library finds a still as <key>.png)
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=yellow:s=64x36" -frames:v 1 "$SRC/ip.png"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=yellow:s=64x36" -frames:v 1 "$SRC/ij.jpg"
+imp "$SRC/ip.png" ip png
+check "import ij.jpg → stored as ij.png, a PNG" "$(postc /library/import "$(jq -nc --arg p "$SRC/ij.jpg" '{path: $p, title: "ij"}')") $(jq -r .videoPath "$T/body") $(head -c 8 "$LIB/imported/ij/ij.png" 2>/dev/null | od -An -tx1 | tr -d ' \n')" \
+  "200 $LIB/imported/ij/ij.png 89504e470d0a1a0a"
+check "…its thumbnail extracted" "$(item ij | jq -r .thumbnailPath)" "$LIB/imported/ij/ij.jpg"
+# another file under a title already taken is its own item beside it; a source that doesn't exist imports nothing
+cp "$SRC/iw.webm" "$SRC/other.webm"
+check "another file titled iw → its own item, iw (1)" "$(postc /library/import "$(jq -nc --arg p "$SRC/other.webm" '{path: $p, title: "iw"}')") $(jq -r .videoPath "$T/body")" \
+  "200 $LIB/imported/iw (1)/iw (1).webm"
+cp "$SRC/ip.png" "$SRC/slash.png"
+check "a title with a slash → the slash left out of its name" "$(postc /library/import "$(jq -nc --arg p "$SRC/slash.png" '{path: $p, title: "a/b"}')") $(jq -r .videoPath "$T/body")" \
+  "200 $LIB/imported/ab/ab.png"
+check "a source that doesn't exist → 400, nothing imported" "$(postc /library/import "$(jq -nc --arg p "$SRC/nope.mp4" '{path: $p, title: "nope"}')") $([ -e "$LIB/imported/nope" ] && echo made || echo none)" \
+  "400 none"
 # what the UI tells a gif from a video by (components/mediaAssets.ts): the gif is its own animated preview, a video has none
 check "the gif lists as its own animated preview (a card plays it as a gif)" "$(item ig | jq -c '[.videoPath == .animatedThumbnailPath, .isScene]')" '[true,false]'
 check "the webm and mkv list as videos, with no gif" "$(item iw | jq -c '[.videoPath, .animatedThumbnailPath]') $(item im | jq -c '[.videoPath, .animatedThumbnailPath]')" \

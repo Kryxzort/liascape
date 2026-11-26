@@ -140,7 +140,8 @@ public static class LibraryStore
         Imported = "imported", Workshop = "workshop", Local = "local";
     public static readonly string[] Sources = { MotionBgs, Moewalls, Desktophut, Imported, Workshop, Local };
 
-    private static string Root => DownloadHelper.LibraryPath;
+    // $XDG_DATA_HOME/liascape/library: every source's folder
+    public static string Root => Path.Combine(AppDirs.Data, "library");
     public static string SourceDir(string source) => Path.Combine(Root, source);
     private static string IndexPath(string source) => Path.Combine(SourceDir(source), "index.json");
 

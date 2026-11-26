@@ -61,7 +61,7 @@ public static class AppOps
         if (PlayerHelper.LoadProgram(paths, s, ps, shuffle, interval, adv, from: playFrom != null ? "index" : null, index: playFrom ?? 0,
                 key: LiascapePlayerProgram.KeyOf(bar?.Name)) == null)
             return PlayerHelper.NoPlayableInPlaylist;
-        Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = adv, OverrideGlobalSettings = ps.OverrideGlobalSettings });
+        Save(s, new LastSession { Paths = paths, Playlist = true });
         return "";
     }
 
@@ -220,8 +220,9 @@ public static class AppOps
     // "Download without subscribing"): WorkshopDownloader.AcquireOneOffAsync by the download mode's own route, the library's own
     // workshop/<id> copy, and a queued unsubscribe of it stays queued (the copy is the library's own, not a subscription's); a
     // subscription the route made only to fetch it is let go once the copy is made (or the import failed).
+    // `library`: a web source's library folder (WebSource.Library), null for the rest
     public static async Task<LibraryItem> DownloadAsync(WallpaperDetail detail, string thumbnailUrl, string sourceId, CancellationToken ct, string? animatedUrl = null,
-        bool oneOff = false)
+        bool oneOff = false, string? library = null)
     {
         var s = SettingsService.Load();
         var progress = new Progress<double>(v =>
@@ -266,8 +267,10 @@ public static class AppOps
                     Favorites = detail.Favorites, Tags = detail.Tags };
             }
 
-            var item = await DownloadHelper.DownloadAsync(dl, thumbnailUrl, sourceId, detail.IsWorkshopAcquire ? null : progress, s.CopyFilesInsteadOfSymlinking, ct, animatedUrl: anim,
-                ownCopy: oneOff);
+            var item = await DownloadHelper.DownloadAsync(new DownloadHelper.Request(dl, sourceId)
+            {
+                ThumbnailUrl = thumbnailUrl, AnimatedUrl = anim, Library = library, CopyLocalFiles = s.CopyFilesInsteadOfSymlinking, OwnCopy = oneOff,
+            }, detail.IsWorkshopAcquire ? null : progress, ct);
             if (item.WorkshopId is string wid && !oneOff) WorkshopUnsubQueue.Unblock(wid); // re-adding an item clears any pending unsubscribe
             SceneLoudnessOps.Imported(item, "download"); // a scene: its offline loudness estimate, in the background
             LibraryFactsOps.Kick("download"); // a web source's item: its frame size (a Workshop download saved Steam's tags)
@@ -295,71 +298,63 @@ public static class AppOps
             EventBus.Broadcast("settings-changed", new { volume = SettingsService.Load().Volume });
     }
 
-    // The keybind actions (`liascape <action>`, forwarded to a running backend's `/action` — ActionForward).
-    // null = done; else the reason it couldn't run. next/previous/random (and
-    // play/toggle-play's Restore()) throw when the library/session has no item playable under the
-    // current engine (e.g. an all-scene library under liascape-player, PlayerHelper.IsSkippedPath) — reported
-    // cleanly, same contract as the /next /prev /random HTTP routes.
-    public static readonly string[] Actions = ["toggle-mute", "toggle-pause", "stop", "play", "toggle-play",
-        "next", "previous", "random", "volume-up", "volume-down", "toggle-loop-current"];
+    // The keybind actions, `liascape <action>` (the words of `liascape volume up` joined by `-`), run here or forwarded to a
+    // running backend's `/action` (ActionForward); each one's whole work, by its name. An action returns what it has to
+    // say (null = nothing). One that can't happen throws InvalidOperationException with why: next / previous / random or a
+    // play when nothing in the library or the session can play (PlayerHelper.IsSkippedPath) — the same 409 as the
+    // /next /prev /random routes.
+    private static readonly Dictionary<string, Func<string?>> ActionTable = new()
+    {
+        ["toggle-mute"] = () =>
+        {
+            if (PlayerHelper.IsUserMuted) PlayerHelper.SetUserMute(false);
+            // an auto-mute, the player's or the backend's monitor's, lifts without becoming the user's own mute
+            else if (PlayerHelper.IsMuted || PlayerHelper.AutoMutedInPlayer) PlayerHelper.UnmuteAuto();
+            else PlayerHelper.SetUserMute(true);
+            return null;
+        },
+        ["toggle-pause"] = () =>
+        {
+            PlayerHelper.TogglePause();
+            // the in-app background follows at once (a switch's resume reaches it through /current). Guard: probe-matrix pause:appBg
+            EventBus.Broadcast("pause-changed", new { paused = PlayerHelper.IsPausedNow() });
+            return null;
+        },
+        ["stop"] = StopAndSay,
+        ["play"] = () => { PlayerHelper.Restore(); return null; },
+        ["toggle-play"] = () =>
+        {
+            if (PlayerHelper.IsPlaying || LiascapePlayerProgram.IsActive) return StopAndSay();
+            PlayerHelper.Restore();
+            return null;
+        },
+        ["next"] = () => { PlayerHelper.NextWallpaper(); return null; },
+        ["previous"] = () => { PlayerHelper.PreviousWallpaper(); return null; },
+        ["random"] = () => { PlayerHelper.ApplyRandom(); return null; },
+        ["volume-up"] = () => { VolumeKey(+5); return null; },
+        ["volume-down"] = () => { VolumeKey(-5); return null; },
+        ["toggle-loop-current"] = () => LoopCurrent(out var said) is string why ? throw new InvalidOperationException(why) : said,
+    };
+
+    // every open page hears that nothing plays now
+    private static string? StopAndSay()
+    {
+        PlayerHelper.Stop();
+        EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
+        return null;
+    }
+
+    public static IReadOnlyCollection<string> Actions => ActionTable.Keys;
+
     public static string? RunAction(string action) => RunAction(action, out _);
-    // `info`: what a successful action has to say (toggle-loop-current: what it did) — the CLI prints it, the UI shows it
+
+    // null = done, else why it couldn't be done; `info` = what a done action has to say (the CLI prints it, the UI shows it)
     public static string? RunAction(string action, out string? info)
     {
         info = null;
-        if (!Actions.Contains(action)) return $"unknown action (one of: {string.Join(", ", Actions)})";
-        try
-        {
-            switch (action)
-            {
-                case "toggle-loop-current":
-                    return LoopCurrent(out info);
-                case "toggle-mute":
-                    if (PlayerHelper.IsUserMuted)
-                        PlayerHelper.SetUserMute(false);
-                    else if (PlayerHelper.IsMuted || PlayerHelper.AutoMutedInPlayer)
-                        PlayerHelper.UnmuteAuto();
-                    else
-                        PlayerHelper.SetUserMute(true);
-                    break;
-                case "toggle-pause":
-                    PlayerHelper.TogglePause();
-                    // the in-app background follows at once (a switch's resume reaches it through /current). Guard: probe-matrix pause:appBg
-                    EventBus.Broadcast("pause-changed", new { paused = PlayerHelper.IsPausedNow() });
-                    break;
-                case "stop":
-                    PlayerHelper.Stop();
-                    EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
-                    break;
-                case "play":
-                    PlayerHelper.Restore();
-                    break;
-                case "toggle-play":
-                    if (PlayerHelper.IsPlaying || PlayerHelper.IsTimedPlaylistActive())
-                    {
-                        PlayerHelper.Stop();
-                        EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
-                    }
-                    else
-                        PlayerHelper.Restore();
-                    break;
-                case "next":
-                    PlayerHelper.NextWallpaper();
-                    break;
-                case "previous":
-                    PlayerHelper.PreviousWallpaper();
-                    break;
-                case "random":
-                    PlayerHelper.ApplyRandom();
-                    break;
-                case "volume-up":
-                case "volume-down":
-                    VolumeKey(action == "volume-up" ? 5 : -5);
-                    break;
-            }
-        }
+        if (!ActionTable.TryGetValue(action, out var run)) return $"unknown action (one of: {string.Join(", ", Actions)})";
+        try { info = run(); return null; }
         catch (InvalidOperationException e) { return e.Message; }
-        return null;
     }
 
     // `liascape toggle-loop-current` (a keybind to loop the current wallpaper indefinitely): toggles "keep
@@ -502,18 +497,12 @@ public static class AppOps
         }
         var s = SettingsService.Load();
         var sess = s.LastSession;
-        bool isPlaylist = sess != null && (sess.IsPlaylist || sess.IsTimedPlaylist);
         var playlistBar = pl?.VideoPaths ?? [];
         var survivors = playlistBar.Where(p => !del.Contains(p)).ToList();
-        if (isPlaylist && sess != null)
+        if (sess is { Playlist: true })
         {
-            // Start from the current playlist's settings (transitions etc.) and take the
-            // rotation from the session — a fresh PlaylistSettings dropped the transitions.
+            // the bar's settings as they are (order, rotation, transitions): a fresh PlaylistSettings would drop them
             var ps = pl?.Settings?.Clone() ?? new PlaylistSettings();
-            ps.Order = sess.Shuffle ? PlaylistOrder.Shuffle : PlaylistOrder.Sequential;
-            ps.OverrideGlobalSettings = sess.OverrideGlobalSettings;
-            ps.IntervalSeconds = sess.TimedIntervalSeconds;
-            ps.SwitchWhenVideoEnds = sess.SwitchWhenVideoEnds;
             int at = playlistBar.IndexOf(playing);
             if (at >= 0 && survivors.Count > 0)
             {

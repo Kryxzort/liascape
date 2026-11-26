@@ -22,44 +22,8 @@ public static class PlayerHelper
     public static bool IsUserMuted => _userMuted;
     public static bool IsMuted => _isMuted;
 
-    // a rotation session is the player's program (`prog:main`)
-    public static bool IsTimedPlaylistActive() => LiascapePlayerProgram.IsActive;
-
-    private static string UserMuteStatePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config", "liascape", "user_mute.state");
-
-    // Build the argv prefix needed to re-invoke this same liascape process
-    // (without args).
-    //   - Self-contained (AppImage, install.sh): the apphost binary and
-    //     entry assembly share a name (liascape-backend / liascape-backend.dll). The
-    //     apphost runs its bundled dll automatically; we just spawn it.
-    //   - Framework-dependent (AUR PKGBUILD): the process executable is the
-    //     dotnet host. We need to pass the entry assembly path so the
-    //     spawned host knows what to run.
-    public static List<string> GetSelfInvocationArgs()
-    {
-        var args = new List<string>();
-        var processPath = Environment.ProcessPath
-            ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-        if (string.IsNullOrEmpty(processPath)) return args;
-        args.Add(processPath);
-
-        var entryAsm = System.Reflection.Assembly.GetEntryAssembly()?.Location;
-        if (string.IsNullOrEmpty(entryAsm) || !entryAsm.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-            return args;
-
-        // Apphost vs dotnet host: in a self-contained build the apphost is
-        // named after the assembly (liascape-backend ↔ liascape-backend.dll), so the names
-        // match and we don't need a separate dll arg. Framework-dependent
-        // builds run under `dotnet` whose name differs.
-        var procStem = Path.GetFileNameWithoutExtension(processPath);
-        var asmStem = Path.GetFileNameWithoutExtension(entryAsm);
-        if (!string.Equals(procStem, asmStem, StringComparison.OrdinalIgnoreCase))
-            args.Add(entryAsm);
-
-        return args;
-    }
+    // the user's own mute, kept across restarts while it holds (auto-mute never lifts it)
+    private static string UserMuteStatePath => Path.Combine(AppDirs.Config, "user_mute.state");
 
     public static Action<string>? OnSceneCrashed;
     // the VRAM guard stopped a scene (path, used MiB, limit MiB, the UI's text)
@@ -150,18 +114,12 @@ public static class PlayerHelper
         if (LiascapePlayerProgram.IsActive) LiascapePlayerProgram.SetTransition();
     }
 
-    // Uniform pick from `pool` excluding `exclude`. No retries: shifts the
-    // chosen index past the excluded one to keep the distribution flat.
-    private static string PickRandomExcluding(IReadOnlyList<string> pool, string? exclude)
+    // Any of `paths` but `current`, all equally likely; `current` itself only when it is the one there is
+    private static string AnyOtherThan(IReadOnlyList<string> paths, string? current)
     {
-        if (pool.Count == 1 || exclude == null) return pool[Random.Shared.Next(pool.Count)];
-        int excludeIdx = -1;
-        for (int i = 0; i < pool.Count; i++)
-            if (pool[i] == exclude) { excludeIdx = i; break; }
-        if (excludeIdx < 0) return pool[Random.Shared.Next(pool.Count)];
-        int pick = Random.Shared.Next(pool.Count - 1);
-        if (pick >= excludeIdx) pick++;
-        return pool[pick];
+        var others = paths.Where((p) => p != current).ToList();
+        var from = others.Count > 0 ? others : paths;
+        return from[Random.Shared.Next(from.Count)];
     }
 
     // ── Pause × a user switch (next / previous / random: keybind, CLI, /next /prev /random) ──────
@@ -187,63 +145,43 @@ public static class PlayerHelper
     public static void NextWallpaper()
     {
         var pause = PauseOnUserSwitch();
-        if (IsTimedPlaylistActive()) { ResumeForRotation(pause); LiascapePlayerProgram.Next(); return; }
-        // Single-wallpaper sessions (single, random) — step the library.
-        TryStepLibrary(forward: true, keepPause: pause.Keep);
+        if (LiascapePlayerProgram.IsActive) { ResumeForRotation(pause); LiascapePlayerProgram.Next(); return; }
+        StepLibrary(forward: true, keepPause: pause.Keep);
     }
 
     public static void PreviousWallpaper()
     {
         // previous at the rotation's first item does nothing — and leaves a user pause alone (matrix
         // `programHeld × prog:previous`: resuming would be for a switch that cannot happen)
-        if (IsTimedPlaylistActive() && LiascapePlayerProgram.PrevIsNoOp()) return;
+        if (LiascapePlayerProgram.IsActive && LiascapePlayerProgram.PrevIsNoOp()) return;
         var pause = PauseOnUserSwitch();
-        if (IsTimedPlaylistActive()) { ResumeForRotation(pause); LiascapePlayerProgram.Prev(); return; }
-        TryStepLibrary(forward: false, keepPause: pause.Keep);
+        if (LiascapePlayerProgram.IsActive) { ResumeForRotation(pause); LiascapePlayerProgram.Prev(); return; }
+        StepLibrary(forward: false, keepPause: pause.Keep);
     }
 
-    // For single-wallpaper sessions (no playlist context), `next`/`prev`
-    // steps through the library alphabetically. Wraps at the ends. Returns
-    // false when the session isn't a single wallpaper (nothing to step).
-    //
-    // Skips unplayable items (IsSkippedPath — scenes when !ScenesPlayable, the contract every
-    // picker applies) by stepping further in the same direction, bounded to one full pass of
-    // the library so an all-unplayable library can't spin forever. Throws InvalidOperationException (never calls Apply on an
-    // unplayable path) when NOT ONE library item is playable — callers turn that into a
-    // 4xx/clear message instead of letting Apply()'s own scene check 500 the request.
-    private static bool TryStepLibrary(bool forward, bool keepPause)
+    // A single wallpaper's next / previous: the library's next / previous item in /library's order (the grid's), round
+    // from the last to the first, passing over what can't play (IsSkippedPath: a scene while scenes can't play, a crashed
+    // one, a preset without its base). No last session, or a playlist's whose program isn't running: nothing to step from,
+    // nothing happens. A library where nothing can play throws why (a 409, never an Apply that fails).
+    private static void StepLibrary(bool forward, bool keepPause)
     {
         var settings = SettingsService.Load();
-        var session = settings.LastSession;
-        if (session == null) return false;
-        if (session.IsTimedPlaylist || session.IsPlaylist) return false;
-        if (session.Paths.Count == 0) return false;
-
-        // Use LoadAll's native order so stepping mirrors the UI grid order
-        // exactly (whatever filesystem order GUI displays).
-        var library = LibraryService.LoadAll();
-        if (library.Count == 0) return false;
-
-        var current = session.Paths[0];
-        int currentIdx = library.FindIndex(i => i.VideoPath == current);
-        int newIdx = currentIdx < 0
-            ? 0
-            : forward
-                ? (currentIdx + 1) % library.Count
-                : (currentIdx - 1 + library.Count) % library.Count;
-
+        if (settings.LastSession is not { Playlist: false, Paths: [var from, ..] }) return;
+        var library = LibraryService.LoadAll().Select((i) => i.VideoPath).ToList();
+        if (library.Count == 0) return;
         bool scenesOk = PlayerStatus.ScenesPlayable(settings);
-        int pickIdx = newIdx;
-        for (int attempts = 0; attempts < library.Count && IsSkippedPath(library[pickIdx].VideoPath, scenesOk); attempts++)
-            pickIdx = forward ? (pickIdx + 1) % library.Count : (pickIdx - 1 + library.Count) % library.Count;
-
-        if (IsSkippedPath(library[pickIdx].VideoPath, scenesOk))
-            throw new InvalidOperationException(NoPlayableMessage);
-
-        var pickPath = library[pickIdx].VideoPath;
-        Apply(pickPath, keepPause);
-        SettingsService.Update(s => s.LastSession = new LastSession { Paths = [pickPath] });
-        return true;
+        int at = library.IndexOf(from), step = forward ? 1 : -1;
+        // one lap at most, from the item after the current one (from the first when the current one left the library)
+        int start = at < 0 ? 0 : at + step;
+        for (int n = 0; n < library.Count; n++)
+        {
+            var path = library[((start + step * n) % library.Count + library.Count) % library.Count];
+            if (IsSkippedPath(path, scenesOk)) continue;
+            Apply(path, keepPause);
+            SettingsService.Update((s) => s.LastSession = new LastSession { Paths = [path] });
+            return;
+        }
+        throw new InvalidOperationException(NoPlayableMessage);
     }
 
     // Live-apply a rotation change (interval — the minimum under advance-on-end — / advance-on-end) to the running
@@ -295,8 +233,7 @@ public static class PlayerHelper
         var session = settings.LastSession;
         if (session == null || session.Paths.Count == 0) { LiascapePlayerClient.Log("restore: nothing shown, no last session to replay"); return; }
         LiascapePlayerClient.Log($"restore: nothing shown — replaying the last session ({session.Paths.Count} item(s))");
-        bool playlist = session.IsTimedPlaylist || session.IsPlaylist;
-        if (!playlist || (session.IsPlaylist && session.Paths.Count == 1 && !IsScenePath(session.Paths[0])))
+        if (!session.Playlist)
         {
             var switched = Apply(session.Paths[0], keepPause: false)
                 ?? throw new InvalidOperationException($"the last wallpaper ({Path.GetFileName(session.Paths[0].TrimEnd('/'))}) can't play");
@@ -304,9 +241,10 @@ public static class PlayerHelper
                 throw new InvalidOperationException($"liascape-player didn't take the switch to the last wallpaper ({Path.GetFileName(session.Paths[0].TrimEnd('/'))}): {LiascapePlayerClient.Shared.LastError ?? "see liascape-player-adapter.log"}");
             return;
         }
+        // its order and rotation as the bar and the settings have them now (a live edit since it started changed them there)
         var ps = PlaylistService.LoadCurrentState()?.Settings;
-        var load = LoadProgram(session.Paths, settings, ps, session.Shuffle, session.TimedIntervalSeconds,
-            session.IsTimedPlaylist ? session.SwitchWhenVideoEnds : true, from: null)
+        var rotation = EffectiveRotation(settings, ps);
+        var load = LoadProgram(session.Paths, settings, ps, ps?.Order == PlaylistOrder.Shuffle, rotation.Interval, rotation.Advance, from: null)
             ?? throw new InvalidOperationException(NoPlayableInPlaylist);
         // `liascape restore` exits right after: the load's own outcome, never a silent exit 0
         if (!load.Wait(15_000)) throw new InvalidOperationException("liascape-player didn't load the last session's playlist within 15 s");
@@ -316,14 +254,14 @@ public static class PlayerHelper
     // Pick a random video and apply it as a single wallpaper. A running rotation picks its own (`program.random`);
     // otherwise a one-shot from the full library.
     //
-    // Excludes unplayable items (IsSkippedPath — same contract as TryStepLibrary) from the pool so a random pick never
+    // Excludes unplayable items (IsSkippedPath — same contract as StepLibrary) from the pool so a random pick never
     // lands Apply() on a scene that can't play. An empty library is still a silent no-op (nothing to play, not an
     // error); a non-empty library with NO playable item throws so the caller can surface it
     // instead of letting Apply() 500.
     public static void ApplyRandom()
     {
         var pause = PauseOnUserSwitch();
-        if (IsTimedPlaylistActive()) { ResumeForRotation(pause); LiascapePlayerProgram.Random(); return; }
+        if (LiascapePlayerProgram.IsActive) { ResumeForRotation(pause); LiascapePlayerProgram.Random(); return; }
         ApplyRandomNow(pause.Keep);
     }
 
@@ -338,10 +276,9 @@ public static class PlayerHelper
         if (pool.Count == 0)
             throw new InvalidOperationException(NoPlayableMessage);
 
-        var current = settings.LastSession?.Paths.FirstOrDefault();
-        var pick = PickRandomExcluding(pool, current);
+        var pick = AnyOtherThan(pool, settings.LastSession?.Paths.FirstOrDefault());
         Apply(pick, keepPause);
-        SettingsService.Update(s => s.LastSession = new LastSession { IsRandom = true, Paths = [pick] });
+        SettingsService.Update((s) => s.LastSession = new LastSession { Paths = [pick] });
     }
 
     // the player owns the pause: one essential toggle that reads `player.paused` and sets the opposite

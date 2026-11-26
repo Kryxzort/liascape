@@ -25,8 +25,7 @@ public static class SecretStore
     public const string LoginSecure = "steam-login-secure";
     private static readonly string[] Names = [RefreshToken, AccessToken, LoginSecure];
 
-    public static string FallbackPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "liascape", "steam-auth.json");
+    public static string FallbackPath => Path.Combine(AppDirs.Config, "steam-auth.json");
 
     private enum Kind { Unknown, Keyring, File }
     private static Kind _kind;

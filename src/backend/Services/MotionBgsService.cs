@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Liascape.Helpers;
 using Liascape.Models;
 using Liascape.Scrapers;
 
@@ -10,7 +11,7 @@ namespace Liascape.Services;
 // tag's pages when the site redirected the query to a tag (MotionBgsScraper). Each query's answer is remembered, so page 2
 // of any query the backend has searched follows the right list; a query it hasn't (the backend restarted under an open
 // page) asks page 1 again first to find out.
-public sealed class MotionBgsService() : WebSource("MotionBgs")
+public sealed class MotionBgsService() : WebSource("MotionBgs", LibraryStore.MotionBgs)
 {
     // query → the tag path it redirected to, "" = a plain search
     private readonly ConcurrentDictionary<string, string> _listOf = new();

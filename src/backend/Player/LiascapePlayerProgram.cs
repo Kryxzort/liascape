@@ -145,7 +145,7 @@ public static class LiascapePlayerProgram
 
     private static LiascapePlayerClient C => LiascapePlayerClient.Shared;
 
-    // A rotation session runs in the player (the UI's `/current.timed`, IsTimedPlaylistActive under liascape-player).
+    // A rotation session runs in the player (the UI's `/current.timed`).
     public static bool IsActive
     {
         get

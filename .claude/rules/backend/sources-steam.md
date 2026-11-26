@@ -100,7 +100,7 @@ choices here: `docs/decisions.md` § Steam & sources.
 - Tests point `LIASCAPE_STEAM_COMMUNITY` / `LIASCAPE_STEAM_API` at `scripts/test-fixtures/fake-steam-community.mjs` (the sign-in's subscribe / unsubscribe, `WorkshopDownloader.SubscribeAsync`, go there too); nothing in a test favourites, posts or subscribes on Steam.
 
 ## Verify
-- `dotnet run --project src/backend -- scraper-selftest` — Browse's web sources against `scripts/test-fixtures/scrapers/` (no network) and the local Wallpaper Engine folder over a fake one (a private HOME).
+- `dotnet run --project src/backend -- scraper-selftest` — Browse's web sources against `scripts/test-fixtures/scrapers/` (no network), the local Wallpaper Engine folder over a fake one, and downloads (`DownloadHelper`: a loopback server for the site, files on this PC, Wallpaper Engine folder items) into a private library (a private HOME and XDG dirs).
 - `bash scripts/test-workshop-social.sh` — hermetic (`unshare -rn`, the fake community server, `LIASCAPE_STEAM_CM_FIXTURE` `@userfiles`); § 6 the details cache, § 7 the favourites cache (one backend restart per phase).
 - `bash scripts/test-ui-matrix.sh --probe probe-steam.js --only '^yours:stack'` — the favourites filter end to end on the matrix stack's own backend (a fake sign-in, `@userfiles`), no network.
 - `bash scripts/test-steam-app-hold.sh` — hermetic (the fake `steamclient.so`, a shortened linger and heartbeat timeout).

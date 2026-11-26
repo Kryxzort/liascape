@@ -25,21 +25,21 @@ public static class MonitorDetector
         // hyprctl monitors -j: [{ name, refreshRate (Hz float), focused (bool) }]
         // hyprctl needs HYPRLAND_INSTANCE_SIGNATURE, which a systemd user unit / boot daemon doesn't
         // inherit → discover the running instance from the runtime dir instead of failing over.
-        var hypr = await TryAsync("hyprctl", "monitors -j", ParseMonitors, HyprlandEnv());
+        var hypr = await TryAsync("hyprctl", ["monitors", "-j"], ParseMonitors, HyprlandEnv());
         if (hypr != null) return hypr;
 
         // swaymsg -t get_outputs: [{ name, focused, primary, current_mode:{ refresh (mHz) } }]
-        var sway = await TryAsync("swaymsg", "-t get_outputs", ParseMonitors);
+        var sway = await TryAsync("swaymsg", ["-t", "get_outputs"], ParseMonitors);
         if (sway != null) return sway;
 
         // wlr-randr --json: any wlroots compositor (river, Wayfire, labwc, …) → [{ name, position{x,y},
         // modes:[{ refresh (Hz float), current }] }]. No "primary" → derived from layout origin.
-        var wlr = await TryAsync("wlr-randr", "--json", ParseWlrRandr);
+        var wlr = await TryAsync("wlr-randr", ["--json"], ParseWlrRandr);
         if (wlr != null) return wlr;
 
         // xrandr: universal X11 + XWayland fallback (covers GNOME/KDE/XFCE/etc. on X11, and most Wayland
         // sessions via XWayland). Has a real "primary" flag. Text output, parsed below.
-        var xr = await TryAsync("xrandr", "", ParseXrandr);
+        var xr = await TryAsync("xrandr", [], ParseXrandr);
         if (xr != null) return xr;
 
         return [];
@@ -66,17 +66,14 @@ public static class MonitorDetector
         catch { return null; }
     }
 
-    private static async Task<List<MonitorInfo>?> TryAsync(string cmd, string args, Func<string, List<MonitorInfo>?> parse,
+    // `cmd` with its arguments as a list (.claude/rules/backend/api.md § Security), its output parsed; null when it isn't
+    // there, fails, or takes over 3 s
+    private static async Task<List<MonitorInfo>?> TryAsync(string cmd, string[] args, Func<string, List<MonitorInfo>?> parse,
         Dictionary<string, string>? env = null)
     {
         try
         {
-            var psi = new ProcessStartInfo(cmd)
-            {
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-            };
+            var psi = new ProcessStartInfo(cmd, args) { RedirectStandardOutput = true };
             if (env != null) foreach (var (k, v) in env) psi.Environment[k] = v;
             using var proc = Process.Start(psi);
             if (proc == null) return null;

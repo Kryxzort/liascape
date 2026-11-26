@@ -752,7 +752,7 @@ public static class ClipStore
     // the library items whose full clip is another quality than q, the most recently played first
     private static List<(string Item, string Path)> Mismatched(int q)
     {
-        var lib = DownloadHelper.LibraryPath.TrimEnd('/') + "/";
+        var lib = LibraryStore.Root.TrimEnd('/') + "/";
         var byItem = SafeFiles("*_full.mp4").Select(Parse).OfType<Clip>().GroupBy(c => c.Item).ToDictionary(g => g.Key, g => g.ToList());
         var list = new List<(string Item, string Path, DateTime Used)>();
         foreach (var (item, clips) in byItem)
@@ -861,7 +861,7 @@ public static class ClipStore
         if (Interlocked.Exchange(ref _pruning, 1) == 1) return;
         try
         {
-            var lib = DownloadHelper.LibraryPath.TrimEnd('/') + "/";
+            var lib = LibraryStore.Root.TrimEnd('/') + "/";
             var outside = new List<FileInfo>();
             foreach (var srcFile in SafeFiles("*.src"))
             {
