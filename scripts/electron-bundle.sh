@@ -10,8 +10,8 @@
 #                                    <shell-dir>'s lockfile (default app/shell) there
 #
 # The launcher's order (scripts/liascape): LIASCAPE_ELECTRON, then `electron45`, then the copy in lib/liascape/electron/,
-# then a plain `electron` on PATH. The copy is installed only when none of LIASCAPE_ELECTRON, `electron45` and `electron`
-# is there at install time; once it is, a plain `electron` installed later (maybe another major) doesn't take over.
+# then a plain `electron` on PATH. The copy is installed unless LIASCAPE_ELECTRON, `electron45` or a plain `electron` of
+# the lockfile's major (another major, or one that won't run, counts as none) is there at install time.
 #   LIASCAPE_BUNDLE_ELECTRON  auto (default): as above | 1: always (the AppImage) | 0: never (the PKGBUILD, which
 #                             depends on electron45 and builds offline)
 set -euo pipefail
@@ -22,6 +22,20 @@ lock_version() {  # the electron version a shell dir's lockfile pins: the one su
     "$(cd "$1" && pwd -P)/package-lock.json"
 }
 
+plain_skip_reason() {  # why the plain `electron` at $1 doesn't count (empty = it does): it must run and report the
+                       # lockfile's major, since the launcher puts it after the bundled copy and it may be another one.
+                       # Guard: scripts/test-electron-bundle.sh
+  local want out rc
+  want="$(lock_version "$ROOT/app/shell")"; want="${want%%.*}"
+  # --version prints and exits, no window; ELECTRON_RUN_AS_NODE would make it print node's version instead
+  out="$(env -u ELECTRON_RUN_AS_NODE timeout 20 "$1" --version 2>/dev/null)" && rc=0 || rc=$?
+  out="$(printf '%s' "$out" | head -n1)"
+  if [ "$rc" != 0 ]; then echo "\`electron --version\` failed, exit $rc"
+  elif [[ ! "$out" =~ ^v?([0-9]+)\. ]]; then echo "\`electron --version\` printed '${out}', no version"
+  elif [ "${BASH_REMATCH[1]}" != "$want" ]; then echo "it reports $out, not Electron $want"
+  fi
+}
+
 decide() {
   case "${LIASCAPE_BUNDLE_ELECTRON:-auto}" in
     1) echo "bundle $(lock_version "$ROOT/app/shell")"; return ;;
@@ -29,20 +43,26 @@ decide() {
     auto) ;;
     *) echo "electron-bundle.sh: LIASCAPE_BUNDLE_ELECTRON must be auto, 1 or 0" >&2; exit 2 ;;
   esac
-  local n p
+  local p
   if [ -n "${LIASCAPE_ELECTRON:-}" ]; then echo "env $LIASCAPE_ELECTRON"; return; fi
-  for n in electron45 electron; do
-    if p="$(command -v "$n" 2>/dev/null)"; then echo "system $n $p"; return; fi
-  done
+  # electron45 is the pinned major by its name; a plain electron only when it says so
+  if p="$(command -v electron45 2>/dev/null)"; then echo "system electron45 $p"; return; fi
+  if p="$(command -v electron 2>/dev/null)" && [ -z "$(plain_skip_reason "$p")" ]; then
+    echo "system electron $p"; return
+  fi
   echo "bundle $(lock_version "$ROOT/app/shell")"
 }
 
 describe() {
-  local d; d="$(decide)"
+  local d p why=""; d="$(decide)"
   case "$d" in
     env\ *) echo "LIASCAPE_ELECTRON=${d#env }, not bundled" ;;
     system\ *) set -- $d; echo "system $2 ($3), not bundled" ;;
-    bundle\ *) echo "bundled Electron ${d#bundle } into lib/liascape/electron/" ;;
+    bundle\ *)
+      if [ "${LIASCAPE_BUNDLE_ELECTRON:-auto}" = auto ] && p="$(command -v electron 2>/dev/null)"; then
+        why=" (skipped $p: $(plain_skip_reason "$p"))"
+      fi
+      echo "bundled Electron ${d#bundle } into lib/liascape/electron/$why" ;;
     none) echo "not bundled (LIASCAPE_BUNDLE_ELECTRON=0)" ;;
   esac
 }

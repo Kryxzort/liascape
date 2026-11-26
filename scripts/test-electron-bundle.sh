@@ -2,7 +2,9 @@
 # Hermetic test of Liascape's own Electron outside Nix (.claude/rules/build-and-packaging.md § Electron): which Electron
 # install.sh decides on, the copy it bundles into a temp prefix, and the one the installed launcher then runs.
 #  dry-run:   `install.sh --dry-run` names the decision: the bundled copy with no Electron on PATH, a system `electron45`
-#             stub when one is there, LIASCAPE_ELECTRON when set, nothing with LIASCAPE_BUNDLE_ELECTRON=0.
+#             stub when one is there, LIASCAPE_ELECTRON when set, nothing with LIASCAPE_BUNDLE_ELECTRON=0; a stub plain
+#             `electron` counts only when it reports the lockfile's major (another major, or one that exits non-zero,
+#             bundles, and the dry-run says why).
 #  bundled:   PATH stripped of every electron / electron45, LIASCAPE_ELECTRON unset: the install step puts the lockfile's
 #             Electron in <prefix>/lib/liascape/electron/ (a stale file planted there first is gone), and the installed
 #             launcher starts that binary (ELECTRON_RUN_AS_NODE on a stub shell: it prints its version and path, no window),
@@ -61,6 +63,24 @@ out=$(run "$STRIPPED" bash "$ROOT/scripts/install.sh" --dry-run 2>&1); echo "$ou
 check "no electron on PATH → bundled Electron $WANT" grep -q "Electron: bundled Electron $WANT" <<< "$out"
 out=$(run "$STUBS:$STRIPPED" bash "$ROOT/scripts/install.sh" --dry-run 2>&1); echo "$out" > "$T/dry-system.txt"
 check "electron45 on PATH → that one, nothing bundled" grep -q "Electron: system electron45 ($STUBS/electron45), not bundled" <<< "$out"
+# a plain `electron` counts only when it reports the pinned major; one of another major, or one that doesn't run, is
+# as good as none (the dry-run says why)
+WANT_MAJOR=${WANT%%.*}; OTHER_MAJOR=42; [ "$WANT_MAJOR" = 42 ] && OTHER_MAJOR=41
+plain_stub() {  # plain_stub <dir> <script body>: a stub plain `electron` in <dir>
+  mkdir -p "$1"; printf '#!/bin/sh\n%s\n' "$2" > "$1/electron"; chmod 755 "$1/electron"
+}
+plain_stub "$T/plain-old" "echo v$OTHER_MAJOR.0.1"
+out=$(run "$T/plain-old:$STRIPPED" bash "$ROOT/scripts/install.sh" --dry-run 2>&1); echo "$out" > "$T/dry-plain-old.txt"
+check "plain electron v$OTHER_MAJOR on PATH → bundled Electron $WANT, and why" grep -qF \
+  "Electron: bundled Electron $WANT into lib/liascape/electron/ (skipped $T/plain-old/electron: it reports v$OTHER_MAJOR.0.1, not Electron $WANT_MAJOR)" <<< "$out"
+plain_stub "$T/plain-same" "echo v$WANT"
+out=$(run "$T/plain-same:$STRIPPED" bash "$ROOT/scripts/install.sh" --dry-run 2>&1); echo "$out" > "$T/dry-plain-same.txt"
+check "plain electron v$WANT on PATH → that one, nothing bundled" grep -qF \
+  "Electron: system electron ($T/plain-same/electron), not bundled" <<< "$out"
+plain_stub "$T/plain-broken" "echo 'cannot open shared object' >&2; exit 127"
+out=$(run "$T/plain-broken:$STRIPPED" bash "$ROOT/scripts/install.sh" --dry-run 2>&1); echo "$out" > "$T/dry-plain-broken.txt"
+check "plain electron that fails to run → bundled Electron $WANT, and why" grep -qF \
+  "Electron: bundled Electron $WANT into lib/liascape/electron/ (skipped $T/plain-broken/electron: \`electron --version\` failed, exit 127)" <<< "$out"
 out=$(run "$STRIPPED" env LIASCAPE_ELECTRON=/opt/e/electron bash "$ROOT/scripts/install.sh" --dry-run 2>&1)
 check "LIASCAPE_ELECTRON set → that one, nothing bundled" grep -q "Electron: LIASCAPE_ELECTRON=/opt/e/electron, not bundled" <<< "$out"
 out=$(run "$STRIPPED" env LIASCAPE_BUNDLE_ELECTRON=0 bash "$ROOT/scripts/install.sh" --dry-run 2>&1)

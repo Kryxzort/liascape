@@ -11,8 +11,8 @@
 #   LIBEXECDIR         the internal executables go in $LIBEXECDIR/liascape (default: $PREFIX/libexec; the PKGBUILD sets
 #                      /usr/lib, Arch's place for them, so they sit in lib/liascape/ beside backend/ and ui/)
 #   LIASCAPE_ELECTRON  read at RUNTIME by `liascape`, first in its order: LIASCAPE_ELECTRON, then `electron45`, then
-#                      the copy in lib/liascape/electron/, then `electron` on PATH. Set (or `electron45` / `electron` on
-#                      PATH) at install time, nothing is bundled.
+#                      the copy in lib/liascape/electron/, then `electron` on PATH. Set (or `electron45`, or an
+#                      `electron` of app/shell's pinned major, on PATH) at install time, nothing is bundled.
 #   LIASCAPE_BUNDLE_ELECTRON  auto (default: bundle app/shell's lockfile Electron into lib/liascape/electron/ only when
 #                      none of the above is there) | 1: always (the AppImage) | 0: never (the PKGBUILD)
 #
@@ -172,7 +172,8 @@ install -Dm755 "$ROOT/src/player/target/release/liascape-player" "$S_LIBEXEC/lia
 install -Dm755 "$ROOT/src/player/target/release/liascape-scene-worker" "$S_LIBEXEC/liascape-scene-worker"
 
 echo "==> Electron for the GUI"
-# The GUI runs: <electron> <shell-dir>. The system's Electron when there is one (LIASCAPE_ELECTRON, electron45, electron);
+# The GUI runs: <electron> <shell-dir>. The system's Electron when there is one (LIASCAPE_ELECTRON, electron45, an
+# electron of the pinned major);
 # else app/shell's lockfile Electron goes into lib/liascape/electron/, the way Discord or VS Code bring their own. A
 # reinstall replaces that copy (or removes it once a system one is there). NixOS never gets here: the flake brings its
 # own. Guard: scripts/test-electron-bundle.sh

@@ -59,10 +59,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (`onScroll`) in `app/ui/src/components/WsSetLoad.tsx` reading `sc.scrollTop` while layout is dirty (a scroll
        event the sidebar's open sends). Find what scrolls the grid on the open, or read the offset without forcing a
        layout.
-135. [ ] `install.sh` counts any plain `electron` on PATH as present and skips bundling, even one of another major: a
-       reinstall after one appears drops the bundled Electron 45 (the launcher already prefers the bundle over a plain
-       `electron`). Check `electron --version`'s major against the pinned one before counting it. Guard:
-       `scripts/test-electron-bundle.sh`.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
