@@ -1,5 +1,6 @@
 # Generates the app icon: liascape-night.svg (the installed icon, copied to app/ui/public/favicon.svg) and
-# liascape-lavender.svg (the light variant). Run: python3 app/icon/generate.py (writes next to this file).
+# liascape-lavender.svg (the light variant, copied to app/ui/public/logo-lavender.svg: the window's opening on a light
+# theme). Run: python3 app/icon/generate.py (writes next to this file).
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 OTHER={"L":"#b48fd0","M":"#3a3352"}

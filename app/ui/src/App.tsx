@@ -26,6 +26,7 @@ import { TopbarStatus } from "./components/TopbarStatus";
 import { TopbarSearch } from "./components/TopbarSearch";
 import { BrowseLocate, LocateButton } from "./components/LocateButton";
 import { ImportButton, ImportDrop } from "./components/ImportButton";
+import { Intro as IntroView } from "./components/Intro";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
 // small + lets Electron's V8 code cache hit the stable vendor chunk across launches. The item sidebars stay eager (their
@@ -35,6 +36,8 @@ import { ImportButton, ImportDrop } from "./components/ImportButton";
 // (dnd-kit's context reaches each one past its memo). Guard: probe-layout perf:sidebar.
 const Settings = memo(lazy(() => import("./views/Settings").then((m) => ({ default: m.Settings }))));
 const PlaylistBar = memo(PlaylistBarView);
+// the window's opening: reads only its own slice, so App's re-renders pass it by
+const Intro = memo(IntroView);
 const SteamModal = lazy(() => import("./components/SteamModal").then((m) => ({ default: m.SteamModal })));
 const SteamPasswordModal = lazy(() => import("./components/SteamPasswordModal").then((m) => ({ default: m.SteamPasswordModal })));
 const SteamTodoPanel = lazy(() => import("./components/SteamTodoPanel").then((m) => ({ default: m.SteamTodoPanel })));
@@ -213,13 +216,15 @@ export default function App() {
   // leaves or swaps fades (index.css; docs/decisions.md § "Fade, never move, with motion off"); the morphs read useMotion()
   // The switch itself shows nothing: it swaps the name of every appear animation that already ran (the page's, an open
   // panel's, the Settings sections'), and CSS restarts a renamed animation — the page would fade or slide in again. So
-  // what the switch just started is finished at once (loops excepted). Guard: probe-layout motion:switch
+  // what the switch just started is finished at once (loops excepted; the window's opening keeps the look it started with:
+  // components/Intro.tsx). Guard: probe-layout motion:switch
   useEffect(() => {
     const root = document.documentElement;
     if (root.classList.contains("no-motion") === !motion) return;
     root.classList.toggle("no-motion", !motion);
     for (const a of document.getAnimations())
-      if (a.pending && a instanceof CSSAnimation && a.effect?.getTiming().iterations !== Infinity) a.finish();
+      if (a.pending && a instanceof CSSAnimation && a.effect?.getTiming().iterations !== Infinity
+        && !(a.effect instanceof KeyframeEffect && a.effect.target?.closest(".intro"))) a.finish();
   }, [motion]);
 
   const src = s.sources[s.activeSource];
@@ -309,6 +314,7 @@ export default function App() {
         <DebugHud setTab={(t) => setTab(t as Tab)} getScroll={() => document.querySelector<HTMLElement>(".scroll")} />
       </Suspense>
       <ImportDrop />
+      <Intro />
     </div>
   );
 }

@@ -71,8 +71,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 125. [ ] (owner) Import from a link: Import accepts a pasted web link (a Workshop item page, a MoeWalls or DesktopHut
        page, or a direct video / picture URL) and downloads it through the matching source's own download path; an
        unknown site says it isn't supported.
-126. [ ] (owner) An opening animation for the app window built from the app logo, short and skippable, following
-       `no-motion` (a plain fade).
 127. [ ] (owner) A native "Start with your desktop" setting: Liascape adds its own autostart entry (XDG autostart
        `.desktop` running `liascape restore`) and detects when that entry won't run — e.g. Hyprland or Sway started
        without a session manager that reads XDG autostart (no uwsm / systemd user session) — and then says what to
@@ -99,6 +97,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        `electron45` / `electron` is on PATH and `LIASCAPE_ELECTRON` is unset, `install.sh` installs the Electron 45 that
        npm already fetches for `app/shell` into Liascape's own folder and the launcher uses it. NixOS keeps the
        flake's. Update the README's Debian / Fedora "no Electron package" lines and `build-and-packaging.md`.
+134. [ ] probe-layout `perf:sidebar` fails when run alone (`--only perf:sidebar`, 3/3, on lp-player's build too; it
+       passed inside the whole probe-layout run): "open: 1 layouts forced from script", the `scroll` listener
+       (`onScroll`) in `app/ui/src/components/WsSetLoad.tsx` reading `sc.scrollTop` while layout is dirty (a scroll
+       event the sidebar's open sends). Find what scrolls the grid on the open, or read the offset without forcing a
+       layout.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

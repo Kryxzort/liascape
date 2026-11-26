@@ -194,6 +194,9 @@ function openWindow(loadUrl) {
 // It does NOT show the on-screen HUD: the visual overlay is gated to the Settings "Show debug overlay"
 // toggle only (see DebugHud overlayOn) — bridge mode keeps the values accessible without painting them.
 const DBG = process.env.LIASCAPE_DEBUG ? "debug" : "";
+// `intro`: the page plays its opening once in this window (app/ui/src/components/Intro.tsx). Only the shell asks: the
+// probes and a browser tab load the page without it. Guard: probe-intro intro:absent
+const PAGE_FLAGS = ["intro", DBG].filter(Boolean).join("&");
 // LIASCAPE_DEBUG opens a CDP remote-debugging port (LIASCAPE_CDP_PORT, default 9222) so tooling can attach to the live window.
 if (process.env.LIASCAPE_DEBUG) app.commandLine.appendSwitch("remote-debugging-port", process.env.LIASCAPE_CDP_PORT || "9222");
 
@@ -202,10 +205,10 @@ app.whenReady().then(() => {
     if (dev) {
       // backend is the systemd dotnet-watch serve (pinned port) — don't spawn our own; just read it.
       // + the backend's API token (serve.token, written before serve.port; the page keeps it and drops it from its URL)
-      waitForPort((port) => openWindow(withToken(`${VITE}/?api=${port}${DBG ? `&${DBG}` : ""}`)));
+      waitForPort((port) => openWindow(withToken(`${VITE}/?api=${port}&${PAGE_FLAGS}`)));
     } else {
       startBackend();
-      waitForPort((port) => openWindow(withToken(`http://127.0.0.1:${port}/${DBG ? `?${DBG}` : ""}`)));
+      waitForPort((port) => openWindow(withToken(`http://127.0.0.1:${port}/?${PAGE_FLAGS}`)));
     }
   });
 });

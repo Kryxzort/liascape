@@ -105,7 +105,11 @@ function keepSame(prev: LibraryItem[], next: LibraryItem[]): LibraryItem[] {
   return same ? prev : out;
 }
 
-function applyThemeVars(t: Theme) {
+// The theme's colours are kept for the next start too (a copy for the first frames only; settings.json decides): the page
+// paints in the user's theme from its first frame, not in the default until the backend answers, and so does the window's
+// opening (components/Intro.tsx). Guard: probe-intro look:theme
+function applyThemeVars(t: Theme, keep = true) {
+  if (keep) LS.set("themeVars", t);
   const r = document.documentElement.style;
   const set = (k: string, v: string) => r.setProperty(k, v);
   set("--bg-base", t.bgBase); set("--bg-mantle", t.bgMantle); set("--bg-crust", t.bgCrust);
@@ -113,6 +117,12 @@ function applyThemeVars(t: Theme) {
   set("--text", t.textColor); set("--subtext", t.subtext); set("--muted", t.muted);
   set("--accent", t.accent); set("--accent-fg", t.accentFg); set("--accent-hover", t.accentHover);
   set("--danger", t.danger); set("--danger-bg", t.dangerBg); set("--success", t.success); set("--warn", t.warn);
+}
+{
+  const kept = LS.get<Partial<Theme> | null>("themeVars", null);
+  const keys = ["bgBase", "bgMantle", "bgCrust", "surface0", "surface1", "surface2", "textColor", "subtext", "muted", "accent", "accentFg",
+    "accentHover", "danger", "dangerBg", "success", "warn"] as const;
+  if (kept && keys.every((k) => typeof kept[k] === "string")) applyThemeVars(kept as Theme, false);
 }
 
 const DEFAULT_PS: PlaylistSettings = {
