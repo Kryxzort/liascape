@@ -8,7 +8,8 @@ import { TypeBadge } from "./TypeBadge";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions (docs/decisions.md § "Left click does the tab's main action, right click opens the item
-// sidebar"): click / right-click → focus (the Browse sidebar shows it: the preview, the numbers, Download & Apply); Ctrl /
+// sidebar"): click / right-click → focus (the Browse sidebar shows it: the preview, the numbers, Download & Apply), a right-click also
+// its menu (Unsubscribe, Hide: Browse.tsx); Ctrl /
 // Shift-click → select only; double-click → download & apply; the hover download button (bottom-right, where the Library
 // card's trash sits) → download & apply; middle-click → open the source page/location.
 // COOL: animated preview is a *layered* element kept mounted (opacity-toggled), not a src swap.
@@ -19,7 +20,7 @@ export const Card = memo(function Card({
   // Settings → "On hover" / "Not hovered" reach the gif before the still image (Browse.tsx)
   gifOnHover: boolean; gifIdle: boolean;
   onClick: (e: React.MouseEvent, w: Wallpaper) => void;
-  onContext: (w: Wallpaper) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void; onDownload: (w: Wallpaper) => void;
+  onContext: (w: Wallpaper, e: React.MouseEvent) => void; onMiddle: (w: Wallpaper) => void; onCancel: (w: Wallpaper) => void; onDownload: (w: Wallpaper) => void;
 }) {
   const [hover, setHover] = useState(false);
   const sub = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
@@ -52,7 +53,7 @@ export const Card = memo(function Card({
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         onClick={(e) => onClick(e, w)}
         onDoubleClick={(e) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey) onDownload(w); }}
-        onContextMenu={(e) => { e.preventDefault(); onContext(w); }}
+        onContextMenu={(e) => { e.preventDefault(); onContext(w, e); }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }} // stop middle-click autoscroll
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onMiddle(w); } }}
        >

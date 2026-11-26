@@ -189,6 +189,12 @@ export interface Source {
   // API: the UI filters this source's list itself from its items' tags / age rating (the local Wallpaper Engine folder)
   supportsLocalFilter?: boolean;
 }
+// API: GET /hidden (Helpers/HiddenItems.cs): what the user hid, per grid: the Library's by item path, Browse's by the card's page
+// URL, with the source it was hidden on and the card itself (the Hidden filter row shows it again without asking the source)
+export type HiddenScope = "library" | "browse";
+export type HiddenEntry = { title: string | null; source?: string | null; card?: Wallpaper | null; hiddenAt?: string };
+export type HiddenState = { library: Record<string, HiddenEntry>; browse: Record<string, HiddenEntry> };
+export type HideEntry = { key: string; title: string; source?: string; card?: Wallpaper };
 export interface Wallpaper {
   title: string; thumbnailUrl: string; animatedThumbnailUrl: string | null; pageUrl: string;
   resolution: string | null; isScene: boolean; workshopId: string | null; addedAt: string | null;
@@ -377,8 +383,14 @@ export const api = {
   trash: (items: LibraryItem[]) => jpost<{ batch: string }>("/library/trash", { items }),
   // API: ok false + `message` = too late (a Delete from source's unsubscribe is reaching Steam right now): nothing changed and
   // the batch stays, so Undo again once it's done brings it back and subscribes it again (AppOps.Undo)
-  undo: () => jpost<{ ok: boolean; count: number; title: string | null; message?: string | null }>("/library/undo"),
+  // `kind` "hide": the Undo showed a Hide's cards again (nothing came back into the library)
+  undo: () => jpost<{ ok: boolean; count: number; title: string | null; message?: string | null; kind?: "trash" | "hide" }>("/library/undo"),
   undoDepth: () => jget<{ depth: number }>("/library/undo-depth"),
+  // API: the cards hidden from a grid (Helpers/HiddenItems.cs): `hide` goes on the Undo stack, `unhide` doesn't; both answer
+  // the whole state (WS `hidden-changed` carries it too)
+  hidden: () => jget<HiddenState>("/hidden"),
+  hide: (scope: HiddenScope, hide: HideEntry[]) => jpost<HiddenState>("/hidden", { scope, hide }),
+  unhide: (scope: HiddenScope, keys: string[]) => jpost<HiddenState>("/hidden", { scope, unhide: keys }),
   libraryOps: () => jget<{ ops: LibraryOp[] }>("/library/ops").then((r) => r.ops),
   // API: `oneOff` = a Workshop item's "Download without subscribing" (a one-off copy, never a subscription; the backend's
   // WorkshopDownloader.AcquireOneOffAsync)

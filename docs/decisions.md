@@ -191,6 +191,15 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
+### Right-click a card for its sidebar and its menu — 2026-11-26
+Owner's ask: Unsubscribe and Hide on a card's right-click. The right-click keeps opening the sidebar (its guards stand) and
+also opens a menu at the pointer, in the control menus' look (`ContextMenu.tsx`), acting on the selection when the card is in
+it. Unsubscribe is each tab's existing one (the Library's Delete from source, Browse's sidebar Unsubscribe), so it deletes
+nothing those didn't. Hide only hides: per grid (the Library by path, Browse by page URL and source), kept in
+`hidden.json`, undone by the removal's Undo; each grid's filter column gets a Hidden row (✓ shows only them, with Unhide),
+offered once something is hidden there, a web source's column holding that row alone. `scripts/test-hidden.sh`,
+`--probe probe-hidden.js`.
+
 ### A lone video always loops — 2026-11-14
 No "Loop videos" switch: play-once-and-freeze is too niche for a global setting that freezes every other video.
 Every player path loops a lone video; there is no `Loop` setting.
@@ -198,8 +207,8 @@ Every player path loops a lone video; there is no `Loop` setting.
 ### Left click does the tab's main action, right click opens the item sidebar — 2026-11-14
 A plain click applies in the Library, opens the item to look over in Browse (double-click, Enter or the hover button
 downloads and applies; a library item's card has no button). A right-click opens the sidebar everywhere, applies nothing, keeps
-the selection; no item menus. Ctrl / Shift-click only select. An open Library sidebar follows a click.
-`.claude/rules/ui/design.md` § Interaction rules (its guards).
+the selection, and shows the card's menu (§ "Right-click a card for its sidebar and its menu"). Ctrl / Shift-click only
+select. An open Library sidebar follows a click. `.claude/rules/ui/design.md` § Interaction rules (its guards).
 
 ### Fade, never move, with motion off — 2026-11-12
 "Smooth window animations" off and `prefers-reduced-motion` mean nothing moves and what appears, leaves or swaps

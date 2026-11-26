@@ -13,6 +13,9 @@ export const LIBRARY_TAG = "@library";
 export const FAVORITES_TAG = "@favorites";
 // the Library's own "Crashed" row (items whose scene crashed the player: LibraryItem.hasCrashed), matched in views/Library.tsx
 export const CRASHED_TAG = "@crashed";
+// every grid's "Hidden" row (the cards hidden from it: store hidden): ✓ shows only them, off or ✕ leaves them out; offered
+// while the grid has one hidden (or while it is on, so it can be turned off). Guard: probe-hidden hide:filter
+export const HIDDEN_TAG = "@hidden";
 
 export type SetMode = "inc" | "exc" | null;
 export type SetModes = { lib: SetMode; fav: SetMode };

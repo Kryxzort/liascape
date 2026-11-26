@@ -138,7 +138,9 @@ for f in $FILES; do
     app/ui/src/components/CardPreview.tsx) add "appear|clip:|$CARD" "$f (+ LIASCAPE_MATRIX_SCREEN=1920x1080 scripts/test-ui-matrix.sh --probe probe-cardpreview.js)" ;;
     # cards leaving and joining the Library / Browse grids and the playlist bar (hooks/usePresence.ts)
     app/ui/src/hooks/usePresence.ts) add "$CARD|$PL|browse:" "$f (+ --probe probe-presence.js; probe-plbar.js; probe-layout.js tabs:keep, tabs:browse, perf:tabs)" ;;
-    app/shell/probe-cardpreview.js|app/shell/probe-libops.js|app/shell/probe-presence.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
+    # the hidden cards: their file has its own script, the menu, Hide / Undo / Unhide and the Hidden row their probe
+    src/backend/Helpers/HiddenItems.cs|scripts/test-hidden.sh) echo "  $f → nothing in the matrix (bash scripts/test-hidden.sh; --probe probe-hidden.js)" >&2 ;;
+    app/shell/probe-cardpreview.js|app/shell/probe-libops.js|app/shell/probe-presence.js|app/shell/probe-hidden.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     # the shell itself: no matrix cell loads main.js; probe-recover.js runs it as a child per cell
     app/shell/main.js|app/shell/renderer-recovery.js|app/shell/probe-recover.js) echo "  $f → nothing in the matrix (--probe probe-recover.js; the page's flags: --probe probe-intro.js)" >&2 ;;
     # the shell's outside-link rules: the sidebar probe runs them with a recording openExternal

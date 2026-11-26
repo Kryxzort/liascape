@@ -28,12 +28,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
        silent, assuming WE never plays a video texture's sound).
 
-4. [ ] (owner) Right-click a card for Unsubscribe and Hide, and a "Hidden" filter. A Workshop card's right-click menu
-       (Library and Browse; extend the menu cards already have, or add one in its look) offers Unsubscribe, through
-       the download modes' order (signed out: the item's Steam page), and Hide; any card offers Hide. A hidden item
-       leaves the grid it was hidden from, with Undo like a removal, and a "Hidden" filter row shows hidden items, with
-       Unhide in their menu. Keep the hidden ids in a state file (field-level, atomic). Multi-select: the menu acts on
-       the selection. Guards: probe cells for the menu, Hide/Undo/Unhide and the filter; a backend test for the file.
 5. [ ] (owner) Opening animation, a prototype: the logo becomes the first library cards. The tile breaks into a few
        rounded tiles that glide to the first row's real card positions (measured once the cards are built) and hand
        over to them; the cover dissolves behind. Same budget and rules as now (`components/Intro.tsx`: gone within

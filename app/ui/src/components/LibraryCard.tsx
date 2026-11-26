@@ -11,7 +11,7 @@ import { TypeBadge } from "./TypeBadge";
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
 // title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
 // PERF: memo'd; content-visibility (CSS) + per-card props; lift+glow hover (design choice).
-// A click applies it; its settings and actions live in the item sidebar (a right-click focuses the card) — components/LibrarySide.tsx.
+// A click applies it; its settings and actions live in the item sidebar (a right-click focuses the card and opens its menu: Unsubscribe, Hide) — components/LibrarySide.tsx.
 // COOL: animated preview (MotionThumb): what it shows hovered and not follows Settings → "On hover" / "Not hovered".
 export const LibraryCard = memo(function LibraryCard({
   item, playing, selected, focused, inPlaylist, unsub, unsubOff, reason, onClick, onTrash, onToggle, onContextFocus,
@@ -27,7 +27,8 @@ export const LibraryCard = memo(function LibraryCard({
   // PERF: each takes the item, so the list passes the same function to every card (Library.tsx useStableFn) and a
   // focus / selection change re-renders only the cards whose own props changed
   onClick: (item: LibraryItem, e: React.MouseEvent) => void; onTrash: (item: LibraryItem) => void; onToggle: (item: LibraryItem) => void;
-  onContextFocus: (item: LibraryItem) => void;
+  // a right-click: the item sidebar on the card and its menu at the pointer (Library.tsx)
+  onContextFocus: (item: LibraryItem, e: React.MouseEvent) => void;
 }) {
   const [hover, setHover] = useState(false);
   const { hoverKind, idleKind } = usePreviewKinds(item);
@@ -46,7 +47,7 @@ export const LibraryCard = memo(function LibraryCard({
           does the tab's main action, right click opens the item sidebar"); the sidebar has Open in file manager / Delete / Delete from
           source. Library.tsx keeps the card where it was while the docked sidebar re-fits the grid (gridKeys.ts keepCardInView). */}
       <div ref={wrapRef} className="thumb-wrap" data-morph-id={`lib-${item.videoPath}`} onClick={(e) => onClick(item, e)}
-        onContextMenu={(e) => { e.preventDefault(); onContextFocus(item); }}
+        onContextMenu={(e) => { e.preventDefault(); onContextFocus(item, e); }}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
        >
         <MotionThumb item={item} hover={hover} hoverKind={hoverKind} idleKind={idleKind} autoVideo={autoVideo} />

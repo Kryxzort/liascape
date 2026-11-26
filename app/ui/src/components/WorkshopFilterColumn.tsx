@@ -1,6 +1,6 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
 import { Check, ChevronDown, Dot, Layers, Monitor, Palette, Shield, Sparkles, Tags, UserRound, X, type LucideIcon } from "lucide-react";
-import { favoritesSignedOut, filterOf, useStore, type FilterScope, type TagState } from "../store";
+import { favoritesSignedOut, filterOf, hiddenOnSource, useStore, type FilterScope, type TagState } from "../store";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
@@ -140,7 +140,7 @@ function GroupBox({ g, states, scope }: { g: Group; states: Map<string, TagState
 
 // scope: whose filter (the Workshop's, the local WE folder's, the Library's — each its own); known: the tags the list's items
 // know, for a local scope (workshopFilter.ts visibleGroups) — null offers every tag (the Workshop)
-const SCOPE_NAME: Record<FilterScope, string> = { workshop: "Workshop", weLocal: "Wallpaper Engine", library: "Library" };
+const SCOPE_NAME: Record<FilterScope, string> = { workshop: "Workshop", weLocal: "Wallpaper Engine", library: "Library", web: "Source" };
 // PERF: memo'd — the Library re-renders on every selection change (a box-selection drag: one per card it crosses), and
 // the column's ~40 rows must not with it. Guard: probe-select perf:drag
 export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, scope = "workshop", known = null, closing = false, entering = false, onClose }: {
@@ -149,6 +149,9 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
   const f = useStore((s) => filterOf(s, scope));
   const presets = usePresetsOn();
   const clearIn = useStore((s) => s.clearTags);
+  // the Hidden row is offered while this grid has a hidden card: the Library's, or one of the shown Browse source's
+  const hiddenAny = useStore((s) => scope === "library" ? Object.keys(s.hidden.library).length > 0
+    : Object.keys(hiddenOnSource(s.hidden, s.sources[s.activeSource]?.name)).length > 0);
   const page = scope === "library" ? "library" : "browse";
   const scrollRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -182,7 +185,7 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
           <button type="button" className="mini wf-close" data-wf-close aria-label="Close filters" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="wf-scroll" ref={smoothRef}>
-          {visibleGroups(groupsFor(scope, presets), known, states).map((g) => <GroupBox key={g.id} g={g} states={states} scope={scope} />)}
+          {visibleGroups(groupsFor(scope, presets), known, states, hiddenAny).map((g) => <GroupBox key={g.id} g={g} states={states} scope={scope} />)}
         </div>
       </aside>
     </>

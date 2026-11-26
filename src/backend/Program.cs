@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Liascape.Helpers;
 
@@ -65,6 +66,17 @@ sealed class Program
             case "steam-ugc":
                 Environment.Exit(Liascape.Helpers.SteamClientUgc.RunChild(args.Skip(1).ToArray()));
                 return;
+            // hidden: `hidden-edit <library|browse> <hide|unhide> <key>…` — the hidden cards' file written from another process
+            // than the backend (Helpers/HiddenItems.cs Change), for scripts/test-hidden.sh's cross-process writes
+            case "hidden-edit" when args.Length >= 4 && HiddenItems.ValidScope(args[1]) && args[2] is "hide" or "unhide":
+            {
+                var keys = args.Skip(3).ToList();
+                var hide = args[2] == "hide"
+                    ? keys.ToDictionary(k => k, k => new HiddenItems.Entry { Title = k, HiddenAt = DateTime.UtcNow })
+                    : new Dictionary<string, HiddenItems.Entry>();
+                HiddenItems.Change(args[1], hide, args[2] == "unhide" ? keys : []);
+                return;
+            }
         }
 
         PlayerHelper.LoadUserMuteState();

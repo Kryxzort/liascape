@@ -23,7 +23,9 @@ import type { LibraryItem } from "../api/client";
 import { unsubBlocked } from "../components/subscribeMode";
 import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
 import { confirmBaseRemoval } from "../components/baseConfirm";
-import { CRASHED_TAG, byFavorites, setModesOf } from "./localSet";
+import { ContextMenu, type MenuAt } from "../components/ContextMenu";
+import { cardMenuItems, menuAt } from "../components/menuItems";
+import { CRASHED_TAG, HIDDEN_TAG, byFavorites, setModesOf } from "./localSet";
 
 const keyOfItem = (i: LibraryItem) => i.videoPath;
 
@@ -91,6 +93,10 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   }, [items]);
   // The Crashed row: ✓ keeps the items whose scene crashed the player, ✕ the rest. Guard: probe-filters lib:crashed
   const crashMode = libFilter.include.includes(CRASHED_TAG) ? "inc" : libFilter.exclude.includes(CRASHED_TAG) ? "exc" : null;
+  // The hidden cards (a card's menu → Hide; store hidden): left out of the grid; the Hidden row's ✓ shows only them, with
+  // Unhide in their menu. Guard: probe-hidden hide:lib, hide:filter
+  const hiddenLib = useStore((s) => s.hidden.library);
+  const hidOnly = libFilter.include.includes(HIDDEN_TAG);
   // The Favourites row: ✓ keeps the items starred on the Workshop, ✕ the rest (a non-Workshop item is never starred). Signed
   // out (or Steam turning the account down) it means nothing. While the list isn't read yet (unread, loading with none in, or a
   // failed read with none in) the whole Library shows under the load line / error with Retry (WsSetLoad, as in Browse): never an
@@ -123,12 +129,13 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // PERF: one predicate per filter change and each item's facets computed once (components/facets.ts facetsOf) — no per-card work
   const filtered = useMemo(() => {
     const q = libQuery.trim().toLowerCase();
-    let f = q ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q)) : items;
+    let f = items.filter((i) => !!hiddenLib[i.videoPath] === hidOnly);
+    if (q) f = f.filter((i) => i.title.toLowerCase().includes(q) || (i.workshopId ?? "").includes(q));
     if (match) f = f.filter((i) => match(facetsOf(i, i.videoPath)));
     if (favSet) f = byFavorites(f, favMode, favSet, (i) => i.workshopId);
     if (crashMode) f = f.filter((i) => !!i.hasCrashed === (crashMode === "inc"));
     return sortItems(f, libSort);
-  }, [items, libQuery, libSort, match, favSet, favMode, crashMode]);
+  }, [items, libQuery, libSort, match, favSet, favMode, crashMode, hiddenLib, hidOnly]);
   // the marked items while the Crashed row is on: a mark lifted (the sidebar's Clear, Housekeeping's) narrows the selection
   // like a star does under Favourites
   const crashSig = useMemo(() => (crashMode ? items.filter((i) => i.hasCrashed).map((i) => i.videoPath).join("\n") : ""), [items, crashMode]);
@@ -141,16 +148,17 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const filterKey = JSON.stringify([libFilter.include, libFilter.exclude, libFilter.featureMatch, libFilter.genreMatch]);
   // a star that comes or goes while the Favourites row is on narrows the selection the same way, the grid keeping its place.
   // Guard: probe-steam lib:yours:fav
-  const shownFilter = useRef(filterKey), shownFavs = useRef(favSet), shownCrash = useRef(crashSig);
+  // a card hidden or shown again (a Hide, an Undo, an Unhide) narrows it the same way. Guard: probe-hidden hide:lib
+  const shownFilter = useRef(filterKey), shownFavs = useRef(favSet), shownCrash = useRef(crashSig), shownHidden = useRef(hiddenLib);
   useLayoutEffect(() => {
     const filterChanged = shownFilter.current !== filterKey;
-    if (!filterChanged && shownFavs.current === favSet && shownCrash.current === crashSig) return;
-    shownFilter.current = filterKey; shownFavs.current = favSet; shownCrash.current = crashSig;
+    if (!filterChanged && shownFavs.current === favSet && shownCrash.current === crashSig && shownHidden.current === hiddenLib) return;
+    shownFilter.current = filterKey; shownFavs.current = favSet; shownCrash.current = crashSig; shownHidden.current = hiddenLib;
     if (filterChanged && scrollRef.current && scrollRef.current.scrollTop > 0) scrollRef.current.scrollTop = 0;
     const vis = new Set(filtered.map((i) => i.videoPath));
     setSel((x) => { const n = new Set([...x].filter((p) => vis.has(p))); return n.size === x.size ? x : n; });
     if (anchor.current && !vis.has(anchor.current)) anchor.current = null;
-  }, [filterKey, favSet, crashSig, filtered]);
+  }, [filterKey, favSet, crashSig, hiddenLib, filtered]);
 
   // the grid's cards leave and join in motion: a delete, an unsubscribe, a filter or search, and Undo bringing one back
   // (hooks/usePresence.ts; a card still leaving renders in its old place, everything else reads `filtered`). After the filter's
@@ -285,7 +293,38 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const cardClick = useStableFn(onCardClick);
   const cardTrash = useStableFn((it: LibraryItem) => doTrash(targetsFor(it)));
   const cardToggle = useStableFn(doToggle);
-  const cardContext = useStableFn((it: LibraryItem) => focusFromCard(it.videoPath)); // keeps the selection: the sidebar edits it
+  // a right-click: the sidebar on the card (the selection kept: the sidebar edits it) and the card's menu at the pointer
+  // (docs/decisions.md § "Right-click a card for its sidebar and its menu")
+  // what it acts on and whether those are hidden, taken as it opens: its words stay put while it fades out after a pick
+  const [menu, setMenu] = useState<{ at: MenuAt; targets: LibraryItem[]; hidden: boolean; open: boolean } | null>(null);
+  const closeMenu = useStableFn(() => setMenu((m) => (m && m.open ? { ...m, open: false } : m)));
+  const cardContext = useStableFn((it: LibraryItem, e: React.MouseEvent) => {
+    focusFromCard(it.videoPath);
+    setMenu({ at: menuAt(e), targets: targetsFor(it), hidden: !!hiddenLib[it.videoPath], open: true });
+  });
+  // The card's menu acts on the selection when the card is in it, else on the card. Unsubscribe: its subscribed Workshop items,
+  // by the Library's own unsubscribe (Delete from source: undoable, the unsubscribe in the download modes' order; signed out
+  // under "Subscribe with Steam login" the item's Steam page), a scene that presets play asking first. Hide / Unhide: every one;
+  // a hidden card leaves the grid (the top bar's Undo brings it back) and the sidebar on it closes.
+  // Guard: probe-hidden menu:lib, hide:lib, hide:multi, unsub:lib, unsub:signedOut
+  const menuTargets = menu?.targets ?? [];
+  const subscribed = (i: LibraryItem) => !!i.workshopId && !!i.subscribed;
+  const leaveSide = (list: LibraryItem[]) => { const f = useStore.getState().libFocus; if (f && list.some((i) => i.videoPath === f)) focusLib(null); };
+  const hideCards = useStore((s) => s.hideCards), unhideCards = useStore((s) => s.unhideCards);
+  const doUnsub = async (list: LibraryItem[]) => {
+    const ws = list.filter(subscribed);
+    if (!ws.length) return;
+    if (unsubOff) { setStatus(unsubOff, true, true); return; }
+    if (!await confirmBaseRemoval(ws, items, "unsubscribe")) return;
+    leaveSide(ws); setSel(new Set());
+    deleteFromSource(ws);
+  };
+  const menuItems = cardMenuItems({
+    n: menuTargets.length, unsubN: menuTargets.filter(subscribed).length, hidden: !!menu?.hidden,
+    onUnsub: () => doUnsub(menuTargets),
+    onHide: () => { leaveSide(menuTargets); setSel(new Set()); hideCards("library", menuTargets.map((i) => ({ key: i.videoPath, title: i.title }))); },
+    onUnhide: () => { leaveSide(menuTargets); setSel(new Set()); unhideCards("library", menuTargets.map((i) => i.videoPath), menuTargets.map((i) => i.title)); },
+  });
   // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
   const onMarquee = useMarquee(scrollRef, { prefix: "lib-", sel, setSel, anchor });
 
@@ -299,7 +338,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     <>
     <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       <WsSetLoad scope="library" />
-      {(match || favSet || crashMode) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
+      {(match || favSet || crashMode || hidOnly) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
       <div className="grid" ref={gridRef}>
         {gridItems.map((it) => (
           <LibraryCard key={it.videoPath} item={it}
@@ -313,6 +352,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
       </div>
     </div>
     {col.panel.value && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
+    <ContextMenu at={menu?.open ? menu.at : null} items={menuItems} onClose={closeMenu} light
+      label={menuTargets.length > 1 ? `${menuTargets.length} wallpapers` : (menuTargets[0]?.title ?? "Wallpaper")} />
     {sideItem && (() => {
       const targets = targetsFor(sideItem);
       const unsubN = targets.filter(unsubs).length;

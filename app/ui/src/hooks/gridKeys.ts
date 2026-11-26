@@ -6,10 +6,12 @@ import { shortcutsBlocked } from "./rangeDrag";
 // aimed at a field or a button (a focused slider in the sidebar steps itself; Enter on a button presses it).
 export function gridOwnsKey(e: KeyboardEvent): boolean {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return false;
-  if (document.querySelector(".sel-pop, .modal-backdrop")) return false;
+  // a card's menu (ContextMenu light) leaves the grid its keys: it hands on the ones it doesn't use
+  if (document.querySelector(".sel-pop:not([data-ctx-light]), .modal-backdrop")) return false;
   if (e.key === "Escape") return !shortcutsBlocked() || !(e.target as HTMLElement | null)?.closest?.("input, textarea");
   if (shortcutsBlocked()) return false;
   const t = e.target as HTMLElement | null;
+  if (t?.closest?.("[data-ctx-light]")) return true; // a key a card's menu handed on (← →): the grid's, as before the menu
   return !t?.closest?.("input, textarea, select, button, a, [contenteditable], .sel");
 }
 

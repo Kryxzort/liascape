@@ -16,8 +16,11 @@ namespace Liascape.Web;
 // Backend orchestration for the play / download / trash flows, callable from the API endpoints.
 public static class AppOps
 {
-    // FromPlaylist: the trashed items' (path, index) in the playlist, so an undo puts them back
-    private sealed record UndoBatch(string BatchDir, List<LibraryItem> Items, List<(string Path, int Index)> FromPlaylist);
+    // FromPlaylist: the trashed items' (path, index) in the playlist, so an undo puts them back. `Hidden`: a Hide instead of a
+    // trash (Helpers/HiddenItems.cs: the scope and the keys it newly hid, with their titles; the other fields empty): the same
+    // Undo brings the cards back, as it does a removal. Guard: scripts/test-hidden.sh § undo
+    private sealed record HideUndo(string Scope, List<(string Key, string? Title)> Keys);
+    private sealed record UndoBatch(string BatchDir, List<LibraryItem> Items, List<(string Path, int Index)> FromPlaylist, HideUndo? Hidden = null);
     private static readonly List<UndoBatch> _undo = new();
     private static readonly object _undoLock = new();
 
@@ -530,7 +533,30 @@ public static class AppOps
         EventBus.Broadcast("wallpaper-changed", new { path = (string?)null });
     }
 
-    public record UndoResult(bool Ok, int Count, string? Title, string? Message = null);
+    // Kind: "trash" (items back in the library) or "hide" (cards shown again)
+    public record UndoResult(bool Ok, int Count, string? Title, string? Message = null, string Kind = "trash");
+
+    // A Hide the user made: the keys it newly hides (as the write found the file: another process may have hidden one
+    // meanwhile) go on the Undo stack as one step (none new: nothing to undo). → the new state
+    public static HiddenItems.State Hide(string scope, IReadOnlyDictionary<string, HiddenItems.Entry> entries)
+    {
+        lock (_undoLock)
+        {
+            var s = HiddenItems.Change(scope, entries, [], out var added);
+            var fresh = added.Select(k => (k, entries[k].Title)).ToList();
+            if (fresh.Count > 0) _undo.Add(new UndoBatch("", [], [], new HideUndo(scope, fresh)));
+            EventBus.Broadcast("hidden-changed", s);
+            return s;
+        }
+    }
+
+    // the Hidden filter row's Unhide (not on the Undo stack: Hide is its way back)
+    public static HiddenItems.State Unhide(string scope, IEnumerable<string> keys)
+    {
+        var s = HiddenItems.Change(scope, new Dictionary<string, HiddenItems.Entry>(), keys);
+        EventBus.Broadcast("hidden-changed", s);
+        return s;
+    }
 
     // An Undo of a Delete from source takes its unsubscribes back first, in one step against the drain
     // (WorkshopUnsubQueue.Withdraw): one the drain is already sending makes it too late. Then nothing changes, the batch stays
@@ -545,6 +571,14 @@ public static class AppOps
         {
             if (_undo.Count == 0) return new(false, 0, null);
             batch = _undo[^1];
+            if (batch.Hidden is { } h)
+            {
+                // the step goes only once its write landed: a write that failed (the file unreadable) leaves it for the next Undo
+                var s = HiddenItems.Change(h.Scope, new Dictionary<string, HiddenItems.Entry>(), h.Keys.Select(k => k.Key));
+                _undo.RemoveAt(_undo.Count - 1);
+                EventBus.Broadcast("hidden-changed", s);
+                return new(true, h.Keys.Count, h.Keys[0].Title, Kind: "hide");
+            }
             w = WorkshopUnsubQueue.Withdraw(batch.Items.Select(i => i.WorkshopId).OfType<string>());
             if (w.Sending.Count > 0)
             {

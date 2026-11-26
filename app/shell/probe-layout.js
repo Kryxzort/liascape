@@ -1802,6 +1802,8 @@ app.whenReady().then(async () => {
         const at = n == null ? null : await cardAt(n);
         if (n != null && !at) { v.push(`${what}: no card on screen to right-click`); break; }
         if (at) win.webContents.sendInputEvent({ type: "mouseMove", x: at.x, y: at.y }); // the pointer gets there first
+        // the right-click's card menu (components/ContextMenu.tsx light) takes the first Escape: it goes before the close is measured
+        if (!at) { win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" }); await sleep(80); win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" }); }
         await sleep(400);
         const r = await perfStep(async () => {
           if (at) await clickAt(at, "right");

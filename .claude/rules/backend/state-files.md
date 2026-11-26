@@ -9,6 +9,8 @@ paths:
   - "src/backend/Helpers/AtomicFile.cs"
   - "src/backend/Helpers/FileLock.cs"
   - "src/backend/Helpers/JsonMerge.cs"
+  - "src/backend/Helpers/HiddenItems.cs"
+  - "scripts/test-hidden.sh"
   - "scripts/test-settings-merge.sh"
   - "scripts/test-cross-process.sh"
 ---
@@ -16,7 +18,9 @@ paths:
 # Settings, sessions and other shared state files
 
 Files: `~/.config/liascape/settings.json` (`AppSettings`), `playlist_state.json` (the playlist bar, `CustomPlaylist`),
-named playlists in `~/.local/share/liascape/playlists/`, per-source library `index.json` (`.claude/rules/backend/library.md`).
+named playlists in `~/.local/share/liascape/playlists/`, per-source library `index.json` (`.claude/rules/backend/library.md`),
+the hidden cards `~/.local/share/liascape/hidden.json` (`src/backend/Helpers/HiddenItems.cs`: `Change` touches only the keys it names; a file
+that doesn't parse is never written over; Guard: `scripts/test-hidden.sh`).
 The CLI, `serve` and the player-side processes all read and write them concurrently.
 
 ## Writing

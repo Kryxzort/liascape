@@ -2,9 +2,10 @@ import { create } from "zustand";
 import {
   steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
   type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState, type LinkTarget,
+  type HiddenState, type HiddenEntry, type HiddenScope, type HideEntry,
 } from "../api/client";
 import {
-  DEFAULT_LOCAL_SORT, FAVORITES_TAG, LIBRARY_TAG, isLocalSet, isLocalSort, setModesOf, type LocalSort, type SetModes,
+  DEFAULT_LOCAL_SORT, FAVORITES_TAG, HIDDEN_TAG, LIBRARY_TAG, isLocalSet, isLocalSort, setModesOf, type LocalSort, type SetModes,
 } from "../views/localSet";
 import { eventsOpened } from "../api/events";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
@@ -70,8 +71,10 @@ const LS = {
 export type TagState = "inc" | "exc" | null;
 // The filter column's three homes, each with its own filter (saved under its own key): the Workshop's goes to the backend,
 // the local Wallpaper Engine folder's and the Library's filter what the page already holds (workshopFilter.ts localMatcher)
-export type FilterScope = "workshop" | "weLocal" | "library";
-export const FILTER_KEY: Record<FilterScope, string> = { workshop: "browseFilter", weLocal: "weLocalFilter", library: "libFilter" };
+// "web": a web source (no tags of its own), whose column holds only the Hidden row: offered once a card of it is hidden
+// (browseScope). Guard: probe-hidden hide:web
+export type FilterScope = "workshop" | "weLocal" | "library" | "web";
+export const FILTER_KEY: Record<FilterScope, string> = { workshop: "browseFilter", weLocal: "weLocalFilter", library: "libFilter", web: "webFilter" };
 export function loadBrowseFilter(key = FILTER_KEY.workshop): WorkshopFilter {
   const raw = LS.get<Partial<WorkshopFilter> | null>(key, null);
   if (!raw || typeof raw !== "object") return { ...DEFAULT_FILTER };
@@ -84,7 +87,17 @@ export function loadBrowseFilter(key = FILTER_KEY.workshop): WorkshopFilter {
   const exclude = [...new Set(strs(raw.exclude))].filter((t) => !include.includes(t)); // include XOR exclude
   return { sort, trendDays, include, exclude, featureMatch, genreMatch };
 }
-export const filterOf = (s: State, scope: FilterScope) => scope === "library" ? s.libFilter : scope === "weLocal" ? s.weFilter : s.browseFilter;
+export const filterOf = (s: State, scope: FilterScope) =>
+  scope === "library" ? s.libFilter : scope === "weLocal" ? s.weFilter : scope === "web" ? s.webFilter : s.browseFilter;
+// The cards hidden from a grid (a card's right-click → Hide; api/client.ts HiddenState): the Library's by path, Browse's by page
+// URL on the source they were hidden on. A grid leaves them out; its filter column's Hidden row (views/localSet.ts HIDDEN_TAG)
+// ✓ shows only them, with Unhide in their menu. Guard: probe-hidden hide:*
+export const hiddenOnSource = (h: HiddenState, source: string | undefined) => {
+  const out: Record<string, HiddenEntry> = {};
+  for (const [k, e] of Object.entries(h.browse)) if (e.source === source) out[k] = e;
+  return out;
+};
+const NO_HIDDEN: HiddenState = { library: {}, browse: {} };
 
 // Applies a theme's 16 colors to :root as CSS vars (ThemeService color keys).
 // COOL: --accent also drives every glow in the app.
@@ -145,8 +158,14 @@ interface State {
   // a Workshop download's step in words (WS download-progress `status`; e.g. "click Subscribe in Steam") — per page URL
   downloadStatus: Record<string, string>;
   browseFilter: WorkshopFilter; browseSort: number;
-  // the local filters (FilterScope): the WE folder's on Browse, the Library's
-  weFilter: WorkshopFilter; libFilter: WorkshopFilter;
+  // the local filters (FilterScope): the WE folder's on Browse, the Library's, a web source's (its Hidden row alone)
+  weFilter: WorkshopFilter; libFilter: WorkshopFilter; webFilter: WorkshopFilter;
+  // the hidden cards (GET /hidden, WS hidden-changed); hide goes on the backend's Undo stack (the top bar's Undo), unhide doesn't
+  hidden: HiddenState; setHidden(h: HiddenState): void;
+  hideCards(scope: HiddenScope, entries: HideEntry[]): Promise<void>;
+  unhideCards(scope: HiddenScope, keys: string[], titles: string[]): Promise<void>;
+  // the shown Browse source's Hidden row is ✓: Browse shows its hidden cards (no request), not the source's list
+  hiddenViewOn(): boolean;
   // what the shown list was read for (its source, search and filter; "" while a switched-to source loads): Browse starts
   // a list read for anything else at its top, and brings a kept scroll offset back only onto the list it was left on
   browseFor: string;
@@ -358,7 +377,10 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
 // a local set's list: nothing from /browse, and one key for every set (Browse keys its kept scroll on the set's own view)
 const NO_ITEMS: Wallpaper[] = [];
-const LOCAL_FOR = "local";
+const LOCAL_FOR = "local", HIDDEN_FOR = "hidden";
+// grows with every change of the store's hidden cards: a resync's /hidden read that started before one is dropped (it may predate
+// a Hide that landed meanwhile)
+let hiddenGen = 0;
 type FavSync = "none" | "open" | "check";
 // the favourites' read on its way (loadFavorites): its promise, the sync it sent and the account epoch it started in, and the
 // read wanted after it. favEpoch grows with every change of the usable sign-in (the subscription at the end of this file): a
@@ -379,7 +401,8 @@ export const useStore = create<State>((set, get) => ({
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
   wsList: null, wsListSort: LS.get<WsListSort>("wsListSort", "lastupdated") === "toprated" ? "toprated" : "lastupdated", wsListNote: null, browseExtra: null,
   wsFavs: null, wsLibDetails: {}, localSort: (() => { const v = LS.get<unknown>("wsLocalSort", DEFAULT_LOCAL_SORT); return isLocalSort(v) ? v : DEFAULT_LOCAL_SORT; })(),
-  weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library),
+  weFilter: loadBrowseFilter(FILTER_KEY.weLocal), libFilter: loadBrowseFilter(FILTER_KEY.library), webFilter: loadBrowseFilter(FILTER_KEY.web),
+  hidden: NO_HIDDEN,
   filterCollapsed: LS.get<string[]>("browseFilterCollapsed", ["features"]),
   scenePropsFolded: LS.get<boolean>("scenePropsFolded", false) === true,
   // the docked filter panel closed; remembered
@@ -438,7 +461,59 @@ export const useStore = create<State>((set, get) => ({
   setWsListSort(v) { set({ wsListSort: v }); LS.set("wsListSort", v); if (get().wsList) get().reload(); },
   setQuery(q) { set({ query: q }); clearTimeout(searchTimer); searchTimer = setTimeout(() => get().reload(), 200); },
   isWorkshop() { return !!get().sources[get().activeSource]?.supportsTagFilter; },
-  browseScope() { const src = get().sources[get().activeSource]; return src?.supportsTagFilter ? "workshop" : src?.supportsLocalFilter ? "weLocal" : null; },
+  // a web source has a column only while it has a hidden card (or its Hidden row is on, so it can be turned off): until the
+  // first Hide its top bar and grid stay as they were. Guard: probe-hidden hide:web
+  browseScope() {
+    const s = get(), src = s.sources[s.activeSource];
+    if (!src) return null;
+    if (src.supportsTagFilter) return "workshop";
+    if (src.supportsLocalFilter) return "weLocal";
+    const on = s.webFilter.include.includes(HIDDEN_TAG) || s.webFilter.exclude.includes(HIDDEN_TAG);
+    return on || Object.values(s.hidden.browse).some((e) => e.source === src.name) ? "web" : null;
+  },
+  hiddenViewOn() { const sc = get().browseScope(); return !!sc && filterOf(get(), sc).include.includes(HIDDEN_TAG); },
+  setHidden(h) { hiddenGen++; set({ hidden: { library: h.library ?? {}, browse: h.browse ?? {} } }); },
+  // Hide: the cards leave their grid at once (the store's copy first), then the backend keeps it and puts it on the Undo stack
+  // (the top bar's Undo, as for a removal); a refusal puts back only the cards this Hide took (another Hide or Unhide that
+  // landed meanwhile stays). Guard: probe-hidden hide:lib, hide:browse
+  async hideCards(scope, entries) {
+    if (!entries.length) return;
+    const before = get().hidden;
+    const map = { ...before[scope] };
+    const source = scope === "browse" ? get().sources[get().activeSource]?.name : undefined;
+    const took = entries.filter((e) => !map[e.key]).map((e) => e.key);
+    for (const e of entries) map[e.key] ??= { title: e.title, source: e.source ?? source, card: e.card ?? null };
+    hiddenGen++; set({ hidden: { ...before, [scope]: map } });
+    const undoMine = () => { const cur = get().hidden, m = { ...cur[scope] }; for (const k of took) delete m[k]; hiddenGen++; set({ hidden: { ...cur, [scope]: m } }); };
+    try {
+      const h = await api.hide(scope, entries.map((e) => ({ ...e, source: e.source ?? source })));
+      get().setHidden(h);
+      const d = await api.undoDepth().catch(() => null);
+      if (d) set({ undoDepth: d.depth });
+      get().setStatus(entries.length === 1 ? `Hidden: ${entries[0].title}. Undo brings it back.` : `Hidden: ${wallpapers(entries.length)}. Undo brings them back.`);
+    } catch (e) {
+      undoMine();
+      get().setStatus(`Couldn't hide ${entries.length === 1 ? entries[0].title : wallpapers(entries.length)}: ${(e as Error).message}`);
+    }
+  },
+  async unhideCards(scope, keys, titles) {
+    if (!keys.length) return;
+    const before = get().hidden;
+    const map = { ...before[scope] };
+    const gave = keys.flatMap((k) => (map[k] ? [[k, map[k]] as const] : []));
+    for (const k of keys) delete map[k];
+    hiddenGen++; set({ hidden: { ...before, [scope]: map } });
+    try {
+      get().setHidden(await api.unhide(scope, keys));
+      get().setStatus(keys.length === 1 ? `Unhidden: ${titles[0] ?? ""}` : `Unhidden: ${wallpapers(keys.length)}`);
+    } catch (e) {
+      // only the cards this Unhide showed go back (the same as Hide's refusal)
+      const cur = get().hidden, m = { ...cur[scope] };
+      for (const [k, v] of gave) m[k] ??= v;
+      hiddenGen++; set({ hidden: { ...cur, [scope]: m } });
+      get().setStatus(`Couldn't unhide: ${(e as Error).message}`);
+    }
+  },
   setModes() { return setModesOf(get().browseFilter, favoritesUsable(get().steam)); },
   localSetOn() { return get().isWorkshop() && isLocalSet(get().setModes()); },
   // API: GET /workshop/my-favorites. One read at a time. A call while one runs for the same account and reaches as far (an
@@ -523,7 +598,7 @@ export const useStore = create<State>((set, get) => ({
   setFilterIn(scope, p) {
     if (scope === "workshop") { get().setBrowseFilter(p); return; }
     const f = { ...filterOf(get(), scope), ...p };
-    set(scope === "library" ? { libFilter: f } : { weFilter: f }); LS.set(FILTER_KEY[scope], f);
+    set(scope === "library" ? { libFilter: f } : scope === "web" ? { webFilter: f } : { weFilter: f }); LS.set(FILTER_KEY[scope], f);
   },
   clearTags(scope = "workshop") { const f = filterOf(get(), scope); if (f.include.length || f.exclude.length) get().setFilterIn(scope, { include: [], exclude: [] }); },
   // Guard: probe-filters swap:browse, swap:library, panel:persist
@@ -547,6 +622,12 @@ export const useStore = create<State>((set, get) => ({
   async reload() {
     // a local set is the page's own: no /browse and no placeholders (hasMore false); the shown set follows the store's
     // favourites and library. Guard: probe-steam yours:noScan, yours:big
+    // the Hidden row's ✓ the same: Browse shows the source's hidden cards from the store (Browse.tsx). Guard: probe-hidden hide:filter
+    if (get().hiddenViewOn()) {
+      ++browseGen;
+      set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseFor: HIDDEN_FOR });
+      return;
+    }
     if (get().localSetOn()) {
       ++browseGen; // a Workshop page still on its way belongs to the list before
       set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseFor: LOCAL_FOR });
@@ -580,7 +661,7 @@ export const useStore = create<State>((set, get) => ({
   },
   async loadMore() {
     const { activeSource, page, loading, hasMore, wallpapers } = get();
-    if (loading || !hasMore || get().localSetOn()) return;
+    if (loading || !hasMore || get().localSetOn() || get().hiddenViewOn()) return;
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const wl = wireList(get());
     const query = wl ? "" : get().query;
@@ -720,6 +801,14 @@ export const useStore = create<State>((set, get) => ({
   async undo() {
     const r = await api.undo();
     if (!r.ok) { if (r.message) get().setStatus(r.message); return; }
+    // a Hide's Undo: its cards come back into their grid (nothing came back into the library). Guard: probe-hidden hide:lib
+    if (r.kind === "hide") {
+      const [h, d] = await Promise.all([api.hidden().catch(() => null), api.undoDepth().catch(() => null)]);
+      if (h) get().setHidden(h);
+      if (d) set({ undoDepth: d.depth });
+      get().setStatus(r.count > 1 ? `Unhidden: ${wallpapers(r.count)}` : `Unhidden: ${r.title ?? ""}`);
+      return;
+    }
     await Promise.all([get().loadLibrary(), get().syncPlaylist()]);
     get().setStatus(r.count > 1 ? `Restored ${r.count} wallpapers` : `Restored: ${r.title ?? ""}`);
   },
@@ -982,9 +1071,11 @@ useStore.subscribe((s) => {
 // favourites read if not yet) or the Workshop's pages again. In a microtask, and only when nothing reloaded since the flip: a
 // source switch reloads itself, and a debounced filter reload still pending would ask a second time.
 // Guard: probe-steam yours:combos, yours:noScan, yours:signFlip
-let localWas = false;
+// The Hidden row's ✓ on Browse's source is a view of its own the same way (reload shows it, or the source's list again).
+// Guard: probe-hidden hide:filter
+let localWas = 0;
 useStore.subscribe((s) => {
-  const on = s.localSetOn();
+  const on = s.hiddenViewOn() ? 2 : s.localSetOn() ? 1 : 0;
   if (on === localWas) return;
   localWas = on;
   const gen = browseGen;
@@ -1073,11 +1164,11 @@ type Setter = (p: Partial<State>) => void;
 async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   let unreachable = false;
   const r = <T,>(p: Promise<T>, core = true) => p.then((v) => ({ v }), (e) => { if (core && e instanceof TypeError) unreachable = true; return null; });
-  const curQ = askCurrent();
-  const [sources, themes, settings, cur, lib, pstate, names, depth, steam, todo, ops] = await Promise.all([
+  const curQ = askCurrent(), hGen = hiddenGen;
+  const [sources, themes, settings, cur, lib, pstate, names, depth, steam, todo, ops, hidden] = await Promise.all([
     r(api.sources()), r(api.themes()), r(api.settings()), r(curQ.reply), r(api.library()), r(api.playlistState()),
     r(api.playlistNames(), false), r(api.undoDepth(), false), r(api.steamStatus(), false), r(api.steamTodo(), false),
-    r(api.libraryOps(), false),
+    r(api.libraryOps(), false), r(api.hidden(), false),
   ]);
   const st = get();
   const playingLine = st.status === "" || st.status === buildPlayingStatus(get); // no transient notice showing
@@ -1108,6 +1199,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   if (steam) p.steam = steam.v;
   if (todo) p.steamTodo = "finished" in todo.v && todo.v.finished ? null : todo.v;
   if (ops) p.libraryOps = ops.v;
+  if (hidden && hGen === hiddenGen) p.hidden = { library: hidden.v.library ?? {}, browse: hidden.v.browse ?? {} }; // none changed meanwhile
   set(p);
   if (playingLine) get().refreshPlayingStatus(); // the now-playing line follows (a transient notice reverts to it itself)
   return !unreachable;

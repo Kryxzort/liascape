@@ -4,7 +4,7 @@ import type { WorkshopFilter } from "../api/client";
 import { useMotion } from "./motion";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
 import { keepCardInView } from "../hooks/gridKeys";
-import { CRASHED_TAG, FAVORITES_TAG, LIBRARY_TAG } from "../views/localSet";
+import { CRASHED_TAG, FAVORITES_TAG, HIDDEN_TAG, LIBRARY_TAG } from "../views/localSet";
 import { facetsOf, type Facetable } from "./facets";
 
 // The Workshop filter column's data + hooks (components/WorkshopFilterColumn.tsx) — a module of its own so the component file
@@ -29,9 +29,13 @@ const prefixed = (p: string, rest: string[]) => [t(`${p} Standard Definition`, "
 // marked (or while it is on, so it can be turned off). Guard: probe-filters lib:crashed
 // On the Workshop a ✓ on either shows that set itself with no request (views/localSet.ts) and ✕ alone hides it from the
 // Workshop's pages; on the local WE folder "In my library" keeps or hides its owned items (Browse's render, `inLibrary`).
+// "Hidden": every grid's (the Library, the Workshop, the local WE folder, a web source), the cards hidden from it (store
+// hidden): ✓ shows only them (Unhide in their menu), off or ✕ leaves them out; offered while the grid has one hidden (or
+// while it is on). Guard: probe-hidden hide:filter
 const YOURS = { id: "yours", name: "Yours" };
+const HIDDEN_ROW = t(HIDDEN_TAG, "Hidden");
 export const WF_GROUPS: Group[] = [
-  { ...YOURS, subs: [{ tags: [t(LIBRARY_TAG, "In my library"), t(FAVORITES_TAG, "Favourites")] }] },
+  { ...YOURS, subs: [{ tags: [t(LIBRARY_TAG, "In my library"), t(FAVORITES_TAG, "Favourites"), HIDDEN_ROW] }] },
   { id: "age", name: "Age", subs: [{ tags: ["Everyone", "Questionable", "Mature"].map((x) => t(x)) }] },
   // Scene stays even with scene support off: Browse doesn't know it (it's a player-side setting) and Workshop lists scenes anyway
   { id: "type", name: "Type", subs: [{ tags: ["Video", "Scene"].map((x) => t(x)) }] },
@@ -85,17 +89,20 @@ export const useActiveTagCount = (scope: FilterScope = "workshop") =>
 const TYPE_PRESET: Group = { ...WF_GROUPS.find((g) => g.id === "type")!, subs: [{ tags: ["Video", "Scene", PRESET_TAG].map((x) => t(x)) }] };
 const withPreset = (gs: Group[]) => gs.map((g) => (g.id === "type" ? TYPE_PRESET : g));
 // Yours with only the rows a scope can match
-const yoursOnly = (tag: string): Group[] => WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: g.subs[0].tags.filter((x) => x.tag === tag) }] } : g));
-const WE_GROUPS = yoursOnly(LIBRARY_TAG);
-const LIB_GROUPS = WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: [t(FAVORITES_TAG, "Favourites"), t(CRASHED_TAG, "Crashed")] }] } : g));
+const yoursOnly = (...tags: string[]): Group[] => WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: g.subs[0].tags.filter((x) => tags.includes(x.tag)) }] } : g));
+const WE_GROUPS = yoursOnly(LIBRARY_TAG, HIDDEN_TAG);
+const LIB_GROUPS = WF_GROUPS.map((g) => (g.id === YOURS.id ? { ...g, subs: [{ tags: [t(FAVORITES_TAG, "Favourites"), t(CRASHED_TAG, "Crashed"), HIDDEN_ROW] }] } : g));
+// a web source: its items carry no tags, so Yours → Hidden is its whole column
+const WEB_GROUPS: Group[] = [{ ...YOURS, subs: [{ tags: [HIDDEN_ROW] }] }];
 const GROUPS = {
   all: WF_GROUPS, allP: withPreset(WF_GROUPS), we: WE_GROUPS, weP: withPreset(WE_GROUPS), lib: LIB_GROUPS, libP: withPreset(LIB_GROUPS),
 };
 // the groups a scope offers (stable arrays): Yours holds both rows on the Workshop, "In my library" alone on the local WE
-// folder, "Favourites" and "Crashed" on the Library; Type has Preset only while presets can play. Guard: probe-filters wf:yours:rows,
-// local:weFolder, lib:column
+// folder, "Favourites" and "Crashed" on the Library, each with "Hidden"; a web source only "Hidden"; Type has Preset only
+// while presets can play. Guard: probe-filters wf:yours:rows, local:weFolder, lib:column, probe-hidden hide:web
 export const groupsFor = (scope: FilterScope, presets: boolean) =>
-  scope === "library" ? (presets ? GROUPS.libP : GROUPS.lib) : scope === "weLocal" ? (presets ? GROUPS.weP : GROUPS.we)
+  scope === "web" ? WEB_GROUPS
+    : scope === "library" ? (presets ? GROUPS.libP : GROUPS.lib) : scope === "weLocal" ? (presets ? GROUPS.weP : GROUPS.we)
     : presets ? GROUPS.allP : GROUPS.all;
 export const usePresetsOn = () => useStore((s) => presetsOn(s.settings));
 
@@ -142,12 +149,14 @@ export function knownTags<T extends Facetable>(items: T[], path: (x: T) => strin
 // the column's groups for a list that knows `known` (null = all, the Workshop): a row shows while some item has its tag or
 // while it is on (so it can be turned off), a pseudo-tag always but "Crashed" (only while the list knows "@crashed": some
 // item is marked); a sub-heading or a group left empty goes
-export function visibleGroups(groups: Group[], known: Set<string> | null, states: Map<string, TagState>): Group[] {
-  if (!known) return groups;
+// "Hidden" only while the grid has a hidden card (`hiddenAny`) or the row is on, on every scope (the Workshop's too)
+export function visibleGroups(groups: Group[], known: Set<string> | null, states: Map<string, TagState>, hiddenAny = false): Group[] {
+  const offered = (t: Tag) => t.tag === HIDDEN_TAG ? hiddenAny || !!states.get(t.tag)
+    : !known || (t.tag.startsWith("@") && t.tag !== CRASHED_TAG) || known.has(t.tag.toLowerCase()) || !!states.get(t.tag);
+  if (!known && (hiddenAny || states.get(HIDDEN_TAG))) return groups; // the Workshop offers every row: the same arrays
   const out: Group[] = [];
   for (const g of groups) {
-    const subs = g.subs.map((s) => ({ ...s, tags: s.tags.filter((t) => (t.tag.startsWith("@") && t.tag !== CRASHED_TAG) || known.has(t.tag.toLowerCase()) || states.get(t.tag)) }))
-      .filter((s) => s.tags.length);
+    const subs = g.subs.map((s) => ({ ...s, tags: s.tags.filter(offered) })).filter((s) => s.tags.length);
     if (subs.length) out.push({ ...g, subs });
   }
   return out;

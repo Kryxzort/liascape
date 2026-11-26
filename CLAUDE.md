@@ -27,6 +27,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - The sidebar's crash-mark Clear and "open in your default app" (a stub xdg-open; what /open/media refuses): `bash scripts/test-item-actions.sh`
 - Folder import and watched folders (the scan, link / copy, live pickup, removals; sources never touched): `bash scripts/test-folder-import.sh`
 - Settings' cache clear (per-category sizes, 400s, nothing outside the ticked folders deleted): `bash scripts/test-cache-clear.sh`
+- The hidden cards' file (field-level, atomic, across processes and restarts; Hide's Undo): `bash scripts/test-hidden.sh`
 - The shell's dev mode only on Liascape's own Vite, never another server on its port: `bash scripts/test-vite-detect.sh`
 - Liascape's own Electron where the system has none (install.sh's decision, the bundled copy, the launcher's order): `bash scripts/test-electron-bundle.sh`
 - "Start with your desktop" (which sessions run autostart entries, the entry written / removed, nothing else touched): `bash scripts/test-autostart.sh`

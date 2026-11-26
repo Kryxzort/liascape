@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { API, withToken, type LibraryItem, type LibraryOp, type SteamTodo } from "./client";
+import { API, withToken, type LibraryItem, type LibraryOp, type SteamTodo, type HiddenState } from "./client";
 
 export type LiascapeEvent =
   | { type: "wallpaper-changed"; payload: { path: string | null } }
@@ -25,6 +25,7 @@ export type LiascapeEvent =
   // skipped its Steam to-do entry, `error` = it failed)
   | { type: "subscribe-progress"; payload: { id: string; value: number; status: string | null; done?: boolean; error?: string | null; skipped?: boolean } }
   | { type: "library-synced"; payload: { count: number } }
+  | { type: "hidden-changed"; payload: HiddenState }
   // the backend changed an item itself: only the fields it sends (a volume keybind → volumeOverride; a scene's
   // loudness estimate / measurement → the loudness* fields)
   | { type: "library-item-changed"; payload: { path: string } & Partial<Pick<LibraryItem, "volumeOverride" | "hasCrashed" | "loudnessLufs" | "loudnessEstimated" | "loudnessSeconds" | "loudnessConfidence" | "loudnessNote" | "fontStandIns"

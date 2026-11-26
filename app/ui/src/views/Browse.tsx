@@ -1,6 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { PRESET_TAG, presetsOn, useStore } from "../store";
+import { PRESET_TAG, filterOf, hiddenOnSource, presetsOn, useStore } from "../store";
+import { api } from "../api/client";
+import { ContextMenu, type MenuAt } from "../components/ContextMenu";
+import { cardMenuItems, menuAt } from "../components/menuItems";
+import { confirmBaseRemoval } from "../components/baseConfirm";
 import { Card } from "../components/Card";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
 import { facetsOf } from "../components/facets";
@@ -24,7 +28,7 @@ import { usePresence } from "../hooks/usePresence";
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { Wallpaper, WorkshopFilter } from "../api/client";
 import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
-import { FAVORITES_TAG, LIBRARY_TAG, buildLocalSet, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
+import { FAVORITES_TAG, HIDDEN_TAG, LIBRARY_TAG, buildLocalSet, byFavorites, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
 
 // WE-local browse sort menu (client-side over the single loaded page).
@@ -85,7 +89,6 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const weFilter = useStore((s) => s.weFilter);
   const local = scope === "weLocal";
   const match = useMemo(() => (local ? localMatcher(weFilter) : null), [local, weFilter]);
-  const known = useMemo(() => (local ? knownTags(wallpapers, (w) => w.pageUrl) : null), [local, wallpapers]);
   // the Workshop's Yours rows (views/localSet.ts): a ✓ shows the set itself — the favourites, the library's Workshop items —
   // with the filter, the search and its own sort applied here; ✕ alone takes the set out of the Workshop's pages
   const ws = scope === "workshop";
@@ -119,7 +122,29 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const setMatch = useMemo(() => (ws ? localMatcher(wsList?.kind === "presets" ? withoutType(browseFilter) : browseFilter) : null), [ws, wsList, browseFilter]);
   // the library's new Workshop items get their details while In my library ✓ shows them (only the ones not held yet)
   useEffect(() => { if (setOn && modes.lib === "inc") loadLibDetails(); }, [setOn, modes.lib, libItems, loadLibDetails]);
-  const sorted = useMemo(() => {
+  // The source's hidden cards (a card's menu → Hide; store hidden, by page URL and source): left out of every list it shows;
+  // the Hidden row's ✓ shows only them, from the cards kept with them (no request: store reload), narrowed by the search, the
+  // tags and the other Yours rows. Guard: probe-hidden hide:browse, hide:filter, hide:web
+  const srcName = useStore((s) => s.sources[s.activeSource]?.name);
+  const hiddenAll = useStore((s) => s.hidden.browse);
+  const hiddenHere = useMemo(() => hiddenOnSource({ library: {}, browse: hiddenAll }, srcName), [hiddenAll, srcName]);
+  const hidOn = useStore((s) => s.hiddenViewOn());
+  const hiddenCards = useMemo(() => {
+    if (!hidOn) return [];
+    const q = query.trim().toLowerCase();
+    let l = Object.values(hiddenHere).flatMap((e) => (e.card ? [e.card] : []));
+    if (q) l = l.filter((w) => w.title.toLowerCase().includes(q) || (w.workshopId ?? "").includes(q));
+    const m = ws ? setMatch : match;
+    if (m) l = l.filter((w) => m(facetsOf(w, w.pageUrl)));
+    if (ws) {
+      l = hideSets(l, modes, favs?.ids ?? NO_IDS, libKeys);
+      if (modes.lib === "inc") l = l.filter((w) => inLibrary(libKeys, w));
+      if (modes.fav === "inc") l = byFavorites(l, "inc", favs?.ids ?? NO_IDS, (w) => w.workshopId);
+    }
+    if (libMode) l = l.filter((w) => inLibrary(libKeys, w) === (libMode === "only"));
+    return sortBrowse(l, ws ? 0 : browseSort);
+  }, [hidOn, hiddenHere, query, ws, setMatch, match, modes, favs, libKeys, libMode, browseSort]);
+  const listed = useMemo(() => {
     if (setOn) return buildLocalSet({ modes, favs: favs?.items ?? [], lib: libCards, libAdded, list: wsList, query, match: setMatch, scenesOn,
       presetsOn: presetsCan, presetTicked: browseFilter.include.includes(PRESET_TAG), sort: localSort });
     let all = sortBrowse(wallpapers, browseSort);
@@ -127,6 +152,11 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     if (libMode) all = all.filter((w) => inLibrary(libKeys, w) === (libMode === "only"));
     return match ? all.filter((w) => match(facetsOf(w, w.pageUrl))) : all;
   }, [setOn, modes, favs, libCards, libAdded, wsList, query, setMatch, scenesOn, presetsCan, browseFilter, localSort, wallpapers, browseSort, ws, libKeys, libMode, match]);
+  // the local WE folder's column offers the tags its items know: the hidden ones' while the Hidden row shows them
+  const known = useMemo(() => (!local ? null : knownTags(hidOn ? Object.values(hiddenHere).flatMap((e) => (e.card ? [e.card] : [])) : wallpapers, (w) => w.pageUrl)),
+    [local, hidOn, hiddenHere, wallpapers]);
+  const sorted = useMemo(() => (hidOn ? hiddenCards : Object.keys(hiddenHere).length ? listed.filter((w) => !hiddenHere[w.pageUrl]) : listed),
+    [hidOn, hiddenCards, hiddenHere, listed]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
@@ -138,7 +168,10 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const localView = local ? JSON.stringify([weFilter.include, weFilter.exclude, weFilter.featureMatch, weFilter.genreMatch])
     : setOn ? JSON.stringify([browseFilter.include, browseFilter.exclude, browseFilter.featureMatch, browseFilter.genreMatch, query, localSort, wsList && [wsList.kind, "id" in wsList ? wsList.id : null]])
     : ws ? JSON.stringify(modes) : "";
-  useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}|${localView}`);
+  // the Hidden view of a source is its own view: its search and filter start it at the top like any list's
+  const scopeFilter = useStore((s) => (scope ? filterOf(s, scope) : null));
+  const hiddenView = hidOn ? JSON.stringify([srcName, query, scopeFilter?.include, scopeFilter?.exclude, scopeFilter?.featureMatch, scopeFilter?.genreMatch]) : "";
+  useKeptScroll(scrollRef, "browse", `${browseFor}|${libMode}|${browseSort}|${localView}|${hiddenView}`);
   // the grid's cards leave and join in motion: a filter, a search, a set's star or library mark, a list replaced (another
   // source: the old cards fade as the new come). The page's first list just shows. After useKeptScroll: its layout effect
   // puts a new view at the top before this one reads where the cards went. Guard: probe-presence browse:filter
@@ -230,7 +263,47 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const cardCancel = useStableFn((x: Wallpaper) => cancelDownload(x.pageUrl));
   const cardClick = useStableFn(onCardClick);
   const cardDownload = useStableFn(dlApply);
-  const cardContext = useStableFn((x: Wallpaper) => focusFromCard(x.pageUrl)); // right-click → the sidebar, the selection kept
+  // a right-click: the sidebar (the selection kept) and the card's menu at the pointer (docs/decisions.md § "Right-click a card
+  // for its sidebar and its menu"); what it acts on and whether those are hidden, taken as it opens (its words stay put while it
+  // fades out after a pick)
+  const [menu, setMenu] = useState<{ at: MenuAt; targets: Wallpaper[]; hidden: boolean; open: boolean } | null>(null);
+  const closeMenu = useStableFn(() => setMenu((m) => (m && m.open ? { ...m, open: false } : m)));
+  const cardContext = useStableFn((x: Wallpaper, e: React.MouseEvent) => {
+    focusFromCard(x.pageUrl);
+    setMenu({ at: menuAt(e), targets: sel.has(x.pageUrl) ? sorted.filter((w) => sel.has(w.pageUrl)) : [x], hidden: !!hiddenHere[x.pageUrl], open: true });
+  });
+  // The card's menu acts on the selection when the card is in it, else on the card. Unsubscribe: its Workshop items (a Workshop
+  // result, a local Wallpaper Engine item) that are subscribed (asked at the pick: a card doesn't know), each by the Browse
+  // sidebar's own Unsubscribe (store unsubscribeWorkshop: the download modes' order, signed out under "Subscribe with Steam
+  // login" the item's Steam page; a library copy goes to the trash, undoable), a scene that presets play asking first. Hide /
+  // Unhide: every card. Guard: probe-hidden menu:browse, hide:browse, hide:multi, unsub:browse
+  const menuTargets = menu?.targets ?? [];
+  const unsubscribeWs = useStore((s) => s.unsubscribeWorkshop);
+  const hideCards = useStore((s) => s.hideCards), unhideCards = useStore((s) => s.unhideCards);
+  const setStatus = useStore((s) => s.setStatus);
+  const setTagState = useStore((s) => s.setTagState);
+  const leaveSide = (list: Wallpaper[]) => { const f = useStore.getState().browseFocus; if (f && list.some((w) => w.pageUrl === f)) focusBrowse(null); };
+  const doUnsub = async (list: Wallpaper[]) => {
+    const items = [...new Map(list.filter((w) => w.workshopId).map((w) => [w.workshopId!, w])).values()];
+    if (!items.length) return;
+    let st: Awaited<ReturnType<typeof api.workshopState>>;
+    try { st = await api.workshopState(items.map((w) => w.workshopId!)); }
+    catch (e) { setStatus(`Couldn't unsubscribe: ${(e as Error).message}`); return; }
+    const go = items.filter((w) => st[w.workshopId!]?.subscribed && !st[w.workshopId!]?.pending);
+    if (!go.length) { setStatus(items.length === 1 ? `Not subscribed to ${items[0].title}` : "None of them is subscribed"); return; }
+    const lib = useStore.getState().libraryItems, ids = new Set(go.map((w) => w.workshopId));
+    if (!await confirmBaseRemoval(lib.filter((i) => i.workshopId && ids.has(i.workshopId) && !i.isPreset), lib, "unsubscribe")) return;
+    setSel(new Set());
+    for (const w of go) await unsubscribeWs(w.workshopId!, w.title);
+    if (go.length > 1) setStatus(`Unsubscribing from ${go.length} wallpapers`);
+  };
+  const menuItems = cardMenuItems({
+    n: menuTargets.length, unsubN: menuTargets.filter((w) => w.workshopId).length, hidden: !!menu?.hidden,
+    onUnsub: () => doUnsub(menuTargets),
+    onHide: () => { leaveSide(menuTargets); setSel(new Set());
+      hideCards("browse", menuTargets.map((w) => ({ key: w.pageUrl, title: w.title, card: w }))); },
+    onUnhide: () => { leaveSide(menuTargets); setSel(new Set()); unhideCards("browse", menuTargets.map((w) => w.pageUrl), menuTargets.map((w) => w.title)); },
+  });
   // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
   const onMarquee = useMarquee(scrollRef, { prefix: "br-", sel, setSel, anchor });
   const cardMiddle = useStableFn((x: Wallpaper) => x.pageUrl.startsWith("http") // middle-click → open source page/location
@@ -241,7 +314,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   // hidden): say so, with a way out that clears the search and the other tags but never the Yours rows, the set itself. Not
   // while the favourites are still coming or couldn't be read: the load line speaks then. A presets list ignores the Type
   // tags (withoutType), so they neither count as a filter to clear there nor get cleared. Guard: probe-steam yours:empty
-  const setEmpty = setOn && !sorted.length && !(modes.fav === "inc" && (!favs || !!favs.loading || !!favs.error));
+  const setEmpty = !hidOn && setOn && !sorted.length && !(modes.fav === "inc" && (!favs || !!favs.loading || !!favs.error));
   const stays = (t: string) => isYours(t) || (wsList?.kind === "presets" && TYPE_TAGS.has(t));
   const others = browseFilter.include.some((t) => !stays(t)) || browseFilter.exclude.some((t) => !stays(t));
   const setClear = query && others ? "Clear search and filters" : query ? "Clear search" : others ? "Clear filters" : null;
@@ -261,6 +334,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
       {ws && <WsSetLoad />}
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
       {setEmpty && <NoMatch kind="set" text="Nothing here matches" clear={setClear} onClear={clearOthers} />}
+      {/* the Hidden row's ✓ with nothing (left) to show: say so, with the way back to the list. Guard: probe-hidden hide:filter */}
+      {hidOn && !sorted.length && scope && <NoMatch kind="hidden" text="Nothing hidden here" clear="Show the list" onClear={() => setTagState(HIDDEN_TAG, null, scope)} />}
       <WsListNote />
       <div className="grid" ref={gridRef}>
           {gridItems.map((w) => (
@@ -275,7 +350,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
               load trigger: one coming toward view fires loadMore, which inserts the next page before the
               block and pushes a fresh batch down. */}
           {/* a local set shows whole: no placeholders even over a hasMore the set's own reload hasn't cleared yet */}
-          {hasMore && !setOn && Array.from({ length: 72 }).map((_, i) => (
+          {hasMore && !setOn && !hidOn && Array.from({ length: 72 }).map((_, i) => (
             <div className="card lib skel-card" key={`ph${i}`}>
               <div className="thumb-wrap skel" />
             </div>
@@ -292,6 +367,8 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     </div>
     {/* keyed by scope: another source's column is another list's — its groups fade in fresh (index.css .wf-body) */}
     {scope && col.panel.value && <WorkshopFilterColumn key={scope} mode={col.panel.value} scope={scope} known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
+    <ContextMenu at={menu?.open ? menu.at : null} items={menuItems} onClose={closeMenu} light
+      label={menuTargets.length > 1 ? `${menuTargets.length} wallpapers` : (menuTargets[0]?.title ?? "Wallpaper")} />
     {sideW && (
       <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
         <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}

@@ -1354,7 +1354,8 @@ app.whenReady().then(async () => {
     // request, the plain click untouched); picking it → ONE POST /workshop/unsubscribe-keep, never /workshop/unsubscribe; Escape
     // and a click outside close it without one; an item not in the library has no menu. The menu grows in (per frame) and
     // shrinks out; no-glow and bg-live keep its fill
-    const MENU = "[data-ctx-menu]";
+    // a control's own menu: the sidebar was opened by a right-click on its card, whose own menu (light) may still be fading out
+    const MENU = "[data-ctx-menu]:not([data-ctx-light])";
     const browseWs = async (status = SIGNED_IN) => {
       await load(status);
       const srcs = (await http("GET", "/sources")).json;

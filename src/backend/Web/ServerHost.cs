@@ -675,7 +675,28 @@ public static class ServerHost
 
         // ---- trash / undo (soft delete) ---------------------------------------------------
         app.MapPost("/library/trash", (TrashReq r) => { FolderImportOps.Forget(r.Items); return Results.Json(new { batch = AppOps.Trash(r.Items) }); });
-        app.MapPost("/library/undo", () => { var u = AppOps.Undo(); return Results.Json(new { ok = u.Ok, count = u.Count, title = u.Title, message = u.Message }); });
+        app.MapPost("/library/undo", () => { var u = AppOps.Undo(); return Results.Json(new { ok = u.Ok, count = u.Count, title = u.Title, message = u.Message, kind = u.Kind }); });
+        // ---- hidden cards (a card's right-click → Hide; the Hidden filter row's Unhide): Helpers/HiddenItems.cs ----------
+        // GET → {library, browse}; POST {scope, hide: [{key, title, source?, card?}], unhide: [key]} → the new state, also
+        // broadcast as `hidden-changed`. A Hide goes on the Undo stack like a removal; nothing touches a file.
+        app.MapGet("/hidden", () => Results.Json(HiddenItems.Load()));
+        app.MapPost("/hidden", (HiddenReq r) =>
+        {
+            if (!HiddenItems.ValidScope(r.Scope)) return Results.BadRequest(new { error = "scope must be library or browse" });
+            var hide = r.Hide ?? [];
+            var why = HiddenItems.Refusal(hide.Select(h => h.Key).Concat(r.Unhide ?? []), hide.Select(h => h.Card));
+            if (why != null) return Results.BadRequest(new { error = why });
+            var s = (HiddenItems.State?)null;
+            if (hide.Count > 0)
+            {
+                var entries = new Dictionary<string, HiddenItems.Entry>();
+                foreach (var h in hide)
+                    entries.TryAdd(h.Key!, new HiddenItems.Entry { Title = h.Title, Source = h.Source, Card = h.Card, HiddenAt = DateTime.UtcNow });
+                s = AppOps.Hide(r.Scope!, entries);
+            }
+            if (r.Unhide is { Count: > 0 } un) s = AppOps.Unhide(r.Scope!, un);
+            return Results.Json(s ?? HiddenItems.Load());
+        });
         app.MapGet("/library/undo-depth", () => Results.Json(new { depth = AppOps.UndoDepth() }));
         app.MapGet("/library/duration", (string path) => ApiSecurity.MediaAllowed(path)
             ? Results.Json(new { seconds = AppOps.GetDurationSeconds(path) }) : Results.Json(new { error = "not a library path" }, statusCode: 403));
@@ -1123,6 +1144,8 @@ public static class ServerHost
     public record WorkshopIdReq(string? WorkshopId, string? Title = null);
     public record OpenPageReq(string? WorkshopId, string? Watch = null);
     public record IdsReq(List<string>? Ids);
+    public record HideReq(string? Key, string? Title = null, string? Source = null, System.Text.Json.JsonElement? Card = null);
+    public record HiddenReq(string? Scope, List<HideReq>? Hide = null, List<string>? Unhide = null);
     public record FavoriteReq(string? WorkshopId, bool Favorite);
     public record CommentReq(string? WorkshopId, string? Owner, string? Text, int? Count);
     // not a record: a record's ToString prints every property — the password must never be printable
