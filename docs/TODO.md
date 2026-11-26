@@ -86,6 +86,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
          and GPU time per frame, ours beside WE's; a gap is a row to fix like a wrong picture (read how WE loads,
          caches and shares textures and shaders where it beats us). Folds in item 48's remaining load work.
+144. [ ] (owner) First-run help: no step-by-step tour.
+       - A welcome in place of the empty library, for the big choices: use the Wallpaper Engine Workshop (find
+         Steam, pick a download mode), import a folder of videos, browse wallpapers. Gone once there are wallpapers;
+         reachable again from Settings.
+       - Small one-time tips in context, the first time a user meets something non-obvious (a card's right-click
+         menu, playlists, per-wallpaper settings, the Steam download modes …): one dismissible line each, shown once,
+         remembered in settings, "Show tips again" in Settings.
+       - Empty states that teach: Playlists, Favourites, Hidden and the rest say what they are for and how to fill
+         them.
+       Reuse the app's notice / hint look (`.claude/rules/ui/design.md` checklist); probe cells for the welcome, each
+       tip's once-only rule and the empty states.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
