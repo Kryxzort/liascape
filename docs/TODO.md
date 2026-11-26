@@ -190,6 +190,15 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          (the test lock in `nix develop`, never the main checkout's node_modules, CodeRabbit, the one attribution line,
          delete the TODO item by its text, queue what's left, no push), so a brief states only the task.
 
+25. [ ] A scene worker's crash on one output disturbs the other output: the real-session crash run
+       (`src/player/tests/onmachine/scenes.sh crash`, 2026-11-27, DP-1 video + DP-2 scene) failed 43/52. DP-1's tone
+       dropped while DP-2's worker was killed or hung (synthetic kill 50 drops, hang 19, a real scene's kill 14; bound
+       0), DP-1's pacing slipped in 5 windows (p95 up to 27.9 ms vs a quiet 7.8 ms), and DP-2 didn't hold its frame
+       exactly after a kill (grim diff 0.0009). Hermetic agent runs overlapped it, so rerun on a quiet machine first; what
+       still fails is a bug in the isolation (`.claude/rules/player/core.md`, the audio bus and the worker supervisor):
+       find where a dying worker blocks the shared audio graph or the compositor loop, fix it, and pin it with a
+       hermetic test (a killed / hung worker under a private PipeWire, the other source's tone without a drop).
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
