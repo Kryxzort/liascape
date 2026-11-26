@@ -79,9 +79,12 @@ public static class LiascapePlayerProgram
     public static List<Item> BuildItems(IReadOnlyList<string> paths, AppSettings s, Dictionary<string, object?>? defaults = null)
     {
         defaults ??= LiascapePlayerMedia.DesiredGlobal(s);
-        bool scenesOk = PlayerEngine.ScenesPlayable(s);
+        // asked only for a scene item (a video's skip never depends on it): with no player answering it runs
+        // `liascape-player scene-check`, ~55 ms in front of a videos-only playlist's load
+        var scenesOk = new Lazy<bool>(() => PlayerEngine.ScenesPlayable(s));
         // DesiredItem kicks a loudness measure for an unmeasured video (normalization on): the program measures nothing
-        return BuildItems(paths, defaults, path => LiascapePlayerMedia.DesiredItem(path, s), path => PlayerHelper.SkippedForRotation(path, scenesOk));
+        return BuildItems(paths, defaults, path => LiascapePlayerMedia.DesiredItem(path, s),
+            path => PlayerHelper.IsScenePath(path) && PlayerHelper.SkippedForRotation(path, scenesOk.Value));
     }
 
     // The rule alone (self-test): each item = what a new source of it gets, minus what `defaults` already says.

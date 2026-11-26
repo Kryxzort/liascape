@@ -75,9 +75,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
-121. [ ] (owner) Starting a playlist, and applying a wallpaper, take too long before the wallpaper shows. Measure
-       click → first frame per step (UI post, backend `PlayFrom` / apply, player command, source `Ready`, transition),
-       video and scene, on a private player. Then cut the largest step.
 124. [ ] (owner) The "go to the playing wallpaper" crosshair also selects that card and opens its sidebar, as a click on
        the card would (without applying it).
 125. [ ] (owner) Import from a link: Import accepts a pasted web link (a Workshop item page, a MoeWalls or DesktopHut
@@ -218,6 +215,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       output on the owner's player at 04:49). Owner's call (switch-over.md § 5): wait for `Ready` or exempt start-up.
 
 ## UI
+- [ ] Matrix cell `single × appear:gifVideo` fails alone on lp-player `b73086f9` too: Settings' preview card "never
+      showed a video of its gif in 6 s" (its `on` half; the `off` half then proves nothing). Cause not looked into yet.
 - [ ] Text that changes in place pops, against design.md's "content changes slide or cross-fade … numbers and bars
       ease" (only the sidebar title, `components/SideTitle.tsx`, does it). Add two shared primitives in `components/`:
       a `SwapText` (keyed on the value: the old line leaves and the new one arrives with a short slide or cross-fade,

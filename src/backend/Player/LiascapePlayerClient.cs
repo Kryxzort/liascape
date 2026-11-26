@@ -966,7 +966,7 @@ public sealed class LiascapePlayerClient
                 {
                     if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
                     if (p is { HasExited: true } && p.ExitCode != 1) break; // 1 = "already running" → keep connecting
-                    Thread.Sleep(50);
+                    Thread.Sleep(10); // the first switch waits on this; a missing socket or a refused connect costs microseconds
                 }
                 if (Reachable()) { LastError = null; _lastSpawnFail = 0; return true; }
             }

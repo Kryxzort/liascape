@@ -32,6 +32,13 @@ use crate::units::{GainSlot, Gains, mpv_volume_gain};
 /// Largest texture edge a source renders at; bigger videos are scaled down (aspect kept).
 pub const MAX_TEXTURE_EDGE: u32 = 4096;
 
+/// What a load's first frame is rendered at before its size is known: mpv reports `dwidth`/`dheight`
+/// only after that frame was shown, and its VO waits at most 200 ms for the frame to be rendered (then
+/// drops it and goes on) — waiting for the size held every new source ~200 ms short of Ready. The
+/// stand-in is never shown: the frame is rendered again at its own size, and only that one readies.
+/// Guard: `tests/sources.rs` `first_frame_is_rendered_before_mpvs_flip_timeout`.
+pub(crate) const PROVISIONAL_SIZE: (u32, u32) = (16, 16);
+
 /// `Position` events are rate-limited to this interval (~10 Hz).
 const POSITION_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -521,6 +528,9 @@ pub struct MpvSource {
     back: Option<Target>,
     /// `back` holds a frame of the current load, rendered after its FILE_LOADED.
     back_valid: bool,
+    /// `back` holds such a frame at [`PROVISIONAL_SIZE`] (rendered before the size was known): it
+    /// is rendered again at its own size, never readied as it is.
+    back_stand_in: bool,
 
     // Render worker (`docs/player/modules/sources.md` § Render worker): `Some` = the render context lives
     // on the worker; `render`/`front`/`back` above stay `None` and these hold the textures
@@ -982,6 +992,7 @@ impl MpvSource {
             front: None,
             back: None,
             back_valid: false,
+            back_stand_in: false,
             worker,
             hwdec_interop,
             w_front: None,
@@ -1390,6 +1401,7 @@ impl MpvSource {
         self.refetched_at = None;
         self.ready = false;
         self.back_valid = false;
+        self.back_stand_in = false;
         self.ended_sent = false;
         self.time_pos = None;
         self.time_pos_before_restart = None;
@@ -2005,13 +2017,17 @@ impl MpvSource {
                     changed = true;
                 } else {
                     // Not ready yet (or a superseded load's leftovers): stage it. Of the
-                    // current load iff rendered after its FILE_LOADED (the worker's tag).
+                    // current load iff rendered after its FILE_LOADED (the worker's tag), and
+                    // at its size — not the stand-in rendered before it was known
+                    // (PROVISIONAL_SIZE; the worker renders it again once it is).
+                    let fits = size == Some((f.tex.w, f.tex.h));
                     if let Some(old) = self.w_back.replace(f.tex) {
                         give_back.push((old, None));
                     }
                     self.back_valid = self.is_current()
                         && self.file_loaded
-                        && self.loaded_fl == Some(f.file_loaded);
+                        && self.loaded_fl == Some(f.file_loaded)
+                        && fits;
                 }
             }
             None => {}
@@ -2300,9 +2316,28 @@ impl Source for MpvSource {
             return false;
         };
         let mut changed = false;
-        // Level-triggered: if we skip (size unknown yet), the frame stays pending.
-        if render.frame_pending()
-            && let Some(size) = self.target_size()
+        // A load's first frame, its size not known yet (PROVISIONAL_SIZE): rendered now at the
+        // stand-in so mpv's VO doesn't wait out its flip timeout, and again (the same frame:
+        // mpv re-renders its current one) once the size is known — only that one readies.
+        let pending = render.frame_pending();
+        let size = self.target_size();
+        if pending && size.is_none() && !self.ready {
+            match render_into(gfx, render, &mut self.back, PROVISIONAL_SIZE) {
+                Ok(()) => self.back_stand_in = self.is_current() && self.file_loaded,
+                Err(e) => self.last_error_log = Some(e.to_string()),
+            }
+        } else if !pending
+            && !self.ready
+            && std::mem::take(&mut self.back_stand_in)
+            && let Some(size) = size
+        {
+            match render_into(gfx, render, &mut self.back, size) {
+                Ok(()) => self.back_valid = self.is_current() && self.file_loaded,
+                Err(e) => self.last_error_log = Some(e.to_string()),
+            }
+        }
+        if pending
+            && let Some(size) = size
         {
             // Stepped: a redraw re-presents the frame shown before (the previous step's), a new
             // frame after the seek's reply is the target (`StepSeek::target_frame`).
@@ -2323,6 +2358,7 @@ impl Source for MpvSource {
                 // Not ready yet (or a superseded load's leftovers): stage it.
                 match render_into(gfx, render, &mut self.back, size) {
                     Ok(()) => {
+                        self.back_stand_in = false;
                         if self.is_current() && self.file_loaded {
                             self.back_valid = true;
                         }

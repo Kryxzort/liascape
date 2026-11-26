@@ -91,7 +91,10 @@ const SLOW_JOB_MS: f64 = 100.0;
 ///   (`tests/api.rs::render_worker_unavailable_falls_back_to_the_loop`);
 /// - `panic` — panic at the first render (a bug or an allocation `expect` on `lia-render`): the
 ///   player must fail like a lost compositor, not freeze (`tests/api.rs::
-///   render_worker_death_fails_the_player`).
+///   render_worker_death_fails_the_player`);
+/// - `slow-idle` — a 10 s idle backstop ([`SLOW_IDLE`]) in place of [`IDLE_POLL`], so a render that
+///   only the backstop would start can't pass for a prompt one (`tests/api.rs::
+///   a_switchs_b_readies_as_soon_as_mpv_has_its_first_frame`).
 ///
 /// The torn-frame guard (`tests/api.rs::render_worker_never_composes_a_torn_frame`) is GREEN
 /// as is and with `slow-flush`, RED with `publish-early`.
@@ -102,10 +105,14 @@ struct Faults {
     publish_early: bool,
     no_context: bool,
     panic: bool,
+    slow_idle: bool,
 }
 
 /// [`Faults`]' `slow-flush` / `publish-early` delay.
 const SLOW_FLUSH: Duration = Duration::from_millis(30);
+
+/// [`Faults`]' `slow-idle` backstop, in place of [`IDLE_POLL`].
+const SLOW_IDLE: Duration = Duration::from_secs(10);
 
 fn faults() -> Faults {
     static F: std::sync::OnceLock<Faults> = std::sync::OnceLock::new();
@@ -118,8 +125,9 @@ fn faults() -> Faults {
             publish_early: has("publish-early"),
             no_context: has("no-context"),
             panic: has("panic"),
+            slow_idle: has("slow-idle"),
         };
-        if f.slow_flush || f.no_fence || f.publish_early || f.no_context || f.panic {
+        if f.slow_flush || f.no_fence || f.publish_early || f.no_context || f.panic || f.slow_idle {
             log::event(
                 "render",
                 Level::Warn,
@@ -127,7 +135,7 @@ fn faults() -> Faults {
                 None,
                 json!({ "slow_flush": f.slow_flush, "no_fence": f.no_fence,
                         "publish_early": f.publish_early, "no_context": f.no_context,
-                        "panic": f.panic }),
+                        "panic": f.panic, "slow_idle": f.slow_idle }),
             );
         }
         f
@@ -825,6 +833,12 @@ impl Inner {
         // Rendered, flushed, fence not signalled yet: (slot, frame, render ms, rendered at).
         let mut inflight: Vec<(u64, Frame, f64, Instant)> = Vec::new();
         let mut next_id = 1u64;
+        // A slot skipped by the last render pass because its previous frame was still on the GPU:
+        // whatever it had due (a frame mpv queued meanwhile, the redraw at a size the loop sent)
+        // woke the eventfd already, so nothing wakes it again — pass again once that frame is out.
+        // Guard: `tests/api.rs` `a_switchs_b_readies_as_soon_as_mpv_has_its_first_frame`.
+        let mut deferred = false;
+        let idle_poll = if faults.slow_idle { SLOW_IDLE } else { IDLE_POLL };
         loop {
             let mut pfd = libc::pollfd {
                 fd: self.fd,
@@ -835,14 +849,14 @@ impl Inner {
             // `glClientWaitSync`: on NVIDIA 595 that wait holds the driver's process-wide lock,
             // so every other thread's GL — the compositor's included — queues behind the GPU
             // work); idle, the eventfd alone wakes it (100 ms backstop).
-            let wait = if inflight.is_empty() {
-                IDLE_POLL
+            let wait = if inflight.is_empty() && !deferred {
+                idle_poll
             } else {
                 FENCE_POLL
             };
             let ts = libc::timespec {
-                tv_sec: 0,
-                tv_nsec: wait.as_nanos() as libc::c_long,
+                tv_sec: wait.as_secs() as libc::time_t,
+                tv_nsec: wait.subsec_nanos() as libc::c_long,
             };
             unsafe { libc::ppoll(&mut pfd, 1, &ts, std::ptr::null()) };
             let mut buf = 0u64;
@@ -950,8 +964,10 @@ impl Inner {
             // mpv queues meanwhile stays pending — level-triggered), one flush for them all.
             let mut rendered = 0u64;
             let mut render_max = 0f64;
+            deferred = false;
             for (id, slot) in slots.iter_mut() {
                 if inflight.iter().any(|(sid, ..)| sid == id) {
+                    deferred = true;
                     continue;
                 }
                 if let Some((mut f, ms)) = slot.render(&gl) {
@@ -1105,10 +1121,17 @@ impl Slot {
             self.free.push((t.id.0.get(), fence));
         }
         // Called every pass, like the loop renderer did every update (it also runs mpv's
-        // render-thread dispatch queue); level-triggered — a frame we can't render yet
-        // (no size) stays pending.
+        // render-thread dispatch queue); level-triggered — a frame not rendered in this pass
+        // stays pending.
         let pending = self.render.as_ref()?.frame_pending();
-        let size = size?;
+        // A new load's size reaches the loop only after its first frame was shown, and mpv's VO
+        // waits ≤ 200 ms for that frame to be rendered: render it now at a stand-in size (the loop
+        // never shows it), and again at its own size once that is known (the redraw below).
+        let size = match size {
+            Some(s) => s,
+            None if pending => super::mpv::PROVISIONAL_SIZE,
+            None => return None,
+        };
         let redraw = !pending && self.last.is_some_and(|(s, _)| s != size);
         if !pending && !redraw {
             return None;

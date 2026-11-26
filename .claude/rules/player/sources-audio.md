@@ -94,6 +94,10 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
   `loop_off_clip_restored_on_its_last_frame_stays_there`.
 - `Ready` = the current load's PLAYBACK_RESTART and a frame rendered after its FILE_LOADED, in either order —
   requiring the frame after the restart can wait forever on a paused clip or image.
+- Render a load's first frame before its size is known (`PROVISIONAL_SIZE`, never shown) and again at its size;
+  ready only a frame at its own size. mpv sends `dwidth`/`dheight` only after that frame was shown, so waiting
+  for the size waits out the VO's 200 ms flip timeout on every load. Guard
+  `tests/sources.rs` `first_frame_is_rendered_before_mpvs_flip_timeout`.
 - `Ended` comes from `eof-reached` (keep-open sends no END_FILE), once per play-through, never with `loop`, never
   for an image, and only after `Ready` (`ended_held`). Guard `ended_holds_last_frame`.
 - A paused source, image or ended clip whose only frame vo_libmpv dropped is re-fetched with a seek after
@@ -156,6 +160,9 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
   waits before publishing; the loop adopts a frame only when its fence has signalled, and returns sampled textures
   with a release fence. Guard `render_worker_never_composes_a_torn_frame`.
 - Count FILE_LOADED with a weak client (every other event masked) and tag frames with it; Ready uses that tag.
+- A pass that skips a slot (its frame still on the GPU) passes again once the frame is out, never waiting for the
+  idle backstop: the wake for what it had due was spent. Guard `src/player/tests/api.rs`
+  `a_switchs_b_readies_as_soon_as_mpv_has_its_first_frame`.
 - `Drop` hands the core and textures to the worker (`Free`); no GL on the loop. Quit order: `finish_teardown`, then
   `render_worker::shutdown`, then `reaper::shutdown`.
 

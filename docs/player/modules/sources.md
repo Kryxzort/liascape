@@ -94,6 +94,11 @@ next frame, so if the loop was busy past 200 ms it never became Ready and the sw
 PLAYBACK_RESTART, the same frame, no FILE_LOADED. Never for a playing source (it would restart a merely slow
 decode), never in stepped mode. `source.frame_refetched` logs it.
 
+**The first frame before its size.** mpv sends a load's `dwidth`/`dheight` only after its first frame was shown:
+rendered, or given up on after the VO's 200 ms wait (a switch's B was Ready ~200 ms late, one VO drop each). The
+first frame is rendered at once into a 16×16 stand-in (`PROVISIONAL_SIZE`), again once the size arrives (with the
+restart); only a frame at the load's own size readies, so the stand-in is never shown.
+
 **`AudioFlowing`.** Un-pausing arms it; the next `audio-pts` change confirms (observed only while armed: it
 changes at the audio-buffer rate and woke the loop all day; the first notification after `observe` is the current
 value and is skipped). `audio-pts` includes the audio driver delay and doesn't move while paused, unlike
@@ -161,6 +166,9 @@ fences; mpv still gets the fence stub.
   into textures it owns, fences, waits and then publishes; the loop adopts a frame only when its fence has
   signalled (else keeps the previous one) and re-binds the texture (share-group visibility). A texture the loop
   sampled goes back with a release fence the worker waits on.
+- **Passes.** A slot skipped because its last frame is still on the GPU gets another pass once that frame is out:
+  its wake was spent, so it waited for mpv's next frame or the 100 ms idle backstop — every new source's size
+  redraw did (the size arrives while the stand-in is in flight).
 - **Ready with a worker.** Frames are tagged with the FILE_LOADED count the worker saw through a weak client (every
   other event masked, so its `wait_event` never takes the core lock). A frame counts for the current load iff its
   tag equals the count at that load's FILE_LOADED — mpv's own event order, not the loop's pump time, so an image

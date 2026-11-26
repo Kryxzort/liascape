@@ -2173,6 +2173,11 @@ fn destroy_never_stalls_the_loop() {
         .as_f64()
         .unwrap();
     assert!(tp > 0.1, "not playing: time_pos {tp}");
+    // `tick_hz_last_s` counts the last second's ticks: a player up for less than ~1.3 s at the probe below
+    // (a source Ready fast) can't have 50 of them, however well it ticks
+    wait_for(Duration::from_secs(5), "the player's first second", || {
+        (c.ok("probe", json!({"name": "loop"}))["uptime_ms"].as_f64().unwrap() >= 1000.0).then_some(())
+    });
     c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
     c.ok("destroy", json!({"id": id}));
     std::thread::sleep(Duration::from_millis(300));
@@ -5795,6 +5800,65 @@ fn render_worker_unavailable_falls_back_to_the_loop() {
     let png = srv.path("out.png");
     c.ok("capture", json!({"target": "out:VIRTUAL-1", "path": png}));
     near(png_pixel(&png, 320, 180), [255, 0, 0], 3, "red on screen");
+}
+
+/// A switch's B is Ready as soon as mpv has its first frame: that frame is rendered at a stand-in size
+/// before mpv tells the size (`docs/player/modules/sources.md` § The first frame before its size), and
+/// the size comes with the restart that render unblocks — while the render is still on the GPU, so the
+/// render worker's pass that the size woke skips the slot, and only a later wake (mpv's next frame,
+/// the 100 ms idle backstop) rendered it at its size. A skipped slot now makes the worker pass again
+/// once its frame is out. Measured as the player's own `transition.scheduled` → B's `source.ready`
+/// (median of 4 switches, the `slow-idle` fault keeping the backstop out of it): ~70 ms here, ~290 ms
+/// with the redraw left to a later wake, 250+ ms with no stand-in render (mpv's 200 ms flip timeout).
+#[test]
+fn a_switchs_b_readies_as_soon_as_mpv_has_its_first_frame() {
+    let clips = [
+        s(&ensure_clip("solid_red_3s", RED_3S)).to_string(),
+        s(&ensure_clip("solid_blue_3s", BLUE_3S)).to_string(),
+    ];
+    let Some(srv) = real_serve_env(
+        &["--render-worker", "on"],
+        &[("LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new("slow-idle"))],
+    ) else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["transition.", "source.ready"]}));
+    let mut seen: Vec<Value> = Vec::new();
+    let mut waits = Vec::new();
+    for round in 0..4 {
+        let r = c.ok(
+            "transition",
+            json!({"outputs": "out:*", "align": "now", "effect_id": null,
+                   "to": {"path": clips[round % 2], "kind": "video", "loop": true, "hwdec": "no"}}),
+        );
+        let corr = r["corr"].as_str().expect("transition → {corr}").to_string();
+        wait_for(Duration::from_secs(5), "the switch's handoff", || {
+            seen.extend(c.drain_events());
+            seen.iter()
+                .any(|e| e["event"] == "transition.handoff" && e["corr"] == json!(corr))
+                .then_some(())
+        });
+        let sch = seen
+            .iter()
+            .find(|e| e["event"] == "transition.scheduled" && e["corr"] == json!(corr))
+            .unwrap_or_else(|| panic!("no transition.scheduled for {corr}: {seen:?}"));
+        let b = sch["to"].clone();
+        let ready = seen
+            .iter()
+            .find(|e| e["event"] == "source.ready" && e["id"] == b)
+            .unwrap_or_else(|| panic!("no source.ready for B {b}: {seen:?}"));
+        let ms = |e: &Value| e["t_mono_ms"].as_f64().unwrap_or_else(|| panic!("no t_mono_ms: {e}"));
+        waits.push(ms(ready) - ms(sch));
+    }
+    eprintln!("scheduled → B Ready, ms: {waits:?}");
+    let mut sorted = waits.clone();
+    sorted.sort_by(f64::total_cmp);
+    let median = (sorted[1] + sorted[2]) / 2.0;
+    assert!(
+        median < 150.0,
+        "B became Ready {median:.0} ms (median) after its switch was scheduled: {waits:?}"
+    );
 }
 
 /// The render worker dying (a panic on `lia-render` — test fault `panic`, at its first

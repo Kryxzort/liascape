@@ -641,6 +641,31 @@ fn dropped_first_frame_of_a_paused_source_or_image_still_readies() {
     }
 }
 
+/// mpv tells a new load's frame size (`dwidth`/`dheight`) only after its first frame was shown, and
+/// vo_libmpv waits at most 200 ms for that frame to be rendered: a source that renders only once it
+/// knows the size waited out the whole timeout on every open (the frame then counts as a VO drop), and
+/// every switch's B was Ready ~200 ms late. Rendered before the size is known (into a target that is
+/// never shown), the VO never gives up: no drop, and Ready comes long before the timeout would end.
+/// Paused (a transition's B) and playing, in both renderers.
+#[test]
+fn first_frame_is_rendered_before_mpvs_flip_timeout() {
+    let Some((_serial, gfx)) = gpu() else { return };
+    let red = ensure_clip("solid_red_2s", RED_2S);
+    for o in [json!({"paused": true}), json!({})] {
+        let mut src = open_src(&gfx, path_str(&red), &opts(o.clone())).expect("MpvSource::open");
+        let wake = Some(src.wake_fd());
+        let (evs, ok) = pump(&gfx, &mut src, wake, Duration::from_secs(3), |e, _| ready(e));
+        assert!(ok, "{o}: no Ready within 3 s; events: {evs:?}");
+        assert_eq!(src.size(), (1920, 1080), "{o}: Ready shows the frame at its own size");
+        assert_rgb(centre(&gfx, &src), [255, 0, 0], 3, "the first frame");
+        assert_eq!(
+            src.mpv_get_string("frame-drop-count").as_deref(),
+            Some("0"),
+            "{o}: mpv's VO gave up waiting for the first frame to be rendered (flip timeout)"
+        );
+    }
+}
+
 /// A short clip that plays to its end before anything rendered it (the loop or the render worker
 /// stalled): it still becomes Ready with its last frame, and `Ended` comes after `Ready` in either
 /// renderer (reporting Ended first breaks `ended_holds_last_frame` under load), and an ended clip, like a paused one, has no next frame to render.
