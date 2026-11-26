@@ -178,7 +178,9 @@ Adapter log `~/.cache/liascape/liascape-player-adapter.log` (identical lines ≤
 
 - **Integration test** (`scripts/test-liascape-player-adapter.sh [--no-build]`, `RESULT pass=N fail=M`): the real
   backend over HTTP against a private headless player (`--clock real --ao null`), hermetic (temp HOME and XDG dirs,
-  own socket and port, display env unset; it aborts unless `/player-engine` says the player is `available`). Every
+  own socket and port, display env unset, no real server: `LIASCAPE_TEST_NO_NETWORK=1` and an empty
+  `LIASCAPE_STEAM_CM_FIXTURE`, "FAIL real network" on a refused call; it aborts unless `/player-engine` says the
+  player is `available`). Every
   player it starts runs the backend's own binary path, so the upgrade check never replaces it under the script.
   Converging state is polled to a deadline, never read after a fixed sleep. `LIASCAPE_KEEP_TMP=1` keeps its temp
   dir; `LIASCAPE_IT_AUTOMUTE_ENGINE=audiomonitor` runs the auto-mute section on the old engine.

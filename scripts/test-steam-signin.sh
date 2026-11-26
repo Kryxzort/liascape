@@ -75,6 +75,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 . "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
+. "$ROOT/scripts/test-no-network.sh"   # lp_real_network: a call to a real server fails the run
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -165,7 +166,7 @@ for _ in $(seq 1 50); do [ -s "$T/fake.port" ] && break; sleep 0.1; done
 [ -s "$T/fake.port" ] || { bad "the fake community server didn't start"; cat "$T/fake.log"; exit 1; }
 FAKE=http://127.0.0.1:$(cat "$T/fake.port")
 # LIASCAPE_WORKSHOP_WAIT_MS: a preset's base that never arrives is given up after 10 s, not 10 min
-(cd /tmp && LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_WORKSHOP_WAIT_MS=10000 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_COMMUNITY=$FAKE exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
+(cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_WORKSHOP_WAIT_MS=10000 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_COMMUNITY=$FAKE exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { wait $BP; echo "backend rc=$?"; BP=""; bad "backend didn't start"; tail -15 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
@@ -584,7 +585,7 @@ printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallp
   "$T/ws3/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
 # no linger: with no page saying the Workshop shows, every Steam-client child lets go right after its operation, so the
 # checks below see one connection per operation (how long it is held otherwise: scripts/test-steam-app-hold.sh)
-(cd /tmp && LIASCAPE_STEAM_APP_LINGER_MS=0 LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
+(cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_LINGER_MS=0 LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1) & BP3=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP3 2>/dev/null || break; sleep 0.1; done
 U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)
@@ -624,5 +625,10 @@ if command -v secret-tool >/dev/null && command -v gnome-keyring-daemon >/dev/nu
 else
   echo "      SKIP — needs secret-tool (libsecret), gnome-keyring-daemon, dbus-run-session, dbus-send (the stub-secret-tool part of § 1 still ran)"
 fi
+# the backends only (LIASCAPE_TEST_NO_NETWORK=1 on their serve lines): steam-selftest checks its own refusals ("no network")
+echo "== no real network"
+rn=$(lp_real_network "$T/backend.log" "$T/backend3.log")
+[ -z "$rn" ] && ok "no call to a real server (none refused, no Steam session)" \
+  || { bad "real network: $(awk '{n += $1} END {print n}' <<<"$rn") call(s) to real servers:"; echo "$rn"; }
 echo "RESULT pass=$PASS fail=$FAIL"
 [ $FAIL = 0 ]

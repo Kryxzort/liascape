@@ -40,6 +40,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 . "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
+. "$ROOT/scripts/test-no-network.sh"   # lp_real_network: a call to a real server fails the run
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -90,6 +91,13 @@ export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never r
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$T/bin/liascape-player LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# No real server: every backend and CLI run here refuses any outbound connection but loopback (Helpers/TestNetwork.cs,
+# "test-network: REFUSED" in its log), and a refused call or a real Steam session fails the run ("FAIL real network",
+# the end). Steam's answers for the library's Workshop items (the startup library facts: tags, trailers) come from an
+# empty fixture (Helpers/SteamWorkshopDetails.cs: an id not in it = no public item), so they ask neither Steam's CM
+# servers nor, as the fallback, its item pages.
+export LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
+echo '{}' > "$LIASCAPE_STEAM_CM_FIXTURE"
 # scenes: the private player (and every one the backend starts) plays synthetic scene folders, and
 # finds its worker even when its binary is a copy elsewhere (the upgrade test replaces $T/bin/liascape-player)
 export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=$ROOT/src/player/target/debug/liascape-scene-worker
@@ -2985,6 +2993,12 @@ fi
 
 echo "== no settings dump in the logs"
 grep -q SteamRefreshToken "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
+
+echo "== no real network"
+# every log under $T: the backends', the one-shot CLIs', the adapter's
+rn=$(lp_real_network "$T")
+[ -z "$rn" ] && ok "no call to a real server (none refused, no Steam session)" \
+  || { bad "real network: $(awk '{n += $1} END {print n}' <<<"$rn") call(s) to real servers:"; echo "$rn"; }
 
 echo "== adapter log (tail)"
 tail -n 8 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'

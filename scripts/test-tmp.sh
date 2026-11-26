@@ -17,6 +17,10 @@ lp_tmp_done() {
   case "$d" in *..*) return 0 ;; esac
   [ -d "$d" ] && [ ! -L "$d" ] || return 0
   if [ -n "${LIASCAPE_KEEP_TMP:-}" ]; then echo "kept $d (LIASCAPE_KEEP_TMP)"; return 0; fi
+  # A user manager run inside the folder (test-backend-stop's unit case) leaves mode-000 entries under its runtime dir
+  # (systemd/inaccessible/*) that neither the artefact copy nor rm can get past. chmod -R never follows a symlink, so
+  # nothing outside the folder changes.
+  chmod -R u+rwx -- "$d" 2>/dev/null
   if [ "$rc" != 0 ]; then
     k=${dest:-$(mktemp -d /tmp/liascape-fail-XXXXXX)}
     mkdir -p "$k" 2>/dev/null

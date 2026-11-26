@@ -16,6 +16,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 . "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
+. "$ROOT/scripts/test-no-network.sh"   # lp_real_network: a call to a real server fails the run
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -39,6 +40,8 @@ export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never r
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 LIASCAPE_PROFILE_SETTINGS=1
+# no real server: anything but loopback is refused and fails the run (scripts/test-no-network.sh)
+export LIASCAPE_TEST_NO_NETWORK=1
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 SP=""; BP=""
 cleanup() {
@@ -108,5 +111,9 @@ med=$(echo "$ms" | median); echo "     ms:$ms"; sleep 0.3
 [ "$med" -lt 20 ] && ok "/preview global median ${med} ms (< 20)" || bad "/preview global median ${med} ms (want < 20)"
 near "$(ctl get '{"path":"cur:*.gain.user"}' | jq -r .value)" "$(dB 55)" && ok "the last drag value landed ($(dB 55) dB)" || bad "cur gain.user $(ctl get '{"path":"cur:*.gain.user"}' | jq -r .value), want $(dB 55)"
 [ "$(curl -sf -m 5 "$U/settings" | jq .volume)" = 100 ] && ok "no persist (volume still 100)" || bad "a preview persisted volume $(curl -sf -m 5 "$U/settings" | jq .volume)"
+echo "== no real network"
+rn=$(lp_real_network "$T")
+[ -z "$rn" ] && ok "no call to a real server (none refused, no Steam session)" \
+  || { bad "real network: $(awk '{n += $1} END {print n}' <<<"$rn") call(s) to real servers:"; echo "$rn"; }
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]

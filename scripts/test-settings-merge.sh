@@ -30,6 +30,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias makes MSBuild delete its own outputs
 . "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
+. "$ROOT/scripts/test-no-network.sh"   # lp_real_network: a call to a real server fails the run
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -61,6 +62,8 @@ export LIASCAPE_SECRETS=file # Helpers/SecretStore.cs: the Steam secrets never r
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }
 export XDG_RUNTIME_DIR=$T/rt XDG_STATE_HOME=$T/st LIASCAPE_PLAYER_BIN=$B LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# no real server: anything but loopback is refused and fails the run (scripts/test-no-network.sh)
+export LIASCAPE_TEST_NO_NETWORK=1
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_UI_DIR LIASCAPE_PORT
 SP=""; BP=""
 cleanup() {
@@ -608,5 +611,9 @@ same e0 e1 '[]' "{PlayerEngine:legacy}"
   || bad "PlayerEngine after the post: GET $(f 'has("playerEngine")' e1), file $(disk 'has("PlayerEngine")')"
 kill -0 "$SP" 2>/dev/null && [ "$(available)" = true ] && ok "liascape-player still runs, available" || bad "the player after {PlayerEngine:legacy}: supervisor alive $(kill -0 "$SP" 2>/dev/null && echo yes || echo no), available $(available)"
 grep -q "test-refresh-token" "$T/backend.log" "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null && bad "settings dumped to a log" || ok "no settings dump in the logs"
+echo "== no real network"
+rn=$(lp_real_network "$T")
+[ -z "$rn" ] && ok "no call to a real server (none refused, no Steam session)" \
+  || { bad "real network: $(awk '{n += $1} END {print n}' <<<"$rn") call(s) to real servers:"; echo "$rn"; }
 echo "RESULT pass=$pass fail=$fail"
 [ $fail = 0 ]
