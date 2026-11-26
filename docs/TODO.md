@@ -130,6 +130,16 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        card preview). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
        (icon present / absent, the tooltip, no pill), and screenshots over light and dark thumbnails.
 
+16. [ ] (owner) The window opens blank, then the opening often falls back to the plain lift. The window is shown at once
+       with only its background (`app/shell/main.js`) while the logo waits for the app's JavaScript (seconds under the
+       Vite dev build); then `HOLD_MAX_MS` (700 ms from the logo, `components/Intro.tsx`) passes before the first data
+       on a busy start, so the split / cascade is skipped. Draw a static logo + cover in `app/ui/index.html` that the
+       Intro takes over seamlessly (first frame = the logo, both builds), show the window on `ready-to-show`, and count
+       the data wait from that static logo with a longer cap (~1.2 s; input passes through meanwhile). Measure window
+       shown → logo → cover gone in the shipped and the dev build on the owner's machine before and after. Guard:
+       probe-intro cells: the logo in the first painted frame, no blank frame, the cards path taken when the data
+       comes within the cap.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
