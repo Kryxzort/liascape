@@ -39,6 +39,13 @@
 //   vram:stopShows    "Stopped scene shows" (Expert) sits right under the video memory cap and only while the
 //                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
 //                     saves sceneVramStopShows; at Advanced it hides and the value stays
+//   vram:capMax:<m>   "Video memory cap (MiB)" is bounded by the card's VRAM: the stack's fake card (8192 MiB, test-ui-matrix.sh
+//                     vram.json) reaches /player-engine vram.total_mib, the field's max is 8192 and a saved 20000 shows as 8192
+//                     with a line saying why (the saved 20000 kept), the player's guard (player.scene_vram_limit_mib) gets
+//                     8192; 4096 typed is saved, goes to the player at once and the line leaves; a stubbed smaller card
+//                     (2048 MiB, read after the tab shows) makes 2048 the max and brings the line back (motion on: it rises
+//                     and fades through in-between frames; off / prefers-reduced-motion: opacity only); an unknown total
+//                     makes 65536 the max with its own line; picture settings-vram-cap-<m>.png
 //   fonts:gone        no "Use Windows fonts in scenes" / "Windows fonts folder" row at any level, old keys in settings.json
 //                     bring none back (scene fonts come from fontconfig)
 //   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; a
@@ -83,6 +90,7 @@ const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const MO = require("./motion-off");
+const net = require("net");
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -903,6 +911,105 @@ app.whenReady().then(async () => {
       }
       return v;
     });
+
+    // vram:capMax — the per-scene video memory cap can't go above the card (Settings.tsx VramCapNote, PlayerStatus.VramStatus,
+    // LiascapePlayerMedia.GpuProps). The stack's player measures a fake card of 8192 MiB (test-ui-matrix.sh vram.json).
+    // One `get` on the stack's player socket (null: no player answering)
+    const playerGet = (prop) => new Promise((res) => {
+      const sk = net.createConnection(E.LIASCAPE_PLAYER_SOCKET ?? "/nonexistent"); let buf = "";
+      const done = (x) => { sk.destroy(); res(x); };
+      sk.setTimeout(2000, () => done(null)); sk.on("error", () => done(null)); sk.setEncoding("utf8");
+      sk.on("connect", () => sk.write(J({ id: 1, cmd: "get", args: { path: prop } }) + "\n"));
+      sk.on("data", (d) => { buf += d; const i = buf.indexOf("\n"); if (i < 0) return;
+        try { const m = JSON.parse(buf.slice(0, i)); done(m.ok ? m.result?.value : null); } catch { done(null); } });
+    });
+    const VC_CAP = "Video memory cap (MiB)";
+    const capRead = () => js(`const r = window.__x.row(${J(VC_CAP)}), i = r?.querySelector("input.num"), n = document.querySelector("[data-vram-cap-note]");
+      return r && { max: i?.max, value: i?.value, note: n?.textContent ?? null, noteColor: n ? getComputedStyle(n).color : null }`);
+    // a stubbed card total on the page's /player-engine reads (undefined = the backend's own answer), answered `delay` ms late,
+    // then a fresh mount of the tab (Settings reads the status on mount)
+    const stubTotal = async (t, delay = 0) => {
+      await js(`window.__vramStub = ${t === undefined ? "undefined" : J(t)}; window.__vramDelay = ${delay};
+        if (!window.__vramWrapped) { window.__vramWrapped = true; const of = window.fetch.bind(window);
+        window.fetch = (u, o) => !String(u).includes("/player-engine") || window.__vramStub === undefined ? of(u, o)
+          : new Promise((r) => setTimeout(r, window.__vramDelay)).then(() => of(u, o)).then((r) => r.json())
+            .then((j) => new Response(JSON.stringify({ ...j, vram: { ...(j.vram ?? {}), total_mib: window.__vramStub } }), { headers: { "Content-Type": "application/json" } })); } return true`);
+      await js(`await window.__x.tab("Library"); await window.__x.tab("Settings"); return true`);
+      await waitFor(async () => (await capRead())?.max != null, 8000);
+    };
+    const VC_IN = `window.__x.row(${J(VC_CAP)})?.querySelector("input.num")`;
+    const vcTyped = (n) => js(`const el = ${VC_IN}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, String(${n})); el.dispatchEvent(new Event("input", { bubbles: true })); return true`);
+    const VC_SAMPLE = (ms) => MO.SAMPLE({ note: "[data-vram-cap-note]" }, ms);
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`vram:capMax:${mode} — the video memory cap's max is the card's VRAM, a larger saved cap holds at it on the field and the player, with a line`, async () => {
+        const v = [];
+        const eng = (await http("GET", "/player-engine")).json;
+        if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
+        if (eng?.vram?.total_mib !== 8192) v.push(`/player-engine vram.total_mib ${J(eng?.vram?.total_mib)}, want the stack's fake card total 8192`);
+        try {
+          await setSettings({ SettingsLevel: "advanced", LimitVramPerScene: true, SceneVramLimitMib: 20000, Morphs: mode !== "off" });
+          await reducedMotion(mode === "reduced");
+          // the guard is the playing wallpaper's: something plays
+          if ((await playerGet("player.scene_vram_limit_mib")) == null) {
+            const vid = ((await http("GET", "/library")).json ?? []).find((i) => !i.isScene && /\.(mp4|webm|mkv)$/i.test(i.videoPath ?? ""));
+            if (vid) await http("POST", "/apply", { path: vid.videoPath });
+            await waitFor(async () => (await playerGet("player.scene_vram_limit_mib")) != null, 15000, 200);
+          }
+          await load();
+          const noMotion = await js(`return document.documentElement.classList.contains("no-motion")`);
+          if (noMotion !== (mode !== "on")) return [`:root.no-motion is ${noMotion} under motion ${mode} — proved nothing`];
+          await waitFor(async () => (await capRead())?.note != null, 8000);
+          const a = await capRead();
+          if (!a) return [...v, `no "${VC_CAP}" row with the cap on at Advanced — proved nothing`];
+          if (a.max !== "8192") v.push(`the field's max is ${J(a.max)}, want the card's 8192`);
+          if (a.value !== "8192") v.push(`a saved 20000 shows as ${J(a.value)}, want 8192 (the card's total)`);
+          if (!a.note || !/8192/.test(a.note) || !/20000/.test(a.note)) v.push(`no line saying why the saved 20000 counts as 8192 (${J(a.note)})`);
+          if (a.note && /—|;|·/.test(a.note)) v.push(`the line breaks the Settings words (em dash, semicolon or ·): ${J(a.note)}`);
+          const sub = await js(`const d = document.createElement("p"); d.style.color = "var(--subtext)"; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c`);
+          if (a.noteColor !== sub) v.push(`the line's colour ${a.noteColor} isn't the theme's --subtext ${sub}`);
+          const n = await js(`return await window.__x.show(document.querySelector("[data-vram-cap-note]"))`);
+          if (n) await shot(`vram-cap-${mode}`, { x: 0, y: Math.max(0, Math.round(n.t) - 120), width: 1100, height: 200 });
+          if ((await field("sceneVramLimitMib")) !== 20000) v.push(`the saved cap became ${await field("sceneVramLimitMib")} (the setting keeps 20000)`);
+          if (!(await waitFor(async () => (await playerGet("player.scene_vram_limit_mib")) === 8192, 5000)))
+            v.push(`the player's guard player.scene_vram_limit_mib is ${J(await playerGet("player.scene_vram_limit_mib"))}, want 8192 (the card's total)`);
+          // live: 4096 typed is saved, reaches the player at once, and the line leaves
+          const sOut = js(`return await ${VC_SAMPLE(900)}`);
+          await sleep(60); await vcTyped(4096);
+          const fout = await sOut;
+          if (!(await waitFor(async () => (await field("sceneVramLimitMib")) === 4096, SAVE_MS))) v.push(`4096 typed saved as ${await field("sceneVramLimitMib")}`);
+          if (!(await waitFor(async () => (await playerGet("player.scene_vram_limit_mib")) === 4096, 5000)))
+            v.push(`4096 saved: the player's guard is ${J(await playerGet("player.scene_vram_limit_mib"))}, want 4096`);
+          const b = await capRead();
+          if (b?.value !== "4096" || b?.note != null) v.push(`4096 saved shows ${J(b)}, want 4096 and no line`);
+          // a smaller card (stubbed: 2048) read after the tab shows: the line comes in over the settled page
+          await stubTotal(2048, 1800);
+          await sleep(mode === "on" ? 1300 : 600);
+          const fin = await js(`return await ${VC_SAMPLE(1600)}`);
+          const c = await capRead();
+          if (c?.max !== "2048" || c?.value !== "2048" || !/2048/.test(c?.note ?? "") || !/4096/.test(c?.note ?? "")) v.push(`a stubbed card of 2048 MiB: ${J(c)}, want max 2048, 2048 shown, a line naming 2048 and the saved 4096`);
+          if (mode === "on") {
+            v.push(...MO.judge("the line out", fout.note, { leave: true, still: false, maxMs: 600 }));
+            v.push(...MO.judge("the line in", fin.note, { appear: true, still: false, maxMs: 600 }));
+            const rising = fin.note.filter((f, i, arr) => f[1] != null && f[1] > 0.05 && f[1] < 0.95 && Math.abs(f[3] - arr.at(-1)[3]) > 0.5).length;
+            if (rising < 2) v.push(`motion on: the line didn't rise in (${rising} frames mid-rise)`);
+          } else {
+            v.push(...MO.judge(`motion ${mode}, the line out`, fout.note, { leave: true }));
+            v.push(...MO.judge(`motion ${mode}, the line in`, fin.note, { appear: true }));
+          }
+          // unknown: 65536 and the line says so
+          await setSettings({ SceneVramLimitMib: 100000 }); await load();
+          await stubTotal(null);
+          await waitFor(async () => (await capRead())?.note != null, 5000);
+          const d = await capRead();
+          if (d?.max !== "65536" || d?.value !== "65536" || !/isn.t known/.test(d?.note ?? "")) v.push(`an unknown card total: ${J(d)}, want max 65536, 65536 shown, a line saying it isn't known`);
+          await stubTotal(undefined);
+        } finally {
+          await reducedMotion(false);
+          await setSettings({ SettingsLevel: "standard", LimitVramPerScene: false, SceneVramLimitMib: 2048, Morphs: true });
+        }
+        return v;
+      });
+    }
 
     // fonts:gone — scene fonts come from fontconfig like any app's (docs/decisions.md § "Scene fonts come from fontconfig, not a
     // Windows install"): no Windows-fonts row at any level under liascape-player, and old keys a settings.json still carries

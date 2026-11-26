@@ -316,7 +316,7 @@ export const api = {
   // API: /player-engine — whether liascape-player can run (+ why not), its scene and low-VRAM status
   playerStatus: () => jget<{ available: boolean; binary: string | null; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
-    vram?: { low_active: boolean | null; mode: string } | null }>("/player-engine"),
+    vram?: { low_active: boolean | null; mode: string; total_mib?: number | null } | null }>("/player-engine"),
   // API: /health/features — features a missing build piece / tool breaks here (FeatureHealth.cs); `affects` = the
   // settings keys whose rows get a warning icon. ok null = not known yet.
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),

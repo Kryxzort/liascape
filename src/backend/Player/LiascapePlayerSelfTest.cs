@@ -391,6 +391,26 @@ public static class LiascapePlayerSelfTest
             (new AppSettings { AllowScenes = true }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop scene_spare=True"),
             (new AppSettings { AllowScenes = true, SceneSpareWorker = false }, "scene_throttle=True scene_vram_limit_mib=0 scene_vram_stop_shows=last_frame vram_low_mode=stop scene_spare=False") })
             if (G(s) != want) fails.Add($"GpuProps → {G(s)}, want {want}");
+        // the cap is bounded by the card's VRAM (the player's `health.vram.total_mib`), else by 65536 MiB while it's unknown;
+        // the setting keeps the larger value. Guard for Settings' "Video memory cap (MiB)" bound (probe-settings vram:capMax)
+        foreach (var (mib, total, want) in new (int, int?, double)[] { (20000, 8192, 8192), (4096, 8192, 4096), (8192, 8192, 8192),
+                     (100_000, null, 65536), (20000, null, 20000), (1_048_576, 24576, 24576) })
+        {
+            var got = LiascapePlayerMedia.GpuProps(new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = mib }, total).First(p => p.prop == "scene_vram_limit_mib").value;
+            if (!Equals(got, want)) fails.Add($"GpuProps: a {mib} MiB cap on a card of {total?.ToString() ?? "unknown"} MiB → {got}, want {want}");
+        }
+        // the total read from `hello.health` / `liascape-player health`: `vram.total_mib` when measured, else unknown
+        foreach (var (json, want) in new (string?, int?)[] {
+                     ("""{"vram":{"ok":true,"reason":null,"probe":"fake","total_mib":8192}}""", 8192),
+                     ("""{"vram":{"ok":false,"reason":"no","probe":"none","total_mib":null}}""", null),
+                     ("""{"vram":{"ok":null,"reason":null,"pending":true}}""", null),
+                     ("""{"vram":{"ok":true,"reason":null,"probe":"nvml","total_mib":0}}""", null),
+                     ("""{"effects":{"ok":true}}""", null), (null, null) })
+        {
+            using var d = json == null ? null : JsonDocument.Parse(json);
+            var got = PlayerStatus.VramTotalOf(d?.RootElement);
+            if (got != want) fails.Add($"VramTotalOf({json ?? "no answer"}) → {got?.ToString() ?? "null"}, want {want?.ToString() ?? "null"}");
+        }
         // ScenesPlayable: AllowScenes × the player's `scene` capability (asked only with scene support on)
         foreach (var allow in new[] { false, true })
         foreach (var cap in new[] { false, true })

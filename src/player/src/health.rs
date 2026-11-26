@@ -6,7 +6,8 @@
 //!
 //! - `effects` — the transitions catalogue (`Catalogue::resolve_dir`): none → every switch is a cut.
 //! - `vram` — a VRAM measurement (`vram::probe_from_env`, one sample): none → "Limit VRAM per scene" and
-//!   "When VRAM runs low" can't act (e.g. an Intel GPU: no NVML, no AMD sysfs, no nvidia-smi).
+//!   "When VRAM runs low" can't act (e.g. an Intel GPU: no NVML, no AMD sysfs, no nvidia-smi). Carries the card's
+//!   `total_mib` (null when unmeasured): the backend's bound for "Video memory cap (MiB)".
 //! - `hwdec_interop` — the render worker's GL interop for hardware-decoded frames (running player only):
 //!   none → hardware decoding copies every frame through the CPU.
 //! - `scenes` — the `scene` capability's rule (`Runtime::scenes_available` / `scene-check`).
@@ -58,20 +59,26 @@ pub fn effects_here() -> Value {
     }
 }
 
-/// `vram` from a probe's name and one sample's outcome.
-pub fn vram_json(probe: &str, sample: Result<(), String>) -> Value {
+/// `vram` from a probe's name and one sample's outcome: the card's total VRAM (MiB) when measured. `total_mib`
+/// (whole MiB, null without a measurement) bounds the backend's "Video memory cap (MiB)" setting.
+pub fn vram_json(probe: &str, sample: Result<f64, String>) -> Value {
     match sample {
-        Ok(()) => json!({ "ok": true, "reason": null, "probe": probe }),
-        Err(e) => json!({ "ok": false, "probe": probe,
+        Ok(total) => json!({ "ok": true, "reason": null, "probe": probe,
+            "total_mib": (total.is_finite() && total > 0.0).then(|| total.round() as u64) }),
+        Err(e) => json!({ "ok": false, "probe": probe, "total_mib": null,
             "reason": format!("no VRAM measurement here ({e}) — the per-scene VRAM limit and the low-VRAM rule can't act") }),
     }
 }
 
-/// One sample from the probe `LIASCAPE_PLAYER_VRAM_PROBE` picks (blocking: nvidia-smi may be spawned).
-pub fn vram_here() -> Value {
-    let mut p = crate::vram::probe_from_env();
+/// `vram` from one sample of `p` (blocking: nvidia-smi may be spawned).
+pub fn vram_of(p: &mut dyn crate::vram::Probe) -> Value {
     let name = p.name();
-    vram_json(name, p.sample(&[]).map(|_| ()))
+    vram_json(name, p.sample(&[]).map(|s| s.total_mib))
+}
+
+/// One sample from the probe `LIASCAPE_PLAYER_VRAM_PROBE` picks.
+pub fn vram_here() -> Value {
+    vram_of(crate::vram::probe_from_env().as_mut())
 }
 
 static VRAM: OnceLock<Value> = OnceLock::new();
@@ -200,11 +207,29 @@ mod tests {
 
     #[test]
     fn vram_cases() {
-        assert_eq!(vram_json("nvml", Ok(()))["ok"], true);
+        assert_eq!(vram_json("nvml", Ok(8192.0))["ok"], true);
         let no = vram_json("none", Err("disabled by LIASCAPE_PLAYER_VRAM_PROBE=none".into()));
         assert_eq!(no["ok"], false);
         assert_eq!(no["probe"], "none");
         assert!(no["reason"].as_str().unwrap().contains("LIASCAPE_PLAYER_VRAM_PROBE=none"));
+        assert!(no["total_mib"].is_null(), "no measurement, no total: {no}");
+    }
+
+    // the card's total reaches `health.vram.total_mib` (the backend bounds Settings' video memory cap by it)
+    #[test]
+    fn vram_total_from_a_probe() {
+        let dir = std::env::temp_dir().join(format!("lia-health-vram-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("vram.json");
+        std::fs::write(&f, r#"{"total_mib":8191.6,"free_mib":6000,"procs":{}}"#).unwrap();
+        let v = vram_of(&mut crate::vram::FakeProbe(f.clone()));
+        assert_eq!(v["ok"], true, "{v}");
+        assert_eq!(v["total_mib"], 8192, "rounded to whole MiB: {v}");
+        std::fs::write(&f, "not json").unwrap();
+        let bad = vram_of(&mut crate::vram::FakeProbe(f));
+        assert_eq!(bad["ok"], false);
+        assert!(bad["total_mib"].is_null(), "{bad}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

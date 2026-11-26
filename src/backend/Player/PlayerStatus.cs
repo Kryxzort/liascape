@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using Liascape.Helpers;
 using Liascape.Models;
 
@@ -55,7 +56,38 @@ public static class PlayerStatus
         if (c.SocketExists)
             try { low = c.Call("get", new Dictionary<string, object?> { ["path"] = "player.vram_low_active" }, LiascapePlayerClient.QuickMs).GetProperty("value").ValueKind == System.Text.Json.JsonValueKind.True; }
             catch (LiascapePlayerException) { }
-        return new { low_active = low, mode = s.VramLowMode };
+        if (_vramTotal == null) NoteVramTotal(c.Health().Health); // a card's total doesn't change while it runs
+        // API: Settings' "Video memory cap (MiB)" takes `total_mib` as its max (65536 while unknown) and says why
+        // a larger saved cap holds at it
+        return new { low_active = low, mode = s.VramLowMode, total_mib = _vramTotal };
+    }
+
+    // The card's total VRAM (MiB), from the player's `health.vram.total_mib` (its VRAM probe: NVML, else AMD's
+    // `mem_info_vram_total`), once any health answer carried it; null until then and without a measurement. It bounds the
+    // per-scene VRAM cap: the player's guard gets `min(SceneVramLimitMib, VramCapMax)` (LiascapePlayerMedia.GpuProps),
+    // the setting keeps what was saved. Guard: player-selftest (GpuProps, VramTotalOf), probe-settings vram:capMax
+    private static volatile int _vramTotalRaw; // 0 = unknown
+    private static int? _vramTotal => _vramTotalRaw > 0 ? _vramTotalRaw : null;
+    public static int? VramTotalMib => _vramTotal;
+    // the cap's bound while the card's total isn't known
+    public const int VramCapUnknownMax = 65536;
+    public static int VramCapMax => _vramTotal ?? VramCapUnknownMax;
+
+    // `vram.total_mib` of a `hello.health` / `liascape-player health` answer (null: no answer, no measurement, pending)
+    public static int? VramTotalOf(JsonElement? health) =>
+        health is { ValueKind: JsonValueKind.Object } h && h.TryGetProperty("vram", out var v) && v.ValueKind == JsonValueKind.Object
+            && v.TryGetProperty("total_mib", out var t) && t.ValueKind == JsonValueKind.Number && t.TryGetDouble(out var d) && d >= 1
+            ? (int)Math.Min(Math.Round(d), int.MaxValue) : null;
+
+    // A health answer read anywhere: a total newly known (or changed) moves the playing wallpaper's guard at once, so a saved
+    // cap above the card holds at its total live, not from the next player start.
+    public static void NoteVramTotal(JsonElement? health)
+    {
+        if (VramTotalOf(health) is not int t || t == _vramTotal) return;
+        var s = SettingsService.Load();
+        var before = LiascapePlayerMedia.GpuProps(s, _vramTotal);
+        _vramTotalRaw = t;
+        LiascapePlayerMedia.ApplyGpuProps(before, LiascapePlayerMedia.GpuProps(s, t));
     }
 
     public const string SceneSupportOff ="scene support is off (Settings → Wallpaper Engine → Play scenes)";

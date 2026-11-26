@@ -413,6 +413,31 @@ function CardPreviewRows({ level }: { level: Level }) {
 }
 const Help = ({ children }: { children: React.ReactNode }) => <p className="help">{children}</p>;
 
+// Settings → "Video memory cap (MiB)": the cap can't go above the card's VRAM (the player measures it: `/player-engine`
+// `vram.total_mib`, NVML or AMD's sysfs), or 65536 MiB while that isn't known. A saved cap above it holds at the bound,
+// on the field and on the playing wallpaper's guard (the backend sends the player the same minimum), with this line saying
+// why; the setting keeps what was saved. It rises in and fades out (motion off: fades only).
+// Guard: probe-settings vram:capMax
+// API: /player-engine vram.total_mib (PlayerStatus.VramStatus)
+const VRAM_CAP_UNKNOWN_MAX = 65536;
+let knownVramTotal: number | null = null;
+function VramCapNote({ saved, total, max }: { saved: number; total: number | null; max: number }) {
+  const fadeOff = useFadeOff();
+  return (
+    <AnimatePresence initial={false}>
+      {saved > max && (
+        <motion.p key="cap" className="help" data-vram-cap-note=""
+          {...fadeOff({ initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 },
+            transition: { duration: 0.22, ease: [0.2, 0.8, 0.3, 1] } })}>
+          {total != null
+            ? <>Your graphics card has {total} MiB of video memory, so the saved cap of {saved} MiB counts as {max} MiB.</>
+            : <>Your graphics card&apos;s video memory isn&apos;t known, so the saved cap of {saved} MiB counts as {max} MiB.</>}
+        </motion.p>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // Settings → Startup → "Start with your desktop" (startWithDesktop): the backend writes or removes Liascape's own autostart
 // entry (Helpers/Autostart.cs). Under the row, a note when the entry isn't the whole story: the compositor's config already
 // starts Liascape (shown on or off), or, while it's on, the entry won't run (Hyprland / Sway with nothing that runs autostart
@@ -552,7 +577,12 @@ export const Settings = memo(function Settings() {
   // liascape-player's status (binary found? last start error? scenes, low VRAM)
   const [player, setPlayer] = useState<{ available: boolean; reason: string | null;
     scenes?: { available: boolean; reason: string | null; assets_dir: string | null };
-    vram?: { low_active: boolean | null; mode: string } | null } | null>(null);
+    vram?: { low_active: boolean | null; mode: string; total_mib?: number | null } | null } | null>(null);
+  // the video memory cap's bound: the card's VRAM, else 65536 MiB (VramCapNote). Until this visit's status read answers,
+  // the total the last one read: the field never shows the saved value first and the bound a moment later.
+  const vramTotal = player ? (player.vram?.total_mib ?? null) : knownVramTotal;
+  const vramCapMax = vramTotal ?? VRAM_CAP_UNKNOWN_MAX;
+  useEffect(() => { if (player?.vram?.total_mib != null) knownVramTotal = player.vram.total_mib; }, [player]);
 
   useEffect(() => {
     if (clearArm <= 0) return;
@@ -752,7 +782,8 @@ export const Settings = memo(function Settings() {
         <Row label="Cap each scene's video memory" hint="stops a scene that uses more video memory than the cap. A playlist moves on. It doesn't count as a crash." rk="limitVramPerScene">
           <input type="checkbox" checked={g("limitVramPerScene", false)} onChange={(e) => set("limitVramPerScene", e.target.checked)} /></Row>
         {g("limitVramPerScene", false) && <Row label="Video memory cap (MiB)" hint="per scene" rk="sceneVramLimitMib">
-          <NumInput min={64} max={1048576} step={64} value={g("sceneVramLimitMib", 2048)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
+          <NumInput min={64} max={vramCapMax} step={64} value={Math.min(g("sceneVramLimitMib", 2048), vramCapMax)} onChange={(v) => set("sceneVramLimitMib", v)} /><span>MiB</span></Row>}
+        {g("limitVramPerScene", false) && <VramCapNote saved={g("sceneVramLimitMib", 2048)} total={vramTotal} max={vramCapMax} />}
         {g("limitVramPerScene", false) && <Row label="Stopped scene shows" hint="Last frame: its picture stays, still. Nothing: the screen goes black." rk="sceneVramStopShows">
           <Segmented<string> label="Stopped scene shows" value={g<string>("sceneVramStopShows", "last_frame")} onChange={(v) => set("sceneVramStopShows", v)}
             options={[{ value: "last_frame", label: "Last frame" }, { value: "nothing", label: "Nothing" }]} /></Row>}

@@ -295,6 +295,7 @@ public static class LiascapePlayerMedia
     // player-level GPU / VRAM settings (a fresh player starts at its own defaults)
     private static void AssertSceneFps(LiascapePlayerClient client, AppSettings s)
     {
+        if (PlayerStatus.VramTotalMib == null) PlayerStatus.NoteVramTotal(client.Health().Health); // the cap's bound (GpuProps)
         foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
         SetPlayerProp(client, "pause_when_covered", AppSettings.CoverMode(s.PauseWhenCovered));
@@ -309,19 +310,24 @@ public static class LiascapePlayerMedia
     // `player.vram_low_mode` ← VramLowMode, `player.scene_spare` ← SceneSpareWorker while AllowScenes (turning scenes
     // off reaps the spare). `/settings` diffs prev → cur (coalescible per prop, `player:<prop>`); a new player process
     // gets every one (`AssertSceneFps`).
-    public static IReadOnlyList<(string prop, object value)> GpuProps(AppSettings s) =>
+    // The cap never goes above the card's VRAM (`PlayerStatus.VramCapMax`: its total, else 65536 while unknown); the setting
+    // keeps a larger saved value.
+    public static IReadOnlyList<(string prop, object value)> GpuProps(AppSettings s) => GpuProps(s, PlayerStatus.VramTotalMib);
+
+    public static IReadOnlyList<(string prop, object value)> GpuProps(AppSettings s, int? vramTotalMib) =>
     [
         ("scene_throttle", s.AutoThrottleScenes),
-        ("scene_vram_limit_mib", s.LimitVramPerScene ? (double)s.SceneVramLimitMib : 0.0),
+        ("scene_vram_limit_mib", s.LimitVramPerScene ? (double)Math.Min(s.SceneVramLimitMib, vramTotalMib ?? PlayerStatus.VramCapUnknownMax) : 0.0),
         ("scene_vram_stop_shows", s.SceneVramStopShows),
         ("vram_low_mode", s.VramLowMode),
         ("scene_spare", s.SceneSpareWorker && s.AllowScenes),
     ];
 
-    public static void ApplyGpuSettings(AppSettings prev, AppSettings cur)
+    public static void ApplyGpuSettings(AppSettings prev, AppSettings cur) => ApplyGpuProps(GpuProps(prev), GpuProps(cur));
+
+    public static void ApplyGpuProps(IReadOnlyList<(string prop, object value)> had, IReadOnlyList<(string prop, object value)> now)
     {
-        var had = GpuProps(prev);
-        foreach (var (prop, v) in GpuProps(cur))
+        foreach (var (prop, v) in now)
             if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
     }
 
