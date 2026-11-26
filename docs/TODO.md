@@ -68,6 +68,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          Puppet Warp, Video Texture), else a keyword search (an effect's or object's name); keep trying new items
          until one uses the feature. A feature with no scene is
          unverified, not done; each row marked pass / fail against WE with its evidence.
+       - The repo's own test scenes: about 10–15 small scenes, one per feature family (puppets + IK, particles, text
+         and clock, effects and blend modes, 3D models and lights, HDR, audio response, scripts, user properties,
+         video textures …), made in WE's own editor with our own images, saved with WE's captured frames as their
+         expected output; hermetic pixel tests against those frames. Made on Windows: the owner starts a session
+         there and a Claude session drives the editor. Write the per-family spec (what each scene must use, how
+         it is captured) before that session.
        - Check LWE's logic per row against the decompiled WE; fix what differs, starting with puppets.
        - The audio piece: a private PipeWire with a null sink fed a fixed track, so music-reactive scenes compare too.
        - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
