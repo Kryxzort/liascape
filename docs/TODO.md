@@ -67,7 +67,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          them.
        Reuse the app's notice / hint look (`.claude/rules/ui/design.md` checklist); probe cells for the welcome, each
        tip's once-only rule and the empty states.
-11. [ ] (owner) Browse feels slow: measure, then fix the biggest part. Time a Workshop browse end to end in the agent
+11. [ ] (owner) Browse feels slow: measure, then fix the biggest part. Measured on the owner's window over 170 min of real use
+       (2026-11-26/27, CDP network log): the card pictures dominate — `/still` (a still frame made from a gif/webp
+       preview) median 7.9 s, p90 26 s, and `/anim` median 10.8 s, p90 19 s, ~310 requests each, together ~110 min of
+       waiting; Steam's own calls are small beside them (`/browse` median 2.1 s; sidebar comments / creator / favourite
+       medians 0–340 ms, p90 ~1.1–1.4 s); 410 main-thread stalls ≥ 50 ms (48 s, worst 463 ms). Start with why a still
+       or a gif takes seconds (ffmpeg per card under `CardWait`, a queue behind the clip sweep, decode of large gifs?). Time a Workshop browse end to end in the agent
        window (`node scripts/bench-live-ui.mjs`, a new scenario): the session connect, each `QueryFiles` page, the
        thumbnails / previews to first paint, the gate's spacing, React's render; first visit, next page, a filter
        change, going back. Then fix the largest share first. Candidates: the next page fetched while the current one
