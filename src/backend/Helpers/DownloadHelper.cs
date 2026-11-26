@@ -50,8 +50,13 @@ public static class DownloadHelper
         string item = Path.Combine(Directory.CreateDirectory(LibraryStore.SourceDir(source)).FullName, id);
         if (!Directory.Exists(item) && !File.Exists(item))
         {
-            if (steams) File.CreateSymbolicLink(item, folder);
-            else LibraryService.CopyTree(folder, item);
+            try
+            {
+                if (steams) File.CreateSymbolicLink(item, folder);
+                else CopyIn(folder, item);
+            }
+            // another download of the same item made it meanwhile (a preset's base fetch beside the user's own): that one stands
+            catch (IOException) when (Directory.Exists(item) || File.Exists(item)) { }
         }
         Record(source, id, d, sourceUrl: null);
         progress?.Report(1.0);
@@ -60,6 +65,23 @@ public static class DownloadHelper
         string media = Path.Combine(item, Path.GetFileName(d.DownloadUrl));
         if (!File.Exists(media)) media = Directory.EnumerateFiles(item).FirstOrDefault(IsVideo) ?? media;
         return Item(d, r.SourceId, media, still, moving);
+    }
+
+    // The library's own copy of a Workshop folder, made in the library's trash (purged at start and close) and moved in whole:
+    // a copy cut short never stands as the item, which every later download of it would keep
+    private static void CopyIn(string folder, string item)
+    {
+        string stage = Path.Combine(Directory.CreateDirectory(LibraryService.TrashPath).FullName, $"copy-{Guid.NewGuid():N}");
+        try
+        {
+            LibraryService.CopyTree(folder, stage);
+            Directory.Move(stage, item);
+        }
+        catch
+        {
+            LibraryService.TryDeleteDir(stage);
+            throw;
+        }
     }
 
     // A web source's file (fetched with its Referer) or a file on this PC (linked, or copied) → <library>/<title>/<title>.<ext>

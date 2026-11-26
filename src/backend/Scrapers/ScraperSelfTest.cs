@@ -336,6 +336,47 @@ public static class ScraperSelfTest
         {
             Title = "Sea Rain Loop", PreviewUrl = "", DownloadUrl = Path.Combine(outside, "sea.mov"), WorkshopId = "1003",
         }, sourceId: "https://steamcommunity.com/sharedfiles/filedetails/?id=1003");
+        // a copy that can't be made whole (a file it can't read) leaves no workshop/<id> a later download would keep
+        string broken = Path.Combine(tmp, "steam-elsewhere", "1099");
+        Directory.CreateDirectory(broken);
+        File.WriteAllText(Path.Combine(broken, "project.json"), "{\"type\":\"scene\"}");
+        File.WriteAllText(Path.Combine(broken, "scene.pkg"), "locked");
+        File.SetUnixFileMode(Path.Combine(broken, "scene.pkg"), UnixFileMode.None);
+        await Download("download: a Workshop folder that can't be copied whole", new WallpaperDetail
+        {
+            Title = "Locked Scene", PreviewUrl = "", DownloadUrl = broken, WorkshopId = "1099", IsScene = true,
+        }, sourceId: "https://steamcommunity.com/sharedfiles/filedetails/?id=1099");
+        File.SetUnixFileMode(Path.Combine(broken, "scene.pkg"), UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        // two downloads of one Workshop item at once (a preset's base fetch beside the user's own): both get the item
+        foreach (var (name, ownCopy, made) in new[] { ("linked", false, LibraryStore.Local), ("own copy", true, LibraryStore.Workshop) })
+        {
+            int errors = 0;
+            for (int round = 0; round < 20; round++)
+            {
+                LibraryService.TryDeleteDir(Path.Combine(LibraryStore.SourceDir(made), "1006"));
+                using var start = new Barrier(2);
+                var both = Enumerable.Range(0, 2).Select((_) => Task.Run(async () =>
+                {
+                    start.SignalAndWait();
+                    try
+                    {
+                        await DownloadHelper.DownloadAsync(new DownloadHelper.Request(new WallpaperDetail
+                        {
+                            Title = "Forest Scene", PreviewUrl = "", DownloadUrl = Path.Combine(ws, "1006"), WorkshopId = "1006", IsScene = true,
+                        }, Path.Combine(ws, "1006")) { OwnCopy = ownCopy }, null, default);
+                    }
+                    catch { Interlocked.Increment(ref errors); }
+                })).ToArray();
+                await Task.WhenAll(both);
+            }
+            string item = Path.Combine(LibraryStore.SourceDir(made), "1006");
+            got[$"download: two downloads of one Workshop item at once, {name}"] = new JsonObject
+            {
+                ["errors"] = errors,
+                ["item"] = new FileInfo(item).LinkTarget is { } to ? "-> " + Rel(to) : Directory.Exists(item) ? "dir" : "none",
+                ["files"] = Directory.Exists(item) ? Directory.GetFiles(item).Length : 0,
+            };
+        }
         server.Stop();
     }
 

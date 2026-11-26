@@ -230,6 +230,12 @@
     },
     "progress": 1
   },
+  "download: a Workshop folder that can\u0027t be copied whole": {
+    "asked": [],
+    "item": "error: UnauthorizedAccessException",
+    "library": {},
+    "progress": -1
+  },
   "download: a Workshop video outside the Wallpaper Engine folder": {
     "asked": [],
     "item": {
@@ -489,6 +495,16 @@
       "$LIB/desktophut": "dir"
     },
     "progress": -1
+  },
+  "download: two downloads of one Workshop item at once, linked": {
+    "errors": 0,
+    "files": 3,
+    "item": "-\u003E $WS/1006"
+  },
+  "download: two downloads of one Workshop item at once, own copy": {
+    "errors": 0,
+    "files": 3,
+    "item": "dir"
   },
   "local details": {
     "1001": {
