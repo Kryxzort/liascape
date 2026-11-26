@@ -55,6 +55,19 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        library item), and have a Workshop folder that changes on disk broadcast `library-item-changed` (also clearing
        `downloadIncomplete`). Guard: a probe cell that rewrites a fixture's preview in place and sees the card's
        picture change without a reload.
+142. [ ] (owner) Scenes checked against real Wallpaper Engine, every feature, every scene, and as fast and lean as
+       WE. Nothing about scenes counts as done until it matches WE's own frames
+       (`docs/player/spikes/we-proton.md`: `scripts/dev/we-ref-capture.sh`, `scene_we_compare.sh`).
+       - The harness as a gate: rerun every library scene, set a fail line per scene (masks for WE's unseeded
+         randomness), look at every failing side-by-side; rerun nightly and on every new download.
+       - Every row of `docs/player/spikes/we-lwe-gap-audit.md` with a test scene: a library scene that uses it, a
+         public Workshop sample found by its feature, or a small synthetic scene built for it (a feature with no
+         scene is unverified, not done); each row marked pass / fail against WE with its evidence.
+       - Check LWE's logic per row against the decompiled WE; fix what differs, starting with puppets.
+       - The audio piece: a private PipeWire with a null sink fed a fixed track, so music-reactive scenes compare too.
+       - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
+         and GPU time per frame, ours beside WE's; a gap is a row to fix like a wrong picture (read how WE loads,
+         caches and shares textures and shaders where it beats us). Folds in item 48's remaining load work.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
