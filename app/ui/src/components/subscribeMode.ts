@@ -12,9 +12,8 @@ type SteamState = { signedIn: boolean; rejected?: boolean; usable?: boolean } | 
 // the last word
 const signInUsable = (steam: SteamState) => !steam || (steam.usable ?? (steam.signedIn && !steam.rejected));
 
-// What a Workshop item's Download / "Download & Apply" do in the chosen mode, the line under them in the Browse sidebar and in
-// the import-from-a-link dialog, so they and the subscription card's Subscribe below never read as contradicting: every way
-// subscribes to get it. "Subscribe with Steam login" without a usable sign-in goes straight to the item's Steam page (the
+// What a Workshop item's download does in the chosen mode, the line in the import-from-a-link dialog (the item sidebar's
+// buttons say Subscribe themselves, with no line under them): every way subscribes to get it. "Subscribe with Steam login" without a usable sign-in goes straight to the item's Steam page (the
 // fallback order's last step, WorkshopDownloader.AcquireViaSubscribeAsync), so the words say that. Merged (the buttons say
 // Subscribe) and unknown modes: no line. Guard: probe-steam side:getHint
 export function downloadHint(settings: Record<string, unknown> | null | undefined, steam: SteamState): string | null {

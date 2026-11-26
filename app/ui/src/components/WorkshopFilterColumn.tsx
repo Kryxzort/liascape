@@ -95,7 +95,7 @@ function MatchSwitch({ m, on, scope }: { m: GroupMatch; on: boolean; scope: Filt
 
 // each group's emblem, in the head like a Settings section's (index.css .wf-gico): one per group, never one per tag — a
 // glyph on some rows and not others reads as a difference between the tags. Resolution and Age take the sidebar's pills'
-// glyphs (LibrarySide.tsx), so a fact wears one icon everywhere.
+// glyphs (ItemSide.tsx), so a fact wears one icon everywhere.
 const GROUP_ICON: Record<string, LucideIcon> = { yours: UserRound, age: Shield, type: Layers, resolution: Monitor, genre: Palette, features: Sparkles };
 // PERF: memo'd — a group re-renders on every tag change, its emblem never needs to. Guard: probe-filters lib:interplay
 const GroupEmblem = memo(function GroupEmblem({ id }: { id: string }) {

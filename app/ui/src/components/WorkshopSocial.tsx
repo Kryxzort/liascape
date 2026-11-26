@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
-import { ExternalLink, Images, Layers, Library as LibraryIcon, LoaderCircle, MessageSquare, PanelRightOpen, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
+import { ChevronRight, ExternalLink, Layers, LoaderCircle, MessageSquare, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
 import { api, steamPageUrl, thumb, workshopStub, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator } from "../api/client";
 import { presetsOn, useStore } from "../store";
 import { StatPills } from "./sidePills";
+import { fmtCount } from "./sideFormat";
 import { useMotion } from "./motion";
 import { glideFlip, snapFlip, type FlipSnap } from "./flipGlide";
 import { revealCard } from "../hooks/gridKeys";
 
-// The item sidebars' Workshop community pieces (BrowseSide.tsx, and LibrarySide.tsx for a Workshop item): the creator, the
+// The item sidebars' Workshop community pieces (ItemSide.tsx, on both tabs): the creator, the
 // favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in: without it
 // they become "Favourite on Steam" / "Comment on Steam", which open the item's page in the Steam app (store openOnSteam, the
 // Steam page as the last resort: docs/decisions.md § "Offer two Workshop download modes, the Steam page the last resort"). A failed read is a quiet line in place, never a crash or a status-bar error. Steam limits its
@@ -20,6 +21,9 @@ const SETTLE_MS = 350;
 const PAGE = 10;
 const creators = new Map<string, WsCreator>(); // per Workshop item
 const favorites = new Map<string, boolean>(); // per Workshop item, signed in
+// the favourite state as first read, per item for the session: what Steam's favourites count (read once and kept) already holds;
+// a toggle here moves the shown count by one from it, a remount too
+const favoritesCounted = new Map<string, boolean>();
 const counts = new Map<string, WsCounts>(); // per Workshop item
 
 function useSettled(key: string) {
@@ -44,12 +48,12 @@ export function Avatar({ src, size }: { src: string | null | undefined; size: nu
 }
 
 // A sidebar row that takes the user to other wallpapers (the creator's, a scene's presets, a preset's base): a picture or
-// glyph, a small heading over a name, and where a click goes as an icon chip at its end (its tooltip `goTitle`; the row's
-// aria-label says it in words: an icon alone doesn't). The name is selectable text, the way to copy it: a drag that selected
-// some of it isn't a click. One control for all of them (index.css .ws-creator). Guard: probe-steam ws:creator, ws:presets,
-// ws:presetBase
-export function WsListRow({ lead, by, name, go, goTitle, label, loading, disabled, rowClass = "ws-list-row", data, onGo }: {
-  lead: ReactNode; by: string; name: string | null; go: ReactNode; goTitle: string; label: string; loading?: boolean; disabled?: boolean;
+// glyph, a small heading over a name, and a chevron at its end. The whole row is the target: it lifts on hover and the
+// chevron slides toward where it goes; no other icon (the row already says where a click goes, its aria-label in words). The
+// name is selectable text, the way to copy it: a drag that selected some of it isn't a click. One control for all of them
+// (index.css .ws-creator). Guard: probe-steam ws:creator, ws:presets, ws:presetBase
+export function WsListRow({ lead, by, name, label, loading, disabled, rowClass = "ws-list-row", data, onGo }: {
+  lead: ReactNode; by: string; name: string | null; label: string; loading?: boolean; disabled?: boolean;
   rowClass?: string; data: Record<`data-${string}`, string>; onGo: () => void;
 }) {
   const click = (e: MouseEvent<HTMLButtonElement>) => {
@@ -65,7 +69,7 @@ export function WsListRow({ lead, by, name, go, goTitle, label, loading, disable
           <span className="ws-creator-by">{by}</span>
           <span className="ws-creator-name" data-ws-row-name>{name ?? "…"}</span>
         </span>
-        <span className="ws-creator-ico" data-ws-go title={goTitle}>{go}</span>
+        <span className="ws-creator-go" data-ws-go aria-hidden="true"><ChevronRight size={16} /></span>
       </button>
     </div>
   );
@@ -100,7 +104,7 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
   };
   return (
     <WsListRow rowClass="ws-creator-row" lead={<Avatar src={c?.avatar} size={30} />} by="Made by" name={name} loading={!name}
-      go={<Images size={16} aria-hidden="true" />} goTitle="All their wallpapers" label={`All their wallpapers, made by ${name ?? "…"}`}
+      label={`All their wallpapers, made by ${name ?? "…"}`}
       disabled={!id} data={{ "data-ws-creator": c ? "known" : failed ? "unknown" : "loading" }} onGo={go} />
   );
 }
@@ -116,7 +120,7 @@ export function PresetsRow({ workshopId, title, onListed, scene }: { workshopId:
   if (!on) return null;
   return (
     <WsListRow lead={<LeadGlyph icon={<SlidersHorizontal size={16} aria-hidden="true" />} />} by="Presets" name="Made for this scene"
-      go={<Images size={16} aria-hidden="true" />} goTitle="All its presets" label="All the presets made for this scene"
+      label="All the presets made for this scene"
       data={{ "data-ws-presets": workshopId }}
       onGo={() => { setWsList({ kind: "presets", id: workshopId, name: title, scene: scene ?? null }); onListed?.(); }} />
   );
@@ -162,30 +166,34 @@ export function BaseRow({ presetId, local, onShowInLibrary, onShowInBrowse }: {
   };
   return (
     <WsListRow lead={<LeadGlyph icon={<Layers size={16} aria-hidden="true" />} />} by="Uses" name={name} loading={!b}
-      go={lib ? <LibraryIcon size={16} aria-hidden="true" /> : <PanelRightOpen size={16} aria-hidden="true" />}
-      goTitle={lib ? "Show it in your library" : "Show its card"} label={`Uses ${name ?? "…"}. ${lib ? "Show it in your library" : "Show its card"}`}
+      label={`Uses ${name ?? "…"}. ${lib ? "Show it in your library" : "Show its card"}`}
       disabled={!b} data={{ "data-ws-base": b ? "known" : "loading" }} onGo={go} />
   );
 }
 
-// The favourite: a toggle tile (the sidebar's tiles' material) — a star that fills when it's in the account's Steam favourites,
-// the words "Favourite" / "Favourited" sharing one cell (index.css .xfade) so the tile keeps its size; the new state's star
-// pops once on a user change, never on mount (index.css .ico-pop). Without a usable sign-in it becomes "Favourite on Steam"
-// (the words roll over in the same cell as the state lands), which opens the item's page in the Steam app; the backend then
-// watches that item's favourite state there for a few minutes (Helpers/SteamFavoriteWatch.cs).
-// Guard: probe-steam ws:favorite, ws:favoriteOff, ws:favoriteSteam, ws:favoriteSteamOff
-export function FavoriteTile({ workshopId }: { workshopId: string }) {
+// The favourite: the favourites count pill is the toggle (docs/decisions.md § "One sidebar for an item, the same on both
+// tabs"; state shows on the control that changes it, never twice): its star fills while the item is in the account's Steam
+// favourites, a click toggles it and the count follows (Steam's own number moves the next time it's read); the new state's
+// star pops once on a user change, never on mount (index.css .ico-pop). Without a usable sign-in a click opens the item's page
+// in the Steam app (its tooltip says so); the backend then watches that item's favourite state there for a few minutes
+// (Helpers/SteamFavoriteWatch.cs). `count` = Steam's favourites count (null: unknown, the star alone).
+// Guard: probe-steam ws:favorite, ws:favoriteSteam
+export function FavoritePill({ workshopId, count }: { workshopId: string; count: number | null | undefined }) {
   const settled = useSettled(workshopId);
   const [st, setSt] = useState<{ signedIn: boolean; favorited: boolean | null } | null>(() =>
     favorites.has(workshopId) ? { signedIn: true, favorited: favorites.get(workshopId)! } : null);
+  // what Steam's count already holds: the state as first read (a later toggle moves the shown count by one)
+  const [counted, setCounted] = useState<boolean | null>(() => favoritesCounted.get(workshopId) ?? null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pops, setPops] = useState(0); // user changes: the star's key, so each one pops once
   useEffect(() => {
     if (!settled || favorites.has(workshopId)) return;
     let alive = true;
-    api.workshopFavorite(workshopId).then((r) => { if (r.signedIn && r.favorited != null) favorites.set(workshopId, r.favorited); if (alive) setSt(r); })
-      .catch(() => { if (alive) setSt({ signedIn: true, favorited: null }); });
+    api.workshopFavorite(workshopId).then((r) => {
+      if (r.signedIn && r.favorited != null) { favorites.set(workshopId, r.favorited); favoritesCounted.set(workshopId, r.favorited); }
+      if (alive) { setSt(r); setCounted(r.favorited ?? null); }
+    }).catch(() => { if (alive) setSt({ signedIn: true, favorited: null }); });
     return () => { alive = false; };
   }, [settled, workshopId]);
   const on = st?.favorited === true;
@@ -197,7 +205,7 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
     if (!st?.signedIn || busy) return;
     const want = !on;
     setBusy(true); setErr(null);
-    // the tile shows the new state at once; Steam's refusal puts it back and says why
+    // the pill shows the new state at once; Steam's refusal puts it back and says why
     setSt({ signedIn: true, favorited: want }); setPops((n) => n + 1);
     try { const r = await api.workshopSetFavorite(workshopId, want); favorites.set(workshopId, r.favorited); }
     catch (e) {
@@ -205,19 +213,17 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   };
-  const label = signedOut ? "Favourite on Steam" : on ? "Favourited" : "Favourite";
+  const n = count == null ? null : Math.max(0, count + (counted === null ? 0 : (on ? 1 : 0) - (counted ? 1 : 0)));
+  const shown = fmtCount(n);
+  const word = signedOut ? "Favourite on Steam" : on ? "Favourited" : "Favourite";
   return (
-    <button type="button" className={`side-tile fav-tile${on ? " on" : ""}`} data-ws-fav={st == null ? "loading" : signedOut ? "signed-out" : on ? "on" : "off"}
+    <button type="button" className={`side-pill fav-pill${on ? " on" : ""}`} data-side-stat="favorites"
+      data-ws-fav={st == null ? "loading" : signedOut ? "signed-out" : on ? "on" : "off"}
       aria-pressed={st?.signedIn ? on : undefined} aria-busy={st == null || busy || undefined}
+      aria-label={shown ? `${word}, ${shown} favourites` : word}
       title={signedOut ? "Liascape isn't signed in to Steam: favourite it on its page in the Steam app" : err ?? undefined} onClick={toggle}>
-      <span className="side-tile-ico">
-        <Star key={pops} size={15} fill={on ? "currentColor" : "none"} className={pops ? "ico-pop" : undefined} />
-      </span>
-      <span className="xfade">
-        {["Favourite", "Favourited", "Favourite on Steam"].map((t) => (
-          <span key={t} data-off={t === label ? undefined : ""} aria-hidden={t !== label}>{t}</span>
-        ))}
-      </span>
+      <Star key={pops} size={13} fill={on ? "currentColor" : "none"} className={pops ? "ico-pop" : undefined} />
+      {shown != null && <span data-fav-count>{shown}</span>}
     </button>
   );
 }
@@ -227,7 +233,7 @@ const STATS_FLIP = ":scope > *, :scope > .side-hero > *";
 
 // The Library sidebar's stat pills: Steam's current subscribers and favourites (a Browse result carries its own, shown in its
 // hero), asked once the sidebar settles (GET /workshop/counts, Steam's client protocol) and kept for the session. They sit in
-// the hero's row beside the other pills (LibrarySide.tsx; `display: contents`, so they are the row's own items), held there
+// the hero's row beside the other pills (ItemSide.tsx; `display: contents`, so they are the row's own items), held there
 // unseen while they're asked, so they fade in where they stay (motion on: rising a little) and nothing moves; no answer
 // (Steam unreachable) → the held pills leave, and what followed them glides into their room (motion off: takes it at once).
 // Guard: probe-steam lib:ws:counts, lib:ws:countsOff, lib:ws:pillRow
@@ -260,7 +266,8 @@ export function WorkshopStats({ workshopId }: { workshopId: string }) {
   // the held pills' stand-ins: the widths of numbers like Steam's, so the real ones land about where they show
   return (
     <span ref={ref} className="ws-stats" data-ws-stats={c ? "known" : "loading"} aria-hidden={!c || undefined}>
-      <StatPills subscriptions={c?.subscriptions ?? 1000} favorites={c?.favorites ?? 100} />
+      <StatPills subscriptions={c?.subscriptions ?? 1000} favorites={c?.favorites ?? 100}
+        fav={<FavoritePill workshopId={workshopId} count={c?.favorites ?? 100} />} />
     </span>
   );
 }

@@ -72,32 +72,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        requests to steamcommunity.com than now (`SteamGate`). Guard: the benchmark scenario's numbers before / after,
        and a probe cell per behaviour added.
 
-12. [ ] (owner) One sidebar for a Workshop item, the same in the Library and Browse: the owner-approved design in
-       `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` § The sidebar (none of it built yet; its filter half is
-       item 17, its motion item 18, its UI rules are in `.claude/rules/ui/design.md`), with the owner's later calls on top.
-       Today `LibrarySide.tsx` and `BrowseSide.tsx` are separate and disagree (the owner's side-by-side of 2922240701).
-       - One skeleton in both tabs: picture → title → info pills (facts and tags only, one order) → one action area →
-         creator / presets rows → About (description; both tabs) → tiles → Playback / Scene properties when the item is in
-         the library (both tabs) → comments.
-       - Action area, not downloaded: "Subscribe" and "Subscribe and apply" (owner 2026-11-26, in place of the spec's
-         Download / Download & Apply), through the download modes' order; the one-off download stays in their right-click
-         menu. No `SubToggle` card, no hint line under the buttons (`side-cta-note`).
-       - Action area, downloaded (Browse, and the Library for Workshop items): one split button Play | Unsubscribe;
-         right-click on Unsubscribe = "Unsubscribe, keep the files". Library items not from the Workshop: Play | Delete.
-         A click on the sidebar's picture plays too, in both tabs.
-       - "Show in Library": an icon button under the close X (`SideHeadTools`, `SidePanel.tsx`); the "In your library" chip
-         goes.
-       - Favourite: the favourites-count pill is the toggle (star filled when favourited; signed out it explains
-         sign-in); the Favourite tile goes.
-       - Creator / presets rows: the whole row is the target, a hover lift and a sliding chevron, no trailing icons; the
-         presets row's look: 2–3 mock-ups for the owner to pick (the spec).
-       - Hide / Unhide in the sidebar, acting on the selection; remove the card right-click menu from e022227c (its
-         `ContextMenu` / `cardMenuItems` wiring, the "light" menu mode, its probe cells); keep `hidden.json`, the Hidden
-         filter row and their tests (`docs/decisions.md` § "Hide and Unsubscribe live in the sidebar, never a card menu").
-       Share one component (or one actions list) so the two can't drift again. Guard: probe cells that open the same item
-       in both tabs and find the same sections in the same order, the same actions and labels, the Show in Library icon
-       under the X, the favourite pill, Hide / Unhide, and no card menu.
-
 13. [ ] (owner) "Text shadow" (Settings → Look & feel, `:root.text-shadow` in `index.css`) fits coloured text over a live
        wallpaper too, and leaves the playlist bar's PLAYLIST label alone.
        - Text in a state colour is excluded today (a black copy under it "reads as dirt"), so the red Unsubscribe tile

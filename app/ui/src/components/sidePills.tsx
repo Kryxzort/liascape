@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { HardDrive, Star, Users } from "lucide-react";
 import { fmtCount, fmtSize } from "./sideFormat";
 
@@ -5,13 +6,14 @@ import { fmtCount, fmtSize } from "./sideFormat";
 
 // Steam's current counts (the backend reads `subscriptions` / `favorited`, never the lifetime ones — Guard:
 // test-workshop-social.sh); the star is the favourite's everywhere (the Favourite tile), the people the subscribers'. No view
-// count. Guard: probe-steam ws:counts, lib:ws:counts
-export function StatPills({ subscriptions, favorites }: { subscriptions: number | null | undefined; favorites: number | null | undefined }) {
+// count. `fav`: the favourites pill as a Workshop item's toggle (WorkshopSocial.tsx FavoritePill), in the plain one's place.
+// Guard: probe-steam ws:counts, lib:ws:counts
+export function StatPills({ subscriptions, favorites, fav }: { subscriptions: number | null | undefined; favorites: number | null | undefined; fav?: ReactNode }) {
   const subs = fmtCount(subscriptions), favs = fmtCount(favorites);
   return (
     <>
       {subs && <span className="side-pill" title="Subscribers" data-side-stat="subscribers"><Users size={13} /> {subs}</span>}
-      {favs && <span className="side-pill" title="Favourites" data-side-stat="favorites"><Star size={13} /> {favs}</span>}
+      {fav ?? (favs && <span className="side-pill" title="Favourites" data-side-stat="favorites"><Star size={13} /> {favs}</span>)}
     </>
   );
 }

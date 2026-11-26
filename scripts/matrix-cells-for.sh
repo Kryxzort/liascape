@@ -103,8 +103,8 @@ for f in $FILES; do
     app/ui/src/components/CopyButton.tsx|app/ui/src/hooks/useCopied.ts)
       echo "  $f → nothing in the matrix (--probe probe-settings.js copy:; probe-icons.js — the ID pill)" >&2 ;;
     # the controls' right-click menus (Unsubscribe → keep the files, Download → without subscribing) and the menu itself
-    app/ui/src/components/SubToggle.tsx|app/ui/src/components/ContextMenu.tsx|app/ui/src/components/menuItems.tsx|app/ui/src/components/subscribeMode.ts)
-      echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:subToggle:, steam:subMerge:, side:)" >&2 ;;
+    app/ui/src/components/ContextMenu.tsx|app/ui/src/components/menuItems.tsx|app/ui/src/components/subscribeMode.ts|app/ui/src/components/wsSubState.ts)
+      echo "  $f → nothing in the matrix (--probe probe-steam.js — steam:sub:, steam:subMerge:, side:; --probe probe-hidden.js same:)" >&2 ;;
     # the item sidebars' creator / favourite / comments / counts and number pills, the Workshop's list pills and the shared
     # Workshop ID pill
     app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx|app/ui/src/components/sidePills.tsx|app/ui/src/components/sideFormat.ts)
@@ -117,8 +117,8 @@ for f in $FILES; do
     # the scene properties editor: its parser/values/conditions and the sidebar section (cells sceneProp:*)
     src/backend/Helpers/SceneProperties.cs|app/ui/src/components/ScenePropsEditor.tsx|app/ui/src/components/scenePropsCache.ts) add "$SCENE|$MODAL" "$f" ;;
     # the item sidebar (it replaced the card settings modal): the cells that open it + its own probe
-    app/ui/src/components/LibrarySide.tsx|app/ui/src/components/SidePanel.tsx|app/ui/src/components/SideTitle.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
-      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre / side:title*; probe-steam.js side:browseTitle, lib:ws:; probe-layout.js perf:sidebar)" ;;
+    app/ui/src/components/ItemSide.tsx|app/ui/src/components/itemRemoval.ts|app/ui/src/components/SidePanel.tsx|app/ui/src/components/SideTitle.tsx|app/ui/src/components/sidePreview.ts|app/ui/src/components/YouTubeEmbed.tsx|app/ui/src/hooks/useLinger.ts|app/ui/src/hooks/gridKeys.ts|app/ui/src/components/motion.ts|app/ui/src/components/flipGlide.ts)
+      add "$MODAL|sceneProp|appear|$KEYS" "$f (+ scripts/test-ui-matrix.sh --probe probe-sidebar.js — the sidebar probe, its lib:clearCrash / preview:open / look:previewOpen / look:iconCentre / side:title*; probe-steam.js side:, steam:sub:, lib:ws:; probe-hidden.js — the same item on both tabs, Hide; probe-layout.js perf:sidebar)" ;;
     app/ui/src/components/PlaylistBar.tsx|app/ui/src/hooks/useSmoothScroll.ts|app/ui/src/hooks/useDockLift.ts|app/ui/src/hooks/useBarFold.ts)
       add "$PL|plStart|plTr|travel:|hoverPreview|global:sceneTiming|playlist:sceneTiming" "$f (+ --probe probe-plbar.js — wheel + gap hover; probe-presence.js bar:remove; probe-layout.js dock:, scroll:, look:plFold, perf:tabs, perf:plFold, perf:dockRepaint)" ;;
     # the segmented control: the playlist modal's order / start switches, the sidebar's preview strip (the level picker is in App.tsx)
@@ -167,7 +167,7 @@ for f in $FILES; do
     # the icon motion vocabulary: one-shots on every icon button, the magnet on the primary actions, the two-part icons
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
-    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/WsSetLoad.tsx|app/ui/src/views/localSet.ts|app/ui/src/components/facets.ts|app/ui/src/components/BrowseSide.tsx|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
+    app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/WsSetLoad.tsx|app/ui/src/views/localSet.ts|app/ui/src/components/facets.ts|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
       add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-presence.js browse:filter; --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:, yours:; --probe probe-filters.js — the Workshop filter column, filter:preset:badge; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)

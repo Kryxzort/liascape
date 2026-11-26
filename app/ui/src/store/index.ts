@@ -275,7 +275,7 @@ interface State {
   filterCollapsed: string[]; toggleFilterGroup(id: string): void;
   // the Library sidebar's "Scene properties" folded: one remembered choice for every scene, never per item (ScenePropsEditor)
   scenePropsFolded: boolean; setScenePropsFolded(v: boolean): void;
-  // oneOff: a Workshop item's "Download without subscribing" (components/BrowseSide.tsx's right-click menu)
+  // oneOff: a Workshop item's "Download without subscribing" (the item sidebar's Subscribe buttons' right-click menu, components/ItemSide.tsx)
   download(source: number, w: Wallpaper, apply: boolean, oneOff?: boolean): Promise<void>;
   redownload(item: LibraryItem): Promise<void>;
   cancelDownload(id: string): void;
@@ -715,7 +715,7 @@ export const useStore = create<State>((set, get) => ({
       await get().loadLibrary();
       // a preset the backend downloaded (and waited for its base) but can't play: downloaded, with why it isn't applied
       if (item.notApplied) { get().setStatus(`Downloaded: ${w.title}. ${cantPlay("it", item.notApplied)}`, true, true); return; }
-      // auto-import on + the "subscribe" mode: the download was the subscription (components/BrowseSide.tsx subIsDownload)
+      // auto-import on + the "subscribe" mode: the download was the subscription (components/subscribeMode.ts subscribeIsDownload)
       const sub = !oneOff && subscribeIsDownload(get().settings) && isWorkshopItem(w);
       get().setStatus(apply ? `Applied: ${w.title}` : `${sub ? "Subscribed" : "Downloaded"}: ${w.title}`);
     } catch (e) {

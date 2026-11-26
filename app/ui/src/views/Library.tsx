@@ -7,7 +7,8 @@ import { facetsOf } from "../components/facets";
 import { knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
-import { LibrarySide } from "../components/LibrarySide";
+import { ItemSide } from "../components/ItemSide";
+import { useRemoval } from "../components/itemRemoval";
 import { useMotion } from "../components/motion";
 import { gridCols, gridOwnsKey, keepCardInView, revealCard, stepIndex } from "../hooks/gridKeys";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
@@ -20,11 +21,7 @@ import { usePresence } from "../hooks/usePresence";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
 import type { LibraryItem } from "../api/client";
-import { unsubBlocked } from "../components/subscribeMode";
 import { setPreviewOrder, setPreviewSide } from "../components/previewQueue";
-import { confirmBaseRemoval } from "../components/baseConfirm";
-import { ContextMenu, type MenuAt } from "../components/ContextMenu";
-import { cardMenuItems, menuAt } from "../components/menuItems";
 import { CRASHED_TAG, HIDDEN_TAG, byFavorites, setModesOf } from "./localSet";
 import { Welcome } from "../components/Welcome";
 import { Tip } from "../components/Tip";
@@ -62,24 +59,14 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const playingPath = useStore((s) => s.playingPath);
   const playlist = useStore((s) => s.playlist);
   const applyItem = useStore((s) => s.applyItem);
-  const trashItems = useStore((s) => s.trashItems);
   const toggleInPlaylist = useStore((s) => s.toggleInPlaylist);
   const addManyToPlaylist = useStore((s) => s.addManyToPlaylist);
   const removeManyFromPlaylist = useStore((s) => s.removeManyFromPlaylist);
-  const deleteFromSource = useStore((s) => s.deleteFromSource);
-  const unsubscribeKeep = useStore((s) => s.unsubscribeKeepWorkshop);
-  const openExternal = useStore((s) => s.openExternal);
   const libFocus = useStore((s) => s.libFocus);
   const focusLib = useStore((s) => s.focusLib);
-  const keepCurrent = useStore((s) => s.keepCurrent);
-  const gVol = useStore((s) => (s.settings?.volume as number) ?? 100);
-  const gSpd = useStore((s) => (s.settings?.speed as number) ?? 1);
   const motion = useMotion();
   const setStatus = useStore((s) => s.setStatus);
   const refreshPlayingStatus = useStore((s) => s.refreshPlayingStatus);
-  const autoImport = useStore((s) => !!(s.settings?.autoAddWeWallpapersToLibrary));
-  // why Unsubscribe can't happen now (signed out), else null: every Unsubscribe here shows it disabled
-  const unsubOff = useStore((s) => unsubBlocked(s.settings, s.steam));
   // every scene and preset is greyed while the scene renderer is missing (store unplayableReasonOf): one flag here, a
   // reason per card
   const scenesBlocked = useStore((s) => s.scenesBlocked);
@@ -102,8 +89,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   }, [items]);
   // The Crashed row: ✓ keeps the items whose scene crashed the player, ✕ the rest. Guard: probe-filters lib:crashed
   const crashMode = libFilter.include.includes(CRASHED_TAG) ? "inc" : libFilter.exclude.includes(CRASHED_TAG) ? "exc" : null;
-  // The hidden cards (a card's menu → Hide; store hidden): left out of the grid; the Hidden row's ✓ shows only them, with
-  // Unhide in their menu. Guard: probe-hidden hide:lib, hide:filter
+  // The hidden cards (the sidebar's Hide; store hidden): left out of the grid; the Hidden row's ✓ shows only them, with
+  // Unhide in their sidebar. Guard: probe-hidden hide:lib, hide:filter
   const hiddenLib = useStore((s) => s.hidden.library);
   const hidOnly = libFilter.include.includes(HIDDEN_TAG);
   // The Favourites row: ✓ keeps the items starred on the Workshop, ✕ the rest (a non-Workshop item is never starred). Signed
@@ -218,40 +205,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
     return () => { if (sel.size) refreshPlayingStatus(); }; // clear selection status on unmount/tab switch
   }, [sel]); // eslint-disable-line
 
-  // With auto-import on, a subscribed Workshop item has no plain Delete (the import would bring it back): its Delete is
-  // Unsubscribe = Delete from source (undoable; Undo subscribes again), on the card's button, the Delete key and the
-  // sidebar alike; a mixed selection unsubscribes those and deletes the rest. The library's own copy of one ("Unsubscribe
-  // without deleting") deletes like any local item. Guard: probe-steam side:unsub:*
-  // When the mode can't unsubscribe (unsubOff: signed out) those Workshop items stay, nothing queued, and the status bar
-  // says why; the rest of a selection still deletes. Guard: probe-steam side:unsub:signedOut
-  const unsubs = (i: LibraryItem) => autoImport && !!i.workshopId && !!i.subscribed;
-  // A scene that presets in the library play asks first, naming how many (components/baseConfirm.ts); `then` runs only once
-  // it goes ahead (the sidebar closes after the answer, not before). Guard: probe-sidebar lib:baseDelete
-  const doTrash = async (list: LibraryItem[], then?: () => void) => {
-    const go = list.filter((i) => !unsubs(i) || !unsubOff);
-    if (go.length && !await confirmBaseRemoval(go, items, go.some(unsubs) ? "unsubscribe" : "delete")) return;
-    then?.();
-    const ws = list.filter(unsubs);
-    if (ws.length && !unsubOff) deleteFromSource(ws);
-    const plain = list.filter((i) => !unsubs(i));
-    const deleted = plain.length ? trashItems(plain) : Promise.resolve();
-    if (ws.length && unsubOff) {
-      const name = (l: LibraryItem[], other: string) => (l.length === 1 ? l[0].title : `${other}${l.length} wallpapers`);
-      // held: clearing the selection re-shows the playing line right after (the effect on `sel` below)
-      deleted.then(() => setStatus(plain.length ? `Deleted ${name(plain, "")}. ${unsubOff} ${name(ws, "the other ")}` : unsubOff, true, true));
-    }
-    setSel(new Set());
-  };
-  // "Unsubscribe without deleting" (the Unsubscribe tile's right-click): each subscribed Workshop item becomes the library's
-  // own copy, then unsubscribes (POST /workshop/unsubscribe-keep, one at a time); the rest of a selection is left alone
-  const doKeep = async (list: LibraryItem[]) => {
-    const ws = [...new Map(list.filter(unsubs).map((i) => [i.workshopId!, i])).values()];
-    if (!ws.length || unsubOff) return;
-    setSel(new Set());
-    setStatus(`Copying ${ws.length === 1 ? ws[0].title : `${ws.length} wallpapers`} into your library…`, false);
-    for (const i of ws) await unsubscribeKeep(i.workshopId!, i.title);
-    if (ws.length > 1) setStatus(`Unsubscribing from ${ws.length} wallpapers. They stay in your library.`);
-  };
+  // the library's removals (components/itemRemoval.ts): the card's button, the Delete key and the sidebar alike
+  const { unsubs, unsubOff, doTrash } = useRemoval(() => setSel(new Set()));
 
   // card actions on a *selected* card repeat to the whole selection.
   const targetsFor = (it: LibraryItem) => (sel.has(it.videoPath) ? [...sel].map((p) => byPath[p]).filter(Boolean) : [it]);
@@ -327,38 +282,21 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const cardClick = useStableFn(onCardClick);
   const cardTrash = useStableFn((it: LibraryItem) => doTrash(targetsFor(it)));
   const cardToggle = useStableFn(doToggle);
-  // a right-click: the sidebar on the card (the selection kept: the sidebar edits it) and the card's menu at the pointer
-  // (docs/decisions.md § "Right-click a card for its sidebar and its menu")
-  // what it acts on and whether those are hidden, taken as it opens: its words stay put while it fades out after a pick
-  const [menu, setMenu] = useState<{ at: MenuAt; targets: LibraryItem[]; hidden: boolean; open: boolean } | null>(null);
-  const closeMenu = useStableFn(() => setMenu((m) => (m && m.open ? { ...m, open: false } : m)));
-  const cardContext = useStableFn((it: LibraryItem, e: React.MouseEvent) => {
-    focusFromCard(it.videoPath);
-    setMenu({ at: menuAt(e), targets: targetsFor(it), hidden: !!hiddenLib[it.videoPath], open: true });
-  });
-  // The card's menu acts on the selection when the card is in it, else on the card. Unsubscribe: its subscribed Workshop items,
-  // by the Library's own unsubscribe (Delete from source: undoable, the unsubscribe in the download modes' order; signed out
-  // under "Subscribe with Steam login" the item's Steam page), a scene that presets play asking first. Hide / Unhide: every one;
-  // a hidden card leaves the grid (the top bar's Undo brings it back) and the sidebar on it closes.
-  // Guard: probe-hidden menu:lib, hide:lib, hide:multi, unsub:lib, unsub:signedOut
-  const menuTargets = menu?.targets ?? [];
-  const subscribed = (i: LibraryItem) => !!i.workshopId && !!i.subscribed;
-  const leaveSide = (list: LibraryItem[]) => { const f = useStore.getState().libFocus; if (f && list.some((i) => i.videoPath === f)) focusLib(null); };
+  // a right-click: the sidebar on the card (the selection kept: the sidebar edits it); no menu (docs/decisions.md § "One
+  // sidebar for an item, the same on both tabs")
+  const cardContext = useStableFn((it: LibraryItem) => focusFromCard(it.videoPath));
+  // the sidebar's Hide / Unhide act on the selection when the card is in it, else on the card: a hidden card leaves the grid
+  // (the top bar's Undo brings it back) and the sidebar on it closes. Guard: probe-hidden hide:lib, hide:multi, hide:filter
   const hideCards = useStore((s) => s.hideCards), unhideCards = useStore((s) => s.unhideCards);
-  const doUnsub = async (list: LibraryItem[]) => {
-    const ws = list.filter(subscribed);
-    if (!ws.length) return;
-    if (unsubOff) { setStatus(unsubOff, true, true); return; }
-    if (!await confirmBaseRemoval(ws, items, "unsubscribe")) return;
-    leaveSide(ws); setSel(new Set());
-    deleteFromSource(ws);
+  const hideFor = (it: LibraryItem) => {
+    const list = targetsFor(it);
+    const done = () => { focusLib(null); setSel(new Set()); };
+    return {
+      hidden: !!hiddenLib[it.videoPath], n: list.length,
+      onHide: () => { done(); hideCards("library", list.map((i) => ({ key: i.videoPath, title: i.title }))); },
+      onUnhide: () => { done(); unhideCards("library", list.map((i) => i.videoPath), list.map((i) => i.title)); },
+    };
   };
-  const menuItems = cardMenuItems({
-    n: menuTargets.length, unsubN: menuTargets.filter(subscribed).length, hidden: !!menu?.hidden,
-    onUnsub: () => doUnsub(menuTargets),
-    onHide: () => { leaveSide(menuTargets); setSel(new Set()); hideCards("library", menuTargets.map((i) => ({ key: i.videoPath, title: i.title }))); },
-    onUnhide: () => { leaveSide(menuTargets); setSel(new Set()); unhideCards("library", menuTargets.map((i) => i.videoPath), menuTargets.map((i) => i.title)); },
-  });
   // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
   const onMarquee = useMarquee(scrollRef, { prefix: "lib-", sel, setSel, anchor });
 
@@ -376,7 +314,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
       {!welcomeWanted && <>
       <WsSetLoad scope="library" />
       {emptyKind === "favourites" && <NoMatch kind="favourites" text="No favourites yet. Star a Workshop wallpaper in its sidebar (right-click its card) and it shows here." onClear={() => clearTags("library")} />}
-      {emptyKind === "hidden" && <NoMatch kind="hidden" text="Nothing is hidden. A wallpaper you hide (right-click it) leaves the grid and shows here." onClear={() => clearTags("library")} />}
+      {emptyKind === "hidden" && <NoMatch kind="hidden" text="Nothing is hidden. A wallpaper you hide (Hide in its sidebar) leaves the grid and shows here." onClear={() => clearTags("library")} />}
       {emptyKind === "filters" && <NoMatch onClear={() => clearTags("library")} />}
       {emptyKind === "search" && <NoMatch kind="search" text={`Nothing in your library matches “${libQuery.trim()}”.`} clear="Clear search" onClear={() => setLibQuery("")} />}
       {emptyKind === "allHidden" && <NoMatch kind="allHidden" text="Every wallpaper here is hidden. The filter's Hidden row shows them." clear={null} onClear={() => {}} />}
@@ -397,30 +335,14 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
       </>}
     </div>
     {col.panel.value && !welcomeWanted && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
-    <ContextMenu at={menu?.open ? menu.at : null} items={menuItems} onClose={closeMenu} light
-      label={menuTargets.length > 1 ? `${menuTargets.length} wallpapers` : (menuTargets[0]?.title ?? "Wallpaper")} />
     {sideItem && !welcomeWanted && (() => {
       const targets = targetsFor(sideItem);
-      const unsubN = targets.filter(unsubs).length;
       return (
         <SidePanel kind="library" id={sideItem.videoPath} order={filtered.findIndex((i) => i.videoPath === sideItem.videoPath)} card={`lib-${sideItem.videoPath}`} closing={shown.closing} title={sideItem.title}
           sub={<SelectionNote n={targets.length} />} onClose={() => focusLib(null)}>
-          <LibrarySide item={sideItem} targets={targets}
-            playing={sideItem.videoPath === playingPath} keepCurrent={keepCurrent}
-            unsubN={unsubN} deleteN={targets.length - unsubN} unsubOff={unsubOff}
-            showDeleteFromSource={!!sideItem.workshopId && !autoImport}
-            globalVolume={gVol} globalSpeed={gSpd}
-            onPlay={() => applyItem(sideItem.videoPath)}
-            onReveal={() => openExternal({ path: sideItem.videoPath, reveal: true, isScene: sideItem.isScene, workshopId: sideItem.workshopId, copiedSceneDir: sideItem.copiedSceneDir })}
-            onTrash={() => doTrash(targets, () => focusLib(null))}
-            onDeleteSource={async () => {
-              if (unsubOff) return;
-              const ws = targets.filter((i) => i.workshopId);
-              if (!await confirmBaseRemoval(ws, items, "unsubscribe")) return;
-              focusLib(null); deleteFromSource(ws);
-            }}
-            onShowInBrowse={onShowInBrowse}
-            onKeep={() => doKeep(targets)} />
+          <ItemSide tab="library" w={null} lib={sideItem} libTargets={targets} hide={hideFor(sideItem)}
+            clearSel={() => setSel(new Set())} onRemoved={() => focusLib(null)}
+            onShowInBrowse={onShowInBrowse} onShowInLibrary={(path) => { focusLib(path); revealCard(`lib-${path}`); }} />
         </SidePanel>
       );
     })()}

@@ -1828,7 +1828,7 @@ app.whenReady().then(async () => {
           }
           const sh = base.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
           if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${base.look})`);
-          // the Browse sidebar's hero chip says the same as the card (BrowseSide.tsx): a right-click on the card opens it
+          // the Browse sidebar's hero chip says the same as the card (ItemSide.tsx): a right-click on the card opens it
           const chip = async (t) => {
             const r = await page(`const c = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === ${J(t)});
               const w = c?.querySelector(".thumb-wrap"); if (!w) return null; w.scrollIntoView({ block: "nearest" }); await m.sleep(150); const b = w.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };`);

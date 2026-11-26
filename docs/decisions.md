@@ -191,11 +191,11 @@ With "Switch when video ends" off the interval is a plain timer; on, the same va
 
 ## UI
 
-### Hide and Unsubscribe live in the sidebar, never a card menu — 2026-11-27
-Right-click opens the item's sidebar, so a menu at the pointer on the same click collides with it (tried 2026-11-26,
-reverted). Unsubscribe and Hide are sidebar actions in both tabs. Hide only hides: per grid (the Library by path, Browse by
-page URL and source), kept in `hidden.json`, undone by the removal's Undo; each grid's filter column gets a Hidden row
-(✓ shows only them, with Unhide in their sidebar), offered once something is hidden there. `scripts/test-hidden.sh`.
+### One sidebar for an item, the same on both tabs — 2026-11-27
+Two copies drifted: `components/ItemSide.tsx` shows an item on both tabs in one skeleton. Held: a split button Play |
+Unsubscribe (Play | Delete off the Workshop); not: Subscribe / Subscribe and apply. Right-click opens it, so a menu at the
+pointer collides (tried, reverted): Hide and Unsubscribe are its actions, never a card menu. Hide only hides, per grid
+(`hidden.json`, the removal's Undo; the filter column's Hidden row). probe-hidden `same:*`, `scripts/test-hidden.sh`.
 
 ### Teach in place, never with a step-by-step tour — 2026-11-26
 First-run help is a welcome in the empty Library's place, one dismissible tip per non-obvious thing where it is met, and
@@ -214,7 +214,7 @@ Every player path loops a lone video; there is no `Loop` setting.
 ### Left click does the tab's main action, right click opens the item sidebar — 2026-11-14
 A plain click applies in the Library, opens the item to look over in Browse (double-click, Enter or the hover button
 downloads and applies; a library item's card has no button). A right-click opens the sidebar everywhere, applies nothing, keeps
-the selection; no item menus (§ "Hide and Unsubscribe live in the sidebar, never a card menu"). Ctrl / Shift-click only
+the selection; no item menus (§ "One sidebar for an item, the same on both tabs"). Ctrl / Shift-click only
 select. An open Library sidebar follows a click. `.claude/rules/ui/design.md` § Interaction rules (its guards).
 
 ### Fade, never move, with motion off — 2026-11-12
@@ -258,7 +258,7 @@ even on a clicked button; `.kbd-nav` limits the ring to Tab navigation. `hooks/f
 ### Make the sidebar's picture the Play control — 2026-11-11
 The Play / In-playlist row was "redundant clutter": the picture is an invisible button (no Play icon, a hover scale), a
 playing item gets a green frame instead of a "Playing now" pill, and the playlist checkbox lives on the card and the bar
-only. `components/SidePanel.tsx`.
+only; the action area's Play is its button. `components/SidePanel.tsx`.
 
 ### Open previews on the gif or still, never the video, and remember the pick per sidebar — 2026-11-11
 Owner: "dont force mp4 when the preview is a still image". The pick is per sidebar, not shared: Browse items rarely have

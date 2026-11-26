@@ -26,8 +26,8 @@ import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPr
 // the head line for a focused card inside a multi-selection
 export function SelectionNote({ n }: { n: number }) { return n > 1 ? <span className="shint side-sub">applies to {n} selected</span> : null; }
 
-// the head's tool slot (before the close button): the content (keyed per item) portals its tools there — the Library
-// sidebar's playlist toggle and, while the picture shows the YouTube trailer, its Play button
+// the head's tool slot (under the close button): the content (keyed per item) portals its tools there — Browse's "Show in
+// Library" for an item the library holds (ItemSide.tsx)
 const HeadSlot = createContext<HTMLElement | null>(null);
 export function SideHeadTools({ children }: { children: ReactNode }) {
   const slot = useContext(HeadSlot);

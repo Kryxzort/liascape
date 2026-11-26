@@ -1204,7 +1204,7 @@ input[type=range]:focus-visible { outline: none; }
 .ico-pop, .pl-toggle-svg.pop-on { animation: icon-pop var(--spring-dur) var(--spring); }
 .pl-toggle-svg.pop-off { animation: icon-pop-b var(--spring-dur) var(--spring); }
 /* status: never moves; glows (a static drop-shadow in its own colour) */
-.side-chip > svg.lucide, .side-sub-ico.subscribed > svg { filter: drop-shadow(0 0 3px currentColor); }
+.side-chip > svg.lucide { filter: drop-shadow(0 0 3px currentColor); }
 /* disclosure: the select / preset carets turn over while their list is open */
 .sel-caret, .combo-caret svg { transition: transform var(--spring-soft-dur) var(--spring-soft), scale var(--spring-dur) var(--spring); }
 .sel.open .sel-caret, .combo-caret.open svg { transform: rotate(180deg); }
@@ -1478,7 +1478,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .sp-fold .sp-chev { filter: none; }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .pw-modal h2 svg { filter: none; }
-:root.no-glow .side-chip > svg.lucide, :root.no-glow .side-sub-ico.subscribed > svg { filter: none; }
+:root.no-glow .side-chip > svg.lucide { filter: none; }
 :root.no-glow .wf-grp::before, :root.no-glow .wf-seg.e[aria-checked="true"] { box-shadow: none; }
 :root.no-glow :is(.ss-filter, .ss-filter.on, .ss-filter:hover, .ss-n) { box-shadow: none; }
 :root.no-glow .seg .seg-hl, :root.no-glow .seg:has(.seg-opt.on:hover) .seg-hl { box-shadow: none; }
@@ -1506,12 +1506,12 @@ input[type=range]:focus-visible { outline: none; }
   .dl-btn:hover, .dl-glyph, .err-modal h2, .go-playing:hover:not(:disabled), .health-sum-head, .hms span.s-warn-text, .mini.on,
   .ns-btn:not(:disabled):hover, .ord-n, .pill.active, .pl-name.sel, .pl-remove:hover, .pl-toggle, .play-btn, .pw-err, .pw-wait, .s-expert,
   .s-reset:hover, .s-warn, .s-warn-text, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
-  .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title, .side-sub-ico.subscribed, .side-sub-ico.subscribing,
-  .side-sub-ico.unsubscribing, .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
+  .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title,
+  .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
   .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-hold-ico, .st-hold-text, .st-msg, .st-name, .st-use,
   .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
   .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
-  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op, .ws-creator-ico) { text-shadow: none; }
+  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op) { text-shadow: none; }
 /* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
    the same shadow as a filter instead, as bg-live does */
 :root.text-shadow .side-head-text { filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
@@ -1520,12 +1520,12 @@ input[type=range]:focus-visible { outline: none; }
    clips its own text, like .pl-title, cuts the shadow at its fill's edge, which shows anyway.) The chosen pill sits under the
    accent highlight: no shadow, or it would leak out round the highlight. A filter shadows its whole subtree, so a status line
    showing a coloured message or name, or an excluded filter row, takes none. */
-:root.text-shadow :is(.st-layer:not(:has(.st-msg, .st-name)), .lib-title span, .st-title, .sel-val, .sh-text, .side-sub-text b,
+:root.text-shadow :is(.st-layer:not(:has(.st-msg, .st-name)), .lib-title span, .st-title, .sel-val, .sh-text,
   .wf-row:not(.exc) .wf-name, .seg-opt:not(.on)) {
   filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }
 :root.text-shadow .seg-opt.on { text-shadow: none; }
 /* under bg-live the loose text over the wallpaper already carries this shadow as a filter: never twice */
-:root.text-shadow.bg-live :is(.wf-none > span, .side-sub-text b, .side-sub-hint, .wf-title, .wf-clear, .wsl-text) { text-shadow: none; }
+:root.text-shadow.bg-live :is(.wf-none > span, .wf-title, .wf-clear, .wsl-text) { text-shadow: none; }
 
 /* Settings levels: the note about changed settings a lower level hides (views/Settings.tsx, .claude/rules/ui/state-and-api.md § Settings page) */
 .help.hidden-changed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -1567,14 +1567,16 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel .side-title-ghost.late { animation-delay: var(--fade-dur) !important; }
 :root.no-motion .side-panel .side-content > .side-body:not(.wait) > .side-crash.leaving,
 :root.no-motion .side-panel .side-wl.leaving { animation: nm-out var(--fade-dur) linear forwards !important; animation-delay: 0s !important; }
-:root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-sub-btn, .side-tile) { transform: none !important; }
+:root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-split > .side-go, .side-tile) { transform: none !important; }
 :root.no-motion .side-panel input[type=range]::-webkit-slider-thumb { transform: none !important; }
 :root.no-motion .side-panel .side-sub-spin { animation: side-sub-spin 1s linear infinite !important; }
 /* the comments and the avatars fade in in place; the creator row doesn't lift; the creator's pill fades in and out */
 :root.no-motion .side-panel :is(.ws-c, .ws-steam-comment) { animation: nm-in var(--fade-dur) linear both !important; }
 :root.no-motion .side-panel :is(.ws-avatar > img, .ws-creator-name) { transition: opacity var(--fade-dur) linear !important; }
-:root.no-motion .side-panel .ws-creator { transform: none !important; }
-:root.no-motion .side-hero > [data-side-row="size"]:last-child { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .side-panel :is(.ws-creator, .ws-creator-go) { transform: none !important; }
+:root.no-motion .side-hero > [data-side-row="size"] { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-body:not(.wait) .side-cta > .side-go.arrive:not(.leaving) { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .side-panel .side-cta > .side-go.leaving { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .side-panel .side-fonts { animation: nm-in var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-fonts.leaving { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .ws-stats > .side-pill { transform: none !important; transition: opacity var(--fade-dur) linear !important; }
@@ -1612,7 +1614,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .pl-item { transition: box-shadow .2s; }
 :root.no-motion .playlist-bar-row .pl-item:not(.dragging) { transform: none; }
 
-/* ---- the item sidebar (WE-style — components/SidePanel.tsx, LibrarySide.tsx, BrowseSide.tsx) ----
+/* ---- the item sidebar (WE-style — components/SidePanel.tsx, ItemSide.tsx) ----
    An <aside> beside the page under the top bar (anchored to its bottom edge, `.topbar`), docked from 900 px (the grid and the playlist
    bar end at its edge — the grid re-fits its columns), floating over the page below that with a scrim. It scrolls on its
    own; the head (title + tools + close) stays. Look:
@@ -1647,13 +1649,17 @@ input[type=range]:focus-visible { outline: none; }
 @keyframes side-in { from { transform: translateX(44px); opacity: 0; } }
 @keyframes side-out { to { transform: translateX(36px); opacity: 0; } }
 
-/* the head: the title, its tools (the playlist toggle, Play while the trailer shows), close */
-.side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
-.side-head { flex: none; position: relative; z-index: 5; display: flex; align-items: flex-start; gap: 6px; padding: 14px 12px 12px 18px;
+/* the head: the title, close and, under it, its tools */
+/* the scrollbar's room is kept whether it shows or not: a body that grows past the panel (a section unfolding) or shrinks under
+   it never re-fits the picture and moves everything below it. Guard: probe-sidebar lib:propsFold:on */
+.side-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.side-head { flex: none; position: relative; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px; padding: 14px 12px 12px 18px;
   background: transparent; } /* the panel's own background shows (nothing scrolls under it any more) */
 .side-head::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 0; height: 1px; pointer-events: none;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 60%, transparent), transparent 85%); }
-.side-head-text { flex: 1; min-width: 0; padding-top: 3px; }
+.side-head-text { grid-row: 1 / span 2; min-width: 0; padding-top: 3px; }
+/* its tools (Browse's "Show in Library") sit under the close button, a column of their own */
+.side-head > .side-close { grid-column: 2; grid-row: 1; }
 /* the title (components/SideTitle.tsx): two lines at most until a click unfolds it. The h2 is the clip the morph scales (its
    words ride along unscaled inside), folded two of its lines tall; the words carry the clamp's ellipsis only once folded and
    landed. Guard: probe-sidebar side:titleFold:<on|off|reduced> */
@@ -1671,7 +1677,7 @@ input[type=range]:focus-visible { outline: none; }
   animation: nm-out var(--fade-dur) linear forwards; }
 .side-title-ghost.late { animation-delay: var(--fade-dur); }
 .side-sub { display: block; margin-top: 3px; }
-.side-head-tools { display: flex; gap: 6px; }
+.side-head-tools { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 6px; }
 .side-head-tools:empty { display: none; }
 .side-tool { flex: none; width: 32px; height: 32px; padding: 0; border-radius: 9px; display: grid; place-items: center; color: var(--subtext);
   background: color-mix(in srgb, var(--surface0) 80%, transparent); border: 1px solid color-mix(in srgb, var(--surface1) 80%, transparent);
@@ -1767,14 +1773,13 @@ input[type=range]:focus-visible { outline: none; }
 /* the strip clips: its focus ring is drawn inside the highlight, which covers the focused (= checked) option */
 :root.kbd-nav .seg.strip:has(.seg-opt:focus-visible) .seg-hl { outline: 2px solid var(--accent-fg); outline-offset: -3px; }
 
-/* held invisible until its asynchronous sections are in (LibrarySide READY_CAP_MS): no section pops in under the user */
+/* held invisible until its asynchronous sections are in (ItemSide READY_CAP_MS): no section pops in under the user */
 .side-body { transition: opacity .14s ease-out; }
 .side-body.wait { opacity: 0; transition: none; }
 .side-body > * + * { margin-top: 12px; }
 /* the hero line: chips (what it is) and pills (its numbers) */
 .side-hero { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .side-hero:empty { display: none; }
-.side-state { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .side-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .5px; padding: 3px 9px;
   border-radius: 999px; background: var(--surface0); color: var(--subtext); }
 .side-chip.accent { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
@@ -1784,9 +1789,8 @@ input[type=range]:focus-visible { outline: none; }
 .side-chip.accent.preset { padding-left: 7px; background: color-mix(in srgb, var(--bg-crust) 60%, transparent);
   box-shadow: inset 0 0 0 1px var(--accent), 0 0 10px -4px var(--accent); }
 .side-chip.preset > svg { flex: none; width: 12px; height: 12px; }
-.side-chip.inlib { background: color-mix(in srgb, var(--success) 82%, black); color: #fff; }
 .side-chip.danger { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
-/* a crashed scene's notice (LibrarySide.tsx): a block of the body in the section cards' material (.side-sec: fill, edge,
+/* a crashed scene's notice (ItemSide.tsx): a block of the body in the section cards' material (.side-sec: fill, edge,
    radius) with a danger stripe where they have the accent one, the warning glyph, the words and the sidebar's small button
    (.mini) to Clear the mark. Cleared, it (and the Playback section's whitelist row) fade out, shrinking a little (motion off:
    the fade alone); what sat after them glides into the room (flipGlide.ts). Guard: probe-sidebar lib:clearCrash:* */
@@ -1804,7 +1808,7 @@ input[type=range]:focus-visible { outline: none; }
   pointer-events: none; animation: side-crash-out .22s ease-in forwards; animation-delay: 0s; }
 .side-wl.leaving { transform-origin: left center; }
 @keyframes side-crash-out { to { opacity: 0; transform: scale(.96); } }
-/* a preset that can't play (LibrarySide.tsx PresetNotice): the crash notice's block, its glyph and stripe in --warn; why
+/* a preset that can't play (ItemSide.tsx PresetNotice): the crash notice's block, its glyph and stripe in --warn; why
    "Download it again" can't run now under its words. One that turns up with the sidebar open rises in (motion off: fades).
    Guard: probe-sidebar lib:preset:needsBase, lib:preset:needsBaseOff */
 .side-crash.side-preset::before { background: linear-gradient(var(--warn), color-mix(in srgb, var(--warn) 30%, transparent)); box-shadow: 0 0 12px -1px var(--warn); }
@@ -1835,7 +1839,6 @@ button.side-pill.copy { overflow: hidden; }
 .side-body > * + .side-tags, .side-body > .side-tags + * { margin-top: 12px; }
 .side-tags .tag { background: color-mix(in srgb, var(--surface0) 70%, transparent);
   border: 1px solid color-mix(in srgb, var(--surface1) 60%, transparent); }
-.side-link { font-size: 12px; }
 /* the Browse sidebar's download buttons: big; the arrow drops into its tray on hover (iconMotion.ts, like the card's) */
 .side-cta { display: flex; flex-wrap: wrap; gap: 8px; }
 .side-cta > .side-go { flex: 1 1 auto; justify-content: center; padding: 10px 14px; font-size: 13.5px; border-radius: 10px;
@@ -1844,56 +1847,35 @@ button.side-pill.copy { overflow: hidden; }
 .side-cta > .side-go:active { transform: scale(.97); transition-duration: .08s; }
 .side-cta > .side-go.accent:hover { box-shadow: 0 10px 22px -8px var(--accent), var(--glow); }
 /* a download the mode can't do now (components/subscribeMode.ts actionBlocked): muted, still, no ring or glow, the reason on its
-   own line under the buttons. Guard: probe-steam side:blocked:download */
+   tooltip. Guard: probe-steam side:blocked:download */
 .side-cta > .side-go[aria-disabled="true"] { opacity: .5; cursor: default; box-shadow: none; }
 .side-cta > .side-go[aria-disabled="true"]:is(:hover, :active) { transform: none; box-shadow: none; }
 .side-go[aria-disabled="true"]::after { animation: none !important; }
-.side-cta-why { flex: 1 0 100%; font-size: 11.5px; color: var(--subtext); line-height: 1.3; }
-/* the line under the download buttons: what they do in the chosen mode, or why they're off; one cell, so the leaving words
-   and the coming ones overlap while they swap; nothing in it, no line (BrowseSide.tsx) */
-.side-cta-note { flex: 1 0 100%; display: grid; }
-.side-cta-note > * { grid-area: 1 / 1; align-self: start; } /* each keeps its own height while they overlap */
-.side-cta-note:empty { display: none; }
-:root.bg-live .side-cta-why { filter: drop-shadow(0 0 3px #000); }
+/* the library copy's split button (ItemSide.tsx): Play | Unsubscribe (or Delete) as one control, the halves joined, a danger
+   seam between them; the action area's buttons' size and press. A row of its own in the action area (the own copy's Subscribe,
+   a subscribed item's Unsubscribe: .side-cta-row) wraps under it */
+.side-cta > .side-split { flex: 1 1 100%; display: flex; min-width: 0; }
+.side-split > .side-go { justify-content: center; padding: 10px 14px; font-size: 13.5px; border: 1px solid transparent;
+  transition: transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
+.side-split > .side-go:first-child { flex: 1 1 auto; border-radius: 10px 0 0 10px; }
+.side-split > .side-go:last-child { flex: 0 1 auto; border-radius: 0 10px 10px 0; border-color: var(--danger);
+  border-left-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+.side-split > .side-go:hover { transform: translateY(-2px); }
+.side-split > .side-go:active { transform: scale(.97); transition-duration: .08s; }
+.side-split > .side-go.accent:hover { box-shadow: 0 10px 22px -8px var(--accent), var(--glow); }
+.side-split > .side-go[aria-disabled="true"] { opacity: .5; cursor: default; box-shadow: none; }
+.side-split > .side-go[aria-disabled="true"]:is(:hover, :active) { transform: none; box-shadow: none; background: transparent; }
+.side-cta > .side-cta-row { flex: 1 0 100%; }
+/* the outline-only danger buttons keep a dark base over the live wallpaper (red text on a bright frame is unreadable) */
+:root.bg-live .side-cta .btn.danger { background: color-mix(in srgb, var(--bg-crust) 70%, transparent); }
+:root.no-glow .side-cta .btn.danger:hover, :root.no-glow .side-split > .side-go.accent:hover { box-shadow: none; }
 .side-dl-ico { display: inline-grid; }
 .side-dl { flex: 1; display: flex; align-items: center; gap: 8px; }
 .side-dl .dl-bar { flex: 1; width: auto; }
-/* the Browse sidebar's Subscribe / Unsubscribe toggle (components/SubToggle.tsx): a card like the tiles (its own dark fill — under
-   bg-live it carries the darkness like .side-sec), a status chip (green subscribed / muted / accent while moving), the words, the
-   button (accent Subscribe, danger Unsubscribe); a slim bar while a Subscribe runs */
-.side-sub { display: flex; flex-direction: column; gap: 8px; padding: 9px 10px; border-radius: 11px; min-height: 52px;
-  background: color-mix(in srgb, var(--bg-crust) 50%, transparent); border: 1px solid var(--surface1); }
-.side-sub[data-state="loading"] { opacity: .5; }
-.side-sub-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.side-sub-ico { flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--subtext);
-  background: color-mix(in srgb, var(--surface0) 70%, transparent); transition: color .2s, background .2s, box-shadow .2s; }
-.side-sub-ico > svg { display: block; }
-.side-sub-ico.subscribed { color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent), 0 0 10px -3px var(--success); }
-.side-sub-ico.subscribing, .side-sub-ico.unsubscribing { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), var(--glow-sm); }
+/* a pending Subscribe / Unsubscribe's spinner (the item sidebar's tiles; the comments' and the import dialog's waits) */
 .side-sub-spin { animation: side-sub-spin 1s linear infinite; }
 @keyframes side-sub-spin { to { transform: rotate(360deg); } }
-.side-sub-text { flex: 1; min-width: 0; display: flex; overflow: hidden; }
-.side-sub-text b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.side-sub-hintrow { display: flex; overflow: hidden; margin-top: -2px; }
-.side-sub-text b { font-size: 13px; font-weight: 700; color: var(--text); }
-.side-sub-hint { font-size: 11.5px; color: var(--subtext); line-height: 1.3; }
-.side-sub-btn { flex: none; padding: 6px 11px; font-size: 12.5px; border-radius: 9px;
-  transition: transform .18s cubic-bezier(.2, 1.3, .4, 1), box-shadow .2s, background .15s; }
-.side-sub-btn:hover:not(:disabled, [aria-disabled="true"]) { transform: translateY(-1px); }
-.side-sub-btn:active:not(:disabled, [aria-disabled="true"]) { transform: scale(.97); transition-duration: .08s; }
-.side-sub-btn:is(:disabled, [aria-disabled="true"]) { opacity: .6; cursor: default; }
-/* signed out (aria-disabled, its right-click menu kept): no hover fill or glow. Guard: probe-steam steam:subToggle:signedOut */
-.side-sub-btn.danger[aria-disabled="true"]:hover { background: transparent; box-shadow: none; }
-:root.bg-live .side-sub-btn.danger[aria-disabled="true"]:hover { background: color-mix(in srgb, var(--bg-crust) 70%, transparent); }
-.side-sub-bar { transform-origin: 0 50%; height: 3px; }
-:root.no-glow .side-sub-ico.subscribed { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 40%, transparent); }
-:root.no-glow .side-sub-ico.subscribing, :root.no-glow .side-sub-ico.unsubscribing { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
-:root.bg-live .side-sub-text b, :root.bg-live .side-sub-hint { filter: drop-shadow(0 0 3px #000); }
-/* the outline-only danger button keeps a dark base over the live wallpaper (red text on a bright frame was unreadable) */
-:root.bg-live .side-sub-btn.danger { background: color-mix(in srgb, var(--bg-crust) 70%, transparent); }
-/* action tiles (the old right-click menu's actions + the source links): an icon chip + the label; danger = red */
+/* action tiles (the item sidebar's actions + the source links): an icon chip + the label; danger = red */
 .side-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .side-tile { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 7px 10px; border-radius: 11px; text-align: left;
   font-size: 12.5px; font-weight: 700; line-height: 1.2; color: var(--text); text-decoration: none;
@@ -1915,16 +1897,15 @@ button.side-pill.copy { overflow: hidden; }
 .side-tile-ico > svg { width: 16px; height: 16px; }
 /* a tile is a verb: its icon acts its meaning (iconMotion.ts / § icon motion) while the chip rises a little on the spring */
 .side-tile:hover .side-tile-ico { transform: translateY(-1px) scale(1.06); }
-/* ---- the Browse sidebar's Workshop community pieces (components/WorkshopSocial.tsx) ----
-   The favourite: a toggle tile whose words roll (.xfade, left-aligned like every tile's label) and whose star fills and pops
-   once on a user change (.ico-pop); signed out "Favourite on Steam", the item's page in the Steam app. Guard: probe-steam
-   ws:favorite, ws:favoriteSteam */
-.fav-tile .xfade > * { justify-content: flex-start; }
-/* the words roll inside their own slot, never over the tile's edge */
-.fav-tile > .xfade { overflow: hidden; }
-.fav-tile.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--surface1)); }
-.fav-tile.on .side-tile-ico { background: color-mix(in srgb, var(--accent) 28%, transparent); }
-.fav-tile[data-ws-fav=loading] .side-tile-ico { opacity: .55; }
+/* ---- the item sidebar's Workshop community pieces (components/WorkshopSocial.tsx) ----
+   The favourite: the favourites count pill as a toggle (the ID pill's quiet button look): its star fills and pops once on a user
+   change (.ico-pop); on, its edge and count take the accent. Guard: probe-steam ws:favorite, ws:favoriteSteam */
+button.side-pill.fav-pill { cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: border-color .15s, color .15s, box-shadow .2s; }
+button.side-pill.fav-pill:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glow-sm); }
+button.side-pill.fav-pill.on { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+button.side-pill.fav-pill[data-ws-fav=loading] svg { opacity: .55; }
+:root.no-glow button.side-pill.fav-pill:hover { box-shadow: none; }
 /* a Steam avatar: the person glyph until the picture has loaded, then the picture fades in over it */
 .ws-avatar { position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 50%; overflow: hidden;
   color: var(--subtext); background: color-mix(in srgb, var(--surface0) 80%, transparent); box-shadow: inset 0 0 0 1px var(--surface1); }
@@ -1945,17 +1926,22 @@ button.side-pill.copy { overflow: hidden; }
 .ws-creator-by { font-size: 10.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--subtext); }
 .ws-creator-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
 .ws-creator.loading .ws-creator-name { opacity: .4; }
-/* where a click goes, as an icon chip (lucide Images for a list, its tooltip "All their wallpapers"): the accent's tint, fuller while the
-   row is hovered; the glyph whole-pixel centred (16 in 28). Guard: probe-steam ws:creator, probe-icons icon:centre:* */
-.ws-creator-ico { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 13%, transparent); transition: background .15s; }
-.ws-creator-ico > svg { display: block; }
-.ws-creator:hover:not(:disabled) .ws-creator-ico { background: color-mix(in srgb, var(--accent) 24%, transparent); }
-.ws-creator:disabled .ws-creator-ico { visibility: hidden; }
-/* the Library sidebar's size on disk, measured in the background: a late one fades in at the hero row's end (LibrarySide.tsx) */
-.side-hero > [data-side-row="size"]:last-child { animation: side-pill-in .28s ease-out; }
+/* the row's end: a bare chevron that slides toward where the row goes while it's hovered (the whole row is the target; no icon
+   chip). Guard: probe-steam ws:creator */
+.ws-creator-go { flex: none; display: grid; place-items: center; width: 20px; color: var(--subtext);
+  transition: transform var(--spring-soft-dur) var(--spring-soft), color .15s; }
+.ws-creator-go > svg { display: block; }
+.ws-creator:hover:not(:disabled) .ws-creator-go { transform: translateX(3px); color: var(--accent); }
+.ws-creator:disabled .ws-creator-go { visibility: hidden; }
+/* the size (the library copy's on disk is measured in the background): a late one fades in (ItemSide.tsx) */
+.side-hero > [data-side-row="size"] { animation: side-pill-in .28s ease-out; }
+/* an action-area button arriving with the state it waits on (the Unsubscribe of a subscribed item the library doesn't hold:
+   ItemSide.tsx) rises in; one going (its subscription gone, the own copy's Subscribe once subscribed) fades out like the crash
+   notice. Motion off: the fades only */
+.side-panel .side-body:not(.wait) .side-cta > .side-go.arrive:not(.leaving) { animation: side-pill-in .28s ease-out; }
+.side-panel .side-cta > .side-go.leaving { pointer-events: none; animation: side-crash-out .22s ease-in forwards; }
 @keyframes side-pill-in { from { opacity: 0; transform: translateY(4px); } }
-/* the scene's font stand-ins (LibrarySide.tsx fontNote): a report landing while the sidebar shows fades in rising a little, a
+/* the scene's font stand-ins (ItemSide.tsx fontNote): a report landing while the sidebar shows fades in rising a little, a
    cleared one fades out (motion off: the fades only, under the no-motion block). Guard: probe-sidebar lib:fontStandIn */
 .side-panel .side-fonts { animation: side-pill-in .28s ease-out; }
 .side-panel .side-fonts.leaving { pointer-events: none; animation: side-crash-out .22s ease-in forwards; }

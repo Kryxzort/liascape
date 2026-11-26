@@ -1,7 +1,7 @@
 import { Check, Hash } from "lucide-react";
 import { useCopied } from "../hooks/useCopied";
 
-// The item sidebars' Workshop ID (LibrarySide.tsx, BrowseSide.tsx): a pill among the hero's facts that copies itself and turns
+// The item sidebars' Workshop ID (ItemSide.tsx): a pill among the hero's facts that copies itself and turns
 // into a green "Copied" for a moment (hooks/useCopied.ts — keyed by the id, so another item's sidebar never says "Copied").
 // Both faces share one grid cell (index.css .xfade): the wider sets the pill's width in either state, so "Copied" never changes
 // it and the row never re-wraps; the hidden face is aria-hidden and the name is the aria-label.

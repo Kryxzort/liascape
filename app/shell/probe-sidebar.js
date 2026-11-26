@@ -114,7 +114,8 @@
 //                        preset plays and a preset itself delete unasked; the dialog zooms in (Off: fades), no-glow, bg-live.
 //                        Shots side-basedel-*.png
 //   browse:click         a Browse click / right-click opens the Browse sidebar and downloads nothing
-//   browse:inLibrary     an item the library has: "In your library" + Show in Library → the Library tab, that item focused
+//   browse:inLibrary     an item the library has: no chip, a Show in Library icon under the close button → the Library tab, that
+//                        item focused
 //   browse:dblclick      a double-click downloads & applies
 //   motion:on|off|reduced the open slides/fades (transform + opacity only); animations off / reduced motion → only opacity
 //                        animates and nothing moves: the panel fades in, a switch cross-fades the old content into the new, the
@@ -133,7 +134,7 @@
 //                        the Library's says so and changes nothing, the bar's still opens k1 (as its right-click); motion off
 //                        → the sidebar on k1 at once
 //   look:dlHover         a Browse card's download button under a real pointer: it lifts, its glow layer shows, the arrow nudges;
-//                        the Browse sidebar's Download & Apply the same (computed styles differ from the un-hovered ones)
+//                        the Browse sidebar's Download and apply the same (computed styles differ from the un-hovered ones)
 // Screenshots: <LIASCAPE_OUT>/side-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 // LIASCAPE_SIDE_SHOTS="1920x1080,1100x700": the `shots:<size>` cells (pictures only — run with LIASCAPE_MATRIX_SCREEN=2560x1440).
 const { app, BrowserWindow } = require("electron");
@@ -372,9 +373,11 @@ app.whenReady().then(async () => {
       const opened = await js(`window.__opened`);
       const o = opened.find((x) => x.p === "/open");
       if (!o || !JSON.parse(o.body || "{}").reveal || JSON.parse(o.body || "{}").path !== K[2]) v.push(`Open in file manager sent ${JSON.stringify(opened)}`);
-      // a Workshop item (s1, auto-import off): Delete and unsubscribe is there
-      await page(`await m.openSide("s1"); await m.sleep(400);`);
-      if (!await page(`return !!m.sideBtn("Delete and unsubscribe");`)) v.push("no Delete and unsubscribe on the Workshop item s1");
+      // a Workshop item (s1, auto-import off): Delete and unsubscribe is its Delete's right-click entry (ItemSide.tsx's split)
+      await page(`await m.openSide("s1"); await m.sleep(400);
+        m.side().querySelector("[data-delete]")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 300 })); await m.sleep(300);`);
+      if ((await js(`document.querySelector("[data-ctx-item=delete-source]")?.textContent.trim() ?? null`)) !== "Delete and unsubscribe") v.push("no Delete and unsubscribe in the Workshop item s1's Delete menu");
+      await page(`document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); await m.sleep(300);`);
       // Delete (k4) → gone from the library, the sidebar closes; Undo brings it back
       await page(`await m.openSide("k4"); await m.sleep(300); m.sideBtn("Delete")?.click();`);
       let gone = false; for (let i = 0; i < 40 && !gone; i++) { gone = !(await libItem(K[3])); if (!gone) await sleep(100); }
@@ -582,11 +585,12 @@ app.whenReady().then(async () => {
       await page(`await m.closeAll(); await m.openSide("k3"); await m.sleep(600);`);
       const r0 = await page(`const s = m.side(); const b = s.querySelector("[data-side-play]"); const f = s.querySelector("[data-side-media]");
         return { btn: !!b, inMedia: !!b?.closest("[data-side-media]"), tag: b?.tagName, label: b?.getAttribute("aria-label"), tab: b ? b.tabIndex : null, media: f ? m.rect(f) : null,
-          old: [...s.querySelectorAll("button")].filter((x) => /^(Play|Playing|In playlist|Add to playlist)$/.test(x.textContent.trim())).length,
+          old: [...s.querySelectorAll("button:not([data-side-apply])")].filter((x) => /^(Play|Playing|In playlist|Add to playlist)$/.test(x.textContent.trim())).length,
           icon: b ? b.querySelectorAll("svg, img").length : null, bg: b ? getComputedStyle(b).backgroundImage : null, pl: s.querySelector(".side-head [data-side-playlist]")?.getAttribute("aria-pressed") ?? null };`);
       if (!r0.btn || !r0.inMedia) return [`no Play control on k3's picture (${JSON.stringify(r0)})`];
       if (r0.label !== "Play k3") v.push(`its accessible name is "${r0.label}", not "Play k3"`);
       if (r0.tag !== "BUTTON" || r0.tab < 0) v.push(`it isn't keyboard-reachable (${r0.tag}, tabIndex ${r0.tab})`);
+      // the action area's Play ([data-side-apply], the split button's first half) is the one shown Play; no other row of them
       if (r0.old) v.push(`the old Play / In playlist buttons are still there (${r0.old})`);
       // no playlist toggle in the head: the title takes the room
       if (r0.pl !== null) v.push(`the head still has a playlist toggle (aria-pressed=${r0.pl})`);
@@ -1231,7 +1235,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // lib:clearCrash:<on|off> — a crashed scene's notice and its Clear (LibrarySide.tsx clearCrash). s2 marked crashed in its
+    // lib:clearCrash:<on|off> — a crashed scene's notice and its Clear (ItemSide.tsx clearCrash). s2 marked crashed in its
     // index entry shows the notice — a block of the body in the section cards' material with a danger stripe, the warning
     // glyph in --danger, its words and a .mini Clear, 12 px from its neighbours — and the whitelist row, and /apply refuses
     // it. A real click on Clear: the notice and the row fade out (in-between opacity frames; motion off: opacity only, nothing
@@ -1331,7 +1335,7 @@ app.whenReady().then(async () => {
     });
 
     // lib:clearCrash:multi — Clear on a selection lifts every selected item's mark, as the selection's other actions repeat to
-    // all of it (LibrarySide.tsx clearCrash). s1 and s2 marked crashed and k1 (no mark) Ctrl-selected, the sidebar opened on s2
+    // all of it (ItemSide.tsx clearCrash). s1 and s2 marked crashed and k1 (no mark) Ctrl-selected, the sidebar opened on s2
     // with a right-click: one real click on Clear → neither index entry is crashed, neither card is marked, k1 is untouched.
     await cell("lib:clearCrash:multi", async () => {
       const v = [], J = JSON.stringify;
@@ -1418,7 +1422,7 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // lib:fontStandIn:<on|off> — a scene font this machine doesn't have, end to end (LibrarySide.tsx fontNote): s2's synthetic
+    // lib:fontStandIn:<on|off> — a scene font this machine doesn't have, end to end (ItemSide.tsx fontNote): s2's synthetic
     // worker reports "Consolas shown with Cascadia Mono" in its Ready (its spec's `fonts`, as a real scene's fontconfig match
     // would), the player's scene.fonts reaches the backend, the index keeps it and library-item-changed tells the page. With
     // s2's sidebar open, a play of s2 brings one muted line "Uses Consolas, shown with Cascadia Mono" in the Playback section
@@ -2140,9 +2144,8 @@ app.whenReady().then(async () => {
         if (on.tShadow !== "none") v.push(`the title's shadow is a text-shadow inside the clamped h2 — its overflow clips it (${on.tShadow})`);
         if (!/drop-shadow/.test(on.wFilter)) v.push(`no Netflix-style drop-shadow on the title's wrapper (filter ${on.wFilter})`);
         if (on.wClip.some((o) => o !== "visible")) v.push(`something around the title clips its shadow (overflow ${on.wClip})`);
-        // a tile's hover tints over its dark fill, never replaces it (else it turns transparent; the danger one too: not an
-        // opaque block)
-        for (const label of ["Open in file manager", "Delete"]) {
+        // a tile's hover tints over its dark fill, never replaces it (else it turns transparent)
+        for (const label of ["Open in file manager", "Hide"]) {
           const r = await page(`const t = [...m.side().querySelectorAll(".side-tile")].find((x) => x.textContent.trim() === ${JSON.stringify(label)}); return t ? m.rect(t) : null;`);
           if (!r) { v.push(`no "${label}" tile`); continue; }
           await mv(r.x + r.w / 2, r.y + r.h / 2, 350);
@@ -2163,7 +2166,7 @@ app.whenReady().then(async () => {
 
     // look:sideRhythm — the sidebar's sections sit 12 px apart (.side-body > * + *), the tag row included, and the tags wear the
     // pills' see-through fill and edge (not .tag's solid one). The item's own tag row when it has one; else one is put where
-    // LibrarySide renders it (after the hero line): the rules under test are index.css's, not the data's.
+    // ItemSide renders it (after the hero line): the rules under test are index.css's, not the data's.
     await cell("look:sideRhythm", async () => {
       const r = await page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const b = m.side().querySelector(".side-body");
         // the item's own tag row when it has one (a second row would measure itself, not the sidebar); else one put in its place
@@ -2498,7 +2501,7 @@ app.whenReady().then(async () => {
       return v;
     }));
 
-    // ---- presets in the Library (LibraryCard reason, LibrarySide PresetNotice / BaseRow / PresetsRow, baseConfirm.ts,
+    // ---- presets in the Library (LibraryCard reason, ItemSide PresetNotice / BaseRow / PresetsRow, baseConfirm.ts,
     // BaseSceneConfirm.tsx, store unplayableReasonOf). The cells add their own items to the stack's library
     // and take them away again (the shared library the other cells count stays as it was): pb, a copy of s1 (its properties
     // color / clock / bars, bars shown while clock is on) under the Workshop id 910000003 (the CM fixture's scene whose two
@@ -2682,7 +2685,7 @@ app.whenReady().then(async () => {
           }
           const sh = plain.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
           if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${plain.look})`);
-          // the sidebar's hero chip says the same as the card (LibrarySide.tsx)
+          // the sidebar's hero chip says the same as the card (ItemSide.tsx)
           const chips = [];
           for (const t of ["pp1", "pb", "s1"]) chips.push(await page(`await m.closeAll(); await m.openSide(${J(t)});
             const c = m.side().querySelector(".side-hero > .side-chip.accent:not([data-side-looping])"); if (!c) return { t: ${J(t)}, text: null };
@@ -3089,7 +3092,9 @@ app.whenReady().then(async () => {
         await sleep(200);
         if (await trashes(n0)) v.push("Escape deleted something");
         // 3. the sidebar's Delete and unsubscribe: the same question, as an unsubscribe; Keep it
-        await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(400); m.side().querySelector("[data-delete-source]")?.click();`);
+        await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(400);
+          m.side().querySelector("[data-delete]")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 300 })); await m.sleep(300);
+          document.querySelector("[data-ctx-item=delete-source]")?.click();`);
         const d3 = await waitDlg(true) ? await dlg() : null;
         if (!d3 || d3.h !== "Unsubscribe from “pb”?" || d3.go !== "Unsubscribe" || d3.text !== WANT) v.push(`Delete and unsubscribe asked ${J(d3)}`);
         await page(`document.querySelector("[data-base-confirm-keep]")?.click();`); await waitDlg(false);
@@ -3173,9 +3178,9 @@ app.whenReady().then(async () => {
       await page(`m.thumb("we1").click();`);
       if (!await page(`return await m.waitSide("browse");`)) return ["no Browse sidebar after a click on we1"];
       await sleep(1500);
-      const r = await page(`return { title: m.sideTitle(), dl: !!m.sideBtn("Download & Apply"), media: !!m.side().querySelector("[data-side-media]"), downloading: !!document.querySelector(".dl-overlay") };`);
+      const r = await page(`return { title: m.sideTitle(), dl: !!m.sideBtn("Download and apply"), media: !!m.side().querySelector("[data-side-media]"), downloading: !!document.querySelector(".dl-overlay") };`);
       if (r.title !== "we1") v.push(`the Browse sidebar shows "${r.title}"`);
-      if (!r.dl) v.push("no Download & Apply button");
+      if (!r.dl) v.push("no Download and apply button");
       if (!r.media) v.push("no picture");
       if (r.downloading || (await libCount()) !== n0) v.push("a click downloaded");
       await shot("browse-click");
@@ -3190,9 +3195,13 @@ app.whenReady().then(async () => {
       await page(`m.thumb("s1-local").click();`);
       if (!await page(`return await m.waitSide("browse");`)) return ["no sidebar for s1-local"];
       await sleep(300);
-      if (!await page(`return !!m.side().querySelector("[data-in-library]");`)) v.push("no In library line for an item the library has");
-      if (!await page(`return !!m.sideBtn("Show in Library");`)) return [...v, "no Show in Library"];
-      await page(`m.sideBtn("Show in Library").click(); await m.sleep(900);`);
+      // "Show in Library" is an icon button under the close button (the head's tools), never a chip in the pills
+      if (await page(`return !!m.side().querySelector("[data-in-library]");`)) v.push("an In your library chip still shows");
+      const tool = await page(`const b = m.side().querySelector(".side-head-tools [data-show-in-library]"), c = m.side().querySelector("[data-side-close]");
+        if (!b || !c) return null; const r = b.getBoundingClientRect(), q = c.getBoundingClientRect(); return { label: b.getAttribute("aria-label"), below: r.top >= q.bottom - 0.5, x: Math.abs(r.left + r.width / 2 - (q.left + q.width / 2)) };`);
+      if (!tool) return [...v, "no Show in Library under the close button"];
+      if (tool.label !== "Show in Library" || !tool.below || tool.x > 1) v.push(`Show in Library: ${JSON.stringify(tool)} (want under the close button, centred on it)`);
+      await page(`m.side().querySelector("[data-show-in-library]").click(); await m.sleep(900);`);
       const r = await page(`return { tab: document.querySelector(".tab.active")?.textContent, title: m.sideTitle(), kind: m.side()?.dataset.side };`);
       if (r.tab !== "Library" || r.kind !== "library" || r.title !== "s1") v.push(`Show in Library → tab ${r.tab}, ${r.kind} sidebar "${r.title}" (expected Library, s1)`);
       await shot("browse-showinlib");
@@ -3221,19 +3230,19 @@ app.whenReady().then(async () => {
       // the arrow drops once and lands (only progress loops — .claude/rules/ui/design.md § Icon motion)
       if (!h.anim || h.loop) v.push(`hovered, the arrow doesn't drop once (${h.anim} animations, looping ${h.loop})`);
       if (h.r) await (async () => { const img = await win.webContents.capturePage({ x: Math.max(0, Math.round(c.x - 20)), y: Math.max(0, Math.round(c.y - 20)), width: Math.round(c.w + 40), height: Math.round(c.h + 40) }); fs.writeFileSync(path.join(OUT, "side-look-dlhover.png"), img.toPNG()); })();
-      // the Browse sidebar's Download & Apply
+      // the Browse sidebar's Download and apply
       await mv(5, 5, 150);
       await page(`m.thumb("we1").click(); await m.waitSide("browse"); await m.sleep(800);`);
-      const readS = `const b = m.sideBtn("Download & Apply"); if (!b) return null; const i = b.querySelector("svg.lucide-download");
+      const readS = `const b = m.sideBtn("Download and apply"); if (!b) return null; const i = b.querySelector("svg.lucide-download");
         const an = i ? i.getAnimations({ subtree: true }) : [];
         return { tr: getComputedStyle(b).transform, bs: getComputedStyle(b).boxShadow, anim: an.length, loop: an.some((a) => a.effect.getTiming().iterations === Infinity), r: m.rect(b) };`;
       const s0 = await page(readS);
-      if (!s0) v.push("no Download & Apply in the Browse sidebar");
+      if (!s0) v.push("no Download and apply in the Browse sidebar");
       else {
         await mv(s0.r.x + s0.r.w / 2, s0.r.y + s0.r.h / 2, 500);
         const s1 = await page(readS);
-        if (s1.tr === s0.tr) v.push(`the sidebar's Download & Apply doesn't lift on hover (${s0.tr})`);
-        if (s1.bs === s0.bs) v.push("the sidebar's Download & Apply doesn't glow more on hover");
+        if (s1.tr === s0.tr) v.push(`the sidebar's Download and apply doesn't lift on hover (${s0.tr})`);
+        if (s1.bs === s0.bs) v.push("the sidebar's Download and apply doesn't glow more on hover");
         if (!s1.anim || s1.loop) v.push(`the sidebar's download arrow doesn't drop once (${s1.anim} animations, looping ${s1.loop})`);
         await shot("look-browse-dlhover");
       }

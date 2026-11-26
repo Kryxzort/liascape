@@ -1,28 +1,8 @@
-# Sidebar and filter cleanup — design
+# Filter and sidebar-motion cleanup — design
 
-Owner-approved direction (2026-11-22). Build after #114 lands (it touches the same files).
-
-## Why
-Browse's and the Library's item sidebars drifted apart, and each grew extras nobody asked for (a state chip, a link among
-the info pills, a subscription toggle, a hint line, a separate Favourite tile). The fix is one layout for both and rules
-that make additions replace rather than pile up.
-
-## The sidebar (Browse and Library: one skeleton)
-Order: picture → title → info pills (facts and tags only) → one action area → creator / presets rows → About → tiles →
-comments. The tabs differ only in what the action area holds.
-
-- Not downloaded (Browse): two buttons, Download & Apply and Download. Removed: the subscription indicator and
-  Subscribe/Unsubscribe toggle (`SubToggle`), the hint line under the buttons (`side-cta-note`). Right-click keeps the
-  download menu it has now.
-- Downloaded (Browse; Library for Workshop items): one split button, Play | Unsubscribe. Right-click on Unsubscribe:
-  "Unsubscribe, keep the files". Library items not from the Workshop: Play | Delete (the Library's existing delete: to the trash, with its undo).
-- "Show in Library": an icon button under the close button, in the head's tool slot (`SideHeadTools`); the "In your
-  library" chip goes.
-- Favourite: the favourites count pill is the toggle (star filled when favourited, click toggles; signed out it
-  explains sign-in). The Favourite tile goes.
-- Creator and presets rows: no generic trailing icons; the whole row is the target, with a hover lift and a chevron
-  that slides on hover.
-- The presets button and row look too plain: mock 2–3 looks in the motion lab for the owner to pick by eye.
+Owner-approved direction (2026-11-22). Its sidebar half is built (`components/ItemSide.tsx`, `docs/decisions.md` § "One
+sidebar for an item, the same on both tabs"); its UI rules are `.claude/rules/ui/design.md` § Layout discipline. Left: the
+filters (`docs/TODO.md` item 17) and the sidebar's motion (item 18).
 
 ## Filters
 - The top-bar creator / presets pill goes. The filter column gets two editable fields: **Author** (a Steam ID, a profile
@@ -38,15 +18,3 @@ The sidebar open/close is variant E from the motion lab (worktree `agent-a841082
 full slide, cards glide nearest first and stay visible under a backdrop that fades in, content soft-cascades in (`--spring-soft`, no overshoot, the 1× pace) starting
 30 % into the panel slide, each item travelling 6× the current offset (owner's pick in the lab: "start 30 % · travel 6×").
 Item switches keep B's quick carousel; close is B's slide out. Motion off: fades only.
-
-## UI rules added to `.claude/rules/ui/design.md`
-1. Agents decide visual details themselves; every visual decision beyond the brief is one line in the report
-   ("added X, because Y").
-2. One skeleton per concept: both sidebars share one layout; a probe fails if their section order differs.
-3. Each area has one job: info pills = facts and tags, the action area = actions, rows = navigation.
-4. State shows on the control that changes it, never twice.
-5. Every addition names what it replaces (merges into or removes something), or says why it can't.
-6. No hint text under buttons: reasons go in the disabled control's tooltip or its right-click menu.
-7. Icons only where they carry meaning; none on a row that is already fully clickable.
-8. Filters live in the filter column, not as top-bar pills.
-9. Every UI review compares Browse and Library screenshots side by side.

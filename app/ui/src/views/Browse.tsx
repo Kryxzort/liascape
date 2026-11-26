@@ -1,17 +1,13 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { PRESET_TAG, browseRequestKey, filterOf, hiddenOnSource, presetsOn, useStore } from "../store";
-import { api } from "../api/client";
-import { ContextMenu, type MenuAt } from "../components/ContextMenu";
-import { cardMenuItems, menuAt } from "../components/menuItems";
-import { confirmBaseRemoval } from "../components/baseConfirm";
 import { Card } from "../components/Card";
 import { NoMatch, WorkshopFilterColumn } from "../components/WorkshopFilterColumn";
 import { facetsOf } from "../components/facets";
 import { WF_GROUPS, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
-import { SidePanel } from "../components/SidePanel";
+import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
-import { BrowseSide } from "../components/BrowseSide";
+import { ItemSide } from "../components/ItemSide";
 import { WsListNote } from "../components/WorkshopSocial";
 import { WsSetLoad } from "../components/WsSetLoad";
 import { useMotion } from "../components/motion";
@@ -26,7 +22,7 @@ import { setBrowseFocusShown } from "../hooks/useBrowseFocusShown";
 import { usePresence } from "../hooks/usePresence";
 // never hijack Ctrl+A / Delete etc. while typing in a field or holding a slider
 import { shortcutsBlocked as typing } from "../hooks/rangeDrag";
-import type { Wallpaper, WorkshopFilter } from "../api/client";
+import type { LibraryItem, Wallpaper, WorkshopFilter } from "../api/client";
 import { inLibrary, libraryCopy, libraryKeys } from "./libraryMatch";
 import { FAVORITES_TAG, HIDDEN_TAG, LIBRARY_TAG, buildLocalSet, byFavorites, effectiveLocalSort, hideSets, isLocalSet, libraryCards } from "./localSet";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "../components/subscribeMode";
@@ -122,7 +118,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const setMatch = useMemo(() => (ws ? localMatcher(wsList?.kind === "presets" ? withoutType(browseFilter) : browseFilter) : null), [ws, wsList, browseFilter]);
   // the library's new Workshop items get their details while In my library ✓ shows them (only the ones not held yet)
   useEffect(() => { if (setOn && modes.lib === "inc") loadLibDetails(); }, [setOn, modes.lib, libItems, loadLibDetails]);
-  // The source's hidden cards (a card's menu → Hide; store hidden, by page URL and source): left out of every list it shows;
+  // The source's hidden cards (the sidebar's Hide; store hidden, by page URL and source): left out of every list it shows;
   // the Hidden row's ✓ shows only them, from the cards kept with them (no request: store reload), narrowed by the search, the
   // tags and the other Yours rows. Guard: probe-hidden hide:browse, hide:filter, hide:web
   const srcName = useStore((s) => s.sources[s.activeSource]?.name);
@@ -263,47 +259,26 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
   const cardCancel = useStableFn((x: Wallpaper) => cancelDownload(x.pageUrl));
   const cardClick = useStableFn(onCardClick);
   const cardDownload = useStableFn(dlApply);
-  // a right-click: the sidebar (the selection kept) and the card's menu at the pointer (docs/decisions.md § "Right-click a card
-  // for its sidebar and its menu"); what it acts on and whether those are hidden, taken as it opens (its words stay put while it
-  // fades out after a pick)
-  const [menu, setMenu] = useState<{ at: MenuAt; targets: Wallpaper[]; hidden: boolean; open: boolean } | null>(null);
-  const closeMenu = useStableFn(() => setMenu((m) => (m && m.open ? { ...m, open: false } : m)));
-  const cardContext = useStableFn((x: Wallpaper, e: React.MouseEvent) => {
-    focusFromCard(x.pageUrl);
-    setMenu({ at: menuAt(e), targets: sel.has(x.pageUrl) ? sorted.filter((w) => sel.has(w.pageUrl)) : [x], hidden: !!hiddenHere[x.pageUrl], open: true });
-  });
-  // The card's menu acts on the selection when the card is in it, else on the card. Unsubscribe: its Workshop items (a Workshop
-  // result, a local Wallpaper Engine item) that are subscribed (asked at the pick: a card doesn't know), each by the Browse
-  // sidebar's own Unsubscribe (store unsubscribeWorkshop: the download modes' order, signed out under "Subscribe with Steam
-  // login" the item's Steam page; a library copy goes to the trash, undoable), a scene that presets play asking first. Hide /
-  // Unhide: every card. Guard: probe-hidden menu:browse, hide:browse, hide:multi, unsub:browse
-  const menuTargets = menu?.targets ?? [];
-  const unsubscribeWs = useStore((s) => s.unsubscribeWorkshop);
+  // a right-click: the sidebar (the selection kept); no menu (docs/decisions.md § "One sidebar for an item, the same on
+  // both tabs")
+  const cardContext = useStableFn((x: Wallpaper) => focusFromCard(x.pageUrl));
+  // The sidebar acts on the selection when its card is in it, else on the card (as the Library's does): Hide / Unhide every
+  // card; the library copies' volume, speed and removal. Guard: probe-hidden hide:browse, hide:multi, same:*
   const hideCards = useStore((s) => s.hideCards), unhideCards = useStore((s) => s.unhideCards);
-  const setStatus = useStore((s) => s.setStatus);
   const setTagState = useStore((s) => s.setTagState);
-  const leaveSide = (list: Wallpaper[]) => { const f = useStore.getState().browseFocus; if (f && list.some((w) => w.pageUrl === f)) focusBrowse(null); };
-  const doUnsub = async (list: Wallpaper[]) => {
-    const items = [...new Map(list.filter((w) => w.workshopId).map((w) => [w.workshopId!, w])).values()];
-    if (!items.length) return;
-    let st: Awaited<ReturnType<typeof api.workshopState>>;
-    try { st = await api.workshopState(items.map((w) => w.workshopId!)); }
-    catch (e) { setStatus(`Couldn't unsubscribe: ${(e as Error).message}`); return; }
-    const go = items.filter((w) => st[w.workshopId!]?.subscribed && !st[w.workshopId!]?.pending);
-    if (!go.length) { setStatus(items.length === 1 ? `Not subscribed to ${items[0].title}` : "None of them is subscribed"); return; }
-    const lib = useStore.getState().libraryItems, ids = new Set(go.map((w) => w.workshopId));
-    if (!await confirmBaseRemoval(lib.filter((i) => i.workshopId && ids.has(i.workshopId) && !i.isPreset), lib, "unsubscribe")) return;
-    setSel(new Set());
-    for (const w of go) await unsubscribeWs(w.workshopId!, w.title);
-    if (go.length > 1) setStatus(`Unsubscribing from ${go.length} wallpapers`);
+  // a selection the search or a filter took off the grid leaves the shown card alone
+  const sideTargets = (w: Wallpaper) => {
+    const shown = sel.has(w.pageUrl) ? sorted.filter((x) => sel.has(x.pageUrl)) : [];
+    return shown.length ? shown : [w];
   };
-  const menuItems = cardMenuItems({
-    n: menuTargets.length, unsubN: menuTargets.filter((w) => w.workshopId).length, hidden: !!menu?.hidden,
-    onUnsub: () => doUnsub(menuTargets),
-    onHide: () => { leaveSide(menuTargets); setSel(new Set());
-      hideCards("browse", menuTargets.map((w) => ({ key: w.pageUrl, title: w.title, card: w }))); },
-    onUnhide: () => { leaveSide(menuTargets); setSel(new Set()); unhideCards("browse", menuTargets.map((w) => w.pageUrl), menuTargets.map((w) => w.title)); },
-  });
+  const hideFor = (w: Wallpaper, list: Wallpaper[]) => {
+    const done = () => { focusBrowse(null); setSel(new Set()); };
+    return {
+      hidden: !!hiddenHere[w.pageUrl], n: list.length,
+      onHide: () => { done(); hideCards("browse", list.map((x) => ({ key: x.pageUrl, title: x.title, card: x }))); },
+      onUnhide: () => { done(); unhideCards("browse", list.map((x) => x.pageUrl), list.map((x) => x.title)); },
+    };
+  };
   // a drag on the empty space between the cards: box selection into the same `sel` / `anchor` (hooks/useMarquee.ts)
   const onMarquee = useMarquee(scrollRef, { prefix: "br-", sel, setSel, anchor });
   const cardMiddle = useStableFn((x: Wallpaper) => x.pageUrl.startsWith("http") // middle-click → open source page/location
@@ -350,7 +325,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
       {setEmpty && <NoMatch kind="set" text={noFavs ? "No favourites yet. Star a Workshop wallpaper in its sidebar and it shows here." : "Nothing here matches"} clear={setClear} onClear={clearOthers} />}
       {/* the Hidden row's ✓ with nothing (left) to show: say so, with the way back to the list. Guard: probe-hidden hide:filter */}
-      {hidOn && !sorted.length && scope && <NoMatch kind="hidden" text="Nothing hidden here. A wallpaper you hide (right-click it) leaves the list and shows here." clear="Show the list" onClear={() => setTagState(HIDDEN_TAG, null, scope)} />}
+      {hidOn && !sorted.length && scope && <NoMatch kind="hidden" text="Nothing hidden here. A wallpaper you hide (Hide in its sidebar) leaves the list and shows here." clear="Show the list" onClear={() => setTagState(HIDDEN_TAG, null, scope)} />}
       {empty && !hidOn && <NoMatch kind={`browse-${empty.kind}`} text={empty.text} clear={empty.clear} onClear={empty.onClear} />}
       <WsListNote />
       <div className="grid" ref={gridRef}>
@@ -383,17 +358,18 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     </div>
     {/* keyed by scope: another source's column is another list's — its groups fade in fresh (index.css .wf-body) */}
     {scope && col.panel.value && <WorkshopFilterColumn key={scope} mode={col.panel.value} scope={scope} known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
-    <ContextMenu at={menu?.open ? menu.at : null} items={menuItems} onClose={closeMenu} light
-      label={menuTargets.length > 1 ? `${menuTargets.length} wallpapers` : (menuTargets[0]?.title ?? "Wallpaper")} />
-    {sideW && (
-      <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title} onClose={() => focusBrowse(null)}>
-        <BrowseSide w={sideW} source={activeSource} libItem={libraryCopy(libItems, sideW)} progress={downloads[sideW.pageUrl]}
-          onDownload={(apply, oneOff) => download(activeSource, sideW, apply, oneOff)} onCancel={() => cancelDownload(sideW.pageUrl)}
-          onApplyLib={(p) => applyItem(p)} onShowInLibrary={onShowInLibrary}
-          onOpenSource={() => sideW.pageUrl.startsWith("http") ? openExternal({ url: sideW.pageUrl })
-            : openExternal({ path: sideW.pageUrl, reveal: true, isScene: sideW.isScene, workshopId: sideW.workshopId })} />
-      </SidePanel>
-    )}
+    {sideW && (() => {
+      const list = sideTargets(sideW);
+      const lib = libraryCopy(libItems, sideW);
+      const libTargets = [...new Set(list.map((x) => (x === sideW ? lib : libraryCopy(libItems, x))).filter((x) => !!x))] as LibraryItem[];
+      return (
+        <SidePanel kind="browse" id={sideW.pageUrl} order={sorted.findIndex((w) => w.pageUrl === sideW.pageUrl)} card={`br-${sideW.pageUrl}`} closing={shown.closing} title={sideW.title}
+          sub={<SelectionNote n={list.length} />} onClose={() => focusBrowse(null)}>
+          <ItemSide tab="browse" w={sideW} lib={lib} libTargets={lib ? [lib, ...libTargets.filter((x) => x !== lib)] : []} hide={hideFor(sideW, list)}
+            clearSel={() => setSel(new Set())} onRemoved={() => {}} onShowInBrowse={() => {}} onShowInLibrary={onShowInLibrary} />
+        </SidePanel>
+      );
+    })()}
     </>
   );
 });

@@ -11,7 +11,7 @@
 //                       Settings order list's move buttons), arrow-right
 //                       + skip-forward + stop (the Steam to-do), sort (the Library top bar's split: the arrow dips, the bars
 //                       settle; its <svg> no longer tilts as an object). Frames: <OUT>/icons-<name>-f<i>.png
-//   icon:act:download:off  signed out under "Subscribe with Steam login" the sidebar's Download & Apply, Subscribe and the card's
+//   icon:act:download:off  signed out under "Subscribe with Steam login" the sidebar's Download and apply, Subscribe and apply and the card's
 //                       download button stay on (components/subscribeMode.ts actionBlocked: the Steam page is every mode's last
 //                       resort); made aria-disabled, their glyphs stay at rest on hover (a disabled control plays nothing)
 //   icon:hold:<name>    trash (a Library card's delete: the lid), folder (the playlist bar's Load: the flap), x (the sidebar's
@@ -23,7 +23,7 @@
 //                       back past 1 and settles at 1
 //   icon:toggle         a Library card's playlist toggle clicked → the new state pops (scale through in-between frames); a fresh
 //                       page pops none of the cards
-//   icon:status         Subscribed's cloud-check: no motion on hover; a glow under Glow effects, none under no-glow
+//   icon:status         the item sidebar's crash notice glyph: no motion on hover; a glow under Glow effects, none under no-glow
 //   icon:loops          after hovering every icon host of the Library, the playlist bar and the Browse sidebar + card: no icon
 //                       animation loops except progress (the spinner, the indeterminate bar)
 //   icon:magnet[:off]   the playlist bar's Play leans toward a pointer 14 px off its edge (≤ 3 px), is home when it's far; motion
@@ -90,6 +90,9 @@ const STUB = `(() => {
     if (p === "/browse" && m === "POST") { const b = JSON.parse(o.body); if (b.filter) return res(b.page > 1 ? [] : items); }
     if (p === "/detail" && m === "POST") return res({ title: "x", previewUrl: "", downloadUrl: "" });
     if ((p === "/download" || p === "/open") && m === "POST") return new Promise(() => {});
+    // icon:status: k1 crashed the player, so its sidebar shows the crash notice (its status glyph)
+    if (p === "/library" && m === "GET" && localStorage.getItem("__probe_ic_crash") === "1")
+      return f(u, o).then((r) => r.json()).then((l) => res(l.map((x) => (x.title === "k1" ? { ...x, hasCrashed: true } : x))));
     return f(u, o);
   };
 })();`;
@@ -290,14 +293,17 @@ app.whenReady().then(async () => {
     const sideBtn = (t) => `[...document.querySelectorAll(".side-panel:not(.closing) button, .side-panel:not(.closing) a")].find((b) => b.textContent.trim() === ${J(t)})`;
 
     // ---- act ----
-    await act("download", browseSide, sideBtn("Download & Apply"), ":scope svg.lucide-download > :nth-child(1)");
+    // the item sidebar's buttons: a Workshop result's Subscribe (the cloud), one Steam keeps subscribed (not imported) Download
+    const subSide = async () => { await closeSide(); await js(`window.__subscribed = ["940000"]; true`); await browseSide(); };
+    const plainSide = async () => { await closeSide(); await js(`window.__subscribed = []; true`); await browseSide(); };
+    await act("download", subSide, sideBtn("Download and apply"), ":scope svg.lucide-download > :nth-child(1)");
     await act("external-link", browseSide, sideBtn("Open on Steam"), ":scope svg.lucide-external-link > :nth-child(2)");
     // the copy glyph acts on the Settings command copy buttons (components/CopyButton.tsx): the sidebars' Workshop ID pill wears
     // the # (an object, below)
     await act("copy", async () => { await closeSide(); await tab("Settings"); await sleep(600);
       await page(`document.querySelector(".settings .copy-btn")?.scrollIntoView({ block: "center" });`); await sleep(500); },
       `document.querySelector(".settings .copy-btn")`, ":scope svg.lucide-copy > rect");
-    await act("cloud-download", browseSide, `document.querySelector("[data-side-sub-btn=subscribe]")`, ":scope svg.lucide-cloud-download > :nth-child(1)");
+    await act("cloud-download", plainSide, sideBtn("Subscribe and apply"), ":scope svg.lucide-cloud-download > :nth-child(1)");
     await act("refresh", async () => { await closeSide(); await browse(); }, `document.querySelector(".pills .mini[aria-label=Refresh]")`, null, { n: 80 });
     await act("upload", lib, `[...document.querySelectorAll(".topbar .btn")].find((b) => b.textContent.trim() === "Import")`, ":scope svg.lucide-upload > :nth-child(1)");
     await act("save", lib, bar("Save playlist"), null);
@@ -345,8 +351,8 @@ app.whenReady().then(async () => {
       await js(`window.__fakeWs("settings-changed", { workshopDownloadMode: "subscribe" }); true`); await sleep(400);
       try {
         for (const [name, setup, host, part, stay] of [
-          ["download", browseSide, sideBtn("Download & Apply"), ":scope svg.lucide-download > :nth-child(1)", false],
-          ["cloud-download", browseSide, `document.querySelector("[data-side-sub-btn=subscribe]")`, ":scope svg.lucide-cloud-download > :nth-child(1)", false],
+          ["download", async () => { await closeSide(); await js(`window.__subscribed = ["940000"]; true`); await browseSide(); }, sideBtn("Download and apply"), ":scope svg.lucide-download > :nth-child(1)", false],
+          ["cloud-download", async () => { await closeSide(); await js(`window.__subscribed = []; true`); await browseSide(); }, sideBtn("Subscribe and apply"), ":scope svg.lucide-cloud-download > :nth-child(1)", false],
           ["card-download", cardSetup, `document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card) .dl-btn")`, ":scope .dl-glyph .dl-arrow", true]]) {
           await setup();
           await status(false); await sleep(400);
@@ -471,22 +477,28 @@ app.whenReady().then(async () => {
     // ---- status ----
     await cell("icon:status", async () => {
       const v = [];
-      await js(`window.__subscribed = ["940000"]`);
-      await browseSide();
-      const ico = `document.querySelector(".side-sub-ico.subscribed svg")`;
-      if (!(await js(`!!${ico}`))) return ["no Subscribed icon — proved nothing"];
-      const c = await centre(`document.querySelector(".side-sub-ico")`);
+      // the item sidebar's crash notice: a status glyph
+      const open = () => page(`const c = [...document.querySelectorAll(".card.lib")].find((x) => x.querySelector('[data-title="k1"]'));
+        if (!c) return false; c.querySelector(".thumb-wrap").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+        for (let i = 0; i < 30 && !document.querySelector(".side-panel:not(.closing) [data-side-crash]"); i++) await m.sleep(100); await m.sleep(500); return true;`);
+      await js(`localStorage.setItem("__probe_ic_crash", "1"); true`); await load(); await lib(); await open();
+      const ico = `document.querySelector(".side-panel:not(.closing) .side-crash-ico > svg")`;
+      if (!(await js(`!!${ico}`))) { await js(`localStorage.removeItem("__probe_ic_crash"); true`); return ["no crash notice icon — proved nothing"]; }
+      const c = await centre(`document.querySelector(".side-panel:not(.closing) .side-crash-ico")`);
       await page(`window.__smp = m.sample(() => ${ico}, 30); true`);
       await mv(c.x, c.y);
       const s = (await js(`window.__smp`)).filter(Boolean), moved = s.some((x) => Math.abs(x.tx) + Math.abs(x.ty) + Math.abs(x.ang) > 0.05 || Math.abs(x.sx - 1) > 0.005);
       const glowOn = await js(`getComputedStyle(${ico}).filter`);
       if (moved) v.push("a status icon moves on hover");
       if (!/drop-shadow/.test(glowOn)) v.push(`glows on: no glow on the status icon (filter ${glowOn})`);
-      await setSettings({ glows: false }); await load(); await js(`window.__subscribed = ["940000"]`); await browseSide();
+      await closeSide();
+      await setSettings({ glows: false }); await load(); await lib(); await open();
       const glowOff = await js(`(${ico}) ? getComputedStyle(${ico}).filter : "?"`);
       if (glowOff !== "none") v.push(`no-glow: the status icon still glows (filter ${glowOff})`);
       console.log(`        status: moved ${moved}; filter ${glowOn} / no-glow ${glowOff}`);
-      await setSettings({ glows: true }); await load(); await js(`window.__subscribed = []`);
+      await closeSide();
+      await js(`localStorage.removeItem("__probe_ic_crash"); true`);
+      await setSettings({ glows: true }); await load();
       return v;
     });
 
@@ -590,7 +602,7 @@ app.whenReady().then(async () => {
       const v = [];
       // download (a one-shot), the close X (a hold), the press — no animation, no transition frames
       await browseSide();
-      for (const [name, host, part] of [["download", sideBtn("Download & Apply"), ":scope svg.lucide-download > :nth-child(1)"],
+      for (const [name, host, part] of [["cloud-download", sideBtn("Subscribe and apply"), ":scope svg.lucide-cloud-download > :nth-child(1)"],
         ["x", `document.querySelector(".side-panel:not(.closing) [data-side-close]")`, null]]) {
         const c = await centre(host); await mv(3, 3, 300);
         const rest = await page(`return m.look(${partExpr(host, part)});`);
@@ -791,7 +803,7 @@ app.whenReady().then(async () => {
       }] });
     await sweep("browse", async () => { await closeSide(); await browse(); await sleep(400); },
       { parks: [null, thumbPark(".scroll:not(.lib-scroll) .card:not(.skel-card) .thumb-wrap")], must: [/\[Refresh\]/, /ss-filter/] });
-    await sweep("browseSide", browseSide, { done: closeSide, must: [/side-close/, /side-sub-ico/, /side-tile-ico/] });
+    await sweep("browseSide", browseSide, { done: closeSide, must: [/side-close/, /side-tile-ico/] });
     // the filter column with no tag set (the lit toggle), then one tag included and one hidden: their switches' lit segments
     // are chips (the others are bare glyphs; the toggle shows its count, words, from then on)
     const clearTags = `for (const s of document.querySelectorAll('.wf-col .wf-seg[aria-checked="true"]:not([data-seg="off"])')) s.closest(".wf-sw").querySelector('[data-seg="off"]').click();

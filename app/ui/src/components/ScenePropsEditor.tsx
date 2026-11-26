@@ -9,7 +9,7 @@ import { rangeFill } from "./sidePreview";
 import { FADE, useMotion } from "./motion";
 import { glideFlip, snapFlip, softSpring, type FlipSnap } from "./flipGlide";
 
-// "Scene properties" in the item sidebar (LibrarySide): a WE scene's own options (project.json general.properties —
+// "Scene properties" in the item sidebar (ItemSide): a WE scene's own options (project.json general.properties —
 // colours, sliders, toggles, combos, text), applied live to the playing scene (liascape-player) and saved per item.
 // Same drag contract as the volume/speed sliders (.claude/rules/ui/design.md): every change → the local value at once +
 // a throttled live preview (~90 ms, /library/scene-props/preview — nothing saved) + a debounced persist

@@ -48,33 +48,35 @@
 //                         height and the chevron change at once; the panel, the body and the entries fade in / out (per
 //                         frame: in-between opacity frames, the boxes still). Mid-animation shots
 //                         steam-todo-glide.png / -fold.png / -slide.png
-//   steam:subToggle:workshop  the Browse sidebar's subscription toggle per a stubbed /workshop/state: Not subscribed → Subscribe
-//                         (POST /workshop/subscribe {workshopId, title}) → Subscribing… + the bar (WS subscribe-progress) →
-//                         Subscribed (danger Unsubscribe) → in the library: "Also removes it from your library" → Unsubscribe
-//                         (POST) → Unsubscribing…; Open on Steam → POST /steam/open-page, ok:false → window.open(https page)
-//   steam:subToggle:weLocal   a WE-local item: Subscribed → Unsubscribe → "Unsubscribed" (folder still there), the words slide
-//                         (per frame); no-glow (the chip's glow off) + bg-live (the card keeps its own fill). Shots steam-subtoggle*.png
+//   steam:sub:workshop    a Workshop result the library doesn't hold, per a stubbed /workshop/state (no subscription card):
+//                         not subscribed → "Subscribe and apply" / "Subscribe", nothing else; Steam keeps it subscribed →
+//                         "Download and apply" / "Download" and an Unsubscribe tile (rising in) → POST /workshop/unsubscribe →
+//                         "Unsubscribing…" (disabled); Open on Steam → POST /steam/open-page, ok:false → window.open(https page)
+//   steam:sub:weLocal     a WE-local item Steam keeps subscribed: Download buttons + Unsubscribe → POST; unsubscribed (folder
+//                         still there): the tile fades out (per frame); no-glow (the chip's glow off) + bg-live (the tile keeps
+//                         its own fill). Shots steam-sub*.png
 //   side:idPill:still     the Library sidebar's Workshop ID pill (a scene, its hero row full: a stubbed resolution + age rating)
 //                         keeps its box, and every hero chip keeps its own, per frame through "Copied" and back, at the window
 //                         widths where the pill starts a row of its own and full screen (1920); the accessible name is the
 //                         aria-label's ("— copy" / "— copied"), never the hidden face's; "Copied" rolls in (motion on) or only
 //                         fades in place (motion off). Shots steam-idpill-*.png
-//   side:deleteSource:names  "Delete from source" reads "Delete and unsubscribe" with a tooltip naming the unsubscribe; its click
-//                         (stubbed POST /workshop/delete-from-source) → the status bar says "Unsubscribing from s1. Undo brings
-//                         it back." (no Undo window's seconds); with auto-import on a Workshop item's Delete reads the same, a
-//                         non-Workshop item's stays "Delete". Shots steam-delsource*.png
-//   steam:subToggle:keepMenu  a library item's Unsubscribe: a real right-click opens a menu at the pointer ("Unsubscribe without
-//                         deleting", focused; it grows in per frame; no request); Escape (focus back) and a click outside close it;
-//                         picking it → ONE POST /workshop/unsubscribe-keep (never /workshop/unsubscribe), the menu fades out, the
-//                         status says "Unsubscribing from ws-1. It stays in your library."; the left-click still posts
-//                         /workshop/unsubscribe; no menu for an item not in the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
-//   steam:subToggle:keepMenuOff  motion off: the menu fades in and out in place (motion-off.js)
-//   steam:subToggle:signedOut  signed out under "Subscribe with Steam login": the Browse sidebar's Unsubscribe stays on (its
-//                         drain opens the item's Steam page), no "Sign in" sub-line, a click posts /workshop/unsubscribe, its
-//                         right-click entry on with no note; "Use the Steam app" the same. Shot steam-subtoggle-signedout.png
-//   side:oneOff:menu      the Browse sidebar's Download and "Download & Apply" (and, merged, "Subscribe"): a real right-click
+//   side:deleteSource:names  auto-import off: a Workshop item's split reads Play | Delete, "Delete and unsubscribe" its right-click
+//                         entry (the tooltip says so); its pick (stubbed POST /workshop/delete-from-source) → the status bar says
+//                         "Unsubscribing from s1. Undo brings it back." (no Undo window's seconds); with auto-import on the
+//                         library's own copy and a non-Workshop item's stay "Delete". Shots steam-delsource*.png
+//   steam:sub:keepMenu    Browse's sidebar on a Workshop result the library holds: the Library's Unsubscribe tile; a real
+//                         right-click opens a menu at the pointer ("Unsubscribe without deleting", focused; it grows in per frame;
+//                         no request); Escape (focus back) and a click outside close it; picking it → ONE POST
+//                         /workshop/unsubscribe-keep, the menu fades out, the status says "… It stays in your library."; the
+//                         left-click posts the Library's /workshop/delete-from-source; no menu on the Unsubscribe of an item not in
+//                         the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
+//   steam:sub:keepMenuOff motion off: the menu fades in and out in place (motion-off.js)
+//   steam:sub:signedOut   signed out under "Subscribe with Steam login": Browse's Unsubscribe tiles stay on (the library copy's:
+//                         a click posts delete-from-source, its right-click entry on with no note; a subscribed item the library
+//                         doesn't hold: /workshop/unsubscribe); "Use the Steam app" the same. Shot steam-sub-signedout.png
+//   side:oneOff:menu      the item sidebar's "Subscribe" and "Subscribe and apply": a real right-click
 //                         opens a menu at the pointer with that button's own entry only (Download: "Download then unsubscribe"
-//                         under "Subscribe with Steam login", "… & apply" for Download & Apply; focused, grows
+//                         under "Subscribe with Steam login", "… & apply" for Subscribe and apply; focused, grows
 //                         in per frame, no request); picking each → ONE POST /download {oneOff: true, apply} and the menu fades
 //                         out while the download shows; the left-click still posts a plain download (oneOff false); the route
 //                         is asked as the pointer reaches the button; a WE-local item's Download has no menu; no-glow + bg-live
@@ -90,21 +92,16 @@
 //                         Steam to download without subscribing" (a page can't make a one-off); a mode change (WS
 //                         settings-changed) or a sign-out (WS steam-status) is asked again at the next right-click
 //   side:blocked:download  no mode blocks a download (components/subscribeMode.ts actionBlocked: the Steam page is every
-//                         mode's last resort): "Subscribe with Steam login" signed out keeps the Browse sidebar's Download /
-//                         Download & Apply on with "Opens its Steam page for you to subscribe, …" under them, no "Sign in"
-//                         line; a click posts /download; the card's button and the selection toolbar's Download N on;
-//                         merged (auto-import on) the same words under the Subscribe buttons; "Use the Steam app"
-//                         keeps them; a sign-out under an open sidebar (WS steam-status): the page words take the line's place
-//                         (per frame: they rise in; motion off: only fade, motion-off.js); no-glow + bg-live: no glow, the
-//                         words' drop shadow. Shots steam-blocked*.png
-//   side:getHint          the line under the Browse sidebar's download buttons says what they do in each mode and sign-in (they
-//                         subscribe in every way), the card's Subscribe that it subscribes only (auto-import on: it then joins
-//                         the library); merged no line; signed out under "Subscribe with Steam login" the page's words; a live
-//                         mode change swaps the words in one
-//                         cell (on: rising in per frame; off: a fade in place); bg-live drop shadow. Shots steam-gethint*.png
+//                         mode's last resort): "Subscribe with Steam login" signed out keeps the sidebar's Subscribe /
+//                         Subscribe and apply on, no line under them; a click posts /download; the card's button and the
+//                         selection toolbar's Download N on; merged (auto-import on) and "Use the Steam app" the same; a
+//                         sign-out under an open sidebar (WS steam-status) changes nothing; no-glow + bg-live: no glow.
+//                         Shots steam-blocked*.png
+//   side:getHint          no line under the item sidebar's Subscribe buttons in any mode, sign-in or auto-import, no second
+//                         Subscribe beside them; a live mode change adds none. Shot steam-gethint.png
 //   side:aboutTall        the About text of a long description: ≥ 300 px in a 900 px window, ≤ 45 % of the window, scrolls inside
-//   side:blocked:subscribe  the Browse sidebar's Subscribe stays on in every mode and sign-in (signed out it goes to the item's
-//                         Steam page): no "Sign in" sub-line, a click posts /workshop/subscribe
+//   side:blocked:subscribe  the Subscribe tile of the library's own copy stays on in every mode and sign-in (signed out it goes to
+//                         the item's Steam page): a click posts /workshop/subscribe
 //   side:unsub:names      auto-import on: a subscribed Workshop item's Library tiles have no Delete but "Unsubscribe" (the cloud-off
 //                         icon, a tooltip naming the right-click and Undo); the card's button is named Unsubscribe; the library's
 //                         own copy and a plain item keep Delete; the tile and the card's button post /workshop/delete-from-source for
@@ -122,17 +119,17 @@
 //                         "Delete and unsubscribe" on; "Use the Steam app" the same; a sign-out under an open sidebar (WS
 //                         steam-status) changes nothing; no-glow + bg-live: the tile keeps its fill, no glow.
 //                         Shot steam-unsub-signedout.png
-//   steam:subMerge:labels auto-import on + "subscribe": "Subscribe & Apply" / "Subscribe" (cloud-download), no subscription card
-//                         until subscribed; "Subscribe" posts /download; steamapp and auto-import off keep Download and
-//                         the card; the cards' button ("Subscribe & apply", the cloud glyph) and the selection toolbar ("Subscribe
-//                         2") follow; subscribed: the card, Unsubscribe; no-glow + bg-live. Shots steam-submerge*.png
-//   steam:subMerge:appear the card rises in once subscribed while what follows glides down (per frame), and leaves (fade, what
-//                         follows glides up) once unsubscribed, never switching to "Not subscribed" on its way out
-//   steam:subMerge:appearOff  motion off: the card only fades in and out, nothing glides
-//   side:resub[Off]       the Library sidebar of its own copy of a Workshop item: the Browse sidebar's subscription card (Not
-//                         subscribed, Subscribe), none for a subscribed item or one the Workshop no longer has; Subscribe posts
-//                         /workshop/subscribe; once delivered (library-synced) the card leaves (fade, what follows glides up;
-//                         Off: only a fade) and the Delete tile reads Unsubscribe. Shots steam-resub*.png
+//   steam:subMerge:labels a Workshop result's sidebar says "Subscribe and apply" / "Subscribe" (cloud-download) in every mode and
+//                         auto-import, never a subscription card; "Subscribe" posts /download; the cards' button ("Subscribe &
+//                         apply", the cloud glyph) and the selection toolbar ("Subscribe 2") only with auto-import on +
+//                         "subscribe"; subscribed in Steam: Download + Unsubscribe; no-glow + bg-live. Shots steam-submerge*.png
+//   steam:subMerge:appear the Unsubscribe tile rises in once subscribed while what follows glides down (per frame), and leaves
+//                         (fade, what follows glides up) once unsubscribed, keeping its words on its way out
+//   steam:subMerge:appearOff  motion off: the tile only fades in and out, nothing glides
+//   side:resub[Off]       the Library sidebar of its own copy of a Workshop item: a Subscribe tile beside its Delete, none for a
+//                         subscribed item or one the Workshop no longer has; Subscribe posts /workshop/subscribe ("Subscribing…");
+//                         once delivered (library-synced) it fades out (Off: only a fade) and the Delete tile reads Unsubscribe.
+//                         Shots steam-resub*.png
 //   side:copyIdPill       the Browse sidebar's Workshop ID pill (the Library's own component, components/WorkshopIdPill.tsx; no
 //                         Copy ID tile): a click copies the id and the pill reads "Copied" (its name "Workshop ID N — copied")
 //                         for ≈ 1.2 s; every hero chip keeps its box per frame; the faces roll (motion on) or only fade (motion
@@ -141,17 +138,17 @@
 //   ws:creator[Off]       the creator row (avatar from the media origin + name, asked once with the item's owner); a click lists
 //                         their items (/browse list creator): the creator's pill slides in (per frame; Off: fades), the search
 //                         goes, the sort is the list's, the sidebar closes; × back (the pill leaves); no-glow + bg-live
-//                         the row ends in an icon chip (lucide images, tooltip and row name "All their wallpapers"), no words; its
-//                         icon tilts on the spring while the row is hovered (Off: stays still); bg-live: the chip's own fill
+//                         the whole row is the target: it ends in a bare chevron (no chip, no tooltip; the row's name "All their
+//                         wallpapers, made by …"), which slides on the spring while the row is hovered and lifts (Off: still)
 //   ws:creatorSelect      the creator's name is selectable text: no Copy beside it; a drag selects it and lists nothing, Ctrl+C copies it
 //   side:browseTitle      the Browse sidebar's long title: folded, a click unfolds it, another folds it; no Copy: a drag selects
 //                         words without unfolding, Ctrl+C copies them
 //   look:browseTitles     a Browse card's long title: two lines, clamped; every card keeps its box (the grid as with short titles)
-//   ws:favorite[Off]      the favourite tile: read state, a click POSTs, "Favourited" rolls in (Off: fades), the star fills and pops
-//                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; no-glow
-//                         + bg-live
-//   ws:favoriteSteam[Off] no usable sign-in: the tile's words roll over to "Favourite on Steam" as the state lands (Off: fade, nothing
-//                         moves), the tile keeps its box; a click opens the item's page in the Steam app (POST /steam/open-page
+//   ws:favorite[Off]      the favourites pill is the toggle (no tile): read state, a click POSTs, the star fills and pops once
+//                         (never on mount; Off: no pop), the count goes up by one, the pill keeps its box; a refusal reverts with
+//                         the reason; no-glow + bg-live
+//   ws:favoriteSteam[Off] no usable sign-in: the pill is "Favourite on Steam" (its name, the reason as its tooltip) once the state
+//                         lands, keeping its box; a click opens the item's page in the Steam app (POST /steam/open-page
 //                         {watch: "favorite"}), sends no favourite; no-glow + bg-live
 //   ws:comments[Off]      the comments: read only once in view, 10 of 23 newest first, the creator's marked, the text plain (markup
 //                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out no box;
@@ -221,11 +218,11 @@
 //   browse:appPresence    "Use the Steam app": the window open, on any tab → POST /steam/app-presence at the interval the
 //                         backend names (no gap across tab switches, no body, nothing on pagehide); another mode: none, and a
 //                         switch to one stops them at once
-//   lib:ws:order         a Workshop item's Library sidebar: its counts in the hero row, the creator under it, then Playback, the
-//                         scene properties, the favourite and the comments, last, 12 px apart; none off the Workshop, for a plain
-//                         item, for a multi-selection
+//   lib:ws:order         a Workshop item's Library sidebar: its counts in the hero row, the creator under it, the tiles with the
+//                         favourite, then Playback, the scene properties and the comments, last, 12 px apart; none off the
+//                         Workshop, for a plain item, for a multi-selection
 //   lib:ws:pillRow        a Workshop scene's and a Workshop video's counts are hero pills beside the others (same row box and
-//                         line as a neighbour, before the size), the creator right under the hero, both above Playback
+//                         line as a neighbour, before the ID and the size), the creator under the action area, both above Playback
 //   lib:ws:counts[Off]    its counts: held unseen while asked (once, after the sidebar settles), they fade in (on: rising) where they
 //                         stay, the creator row never moves; 4.3k people / 87 star, no views; no answer → the pills leave and the
 //                         size glides into their room (Off: at once); no-glow + bg-live
@@ -335,7 +332,7 @@ const STUB = `(() => {
     // the Steam to-do: idle at load, every button's POST recorded (steam:todo)
     if (p === "/steam-todo") return res({ finished: true });
     if (p.startsWith("/steam-todo/") && m === "POST") { st.calls.push({ p, body: null }); return res(p.endsWith("use-steam-app") ? { error: null } : null); }
-    // the Browse sidebar's subscription toggle (steam:subToggle): the state a cell sets in window.__wsState, every write recorded
+    // a Workshop item's subscription (steam:sub:*): the state a cell sets in window.__wsState, every write recorded
     if (p === "/workshop/state" && m === "POST") {
       const ids = JSON.parse(o.body).ids || [], s = window.__wsState || {}, r = {};
       for (const id of ids) r[id] = s[id] ?? { subscribed: false, pending: null, inLibrary: false, onDisk: false };
@@ -378,7 +375,7 @@ const STUB = `(() => {
       return res(p.endsWith("unsubscribe") ? { inLibrary: !!(window.__wsState?.[JSON.parse(o.body).workshopId]?.inLibrary), batch: null, unsubscribeInMs: 5000 }
         : { subscribed: false, inSteamTodo: true, message: "Click Subscribe in Steam, then Next…" });
     }
-    // "Unsubscribe without deleting" and the Library sidebar's "Delete and unsubscribe" (side:*, steam:subToggle:keepMenu*):
+    // "Unsubscribe without deleting" and the Library sidebar's "Delete and unsubscribe" (side:*, steam:sub:keepMenu*):
     // recorded, answered here, never reaching the stack's backend (its library stays as it is)
     if ((p === "/workshop/unsubscribe-keep" || p === "/workshop/delete-from-source" || p === "/workshop/drain" || p === "/library/trash") && m === "POST") {
       st.calls.push({ p, body: o.body ? JSON.parse(o.body) : null });
@@ -396,9 +393,9 @@ const STUB = `(() => {
       const nosize = JSON.parse(localStorage.getItem("__probe_lib_nosize") || "[]"), wsOf = JSON.parse(localStorage.getItem("__probe_lib_ws") || "{}");
       return f(u, o).then((r) => r.json()).then((list) => res(list.map((x) => {
         let y = full && x.isScene && x.workshopId ? { ...x, resolution: "3840 x 2160", ageRating: "Everyone" } : x;
-        if (x.workshopId && x.workshopId in sub) y = { ...y, subscribed: sub[x.workshopId] };
-        if (nosize.includes(x.title)) y = { ...y, diskBytes: null };
         if (x.title in wsOf) y = { ...y, workshopId: wsOf[x.title] };
+        if (y.workshopId && y.workshopId in sub) y = { ...y, subscribed: sub[y.workshopId] };
+        if (nosize.includes(x.title)) y = { ...y, diskBytes: null };
         return x.workshopId && off ? { ...y, offWorkshop: off.includes(x.workshopId) } : y; })));
     }
     if (p === "/browse" && m === "POST") {
@@ -422,7 +419,7 @@ const STUB = `(() => {
         : i === 1 ? { ...x, title: "ws-preset", isScene: true, isPreset: true, tags: ["Preset", "Scene", "Anime"] }
         : i === 3 ? { ...x, title: "ws-lone-scene", isScene: true, tags: ["Scene"] } : x;
       if (b.filter) return res(b.page > 1 ? [] : items.map(shape).map((x, i) => (i === 0 ? { ...x, ...(long ? { title: long } : {}), ...(longDesc ? { description: longDesc } : {}) } : x)));
-      // a fake Wallpaper Engine (Local) folder (steam:subToggle): local page paths + Workshop ids
+      // a fake Wallpaper Engine (Local) folder (steam:sub:weLocal): local page paths + Workshop ids
       if (localStorage.getItem("__probe_we_local") === "1") return res(b.page > 1 ? [] : items.map((x, i) => ({ ...x, title: "we-" + (i + 1),
         pageUrl: "/tmp/probe-we/" + (931000 + i), workshopId: String(931000 + i), description: null, subscriptions: null, favorites: null, views: null })));
     }
@@ -886,8 +883,8 @@ app.whenReady().then(async () => {
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(ws)})?.click();`);
       await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap").click();`); await sleep(700);
-      const btn = await page(`const b = [...document.querySelectorAll(".side-go")].find((x) => x.textContent.trim() === "Download"); if (!b) return false; b.click(); return true;`);
-      if (!btn) return ["no Download button in the Browse sidebar"];
+      const btn = await page(`const b = [...document.querySelectorAll(".side-go")].find((x) => x.textContent.trim() === "Subscribe"); if (!b) return false; b.click(); return true;`);
+      if (!btn) return ["no Subscribe button in the Browse sidebar"];
       const dl = await waitFor(() => js(`window.__st.dl && window.__st.dl.body`), 2000);
       if (!dl) return ["no POST /download"];
       // the fallback order's last step: its page waits in the Steam app (WorkshopDownloader.OpenedInSteam)
@@ -1075,19 +1072,20 @@ app.whenReady().then(async () => {
     }
     await setSettings({ morphs: true });
 
-    // The Browse sidebar's subscribe / unsubscribe toggle for WE-local and Workshop items, and Open on Steam opening the Steam
-    // client. The toggle (components/SubToggle.tsx) per the stubbed /workshop/state; its POSTs; Open on Steam
-    // → POST /steam/open-page (ok:false → the https page through window.open). Shots steam-subtoggle*.png
+    // The item sidebar's subscription for a Workshop result and a WE-local item the library doesn't hold (components/ItemSide.tsx:
+    // no subscription card): the buttons and the Unsubscribe tile per the stubbed /workshop/state (components/wsSubState.ts);
+    // their POSTs; Open on Steam → POST /steam/open-page (ok:false → the https page through window.open). Shots steam-sub*.png
     const openSide = async (n = 0) => { await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[${n}].click();`); await sleep(800); };
-    const sub = () => page(`const s = document.querySelector("[data-side-sub]"); if (!s) return null; const b = s.querySelector("[data-side-sub-btn]");
-      const ico = s.querySelector(".side-sub-ico");
-      return { state: s.dataset.state, label: [...s.querySelectorAll("[data-side-sub-label]")].at(-1)?.textContent ?? null, hint: [...s.querySelectorAll("[data-side-sub-hint]")].at(-1)?.textContent ?? null,
-        btn: b?.dataset.sideSubBtn ?? null, btnText: b?.textContent.trim() ?? null, btnClass: b?.className ?? "", progress: !!s.querySelector("[data-side-sub-progress]"),
-        titles: s.querySelectorAll("[title]").length, bg: getComputedStyle(s).backgroundColor, icoShadow: ico ? getComputedStyle(ico).boxShadow : null,
-        icons: s.querySelectorAll("svg.lucide").length };`);
+    const sub = () => page(`const b = document.querySelector(".side-panel:not(.closing) .side-body"); if (!b) return null;
+      const t = b.querySelector("[data-unsubscribe-steam]");
+      return { cta: [...b.querySelectorAll(".side-cta .side-go:not([data-unsubscribe-steam])")].map((e) => e.textContent.trim()), tile: t ? t.textContent.trim() : null, off: t?.getAttribute("aria-disabled") ?? null,
+        card: !!b.querySelector("[data-side-sub]"), row: t ? t.className : null, bg: t ? getComputedStyle(t).backgroundColor : null, icoShadow: t ? getComputedStyle(t).boxShadow : null };`);
     const setWs = (id, st) => js(`window.__wsState = { ...(window.__wsState || {}), ${J(id)}: ${J(st)} }; true`);
-    const bump = () => ev("steam-todo", { finished: true }); // any event that can change a subscription → the toggle re-reads
-    await cell("steam:subToggle:workshop", async () => {
+    const bump = () => ev("steam-todo", { finished: true }); // any event that can change a subscription → the state is read again
+    // steam:sub:workshop — a Workshop result: not subscribed → "Subscribe and apply" / "Subscribe" and no subscription action;
+    // Steam keeps it subscribed (not imported) → "Download and apply" / "Download" and an Unsubscribe tile (POST /workshop/unsubscribe),
+    // "Unsubscribing…" (disabled) while pending; never a subscription card
+    await cell("steam:sub:workshop", async () => {
       const v = []; await load(SIGNED_IN);
       const srcs = (await http("GET", "/sources")).json;
       const wsName = srcs.find((s) => s.supportsTagFilter)?.name;
@@ -1095,38 +1093,23 @@ app.whenReady().then(async () => {
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
       await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await setWs("930000", { subscribed: false, pending: null, inLibrary: false, onDisk: false });
-      await openSide(0);
-      let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
+      await openSide(0); await sleep(300);
+      let s = await sub();
       console.log(`        not subscribed: ${J(s)}`);
-      if (!s || s.state !== "not-subscribed" || s.label !== "Not subscribed" || s.btn !== "subscribe" || s.btnText !== "Subscribe" || !/accent/.test(s.btnClass))
-        v.push(`not subscribed: ${J(s)}`);
-      if (s && !/without adding it to your library/.test(s.hint ?? "")) v.push(`the hint reads "${s?.hint}"`);
-      if (s?.titles) v.push(`${s.titles} tooltip(s) in the toggle`);
-      // Subscribe → POST /workshop/subscribe {workshopId, title}; WS subscribe-progress → "Subscribing…" + the bar; done → Subscribed
+      if (!s || J(s.cta) !== J(["Subscribe and apply", "Subscribe"]) || s.tile || s.row || s.card) v.push(`not subscribed: ${J(s)}`);
+      // subscribed in Steam, not imported: Download + Unsubscribe, arriving with the state (rising in)
+      await setWs("930000", { subscribed: true, pending: null, inLibrary: false, onDisk: true }); await bump(); await sleep(600);
+      s = await sub();
+      console.log(`        subscribed: ${J(s)}`);
+      if (!s || J(s.cta) !== J(["Download and apply", "Download"]) || s.tile !== "Unsubscribe" || s.off || s.card || !/arrive/.test(s.row ?? "")) v.push(`subscribed: ${J(s)}`);
+      await shot("sub-workshop");
       let n0 = (await calls()).length;
-      await page(`document.querySelector("[data-side-sub-btn]").click();`); await sleep(300);
+      await page(`document.querySelector("[data-unsubscribe-steam]").click();`); await sleep(300);
       let got = (await calls()).slice(n0);
-      if (got.length !== 1 || got[0].p !== "/workshop/subscribe" || got[0].body?.workshopId !== "930000" || got[0].body?.title !== "ws-1") v.push(`Subscribe posted ${J(got)}`);
-      await ev("subscribe-progress", { id: "930000", value: 0, status: "Click Subscribe in Steam, then Next…" }); await sleep(400);
-      s = await sub();
-      if (s?.state !== "subscribing" || s.label !== "Subscribing…" || !s.progress || s.btn) v.push(`while subscribing: ${J(s)}`);
-      await shot("subtoggle-subscribing");
-      await setWs("930000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
-      await ev("subscribe-progress", { id: "930000", value: 1, status: "Subscribed", done: true }); await sleep(600);
-      s = await sub();
-      if (s?.state !== "subscribed" || s.label !== "Subscribed" || s.btn !== "unsubscribe" || s.btnText !== "Unsubscribe" || !/danger/.test(s.btnClass)) v.push(`subscribed: ${J(s)}`);
-      // in the library: the sub-line says Unsubscribe also removes it
-      await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true }); await bump(); await sleep(500);
-      s = await sub();
-      if (!/also removes it from your library/i.test(s?.hint ?? "")) v.push(`in the library, the hint reads "${s?.hint}"`);
-      await shot("subtoggle");
-      n0 = (await calls()).length;
-      await page(`document.querySelector("[data-side-sub-btn]").click();`); await sleep(300);
-      got = (await calls()).slice(n0);
       if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe" || got[0].body?.workshopId !== "930000") v.push(`Unsubscribe posted ${J(got)}`);
       await setWs("930000", { subscribed: false, pending: "unsubscribe", inLibrary: false, onDisk: true }); await bump(); await sleep(500);
       s = await sub();
-      if (s?.state !== "unsubscribing" || s.label !== "Unsubscribing…" || s.btn) v.push(`pending unsubscribe: ${J(s)}`);
+      if (s?.tile !== "Unsubscribing…" || s.off !== "true") v.push(`pending unsubscribe: ${J(s)}`);
       // Open on Steam → POST /steam/open-page; the browser only when the Steam app couldn't be opened
       await page(`window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; window.__replies = { ...(window.__replies || {}), "/steam/open-page": { body: { ok: true } } };`);
       n0 = (await calls()).length;
@@ -1141,7 +1124,10 @@ app.whenReady().then(async () => {
       if (await page(`return !!document.querySelector('.side-panel a[href*="steamcommunity.com"]');`)) v.push("a plain steamcommunity.com link is still in the sidebar");
       return v;
     });
-    await cell("steam:subToggle:weLocal", async () => {
+    // steam:sub:weLocal — a WE-local item Steam keeps subscribed: "Download and apply" / "Download" (it imports) and Unsubscribe →
+    // POST /workshop/unsubscribe; unsubscribed with its folder still there: the tile fades out (per frame) and what follows
+    // glides up; no-glow: the tile's chip has no glow; bg-live: the tile keeps its own dark fill
+    await cell("steam:sub:weLocal", async () => {
       const v = [];
       await js(`localStorage.setItem("__probe_we_local", "1"); true`);
       await load(SIGNED_IN);
@@ -1153,36 +1139,35 @@ app.whenReady().then(async () => {
       await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await setWs("931000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
       await openSide(0);
-      let s = await waitFor(() => sub().then((x) => x && x.state !== "loading" ? x : null), 3000);
+      let s = await waitFor(() => sub().then((x) => x && x.tile ? x : null), 3000);
       console.log(`        WE local: ${J(s)}`);
-      if (s?.state !== "subscribed" || s.btn !== "unsubscribe") v.push(`a WE-local subscription: ${J(s)}`);
+      if (s?.tile !== "Unsubscribe" || J(s?.cta) !== J(["Download and apply", "Download"])) v.push(`a WE-local subscription: ${J(s)}`);
       const n0 = (await calls()).length;
-      // the state swap animates (the words slide) — per frame, the new words' x passes through offsets
-      const xs = await frames(`document.querySelector("[data-side-sub-btn]").click(); window.__wsState["931000"] = { subscribed: false, pending: null, inLibrary: false, onDisk: true };`,
-        `(() => { const t = [...document.querySelectorAll("[data-side-sub] [data-side-sub-label]")].at(-1); return t && t.textContent === "Unsubscribed" ? new DOMMatrix(getComputedStyle(t).transform).m41 : null; })()`, 900);
+      // the tile leaves: its opacity per frame passes through in-between values
+      const ops = await frames(`document.querySelector("[data-unsubscribe-steam]").click(); window.__wsState["931000"] = { subscribed: false, pending: null, inLibrary: false, onDisk: true };`,
+        `(() => { const t = document.querySelector("[data-unsubscribe-steam]"); return t ? +getComputedStyle(t).opacity : null; })()`, 900);
       const got = (await calls()).slice(n0);
       if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe" || got[0].body?.workshopId !== "931000") v.push(`Unsubscribe posted ${J(got)}`);
       s = await sub();
-      if (s?.state !== "unsubscribed" || s.label !== "Unsubscribed" || s.btn !== "subscribe") v.push(`after the unsubscribe (folder still there): ${J(s)}`);
-      const slid = xs.filter((x) => x != null && Math.abs(x) > 1).length;
-      console.log(`        swap x: [${xs.filter((x) => x != null).slice(0, 8).map((x) => x.toFixed(1))}] ${slid} offset frame(s)`);
-      if (slid < 2) v.push(`the state swap didn't slide (${slid} frames)`);
-      await shot("subtoggle-welocal");
-      // no-glow: the subscribed chip has no glow; bg-live: the card keeps its own dark fill
-      await setWs("931000", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
+      if (s?.tile || s?.row) v.push(`after the unsubscribe (folder still there): ${J(s)}`);
+      const mid = ops.filter((x) => x != null && x > 0.05 && x < 0.95).length;
+      console.log(`        leave opacity: [${ops.filter((x) => x != null).slice(0, 10).map((x) => x.toFixed(2))}] ${mid} in-between frame(s)`);
+      if (mid < 2) v.push(`the tile didn't fade out (${mid} frames)`);
+      await shot("sub-welocal");
+      // no-glow: the tile's chip has no glow; bg-live: the tile keeps its own dark fill
       await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
       await load(SIGNED_IN); await tab("Browse");
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(local)})?.click();`);
       await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
       await js(`window.__wsState = { "931000": { subscribed: true, pending: null, inLibrary: false, onDisk: true } }; true`);
       await openSide(0);
-      s = await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
+      s = await waitFor(() => sub().then((x) => x && x.tile ? x : null), 3000);
       const html = await js(`document.documentElement.className`);
       console.log(`        no-glow + bg-live: ${J({ html, bg: s?.bg, ico: s?.icoShadow })}`);
       if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
-      if (s && /0px 0px 10px/.test(s.icoShadow ?? "")) v.push(`no-glow: the chip still glows (${s.icoShadow})`);
-      if (!s || /rgba\(0, 0, 0, 0\)|transparent/.test(s.bg)) v.push(`bg-live: the toggle has no fill of its own (${s?.bg})`);
-      await shot("subtoggle-live");
+      if (s && (s.icoShadow ?? "").split(/,(?![^(]*\))/).some((x) => !/inset|none/.test(x) && !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the button glows (${s.icoShadow})`);
+      if (!s || /rgba\(0, 0, 0, 0\)|transparent/.test(s.bg)) v.push(`bg-live: the Unsubscribe has no dark base of its own (${s?.bg})`);
+      await shot("sub-live");
       await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
       await js(`localStorage.removeItem("__probe_we_local"); true`);
       return v;
@@ -1302,27 +1287,34 @@ app.whenReady().then(async () => {
     // unsubscribes: the import would bring it back) says so the same way, a non-Workshop item's stays a plain "Delete"
     await cell("side:deleteSource:names", async () => {
       const v = [];
-      const tiles = () => page(`return [...document.querySelectorAll("${SIDE} .side-tiles > *")].map((t) => ({ text: t.textContent.trim(), title: t.getAttribute("title"),
+      // (this cell runs before the shared menu helpers further down are defined: its own)
+      const boxOf = (sel) => js(`(() => { const e = document.querySelector("${SIDE} ${sel}"); if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      const menuNow = () => js(`(() => { const m = document.querySelector("[data-ctx-menu]"); return m ? { items: [...m.querySelectorAll("[role=menuitem]")].map((b) => ({ key: b.dataset.ctxItem, text: b.textContent.trim() })) } : null; })()`);
+      const itemAt = (key) => js(`(() => { const r = document.querySelector("[data-ctx-item=${key}]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+      const acts = () => page(`return [...document.querySelectorAll("${SIDE} .side-cta .side-go, ${SIDE} .side-tiles > *")].map((t) => ({ text: t.textContent.trim(), title: t.getAttribute("title"),
         danger: t.classList.contains("danger"), name: t.getAttribute("aria-label") }));`);
       await setSettings({ autoAddWeWallpapersToLibrary: false });
       await js(`localStorage.setItem("__probe_lib_full", "1"); true`);
       await load(SIGNED_IN);
       if (!(await openLib("s1"))) { await restoreLib(); return ["no sidebar for the scene s1 — proved nothing"]; }
       await sleep(600);
-      let t = await tiles(); console.log(`        auto-import off: ${J(t)}`);
-      const ds = t.find((x) => /unsubscribe/i.test(x.text));
-      if (!ds || ds.text !== "Delete and unsubscribe" || !ds.danger) v.push(`no "Delete and unsubscribe" tile: ${J(t)}`);
-      if (ds && !/unsubscribes on Steam/i.test(ds.title ?? "")) v.push(`its tooltip doesn't name the unsubscribe: ${J(ds.title)}`);
+      let t = await acts(); console.log(`        auto-import off: ${J(t)}`);
+      const del = t.find((x) => x.danger);
+      if (!del || del.text !== "Delete" || !/unsubscribes on Steam/i.test(del.title ?? "")) v.push(`the Delete half: ${J(del)} (want "Delete", its tooltip naming the right-click's unsubscribe)`);
       if (t.some((x) => /from source/i.test(x.text + (x.title ?? "")))) v.push(`"Delete from source" is still there: ${J(t)}`);
-      if (!t.some((x) => x.text === "Delete" && !x.title)) v.push(`the plain Delete changed: ${J(t)}`);
-      await page(`document.querySelector("${SIDE}").scrollTop = 0; document.querySelector("${SIDE} [data-delete-source]")?.scrollIntoView({ block: "center" });`); await sleep(400);
+      const db = await boxOf("[data-delete]");
+      if (db) { await clickAt(db.x, db.y, "right"); await sleep(350); }
+      const m = await menuNow();
+      console.log(`        Delete's right-click: ${J(m?.items)}`);
+      if (!m || J(m.items.map((x) => x.text)) !== J(["Delete and unsubscribe"])) v.push(`Delete's right-click menu: ${J(m)}`);
       await shot("delsource");
       const n0 = (await calls()).length;
-      await page(`document.querySelector("${SIDE} [data-delete-source]")?.click();`); await sleep(700);
+      const pk = await itemAt("delete-source");
+      if (pk) { await clickAt(pk.x, pk.y); await sleep(700); }
       const got = (await calls()).slice(n0);
       const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
-      console.log(`        clicked: ${J(got.map((c) => c.p))} | status "${status}"`);
-      if (!got.some((c) => c.p === "/workshop/delete-from-source" && c.body?.items?.[0]?.workshopId === "900000001")) v.push(`the click posted ${J(got)}`);
+      console.log(`        picked: ${J(got.map((c) => c.p))} | status "${status}"`);
+      if (!got.some((c) => c.p === "/workshop/delete-from-source" && c.body?.items?.[0]?.workshopId === "900000001")) v.push(`the pick posted ${J(got)}`);
       if (!/^Unsubscribing from s1\. Undo brings it back\.$/.test(status)) v.push(`the status bar says "${status}"`);
       // auto-import on: a Workshop item Steam doesn't have subscribed (the library's own copy) deletes plainly — no unsubscribe
       // (a subscribed one's Delete is Unsubscribe: side:unsub:names); a plain item's stays "Delete"
@@ -1331,9 +1323,9 @@ app.whenReady().then(async () => {
       await load(SIGNED_IN);
       if (!(await openLib("s1"))) v.push("auto-import on: no sidebar for s1");
       else {
-        await sleep(600); t = await tiles(); console.log(`        auto-import on, s1 (its own copy): ${J(t)}`);
-        const del = t.find((x) => x.danger);
-        if (t.filter((x) => x.danger).length !== 1 || del?.text !== "Delete" || del?.title) v.push(`auto-import on, the library's own copy of a Workshop item: ${J(t)}`);
+        await sleep(600); t = await acts(); console.log(`        auto-import on, s1 (its own copy): ${J(t)}`);
+        const d = t.filter((x) => x.danger);
+        if (d.length !== 1 || d[0].text !== "Delete" || d[0].title) v.push(`auto-import on, the library's own copy of a Workshop item: ${J(t)}`);
         await shot("delsource-autoimport");
       }
       await js(`localStorage.removeItem("__probe_lib_sub"); true`);
@@ -1341,7 +1333,7 @@ app.whenReady().then(async () => {
       if (!plain) v.push("no non-Workshop library item — proved nothing about the plain Delete");
       else if (!(await openLib(plain))) v.push(`auto-import on: no sidebar for ${plain}`);
       else {
-        await sleep(600); t = await tiles(); console.log(`        auto-import on, ${plain}: ${J(t)}`);
+        await sleep(600); t = await acts(); console.log(`        auto-import on, ${plain}: ${J(t)}`);
         if (!t.some((x) => x.text === "Delete" && !x.title) || t.some((x) => /unsubscribe/i.test(x.text))) v.push(`auto-import on, a non-Workshop item: ${J(t)}`);
       }
       await setSettings({ autoAddWeWallpapersToLibrary: false });
@@ -1350,12 +1342,12 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // The Browse sidebar's Unsubscribe: a right-click on a library item's opens a menu with "Unsubscribe without deleting" (no
-    // request, the plain click untouched); picking it → ONE POST /workshop/unsubscribe-keep, never /workshop/unsubscribe; Escape
-    // and a click outside close it without one; an item not in the library has no menu. The menu grows in (per frame) and
-    // shrinks out; no-glow and bg-live keep its fill
-    // a control's own menu: the sidebar was opened by a right-click on its card, whose own menu (light) may still be fading out
-    const MENU = "[data-ctx-menu]:not([data-ctx-light])";
+    // Browse's sidebar on a Workshop result the library holds: the Library's own Unsubscribe tile (components/ItemSide.tsx, one
+    // sidebar on both tabs). A right-click opens "Unsubscribe without deleting" at the pointer (no request, the plain click
+    // untouched); picking it → ONE POST /workshop/unsubscribe-keep; Escape and a click outside close it without one; the plain
+    // click is the Library's Delete from source; an item not in the library has no menu. The menu grows in (per frame) and
+    // shrinks out; no-glow and bg-live keep its fill. The library's k1 stands in as ws-1's copy (__probe_lib_ws)
+    const MENU = "[data-ctx-menu]";
     const browseWs = async (status = SIGNED_IN) => {
       await load(status);
       const srcs = (await http("GET", "/sources")).json;
@@ -1364,121 +1356,132 @@ app.whenReady().then(async () => {
       await page(`[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`);
       await waitFor(() => page(`return document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length > 0;`), 4000);
     };
-    const btnBox = () => js(`(() => { const r = document.querySelector("[data-side-sub-btn=unsubscribe]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+    // ws-1 (930000) in the library as k1's copy, subscribed, auto-import on: its Browse sidebar has the Library's Unsubscribe
+    const libCopy = async (status = SIGNED_IN) => {
+      await setSettings({ autoAddWeWallpapersToLibrary: true });
+      await js(`localStorage.setItem("__probe_lib_ws", ${J(J({ k1: "930000" }))}); localStorage.setItem("__probe_lib_sub", ${J(J({ "930000": true }))}); true`);
+      await browseWs(status);
+      await openSide(0);
+      return waitFor(() => js(`!!document.querySelector("${SIDE} [data-unsubscribe]")`), 3000);
+    };
+    const libCopyDone = async () => {
+      await js(`localStorage.removeItem("__probe_lib_ws"); localStorage.removeItem("__probe_lib_sub"); true`);
+      await setSettings({ autoAddWeWallpapersToLibrary: false });
+    };
+    const btnBox = (sel = "[data-unsubscribe]") => js(`(() => { const e = document.querySelector("${SIDE} ${sel}"); if (!e) return null; e.scrollIntoView({ block: "center" });
+      const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
     const menuState = () => page(`const m = document.querySelector(${J(MENU)}); if (!m) return null; const r = m.getBoundingClientRect(), cs = getComputedStyle(m);
       return { items: [...m.querySelectorAll("[role=menuitem]")].map((b) => b.textContent.trim()), focus: document.activeElement?.dataset?.ctxItem ?? null,
         x: r.x, y: r.y, r: r.right, b: r.bottom, w: r.width, closing: m.classList.contains("closing"), bg: cs.backgroundColor, shadow: cs.boxShadow,
         role: m.getAttribute("role"), titles: m.querySelectorAll("[title]").length };`);
-    await cell("steam:subToggle:keepMenu", async () => {
+    await cell("steam:sub:keepMenu", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
-      await browseWs();
-      await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true });
-      await openSide(0);
-      let s = await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
-      if (!s) return [`no subscribed toggle: ${J(await sub())}`];
-      if (!/right-click keeps it/.test(s.hint ?? "")) v.push(`the hint doesn't tell about the menu: "${s.hint}"`);
-      const title0 = await js(`document.querySelector("${SIDE} .side-title, ${SIDE} h2")?.textContent.trim() ?? null`);
-      let b = await btnBox();
-      // a real right-click: the menu grows in at the pointer (per frame: its width passes through in-between values)
-      let n0 = (await calls()).length;
-      const grow = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { out.push(document.querySelector(${J(MENU)})?.getBoundingClientRect().width ?? null);
-        if (performance.now() - t0 < 400) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
-      await sleep(20);
-      await clickAt(b.x, b.y, "right");
-      await sleep(70); await shot("keepmenu-opening");
-      const ws = await grow;
-      let m = await menuState();
-      console.log(`        menu: ${J(m)} | widths ${J(ws.filter((x) => x != null).slice(0, 8).map((x) => +x.toFixed(1)))}`);
-      if (!m) return [...v, "no menu after a right-click on Unsubscribe"];
-      if (J(m.items) !== J(["Unsubscribe without deleting"])) v.push(`menu items ${J(m.items)}`);
-      if (m.role !== "menu" || m.titles) v.push(`role ${m.role}, ${m.titles} tooltip(s)`);
-      if (m.focus !== "keep") v.push(`the first entry isn't focused (${m.focus})`);
-      if (Math.min(Math.abs(m.x - b.x), Math.abs(m.r - b.x)) > 2 || Math.min(Math.abs(m.y - b.y), Math.abs(m.b - b.y)) > 2) v.push(`the menu isn't at the pointer (${J({ b, m })})`);
-      if (m.x < 0 || m.y < 0 || m.r > 1400 || m.b > 900) v.push(`the menu leaves the window ${J(m)}`);
-      if (between(ws, 1) < 2) v.push(`the menu didn't grow in (widths ${J(ws.slice(0, 10))})`);
-      if ((await calls()).length !== n0) v.push(`the right-click sent ${J((await calls()).slice(n0))}`);
-      if (/rgba\(0, 0, 0, 0\)|transparent/.test(m.bg)) v.push(`the menu has no fill (${m.bg})`);
-      await sleep(250); await shot("keepmenu");
-      if ((await js(`document.querySelector("${SIDE} .side-title, ${SIDE} h2")?.textContent.trim() ?? null`)) !== title0) v.push("the right-click changed the sidebar");
-      // Escape closes it, no request; focus back on the button
-      await key("Escape"); await sleep(300);
-      if (await menuState()) v.push("Escape didn't close the menu");
-      if (!(await js(`document.activeElement?.dataset?.sideSubBtn === "unsubscribe"`))) v.push("after Escape the focus isn't back on Unsubscribe");
-      if (!(await js(`!!document.querySelector("${SIDE}")`))) v.push("Escape in the menu closed the sidebar too");
-      // a click outside closes it, no request
-      await clickAt(b.x, b.y, "right"); await sleep(300);
-      await clickAt(40, 450); await sleep(300);
-      if (await menuState()) v.push("a click outside didn't close the menu");
-      if ((await calls()).length !== n0) v.push(`closing sent ${J((await calls()).slice(n0))}`);
-      // pick it: ONE POST /workshop/unsubscribe-keep, never /workshop/unsubscribe; the menu shrinks out; the status says kept
-      await clickAt(b.x, b.y, "right"); await sleep(300);
-      m = await menuState();
-      const it = await js(`(() => { const r = document.querySelector("[data-ctx-item=keep]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
-      if (!it) return [...v, "no menu entry to pick"];
-      const shrink = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { const e = document.querySelector(${J(MENU)}); out.push(e ? +getComputedStyle(e).opacity : null);
-        if (performance.now() - t0 < 400) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
-      await sleep(20);
-      n0 = (await calls()).length;
-      await clickAt(it.x, it.y); await sleep(500);
-      const ops = await shrink;
-      const got = (await calls()).slice(n0);
-      if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe-keep" || got[0].body?.workshopId !== "930000" || got[0].body?.title !== "ws-1") v.push(`picking it posted ${J(got)}`);
-      if (between(ops, 0.05) < 1 || ops.at(-1) != null) v.push(`the menu didn't fade / shrink out (opacity per frame ${J(ops.slice(0, 12))})`);
-      const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
-      if (!/^Unsubscribing from \S+\. It stays in your library\.$/.test(status)) v.push(`the status bar says "${status}"`);
-      // the plain left-click is still the deleting Unsubscribe
-      await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true }); await bump(); await sleep(500);
-      b = await btnBox(); n0 = (await calls()).length;
-      await clickAt(b.x, b.y); await sleep(400);
-      const plain = (await calls()).slice(n0);
-      if (plain.length !== 1 || plain[0].p !== "/workshop/unsubscribe") v.push(`a left-click posted ${J(plain)}`);
-      // not in the library: nothing to keep, no menu
-      await setWs("930000", { subscribed: true, pending: null, inLibrary: false, onDisk: true }); await bump(); await sleep(500);
-      b = await btnBox(); await clickAt(b.x, b.y, "right"); await sleep(300);
-      if (await menuState()) v.push("a menu on an item that isn't in the library");
-      // no-glow + bg-live: the menu keeps its own fill and loses its glow
-      await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
-      await browseWs();
-      await js(`window.__wsState = { "930000": { subscribed: true, pending: null, inLibrary: true, onDisk: true } }; true`);
-      await openSide(0);
-      await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
-      b = await btnBox(); await clickAt(b.x, b.y, "right"); await sleep(350);
-      m = await menuState();
-      const html = await js(`document.documentElement.className`);
-      console.log(`        no-glow + bg-live: ${J({ html, bg: m?.bg, shadow: m?.shadow })}`);
-      if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
-      if (!m || /rgba\(0, 0, 0, 0\)|transparent/.test(m.bg)) v.push(`bg-live: the menu has no fill of its own (${m?.bg})`);
-      if (m && (m.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((c) => !/rgba\(0, 0, 0/.test(c))) v.push(`no-glow: the menu still glows (${m.shadow})`);
-      await shot("keepmenu-live");
-      await key("Escape"); await sleep(250);
-      await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+      try {
+        if (!(await libCopy())) return [`no Unsubscribe tile on ws-1's Browse sidebar (its library copy) — proved nothing`];
+        await sleep(400);
+        const tip = await js(`document.querySelector("${SIDE} [data-unsubscribe]")?.getAttribute("title") ?? ""`);
+        if (!/right-click keeps it/.test(tip)) v.push(`the tile doesn't tell about the menu: "${tip}"`);
+        const title0 = await js(`document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null`);
+        let b = await btnBox(); await sleep(250); b = await btnBox();
+        // a real right-click: the menu grows in at the pointer (per frame: its width passes through in-between values)
+        let n0 = (await calls()).length;
+        const grow = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { out.push(document.querySelector(${J(MENU)})?.getBoundingClientRect().width ?? null);
+          if (performance.now() - t0 < 400) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
+        await sleep(20);
+        await clickAt(b.x, b.y, "right");
+        await sleep(70); await shot("keepmenu-opening");
+        const ws = await grow;
+        let m = await menuState();
+        console.log(`        menu: ${J(m)} | widths ${J(ws.filter((x) => x != null).slice(0, 8).map((x) => +x.toFixed(1)))}`);
+        if (!m) return [...v, "no menu after a right-click on Unsubscribe"];
+        if (J(m.items) !== J(["Unsubscribe without deleting"])) v.push(`menu items ${J(m.items)}`);
+        if (m.role !== "menu" || m.titles) v.push(`role ${m.role}, ${m.titles} tooltip(s)`);
+        if (m.focus !== "keep") v.push(`the first entry isn't focused (${m.focus})`);
+        if (Math.min(Math.abs(m.x - b.x), Math.abs(m.r - b.x)) > 2 || Math.min(Math.abs(m.y - b.y), Math.abs(m.b - b.y)) > 2) v.push(`the menu isn't at the pointer (${J({ b, m })})`);
+        if (m.x < 0 || m.y < 0 || m.r > 1400 || m.b > 900) v.push(`the menu leaves the window ${J(m)}`);
+        if (between(ws, 1) < 2) v.push(`the menu didn't grow in (widths ${J(ws.slice(0, 10))})`);
+        if ((await calls()).slice(n0).some((c) => c.p !== "/workshop/state")) v.push(`the right-click sent ${J((await calls()).slice(n0))}`);
+        if (/rgba\(0, 0, 0, 0\)|transparent/.test(m.bg)) v.push(`the menu has no fill (${m.bg})`);
+        await sleep(250); await shot("keepmenu");
+        if ((await js(`document.querySelector("${SIDE} [data-side-title]")?.textContent.trim() ?? null`)) !== title0) v.push("the right-click changed the sidebar");
+        // Escape closes it, no request; focus back on the tile
+        await key("Escape"); await sleep(300);
+        if (await menuState()) v.push("Escape didn't close the menu");
+        if (!(await js(`document.activeElement?.dataset?.unsubscribe !== undefined`))) v.push("after Escape the focus isn't back on Unsubscribe");
+        if (!(await js(`!!document.querySelector("${SIDE}")`))) v.push("Escape in the menu closed the sidebar too");
+        // a click outside closes it, no request
+        n0 = (await calls()).length;
+        await clickAt(b.x, b.y, "right"); await sleep(300);
+        await clickAt(40, 450); await sleep(300);
+        if (await menuState()) v.push("a click outside didn't close the menu");
+        if ((await calls()).slice(n0).some((c) => c.p !== "/workshop/state")) v.push(`closing sent ${J((await calls()).slice(n0))}`);
+        // pick it: ONE POST /workshop/unsubscribe-keep; the menu shrinks out; the status says kept
+        await openSide(0); await sleep(300); b = await btnBox();
+        await clickAt(b.x, b.y, "right"); await sleep(300);
+        const it = await js(`(() => { const r = document.querySelector("[data-ctx-item=keep]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+        if (!it) return [...v, "no menu entry to pick"];
+        const shrink = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { const e = document.querySelector(${J(MENU)}); out.push(e ? +getComputedStyle(e).opacity : null);
+          if (performance.now() - t0 < 400) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
+        await sleep(20);
+        n0 = (await calls()).length;
+        await clickAt(it.x, it.y); await sleep(500);
+        const ops = await shrink;
+        const got = (await calls()).slice(n0).filter((c) => c.p !== "/workshop/state" && c.p !== "/workshop/drain");
+        if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe-keep" || got[0].body?.workshopId !== "930000") v.push(`picking it posted ${J(got)}`);
+        if (between(ops, 0.05) < 1 || ops.at(-1) != null) v.push(`the menu didn't fade / shrink out (opacity per frame ${J(ops.slice(0, 12))})`);
+        const status = await js(`document.querySelector(".status")?.textContent ?? ""`);
+        if (!/^Unsubscribing from \S+\. It stays in your library\.$/.test(status)) v.push(`the status bar says "${status}"`);
+        // the plain left-click: the Library's Delete from source
+        await libCopy(); await sleep(400);
+        b = await btnBox(); n0 = (await calls()).length;
+        await clickAt(b.x, b.y); await sleep(600);
+        const plain = (await calls()).slice(n0).filter((c) => c.p !== "/workshop/state" && c.p !== "/workshop/drain");
+        if (plain.length !== 1 || plain[0].p !== "/workshop/delete-from-source") v.push(`a left-click posted ${J(plain)}`);
+        // not in the library (ws-2, subscribed in Steam): its Unsubscribe has nothing to keep, no menu
+        await setWs("930001", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
+        await openSide(1);
+        await waitFor(() => js(`!!document.querySelector("${SIDE} [data-unsubscribe-steam]")`), 3000);
+        b = await btnBox("[data-unsubscribe-steam]");
+        if (!b) v.push("ws-2 (subscribed, not in the library): no Unsubscribe — proved nothing");
+        else { await clickAt(b.x, b.y, "right"); await sleep(300); if (await menuState()) v.push("a menu on an item that isn't in the library"); }
+        // no-glow + bg-live: the menu keeps its own fill and loses its glow
+        await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+        await libCopy(); await sleep(400);
+        b = await btnBox(); await clickAt(b.x, b.y, "right"); await sleep(350);
+        m = await menuState();
+        const html = await js(`document.documentElement.className`);
+        console.log(`        no-glow + bg-live: ${J({ html, bg: m?.bg, shadow: m?.shadow })}`);
+        if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
+        if (!m || /rgba\(0, 0, 0, 0\)|transparent/.test(m.bg)) v.push(`bg-live: the menu has no fill of its own (${m?.bg})`);
+        if (m && (m.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((c) => !/rgba\(0, 0, 0/.test(c))) v.push(`no-glow: the menu still glows (${m.shadow})`);
+        await shot("keepmenu-live");
+        await key("Escape"); await sleep(250);
+      } finally { await setSettings({ glows: true, liveWallpaperBehindAllTabs: false }); await libCopyDone(); }
       return v;
     });
     // motion off (Smooth window animations off): the menu fades in and out in place, nothing moves
-    await cell("steam:subToggle:keepMenuOff", async () => {
+    await cell("steam:sub:keepMenuOff", async () => {
       const v = [];
       await setSettings({ morphs: false });
-      await browseWs();
-      await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true });
-      await openSide(0);
-      await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
-      const b = await btnBox();
-      if (!b) { await setSettings({ morphs: true }); return ["no Unsubscribe button"]; }
-      await mvTo(b.x, b.y, 300);
-      let smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
-      await clickAt(b.x, b.y, "right");
-      const sIn = await smp;
-      smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
-      await key("Escape");
-      const sOut = await smp;
-      console.log(`        motion off: in ${MO.brief(sIn.menu)} / out ${MO.brief(sOut.menu)}`);
-      v.push(...MO.judge("motion off: the menu appearing", sIn.menu, { appear: true }), ...MO.judge("motion off: the menu leaving", sOut.menu, { leave: true }));
-      await setSettings({ morphs: true });
+      try {
+        if (!(await libCopy())) return ["no Unsubscribe tile on ws-1's Browse sidebar — proved nothing"];
+        await sleep(400);
+        let b = await btnBox(); await sleep(250); b = await btnBox();
+        await mvTo(b.x, b.y, 300);
+        let smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
+        await clickAt(b.x, b.y, "right");
+        const sIn = await smp;
+        smp = js(MO.SAMPLE({ menu: MENU }, 450)); await sleep(30);
+        await key("Escape");
+        const sOut = await smp;
+        console.log(`        motion off: in ${MO.brief(sIn.menu)} / out ${MO.brief(sOut.menu)}`);
+        v.push(...MO.judge("motion off: the menu appearing", sIn.menu, { appear: true }), ...MO.judge("motion off: the menu leaving", sOut.menu, { leave: true }));
+      } finally { await setSettings({ morphs: true }); await libCopyDone(); }
       return v;
     });
     // ---- "Download without subscribing": the Browse sidebar's download / subscribe buttons' right-click menu
-    // (components/BrowseSide.tsx, menuItems.tsx oneOffMenuItems). /download is held by the stub; /workshop/one-off answers
+    // (components/ItemSide.tsx, menuItems.tsx oneOffMenuItem). /download is held by the stub; /workshop/one-off answers
     // window.__oneOff
     const getBox = (k) => js(`(() => { const r = document.querySelector("${SIDE} [data-side-get=${k}]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
     const ctxItems = () => page(`const m = document.querySelector(${J(MENU)}); if (!m) return null;
@@ -1684,23 +1687,21 @@ app.whenReady().then(async () => {
     const cardBtn = () => page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn"); return b ? { off: b.getAttribute("aria-disabled") === "true", title: b.getAttribute("title") } : null;`);
     const statusText = () => js(`document.querySelector(".status")?.textContent ?? ""`);
     // no mode blocks a download: every one ends on the item's Steam page (docs/decisions.md § "Offer two Workshop download
-    // modes, the Steam page the last resort"), so signed out under "Subscribe with Steam login" every Download stays on and the
-    // line under the sidebar's buttons says the page's words
+    // modes, the Steam page the last resort"), so signed out under "Subscribe with Steam login" every Subscribe stays on, with no
+    // line under them (a reason would be the disabled button's tooltip: none here)
+    const noLine = () => js(`!document.querySelector("${SIDE} [data-side-get-hint], ${SIDE} [data-side-get-why], ${SIDE} .side-cta-note")`);
     await cell("side:blocked:download", async () => {
       const v = [];
-      const PAGE = "Opens its Steam page for you to subscribe, then adds it to your library";
-      const LOGIN = "Subscribes with your Steam login, then adds it to your library";
-      const hintOf = () => js(`document.querySelector("${SIDE} [data-side-get-hint]")?.textContent ?? null`);
       try {
         await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
         await browseWs(SIGNED_OUT); await openSide(0);
-        let g = await sideGet(); console.log(`        signed out: ${J(g)} | ${await hintOf()}`);
+        let g = await sideGet(); console.log(`        signed out: ${J(g)} | no line ${await noLine()}`);
         if (J(g.off) !== J([false, false]) || g.why) v.push(`signed out, the sidebar's buttons: ${J(g)} (want both on, no "Sign in" line)`);
-        if ((await hintOf()) !== PAGE) v.push(`signed out, the line under them: ${J(await hintOf())}, want ${J(PAGE)}`);
+        if (!(await noLine())) v.push("signed out: a line under the buttons");
         await shot("blocked");
         await js(`window.__st.dl = null; true`);
         await page(`document.querySelector("${SIDE} [data-side-get=only]")?.click();`); await sleep(400);
-        if (!(await heldDl())) v.push("signed out, a click on Download posted no /download");
+        if (!(await heldDl())) v.push("signed out, a click on Subscribe posted no /download");
         // the card's button: on
         await browseWs(SIGNED_OUT); await sleep(300);
         const cb = await cardBtn();
@@ -1710,51 +1711,29 @@ app.whenReady().then(async () => {
         const tb = await page(`const b = document.querySelector(".sel-toolbar .btn.accent"); return b ? { off: b.getAttribute("aria-disabled"), title: b.getAttribute("title"), text: b.textContent } : null;`);
         if (!tb || tb.off === "true" || /Sign in/.test(tb.title ?? "")) v.push(`the selection toolbar: ${J(tb)} (want on)`);
         await key("Escape"); await sleep(200);
-        // merged: the Subscribe buttons on, the page's words under them
+        // merged: the same
         await setSettings({ autoAddWeWallpapersToLibrary: true });
         await browseWs(SIGNED_OUT); await openSide(0);
         g = await sideGet();
-        if (J(g.off) !== J([false, false]) || g.why || (await hintOf()) !== PAGE) v.push(`merged, signed out: ${J(g)} | ${J(await hintOf())}`);
+        if (J(g.off) !== J([false, false]) || g.why || !(await noLine())) v.push(`merged, signed out: ${J(g)}`);
         await setSettings({ autoAddWeWallpapersToLibrary: false });
         // "Use the Steam app" keeps them
         await setSettings({ workshopDownloadMode: "steamapp" });
         await browseWs(SIGNED_OUT); await openSide(0);
         g = await sideGet(); const c2 = await cardBtn();
         if (J(g.off) !== J([false, false]) || g.why || c2?.off) v.push(`steamapp, signed out: ${J(g)}, card ${J(c2)}`);
-        // live: a sign-out under an open sidebar — the page's words take the line's place, rising in (motion on) / only fading
-        // per hint: its words, its opacity as seen (the product up the tree), its translateY, and its box as drawn (motion-off.js's frame)
-        const NOTE = `(() => { const t = Math.round(performance.now()), n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return { t, hs: [] };
-          return { t, hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e), r = e.getBoundingClientRect();
-            let op = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
-            return [e.textContent, +op.toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2), +r.x.toFixed(1), +r.y.toFixed(1), +r.width.toFixed(1), +r.height.toFixed(1)]; }) }; })()`;
-        // one hint's frames in motion-off.js's shape ([t, op, x, y, w, h], [t, null] while it isn't there)
-        const moFrames = (smp, words) => smp.filter((x) => x).map((x) => { const h = x.hs.find((y) => y[0] === words); return h ? [x.t, h[1], h[3], h[4], h[5], h[6]] : [x.t, null]; });
-        for (const motion of [true, false]) {
-          await setSettings({ workshopDownloadMode: "subscribe", morphs: motion });
-          await browseWs(SIGNED_IN); await openSide(0); await sleep(300);
-          if ((await hintOf()) !== LOGIN) { v.push(`motion ${motion}: signed in, the line says ${J(await hintOf())}, want ${J(LOGIN)}`); continue; }
-          const fr = frames("", NOTE, 700); await sleep(30);
-          await ev("steam-status", SIGNED_OUT);
-          if (motion) { await sleep(70); await shot("blocked-live"); }
-          const smp = await fr;
-          const nw = smp.filter((x) => x).map((x) => x.hs.find((h) => h[0] === PAGE)).filter((x) => x);
-          const ops = nw.map((x) => x[1]), ys = nw.map((x) => x[2]);
-          if (!nw.length) { v.push(`motion ${motion}: the page's words never showed after WS steam-status — proved nothing`); continue; }
-          if (motion && !ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion on: the page's words popped in (opacity ${J(ops.slice(0, 10))})`);
-          if (motion && new Set(ys).size < 3) v.push(`motion on: the page's words didn't rise in (y ${J(ys.slice(0, 10))})`);
-          // motion off: the shared judge — nothing moves or resizes, the new words fade in and the old ones out, briefly
-          if (!motion) v.push(...MO.judge("motion off: the page's words", moFrames(smp, PAGE), { appear: true }),
-            ...MO.judge("motion off: the sign-in's words", moFrames(smp, LOGIN), { leave: true }));
-          g = await sideGet();
-          if (J(g.off) !== J([false, false]) || g.why) v.push(`motion ${motion}: after WS steam-status (signed out) the buttons: ${J(g)}`);
-        }
-        // no-glow + bg-live: the words stay readable over the wallpaper (their drop shadow), the buttons don't glow
+        // live: a sign-out under an open sidebar (WS steam-status) changes nothing: the buttons on, still no line
+        await setSettings({ workshopDownloadMode: "subscribe" });
+        await browseWs(SIGNED_IN); await openSide(0); await sleep(300);
+        await ev("steam-status", SIGNED_OUT); await sleep(500);
+        g = await sideGet();
+        if (J(g.off) !== J([false, false]) || g.why || !(await noLine())) v.push(`after WS steam-status (signed out) the buttons: ${J(g)}, no line ${await noLine()}`);
+        // no-glow + bg-live: the buttons don't glow
         await setSettings({ morphs: true, glows: false, liveWallpaperBehindAllTabs: true });
         await browseWs(SIGNED_OUT); await openSide(0); await sleep(300);
         g = await sideGet();
-        const hf = await js(`(() => { const h = document.querySelector("${SIDE} [data-side-get-hint]"); return h ? getComputedStyle(h).filter : null; })()`);
         const html = await js(`document.documentElement.className`);
-        if (!/no-glow/.test(html) || !/bg-live/.test(html) || !/drop-shadow/.test(hf ?? "") || g.shadow.some((x) => /rgba?\((?!0, 0, 0)/.test(x))) v.push(`no-glow + bg-live: ${J(g)}, the words' filter ${hf} (${html})`);
+        if (!/no-glow/.test(html) || !/bg-live/.test(html) || g.shadow.some((x) => /rgba?\((?!0, 0, 0)/.test(x))) v.push(`no-glow + bg-live: ${J(g)} (${html})`);
         await shot("blocked-live-bg");
       } finally {
         await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
@@ -1763,89 +1742,51 @@ app.whenReady().then(async () => {
     });
     await cell("side:blocked:subscribe", async () => {
       const v = [];
-      const NOT = { subscribed: false, pending: null, inLibrary: false, onDisk: false };
-      const open = async (status) => { await browseWs(status); await setWs("930000", NOT); await openSide(0);
-        return waitFor(() => sub().then((x) => x && x.state === "not-subscribed" ? x : null), 3000); };
-      const btnOff = () => js(`document.querySelector("[data-side-sub-btn=subscribe]")?.getAttribute("aria-disabled") ?? null`);
+      const tileOff = () => js(`(() => { const b = document.querySelector("${SIDE} [data-side-subscribe]"); return b ? b.getAttribute("aria-disabled") : "none"; })()`);
       try {
         await setSettings({ autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
-        // signed out under "Subscribe with Steam login" it goes to the item's Steam page: never off, in any mode or sign-in
-        for (const [mode, status, why] of [["subscribe", SIGNED_OUT, null], ["steamapp", SIGNED_OUT, null], ["subscribe", SIGNED_IN, null]]) {
+        // s2 is the library's own copy of a Workshop item the Workshop still has (the empty CM fixture says none has)
+        await js(`localStorage.setItem("__probe_lib_sub", ${J(J({ "900000002": false }))}); localStorage.setItem("__probe_lib_off", "[]"); true`);
+        for (const [mode, status] of [["subscribe", SIGNED_OUT], ["steamapp", SIGNED_OUT], ["subscribe", SIGNED_IN]]) {
           await setSettings({ workshopDownloadMode: mode });
-          const x = await open(status);
-          const off = await btnOff();
+          await load(status);
+          const label = `${mode} (${status.signedIn ? "signed in" : "signed out"})`;
+          if (!(await openLib("s2"))) { v.push(`${label}: no sidebar for s2`); continue; }
+          await sleep(600);
+          const off = await tileOff();
           const n0 = (await calls()).length;
-          await page(`document.querySelector("[data-side-sub-btn=subscribe]")?.click();`); await sleep(400);
+          await page(`document.querySelector("${SIDE} [data-side-subscribe]")?.click();`); await sleep(400);
           const sent = (await calls()).slice(n0).filter((c) => c.p === "/workshop/subscribe");
-          console.log(`        ${mode} (${status.signedIn ? "signed in" : "signed out"}): ${J({ hint: x?.hint, off })}`);
-          if (why ? (off !== "true" || x?.hint !== why || sent.length) : (off !== null || sent.length !== 1))
-            v.push(`${mode} (${status.signedIn ? "signed in" : "signed out"}): ${J(x)}, aria-disabled ${off}, posted ${sent.length}`);
+          console.log(`        ${label}: aria-disabled ${off}, posted ${sent.length}`);
+          if (off !== null || sent.length !== 1) v.push(`${label}: the Subscribe tile aria-disabled ${off}, posted ${sent.length}`);
           if (mode === "subscribe" && !status.signedIn) await shot("blocked-subscribe");
         }
-      } finally { await setSettings({ workshopDownloadMode: "subscribe" }); }
+      } finally { await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false }); await js(`localStorage.removeItem("__probe_lib_sub"); localStorage.removeItem("__probe_lib_off"); true`); }
       return v;
     });
-    // side:getHint — what the download buttons do in the chosen mode, on the line under them (components/subscribeMode.ts
-    // downloadHint), and the subscription card's Subscribe saying it subscribes only, so the two never read as contradicting:
-    // per mode and sign-in (subscribe signed in, the Steam app, subscribe signed out: the page's words) and with "Import new
-    // Workshop wallpapers" on; merged: no line. A mode change under the open
-    // sidebar swaps the words in one cell (never stacked: the line's box never grows past the taller of the two): on, the new
-    // words rise in per frame; off, they only fade in place. bg-live: the words' drop shadow. Shots steam-gethint*.png
+    // side:getHint — no line under the item sidebar's Subscribe buttons in any mode, sign-in or auto-import (the buttons say what
+    // they do; a reason goes in the disabled control's tooltip or its menu), and no second Subscribe (a subscription card) beside
+    // them; a live mode change adds none
     await cell("side:getHint", async () => {
       const v = [];
       const NOT = { subscribed: false, pending: null, inLibrary: false, onDisk: false };
-      const HINTS = { subscribe: "Subscribes with your Steam login, then adds it to your library", steamapp: "Subscribes through the Steam app, then adds it to your library",
-        page: "Opens its Steam page for you to subscribe, then adds it to your library" };
-      const SUBHINT = { off: "Subscribe only, without adding it to your library", on: "Subscribe only, it joins your library once Steam has it" };
-      const line = () => js(`(() => { const h = document.querySelector("${SIDE} [data-side-get-hint]"), w = document.querySelector("${SIDE} [data-side-get-why]");
-        return { hint: h?.textContent ?? null, why: w?.textContent ?? null, filter: h ? getComputedStyle(h).filter : null }; })()`);
       try {
         for (const [mode, auto, status] of [["subscribe", false, SIGNED_IN], ["steamapp", false, SIGNED_OUT], ["subscribe", false, SIGNED_OUT],
-          ["steamapp", true, SIGNED_OUT]]) {
+          ["steamapp", true, SIGNED_OUT], ["subscribe", true, SIGNED_IN]]) {
           await setSettings({ workshopDownloadMode: mode, autoAddWeWallpapersToLibrary: auto, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
           await browseWs(status); await setWs("930000", NOT); await openSide(0);
-          const x = await waitFor(() => sub().then((y) => y && y.state === "not-subscribed" ? y : null), 3000);
-          const l = await line();
+          await sleep(400);
+          const x = await sub();
           const label = `${mode}${auto ? " + auto-import" : ""}${status.signedIn ? "" : ", signed out"}`;
-          const want = mode === "subscribe" && !status.signedIn ? HINTS.page : HINTS[mode];
-          console.log(`        ${label}: ${J({ line: l.hint ?? l.why, sub: x?.hint })}`);
-          if (l.hint !== want || l.why) v.push(`${label}: the line under the buttons says ${J(l)}, want ${J(want)}`);
-          const wantSub = SUBHINT[auto ? "on" : "off"];
-          if (x?.hint !== wantSub) v.push(`${label}: the card's Subscribe says ${J(x?.hint)}, want ${J(wantSub)}`);
-          if (mode === "subscribe" && status.signedIn) await shot("gethint");
+          console.log(`        ${label}: ${J({ cta: x?.cta, card: x?.card, noLine: await noLine() })}`);
+          if (!(await noLine())) v.push(`${label}: a line under the buttons`);
+          if (J(x?.cta) !== J(["Subscribe and apply", "Subscribe"]) || x?.card || x?.tile) v.push(`${label}: the actions ${J(x)} (want the two Subscribe buttons alone)`);
+          if (mode === "subscribe" && status.signedIn && !auto) await shot("gethint");
         }
-        await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: true });
-        await browseWs(SIGNED_IN); await openSide(0);
-        let l = await line();
-        if (l.hint || l.why) v.push(`merged: ${J(l)} (want no line: the buttons say Subscribe)`);
-        await setSettings({ autoAddWeWallpapersToLibrary: false });
-        const NOTE = `(() => { const n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return null;
-          return { h: +n.getBoundingClientRect().height.toFixed(1), hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e);
-            return [e.textContent, +(+cs.opacity).toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2)]; }) }; })()`;
-        for (const motion of [true, false]) {
-          await setSettings({ workshopDownloadMode: "steamapp", morphs: motion });
-          await browseWs(SIGNED_OUT); await openSide(0); await sleep(300);
-          const h0 = (await js(NOTE))?.h;
-          const fr = frames("", NOTE, 700); await sleep(30);
-          await setSettings({ workshopDownloadMode: "subscribe" }); await ev("settings-changed", { workshopDownloadMode: "subscribe" });
-          if (motion) { await sleep(70); await shot("gethint-swap"); }
-          const f = (await fr).filter((x) => x);
-          const h1 = (await js(NOTE))?.h;
-          const nw = f.map((x) => x.hs.find((h) => h[0] === HINTS.page)).filter((x) => x);
-          const ops = nw.map((x) => x[1]), ys = nw.map((x) => x[2]), maxH = Math.max(...f.map((x) => x.h));
-          console.log(`        motion ${motion}: heights ${h0} → ${h1} (max ${maxH}), new opacity ${J(ops.slice(0, 8))} y ${J(ys.slice(0, 8))}`);
-          if (!nw.length) { v.push(`motion ${motion}: the page's words never showed — proved nothing`); continue; }
-          if (maxH > Math.max(h0, h1) + 1) v.push(`motion ${motion}: the old and new words stacked (the line grew to ${maxH}, from ${h0} to ${h1})`);
-          if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion ${motion}: the new words popped in (opacity ${J(ops.slice(0, 10))})`);
-          if (motion && new Set(ys).size < 3) v.push(`motion on: the new words didn't rise in (y ${J(ys.slice(0, 10))})`);
-          if (!motion && ys.some((y) => Math.abs(y) > 0.01)) v.push(`motion off: the new words moved (y ${J(ys.slice(0, 10))})`);
-        }
-        await setSettings({ morphs: true, glows: false, liveWallpaperBehindAllTabs: true, workshopDownloadMode: "subscribe" });
-        await browseWs(SIGNED_IN); await openSide(0); await sleep(300);
-        l = await line();
-        const html = await js(`document.documentElement.className`);
-        if (!/bg-live/.test(html) || !/drop-shadow/.test(l.filter ?? "")) v.push(`bg-live: the line's words have no drop shadow (${J(l)}, ${html})`);
-        await shot("gethint-live");
+        await setSettings({ workshopDownloadMode: "steamapp", autoAddWeWallpapersToLibrary: false });
+        await browseWs(SIGNED_OUT); await openSide(0); await sleep(300);
+        await setSettings({ workshopDownloadMode: "subscribe" }); await ev("settings-changed", { workshopDownloadMode: "subscribe" }); await sleep(500);
+        if (!(await noLine())) v.push("a live mode change put a line under the buttons");
       } finally {
         await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       }
@@ -1880,13 +1821,13 @@ app.whenReady().then(async () => {
     // mixed selection unsubscribes the Workshop part and deletes the rest. /library's `subscribed` comes from __probe_lib_sub.
     // Shots steam-unsub*.png
     const libSub = (m) => js(`localStorage.setItem("__probe_lib_sub", ${J(J(m))}); true`);
-    const dangerTiles = () => page(`return [...document.querySelectorAll("${SIDE} .side-tiles > .danger")].map((t) => ({ text: t.textContent.trim(),
+    const dangerTiles = () => page(`return [...document.querySelectorAll("${SIDE} .side-cta .danger")].map((t) => ({ text: t.textContent.trim(),
       title: t.getAttribute("title"), unsub: t.dataset.unsubscribe !== undefined, icon: t.querySelector("svg.lucide")?.getAttribute("class") ?? "" }));`);
     const cardDel = (t) => page(`const c = [...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="${t}"]')); return c?.querySelector(".del")?.getAttribute("aria-label") ?? null;`);
     const cardBox = (t) => page(`const c = [...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="${t}"]')); if (!c) return null;
       c.scrollIntoView({ block: "center" }); const r = c.querySelector(".thumb-wrap").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 3 };`);
     const plainTitle = () => page(`return [...document.querySelectorAll(".card.lib:not([data-leaving]) [data-title]")].map((e) => e.dataset.title).find((x) => !/^s\\d$/.test(x)) ?? null;`);
-    const unsubBox = () => js(`(() => { const e = document.querySelector("${SIDE} [data-unsubscribe]"); if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    const unsubBox = (sel = "[data-unsubscribe]") => js(`(() => { const e = document.querySelector("${SIDE} ${sel}"); if (!e) return null; e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
     const unsubDone = async () => { await libSub({}); await js(`localStorage.removeItem("__probe_lib_sub"); true`); await setSettings({ autoAddWeWallpapersToLibrary: false }); };
 
     await cell("side:unsub:names", async () => {
@@ -1899,7 +1840,7 @@ app.whenReady().then(async () => {
       let d = await dangerTiles(); console.log(`        s1 (subscribed): ${J(d)}`);
       if (d.length !== 1 || d[0].text !== "Unsubscribe" || !d[0].unsub || !/lucide-cloud-off/.test(d[0].icon)) v.push(`a subscribed Workshop item's tiles: ${J(d)}`);
       if (d[0] && !(/right-click keeps it/.test(d[0].title ?? "") && /Undo subscribes again/.test(d[0].title ?? ""))) v.push(`its tooltip doesn't name the right-click or Undo: ${J(d[0].title)}`);
-      if (await js(`[...document.querySelectorAll("${SIDE} .side-tiles > *")].some((t) => /^Delete/.test(t.textContent.trim()))`)) v.push("a Delete tile is still offered for a subscribed Workshop item");
+      if (await js(`[...document.querySelectorAll("${SIDE} .side-cta .side-go, ${SIDE} .side-tiles > *")].some((t) => /^Delete/.test(t.textContent.trim()))`)) v.push("a Delete is still offered for a subscribed Workshop item");
       await page(`document.querySelector("${SIDE} [data-unsubscribe]")?.scrollIntoView({ block: "center" });`); await sleep(300);
       await shot("unsub-tile");
       const plain = await plainTitle();
@@ -1928,13 +1869,18 @@ app.whenReady().then(async () => {
       await page(`[...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(600);
       got = (await calls()).slice(n0).filter((c) => c.p !== "/workshop/drain");
       if (got.length !== 1 || got[0].p !== "/workshop/delete-from-source" || J(got[0].body?.items?.map((i) => i.title)) !== J(["s1"])) v.push(`the card's Unsubscribe posted ${J(got)}`);
-      // auto-import off: today's Delete + "Delete and unsubscribe", the card's plain Delete
+      // auto-import off: Delete, "Delete and unsubscribe" its right-click entry; the card's plain Delete
       await setSettings({ autoAddWeWallpapersToLibrary: false });
       await load(SIGNED_IN);
       if (!(await openLib("s1"))) v.push("auto-import off: no sidebar for s1");
       else {
         await sleep(500); d = await dangerTiles(); console.log(`        auto-import off, s1: ${J(d)}`);
-        if (J(d.map((x) => x.text)) !== J(["Delete", "Delete and unsubscribe"]) || d.some((x) => x.unsub)) v.push(`auto-import off: ${J(d)}`);
+        if (J(d.map((x) => x.text)) !== J(["Delete"]) || d.some((x) => x.unsub)) v.push(`auto-import off: ${J(d)}`);
+        const db = await unsubBox("[data-delete]");
+        if (db) { await clickAt(db.x, db.y, "right"); await sleep(350); }
+        const dm = await ctxItems();
+        if (!dm || J(dm.items.map((x) => [x.key, x.text])) !== J([["delete-source", "Delete and unsubscribe"]])) v.push(`auto-import off, Delete's right-click: ${J(dm?.items)}`);
+        await key("Escape"); await sleep(250);
         if ((await cardDel("s1")) !== "Delete") v.push(`auto-import off: the card's button is "${await cardDel("s1")}"`);
       }
       await js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
@@ -2014,7 +1960,7 @@ app.whenReady().then(async () => {
       if (!it) { await unsubDone(); return [...v, "no menu entry to pick"]; }
       await libSub({ "900000001": false });
       n0 = (await calls()).length;
-      const DT = `${SIDE} .side-tiles > .danger`;
+      const DT = `${SIDE} .side-cta .danger`;
       const swap = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { const e = document.querySelector(${J(DT)});
         out.push(e ? [e.textContent.trim(), +getComputedStyle(e).opacity, +new DOMMatrix(getComputedStyle(e).transform).m41.toFixed(2)] : null);
         if (performance.now() - t0 < 1200) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
@@ -2043,13 +1989,13 @@ app.whenReady().then(async () => {
         await sleep(600); b = await unsubBox(); await sleep(250); b = await unsubBox();
         await clickAt(b.x, b.y, "right"); await sleep(350);
         m = await menuState();
-        const tl = await js(`(() => { const t = document.querySelector("${SIDE} [data-unsubscribe]"), i = t?.querySelector(".side-tile-ico"); return t ? { bg: getComputedStyle(t).backgroundColor, ico: getComputedStyle(i).boxShadow } : null; })()`);
+        const tl = await js(`(() => { const t = document.querySelector("${SIDE} [data-unsubscribe]"); return t ? { bg: getComputedStyle(t).backgroundColor, ico: getComputedStyle(t).boxShadow } : null; })()`);
         const html = await js(`document.documentElement.className`);
         console.log(`        no-glow + bg-live: ${J({ html, menuBg: m?.bg, tile: tl })}`);
         if (!/no-glow/.test(html) || !/bg-live/.test(html)) v.push(`the toggles didn't apply: html "${html}"`);
         if (!m || /rgba\(0, 0, 0, 0\)|transparent/.test(m.bg)) v.push(`bg-live: the menu has no fill (${m?.bg})`);
         if (!tl || /rgba\(0, 0, 0, 0\)|transparent/.test(tl.bg)) v.push(`bg-live: the tile has no fill (${tl?.bg})`);
-        if (tl && /\d+px \d+px \d+px/.test(tl.ico) && !/inset/.test(tl.ico)) v.push(`no-glow: the tile's icon glows (${tl.ico})`);
+        if (tl && tl.ico.split(/,(?![^(]*\))/).some((x) => !/inset|none/.test(x) && !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the Unsubscribe glows (${tl.ico})`);
         await shot("unsub-keepmenu-live");
         await key("Escape"); await sleep(250);
       }
@@ -2073,7 +2019,7 @@ app.whenReady().then(async () => {
       const sIn = await smp;
       const it = await js(`(() => { const r = document.querySelector("[data-ctx-item=keep]")?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
       await libSub({ "900000001": false });
-      const DT = `${SIDE} .side-tiles > .danger`;
+      const DT = `${SIDE} .side-cta .danger`;
       const swap = js(`new Promise((res) => { const out = []; const t0 = performance.now(); const f = () => { const e = document.querySelector(${J(DT)});
         out.push(e ? [e.textContent.trim(), +getComputedStyle(e).opacity, getComputedStyle(e).transform] : null);
         if (performance.now() - t0 < 900) requestAnimationFrame(f); else res(out); }; requestAnimationFrame(f); })`);
@@ -2103,7 +2049,7 @@ app.whenReady().then(async () => {
       const v = [];
       const tile = (sel = "[data-unsubscribe]") => page(`const t = document.querySelector("${SIDE} ${sel}"); if (!t) return null; const cs = getComputedStyle(t);
         return { off: t.getAttribute("aria-disabled") === "true", title: t.getAttribute("title"), text: t.textContent.trim(), color: cs.color, bg: cs.backgroundColor,
-          shadow: cs.boxShadow, icoShadow: getComputedStyle(t.querySelector(".side-tile-ico")).boxShadow };`);
+          shadow: cs.boxShadow, icoShadow: t.querySelector(".side-tile-ico") ? getComputedStyle(t.querySelector(".side-tile-ico")).boxShadow : "none" };`);
       await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "subscribe", morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       await libSub({ "900000001": true });
       await load(SIGNED_OUT);
@@ -2142,14 +2088,18 @@ app.whenReady().then(async () => {
         const got = await posted(n0);
         if (!got.some((x) => x[0] === "/workshop/delete-from-source" && J(x[1]) === J(["s1"]))) v.push(`a click on the tile posted ${J(got)}, want delete-from-source [s1]`);
       } else v.push("no Unsubscribe tile");
-      // auto-import off: "Delete and unsubscribe" on too
+      // auto-import off: "Delete and unsubscribe" (Delete's right-click entry) on too
       await libSub({ "900000001": true });
       await setSettings({ autoAddWeWallpapersToLibrary: false });
       await load(SIGNED_OUT);
       if (!(await openLib("s1"))) v.push("auto-import off: no sidebar for s1");
       else {
-        await sleep(500); t = await tile("[data-delete-source]");
-        if (!t || t.off || t.title === WHY) v.push(`auto-import off, "Delete and unsubscribe": ${J(t)} (want on)`);
+        await sleep(500);
+        const db = await unsubBox("[data-delete]");
+        if (db) { await clickAt(db.x, db.y, "right"); await sleep(350); }
+        const dm = await ctxItems();
+        if (!dm || dm.items[0]?.key !== "delete-source" || dm.items[0].off || dm.note) v.push(`auto-import off, "Delete and unsubscribe": ${J(dm)} (want on)`);
+        await key("Escape"); await sleep(250);
       }
       // "Use the Steam app" the same
       await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "steamapp" });
@@ -2173,44 +2123,49 @@ app.whenReady().then(async () => {
       await unsubDone();
       return v;
     });
-    // the Browse sidebar's Unsubscribe, signed out under "Subscribe with Steam login": on (its drain opens the item's Steam
-    // page), no "Sign in" sub-line, its right-click entry on; "Use the Steam app" the same
-    await cell("steam:subToggle:signedOut", async () => {
+    // Browse's Unsubscribe tiles, signed out under "Subscribe with Steam login": on (its drain opens the item's Steam page),
+    // no "Sign in" reason, the library copy's right-click entry on; a subscribed item the library doesn't hold the same; "Use the
+    // Steam app" the same
+    await cell("steam:sub:signedOut", async () => {
       const v = [];
       await setSettings({ workshopDownloadMode: "subscribe", morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
-      const open = async (status) => {
-        await browseWs(status);
-        await setWs("930000", { subscribed: true, pending: null, inLibrary: true, onDisk: true });
-        await openSide(0);
-        return waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
-      };
-      const btnOff = () => js(`document.querySelector("[data-side-sub-btn=unsubscribe]")?.getAttribute("aria-disabled") ?? null`);
-      let s = await open(SIGNED_OUT);
-      console.log(`        signed out: ${J(s)}, aria-disabled ${await btnOff()}`);
-      if (!s || s.btn !== "unsubscribe" || (await btnOff()) !== null || s.hint === WHY) v.push(`signed out: ${J(s)}, aria-disabled ${await btnOff()} (want on, no "Sign in" line)`);
-      if (s?.titles) v.push(`${s.titles} tooltip(s) in the toggle`);
-      const b = await btnBox();
-      if (b) {
+      const off = (sel) => js(`document.querySelector("${SIDE} ${sel}")?.getAttribute("aria-disabled") ?? null`);
+      const tip = (sel) => js(`document.querySelector("${SIDE} ${sel}")?.getAttribute("title") ?? null`);
+      try {
+        if (!(await libCopy(SIGNED_OUT))) return ["signed out: no Unsubscribe tile on ws-1 (its library copy) — proved nothing"];
+        await sleep(400);
+        console.log(`        signed out: aria-disabled ${await off("[data-unsubscribe]")}, title ${J(await tip("[data-unsubscribe]"))}`);
+        if ((await off("[data-unsubscribe]")) !== null || (await tip("[data-unsubscribe]")) === WHY) v.push(`signed out, the library copy's tile: aria-disabled ${await off("[data-unsubscribe]")} (want on, no "Sign in" reason)`);
+        let b = await btnBox();
         await clickAt(b.x, b.y, "right"); await sleep(350);
         const m = await ctxItems(); console.log(`        its menu: ${J(m && { items: m.items, note: m.note })}`);
         if (!m || m.items.length !== 1 || m.items[0].off || m.note) v.push(`the right-click menu: ${J(m)}`);
         await key("Escape"); await sleep(300);
         await mvTo(b.x, b.y, 300);
-        await shot("subtoggle-signedout");
-        const n0 = (await calls()).length;
+        await shot("sub-signedout");
+        let n0 = (await calls()).length;
         await clickAt(b.x, b.y); await sleep(500);
-        if (!(await posted(n0)).some((x) => x[0] === "/workshop/unsubscribe")) v.push(`a click posted ${J(await posted(n0))}, want /workshop/unsubscribe`);
-      } else v.push("no Unsubscribe button");
-      await setSettings({ workshopDownloadMode: "steamapp" });
-      s = await open(SIGNED_OUT);
-      if (!s || (await btnOff()) !== null || s.hint === WHY) v.push(`Use the Steam app, signed out: ${J(s)}, aria-disabled ${await btnOff()}`);
-      await setSettings({ workshopDownloadMode: "subscribe" });
+        if (!(await posted(n0)).some((x) => x[0] === "/workshop/delete-from-source")) v.push(`a click posted ${J(await posted(n0))}, want /workshop/delete-from-source`);
+        // a subscribed item the library doesn't hold (ws-2): its Unsubscribe on too
+        await setWs("930001", { subscribed: true, pending: null, inLibrary: false, onDisk: true });
+        await openSide(1);
+        await waitFor(() => js(`!!document.querySelector("${SIDE} [data-unsubscribe-steam]")`), 3000);
+        if ((await off("[data-unsubscribe-steam]")) !== null || (await tip("[data-unsubscribe-steam]")) === WHY) v.push(`signed out, ws-2's Unsubscribe: aria-disabled ${await off("[data-unsubscribe-steam]")}`);
+        b = await btnBox("[data-unsubscribe-steam]");
+        n0 = (await calls()).length;
+        if (b) { await clickAt(b.x, b.y); await sleep(500); }
+        if (!(await posted(n0)).some((x) => x[0] === "/workshop/unsubscribe")) v.push(`ws-2's click posted ${J(await posted(n0))}, want /workshop/unsubscribe`);
+        await setSettings({ workshopDownloadMode: "steamapp" });
+        if (!(await libCopy(SIGNED_OUT))) v.push("Use the Steam app: no Unsubscribe tile");
+        else if ((await off("[data-unsubscribe]")) !== null) v.push(`Use the Steam app, signed out: aria-disabled ${await off("[data-unsubscribe]")}`);
+      } finally { await setSettings({ workshopDownloadMode: "subscribe" }); await libCopyDone(); }
       return v;
     });
 
-    // ---- the Browse sidebar with auto-import on + the "subscribe" mode: Download IS Subscribe ("Subscribe & Apply" /
-    // "Subscribe", the subscribe glyph) and the subscription card shows only once subscribed; the other modes and auto-import
-    // off keep Download and the card. Shots steam-submerge*.png
+    // ---- the item sidebar's buttons for a Workshop result the library doesn't hold: "Subscribe and apply" / "Subscribe" (the
+    // subscribe glyph) in every download mode and auto-import, never a subscription card; Steam keeping it subscribed (not
+    // imported): "Download and apply" / "Download" and an Unsubscribe tile. The card's own button and the selection toolbar still
+    // say Subscribe only with auto-import on + the "subscribe" mode (components/subscribeMode.ts). Shots steam-submerge*.png
     const ctas = () => page(`return [...document.querySelectorAll("${SIDE} .side-cta .side-go")].map((b) => [b.textContent.trim(), b.querySelector("svg.lucide")?.getAttribute("class")?.match(/lucide-([a-z-]+)/g)?.at(-1) ?? null]);`);
     const hasCard = () => js(`!!document.querySelector("${SIDE} [data-side-sub]")`);
     const mergedSide = async (state) => {
@@ -2219,14 +2174,15 @@ app.whenReady().then(async () => {
       await openSide(0); await sleep(500);
     };
     const NOT_SUB = { subscribed: false, pending: null, inLibrary: false, onDisk: false };
-    const SUBD = { subscribed: true, pending: null, inLibrary: true, onDisk: true };
+    const SUBD = { subscribed: true, pending: null, inLibrary: false, onDisk: true };
+    const SUBS = `${SIDE} [data-unsubscribe-steam]`;
     await cell("steam:subMerge:labels", async () => {
       const v = [];
       for (const [auto, mode, merged] of [[true, "subscribe", true], [true, "steamapp", false], [false, "subscribe", false]]) {
         await setSettings({ autoAddWeWallpapersToLibrary: auto, workshopDownloadMode: mode, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
         await mergedSide(NOT_SUB);
         const c = await ctas(), card = await hasCard();
-        // the cards' own button and the selection toolbar say the same (components/subscribeMode.ts)
+        // the cards' own button and the selection toolbar (components/subscribeMode.ts)
         const btn = await page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn"); return b ? { title: b.getAttribute("title"), sub: b.dataset.dlSub ?? null, arrow: b.querySelector(".dl-arrow")?.getAttribute("d") } : null;`);
         await page(`document.querySelector("${SIDE} .side-close, .side-panel .side-close")?.click();`); await sleep(300);
         for (const i of [1, 2]) {
@@ -2245,67 +2201,68 @@ app.whenReady().then(async () => {
         console.log(`        auto-import ${auto}, ${mode}: ${J(c)} card ${card} | card button ${J(btn)} | toolbar "${bulk}"`);
         if (!btn || btn.title !== (merged ? "Subscribe & apply" : "Download & apply") || !!btn.sub !== merged) v.push(`auto-import ${auto}, ${mode}: the card's button ${J(btn)}`);
         if (bulk !== (merged ? "Subscribe 2" : "Download 2")) v.push(`auto-import ${auto}, ${mode}: the selection toolbar reads "${bulk}"`);
-        const want = merged ? [["Subscribe & Apply", "lucide-cloud-download"], ["Subscribe", "lucide-cloud-download"]] : [["Download & Apply", "lucide-download"], ["Download", "lucide-download"]];
+        const want = [["Subscribe and apply", "lucide-cloud-download"], ["Subscribe", "lucide-cloud-download"]];
         if (J(c) !== J(want)) v.push(`auto-import ${auto}, ${mode}: buttons ${J(c)}, want ${J(want)}`);
-        if (card === merged) v.push(`auto-import ${auto}, ${mode}: not subscribed, the subscription card is ${card ? "there" : "missing"}`);
+        if (card) v.push(`auto-import ${auto}, ${mode}: a subscription card`);
         if (merged) await shot("submerge");
       }
-      // merged: "Subscribe" is the download (POST /download, held by the stub), then Cancel
+      // "Subscribe" is the download (POST /download, held by the stub), then Cancel
       await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "subscribe" });
       await mergedSide(NOT_SUB);
       await page(`document.querySelector("${SIDE} [data-side-get=only]")?.click();`);
       const dl = await waitFor(() => js(`window.__st.dl && window.__st.dl.body`), 2000);
       if (dl?.result?.workshopId !== "930000" || dl.apply !== false) v.push(`"Subscribe" posted ${J(dl)}`);
-      if (await hasCard()) v.push("the subscription card showed while subscribing (the download says it)");
+      if (await hasCard()) v.push("a subscription card showed while subscribing (the download says it)");
       await page(`[...document.querySelectorAll("${SIDE} .side-dl button")].find((b) => /Cancel/.test(b.textContent))?.click();`); await sleep(400);
-      // subscribed (and in the library): the card with its state and Unsubscribe; no-glow + bg-live keep its fill, no glow
+      // subscribed in Steam, not in the library: Download and an Unsubscribe (the action area's third button); no-glow + bg-live keep its fill, no glow
       await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
       await mergedSide(SUBD);
-      const s = await waitFor(() => sub().then((x) => x && x.state === "subscribed" ? x : null), 3000);
-      console.log(`        subscribed: ${J(s)}`);
-      if (!s || s.btn !== "unsubscribe" || !/right-click keeps it/.test(s.hint ?? "")) v.push(`subscribed: ${J(s)}`);
-      if (s && /0px 0px 10px/.test(s.icoShadow ?? "")) v.push(`no-glow: the chip still glows (${s.icoShadow})`);
-      if (!s || /rgba\(0, 0, 0, 0\)|transparent/.test(s.bg)) v.push(`bg-live: the card has no fill (${s?.bg})`);
+      const s = await waitFor(() => sub().then((x) => x && x.tile ? x : null), 3000);
+      const c = await ctas();
+      console.log(`        subscribed: ${J(s)} | ${J(c)}`);
+      if (!s || s.tile !== "Unsubscribe" || s.card) v.push(`subscribed: ${J(s)}`);
+      if (J(c) !== J([["Download and apply", "lucide-download"], ["Download", "lucide-download"], ["Unsubscribe", "lucide-cloud-off"]])) v.push(`subscribed, the buttons ${J(c)}`);
+      if (s && (s.icoShadow ?? "").split(/,(?![^(]*\))/).some((x) => !/inset|none/.test(x) && !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the button glows (${s.icoShadow})`);
+      if (!s || /rgba\(0, 0, 0, 0\)|transparent/.test(s.bg)) v.push(`bg-live: the Unsubscribe has no dark base (${s?.bg})`);
       await shot("submerge-live");
       await setSettings({ glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false });
       return v;
     });
-    // the card appears once subscribed (it rises in, what follows glides down out of its room) and leaves once unsubscribed
-    // (it fades out, what follows glides up); motion off: it only fades, nothing glides
-    const NEXT_Y = `(() => { const c = document.querySelector("${SIDE} [data-side-sub]"), n = document.querySelector("${SIDE} [data-probe-next]");
+    // the Unsubscribe tile arrives with the state (it rises in, what follows glides down out of its room) and leaves once
+    // unsubscribed (it fades out keeping its words, what follows glides up); motion off: it only fades, nothing glides
+    const NEXT_Y = `(() => { const c = document.querySelector(${J(SUBS)}), n = document.querySelector("${SIDE} [data-probe-next]");
       return [c ? +(() => { let o = 1; for (let x = c; x && x.nodeType === 1; x = x.parentElement) o *= +getComputedStyle(x).opacity; return o; })().toFixed(3) : null,
-        n ? +new DOMMatrix(getComputedStyle(n).transform).m42.toFixed(2) : null]; })()`;
+        n ? +new DOMMatrix(getComputedStyle(n).transform).m42.toFixed(2) : null, c ? c.textContent.trim() : null]; })()`;
     const markNext = () => js(`(() => { const n = document.querySelector("${SIDE} .side-cta")?.nextElementSibling; if (!n) return false; n.dataset.probeNext = ""; return true; })()`);
     await cell("steam:subMerge:appear", async () => {
       const v = [];
       await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "subscribe", morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       await mergedSide(NOT_SUB);
-      if (await hasCard()) { await setSettings({ autoAddWeWallpapersToLibrary: false }); return ["the card shows while not subscribed — proved nothing"]; }
+      if (await js(`!!document.querySelector(${J(SUBS)})`)) { await setSettings({ autoAddWeWallpapersToLibrary: false }); return ["an Unsubscribe while not subscribed — proved nothing"]; }
       if (!(await markNext())) { await setSettings({ autoAddWeWallpapersToLibrary: false }); return ["nothing follows the buttons — proved nothing"]; }
       const inP = frames(`window.__wsState["930000"] = ${J(SUBD)}; window.__fakeWs("steam-todo", { finished: true });`, NEXT_Y, 900);
       await sleep(150); await shot("submerge-appear");
       const fin = await inP;
       const ops = fin.map((f) => f?.[0] ?? null), ys = fin.map((f) => f?.[1] ?? null);
       console.log(`        appear: op ${J(ops.filter((x) => x != null).slice(0, 10))} next y ${J(ys.filter((y) => y).slice(0, 10))}`);
-      if (!ops.some((o) => o != null && o >= 0.95)) v.push("the card never appeared");
-      if (between(ops.map((o) => o ?? 0), 0.05) < 2) v.push(`the card popped in (opacity per frame ${J(ops.slice(0, 14))})`);
+      if (!ops.some((o) => o != null && o >= 0.95)) v.push("the tile never appeared");
+      if (between(ops.map((o) => o ?? 0), 0.05) < 2) v.push(`the tile popped in (opacity per frame ${J(ops.slice(0, 14))})`);
       if (ys.filter((y) => y != null && y < -1).length < 2) v.push(`what follows didn't glide down (y per frame ${J(ys.slice(0, 14))})`);
-      if (await js(`document.querySelector("${SIDE} [data-side-sub]")?.dataset.state`) !== "subscribed") v.push("the card isn't the subscribed state");
       await sleep(300); await shot("submerge-subscribed");
-      // Unsubscribe: Steam says it's gone → the card leaves
+      // Unsubscribe: Steam says it's gone → the tile leaves
       const n0 = (await calls()).length;
-      await page(`document.querySelector("${SIDE} [data-side-sub-btn=unsubscribe]")?.click();`); await sleep(300);
-      const got = (await calls()).slice(n0);
+      await page(`document.querySelector("${SIDE} [data-unsubscribe-steam]")?.click();`); await sleep(300);
+      const got = (await calls()).slice(n0).filter((c) => c.p !== "/workshop/state");
       if (got.length !== 1 || got[0].p !== "/workshop/unsubscribe") v.push(`Unsubscribe posted ${J(got)}`);
       const outP = frames(`window.__wsState["930000"] = ${J(NOT_SUB)}; window.__fakeWs("steam-todo", { finished: true });`, NEXT_Y, 1000);
       await sleep(120); await shot("submerge-leave");
       const fout = await outP;
-      const ops2 = fout.map((f) => f?.[0] ?? null), ys2 = fout.map((f) => f?.[1] ?? null);
-      console.log(`        leave: op ${J(ops2.slice(0, 16))} next y ${J(ys2.filter((y) => y).slice(0, 10))}`);
-      if (ops2.at(-1) != null) v.push("the card didn't leave");
-      if (!ops2.some((o) => o != null && o > 0.05 && o < 0.95)) v.push(`the card popped out (opacity per frame ${J(ops2.slice(0, 16))})`);
+      const ops2 = fout.map((f) => f?.[0] ?? null), ys2 = fout.map((f) => f?.[1] ?? null), words = [...new Set(fout.map((f) => f?.[2]).filter((x) => x != null))];
+      console.log(`        leave: op ${J(ops2.slice(0, 16))} next y ${J(ys2.filter((y) => y).slice(0, 10))} words ${J(words)}`);
+      if (ops2.at(-1) != null) v.push("the tile didn't leave");
+      if (!ops2.some((o) => o != null && o > 0.05 && o < 0.95)) v.push(`the tile popped out (opacity per frame ${J(ops2.slice(0, 16))})`);
       if (ys2.filter((y) => y != null && y > 1).length < 2) v.push(`what follows didn't glide up (y per frame ${J(ys2.slice(0, 16))})`);
-      if (await js(`[...document.querySelectorAll("${SIDE} [data-side-sub] [data-side-sub-label]")].some((e) => e.textContent === "Not subscribed")`)) v.push("the leaving card switched to \"Not subscribed\"");
+      if (words.some((w) => !/^Unsubscrib/.test(w))) v.push(`the leaving tile changed its words: ${J(words)}`);
       await setSettings({ autoAddWeWallpapersToLibrary: false });
       return v;
     });
@@ -2313,79 +2270,73 @@ app.whenReady().then(async () => {
       const v = [];
       await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "subscribe", morphs: false });
       await mergedSide(NOT_SUB);
-      if (await hasCard() || !(await markNext())) { await setSettings({ autoAddWeWallpapersToLibrary: false, morphs: true }); return ["no starting state — proved nothing"]; }
+      if (await js(`!!document.querySelector(${J(SUBS)})`) || !(await markNext())) { await setSettings({ autoAddWeWallpapersToLibrary: false, morphs: true }); return ["no starting state — proved nothing"]; }
       const GLIDES = `${MO.OPACITY_ONLY}(document.querySelector("${SIDE} .side-body"))`;
-      let smp = js(MO.SAMPLE({ card: `${SIDE} [data-side-sub]` }, 500)); await sleep(20);
+      let smp = js(MO.SAMPLE({ card: SUBS }, 500)); await sleep(20);
       await js(`window.__wsState["930000"] = ${J(SUBD)}; window.__fakeWs("steam-todo", { finished: true }); true`);
       await sleep(60); const g1 = await js(GLIDES);
       const sIn = await smp;
-      await page(`document.querySelector("${SIDE} [data-side-sub-btn=unsubscribe]")?.click();`); await sleep(300);
-      smp = js(MO.SAMPLE({ card: `${SIDE} [data-side-sub]` }, 500)); await sleep(20);
+      await page(`document.querySelector("${SIDE} [data-unsubscribe-steam]")?.click();`); await sleep(300);
+      smp = js(MO.SAMPLE({ card: SUBS }, 500)); await sleep(20);
       await js(`window.__wsState["930000"] = ${J(NOT_SUB)}; window.__fakeWs("steam-todo", { finished: true }); true`);
       await sleep(60); const g2 = await js(GLIDES);
       const sOut = await smp;
       await sleep(250); const g3 = await js(GLIDES);
       console.log(`        motion off: in ${MO.brief(sIn.card)} / out ${MO.brief(sOut.card)} | non-opacity animations ${J([g1, g2, g3])}`);
-      v.push(...MO.judge("motion off: the card appearing", sIn.card, { appear: true, size: false }), ...MO.judge("motion off: the card leaving", sOut.card, { leave: true, size: false }));
+      v.push(...MO.judge("motion off: the tile appearing", sIn.card, { appear: true, size: false }), ...MO.judge("motion off: the tile leaving", sOut.card, { leave: true, size: false }));
       if ([...g1, ...g2, ...g3].length) v.push(`motion off: something glides (${J([g1, g2, g3])})`);
       await setSettings({ autoAddWeWallpapersToLibrary: false, morphs: true });
       return v;
     });
 
-    // ---- the Library sidebar's Subscribe for a Workshop item it holds unsubscribed (its own copy after "Unsubscribe without
-    // deleting"): the Browse sidebar's subscription card (SubToggle only="unsubscribed"), never for a subscribed item or one
-    // the Workshop no longer has; Subscribe → POST /workshop/subscribe; once subscribed the card leaves (fades, what follows
-    // glides up) and the Delete tile becomes Unsubscribe. Motion off: only fades. Shots steam-resub*.png
-    const libCard = () => page(`const s = document.querySelector("${SIDE} [data-side-sub]"); if (!s) return null; const b = s.querySelector("[data-side-sub-btn]");
-      return { state: s.dataset.state, btn: b?.dataset.sideSubBtn ?? null, hint: s.querySelector("[data-side-sub-hint]")?.textContent ?? null };`);
+    // ---- the item sidebar's Subscribe for a Workshop item the library holds unsubscribed (its own copy after "Unsubscribe
+    // without deleting"): a Subscribe tile beside its Delete, never for a subscribed item or one the Workshop no longer has;
+    // Subscribe → POST /workshop/subscribe, "Subscribing…" meanwhile; once subscribed the tile fades out and the Delete tile
+    // becomes Unsubscribe. Motion off: only fades. Shots steam-resub*.png
+    const subTile = () => js(`document.querySelector("${SIDE} [data-side-subscribe]")?.textContent.trim() ?? null`);
     const resubDone = async () => { await js(`localStorage.removeItem("__probe_lib_off"); document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`); await unsubDone(); };
     const resubFlow = async (v, motionOn) => {
       await setSettings({ autoAddWeWallpapersToLibrary: true, morphs: motionOn, glows: true, liveWallpaperBehindAllTabs: false });
       await libSub({ "900000001": true, "900000002": false, "900000003": false });
       await js(`localStorage.setItem("__probe_lib_off", ${J(J(["900000003"]))}); true`);
-      await load(SIGNED_IN); // signed out its Subscribe is off (side:blocked:subscribe)
-      await js(`window.__wsState = { "900000001": ${J(SUBD)}, "900000002": { subscribed: false, pending: null, inLibrary: true, onDisk: false } }; true`);
-      // a subscribed item: no card; one the Workshop no longer has: no card
+      await load(SIGNED_IN);
+      // a subscribed item: no Subscribe; one the Workshop no longer has: none
       for (const t of ["s1", "s3"]) {
         if (!(await openLib(t))) { v.push(`no sidebar for ${t}`); continue; }
         await sleep(700);
-        if (await libCard()) v.push(`${t}: a subscription card (${J(await libCard())})`);
+        if (await subTile()) v.push(`${t}: a Subscribe tile (${J(await subTile())})`);
       }
       if (!(await openLib("s2"))) return false;
-      const c = await waitFor(() => libCard().then((x) => x && x.state === "not-subscribed" ? x : null), 3000);
+      await sleep(600);
+      const c = await subTile();
       console.log(`        s2 (its own copy): ${J(c)} | tiles ${J(await dangerTiles())}`);
-      if (!c || c.btn !== "subscribe" || !/keep it up to date/.test(c.hint ?? "")) { v.push(`s2's card: ${J(c)}`); return false; }
+      if (c !== "Subscribe") { v.push(`s2's Subscribe: ${J(c)}`); return false; }
       if (motionOn) await shot("resub");
       const n0 = (await calls()).length;
-      await page(`document.querySelector("${SIDE} [data-side-sub-btn=subscribe]")?.click();`); await sleep(400);
+      await page(`document.querySelector("${SIDE} [data-side-subscribe]")?.click();`); await sleep(400);
       // the sidebar's own community reads (counts, creator, favourite state, asked once it settles) may land meanwhile: they
       // read, they never act
       const got = (await calls()).slice(n0).filter((c) => !/^\/workshop\/(counts|creator|comments)$/.test(c.p) && !(c.p === "/workshop/favorite" && c.m === "GET"));
       if (got.length !== 1 || got[0].p !== "/workshop/subscribe" || got[0].body?.workshopId !== "900000002" || got[0].body?.title !== "s2") v.push(`Subscribe posted ${J(got)}`);
-      const sc = await libCard();
-      if (sc?.state !== "subscribing") v.push(`while subscribing: ${J(sc)}`);
-      // Steam delivers: subscribed, the library re-read (the backend's library-synced) — the card leaves, the tile turns
+      if ((await subTile()) !== "Subscribing…") v.push(`while subscribing: ${J(await subTile())}`);
+      // Steam delivers: subscribed, the library re-read (the backend's library-synced)
       await libSub({ "900000001": true, "900000002": true, "900000003": false });
-      await js(`(() => { const n = document.querySelector("${SIDE} [data-side-sub]")?.nextElementSibling; if (n) n.dataset.probeNext = ""; })(); true`);
       return true;
     };
-    const RESUB = `(() => { const c = document.querySelector("${SIDE} [data-side-sub]"), n = document.querySelector("${SIDE} [data-probe-next]"), d = document.querySelector("${SIDE} .side-tiles > .danger");
-      let o = null; if (c) { o = 1; for (let x = c; x && x.nodeType === 1; x = x.parentElement) o *= +getComputedStyle(x).opacity; }
-      return [o == null ? null : +o.toFixed(3), n ? +new DOMMatrix(getComputedStyle(n).transform).m42.toFixed(2) : null, d ? d.textContent.trim() : null]; })()`;
-    const DELIVER = `window.__wsState["900000002"] = { subscribed: true, pending: null, inLibrary: true, onDisk: true };
-      window.__fakeWs("subscribe-progress", { id: "900000002", value: 1, status: "Subscribed", done: true }); window.__fakeWs("library-synced", { count: 0 });`;
+    const RESUB = `(() => { const c = document.querySelector("${SIDE} [data-side-subscribe]"), d = document.querySelector("${SIDE} .side-cta .danger");
+      return [c ? +getComputedStyle(c).opacity : null, d ? d.textContent.trim() : null]; })()`;
+    const DELIVER = `window.__fakeWs("subscribe-progress", { id: "900000002", value: 1, status: "Subscribed", done: true }); window.__fakeWs("library-synced", { count: 0 });`;
     await cell("side:resub", async () => {
       const v = [];
       if (!(await resubFlow(v, true))) { await resubDone(); return v.length ? v : ["no starting state — proved nothing"]; }
       const outP = frames(DELIVER, RESUB, 1100);
       await sleep(110); await shot("resub-leave");
       const fr = await outP;
-      const ops = fr.map((f) => f?.[0] ?? null), ys = fr.map((f) => f?.[1] ?? null), tiles = fr.map((f) => f?.[2] ?? null);
-      console.log(`        delivered: card op ${J(ops.slice(0, 16))} next y ${J(ys.filter((y) => y).slice(0, 10))} tile ${J([...new Set(tiles)])}`);
-      if (ops.at(-1) != null) v.push("the card didn't leave once subscribed");
-      if (!ops.some((o) => o != null && o > 0.05 && o < 0.95)) v.push(`the card popped out (opacity ${J(ops.slice(0, 16))})`);
-      if (ys.filter((y) => y != null && y > 1).length < 2) v.push(`what follows didn't glide up (y ${J(ys.slice(0, 16))})`);
-      if (tiles.at(-1) !== "Unsubscribe") v.push(`the tile didn't become Unsubscribe: ${J([...new Set(tiles)])}`);
+      const ops = fr.map((f) => f?.[0] ?? null), tiles = fr.map((f) => f?.[1] ?? null);
+      console.log(`        delivered: Subscribe op ${J(ops.slice(0, 16))} tile ${J([...new Set(tiles)])}`);
+      if (ops.at(-1) != null) v.push("the Subscribe tile didn't leave once subscribed");
+      if (!ops.some((o) => o != null && o > 0.05 && o < 0.95)) v.push(`the Subscribe tile popped out (opacity ${J(ops.slice(0, 16))})`);
+      if (tiles.at(-1) !== "Unsubscribe") v.push(`the Delete tile didn't become Unsubscribe: ${J([...new Set(tiles)])}`);
       await sleep(300); await shot("resub-done");
       await resubDone();
       return v;
@@ -2394,12 +2345,12 @@ app.whenReady().then(async () => {
       const v = [];
       if (!(await resubFlow(v, false))) { await resubDone(); await setSettings({ morphs: true }); return v.length ? v : ["no starting state — proved nothing"]; }
       const GLIDES = `${MO.OPACITY_ONLY}(document.querySelector("${SIDE} .side-body"))`;
-      const smp = js(MO.SAMPLE({ card: `${SIDE} [data-side-sub]` }, 500)); await sleep(20);
+      const smp = js(MO.SAMPLE({ card: `${SIDE} [data-side-subscribe]` }, 500)); await sleep(20);
       await js(`${DELIVER} true`);
       await sleep(60); const g = await js(GLIDES);
       const s = await smp;
-      console.log(`        motion off: the card ${MO.brief(s.card)} | non-opacity animations ${J(g)}`);
-      v.push(...MO.judge("motion off: the card leaving", s.card, { leave: true, size: false }));
+      console.log(`        motion off: the tile ${MO.brief(s.card)} | non-opacity animations ${J(g)}`);
+      v.push(...MO.judge("motion off: the Subscribe tile leaving", s.card, { leave: true, size: false }));
       if (g.length) v.push(`motion off: something glides (${J(g)})`);
       await resubDone(); await setSettings({ morphs: true });
       return v;
@@ -2511,36 +2462,34 @@ app.whenReady().then(async () => {
         if (c.length !== 1 || !/owner=76561190000000007/.test(c[0].q)) v.push(`creator asked ${c.length}× (${J(c)}), want once with the item's owner`);
         const name = await js(`document.querySelector("${ROW} [data-ws-row-name]")?.textContent`);
         if (name !== "Probe Creator") v.push(`the row says ${J(name)}`);
-        // "All their wallpapers" is an icon chip at the row's end (lucide images), said by its tooltip and the row's name
+        // the whole row is the target: it ends in a bare chevron (no icon chip, no tooltip, no words), the row's name says where
+        // it goes
         const go = await js(`(() => { const r = document.querySelector(${J(ROW)}), g = r?.querySelector("[data-ws-go]"); if (!g) return null;
-          const sv = g.querySelector("svg"), gr = g.getBoundingClientRect(), rr = r.getBoundingClientRect();
+          const sv = g.querySelector("svg"), gr = g.getBoundingClientRect(), rr = r.getBoundingClientRect(), cs = getComputedStyle(g);
           return { text: g.textContent.trim(), icon: [...(sv?.classList ?? [])].find((c) => c.startsWith("lucide-") && c !== "lucide") ?? null, title: g.getAttribute("title"),
-            label: r.getAttribute("aria-label"), words: r.textContent.includes("All their wallpapers"), w: gr.width, h: gr.height, endGap: +(rr.right - gr.right).toFixed(1),
-            m: sv ? (() => { const b = sv.getBoundingClientRect(); return [b.left - gr.left, gr.right - b.right, b.top - gr.top, gr.bottom - b.bottom, b.width, b.height].map((x) => +x.toFixed(2)); })() : null }; })()`);
+            label: r.getAttribute("aria-label"), words: r.textContent.includes("All their wallpapers"), endGap: +(rr.right - gr.right).toFixed(1), bg: cs.backgroundColor,
+            icons: r.querySelectorAll("svg.lucide").length }; })()`);
         console.log(`        the row's end: ${J(go)}`);
-        if (!go) v.push("the row's end has no icon chip ([data-ws-go])");
+        if (!go) v.push("the row's end has no chevron ([data-ws-go])");
         else {
           if (go.text || go.words) v.push(`"All their wallpapers" is still words in the row (${J(go)})`);
-          if (go.icon !== "lucide-images") v.push(`the chip's icon is ${go.icon} (want lucide-images)`);
-          if (go.title !== "All their wallpapers") v.push(`the chip's tooltip reads ${J(go.title)}`);
+          if (go.icon !== "lucide-chevron-right" || go.title) v.push(`the row's end is ${go.icon} with tooltip ${J(go.title)} (want a bare chevron, no tooltip)`);
+          if (!/rgba\(0, 0, 0, 0\)|transparent/.test(go.bg)) v.push(`the chevron sits on a chip (${go.bg})`);
           if (!/^All their wallpapers, made by Probe Creator$/.test(go.label ?? "")) v.push(`the row's name reads ${J(go.label)}`);
-          if (go.endGap > 14) v.push(`the chip isn't at the row's end (${go.endGap} px short)`);
-          // its glyph centred: whole-pixel size and equal whole-pixel margins (design.md § Controls; probe-icons never opens a
-          // Workshop sidebar, so it is judged here)
-          const [ml, mr, mt, mb, gw, gh] = go.m ?? [];
-          if (!go.m || [ml, mr, mt, mb, gw, gh].some((x) => Math.abs(x - Math.round(x)) > 0.05) || Math.abs(ml - mr) > 0.05 || Math.abs(mt - mb) > 0.05)
-            v.push(`the chip's glyph isn't centred on whole pixels (left, right, top, bottom margins, size: ${J(go.m)})`);
+          if (go.endGap > 14) v.push(`the chevron isn't at the row's end (${go.endGap} px short)`);
         }
-        // its icon: the object tilt while the row is hovered (motion on: on the spring, per frame; off: stays still)
+        // hovered, the row lifts and its chevron slides toward where it goes (motion on: on the spring, per frame; off: still)
         await mvTo(3, 3, 300);
         const rb = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-        const tilt = frames("", `(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector("${ROW} [data-ws-go] svg")).transform); return +(Math.atan2(m.b, m.a) * 180 / Math.PI).toFixed(2); })()`, 600);
+        const slide = frames("", `(() => { const g = document.querySelector("${ROW} [data-ws-go]"), r = document.querySelector(${J(ROW)});
+          return [+new DOMMatrix(getComputedStyle(g).transform).m41.toFixed(2), +new DOMMatrix(getComputedStyle(r).transform).m42.toFixed(2)]; })()`, 600);
         await sleep(30); await mvTo(rb.x, rb.y);
         if (motion) { await sleep(90); await shot("ws-creator-go"); }
-        const ang = (await tilt).filter((x) => x != null);
-        console.log(`        the icon's turn per frame: ${J(ang.slice(0, 14))}`);
-        if (motion && (Math.abs(ang.at(-1)) < 3 || between(ang, 0.5) < 3)) v.push(`motion on: the icon didn't tilt on the spring (${J(ang.slice(0, 14))})`);
-        if (!motion && ang.some((a) => Math.abs(a) > 0.01)) v.push(`motion off: the icon turned (${J(ang.slice(0, 14))})`);
+        const sl = (await slide).filter((x) => x != null), xs = sl.map((x) => x[0]), lift = sl.map((x) => x[1]);
+        console.log(`        the chevron's x per frame: ${J(xs.slice(0, 14))}; the row's y ${J(lift.slice(0, 8))}`);
+        if (motion && (xs.at(-1) < 2 || between(xs, 0.3) < 3)) v.push(`motion on: the chevron didn't slide on the spring (${J(xs.slice(0, 14))})`);
+        if (motion && !(lift.at(-1) < -0.5)) v.push(`motion on: the row didn't lift (${J(lift.slice(0, 8))})`);
+        if (!motion && (xs.some((x) => Math.abs(x) > 0.01) || lift.some((y) => Math.abs(y) > 0.01))) v.push(`motion off: the row or its chevron moved (${J(sl.slice(0, 8))})`);
         await mvTo(3, 3, 200);
         if (libThumb && !(await waitFor(() => js(`document.querySelector("${ROW} [data-ws-avatar]")?.dataset.wsAvatar === "loaded"`), 3000))) v.push("the avatar never loaded");
         const src = await js(`document.querySelector("${ROW} img")?.src ?? ""`);
@@ -2553,9 +2502,8 @@ app.whenReady().then(async () => {
           await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000); await sleep(300);
           const rr = await js(`(() => { const r = document.querySelector(${J(ROW)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
           await mvTo(rr.x, rr.y, 400);
-          const lk = await looks(ROW), chip = await looks(`${ROW} [data-ws-go]`);
-          console.log(`        no-glow + bg-live: ${J(lk)} chip ${J(chip)}`);
-          if (!chip || /rgba\(0, 0, 0, 0\)|transparent/.test(chip.bg)) v.push(`bg-live: the chip has no fill of its own (${chip?.bg})`);
+          const lk = await looks(ROW);
+          console.log(`        no-glow + bg-live: ${J(lk)}`);
           if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
           if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the creator row has no fill of its own (${lk.bg})`);
           if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the hovered row glows (${lk.shadow})`);
@@ -2716,9 +2664,9 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the favourite: a toggle tile — signed in it reads the state (once the sidebar settles), a click favourites (POST), the star
-    // fills and pops once (never on mount), the words roll and the tile keeps its box; Steam refusing puts it back with the reason.
-    // Motion off: the words only fade. Signed out: ws:favoriteSteam.
+    // the favourite: the favourites count pill is the toggle (no Favourite tile) — signed in it reads the state (once the sidebar
+    // settles), a click favourites (POST), the star fills and pops once (never on mount), the count goes up by one and the pill
+    // keeps its box; Steam refusing puts it back with the reason. Motion off: no pop, nothing moves. Signed out: ws:favoriteSteam.
     for (const motion of [true, false]) {
       await cell(`ws:favorite${motion ? "" : "Off"}`, async () => {
         const v = [];
@@ -2727,49 +2675,51 @@ app.whenReady().then(async () => {
         await W({ fav: { signedIn: true, favorited: false } });
         await openSide(0);
         const FAV = `${SIDE} [data-ws-fav]`;
-        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "off"`), 3000))) return ["the favourite tile never read its state"];
-        const t0 = await page(`const t = document.querySelector(${J(FAV)}); return { text: t.querySelector(".xfade > :not([data-off])")?.textContent, pressed: t.getAttribute("aria-pressed"),
-          pop: !!t.querySelector(".ico-pop"), inTiles: !!t.closest(".side-tiles") };`);
-        if (t0.text !== "Favourite" || t0.pressed !== "false" || t0.pop || !t0.inTiles) v.push(`at rest: ${J(t0)} (want "Favourite", not pressed, no pop on mount, among the tiles)`);
-        await scrollSideTo(FAV); await sleep(400);
+        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "off"`), 3000))) return ["the favourites pill never read its state"];
+        const t0 = await page(`const t = document.querySelector(${J(FAV)}); return { count: t.querySelector("[data-fav-count]")?.textContent ?? null, pressed: t.getAttribute("aria-pressed"),
+          pop: !!t.querySelector(".ico-pop"), inPills: !!t.closest(".side-hero"), stat: t.dataset.sideStat, tiles: !!document.querySelector("${SIDE} .side-tiles [data-ws-fav]") };`);
+        if (t0.count !== "56" || t0.pressed !== "false" || t0.pop || !t0.inPills || t0.stat !== "favorites" || t0.tiles)
+          v.push(`at rest: ${J(t0)} (want the favourites pill "56", not pressed, no pop on mount, among the info pills, no tile)`);
         const box0 = await js(`(() => { const e = document.querySelector(${J(FAV)}); return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]; })()`);
-        const smp = motion ? null : js(MO.SAMPLE({ face: `${FAV} .xfade > :nth-child(2)`, tile: FAV }, 500));
+        const smp = motion ? null : js(MO.SAMPLE({ tile: FAV }, 500));
         if (!motion) await sleep(40);
-        const fr = frames(`document.querySelector(${J(FAV)}).click();`, `(() => { const e = document.querySelector(${J(FAV)}); const f = e.querySelector(".xfade > :nth-child(2)"); const s = e.querySelector(".side-tile-ico svg");
-          return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, +new DOMMatrix(getComputedStyle(f).transform).m42.toFixed(2), +new DOMMatrix(getComputedStyle(s).transform).a.toFixed(3)]; })()`, 600);
+        const fr = frames(`document.querySelector(${J(FAV)}).click();`, `(() => { const e = document.querySelector(${J(FAV)}); const s = e.querySelector("svg");
+          return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, +new DOMMatrix(getComputedStyle(s).transform).a.toFixed(3)]; })()`, 600);
         if (motion) { await sleep(80); await shot("ws-fav-pop"); }
         const f = await fr;
         await sleep(300);
         const post = (await wsCalls("/workshop/favorite")).filter((c) => c.m === "POST");
         if (post.length !== 1 || post[0].body.workshopId !== "930000" || post[0].body.favorite !== true) v.push(`POSTs: ${J(post)}`);
-        const t1 = await page(`const t = document.querySelector(${J(FAV)}); return { text: t.querySelector(".xfade > :not([data-off])")?.textContent, pressed: t.getAttribute("aria-pressed"),
-          fill: t.querySelector(".side-tile-ico svg")?.getAttribute("fill"), pop: !!t.querySelector(".side-tile-ico svg.ico-pop") };`);
-        if (t1.text !== "Favourited" || t1.pressed !== "true" || t1.fill !== "currentColor" || !t1.pop) v.push(`after the click: ${J(t1)}`);
-        if (f.some((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75))) v.push(`the tile moved or resized: ${J(box0)} → ${J(f.find((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75)))}`);
+        const t1 = await page(`const t = document.querySelector(${J(FAV)}); return { count: t.querySelector("[data-fav-count]")?.textContent ?? null, pressed: t.getAttribute("aria-pressed"),
+          fill: t.querySelector("svg")?.getAttribute("fill"), pop: !!t.querySelector("svg.ico-pop"), label: t.getAttribute("aria-label") };`);
+        if (t1.count !== "57" || t1.pressed !== "true" || t1.fill !== "currentColor" || !t1.pop || !/^Favourited, 57 favourites$/.test(t1.label ?? "")) v.push(`after the click: ${J(t1)}`);
+        if (f.some((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75))) v.push(`the pill moved or resized: ${J(box0)} → ${J(f.find((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75)))}`);
         if (motion) {
-          const ys = f.filter((x) => x).map((x) => x[4]), sc = f.filter((x) => x).map((x) => x[5]);
-          console.log(`        "Favourited" y ${J(ys.slice(0, 8))}; star scale ${J(sc.slice(0, 8))}`);
-          if (between(ys, 0.5) < 2) v.push("\"Favourited\" didn't roll in");
+          const sc = f.filter((x) => x).map((x) => x[4]);
+          console.log(`        star scale ${J(sc.slice(0, 8))}`);
           if (!sc.some((a) => a < 0.95)) v.push("the star didn't pop");
         } else {
-          const s1 = await smp; console.log(`        motion off: "Favourited" ${MO.brief(s1.face)}`);
-          v.push(...MO.judge("motion off: \"Favourited\"", s1.face, { appear: true }), ...MO.judge("motion off: the tile", s1.tile));
-          if (f.some((x) => x && x[5] < 0.99)) v.push("motion off: the star popped");
+          const s1 = await smp; console.log(`        motion off: the pill ${MO.brief(s1.tile)}`);
+          v.push(...MO.judge("motion off: the pill", s1.tile));
+          if (f.some((x) => x && x[4] < 0.99)) v.push("motion off: the star popped");
         }
-        // Steam refusing: back to "Favourited" (the state before), the reason as the tile's tooltip
+        // Steam refusing: back to on (the state before), the reason as the pill's tooltip
         await W({ favFail: true });
         await page(`document.querySelector(${J(FAV)}).click();`); await sleep(500);
-        const t2 = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, title: t.title };`);
-        if (t2.state !== "on" || !/turned that down/.test(t2.title)) v.push(`a refused unfavourite: ${J(t2)} (want back on, with the reason)`);
+        const t2 = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, title: t.title, count: t.querySelector("[data-fav-count]")?.textContent ?? null };`);
+        if (t2.state !== "on" || !/turned that down/.test(t2.title) || t2.count !== "57") v.push(`a refused unfavourite: ${J(t2)} (want back on, 57, with the reason)`);
         if (motion) {
           await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
           await browseWs(); await W({ fav: { signedIn: true, favorited: true } }); await openSide(0);
-          await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "on"`), 3000); await scrollSideTo(FAV); await sleep(400);
-          const lk = await looks(FAV), ico = await looks(`${FAV} .side-tile-ico`);
+          await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "on"`), 3000); await sleep(400);
+          const r = await js(`(() => { const e = document.querySelector(${J(FAV)}).getBoundingClientRect(); return { x: e.x + e.width / 2, y: e.y + e.height / 2 }; })()`);
+          await mvTo(r.x, r.y, 300);
+          const lk = await looks(FAV);
           if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
-          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the tile has no fill (${lk.bg})`);
-          if (/0px 0px 10px/.test(ico.shadow)) v.push(`no-glow: the star's chip glows (${ico.shadow})`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the pill has no fill (${lk.bg})`);
+          if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the hovered pill glows (${lk.shadow})`);
           await shot("ws-fav-live");
+          await mvTo(3, 3, 100);
           await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
         }
         return v;
@@ -2790,11 +2740,10 @@ app.whenReady().then(async () => {
       return v;
     };
 
-    // no usable sign-in: the favourite tile becomes "Favourite on Steam" — its words roll over in their one cell as the state lands
-    // (motion off: they fade, nothing moves) and the tile keeps its box; a click opens the item's page in the Steam app (POST
-    // /steam/open-page {watch: "favorite"}: the backend watches its state there) and sends no favourite; the tile stays as it was
-    // (Steam's own page takes the star). Shots
-    // steam-ws-fav-steam-roll.png, steam-ws-fav-steam.png, steam-ws-fav-steam-live.png
+    // no usable sign-in: the favourites pill says "Favourite on Steam" (its name; the reason as its tooltip) once the state lands,
+    // keeping its box (motion off: nothing moves); a click opens the item's page in the Steam app (POST /steam/open-page {watch:
+    // "favorite"}: the backend watches its state there) and sends no favourite; the pill stays as it was (Steam's own page takes
+    // the star). Shots steam-ws-fav-steam.png, steam-ws-fav-steam-live.png
     for (const motion of [true, false]) {
       await cell(`ws:favoriteSteam${motion ? "" : "Off"}`, async () => {
         const v = [];
@@ -2802,31 +2751,20 @@ app.whenReady().then(async () => {
         await browseWs();
         // the state answers 700 ms after it is asked (the sidebar settles 350 ms first): the swap lands well inside the sampling
         await W({ fav: { signedIn: false, favorited: null }, favDelay: 700 });
-        const FAV = `${SIDE} [data-ws-fav]`, FACE = `${FAV} .xfade > :nth-child(3)`, OLD = `${FAV} .xfade > :nth-child(1)`;
+        const FAV = `${SIDE} [data-ws-fav]`;
         await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[0].click();`);
-        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "loading"`), 2000))) return ["the tile never showed while its state was asked — proved nothing"];
+        if (!(await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "loading"`), 2000))) return ["the pill never showed while its state was asked — proved nothing"];
         await sleep(450); // the sidebar's open and its body's fade are over
         const box0 = await js(`(() => { const e = document.querySelector(${J(FAV)}); return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]; })()`);
-        const smp = motion ? null : js(MO.SAMPLE({ face: FACE, old: OLD, tile: FAV }, 1100));
-        const fr = motion ? frames("", `(() => { const e = document.querySelector(${J(FAV)}), f = e.querySelector(".xfade > :nth-child(3)");
-          return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight, +new DOMMatrix(getComputedStyle(f).transform).m42.toFixed(2), +(+getComputedStyle(f).opacity).toFixed(2)]; })()`, 1100) : null;
-        if (motion) { await sleep(560); await shot("ws-fav-steam-roll"); }
+        const smp = motion ? null : js(MO.SAMPLE({ tile: FAV }, 1100));
+        const fr = motion ? frames("", `(() => { const e = document.querySelector(${J(FAV)}); return [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight]; })()`, 1100) : null;
         const f = motion ? await fr : null, s1 = motion ? null : await smp;
-        const t = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, text: t.querySelector(".xfade > :not([data-off])")?.textContent,
+        const t = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, label: t.getAttribute("aria-label"),
           disabled: t.disabled, pressed: t.getAttribute("aria-pressed"), title: t.title };`);
-        if (t.state !== "signed-out" || t.text !== "Favourite on Steam" || t.disabled || t.pressed !== null || !/Steam app/.test(t.title))
+        if (t.state !== "signed-out" || !/^Favourite on Steam/.test(t.label ?? "") || t.disabled || t.pressed !== null || !/Steam app/.test(t.title))
           v.push(`signed out: ${J(t)} (want "Favourite on Steam", enabled, no pressed state, the reason as its tooltip)`);
-        if (motion) {
-          const ys = f.filter((x) => x).map((x) => x[4]), ops = f.filter((x) => x).map((x) => x[5]);
-          console.log(`        "Favourite on Steam" y ${J(ys.filter((y, i, a) => i === 0 || y !== a[i - 1]).slice(0, 10))}; opacity ${J(ops.filter((o, i, a) => i === 0 || o !== a[i - 1]).slice(0, 10))}`);
-          if (!ys.length || Math.abs(ys[0]) < 1) v.push(`"Favourite on Steam" was in place before the state landed (y ${J(ys[0])}) — proved nothing`);
-          else if (between(ys, 0.5) < 2) v.push("\"Favourite on Steam\" didn't roll in (no in-between frames)");
-          if (f.some((x) => x && x.slice(0, 4).some((n, k) => Math.abs(n - box0[k]) > 0.75))) v.push(`the tile moved or resized as its words swapped: ${J(box0)}`);
-        } else {
-          console.log(`        motion off: "Favourite on Steam" ${MO.brief(s1.face)}; "Favourite" ${MO.brief(s1.old)}`);
-          v.push(...MO.judge("motion off: \"Favourite on Steam\"", s1.face, { appear: true }), ...MO.judge("motion off: \"Favourite\"", s1.old, { leave: true }),
-            ...MO.judge("motion off: the tile", s1.tile));
-        }
+        if (motion) { if (f.some((x) => x && x.some((n, k) => Math.abs(n - box0[k]) > 0.75))) v.push(`the pill moved or resized as its state landed: ${J(box0)}`); }
+        else { console.log(`        motion off: the pill ${MO.brief(s1.tile)}`); v.push(...MO.judge("motion off: the pill", s1.tile)); }
         v.push(...await steamOpenClick(FAV, { watch: "favorite" }, "/workshop/favorite"));
         const t2 = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, pop: !!t.querySelector(".ico-pop") };`);
         if (t2.state !== "signed-out" || t2.pop) v.push(`after the click: ${J(t2)} (want unchanged, no pop)`);
@@ -2834,11 +2772,11 @@ app.whenReady().then(async () => {
           await shot("ws-fav-steam");
           await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
           await browseWs(); await W({ favDelay: 0 }); await openSide(0);
-          await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "signed-out"`), 3000); await scrollSideTo(FAV); await sleep(400);
-          const lk = await looks(FAV), ico = await looks(`${FAV} .side-tile-ico`);
+          await waitFor(() => js(`document.querySelector(${J(FAV)})?.dataset.wsFav === "signed-out"`), 3000); await sleep(400);
+          const lk = await looks(FAV);
           if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
-          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the tile has no fill (${lk.bg})`);
-          if (/0px 0px 10px/.test(ico.shadow)) v.push(`no-glow: the star's chip glows (${ico.shadow})`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the pill has no fill (${lk.bg})`);
+          if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the pill glows (${lk.shadow})`);
           await shot("ws-fav-steam-live");
           await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
         }
@@ -2856,7 +2794,7 @@ app.whenReady().then(async () => {
         await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
         await browseWs();
         await W({ comments: COMMENTS.slice(0, 3), signedIn: false });
-        win.setContentSize(1400, 560); await sleep(300); // the section below the fold: it reads (and its button appears) on the scroll
+        win.setContentSize(1400, 480); await sleep(300); // the section below the fold: it reads (and its button appears) on the scroll
         await openSide(0); await sleep(500);
         const SEC = `${SIDE} [data-ws-comments]`, BTN = `${SEC} [data-ws-steam-comment]`;
         if (await js(`!!document.querySelector(${J(BTN)})`)) { win.setContentSize(1400, 900); return ["the button was there before the comments were read — proved nothing"]; }
@@ -2907,7 +2845,7 @@ app.whenReady().then(async () => {
         await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
         await browseWs();
         await W({ comments: COMMENTS, signedIn: false });
-        win.setContentSize(1400, 560); await sleep(300); // the section below the sidebar's fold: its read waits for it
+        win.setContentSize(1400, 480); await sleep(300); // the section below the sidebar's fold: its read waits for it
         await openSide(0); await sleep(500);
         const SEC = `${SIDE} [data-ws-comments]`;
         const inView = await page(`const e = document.querySelector(${J(SEC)}), sc = e?.closest(".side-scroll"); if (!e) return null;
@@ -3099,7 +3037,7 @@ app.whenReady().then(async () => {
       if (!a || !b) { v.push(`${what}: no row to compare (${J(a)} / ${J(b)})`); return; }
       if (!a.cls) v.push(`${what} isn't the creator row's control (.ws-creator)`);
       for (const k of ["bg", "border", "radius", "pad", "h", "w", "font"]) if (a[k] !== b[k]) v.push(`${what}'s ${k} ${J(a[k])} ≠ the creator row's ${J(b[k])}`);
-      if (J(a.chip) !== J(b.chip)) v.push(`${what}'s end chip ${J(a.chip)} ≠ the creator row's ${J(b.chip)}`);
+      if (J(a.chip) !== J(b.chip)) v.push(`${what}'s end (its chevron) ${J(a.chip)} ≠ the creator row's ${J(b.chip)}`);
     };
     const clickRow = (sel) => page(`const e = document.querySelector(${J(sel)}); if (!e) return false; e.click(); return true;`);
 
@@ -3187,11 +3125,10 @@ app.whenReady().then(async () => {
             if (!rr) v.push("no-glow + bg-live: no Presets row");
             else {
               await mvTo(rr.x, rr.y, 400);
-              const lk = await looks(PROW), chip = await looks(`${PROW} [data-ws-go]`);
-              console.log(`        no-glow + bg-live: ${J(lk)} chip ${J(chip)}`);
+              const lk = await looks(PROW);
+              console.log(`        no-glow + bg-live: ${J(lk)}`);
               if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
               if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk.bg)) v.push(`bg-live: the Presets row has no fill of its own (${lk.bg})`);
-              if (!chip || /rgba\(0, 0, 0, 0\)|transparent/.test(chip.bg)) v.push(`bg-live: its chip has no fill of its own (${chip?.bg})`);
               if ((lk.shadow.match(/rgba?\([^)]*\)/g) ?? []).some((x) => !/rgba\(0, 0, 0/.test(x))) v.push(`no-glow: the hovered row glows (${lk.shadow})`);
               await shot("ws-presets-live");
             }
@@ -4687,7 +4624,7 @@ app.whenReady().then(async () => {
     });
 
     // ---- the Library sidebar's Workshop pieces — the Browse sidebar's own components (components/WorkshopSocial.tsx), after the
-    // scene properties — and every Library item's size on disk (LibrarySide.tsx). The stack's scenes s1..s3 are Workshop copies
+    // scene properties — and every Library item's size on disk (ItemSide.tsx). The stack's scenes s1..s3 are Workshop copies
     // (workshop/<id>); its empty CM fixture marks every id off the Workshop, so __probe_lib_off names the only ones that are.
     // Shots steam-libws*.png
     const libWs = async ({ off = [], nosize = [], wsOf = {} } = {}, ws = {}) => {
@@ -4716,12 +4653,14 @@ app.whenReady().then(async () => {
       return { n: kids.length, playback: at((k) => k.matches('[data-sec="playback"]')), props: at((k) => k.matches("[data-scene-props]")),
         hero: at((k) => k.matches(".side-hero")), statsInHero: !!b.querySelector(":scope > .side-hero > [data-ws-stats]"),
         stats: at((k) => k.matches("[data-ws-stats]")), creator: at((k) => k.matches(".ws-creator-row")),
-        fav: at((k) => k.matches(".side-tiles") && !!k.querySelector("[data-ws-fav]")), comments: at((k) => k.matches("[data-ws-comments]")),
+        cta: at((k) => k.matches(".side-cta")), tiles: at((k) => k.matches(".side-tiles")), favInHero: !!b.querySelector(":scope > .side-hero [data-ws-fav]"),
+        comments: at((k) => k.matches("[data-ws-comments]")),
         gaps: kids.slice(1).map((k, i) => +(k.getBoundingClientRect().top - kids[i].getBoundingClientRect().bottom).toFixed(1)) }; })()`;
 
-    // lib:ws:order — a Workshop item's Library sidebar: its counts in the hero row, the creator right under it (as in Browse),
-    // and after the Playback card and the scene properties the favourite and the comments, last, in the body's rhythm (12 px
-    // apart); none of them for an item the Workshop no longer has, a non-Workshop item, or a multi-selection. Shot steam-libws.png
+    // lib:ws:order — a Workshop item's Library sidebar: its counts in the hero row (the favourites pill its toggle), the action
+    // area, the creator under it (as in Browse), the tiles before the Playback card and the scene properties, the comments last (the order Browse
+    // shows too: components/ItemSide.tsx), in the body's rhythm (12 px apart); none of them for an item the Workshop no longer
+    // has, a non-Workshop item, or a multi-selection. Shot steam-libws.png
     await cell("lib:ws:order", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false, settingsLevel: "standard" });
@@ -4732,8 +4671,8 @@ app.whenReady().then(async () => {
         const o = await js(BODY_ORDER);
         console.log(`        s1: ${J(o)}`);
         if (!o || o.props < 0) return ["s1's sidebar shows no scene properties — proved nothing"];
-        if (!(o.hero === 0 && o.statsInHero && o.creator === 1 && o.playback > o.creator && o.playback < o.props && o.props < o.fav && o.fav + 1 === o.comments && o.comments === o.n - 1))
-          v.push(`the order: ${J(o)} (want the counts in the hero row, the creator under it, then Playback, the scene properties, the favourite and the comments, last)`);
+        if (!(o.hero === 0 && o.statsInHero && o.favInHero && o.cta === 1 && o.creator === 2 && o.tiles > o.creator && o.playback > o.tiles && o.playback < o.props && o.comments > o.props && o.comments === o.n - 1))
+          v.push(`the order: ${J(o)} (want the counts in the hero row with the favourite, the action area, the creator, the tiles, then Playback, the scene properties and the comments, last)`);
         for (const i of [0, ...Array.from({ length: Math.max(0, o.n - 1 - Math.max(o.props, 0)) }, (_, k) => Math.max(o.props, 0) + k)])
           if (Math.abs(o.gaps[i] - 12) > 0.75) v.push(`blocks ${i} → ${i + 1}: ${o.gaps[i]} px apart (want the body's 12)`);
         await shot("libws");
@@ -4761,7 +4700,8 @@ app.whenReady().then(async () => {
 
     // lib:ws:pillRow — the counts are hero pills: for a Workshop scene (s1) and a Workshop video (a plain item given an id), the
     // subscribers and favourites pills sit in the hero row beside the others (inside its box, on a line another hero pill
-    // shares) before the size, which stays last; the creator row comes right under the hero; both above the Playback card.
+    // shares) before the Workshop ID, then the size, last (components/ItemSide.tsx: one order on both tabs); the creator row
+    // comes right under the hero; both above the Playback card.
     // Shots steam-libws-pillrow*.png
     await cell("lib:ws:pillRow", async () => {
       const v = [];
@@ -4778,8 +4718,8 @@ app.whenReady().then(async () => {
             const subs = h.querySelector("[data-side-stat=subscribers]"), favs = h.querySelector("[data-side-stat=favorites]");
             const others = [...h.querySelectorAll(".side-pill, .side-chip")].filter((e) => !e.closest("[data-ws-stats]") && getComputedStyle(e).visibility !== "hidden").map(R);
             const pb = b.querySelector('[data-sec="playback"]'), cr = b.querySelector(":scope > .ws-creator-row");
-            return { hero: R(h), subs: subs && R(subs), favs: favs && R(favs), others, last: h.lastElementChild?.dataset.sideRow ?? null,
-              known: h.querySelector("[data-ws-stats]")?.dataset.wsStats ?? null, creatorNext: h.nextElementSibling === cr, creator: cr && R(cr), playback: pb && R(pb),
+            return { hero: R(h), subs: subs && R(subs), favs: favs && R(favs), others, last: [...h.children].slice(-2).map((e) => e.dataset.sideRow ?? null),
+              known: h.querySelector("[data-ws-stats]")?.dataset.wsStats ?? null, creatorNext: h.nextElementSibling?.matches(".side-cta") && h.nextElementSibling.nextElementSibling === cr, creator: cr && R(cr), playback: pb && R(pb),
               loose: b.querySelectorAll(":scope > [data-ws-stats]").length }; })()`);
           console.log(`        ${t}: ${J(r)}`);
           if (!r) { v.push(`${t}: no hero row`); continue; }
@@ -4789,8 +4729,8 @@ app.whenReady().then(async () => {
             if (p.x < r.hero.x - 0.5 || p.x + p.w > r.hero.x + r.hero.w + 0.5 || p.y < r.hero.y - 0.5 || p.y + p.h > r.hero.y + r.hero.h + 0.5) v.push(`${t}: the ${k} pill lies outside the hero row (${J(p)} vs ${J(r.hero)})`);
             if (!r.others.some((o) => Math.abs(o.y + o.h / 2 - (p.y + p.h / 2)) < 1.5) && r.others.length) v.push(`${t}: the ${k} pill shares no line with the other pills (${J(p)})`);
           }
-          if (r.last !== "size") v.push(`${t}: the hero's last pill is ${r.last} (want the size, last)`);
-          if (!r.creatorNext) v.push(`${t}: the creator row isn't right under the hero`);
+          if (J(r.last) !== J(["workshop-id", "size"])) v.push(`${t}: the hero's last pills are ${J(r.last)} (want the ID, then the size: a late measure moves nothing)`);
+          if (!r.creatorNext) v.push(`${t}: the creator row isn't right under the hero's action area`);
           if (!r.playback || !r.creator || r.creator.y > r.playback.y || r.subs.y > r.playback.y) v.push(`${t}: the counts / creator sit below Playback (${J({ creator: r.creator, playback: r.playback })})`);
           await shot(t === "s1" ? "libws-pillrow" : "libws-pillrow-video");
         }
@@ -4814,12 +4754,12 @@ app.whenReady().then(async () => {
           const held = await js(`document.querySelector(${J(ST)})?.dataset.wsStats ?? null`);
           if (held !== "loading") v.push(`while Steam is asked the row is ${J(held)} (want held, "loading")`);
           await scrollSideTo(ST);
-          const smp = js(MO.SAMPLE({ subs: SUBS, next: `${SIDE} .ws-creator-row` }, 1300));
+          const smp = js(MO.SAMPLE({ subs: SUBS, next: `${SIDE} .side-cta` }, 1300));
           if (motion) { await sleep(1080); await shot("libws-counts-in"); }
           const s = await smp;
           console.log(`        subscribers ${MO.brief(s.subs)} | y ${J([...new Set(s.subs.filter((f) => f[1] > 0.02).map((f) => f[3]))].slice(0, 8))}`);
           const ys = s.next.filter((f) => f[1] != null).map((f) => f[3]);
-          if (!ys.length || Math.max(...ys) - Math.min(...ys) > 0.75) v.push(`the creator row moved while the counts landed (y ${J([...new Set(ys)].slice(0, 6))})`);
+          if (!ys.length || Math.max(...ys) - Math.min(...ys) > 0.75) v.push(`the action area under the pills moved while the counts landed (y ${J([...new Set(ys)].slice(0, 6))})`);
           if (motion) {
             const ops = s.subs.map((f) => f[1]).filter((x) => x != null), py = s.subs.filter((f) => f[1] > 0.02).map((f) => f[3]);
             if (!ops.some((x) => x > 0.05 && x < 0.95)) v.push(`the counts popped in (opacity ${J([...new Set(ops)].slice(0, 10))})`);
