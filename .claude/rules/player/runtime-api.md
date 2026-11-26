@@ -85,8 +85,9 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
 - On output add: re-apply its remembered `out:` props first, then a parked wallpaper parked for that
   connector, else join the live transition covering another output (`Transitions::adopt_output`), else
   show `cur:` of the first output, else the parked wallpaper — a source not yet `Ready` at its `Ready`
-  (`show_when_ready`). Guards: `tests/supervise.rs::output_props_survive_replug`,
-  `tests/api.rs::hotplug_mid_transition`, `restore_pending_layer_counts_as_shown`.
+  (`show_when_ready`; a scene a VRAM stop blanks on purpose shows at once). Guards:
+  `tests/supervise.rs::output_props_survive_replug`, `tests/api.rs::hotplug_mid_transition`,
+  `restore_pending_layer_counts_as_shown`, `output_added_while_a_vram_stop_shows_nothing_keeps_the_scene`.
 - On output removal: drop it from every transition (`drop_output`; a transition left with no output is
   committed via `commit_unseen`), then retire whatever only it showed. With no output left, park the last
   current wallpaper (ramped to −96, paused, still in `srcs:*`). Guards: `tests/api.rs::remove_output_retires_what_only_it_showed`,

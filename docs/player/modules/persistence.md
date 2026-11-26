@@ -43,7 +43,8 @@ What the player shows, so a restarted player comes back with the same wallpaper 
 - **How a wait ends.** A `transition` or a `set` of the layer's `content` on that output wins (the source no layer
   waits for any more is retired; the switch is a cut, there is no A picture) — except an `align: end` switch over a
   waiting video (a restored program re-arming), which keeps it as its A: it shows at its `Ready` and plays to its
-  end first (`Runtime::start_switch`). `stop` and the output going end it. A scene past its restart budget shows its
+  end first (`Runtime::start_switch`); a refused request changes nothing, and the wait keeps its start time. `stop`
+  and the output going end it. A scene past its restart budget shows its
   broken display (its preview, or nothing without one) and stays referenced, so the next snapshot saves it
   `broken`; any other failure with no picture (a file that won't open, a VRAM stop) leaves the layers empty and
   retires the source, as does a wait past `READY_TIMEOUT` (`LOADING_READY_TIMEOUT` while the scene reports its

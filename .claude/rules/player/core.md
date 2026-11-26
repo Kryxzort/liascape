@@ -166,11 +166,12 @@ you touch before changing a recipe, a source or the runtime.
   `show_pending`: a texture — its first frame or a restarting scene's preview), never at once; a scene restored
   `broken` shows its preview at once. Count a waiting layer as showing its source (`cur:`, `srcs:`,
   `state.outputs[].pending`, the snapshot); a `transition` (`Runtime::start_switch`; an `align: end` one keeps a
-  waiting video as its A), a `content` set, `stop` or the output going ends the wait and retires a source no layer
-  waits for. A scene broken during the wait shows its broken display (kept for the snapshot); another failure with
+  waiting video as its A; a refused one changes nothing, its timeout still counted from the start), a `content` set,
+  `stop` or the output going ends the wait and retires a source no layer waits for. A scene broken during the wait shows its broken display (kept for the snapshot); another failure with
   no picture, or the timeout (paused by a hold), retires it. Guards: `src/player/tests/api.rs`
   `restore_waits_for_ready_no_seam`, `restore_pending_is_cancelled_by_a_switch`, `restore_broken_scene_shows_its_preview`,
-  `restore_pending_dropped_on_error`, `restore_pending_times_out`, `restore_preview_shows_while_the_worker_restarts`,
+  `restore_pending_dropped_on_error`, `restore_pending_times_out`, `restore_pending_outlives_a_refused_switch`,
+  `restore_preview_shows_while_the_worker_restarts`,
   `src/player/tests/supervise.rs` `restore_wait_survives_a_low_vram_hold`.
 - `Writer::runner()` queues other jobs (outbox compaction) on the same thread; `finish` sends an explicit `Stop`.
 - Test knob `LIASCAPE_PLAYER_TEST_SNAPSHOT_WRITE_MS` slows every write deterministically.

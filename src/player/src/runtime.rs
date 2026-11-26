@@ -3625,9 +3625,13 @@ impl Runtime {
     }
 
     /// `id` would draw something now: not a source, or the host has its texture (a frame, the
-    /// preview a scene shows while its worker restarts or once it broke, a low-VRAM still).
+    /// preview a scene shows while its worker restarts or once it broke, a low-VRAM still) — or
+    /// a VRAM stop under `nothing` hides its frame on purpose, a blank that is its display (a
+    /// layer waiting for it would time out and stay empty when `last_frame` brings it back).
     fn has_picture(&self, id: &str) -> bool {
-        self.graph.kind_of(id) != Some(NodeKind::Source) || self.host.texture(id).is_some()
+        self.graph.kind_of(id) != Some(NodeKind::Source)
+            || self.host.texture(id).is_some()
+            || self.host.scene(id).is_some_and(|sc| sc.hides_a_picture())
     }
 
     /// The graph's copy (`cur:`, `srcs:`).
@@ -3708,11 +3712,12 @@ impl Runtime {
         if conns.is_empty() || keep {
             return start(self);
         }
-        let saved = self.pending_show.clone();
+        // The start times too: a wait put back must still time out from when it began.
+        let saved = (self.pending_show.clone(), self.pending_since.clone());
         let orphans = self.unpend(&conns);
         let res = start(self);
         if res.is_err() {
-            self.pending_show = saved;
+            (self.pending_show, self.pending_since) = saved;
             self.mirror_pending();
         } else {
             self.retire_dropped(orphans, &conns);

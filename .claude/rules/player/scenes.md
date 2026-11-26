@@ -212,8 +212,9 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   slot. Guards: `tests/api.rs::scene_over_vram_limit_is_stopped_not_crashed`,
   `tests/scene.rs::vram_stopped_scene_keeps_only_its_shown_slot`.
 - Under `player.scene_vram_stop_shows` `nothing` a VRAM-stopped scene hides that slot (`SceneSource::shows_nothing`,
-  never dropped, so the choice is live both ways) and the seam probe skips it. Guard:
-  `tests/api.rs::scene_over_vram_limit_can_show_nothing`.
+  never dropped, so the choice is live both ways) and the seam probe skips it; a layer waiting for a picture takes
+  that blank as one (`SceneSource::hides_a_picture`). Guards: `tests/api.rs::scene_over_vram_limit_can_show_nothing`,
+  `output_added_while_a_vram_stop_shows_nothing_keeps_the_scene`.
 - The low-VRAM hold composes into the effective pause (never `player.paused`); `stop` mode suspends every media source and resumes each at its position; the reserve keeps freed memory from reading as free. Guards: `low_vram_never_flaps_under_light_load`, `low_vram_releases_when_the_probe_dies`, `tests/api.rs::low_vram_stop_frees_and_resumes_every_source`, `low_vram_pause_mode_pauses_without_freeing`.
 - Count only this player's own pids in the reserve (compositor, scene workers, spare) and keep it to the held sources that can still come back: one replaced by a transition, retired or destroyed drops its share at once (`Runtime::vram_gone`, `LowVram::set_reserve`) and never reopens; `stop` clears the hold. Resume at low + `RESUME_MARGIN_MIB` (256); anti-flap's doubling hold is the loop guard, never a wider bar. Guards: `low_vram_high_usage_resumes_at_the_resume_bar`, `low_vram_reserve_follows_the_held_sources`, `tests/api.rs::low_vram_apply_while_held_plays_once_memory_allows`, `low_vram_stop_clears_the_hold`, `low_vram_replaced_source_drops_its_reserve`.
 - Say what the hold keeps and why: `hello.vram_hold` / `state.vram_hold`, `vram.held {sources, reason, free_mib, needed_mib}` / `vram.released {reason}` → the backend's WS `vram-hold` → the now-playing line. Guards: the low_vram tests above, adapter IT § "the low-VRAM hold is visible", probe-matrix `vram:held`.

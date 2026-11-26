@@ -70,8 +70,11 @@ cmd_deps() {
     local missing=""
     command -v cmake >/dev/null 2>&1 || missing="$missing cmake"
     command -v c++ >/dev/null 2>&1 || command -v g++ >/dev/null 2>&1 || missing="$missing c++"
-    # cmake's default generator writes Makefiles
-    [ -n "${CMAKE_GENERATOR:-}" ] || command -v make >/dev/null 2>&1 || missing="$missing make"
+    # the build tool of the generator cmake will use (unset = its default, Makefiles)
+    case "${CMAKE_GENERATOR:-Unix Makefiles}" in
+        "Unix Makefiles") command -v make >/dev/null 2>&1 || missing="$missing make" ;;
+        Ninja*) command -v ninja >/dev/null 2>&1 || missing="$missing ninja" ;;
+    esac
     command -v git >/dev/null 2>&1 || missing="$missing git"
     if command -v pkg-config >/dev/null 2>&1; then
         for p in sdl2 freetype2 fontconfig harfbuzz liblz4 zlib libavformat libavcodec libswresample libswscale libavutil gl; do

@@ -1046,6 +1046,12 @@ impl SceneSource {
         self.vram_blank && self.vram_stopped.is_some()
     }
 
+    /// [`shows_nothing`](Self::shows_nothing) over a picture it would show under `last_frame`: a
+    /// layer that waits for a picture (`Runtime::show_when_ready`) takes this blank as one.
+    pub fn hides_a_picture(&self) -> bool {
+        self.shows_nothing() && self.picture().is_some()
+    }
+
     /// One GPU-budget observation (the runtime, every `budget::OBSERVE_EVERY`):
     /// `missed_pct` = the worst miss rate of the outputs showing this scene over the last 2 s,
     /// `now` the caller's monotonic time (tests pass a virtual one). `auto` off (`player.
@@ -2197,6 +2203,11 @@ impl SceneSource {
         if self.shows_nothing() {
             return None;
         }
+        self.picture()
+    }
+
+    /// What [`texture`](Self::texture) shows unless a VRAM stop blanks it.
+    fn picture(&self) -> Option<&Tex> {
         match self.latch.current() {
             Some((slot, _, _, generation)) => self
                 .rings

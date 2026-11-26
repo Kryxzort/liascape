@@ -2467,7 +2467,7 @@ sid=$(srcIdForPath "$SL"); p1=$(pend); r1=$(cur ready)
 restore_cli; p2=$(pend); r2=$(cur ready)
 [ -n "$sid" ] && [ "$p1/$r1" = "$sid/false" ] && [ "$p2/$r2" = "$sid/false" ] || bad "proved nothing: the restores didn't run during the wait (source $sid, pending $p1 → $p2, ready $r1 → $r2)"
 [ "$(cur path)" = "$SL" ] && ok "restore during the wait: cur is the restored scene before its first frame" || bad "restore during the wait: cur $(cur path)"
-waitfor 20000 scene_ready "$SL"
+waitfor 20000 scene_ready "$SL" || bad "the restored scene never became ready: cur $(cur path), ready $(cur ready), pending $(pend)"
 [ "$(nsch)" = 0 ] && [ "$(( $(grep -c . "$HB/spawned.log") - n0 ))" = 1 ] && [ "$(cur path)" = "$SL" ] && [ -z "$(pend)" ] \
   && ok "…2 restores during the wait: no switch (LastSession not replayed), one player start, the scene shown at its Ready" \
   || bad "restore during the wait: $(nsch) switches ($(ctl logs '{"kind_prefix":"transition.scheduled","limit":100}' | jq -c '[.events[].path]')), $(( $(grep -c . "$HB/spawned.log") - n0 )) player starts, cur $(cur path), pending $(pend)"

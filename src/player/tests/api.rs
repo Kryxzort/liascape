@@ -9960,6 +9960,59 @@ fn scene_over_vram_limit_can_show_nothing() {
     assert_eq!(seams, seams0, "a blank on purpose is not a seam");
 }
 
+/// An output plugged in while a VRAM-stopped scene shows nothing on purpose shows that scene
+/// at once (blank is what it draws, not a wait): past the restored-layer timeout it still names
+/// it, and `last_frame` brings the frame back there too.
+#[test]
+fn output_added_while_a_vram_stop_shows_nothing_keeps_the_scene() {
+    let timeout = Path::new("1500");
+    let Some((srv, file)) = vram_serve_with(&[("LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS", timeout)])
+    else {
+        return;
+    };
+    let mut c = srv.client();
+    c.ok("subscribe", json!({"topics": ["scene.vram_exceeded"]}));
+    c.ok(
+        "set",
+        json!({"path": "player.scene_vram_stop_shows", "value": "nothing"}),
+    );
+    let mut spec = synth(Pattern::Solid);
+    spec.rgb = [10, 200, 30];
+    let id = create_scene(&mut c, "api-t8-vram-blank-hotplug", &spec, json!({}));
+    show_all(&mut c, &id);
+    wait_playing(&mut c, &id, 0.3);
+    let pid = worker_of(&mut c, &id)["pid"].as_u64().unwrap();
+    c.ok("set", json!({"path": "player.scene_vram_limit_mib", "value": 1536}));
+    write_vram(&file, 6000.0, &[(pid, 1800.0)]);
+    let mut seen = Vec::new();
+    wait_event(&mut c, &mut seen, "scene.vram_exceeded", Duration::from_secs(5));
+    let p = srv.path("t8-vram-blank-hotplug.png");
+    let shot = |c: &mut Client, o: &str, x: u32, y: u32| {
+        c.ok("capture", json!({"target": format!("out:{o}"), "path": s(&p)}));
+        png_pixel(&p, x, y)
+    };
+    wait_for(Duration::from_secs(2), "VIRTUAL-1 to go black", || {
+        (shot(&mut c, "VIRTUAL-1", 320, 180)[..3] == [0, 0, 0]).then_some(())
+    });
+    c.ok(
+        "headless.add_output",
+        json!({"name": "VIRTUAL-3", "width": 320, "height": 180, "hz": 60}),
+    );
+    std::thread::sleep(Duration::from_millis(2500));
+    let st = c.ok("state", json!({}));
+    assert_eq!(st["graph"]["lay:VIRTUAL-3:main"]["content"], json!(id), "{st}");
+    assert_eq!(state_output(&st, "VIRTUAL-3")["pending"], Value::Null, "{st}");
+    c.ok(
+        "set",
+        json!({"path": "player.scene_vram_stop_shows", "value": "last_frame"}),
+    );
+    for (o, x, y) in [("VIRTUAL-1", 320, 180), ("VIRTUAL-3", 160, 90)] {
+        wait_for(Duration::from_secs(2), "the last frame back", || {
+            (shot(&mut c, o, x, y)[..3] == [10, 200, 30]).then_some(())
+        });
+    }
+}
+
 /// A playing video on VIRTUAL-1 and a scene on VIRTUAL-2, for the low-VRAM rule.
 fn video_and_scene(c: &mut Client, name: &str) -> (String, String) {
     let clip = ensure_clip("frame_index_120", ClipSpec::FrameIndex { frames: 120 });
@@ -12506,9 +12559,14 @@ fn restore_pending_is_cancelled_by_a_switch() {
     let Some((srv, dir, id)) = restore_scene("api-restore-switch", slow_scene(), json!({}), &[], |_| {}) else {
         return;
     };
-    let mut c = srv.client();
-    not_ready_yet(&c.ok("state", json!({})), &id);
+    // The clip first: a clip made after the check could let the scene's load end before the switch.
     let red = ensure_clip("api_red_3s", RED_3S);
+    let mut c = srv.client();
+    let st = c.ok("state", json!({}));
+    not_ready_yet(&st, &id);
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(state_output(&st, o)["pending"], json!(id), "precondition: {o} waits: {st}");
+    }
     let corr = seam_switch(&mut c, &json!({"path": s(&red), "loop": true}), "full-live", 200, true);
     let to = c.ok("logs", json!({"corr": corr}))["events"]
         .as_array()
@@ -12619,13 +12677,56 @@ fn restore_pending_times_out() {
         return;
     };
     let mut c = srv.client();
-    let t = Instant::now();
     let ev = wait_for(Duration::from_secs(10), "snapshot.pending_timeout", || {
         logs_of(&mut c, "snapshot.pending_timeout")
             .into_iter()
             .find(|e| e["id"] == json!(id))
     });
-    assert!(t.elapsed() >= Duration::from_millis(1000), "not before the timeout: {ev}");
+    // The wait's own clock: it began at the restore, before this test could start one.
+    let waited = ev["waited_ms"].as_f64().unwrap_or(0.0);
+    assert!(waited >= 1500.0, "not before the timeout: {ev}");
+    std::thread::sleep(Duration::from_millis(300));
+    let st = c.ok("state", json!({}));
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(st["graph"][format!("lay:{o}:main")]["content"], json!(""), "{st}");
+        assert_eq!(state_output(&st, o)["pending"], Value::Null, "{st}");
+    }
+    assert!(scene_of(&st, &dir).is_none(), "the source is retired: {st}");
+}
+
+/// A switch refused while a restored layer waits changes nothing: every layer still waits, and
+/// the wait still times out, counted from when it began (`Runtime::start_switch` puts back its
+/// start time with the wait).
+#[test]
+fn restore_pending_outlives_a_refused_switch() {
+    let never = SyntheticSpec {
+        load_ms: 20_000,
+        ..synth(Pattern::FrameIndex)
+    };
+    let env = [("LIASCAPE_PLAYER_TEST_PENDING_TIMEOUT_MS", Path::new("1500"))];
+    let Some((srv, dir, id)) = restore_scene("api-restore-refused", never, json!({}), &env, |_| {})
+    else {
+        return;
+    };
+    let mut c = srv.client();
+    not_ready_yet(&c.ok("state", json!({})), &id);
+    // Refused inside the switch (`Transitions::start`), after the wait was lifted for it.
+    let e = c.err(
+        "transition",
+        json!({"outputs": "out:*", "to": {"kind": "snapshot", "path": "/nowhere"}, "effect_id": null}),
+    );
+    assert_eq!(e["code"], "unsupported", "{e}");
+    let st = c.ok("state", json!({}));
+    for o in ["VIRTUAL-1", "VIRTUAL-2"] {
+        assert_eq!(state_output(&st, o)["pending"], json!(id), "{o} still waits: {st}");
+    }
+    let ev = wait_for(Duration::from_secs(10), "snapshot.pending_timeout", || {
+        logs_of(&mut c, "snapshot.pending_timeout")
+            .into_iter()
+            .find(|e| e["id"] == json!(id))
+    });
+    let waited = ev["waited_ms"].as_f64().unwrap_or(0.0);
+    assert!((1500.0..4000.0).contains(&waited), "timed from the restore: {ev}");
     std::thread::sleep(Duration::from_millis(300));
     let st = c.ok("state", json!({}));
     for o in ["VIRTUAL-1", "VIRTUAL-2"] {
