@@ -28,8 +28,12 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - What happened (incidents, who said what, dates, Task/Phase/R-numbers, measurements of a bug now fixed) → the commit message only. `git log -S` finds it.
 - Work not done yet → `docs/TODO.md`: product work only, agreed-but-unstarted work at the top under "Queued", in order;
   delete an item in the commit that does it.
-- A design spec or implementation plan → `docs/superpowers/`, only while its work is open; the commit that finishes the
-  work deletes it and moves its still-true facts to their homes above (git history keeps the file).
+- A design spec or implementation plan → `docs/superpowers/`, only while its work is open, and always named by a
+  `docs/TODO.md` item for what of it is left (`check-rules.sh` fails a spec no item names). A commit that builds part of it
+  rewrites that item to the remaining part; the commit that finishes the work deletes the spec and moves its still-true
+  facts to their homes above (git history keeps the file).
+- Every owner request or agreed decision about the app → a `docs/TODO.md` item in the same turn it is agreed, before any
+  work or delegation; a chat message, a spec or an agent's brief is never its only record.
 - A zero-exception ban → a hook or a permission rule, not prose.
 - What a user needs to install, start and use the app → `README.md` (see below); never internals or a change log.
 - One person's own workflow on their machine (where their notes go, their habits) → `CLAUDE.local.md` (gitignored,

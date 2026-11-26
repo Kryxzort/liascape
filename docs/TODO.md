@@ -6,7 +6,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 
 ## Queued (in order — the next thing to pick up)
 1. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
-       player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
+       player). Plan for the first-ever load's compiles: `docs/superpowers/48-shader-compiles-plan.md`. Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
        spawn → `Hello` for every apply after a run's first: warm 65–135 ms, cold 70–215 ms faster). Left: a first-ever
        load's NVIDIA compiles. 2921510865 (3.6 GB of VRAM) wasn't measured beside a busy desktop. Not worth it (tried):
@@ -81,7 +81,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        requests to steamcommunity.com than now (`SteamGate`). Guard: the benchmark scenario's numbers before / after,
        and a probe cell per behaviour added.
 
-12. [ ] (owner) One sidebar for a Workshop item, the same in the Library and Browse (today they are separate
+12. [ ] (owner) One sidebar for a Workshop item, the same in the Library and Browse — the owner-approved design in
+       `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` (its filter half is built; this is the sidebar half) (today they are separate
        components that disagree: `LibrarySide.tsx` and `BrowseSide.tsx`).
        - Not in the library: the actions are "Subscribe" and "Subscribe and apply" (in place of Download / Download and
          apply), through the download modes' order; the one-off download stays in their right-click menu. The
@@ -157,7 +158,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
             unprivileged user namespaces are off. Test with `ldd` on every ELF in containers without mpv/FFmpeg/SDL2.
 - [ ] **Multi-monitor management** (per-monitor wallpapers, user-facing): UI assignment, per-output rotation, which
       monitor actions target, `/current` + preview per output, `--restore`, hotplug defaults. Design (top-bar screen
-      carousel, follow All, per-screen popover, sound priority list): `docs/superpowers/specs/2026-11-17-multi-monitor-design.md`.
+      carousel, follow All, per-screen popover, sound priority list): `docs/superpowers/specs/2026-11-17-multi-monitor-design.md`. (plan: `docs/superpowers/plans/2026-11-17-multi-monitor-v1.md`)
 - [ ] **Web wallpapers**: WE `web` items via CEF / LWE's `webhelper`, an optional build module (the player's last phase), gated on the NVIDIA LINEAR-dmabuf external-only risk. Today WorkshopTags.Unplayable drops Web from
       Browse and the scrapers; once it plays, take it out of Unplayable and the Browse type filter (its tag then shows
       in the sidebar on its own: components/sideTags.ts hides only "Wallpaper" and the type).

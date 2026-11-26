@@ -210,6 +210,18 @@ for f in sorted(set(listed)):
         if not os.path.exists(cp) and not ignored(cp): bad(f, f'names a code path that does not exist: {cp}')
 print(f'code paths in docs: {ncode} checked')
 
+# Every open spec or plan under docs/superpowers/ is named by docs/TODO.md: work that lives only in a spec gets forgotten
+# (an owner-approved sidebar design was half built and its rest dropped out of sight for days). A spec is deleted when its
+# work is done; until then a TODO item says what of it is left.
+with open('docs/TODO.md', encoding='utf-8', errors='replace') as fh: todo_text = fh.read()
+nspec = 0
+for f in sorted(set(listed)):
+    if not re.match(r'docs/superpowers/.+\.md$', f) or not os.path.isfile(f): continue
+    nspec += 1
+    if f not in todo_text and os.path.basename(f) not in todo_text:
+        bad(f, 'an open spec or plan that docs/TODO.md does not name: add the item for what of it is left, or delete it if done')
+print(f'open specs and plans: {nspec} checked against docs/TODO.md')
+
 if not yaml: print("(PyYAML not installed: frontmatter checked with the strict built-in parser)")
 for p in problems: print("PROBLEM " + p)
 print(f"RESULT problems={len(problems)}")
