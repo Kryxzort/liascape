@@ -734,7 +734,9 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 /* Browse's locate finds the SELECTED card, which is ringed in the accent (`.card.focused`): its spotlight takes that colour,
    a green one would fight the ring the same way */
 .locate-flash.lfx-focus, .locate-fx.lfx-focus { --lfx-c: var(--accent); }
-.locate-flash { outline: 2px solid var(--lfx-c); outline-offset: 0; }
+/* the playing card the crosshair finds is also focused by it (store pickLib), so the flash outranks its focus ring (2 px off,
+   `.card.playing:is(.focused, .selected)`) until it ends. Guard: probe-sidebar look:locator */
+.locate-flash, .card.playing.locate-flash { outline: 2px solid var(--lfx-c); outline-offset: 0; }
 .locate-fx { position: fixed; left: 0; top: 0; z-index: 85; pointer-events: none; will-change: transform; }
 .locate-fx div { position: absolute; inset: 0; border-radius: var(--r, 10px); }
 .locate-fx > .lfx-clip { border-radius: 0; } /* its clip-path is set per frame (travelToPlaying.ts place) */

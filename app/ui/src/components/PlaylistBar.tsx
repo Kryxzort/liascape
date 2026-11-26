@@ -149,6 +149,7 @@ export function PlaylistBar() {
   const playingPath = useStore((s) => s.playingPath);
   const reorder = useStore((s) => s.reorderPlaylist);
   const play = useStore((s) => s.playPlaylist);
+  const pickLib = useStore((s) => s.pickLib);
   const ps = useStore((s) => s.playlistSettings);
   const setPS = useStore((s) => s.setPlaylistSettings);
   const names = useStore((s) => s.playlistNames);
@@ -235,10 +236,12 @@ export function PlaylistBar() {
         <button className="mini ico" title="Playlist settings" onClick={() => setShowSettings(true)}><SlidersHorizontal size={15} /></button>
         <button className="mini ico" title="Save playlist" onClick={() => setShowSave(true)}><Save size={15} /></button>
         <button className="mini ico" title="Load playlist" onClick={() => setShowLoad(true)}><FolderFlap size={15} /></button>
-        {/* "Go to playing": glides the row to the playing item and rings it; only when it's in the playlist */}
+        {/* "Go to playing": glides the row to the playing item, rings it, and selects its card with the sidebar open (store
+            pickLib: a click's selection, without the apply; the grid shows the card, as the item's right-click does); only
+            when it's in the playlist */}
         <LocateButton target="bar" className="ico" size={15} label="Go to the playing wallpaper" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
           title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
-          onClick={() => glideTo(rowRef.current, ".pl-item.playing", "x", motion)} />
+          onClick={() => { if (playingPath && glideTo(rowRef.current, ".pl-item.playing", "x", motion)) { pickLib(playingPath); revealCard(`lib-${playingPath}`); } }} />
         <div className="spacer" />
         <button className="play-btn ico" ref={magnetRef} onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
       </div>

@@ -114,6 +114,11 @@
 //   look:locator         "go to playing" (grid + bar): the spotlight (dim + rings + glow) appears, the rings ripple, all gone in
 //                        ≤ 2 s; Glow effects off → no glow layer, still dim + rings; animations off → a still highlight that fades
 //                        in and out (opacity only, nothing scales)
+//   lib:locateSelect     "go to playing" also selects the playing card and opens its sidebar, as a click would, without applying
+//                        it: the Library's crosshair with k2 + k3 Ctrl-selected and the sidebar on k3 → the sidebar on k1, the
+//                        selection replaced (none left), no /apply; the bar's with the sidebar on k2 → k1; a search hiding k1 →
+//                        the Library's says so and changes nothing, the bar's still opens k1 (as its right-click); motion off
+//                        → the sidebar on k1 at once
 //   look:dlHover         a Browse card's download button under a real pointer: it lifts, its glow layer shows, the arrow nudges;
 //                        the Browse sidebar's Download & Apply the same (computed styles differ from the un-hovered ones)
 // Screenshots: <LIASCAPE_OUT>/side-<cell>.png. Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
@@ -2161,6 +2166,55 @@ app.whenReady().then(async () => {
         if (st.gone == null || st.edge == null || st.gone - st.edge > 1600 || st.gone - st.edge < 900) v.push(`${btn}, animations off: shown ${st.gone == null || st.edge == null ? "for ever / never" : st.gone - st.edge + " ms"} (~1.2 s)`);
       }
       await setMotion(true);
+      return v;
+    });
+
+    // "go to playing" selects the playing card and opens its sidebar (a click's selection, without the apply)
+    await cell("lib:locateSelect", async () => {
+      const v = [], J = JSON.stringify;
+      await post("/apply", { path: K[0] }); await sleep(1500); await mv(5, 5, 100);
+      const ctrl = (t) => `m.thumb("${t}").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));`;
+      const state = `return { side: m.sideTitle(), sel: [...document.querySelectorAll(".card.lib.selected")].map((c) => c.querySelector(".lib-title")?.dataset.title),
+        focused: [...document.querySelectorAll(".card.lib.focused")].map((c) => c.querySelector(".lib-title")?.dataset.title),
+        applied: window.__reqs.filter(([mm, p]) => mm === "POST" && (p.startsWith("/apply") || p.startsWith("/play"))).map(([, p]) => p) };`;
+      const press = (btn, ms) => page(`window.__reqs = []; const b = document.querySelector('[data-go-playing="${btn}"]'); if (!b || b.disabled) return null; b.click(); await m.sleep(${ms}); ${state}`);
+      // `card`: the grid shows the card (a search hiding it leaves no card to ring)
+      const want = (label, r, side, card = true) => {
+        console.log(`        ${label}: ${J(r)}`);
+        if (!r) { v.push(`${label}: no enabled crosshair`); return; }
+        if (r.side !== side) v.push(`${label}: the sidebar shows ${r.side}, not ${side}`);
+        if (J(r.focused) !== J(card ? [side] : [])) v.push(`${label}: focused cards ${J(r.focused)}, want ${J(card ? [side] : [])}`);
+        if (r.applied.length) v.push(`${label}: it applied (${J(r.applied)}) — the wallpaper is already playing`);
+      };
+      // the Library's, over a multi-selection with the sidebar on another card: the selection is replaced, like a plain click
+      const pre = await page(`await m.closeAll(); ${ctrl("k2")} await m.sleep(150); ${ctrl("k3")} await m.sleep(200); await m.openSide("k3"); ${state}`);
+      if (J(pre.sel) !== J(["k2", "k3"]) || pre.side !== "k3") return [`setup: selection ${J(pre.sel)}, sidebar ${pre.side} (want k2 + k3, k3)`];
+      const lib = await press("library", 1800);
+      want("library", lib, "k1");
+      if (lib && lib.sel.length) v.push(`library: the selection ${J(lib.sel)} stayed — a click on the card replaces it`);
+      // the bar's, with the sidebar on another card
+      await page(`await m.closeAll(); await m.openSide("k2");`);
+      want("bar", await press("bar", 1800), "k1");
+      // a search hiding k1: the Library's crosshair finds nothing and leaves the sidebar alone; the bar's still opens k1
+      const search = (q) => page(`const i = [...document.querySelectorAll(".tsearch input.search")].find((x) => x.checkVisibility()); if (!i) return false;
+        m.setValue(i, ${J(q)}); await m.sleep(500); return true;`);
+      await page(`await m.closeAll();`);
+      if (!await search("k2")) v.push("no search field");
+      else {
+        const hid = await press("library", 600);
+        console.log(`        library, k1 hidden: ${J(hid)}`);
+        if (hid && (hid.side || hid.focused.length || hid.applied.length)) v.push(`library, k1 hidden by the search: it opened / applied something (${J(hid)})`);
+        want("bar, k1 hidden", await press("bar", 1800), "k1", false);
+        await page(`await m.closeAll();`); await search("");
+      }
+      // animations off: the sidebar on k1 at once
+      await setMotion(false); await mv(5, 5, 100);
+      await page(`await m.closeAll(); await m.openSide("k3");`);
+      want("library, animations off", await press("library", 150), "k1");
+      await setMotion(true);
+      // to look at: the spotlight mid-glide with the sidebar opening, then the card ringed with its sidebar open
+      await page(`await m.closeAll(); await m.openSide("k3"); document.querySelector('[data-go-playing="library"]').click(); await m.sleep(450);`);
+      await shot("locate-select-mid"); await sleep(1800); await shot("locate-select-end");
       return v;
     });
 

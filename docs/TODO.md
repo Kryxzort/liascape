@@ -75,8 +75,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
-124. [ ] (owner) The "go to the playing wallpaper" crosshair also selects that card and opens its sidebar, as a click on
-       the card would (without applying it).
 125. [ ] (owner) Import from a link: Import accepts a pasted web link (a Workshop item page, a MoeWalls or DesktopHut
        page, or a direct video / picture URL) and downloads it through the matching source's own download path; an
        unknown site says it isn't supported.

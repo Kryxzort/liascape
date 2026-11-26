@@ -54,7 +54,7 @@ const BROWSE_SORTS =["Default", "Name A–Z", "Name Z–A", "Videos first", "Sce
 export default function App() {
   // PERF: only what App reads (useShallow: the store's actions are stable, so the state fields decide), never the whole
   // store: a Library filter change or a selection re-rendered App and its top bar's ~30 icons. Guard: probe-filters lib:interplay
-  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort, localSetOn: st.localSetOn(), libInc: st.setModes().lib === "inc", localSort: st.localSort, setLocalSort: st.setLocalSort })));
+  const s = useStore(useShallow((st) => ({ activeSource: st.activeSource, browseFilter: st.browseFilter, browseFocus: st.browseFocus, browseScope: st.browseScope, browseSort: st.browseSort, bumpWsState: st.bumpWsState, focusLib: st.focusLib, pickLib: st.pickLib, init: st.init, itemChangedByBackend: st.itemChangedByBackend, libQuery: st.libQuery, libSort: st.libSort, libraryItems: st.libraryItems, loadLibrary: st.loadLibrary, loading: st.loading, mergeSettings: st.mergeSettings, onPwCode: st.onPwCode, onPwError: st.onPwError, onSignedIn: st.onSignedIn, playingPath: st.playingPath, query: st.query, reload: st.reload, resync: st.resync, setBrowseFilter: st.setBrowseFilter, setBrowseSort: st.setBrowseSort, setDownload: st.setDownload, setKeepCurrent: st.setKeepCurrent, setLibQuery: st.setLibQuery, setLibSort: st.setLibSort, setLibraryOps: st.setLibraryOps, setPlaying: st.setPlaying, setQrPng: st.setQrPng, setQuery: st.setQuery, setSetting: st.setSetting, setStatus: st.setStatus, setSteamTodo: st.setSteamTodo, setSubProgress: st.setSubProgress, setWsListSort: st.setWsListSort, settings: st.settings, sources: st.sources, stop: st.stop, syncPlaylist: st.syncPlaylist, undo: st.undo, undoDepth: st.undoDepth, wsList: st.wsList, wsListSort: st.wsListSort, localSetOn: st.localSetOn(), libInc: st.setModes().lib === "inc", localSort: st.localSort, setLocalSort: st.setLocalSort })));
   const motion = useMotion(); // "Smooth window animations" && !prefers-reduced-motion
   const narrow = useNarrow(BUTTONS_NARROW); // the top bar's labelled buttons show their icons only (index.css .tb-label)
   // COOL: the tab switch slides — the active pill glides under the tabs, the new page slides in from the side it's on
@@ -270,10 +270,14 @@ export default function App() {
         )}
         {tab === "library" && (
           <>
-            {/* "Go to playing": glides the grid to the playing wallpaper's card and rings it */}
+            {/* "Go to playing": glides the grid to the playing wallpaper's card, rings it, and selects it with its sidebar open
+                (store pickLib: a click's selection, without the apply); a card the view hides is left alone */}
             <LocateButton target="library" label="Go to the playing wallpaper" disabled={!s.playingPath}
               title={s.playingPath ? "Show the playing wallpaper in the library" : "Nothing is playing"}
-              onClick={() => { if (!glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true); }} />
+              onClick={() => {
+                if (!s.playingPath || !glideTo(document.querySelector<HTMLElement>(".lib-scroll"), ".card.playing", "y", motion)) s.setStatus("The playing wallpaper isn't in this view", true);
+                else s.pickLib(s.playingPath);
+              }} />
             {/* Import: a folder (its chevron: files), shown in the import dialog before anything lands */}
             <ImportButton narrow={narrow} />
             <TopbarSearch placeholder="Search library…" value={s.libQuery} onChange={s.setLibQuery} />

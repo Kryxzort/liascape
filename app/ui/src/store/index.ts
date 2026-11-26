@@ -188,6 +188,8 @@ interface State {
   // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
   // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
   libFocus: string | null; browseFocus: string | null;
+  // bumped by pickLib: views/Library.tsx replaces its own selection (local state) with the picked card when it changes
+  libPick: number;
   // the sidebar picture's preview switch (GIF / Video / YouTube / the still): the last pick per sidebar, for the session — the
   // next item opens on it when it has one (components/SidePanel.tsx SideMedia)
   previewPref: { library: PreviewKind | null; browse: PreviewKind | null };
@@ -256,7 +258,7 @@ interface State {
   cancelPwLogin(): Promise<void>; onPwCode(p: { kind: "email" | "device" | "confirm"; hint: string | null; retry: boolean }): void;
   onPwError(message: string): void;
   openExternal(body: { path?: string; url?: string; reveal?: boolean; isScene?: boolean; workshopId?: string | null; copiedSceneDir?: string | null }): void;
-  focusLib(path: string | null): void; focusBrowse(pageUrl: string | null): void; showBrowseItem(w: Wallpaper): void;
+  focusLib(path: string | null): void; pickLib(path: string): void; focusBrowse(pageUrl: string | null): void; showBrowseItem(w: Wallpaper): void;
   setPreviewPref(side: "library" | "browse", k: PreviewKind): void;
   // shared
   applyTheme(name: string): void; setPlaying(p: string | null): void; setStatus(s: string, timed?: boolean, hold?: boolean): void;
@@ -361,7 +363,7 @@ export const useStore = create<State>((set, get) => ({
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, scenesBlocked: null, vramHold: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
-  libFocus: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
+  libFocus: null, libPick: 0, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
@@ -843,6 +845,10 @@ export const useStore = create<State>((set, get) => ({
     if (path) closeFiltersFor("library");
     if (was && !path) get().loadLibrary().catch(() => {});
   },
+  // a card picked from outside the grid (the "go to playing" crosshairs, components/LocateButton.tsx): what a click on it
+  // selects — the selection replaced by it, as a plain click does (views/Library.tsx, on libPick) — and its sidebar open,
+  // without the click's apply (it is already playing). Guard: probe-sidebar lib:locateSelect
+  pickLib(path) { set((s) => ({ libPick: s.libPick + 1 })); get().focusLib(path); },
   focusBrowse(pageUrl) { set({ browseFocus: pageUrl }); if (pageUrl && get().browseScope()) closeFiltersFor("browse"); },
   // the Browse sidebar on `w`: the list's own card when it holds the item, else `w` itself (views/Browse.tsx shows browseExtra
   // while it is the focus). Guard: probe-steam ws:presetBase

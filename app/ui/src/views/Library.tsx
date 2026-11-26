@@ -109,6 +109,16 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // the page stays mounted across tab switches (App.tsx): leaving it clears the selection (and a drawer: useFilterPanel),
   // its grid stays where it was
   useResetOnLeave(() => { setSel((x) => (x.size ? new Set() : x)); anchor.current = null; });
+  // a card picked from outside the grid (store pickLib: the "go to playing" crosshairs) replaces the selection like a plain
+  // click on it: the selection cleared, the range anchor on it. Compared with the last pick seen, since <Activity> re-runs
+  // effects on every return to the page. Guard: probe-sidebar lib:locateSelect
+  const libPick = useStore((s) => s.libPick);
+  const seenPick = useRef(libPick);
+  useEffect(() => {
+    if (seenPick.current === libPick) return;
+    seenPick.current = libPick;
+    setSel((x) => (x.size ? new Set() : x)); anchor.current = useStore.getState().libFocus;
+  }, [libPick]);
 
   // PERF: one predicate per filter change and each item's facets computed once (components/facets.ts facetsOf) — no per-card work
   const filtered = useMemo(() => {
