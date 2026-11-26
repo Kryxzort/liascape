@@ -548,6 +548,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       when the adapter integration test happens to exercise it. Derive a JSON Schema from the Rust types (`schemars`),
       commit it, and add a test that checks it is current and that every C# DTO field exists in it with a matching
       type (or generate the C# types from it). Same idea later for the UI's `api/client.ts` vs the backend's web API.
+- [ ] The shared HttpClient (`HttpClientProvider`: the scrapers' pages, the sites' downloads, steamcommunity.com)
+      follows a site's redirects to any address, this machine and the LAN included. Only the sites' own origins are
+      asked (an import from a link picks only the path), so it takes a source site that redirects inward. Give the
+      shared handler's connect the image proxy's public-address check (`ApiSecurity.PublicOnlyHttp`), with a test
+      switch for the loopback fakes every hermetic suite points it at.
 
 ## Older backlog
 - [ ] `scripts/test-backend-stop.sh` § libop flakes on its "proved nothing" guard ("libop: an encode runs … got no";

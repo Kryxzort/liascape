@@ -290,7 +290,10 @@ public static class ScraperSelfTest
 
         var reach = new JsonObject();
         foreach (var a in new[] { "93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946", "127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1",
-                     "10.0.0.5", "192.168.1.1", "172.16.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "fe80::1", "fd00::1", "224.0.0.1" })
+                     "10.0.0.5", "192.168.1.1", "172.16.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "fe80::1", "fd00::1", "224.0.0.1",
+                     // the documentation ranges (TEST-NET-1/2/3, 2001:db8::/32) and NAT64's prefixes, each with a neighbour just outside
+                     "192.0.2.10", "192.0.1.255", "192.0.3.0", "198.51.100.7", "198.51.99.255", "198.51.101.0", "203.0.113.9", "203.0.112.255", "203.0.114.0",
+                     "2001:db8::1", "2001:db8:ffff::1", "2001:db9::1", "2001:db7:ffff::1", "64:ff9b::808:808", "64:ff9b:1::1", "64:ff9b:2::1", "64:ff9c::1" })
         {
             var ip = System.Net.IPAddress.Parse(a);
             reach[a] = $"{(LinkImport.AddressAllowed(ip, false) ? "public" : "refused")}, tests: {(LinkImport.AddressAllowed(ip, true) ? "allowed" : "refused")}";

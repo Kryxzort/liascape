@@ -320,7 +320,7 @@ class H(http.server.BaseHTTPRequestHandler):
         p = self.path.split("?")[0]
         with open(log, "a") as f: f.write(f"{p} {self.headers.get('User-Agent', '')[:20]}\n")
         go = lambda to: self.send(302, extra=[("Location", to)])
-        if p in ("/files/neon.mp4", "/files/redir-target.mp4", "/files/again.mp4"): self.send(200, V, "video/mp4")
+        if p in ("/files/neon.mp4", "/files/redir-target.mp4", "/files/again.mp4", "/files/creds-target.mp4"): self.send(200, V, "video/mp4")
         elif p == "/files/still.jpg": self.send(200, J, "image/jpeg")
         elif p == "/v/abc": self.send(200, V, "video/mp4", [("Content-Disposition", 'attachment; filename="Sunset Loop.mp4"')])
         elif p in ("/page", "/v/page"): self.send(200, b"<!doctype html><title>a page</title>", "text/html; charset=utf-8")
@@ -330,6 +330,7 @@ class H(http.server.BaseHTTPRequestHandler):
         elif p == "/r/lan.mp4": go("http://192.168.1.1/a.mp4")
         elif p == "/r/file.mp4": go("file:///etc/passwd")
         elif p == "/r/loop.mp4": go("/r/loop.mp4")
+        elif p == "/r/creds.mp4": go(f"http://user:secret@127.0.0.1:{self.server.server_address[1]}/files/creds-target.mp4")
         elif p == "/files/big.mp4": self.send(200, b"\0" * 300000, "video/mp4")
         elif p == "/files/endless.mp4":
             self.send_response(200); self.send_header("Content-Type", "video/mp4"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
@@ -384,6 +385,8 @@ check "a redirect into the LAN (192.168.1.1) → refused" "$(importl "$S/r/lan.m
 check "a link straight into the LAN (10.0.0.5) → refused" "$(importl "http://10.0.0.5/a.mp4" .error)" "400 $(private_msg 10.0.0.5)"
 check "a redirect to file: → refused" "$(importl "$S/r/file.mp4" .error)" '400 "The link leads on to a file: address, which isn'"'"'t fetched."'
 check "a redirect loop → refused" "$(importl "$S/r/loop.mp4" .error)" '400 "The link redirects too many times."'
+check "a redirect to an address with a user name and password in it → refused, never fetched" "$(importl "$S/r/creds.mp4" .error) $(grep -c creds-target "$T/files.log" || true)" \
+  '400 "A link with a user name or password in it isn'"'"'t imported." 0'
 check "a file: link itself → only web links" "$(importl "file:///etc/passwd" .error)" '400 "Only web links (http or https) can be imported."'
 toobig="\"It's bigger than 200000 bytes, the most an import from a link fetches.\""
 check "a file over the cap by its Content-Length → refused before its body" "$(importl "$S/files/big.mp4" .error) $(trash_left)" "400 $toobig 0"

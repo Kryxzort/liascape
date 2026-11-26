@@ -22,6 +22,7 @@ public static partial class LinkImport
     public const string NotSupported = "That site isn't supported. Import takes a Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture.";
     public const string OnlyWeb = "Only web links (http or https) can be imported.";
     public const string Empty = "Paste a link to a wallpaper.";
+    public const string WithCredentials = "A link with a user name or password in it isn't imported.";
 
     static readonly string[] VideoExts = [.. FolderScanner.VideoExts];
     static readonly string[] PictureExts = [.. ImportService.ImageExtensions];
@@ -43,7 +44,7 @@ public static partial class LinkImport
         if (s.Length == 0) return Refuse(Empty);
         if (!Uri.TryCreate(s, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https") || u.Host.Length == 0)
             return Refuse(OnlyWeb);
-        if (!string.IsNullOrEmpty(u.UserInfo)) return Refuse("A link with a user name or password in it isn't imported.");
+        if (!string.IsNullOrEmpty(u.UserInfo)) return Refuse(WithCredentials);
         string host = u.IdnHost.ToLowerInvariant().TrimEnd('.');
         if (host.StartsWith("www.", StringComparison.Ordinal)) host = host[4..];
         var segs = u.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);

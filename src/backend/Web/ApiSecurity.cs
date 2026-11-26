@@ -439,6 +439,9 @@ public static class ApiSecurity
                 || (b[0] == 172 && b[1] >= 16 && b[1] < 32)
                 || (b[0] == 192 && b[1] == 168)
                 || (b[0] == 192 && b[1] == 0 && b[2] == 0)
+                // the documentation ranges, TEST-NET-1/2/3 (each exactly a /24: its neighbours are public). Guard:
+                // scraper-selftest "link: the addresses a link may reach"
+                || (b[0] == 192 && b[1] == 0 && b[2] == 2) || (b[0] == 198 && b[1] == 51 && b[2] == 100) || (b[0] == 203 && b[1] == 0 && b[2] == 113)
                 || (b[0] == 198 && (b[1] == 18 || b[1] == 19)));
         }
         if (a.AddressFamily == AddressFamily.InterNetworkV6)
@@ -446,7 +449,9 @@ public static class ApiSecurity
             if (a.Equals(IPAddress.IPv6Loopback) || a.Equals(IPAddress.IPv6None) || a.IsIPv6LinkLocal || a.IsIPv6SiteLocal || a.IsIPv6Multicast) return false;
             var b = a.GetAddressBytes();
             if ((b[0] & 0xfe) == 0xfc) return false;             // unique local fc00::/7
-            if (b[0] == 0 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) return false; // NAT64 (wraps an IPv4)
+            // NAT64 (wraps an IPv4): 64:ff9b::/32 holds both its well-known /96 and its local-use 64:ff9b:1::/48
+            if (b[0] == 0 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b) return false;
+            if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8) return false; // documentation 2001:db8::/32
             return true;
         }
         return false;

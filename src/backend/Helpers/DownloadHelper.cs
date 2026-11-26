@@ -161,6 +161,8 @@ public static class DownloadHelper
         for (int hop = 0; ; hop++)
         {
             if (at.Scheme is not ("http" or "https")) throw new LinkRefused($"The link leads on to a {at.Scheme}: address, which isn't fetched.");
+            // a redirect is held to what a pasted link is (LinkImport.Map): never an address carrying a user name or password
+            if (at.UserInfo.Length > 0) throw new LinkRefused(LinkImport.WithCredentials);
             if (await Liascape.Web.ApiSecurity.CheckPublicUrl(at.AbsoluteUri, ct, LinkImport.LoopbackForTests) != null)
                 throw new LinkRefused($"The link leads to {at.Host}, which is this computer or your own network: only public addresses are fetched.");
             var ask = new HttpRequestMessage(HttpMethod.Get, at);
