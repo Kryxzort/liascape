@@ -93,6 +93,12 @@
 //                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
 //                        for the library's own copy with a one-off route, disabled with the reason when the mode can't; the
 //                        base back → the notice leaves, the cards come back; no-glow, bg-live. Shots side-needsbase-*.png
+//   lib:incomplete[Off]  a Workshop scene whose download Steam left empty (GET /library downloadIncomplete): its card greys with
+//                        "Download incomplete" over the picture (fading in when the page hears of it; Off: opacity only), no
+//                        second status icon; a click plays nothing, the status bar says why; the sidebar's notice says it with
+//                        "Redownload"; a click → POST /library/redownload
+//                        of its path (held), the button says it's downloading and the line under the words Steam's step; done →
+//                        the words fade out, the card and the notice come back; no-glow, bg-live. Shots side-incomplete-*.png
 //   lib:scenesBlocked    the scene renderer missing (page-only scenes-blocked): every scene and preset greyed with the reason
 //                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why;
 //                        cleared → back
@@ -186,8 +192,9 @@ async function loadUi() {
   // /open would start a real file manager (/open/media a real player), the unsubscribe a Steam call: recorded, never sent
   // The preset cells' hooks, inert unless a cell sets them: every request recorded (__reqs: [method, path]); /download held
   // and recorded while __dlHold (__dl: its bodies; __dlGo() answers it); /workshop/one-off answered by __oneOff; a
-  // /library/trash stubbed while __stubTrash (__trashed: its bodies); GET /library's items patched by __libPatch {path: fields}
-  await js(`(() => { window.__opened = []; window.__reqs = []; window.__dl = []; window.__trashed = []; const f = window.fetch;
+  // /library/trash stubbed while __stubTrash (__trashed: its bodies); GET /library's items patched by __libPatch {path: fields};
+  // /library/redownload held and recorded while __redlHold (__redl: its bodies; __redlGo(answer) answers it)
+  await js(`(() => { window.__opened = []; window.__reqs = []; window.__dl = []; window.__redl = []; window.__trashed = []; const f = window.fetch;
     const json = (b) => Promise.resolve(new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } }));
     window.fetch = (u, o) => { const p = String(u).replace(/^https?:\\/\\/[^/]+/, "").split("?")[0], m = (o?.method || "GET").toUpperCase();
     window.__reqs.push([m, p]);
@@ -195,6 +202,7 @@ async function loadUi() {
       return json({}); }
     if (m === "POST" && p === "/download" && window.__dlHold) { window.__dl.push(JSON.parse(o.body)); return new Promise((r) => { window.__dlGo = () => r(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })); }); }
     if (p === "/workshop/one-off" && window.__oneOff) return json(window.__oneOff);
+    if (m === "POST" && p === "/library/redownload" && window.__redlHold) { window.__redl.push(JSON.parse(o.body)); return new Promise((r) => { window.__redlGo = (b) => r(new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } })); }); }
     if (m === "POST" && p === "/library/trash" && window.__stubTrash) { window.__trashed.push(JSON.parse(o.body)); return json({ batch: "" }); }
     if (m === "GET" && p === "/library" && window.__libPatch) return f(u, o).then((r) => r.json()).then((l) => json(l.map((i) => ({ ...i, ...(window.__libPatch[i.videoPath] || {}) }))));
     return f(u, o); }; })(); true`);
@@ -2803,6 +2811,105 @@ app.whenReady().then(async () => {
       for (const t of ["pb", "s2", "pp1"]) if (back[t]?.off || back[t]?.op > 0.01) v.push(`${t} still greyed once cleared: ${J(back[t])}`);
       return v;
     }));
+
+    // lib:incomplete:<on|off> — pb (a Workshop scene) as a download Steam left empty: the page hears it (library-item-changed
+    // {downloadIncomplete: true}, as GET /library would say it) and its card greys, "Download incomplete" fading in over the
+    // picture (off: opacity only), its preset status icon staying hidden (one sign, not two); a click plays nothing and the
+    // status bar says why; its sidebar's notice says it with "Redownload" (enabled: every download mode can download, the
+    // one rule, components/subscribeMode.ts actionBlocked); a click posts /library/redownload {path} (held): "Downloading…", disabled, a download-progress step under the
+    // words; answered done → the words fade out (off: opacity only), the card and the notice come back. The words keep their
+    // own fill under bg-live and lose their outer glow under no-glow. Shots side-incomplete-*.png
+    for (const mode of ["on", "off"]) await cell(`lib:incomplete${mode === "off" ? "Off" : ""}`, async () => withPresets(async () => {
+      const v = [], J = JSON.stringify, pb = preDir(PRE.base), page0 = `https://steamcommunity.com/sharedfiles/filedetails/?id=${PRE.base}`;
+      const CHIP = `.card.lib:has([data-title="pb"]) .card-incomplete`;
+      const chip = () => page(`const c = document.querySelector(${J(CHIP)}); if (!c) return null; const s = getComputedStyle(c), w = c.closest(".thumb-wrap").getBoundingClientRect(), r = c.getBoundingClientRect();
+        return { on: c.classList.contains("on"), text: c.textContent.trim(), op: +s.opacity, bg: s.backgroundColor, sh: s.boxShadow, color: s.color, svg: !!c.querySelector("svg"),
+          dx: Math.round((r.left + r.width / 2) - (w.left + w.width / 2)), inside: r.left >= w.left && r.right <= w.right };`);
+      const cur0 = await current();
+      try {
+        if (mode === "off") await setMotion(false);
+        const c0 = await chip(), s0 = await cardState("pb");
+        if (!c0 || c0.on || s0?.off) return [`pb before: chip ${J(c0)}, card ${J(s0)} — want a whole, playable Workshop card (proved nothing)`];
+        const samp = js(MO.SAMPLE({ chip: CHIP }, 1200));
+        await sleep(40);
+        await page(`window.__libPatch = { ${J(pb)}: { downloadIncomplete: true } };`);
+        await js(`window.__fakeWs("library-item-changed", { path: ${J(pb)}, downloadIncomplete: true })`);
+        const fr = await samp;
+        console.log(`        motion ${mode}: chip ${MO.brief(fr.chip)}`);
+        v.push(...MO.judge("the card's Download incomplete words", fr.chip, { appear: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        await sleep(300);
+        const c1 = await chip(), s1 = await cardState("pb");
+        console.log(`        card: ${J(s1)} chip ${J(c1)}`);
+        if (!s1?.off || !/grayscale\(1\)/.test(s1.filter ?? "")) v.push(`pb's card isn't greyed: ${J(s1)}`);
+        if (s1?.reason !== "" || s1?.op > 0.01) v.push(`pb's preset status icon shows too: ${J(s1)}`);
+        if (!c1?.on || c1.text !== "Download incomplete" || c1.op < 0.99 || !c1.svg) v.push(`the card's words: ${J(c1)}, want "Download incomplete" with its glyph, shown`);
+        if (c1 && (Math.abs(c1.dx) > 1 || !c1.inside)) v.push(`the words aren't centred on the picture: ${J(c1)}`);
+        const warn = await page(`const d = document.createElement("div"); d.style.color = "var(--warn)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c;`);
+        if (c1 && c1.color !== warn) v.push(`the words are ${c1.color}, want --warn ${warn}`);
+        if (mode === "on") await shot("incomplete-card");
+        // a click plays nothing, the status bar says why
+        const th = await page(`const t = m.thumb("pb"); t.scrollIntoView({ block: "center" }); await m.sleep(300); return m.rect(t);`);
+        const n1 = await reqMark();
+        await clickAt(th.x + th.w / 2, th.y + th.h / 2); await sleep(500);
+        if ((await reqsSince(n1)).some(([mt, p]) => mt === "POST" && p === "/apply")) v.push("a click on pb posted /apply");
+        const st = await statusText();
+        if (st !== "Can't play pb: download incomplete") v.push(`the status bar says ${J(st)}`);
+        if ((await current()) !== cur0) v.push(`the playing wallpaper changed (${T(await current())})`);
+        // its glow: the ring plus an outer --warn glow; no-glow: the ring alone; bg-live: its own fill
+        const look = await page(`const root = document.documentElement, c = document.querySelector(${J(CHIP)}); root.classList.add("no-glow"); await m.sleep(60);
+          const out = { noGlow: getComputedStyle(c).boxShadow }; root.classList.remove("no-glow"); const had = root.classList.contains("bg-live"); root.classList.add("bg-live"); await m.sleep(60);
+          out.liveBg = getComputedStyle(c).backgroundColor; if (!had) root.classList.remove("bg-live"); return out;`);
+        const outer = (sh) => (sh ?? "").split(/,(?![^(]*\))/).filter((x) => !/inset/.test(x) && x.trim() !== "none").length;
+        if (!/inset/.test(c1?.sh ?? "") || outer(c1?.sh) !== 1) v.push(`the words don't glow (${c1?.sh})`);
+        if (!/inset/.test(look.noGlow) || outer(look.noGlow) !== 0) v.push(`no-glow: ${look.noGlow}, want the ring alone`);
+        if (alpha(look.liveBg) < 0.3) v.push(`bg-live: the words have no fill of their own (${look.liveBg})`);
+        if (mode === "on") {
+          await page(`document.documentElement.classList.add("no-glow");`); await sleep(250); await shot("incomplete-noglow");
+          await page(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live");`); await sleep(250);
+          await shot("incomplete-bglive"); await page(`document.documentElement.classList.remove("bg-live");`);
+        }
+        // the sidebar's notice and its Redownload
+        await page(`await m.closeAll(); await m.openSide("pb"); await m.sleep(600);`);
+        const note = await page(`const n = m.side().querySelector("[data-preset-note]"), b = n?.querySelector("[data-redownload]"); if (!n) return null;
+          return { note: n.dataset.presetNote, text: n.querySelector(".side-crash-text")?.firstChild?.textContent.trim(), why: n.querySelector("[data-preset-why]")?.textContent.trim(),
+            btn: b?.textContent.trim() ?? null, off: b?.getAttribute("aria-disabled") ?? null, get: !!n.querySelector("[data-preset-get]") };`);
+        console.log(`        notice ${J(note)}`);
+        if (!note || note.text !== "Download incomplete" || note.btn !== "Redownload" || note.off || note.get)
+          v.push(`pb's notice: ${J(note)}, want "Download incomplete" with Redownload, enabled (no base download)`);
+        if (mode === "on") await shot("incomplete-side");
+        await page(`window.__redlHold = true;`);
+        // Redownload: its path, held; the button busy, Steam's step under the words
+        const br = await page(`return m.rect(m.side().querySelector("[data-redownload]"));`);
+        await clickAt(br.x + br.w / 2, br.y + br.h / 2); await sleep(400);
+        await js(`window.__fakeWs("download-progress", { id: ${J(page0)}, value: 0, status: "Steam is downloading it…" })`); await sleep(300);
+        const sent = await js(`window.__redl.slice()`);
+        const busy = await page(`const n = m.side().querySelector("[data-preset-note]"), b = n?.querySelector("[data-redownload]");
+          return { text: b?.textContent.trim(), off: b?.getAttribute("aria-disabled"), why: n?.querySelector("[data-preset-why]")?.textContent.trim() };`);
+        console.log(`        sent ${J(sent)}; busy ${J(busy)}`);
+        if (sent.length !== 1 || sent[0].path !== pb) v.push(`${sent.length} redownloads sent (${J(sent)}), want one of pb's path`);
+        if (busy.text !== "Downloading…" || busy.off !== "true" || busy.why !== "Steam is downloading it…") v.push(`while it runs: ${J(busy)}`);
+        if (mode === "on") await shot("incomplete-busy");
+        // done: the words fade out, the card comes back, the notice leaves
+        const out = js(MO.SAMPLE({ chip: CHIP }, 1200));
+        await sleep(40);
+        await page(`window.__libPatch = null; window.__redlGo({ done: true, openedInSteam: false, message: "Downloaded again" });`);
+        const fo = await out;
+        console.log(`        done, motion ${mode}: chip ${MO.brief(fo.chip)}`);
+        v.push(...MO.judge("the card's Download incomplete words", fo.chip, { leave: true, still: mode === "off", maxMs: mode === "on" ? 450 : 300 }));
+        await sleep(500);
+        const s2 = await cardState("pb"), c2 = await chip();
+        const left = await page(`return !!m.side()?.querySelector("[data-preset-note]");`);
+        if (!s2 || !c2) v.push(`pb's card is gone after the redownload: ${J(s2)} ${J(c2)}`);
+        else if (s2.off || c2.on || c2.op > 0.01) v.push(`pb still greyed after the redownload: ${J(s2)} ${J(c2)}`);
+        if (left) v.push("the notice stayed after the redownload");
+        const sb = await statusText();
+        if (sb !== "Downloaded again: pb") v.push(`the status bar says ${J(sb)}`);
+      } finally {
+        await page(`window.__redlHold = false; window.__redlGo?.({ done: false, openedInSteam: false, message: "" }); window.__libPatch = null; await m.closeAll();`).catch(() => {});
+        if (mode === "off") await setMotion(true);
+      }
+      return v;
+    }, { workshopDownloadMode: "steamapp" }));
 
     // lib:baseDelete:<on|off> — deleting pb, which pp1 and pp2 play, asks first: the card's Delete button, the Delete key on
     // a selection and the sidebar's Delete all open the dialog (the modal shell: zooms in, motion off fades in place) naming

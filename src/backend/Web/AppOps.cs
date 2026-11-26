@@ -36,7 +36,8 @@ public static class AppOps
         if (paths.Count == 0) return "Playlist is empty";
         // a playlist of presets that can't play (their base gone) plays nothing: say why rather than leave the screen as
         // it was with no word. Guard: scripts/test-liascape-player-adapter.sh § presets
-        if (paths.All(p => PlayerHelper.PresetUnplayableReason(p) != null)) return PlayerHelper.PresetUnplayableReason(paths[0])!;
+        // (a Workshop download Steam left empty too: test-item-actions.sh § incomplete)
+        if (paths.All(p => PlayerHelper.UnplayableReason(p) != null)) return PlayerHelper.UnplayableReason(paths[0])!;
         // Persist what's actually playing as the current playlist state. TransitionService.CurrentConfig()
         // (the transition/crossfade gate) reads playlist_state.json — without this, /playlist/play only
         // saved LastSession, so the state stayed stale and scene switches never transitioned/crossfaded.
@@ -71,7 +72,7 @@ public static class AppOps
         if (paths.Count == 0 || startIndex < 0 || startIndex >= paths.Count || string.IsNullOrEmpty(paths[startIndex])) return "bad index";
         // the clicked item is a preset that can't play: refused with its reason, as /apply is, never quietly the item
         // after it. Guard: scripts/test-liascape-player-adapter.sh § presets
-        if (PlayerHelper.PresetUnplayableReason(paths[startIndex]) is string why) return why;
+        if (PlayerHelper.UnplayableReason(paths[startIndex]) is string why) return why;
         // the program plays from that item (`from: index` — an explicit play-from beats the start setting) in the
         // playlist's own order; the player shuffles the rest of a shuffled cycle
         return PlayPlaylist(paths, ps, playFrom: startIndex);

@@ -45,8 +45,15 @@ const favoritesWanted = (s: Pick<State, "steam" | "browseFilter" | "libFilter">)
 // preset, why it can't play a scene here (the store's scenesBlocked: the scene renderer is missing — GET /current, WS
 // scenes-blocked). The card greys with it, the sidebar says it, a click plays nothing. Guard: probe-sidebar
 // lib:preset:needsBase, lib:scenesBlocked
-export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene">, scenesBlocked: string | null) =>
-  i.presetReason ?? ((i.isScene || i.isPreset) && scenesBlocked ? scenesBlocked : null);
+// A Workshop download Steam left empty comes first: nothing else makes it play. Guard: probe-sidebar lib:incomplete
+export const unplayableReasonOf = (i: Pick<LibraryItem, "isPreset" | "presetReason" | "isScene" | "downloadIncomplete">, scenesBlocked: string | null) =>
+  (i.downloadIncomplete ? DOWNLOAD_INCOMPLETE : null) ?? i.presetReason ?? ((i.isScene || i.isPreset) && scenesBlocked ? scenesBlocked : null);
+// API: Helpers/LibraryService.cs IncompleteReason, word for word
+export const DOWNLOAD_INCOMPLETE = "Download incomplete";
+// Which Workshop action a Redownload is (Web/RedownloadOps.cs): Steam's own folder is mended by a download; the library's own
+// copy (a scene's copiedSceneDir, a video under workshop/) comes again by the one-off's route, with its rule
+export const redownloadAction = (i: Pick<LibraryItem, "copiedSceneDir" | "videoPath" | "isScene">) =>
+  (i.isScene ? !!i.copiedSceneDir : /\/library\/workshop\//.test(i.videoPath)) ? "oneOff" as const : "download" as const;
 // the status bar's "Can't play X: it needs its base scene" (a reason starts with a capital: it is also the card's tooltip)
 export const cantPlay = (title: string, why: string) =>
   `Can't play ${title}: ${/^Needs /.test(why) ? "it n" + why.slice(1) : why[0].toLowerCase() + why.slice(1)}`;
@@ -241,6 +248,7 @@ interface State {
   scenePropsFolded: boolean; setScenePropsFolded(v: boolean): void;
   // oneOff: a Workshop item's "Download without subscribing" (components/BrowseSide.tsx's right-click menu)
   download(source: number, w: Wallpaper, apply: boolean, oneOff?: boolean): Promise<void>;
+  redownload(item: LibraryItem): Promise<void>;
   cancelDownload(id: string): void;
   setDownload(id: string, v: number, status?: string): void;
   stop(): Promise<void>; resetAllSettings(): void;
@@ -615,6 +623,28 @@ export const useStore = create<State>((set, get) => ({
       delete dlCtrls[w.pageUrl];
       const d = { ...get().downloads }; delete d[w.pageUrl];
       const st = { ...get().downloadStatus }; delete st[w.pageUrl];
+      set({ downloads: d, downloadStatus: st });
+    }
+  },
+  // the sidebar's Redownload of a Workshop item Steam left empty (POST /library/redownload: the download mode's order). Its
+  // progress rides the item's page URL as a Browse download's does (WS download-progress), so the button shows it; the
+  // backend's library-item-changed {downloadIncomplete: false} heals the card. Guard: probe-sidebar lib:incomplete
+  async redownload(item) {
+    if (!item.workshopId) return;
+    const off = actionBlocked(get().settings, get().steam, redownloadAction(item));
+    if (off) { get().setStatus(off, true, true); return; }
+    const page = steamPageUrl(item.workshopId);
+    if (page in get().downloads) return;
+    set({ downloads: { ...get().downloads, [page]: 0 } });
+    try {
+      const r = await api.libraryRedownload(item.videoPath);
+      if (r.done) { get().itemChangedByBackend(item.videoPath, { downloadIncomplete: false }); get().setStatus(`Downloaded again: ${item.title}`); }
+      else get().setStatus(r.message, true, true);
+    } catch (e) {
+      get().setError(`Redownload failed: ${(e as Error).message}`);
+    } finally {
+      const d = { ...get().downloads }; delete d[page];
+      const st = { ...get().downloadStatus }; delete st[page];
       set({ downloads: d, downloadStatus: st });
     }
   },

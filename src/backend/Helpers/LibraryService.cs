@@ -527,13 +527,60 @@ public static class LibraryService
             var workshopId = source is LibraryStore.Workshop or LibraryStore.Local ? key : null;
             var preset = Presets.Read(itemDir) is { } pf ? PresetFactsOf(pf, m, m?.WorkshopId ?? workshopId, ctx) : null;
             return Build(itemDir, key, m, isScene: true, assetDir: itemDir,
-                workshopId: workshopId, copiedSceneDir: owned ? itemDir : null, preset: preset);
+                workshopId: workshopId, copiedSceneDir: owned ? itemDir : null, preset: preset,
+                incomplete: IsWorkshopSource(source) && DownloadIncomplete(itemDir));
         }
         var media = ResolveItemMedia(itemDir, key, imported: source == LibraryStore.Imported);
         if (media == null) return null;
         if (!File.Exists(media)) { if (m == null) TryDeleteDir(itemDir); return null; } // dangling symlink
-        return Build(media, key, m, isScene: false, itemDir);
+        return Build(media, key, m, isScene: false, itemDir,
+            incomplete: IsWorkshopSource(source) && (DownloadIncomplete(itemDir) || FileLen(media) == 0));
     }
+
+    // ---------- a Workshop download Steam left unfinished ----------
+    // What the card and the sidebar say (the store's unplayableReasonOf reads the flag, these words are its)
+    public const string IncompleteReason = "Download incomplete";
+    // Why Apply / play-from refuse one (the CLI and the API's own words)
+    public const string IncompleteApplyReason = "Its download is incomplete: Steam left its files empty. Redownload it from its sidebar.";
+
+    // the folders whose files are Steam's Workshop download (a local/<id> link, or the library's own copy of one)
+    static bool IsWorkshopSource(string source) => source is LibraryStore.Workshop or LibraryStore.Local;
+
+    // An interrupted Steam download leaves an item's files in place but empty: project.json and scene.pkg 0 bytes (seen on a
+    // real library: project.json, scene.pkg and preview.gif all empty). Incomplete = project.json there but empty or not a JSON
+    // object, or the main file it names, or a scene.pkg, there with 0 bytes. A missing project.json alone isn't: a scene.pkg
+    // without one plays (IsSceneFolder). Guard: scripts/test-item-actions.sh § incomplete
+    public static bool DownloadIncomplete(string itemDir)
+    {
+        var pj = Path.Combine(itemDir, "project.json");
+        if (File.Exists(pj))
+        {
+            string? file = null;
+            try
+            {
+                if (FileLen(pj) <= 0) return true;
+                using var doc = JsonDocument.Parse(File.ReadAllText(pj));
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) return true;
+                if (doc.RootElement.TryGetProperty("file", out var f) && f.ValueKind == JsonValueKind.String) file = f.GetString();
+            }
+            catch { return true; }
+            if (!string.IsNullOrEmpty(file) && FileLen(Path.Combine(itemDir, file)) == 0) return true;
+        }
+        return FileLen(Path.Combine(itemDir, "scene.pkg")) == 0;
+    }
+
+    // A library play path (a scene's folder, a video file in its item folder) that is a Workshop item Steam left unfinished:
+    // read fresh at every gate (Apply, play-from, the pickers, a rotation's skip flag), as the crash mark is.
+    public static bool IsIncompleteWorkshopItem(string path)
+    {
+        if (string.IsNullOrEmpty(path) || LibraryStore.Locate(path) is not { } loc || !IsWorkshopSource(loc.Source)) return false;
+        var dir = Path.Combine(LibraryStore.SourceDir(loc.Source), loc.Key);
+        if (!Directory.Exists(dir)) return false;
+        return DownloadIncomplete(dir) || (!PlayerHelper.IsScenePath(path) && FileLen(path) == 0);
+    }
+
+    // -1 = no such file (or unreadable)
+    static long FileLen(string path) { try { var fi = new FileInfo(path); return fi.Exists ? fi.Length : -1; } catch { return -1; } }
 
     // A workshop/local folder is a scene when project.json says type=scene (authoritative when present), else when it is
     // a Wallpaper Engine preset (no type: Presets.Read; it plays as its base scene), else when a compiled scene.pkg sits in
@@ -560,7 +607,7 @@ public static class LibraryService
     private sealed record PresetFacts(string? BaseId, PresetStatus Status, string? BaseTitle);
     private static PresetFacts PresetFactsOf(PresetFile f, LibMeta? m, string? selfId, BuildContext ctx)
     {
-        var st = Presets.StatusFor(f, selfId, m?.BaseKind, id => Presets.BaseDirOf(id, ctx.Index), Presets.KindOf);
+        var st = Presets.WithWholeBase(Presets.StatusFor(f, selfId, m?.BaseKind, id => Presets.BaseDirOf(id, ctx.Index), Presets.KindOf));
         string? own = null;
         if (st.BaseDir is { } bd && LibraryStore.Locate(bd) is { } bl)
             own = ctx.Index(bl.Source).GetValueOrDefault(bl.Key)?.Title;
@@ -596,7 +643,8 @@ public static class LibraryService
     }
 
     private static LibraryItem Build(string media, string key, LibMeta? m, bool isScene,
-        string? assetDir = null, string? workshopId = null, string? copiedSceneDir = null, PresetFacts? preset = null)
+        string? assetDir = null, string? workshopId = null, string? copiedSceneDir = null, PresetFacts? preset = null,
+        bool incomplete = false)
     {
         m ??= new LibMeta();
         string folder = assetDir ?? Path.GetDirectoryName(media) ?? "";
@@ -634,6 +682,7 @@ public static class LibraryService
             WatchedFrom = m.WatchedFrom,
             IsPreset = preset != null, BaseWorkshopId = preset?.BaseId, BasePath = preset?.Status.BaseDir,
             BaseTitle = preset?.BaseTitle, PresetReason = preset?.Status.Reason,
+            DownloadIncomplete = incomplete,
         };
     }
 

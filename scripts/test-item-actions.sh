@@ -25,13 +25,21 @@
 #         (LIASCAPE_STEAM_CM_FIXTURE), the download mode's fallback order (no Steam client or sign-in here: the item's page in
 #         the Steam app, the note on its progress, Stop → skipped); a web wallpaper and an unknown id refused. A MoeWalls page
 #         goes to MoeWalls (unreachable here).
+#  incomplete: Workshop items an interrupted Steam download left empty (a scene whose project.json, scene.pkg and preview.gif
+#         are 0 bytes, a video whose file is, the library's own copy of one) list as `downloadIncomplete` (whole ones don't);
+#         /apply, play-from and a playlist of only such items refuse with why and nothing plays or is saved as the session.
+#         POST /library/redownload: refused for a whole item and outside the library; with no Steam client and no sign-in → the
+#         item's page in the Steam app (the order's last step); the library's own copy → the one-off's route, which has no
+#         page (409, its files left alone); then through a FAKE steamclient.so (scripts/test-fixtures/fake_steamclient.c, built
+#         here when a C compiler is there) its DownloadItem mends Steam's folder in place: whole in /library, every page told.
+#         LibraryService.DownloadIncomplete, PlayerHelper.UnplayableReason, Web/RedownloadOps.cs.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
 # Usage: scripts/test-item-actions.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
 #   LIASCAPE_KEEP_TMP=1 keeps the temp folder; a failed run keeps only its logs / screenshots and prints where (last line).
-# Needs: dotnet (or DOTNET=…), unshare + ip (iproute2), ffmpeg, curl, jq, python3, mkfifo.
+# Needs: dotnet (or DOTNET=…), unshare + ip (iproute2), ffmpeg, curl, jq, python3, mkfifo; cc for § incomplete's Steam-client part.
 # Last line `RESULT pass=N fail=M`, exit 0 = pass.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -102,6 +110,22 @@ ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=green:s=32x18" -frames:v
 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=green:s=32x18" -frames:v 1 "$LIB/imported/p1/p1.jpg"
 printf '{"v1":{"title":"v1","crashed":true},"g1":{"title":"g1"},"p1":{"title":"p1"}}' > "$LIB/imported/index.json"
 mkdir -p "$WE/920000001"; vid "$WE/920000001/v.mp4"; ln -s "$WE/920000001" "$LIB/local/920000001"
+# § incomplete: what an interrupted Steam download leaves — a scene's files all 0 bytes, a video's file 0 bytes (both Steam's
+# folders, linked), the library's own copy of an empty scene; Steam's client is the fake one, failing to start until the
+# Steam-client part (fail-init)
+for id in 940000001 940000002; do mkdir -p "$WE/$id"; ln -s "$WE/$id" "$LIB/local/$id"; done
+: > "$WE/940000001/project.json"; : > "$WE/940000001/scene.pkg"; : > "$WE/940000001/preview.gif"
+printf '{"type":"video","file":"v.mp4","title":"ev"}' > "$WE/940000002/project.json"; : > "$WE/940000002/v.mp4"
+mkdir -p "$LIB/workshop/940000003"; : > "$LIB/workshop/940000003/project.json"; : > "$LIB/workshop/940000003/scene.pkg"
+mkdir -p "$LIB/workshop/940000004"   # a preset of the empty scene (Wallpaper Engine's format): whole itself, its base not
+printf '{"dependency":"940000001","preset":{"rate":100},"preview":"preview.jpg","tags":["Unspecified"],"title":"preset of empty","visibility":"public"}' > "$LIB/workshop/940000004/project.json"
+printf '{"940000001":{"title":"empty scene","isScene":true,"workshopId":"940000001"},"940000002":{"title":"empty video","workshopId":"940000002"}}' > "$LIB/local/index.json"
+jq -c '. + {"940000003":{"title":"empty copy","isScene":true,"workshopId":"940000003"},"940000004":{"title":"preset of empty","workshopId":"940000004"}}' "$LIB/workshop/index.json" > "$T/wsidx" && mv "$T/wsidx" "$LIB/workshop/index.json"
+FAKECC=${CC:-$(command -v cc || command -v gcc || true)}
+if [ -n "$FAKECC" ] && "$FAKECC" -shared -fPIC -O1 -o "$T/steamclient.so" "$ROOT/scripts/test-fixtures/fake_steamclient.c"; then
+  : > "$WE/fail-init"
+  export LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$WE LIASCAPE_STEAM_APP_LINGER_MS=0
+fi
 vid "$OUT/o.mp4"
 ln -s "$OUT/o.mp4" "$LIB/imported/bad/escape.mp4"
 printf '[Desktop Entry]\nType=Application\nName=x\nExec=touch %s/pwned\n' "$T" > "$LIB/imported/bad/desk.mp4"
@@ -426,6 +450,54 @@ check "a Workshop id Steam has no item for → says so" "$(resolve "https://stea
 # a web source's page goes to that site (no network here: it can't be reached), never anywhere else
 check "a MoeWalls page → fetched from MoeWalls (unreachable in this test)" \
   "$(importl "https://moewalls.com/anime/neon-rain-live-wallpaper/" '.error | startswith("MoeWalls couldn'"'"'t be reached")')" "400 true"
+
+echo "== incomplete: Workshop items an interrupted Steam download left empty"
+ES=$(item "empty scene" | jq -r .videoPath); EV=$(item "empty video" | jq -r .videoPath); EC=$(item "empty copy" | jq -r .videoPath)
+check "/library lists the empty scene, the empty video and the empty copy as download incomplete (whole items not)" \
+  "$(api "$U/library" | jq -c '[.[] | select(.title == "empty scene" or .title == "empty video" or .title == "empty copy" or .title == "sc" or .title == "v1") | [.title, (.downloadIncomplete // false)]] | sort')" \
+  '[["empty copy",true],["empty scene",true],["empty video",true],["sc",false],["v1",false]]'
+check "…the empty scene still lists as a scene" "$(item "empty scene" | jq -c .isScene)" true
+WHY="Its download is incomplete: Steam left its files empty. Redownload it from its sidebar."
+ls0=$(jq -c '.LastSession // null' "$XDG_CONFIG_HOME/liascape/settings.json")
+for p in "$ES" "$EV"; do
+  check "/apply of $(basename "$(dirname "$p")")/$(basename "$p") → refused with why" "$(postc /apply "$(jq -nc --arg p "$p" '{path: $p}')" | cut -c1) $(jq -r .error "$T/body")" "5 $WHY"
+done
+check "…nothing saved as the session" "$(jq -c '.LastSession // null' "$XDG_CONFIG_HOME/liascape/settings.json")" "$ls0"
+check "play-from on it → refused with why" "$(postc /playlist/play-from "$(jq -nc --arg a "$ES" --arg b "$SCP" '{paths: [$a, $b], startIndex: 0}')") $(jq -r .message "$T/body")" "200 $WHY"
+check "a playlist of only such items → refused with why" "$(postc /playlist/play "$(jq -nc --arg a "$ES" --arg b "$EV" '{paths: [$a, $b]}')") $(jq -r .message "$T/body")" "200 $WHY"
+EP=$(item "preset of empty" | jq -r .videoPath)
+check "a preset of the empty scene: itself whole, greyed with its base's reason" "$(item "preset of empty" | jq -c '[(.downloadIncomplete // false), .presetReason]')" \
+  '[false,"Its base scene'"'"'s download is incomplete"]'
+check "…/apply of it → refused with that reason" "$(postc /apply "$(jq -nc --arg p "$EP" '{path: $p}')" | cut -c1) $(jq -r .error "$T/body")" "5 Its base scene's download is incomplete"
+check "redownload of a whole item → refused" "$(postc /library/redownload "$(jq -nc --arg p "$SCP" '{path: $p}')") $(jq -r .error "$T/body")" \
+  "400 Its download is complete: nothing to download again."
+check "redownload of a path outside the library → refused" "$(postc /library/redownload "$(jq -nc --arg p "$OUT/o.mp4" '{path: $p}')") $(jq -r .error "$T/body")" \
+  "400 Only a Workshop item in the library can be downloaded again."
+: > "$OPENED"
+check "redownload with no Steam client and no sign-in → its page in the Steam app (the order's last step)" \
+  "$(postc /library/redownload "$(jq -nc --arg p "$ES" '{path: $p}')") $(jq -c '[.done, .openedInSteam, .message]' "$T/body")" \
+  '200 [false,true,"Opened in Steam: unsubscribe and subscribe again there to download it again"]'
+for _ in $(seq 1 50); do [ -s "$OPENED" ] && break; sleep 0.1; done
+check "…xdg-open got the item's Steam page" "$(tr '\n' '|' < "$OPENED")" "argc=1|arg=steam://url/CommunityFilePage/940000001|"
+api -o /dev/null -X POST "$U/steam-todo/stop"
+check "…still download incomplete" "$(item "empty scene" | jq -c .downloadIncomplete)" true
+check "redownload of the library's own copy, no Steam client → the one-off's route has no page: refused, its files left alone" \
+  "$(postc /library/redownload "$(jq -nc --arg p "$EC" '{path: $p}')") $(jq -r '.error | startswith("Couldn'"'"'t use the Steam app")' "$T/body") $(ls "$LIB/workshop/940000003" | tr '\n' ' ')" \
+  "409 true project.json scene.pkg "
+if [ -n "${LIASCAPE_STEAM_CLIENT_LIB:-}" ]; then
+  # Steam's client answers now; its DownloadItem installs the item again over the empty files (template-<id>)
+  rm -f "$WE/fail-init"; : > "$WE/refetch-940000001"
+  mkdir -p "$WE/template-940000001"; printf '{"type":"scene","file":"scene.json","title":"empty scene"}' > "$WE/template-940000001/project.json"
+  head -c 16 /dev/zero > "$WE/template-940000001/scene.pkg"; cp "$LIB/imported/g1/g1.gif" "$WE/template-940000001/preview.gif"
+  check "redownload through the Steam app → Steam's DownloadItem, whole again" \
+    "$(postc /library/redownload "$(jq -nc --arg p "$ES" '{path: $p}')") $(jq -c '[.done, .openedInSteam]' "$T/body") $(cat "$WE/downloads" 2>/dev/null | tr '\n' ' ')" \
+    "200 [true,false] 940000001 "
+  check "…/library: no longer download incomplete" "$(item "empty scene" | jq -c .downloadIncomplete)" false
+  got=""; for _ in $(seq 1 30); do got=$(jq -c --arg p "$ES" 'select(.type == "library-item-changed" and .payload.path == $p) | .payload' "$T/events.jsonl" 2>/dev/null | head -1); [ -n "$got" ] && break; sleep 0.1; done
+  check "…every page told: library-item-changed {path, downloadIncomplete:false}" "$got" "$(jq -nc --arg p "$ES" '{path: $p, downloadIncomplete: false}')"
+else
+  echo "SKIP  redownload through the Steam app — no C compiler for the fake steamclient.so"
+fi
 kill "$FP" 2>/dev/null
 stopbe
 

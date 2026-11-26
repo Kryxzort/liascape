@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat, Unplug, Download } from "lucide-react";
+import { RotateCcw, Clock, ExternalLink, Monitor, Shield, AudioLines, Trash2, CloudOff, AlertTriangle, SlidersHorizontal, Repeat, Unplug, Download, FileWarning } from "lucide-react";
 import { api, media, still, anim as animUrl, steamPageUrl, workshopStub, CARD_STILL_W, type LibraryItem, type OneOffRoute } from "../api/client";
-import { unplayableReasonOf, useStore } from "../store";
+import { DOWNLOAD_INCOMPLETE, redownloadAction, unplayableReasonOf, useStore } from "../store";
 import { levelOf, rank, type Level } from "../settingsLevel";
 import { SideMedia, SideSection } from "./SidePanel";
 import { FolderFlap } from "./icons";
@@ -420,6 +420,38 @@ const NEEDS_BASE = "Needs its base scene";
 // mode's route. While it downloads the button says so; once the base lands the library's re-read takes the notice away.
 // Guard: probe-sidebar lib:preset:needsBase, lib:preset:needsBaseOff
 function PresetNotice({ item, reason, closing, arrive }: { item: LibraryItem; reason: string; closing: boolean; arrive: boolean }) {
+  if (reason === DOWNLOAD_INCOMPLETE) return <IncompleteNotice item={item} closing={closing} arrive={arrive} />;
+  return <BaseNotice item={item} reason={reason} closing={closing} arrive={arrive} />;
+}
+
+// A Workshop download Steam left empty (GET /library downloadIncomplete), in the same notice block, with "Redownload": the
+// store's redownload (POST /library/redownload, the download mode's order). A mode that can't download now shows it disabled
+// with the reason under the words (components/subscribeMode.ts actionBlocked), never another mode's route; while it runs the
+// button says so and the line under the words carries Steam's step; once whole, the backend's library-item-changed takes the
+// notice away. Guard: probe-sidebar lib:incomplete
+function IncompleteNotice({ item, closing, arrive }: { item: LibraryItem; closing: boolean; arrive: boolean }) {
+  const page = item.workshopId ? steamPageUrl(item.workshopId) : "";
+  const progress = useStore((s) => (page ? s.downloads[page] : undefined));
+  const step = useStore((s) => (page ? s.downloadStatus[page] : undefined));
+  const blocked = useStore((s) => (item.workshopId ? actionBlocked(s.settings, s.steam, redownloadAction(item)) : null));
+  const redownload = useStore((s) => s.redownload);
+  const busy = progress !== undefined;
+  const why = busy ? step ?? null : blocked;
+  return (
+    <div className={`side-crash side-preset${closing ? " leaving" : ""}${arrive ? " arrive" : ""}`} data-preset-note={DOWNLOAD_INCOMPLETE} role="status">
+      <span className="side-crash-ico"><FileWarning size={16} /></span>
+      <span className="side-crash-text">{DOWNLOAD_INCOMPLETE}
+        <span className="side-preset-why" data-preset-why>{why ?? "Steam left its files empty, so it can't play"}</span></span>
+      {item.workshopId && (
+        <button className="mini ico side-crash-clear" data-redownload disabled={closing}
+          aria-disabled={blocked || busy ? true : undefined} onClick={() => { if (!blocked && !busy) void redownload(item); }}>
+          <Download size={13} />{busy ? (progress > 0 ? `Downloading ${Math.round(progress * 100)}%` : "Downloading…") : "Redownload"}</button>
+      )}
+    </div>
+  );
+}
+
+function BaseNotice({ item, reason, closing, arrive }: { item: LibraryItem; reason: string; closing: boolean; arrive: boolean }) {
   const baseId = reason === NEEDS_BASE ? item.baseWorkshopId ?? null : null;
   const ownCopy = item.subscribed === false;
   const [route, setRoute] = useState<OneOffRoute | null>(null);

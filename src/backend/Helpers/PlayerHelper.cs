@@ -47,8 +47,9 @@ public static class PlayerHelper
     // nothing was queued.
     private static Task<string?>? Apply(string videoPath, bool keepPause)
     {
-        // a preset that can't play: its reason, never its plain base scene
-        if (PresetUnplayableReason(videoPath) is string presetWhy) throw new InvalidOperationException(presetWhy);
+        // a preset that can't play: its reason, never its plain base scene; a Workshop download Steam left empty: why, never
+        // sent to the player (it can't load an empty scene.pkg or a 0-byte video)
+        if (UnplayableReason(videoPath) is string unplayable) throw new InvalidOperationException(unplayable);
         // no player binary: the reason, never a queued switch that can't start (a silent black screen)
         if (PlayerStatus.MissingReason() is string missing) throw new InvalidOperationException(missing);
         // scenes play when they're on and the player can (its worker + WE's assets) — else the reason. A crashed one
@@ -401,6 +402,13 @@ public static class PlayerHelper
     public static string? PresetUnplayableReason(string path) =>
         IsScenePath(path) && Presets.Read(path) != null ? Presets.StatusOf(path).Reason : null;
 
+    // Why a library item can't play at all, whatever the player can do: a preset's reason (PresetUnplayableReason), else a
+    // Workshop download Steam left unfinished (LibraryService.IsIncompleteWorkshopItem). Null = it may play. Apply, play-from
+    // and a playlist of only such items refuse with it; the pickers and a rotation's skip flag pass it by (IsSkippedPath).
+    // Guard: scripts/test-item-actions.sh § incomplete
+    public static string? UnplayableReason(string path) =>
+        PresetUnplayableReason(path) ?? (LibraryService.IsIncompleteWorkshopItem(path) ? LibraryService.IncompleteApplyReason : null);
+
     // `source.broken` (a scene's worker crashed past its restart budget, 3 in 60 s) → marked crashed in its index entry
     // (rotations skip it unless whitelisted, D6; a click still plays it), the UI told (WS `scene-crashed`), and — by
     // design — a rotation PLAYING it advances at once (the player's program; its skip flag follows the mark). A single
@@ -515,6 +523,7 @@ public static class PlayerHelper
     // instead of once per scene item; the crash mark is one index read per scene.
     private static bool IsSkippedPath(string path, bool scenesPlayable)
     {
+        if (LibraryService.IsIncompleteWorkshopItem(path)) return true;
         if (!IsScenePath(path)) return false;
         if (!scenesPlayable || PresetUnplayableReason(path) != null) return true;
         var m = LibraryStore.GetMeta(path);

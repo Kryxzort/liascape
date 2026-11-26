@@ -62,4 +62,7 @@ public class LibraryItem
     public string? BasePath { get; init; }
     public string? BaseTitle { get; init; }
     public string? PresetReason { get; init; }
+    // A Workshop item Steam left unfinished (LibraryService.DownloadIncomplete: its project.json empty or unreadable, its main
+    // file 0 bytes): it never plays, the card says "Download incomplete" and the sidebar offers Redownload (Web/RedownloadOps.cs).
+    public bool DownloadIncomplete { get; init; }
 }

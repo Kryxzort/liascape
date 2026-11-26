@@ -231,7 +231,7 @@ public static class ServerHost
                 o["notApplied"] = why;
                 return Results.Json(o);
             }
-            if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why) return NotApplied(why);
+            if (PlayerHelper.UnplayableReason(item.VideoPath) is string why) return NotApplied(why);
             // the apply's own refusal (scenes off or unplayable here, no player binary): the same answer
             try { PlayerHelper.Apply(item.VideoPath); }
             catch (InvalidOperationException e) { return NotApplied(e.Message); }
@@ -641,6 +641,14 @@ public static class ServerHost
         app.MapPost("/library/clear-crash", (PathReq r) => Results.Json(new { cleared = AppOps.ClearCrash(r.Path) }));
         // Settings → Housekeeping's "Clear crash marks": every mark at once (AppOps.ClearAllCrashes). Guard: scripts/test-item-actions.sh § crash
         app.MapPost("/library/clear-crash-all", () => Results.Json(new { cleared = AppOps.ClearAllCrashes() }));
+        // the sidebar's Redownload of a Workshop item Steam left unfinished (Web/RedownloadOps.cs): {done, openedInSteam, message};
+        // 400 {error} = refused before anything reached Steam, 409 {error} = a step failed after. Guard: test-item-actions.sh § incomplete
+        app.MapPost("/library/redownload", async (PathReq r, HttpContext ctx) =>
+        {
+            try { return Results.Json(await RedownloadOps.RedownloadAsync(r.Path, ctx.RequestAborted)); }
+            catch (RedownloadOps.Refused e) { return Results.Json(new { error = e.Message }, statusCode: 400); }
+            catch (Exception e) when (e is InvalidOperationException or TimeoutException) { return Results.Json(new { error = e.Message }, statusCode: 409); }
+        });
         // a scene's user properties (project.json general.properties): the editor's list, a set / reset (saved per
         // item in its index, then live on its source(s) under liascape-player), and the drag twin (live, nothing saved)
         app.MapGet("/library/scene-props", (string path) => Results.Json(AppOps.SceneProps(path)));

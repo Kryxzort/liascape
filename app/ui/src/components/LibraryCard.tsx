@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import { Trash2, AlertTriangle, Unplug } from "lucide-react";
+import { Trash2, AlertTriangle, Unplug, FileWarning } from "lucide-react";
 import { type LibraryItem } from "../api/client";
 import { PlaylistToggle } from "./PlaylistToggle";
 import { MotionThumb } from "./MotionThumb";
@@ -38,6 +38,7 @@ export const LibraryCard = memo(function LibraryCard({
   useSeenCard(wrapRef, item.videoPath);
   // COOL: a preset or scene greys out and its status icon fades in when it stops being playable, and back (CSS transitions on a state
   // class, never a mount animation: the page is hidden and shown again by <Activity>, which would replay one)
+  const incomplete = !!item.downloadIncomplete;
   const cls = `card lib${playing ? " playing" : ""}${selected ? " selected" : ""}${focused ? " focused" : ""}${item.hasCrashed && !reason ? " crashed" : ""}${reason ? " unplayable" : ""}`;
   return (
     <div className={cls} data-key={item.videoPath}>
@@ -53,8 +54,13 @@ export const LibraryCard = memo(function LibraryCard({
             lib:preset:badge */}
         {item.isScene && <TypeBadge preset={item.isPreset} />}
         {/* Guard: probe-sidebar lib:preset:needsBase, lib:scenesBlocked (a scene's too) */}
-        {(item.isPreset || item.isScene) && <span className={`warn preset${reason ? " on" : ""}`} data-card-reason={reason ?? ""} title={reason ?? undefined}
-          aria-hidden={reason ? undefined : true}><Unplug size={15} /></span>}
+        {(item.isPreset || item.isScene) && <span className={`warn preset${reason && !incomplete ? " on" : ""}`} data-card-reason={incomplete ? "" : reason ?? ""}
+          title={reason && !incomplete ? reason : undefined} aria-hidden={reason && !incomplete ? undefined : true}><Unplug size={15} /></span>}
+        {/* a Workshop download Steam left empty: the words on the card itself, over its greyed picture (it has no picture of its
+            own: Steam's preview is empty too). Held for every Workshop card and faded in by a state class, as the status icon is,
+            so a Redownload that mends it fades it out. Guard: probe-sidebar lib:incomplete */}
+        {item.workshopId && <span className={`card-incomplete${incomplete ? " on" : ""}`} data-card-incomplete={incomplete ? "" : undefined}
+          aria-hidden={incomplete ? undefined : true}><FileWarning size={14} aria-hidden="true" />Download incomplete</span>}
         {item.hasCrashed && !reason && <span className="warn" title="Scene crashed — rotations skip it"><AlertTriangle size={15} /></span>}
         <button className={`pl-toggle${inPlaylist ? " on" : ""}`} title={inPlaylist ? "In playlist — click to remove" : "Add to playlist"}
           onClick={(e) => { e.stopPropagation(); onToggle(item); }}><PlaylistToggle on={inPlaylist} /></button>

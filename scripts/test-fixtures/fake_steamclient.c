@@ -5,7 +5,8 @@
 // GetItemInstallInfo 73, GetItemDownloadInfo 74, DownloadItem 75. SubscribeItem → "subscribed" at once, "downloading" with
 // bytes climbing over ~1.2 s, then installed in $FAKE_UGC_DIR/<id> (project.json + v.mp4 copied from $FAKE_UGC_CLIP).
 // DownloadItem → the same download without subscribing (the subscribed bit stays as it was). Never talks to Steam.
-//   $FAKE_UGC_DIR/template-<id>/ exists → that item installs as a copy of it instead (a preset, a scene) of the video
+//   $FAKE_UGC_DIR/template-<id>/ exists → that item installs as a copy of it instead (a preset, a scene) of the video,
+//   over the files of a folder already there when $FAKE_UGC_DIR/refetch-<id> exists (removed once installed)
 //   $FAKE_UGC_DIR/refuse-download exists → DownloadItem returns false for an item that isn't subscribed
 //   $FAKE_UGC_DIR/downloads ← a line "<id>" per DownloadItem Steam took
 //   $FAKE_UGC_DIR/fail-init exists → ConnectToGlobalUser returns 0 (Steam not running / WE not owned)
@@ -51,12 +52,17 @@ static Obj client = { client_vt }, ugc = { ugc_vt };
 
 static void install(uint64_t id) {
   char d[4096], p[4200]; snprintf(d, sizeof d, "%s/%llu", dir(), (unsigned long long)id);
-  struct stat st; if (stat(d, &st) == 0) return;
+  // installed once; again only while $FAKE_UGC_DIR/refetch-<id> exists (a folder Steam left empty, fetched again: removed
+  // once it is)
+  char r[4096]; snprintf(r, sizeof r, "%s/refetch-%llu", dir(), (unsigned long long)id);
+  struct stat st; if (stat(d, &st) == 0 && stat(r, &st) != 0) return;
+  unlink(r);
   char t[4096]; snprintf(t, sizeof t, "%s/template-%llu", dir(), (unsigned long long)id);
   if (stat(t, &st) == 0 && S_ISDIR(st.st_mode)) {
-    // cp -R <template> <d>: d doesn't exist yet, so it becomes the copy (files/ and all)
+    // cp -RT <template> <d>: d becomes the copy (files/ and all); a d already there (a download Steam left empty, fetched
+    // again) gets the template's files over its own, as Steam rewrites an item in place
     pid_t c = fork();
-    if (c == 0) { execlp("cp", "cp", "-R", t, d, (char *)NULL); _exit(127); }
+    if (c == 0) { execlp("cp", "cp", "-RT", t, d, (char *)NULL); _exit(127); }
     if (c > 0) { int rc; waitpid(c, &rc, 0); }
     return;
   }

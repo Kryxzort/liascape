@@ -84,7 +84,8 @@ public static class LiascapePlayerProgram
         var scenesOk = new Lazy<bool>(() => PlayerStatus.ScenesPlayable(s));
         // DesiredItem kicks a loudness measure for an unmeasured video (normalization on): the program measures nothing
         return BuildItems(paths, defaults, path => LiascapePlayerMedia.DesiredItem(path, s),
-            path => PlayerHelper.IsScenePath(path) && PlayerHelper.SkippedForRotation(path, scenesOk.Value));
+            path => PlayerHelper.IsScenePath(path) ? PlayerHelper.SkippedForRotation(path, scenesOk.Value)
+                : LibraryService.IsIncompleteWorkshopItem(path)); // a video Steam left empty is skipped too
     }
 
     // The rule alone (self-test): each item = what a new source of it gets, minus what `defaults` already says.

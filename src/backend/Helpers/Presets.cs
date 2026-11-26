@@ -28,6 +28,7 @@ public static class Presets
 {
     public const string NeedsBaseReason = "Needs its base scene";
     public const string NoBaseReason = "Its preset file names no base scene";
+    public const string BaseIncompleteReason = "Its base scene's download is incomplete";
     public static string NotSceneReason(string kind)
     {
         var k = kind.ToLowerInvariant();
@@ -123,8 +124,15 @@ public static class Presets
             m = LibraryStore.LoadIndex(loc.Source).GetValueOrDefault(loc.Key);
             selfId = m?.WorkshopId ?? (loc.Source is LibraryStore.Workshop or LibraryStore.Local ? loc.Key : null);
         }
-        return StatusFor(f, selfId, m?.BaseKind, BaseDirOf, KindOf);
+        return WithWholeBase(StatusFor(f, selfId, m?.BaseKind, BaseDirOf, KindOf));
     }
+
+    // A preset plays its base's scene.pkg: a base an interrupted Steam download left empty (LibraryService.DownloadIncomplete)
+    // can't play through it either. Kept out of StatusFor (the self-test's pure table): it reads the base's files.
+    // Guard: scripts/test-item-actions.sh § incomplete ("a preset of the empty scene")
+    internal static PresetStatus WithWholeBase(PresetStatus st) =>
+        st is { Problem: PresetProblem.None, BaseDir: { } bd } && LibraryService.DownloadIncomplete(bd)
+            ? new(PresetProblem.NeedsBase, bd, BaseIncompleteReason) : st;
 
     // The rule (pure; the self-test's table). The first problem wins: no base named (no id, or its own id: never resolved
     // through itself) → a base the download found isn't a scene (LibMeta.BaseKind), unless a scene base of that id is in

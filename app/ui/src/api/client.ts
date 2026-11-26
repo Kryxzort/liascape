@@ -244,6 +244,9 @@ export interface LibraryItem {
   // "Needs its base scene", "Its preset file names no base scene", "Its base is a(n) … wallpaper, not a scene", "Presets play
   // only in the Liascape player")
   isPreset?: boolean; baseWorkshopId?: string | null; basePath?: string | null; baseTitle?: string | null; presetReason?: string | null;
+  // API: a Workshop item an interrupted Steam download left empty (LibraryService.DownloadIncomplete): it never plays, the card
+  // says "Download incomplete", the sidebar offers Redownload (POST /library/redownload)
+  downloadIncomplete?: boolean;
 }
 // a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips' queue: following "Video
 // preview quality" (phase low | mid | high) or the cards' own first clips (make), `facts` = Steam's tags (steam), trailer
@@ -350,6 +353,8 @@ export const api = {
   libraryClearCrash: (path: string) => jpost<{ cleared: boolean }>("/library/clear-crash", { path }),
   // API: every crash mark at once (Settings → Housekeeping; AppOps.ClearAllCrashes: library-item-changed per item, as above)
   libraryClearCrashAll: () => jpost<{ cleared: number }>("/library/clear-crash-all", {}),
+  // API: Web/RedownloadOps.cs — the download mode's order: done = whole again; openedInSteam = its page waits in the Steam app
+  libraryRedownload: (path: string) => jpost<{ done: boolean; openedInSteam: boolean; message: string }>("/library/redownload", { path }),
   // API: a scene's user properties (project.json general.properties) — list, set (saved per item + live),
   // reset (name: one, none: all), and the drag twin (live, nothing saved)
   sceneProps: (path: string) => jget<ScenePropsResp>(`/library/scene-props?path=${encodeURIComponent(path)}`),
