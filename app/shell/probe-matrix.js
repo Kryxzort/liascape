@@ -2700,8 +2700,10 @@ C["appear:gifResume"] = { states: ["single"], noSwitch: true,
 const GV_SAMPLE = (ms, find = "card") => `(() => new Promise((res) => { const m = window.__mx, out = [], t0 = performance.now();
   const step = () => { const w = m.${find}("k1")?.querySelector(".thumb-wrap"), v = w?.querySelector("video.thumb.anim[data-gif]");
     const g = w && [...w.querySelectorAll("img.thumb.anim")].find((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
+    // the video counts once it has a frame AND is painted (a hidden one is a blank card to the eye)
+    const vs = v && getComputedStyle(v), vSeen = !!v && v.readyState >= 2 && vs.visibility !== "hidden" && vs.display !== "none" && +vs.opacity > 0.05;
     // a frame before the tab's page shows has no k1 card to judge: left out
-    if (w) out.push({ t: +(performance.now() - t0).toFixed(1), gif: !!g, vid: !!v && v.readyState >= 2, ct: v ? +v.currentTime.toFixed(3) : null, p: v ? v.paused : null });
+    if (w) out.push({ t: +(performance.now() - t0).toFixed(1), gif: !!g, vid: vSeen, ct: v ? +v.currentTime.toFixed(3) : null, p: v ? v.paused : null });
     if (performance.now() - t0 < ${ms}) requestAnimationFrame(step); else res(out); };
   requestAnimationFrame(step); }))()`;
 const gvBlank = (sm) => sm.filter((x) => !x.gif && !x.vid).length;
@@ -2732,7 +2734,7 @@ C["appear:gifVideo"] = { states: ["single"], noSwitch: true,
     const toggle = (ms) => ui(`m.tab("Settings"); for (let i = 0; i < 50 && !m.row(${L}); i++) await m.sleep(100);
       m.row(${L}).scrollIntoView({ block: "center" });
       const gifUp = () => [...(m.previewCard("k1")?.querySelectorAll("img.thumb.anim") ?? [])].some((i) => getComputedStyle(i).visibility !== "hidden" && i.complete && i.naturalWidth > 0);
-      const vidUp = () => (m.previewCard("k1")?.querySelector("video.thumb.anim[data-gif]")?.readyState ?? 0) >= 2;
+      const vidUp = () => { const v = m.previewCard("k1")?.querySelector("video.thumb.anim[data-gif]"); return !!v && v.readyState >= 2 && getComputedStyle(v).visibility !== "hidden"; };
       for (let i = 0; i < 80 && !gifUp() && !vidUp(); i++) await m.sleep(100);
       await m.sleep(300);
       const p = ${GV_SAMPLE(ms, "previewCard")}; await m.sleep(150); m.click(m.input(${L}), ${L}); return await p;`);
