@@ -130,7 +130,7 @@ export default function App() {
     else if (e.type === "steam-login-error") s.onPwError(e.payload.message);
     // the unsubscribes reaching Steam: their count is the library's "unsubscribe" operation (library-ops, the top bar's words
     // and line); here only the end. What the drain wants the user to know (held, not a flash): what to click in the Steam app
-    // ("Open in the Steam app"), or that an unsubscribe was dropped for want of a sign-in
+    // (the fallback order's last step), or that Steam is limiting requests
     else if (e.type === "unsub-progress") {
       if (e.payload.finished && e.payload.message) s.setStatus(e.payload.message, false);
       else if (e.payload.finished && e.payload.error) s.setStatus("Couldn't unsubscribe on Steam: " + e.payload.error);

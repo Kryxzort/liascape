@@ -13,10 +13,9 @@ namespace Liascape.Helpers;
 
 // Workshop through the RUNNING Steam client, the way Wallpaper Engine itself does it (docs/decisions.md § "Drive the Steam
 // client through its own `steamclient.so`"). Steam's ISteamUGC lets a program that is "the game" subscribe to
-// an item and read Steam's own download progress (bytes done / total) and the item's real install folder. Opt-in
-// (`WorkshopDownloadMode` "steamapp", Settings "Use the Steam app" — a way of its own to get wallpapers, so its own radio,
-// not a switch inside "Subscribe via Steam"): the helper presents itself as Wallpaper Engine (431960) — Steam checks the account
-// owns it, and shows "Playing Wallpaper Engine" while connected.
+// an item and read Steam's own download progress (bytes done / total) and the item's real install folder. The default way
+// (`WorkshopDownloadMode` "steamapp", Settings "Use the Steam app"): the helper presents itself as Wallpaper Engine (431960)
+// — Steam checks the account owns it, and shows "Playing Wallpaper Engine" while connected.
 //
 // - Straight through the Steam client's OWN steamclient.so (every Steam install has it: ~/.steam/sdk64/steamclient.so) —
 //   NOT Valve's libsteam_api.so, which is only a thin adapter over it and isn't ours to ship (a user's copy comes only with
@@ -31,8 +30,9 @@ namespace Liascape.Helpers;
 //   so a crash in Steam's library can't take the backend down: JSON commands on its stdin, JSON lines on its stdout; a
 //   closed stdin = release Steam + exit. It stays connected between operations only while the user browses the Workshop,
 //   plus a linger (Helpers/SteamClientHold.cs: one connection per visit, not a "Playing" blink per download).
-// - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason; the caller fails
-//   with `FailureMessage` and never switches method by itself (sources-steam.md § Workshop downloads).
+// - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason; the caller takes
+//   the fallback order's next step (WorkshopDownloader.AcquireViaSubscribeAsync), or fails with `FailureMessage` where no step
+//   is left (a one-off without a sign-in, the Steam to-do's "Let the Steam app do all N").
 // - ONE child, ONE operation on it at a time, app-wide (`Turn`; a bulk download waits with "Waiting for the Steam app…").
 //   `steam-ugc probe` (connect, release, exit) answers the Steam to-do's "Let the Steam app do all N" (Web/SteamTodo.cs)
 //   when no session is connected.
@@ -63,11 +63,10 @@ public static class SteamClientUgc
 
     public sealed record Result(string? Folder, string? Fallback);
 
-    /// What the user reads when the Steam app couldn't do it — the mode FAILS there, it never switches to the sign-in or the
-    /// page — a quiet fallback would hide why the chosen mode didn't work.
+    /// What the user reads when the Steam app couldn't do it and no other step of the fallback order could take it.
     public static string FailureMessage(string? why) =>
         $"Couldn't use the Steam app: {(string.IsNullOrWhiteSpace(why) ? "Steam didn't answer" : why)}. Start Steam (signed in to an " +
-        "account that owns Wallpaper Engine), or pick another way under Settings → Getting Workshop wallpapers.";
+        "account that owns Wallpaper Engine), or sign in to Steam under Settings → Getting Workshop wallpapers.";
 
     /// Subscribe + wait for Steam to install it. Folder = done; Fallback = why this route couldn't be used (the caller
     /// fails with it). Throws only for cancellation and for failures AFTER Steam took the subscribe.

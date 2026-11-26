@@ -63,9 +63,10 @@ is affected: it restarts, and after three crashes in a minute it shows a still p
 - PipeWire as your sound server, for auto-mute. Most current distros use it already.
 - For Wallpaper Engine scenes: Wallpaper Engine installed through Steam. Liascape uses its asset files and looks for
   it in your Steam libraries.
-- For Workshop downloads: Steam. Settings → Getting Workshop wallpapers offers three ways to get them: through the
-  running Steam app, by opening the item's page in Steam, or by subscribing with a Steam login inside Liascape (the
-  default).
+- For Workshop downloads: Steam. Settings → Getting Workshop wallpapers offers two ways to get them: through the
+  running Steam app (the default), or by subscribing with a Steam login inside Liascape. When the Steam app can't (it
+  isn't running, or the account doesn't own Wallpaper Engine), your Steam login takes over if you signed in. Failing
+  that, Liascape opens the item's page in Steam: subscribe there and it downloads.
 
 Scenes that name a Windows font (Arial, Consolas and so on) use your installed fonts, like any app. The packages bring
 open look-alikes (Liberation, Cascadia Mono, Selawik, Comic Neue and others), and the real Arial, Verdana, Comic Sans and

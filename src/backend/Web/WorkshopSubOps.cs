@@ -14,7 +14,7 @@ namespace Liascape.Web;
 // are thin wrappers.
 // - State: from disk + the unsubscribe queue + the Steam to-do only — never a Steam-client connection just to show it.
 // - Unsubscribe: an item IN the library = exactly the Library's "Delete from source" (trash + the queued unsubscribe, undoable);
-//   not in it = the queued unsubscribe alone. Then the drain (routed by the download mode, like Delete from source), after
+//   not in it = the queued unsubscribe alone. Then the drain (by the download mode's fallback order, like Delete from source), after
 //   the Undo window (SteamOps.DrainAfterUndoWindow).
 // - Subscribe: WorkshopDownloader.SubscribeOnlyAsync — nothing imported. WS `subscribe-progress {id, value, status, done?,
 //   error?, skipped?}` while it runs (the page route: until the to-do entry is Done / skipped).

@@ -14,8 +14,8 @@ namespace Liascape.Web;
 // An import from a link: POST /library/link {url} says what the link names (the dialog shows it before anything lands),
 // POST /library/import-link {url} imports it. The link is read by Helpers/LinkImport.cs, then the item comes by its own
 // source's path, never a downloader of this file's own:
-//  • a Workshop item and a web source's page: /download's (ServerHost.DownloadResultAsync) — the chosen download mode with
-//    its refusals and nothing else (.claude/rules/backend/sources-steam.md § Workshop downloads), the site's own detail
+//  • a Workshop item and a web source's page: /download's (ServerHost.DownloadResultAsync) — the chosen download mode and
+//    its fallback order, nothing else (.claude/rules/backend/sources-steam.md § Workshop downloads), the site's own detail
 //    and file, the page's own name (SitePage.PageName);
 //  • a file straight from a server: DownloadHelper's link fetch (public addresses only, redirects checked, capped), its
 //    first bytes checked, then into imported/ like a file imported from this PC (ImportService, the address as its source);
@@ -27,8 +27,10 @@ public static class LinkImportOps
 {
     // kind workshop | site | direct; id = the item's source id (Steam's item page, the site's page, the file's address);
     // media = video | gif | image | scene | preset (null: an unknown site's file not looked at yet); inLibrary = an item with
-    // that source id (or Workshop id) is there; blocked = why the download mode can't fetch it now (WorkshopDownloader.Blocked)
-    public sealed record Resolved(string Kind, string Id, string Title, string Source, string? Media, bool InLibrary, string? Blocked);
+    // that source id (or Workshop id) is there. A Workshop download is never refused up front: its fallback order ends on the
+    // item's Steam page (WorkshopDownloader.Blocked), and the dialog says which way it goes (components/subscribeMode.ts
+    // downloadHint)
+    public sealed record Resolved(string Kind, string Id, string Title, string Source, string? Media, bool InLibrary);
 
     private sealed record Plan(Resolved Shown, LinkImport.Target Target, int SourceIndex, WallpaperResult? Result);
 
@@ -45,7 +47,6 @@ public static class LinkImportOps
         catch (DownloadHelper.LinkRefused e) { return Refused(e.Message); }
         var shown = plan.Shown;
         if (shown.InLibrary) return Results.Json(new { already = true, title = shown.Title });
-        if (shown.Blocked != null) return Refused(shown.Blocked);
         Console.WriteLine($"link: importing a {shown.Kind} link ({Host(shown.Id)})");
         Begin();
         try
@@ -87,14 +88,14 @@ public static class LinkImportOps
                             ? "That Workshop item is a scene: turn on Play scenes in Settings to import it."
                             : "That Workshop item isn't a video or a scene.");
                 var shown = new Resolved("workshop", r.PageUrl, r.Title, ServerHost.Workshop.Name, r.IsPreset ? "preset" : r.IsScene ? "scene" : "video",
-                    Has(r.PageUrl, id), WorkshopDownloader.Blocked(s, WorkshopDownloader.WorkshopAction.Download));
+                    Has(r.PageUrl, id));
                 return new(shown, t, ServerHost.SourceIndex(ServerHost.Workshop.Name), r);
             }
             case LinkImport.Kind.Site:
             {
                 // the card the site's Browse would show, less what only its list knows: the detail reads the page's name
                 var r = new WallpaperResult { Title = "", ThumbnailUrl = "", PageUrl = t.Url };
-                return new(new Resolved("site", t.Url, LinkImport.SlugTitle(t.Url), SiteLabel(t.Source!), "video", Has(t.Url), null),
+                return new(new Resolved("site", t.Url, LinkImport.SlugTitle(t.Url), SiteLabel(t.Source!), "video", Has(t.Url)),
                     t, ServerHost.SourceIndex(t.Source!), r);
             }
             default:
@@ -107,7 +108,7 @@ public static class LinkImportOps
                     media = LinkImport.MediaOf("x" + ext);
                     title = LinkImport.TitleFor(t.Url, Disposition(answer));
                 }
-                return new(new Resolved("direct", t.Url, title, Host(t.Url), media, Has(t.Url), null), t, -1, null);
+                return new(new Resolved("direct", t.Url, title, Host(t.Url), media, Has(t.Url)), t, -1, null);
             }
         }
     }

@@ -47,6 +47,10 @@
 //   import:link:close   Close while it imports: the dialog leaves at once, the import goes on and lands, the status says so
 //   import:link:error   a page served as video/mp4: the import's refusal shows under what the link names, which stays with
 //                       Import on; Import again asks the server again and says the same; an edit of the link clears it
+//   import:link:workshop  a Workshop item's link (/library/link answered in the page) says which way its download goes, the
+//                       Browse sidebar's line (components/subscribeMode.ts downloadHint), in --subtext, Import on: "Subscribe
+//                       with Steam login" signed out (the stack has no sign-in) → "Opens its Steam page for you to subscribe,
+//                       …"; under "Use the Steam app" → "Subscribes through the Steam app, …"
 //   import:link:look    the error line in --danger, where it comes from in --subtext, the chip in --accent, the progress fill
 //                       in --accent with its glow (none under no-glow), bg-live keeps the dialog's fill; pictures
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
@@ -734,6 +738,48 @@ app.whenReady().then(async () => {
       if ((await linkState()).failed != null) v.push(`an edit left the refusal: ${J(await linkState())}`);
       await closeDialog();
       if ((await titles()).includes("fake")) v.push("the page landed in the library");
+      return v;
+    });
+
+    await cell("import:link:workshop — a Workshop link says which way its download goes: its Steam page signed out, the Steam app", async () => {
+      const v = [];
+      await setSettings({ WorkshopDownloadMode: "subscribe" });
+      try {
+        // what /library/link answers for a Workshop item (Web/LinkImportOps.cs Resolved): the stack's fake Steam lists none
+        const page = "https://steamcommunity.com/sharedfiles/filedetails/?id=910000001";
+        const PAGE = "Opens its Steam page for you to subscribe, then adds it to your library";
+        const APP = "Subscribes through the Steam app, then adds it to your library";
+        const hint = () => js(`const e = document.querySelector("[data-import-link-hint]"); if (!e) return null;
+          const probe = document.createElement("i"); probe.style.color = "var(--subtext)"; document.body.append(probe);
+          const want = getComputedStyle(probe).color; probe.remove(); return { text: e.textContent, colour: getComputedStyle(e).color === want }`);
+        // a fresh page per mode (the settings it loads with), the link typed into the dialog
+        const open = async () => {
+          await load();
+          await js(`const real = window.fetch; window.fetch = (u, o) => String(u).includes("/library/link") && !String(u).includes("import-link")
+            ? Promise.resolve(new Response(JSON.stringify({ kind: "workshop", id: ${J(page)}, title: "Fixture Workshop One", source: "Wallpaper Engine (Workshop)",
+                media: "video", inLibrary: false }), { status: 200, headers: { "Content-Type": "application/json" } }))
+            : real(u, o); return true`);
+          if (!(await openLinkFromMenu())) return "no Import from a link… in the menu";
+          await js(`${setLink(page)} return true`);
+          if (!(await lineIs("found"))) return `the link: ${J(await linkState())}`;
+          return null;
+        };
+        let why = await open();
+        if (why) return [why];
+        let h = await hint();
+        if (h?.text !== PAGE) v.push(`signed out under Subscribe with Steam login: the line reads ${J(h?.text ?? null)}, want ${J(PAGE)}`);
+        if (h && !h.colour) v.push("the line isn't in --subtext");
+        const s = await linkState();
+        if (s.goOff) v.push("Import is off for a Workshop link (nothing refuses it up front)");
+        await shot("link-workshop", ".imp-modal");
+        await closeDialog();
+        await setSettings({ WorkshopDownloadMode: "steamapp" });
+        why = await open();
+        if (why) return [...v, why];
+        h = await hint();
+        if (h?.text !== APP) v.push(`under Use the Steam app: ${J(h)}, want ${J(APP)}`);
+        await closeDialog();
+      } finally { await setSettings({ WorkshopDownloadMode: "steamapp" }); }
       return v;
     });
 

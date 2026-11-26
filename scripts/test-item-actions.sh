@@ -22,8 +22,9 @@
 #         site's file named by its Content-Disposition, its page "isn't supported"; refused, landing nothing: a page served
 #         as video/mp4, redirects to cloud metadata / the LAN / file: / round a loop, a LAN address, a file over the cap
 #         (by its length, and one sending none), a 404; the link's query never logged. A Workshop link: Steam's details
-#         (LIASCAPE_STEAM_CM_FIXTURE), the download mode's refusal and nothing else (no Steam page); a web wallpaper and an
-#         unknown id refused. A MoeWalls page goes to MoeWalls (unreachable here).
+#         (LIASCAPE_STEAM_CM_FIXTURE), the download mode's fallback order (no Steam client or sign-in here: the item's page in
+#         the Steam app, the note on its progress, Stop → skipped); a web wallpaper and an unknown id refused. A MoeWalls page
+#         goes to MoeWalls (unreachable here).
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
@@ -355,7 +356,7 @@ importl() { echo "$(link /library/import-link "$1") $(jq -c "${2:-.}" "$T/body")
 trash_left() { find "$LIB/.trash" -mindepth 1 -maxdepth 1 -name 'link-*' 2>/dev/null | wc -l; }
 
 check "a file's link resolves to it, by its name" "$(resolve "$S/files/neon.mp4?token=SECRET-IN-QUERY")" \
-  "200 $(jq -nc --arg u "$S/files/neon.mp4?token=SECRET-IN-QUERY" '{kind: "direct", id: $u, title: "neon", source: "127.0.0.1", media: "video", inLibrary: false, blocked: null}')"
+  "200 $(jq -nc --arg u "$S/files/neon.mp4?token=SECRET-IN-QUERY" '{kind: "direct", id: $u, title: "neon", source: "127.0.0.1", media: "video", inLibrary: false}')"
 check "…nothing fetched to say so (the name told)" "$(grep -c neon "$T/files.log" 2>/dev/null || true)" 0
 : > "$T/events.jsonl"
 check "importing it → imported/neon/neon.mp4" "$(importl "$S/files/neon.mp4?token=SECRET-IN-QUERY" .videoPath)" "200 \"$LIB/imported/neon/neon.mp4\""
@@ -401,14 +402,22 @@ check "a file over the cap with no length → cut off at the cap, nothing kept" 
   "400 $toobig $n0 0"
 check "a link the server doesn't have → its answer" "$(importl "$S/files/gone.mp4" .error)" '400 "The server answered 404 (Not Found)."'
 check "the link's query (a token in it) never reaches the log" "$(grep -c SECRET-IN-QUERY "$LOG" || true)" 0
-# a Workshop item's link goes through /download's path: the chosen mode ("subscribe", signed out here) refuses it with the
-# mode's own words before anything reaches Steam, and no other way (a Steam page) is tried
+# a Workshop item's link goes through /download's path, by the download mode's fallback order: the default "Use the Steam
+# app" with no Steam client and no sign-in here → the item's page in the Steam app (the stub xdg-open records it), the
+# dialog's progress line its note; nothing is refused up front. Stop in the Steam to-do ends the import as skipped
 : > "$OPENED"
-check "a Workshop link resolves to the item (Steam's details), the mode's refusal shown up front" \
-  "$(resolve "https://steamcommunity.com/workshop/filedetails/?id=930000001" '[.kind, .id, .title, .media, .blocked]')" \
-  '200 ["workshop","https://steamcommunity.com/sharedfiles/filedetails/?id=930000001","Link Workshop Video","video","Sign in to Steam to download"]'
-check "…its import refused with those words, no Steam page opened" "$(importl "https://steamcommunity.com/sharedfiles/filedetails/?id=930000001" .error) $(wc -l < "$OPENED")" \
-  '400 "Sign in to Steam to download" 0'
+WSPAGE="https://steamcommunity.com/sharedfiles/filedetails/?id=930000001"
+check "a Workshop link resolves to the item (Steam's details), nothing refused up front" \
+  "$(resolve "https://steamcommunity.com/workshop/filedetails/?id=930000001" '[.kind, .id, .title, .media, has("blocked")]')" \
+  "200 [\"workshop\",\"$WSPAGE\",\"Link Workshop Video\",\"video\",false]"
+( api -o "$T/wsbody" -w '%{http_code}' -X POST "$U/library/import-link" -d "$(jq -nc --arg u "$WSPAGE" '{url: $u}')" > "$T/wscode" ) & IP=$!
+for _ in $(seq 1 50); do grep -q "arg=steam://url/CommunityFilePage/930000001" "$OPENED" && break; sleep 0.1; done
+check "…its import opens the item's page in the Steam app (the order's last step)" "$(cat "$OPENED" | tr '\n' '|')" "argc=1|arg=steam://url/CommunityFilePage/930000001|"
+got=""; for _ in $(seq 1 30); do got=$(jq -r --arg u "$WSPAGE" 'select(.type == "download-progress" and .payload.id == $u and .payload.status != null) | .payload.status' "$T/events.jsonl" 2>/dev/null | grep -c "^Opened in Steam: subscribe there and it downloads here$"); [ "$got" -gt 0 ] && break; sleep 0.1; done
+check "…the dialog's progress line says \"Opened in Steam: subscribe there and it downloads here\"" "$([ "${got:-0}" -gt 0 ] && echo yes || echo no)" yes
+api -o /dev/null -X POST "$U/steam-todo/stop"
+wait $IP
+check "…Stop in the Steam to-do ends the import as skipped, nothing imported" "$(cat "$T/wscode") $(jq -c .skipped "$T/wsbody") $(item "Link Workshop Video")" "200 true null"
 check "a Workshop scene's link → a scene" "$(resolve "https://steamcommunity.com/sharedfiles/filedetails/?id=930000003" .media)" '200 "scene"'
 check "a Workshop web wallpaper's link → refused (it can't play)" "$(resolve "https://steamcommunity.com/sharedfiles/filedetails/?id=930000002" .error)" \
   '400 "That Workshop item is a web or application wallpaper, which Liascape doesn'"'"'t play."'

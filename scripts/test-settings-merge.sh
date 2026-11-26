@@ -175,8 +175,8 @@ snap s0
   && ok "a file with the old toggles on: previewOnHover gif,video,image and previewNotHovered image,gif,video (the defaults)" \
   || bad "preview orders after loading an old file: $(f '[.previewOnHover, .previewNotHovered]' s0)"
 
-# the dropped "steamcmd" download mode reads as the default; its two settings are unknown keys (no migration)
-[ "$(f .workshopDownloadMode s0)" = '"subscribe"' ] && ok "an old file's WorkshopDownloadMode \"steamcmd\" loads as \"subscribe\" (the default)" \
+# the dropped "steamcmd" download mode reads as the default ("steamapp"); its two settings are unknown keys (no migration)
+[ "$(f .workshopDownloadMode s0)" = '"steamapp"' ] && ok "an old file's WorkshopDownloadMode \"steamcmd\" loads as \"steamapp\" (the default)" \
   || bad "WorkshopDownloadMode \"steamcmd\" loaded as $(f .workshopDownloadMode s0)"
 [ "$(f '[has("steamUsername"), has("steamCmdPath")] | any' s0)" = false ] && ok "GET /settings has no steamUsername / steamCmdPath (removed with the steamcmd mode)" \
   || bad "GET /settings still has a steamcmd setting: $(f '[has("steamUsername"), has("steamCmdPath")]' s0)"

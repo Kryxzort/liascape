@@ -30,6 +30,10 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
 const childPid = () => +fs.readFileSync(`${T}/steamlib/child.pid`, "utf8").trim();
 const released = () => fs.existsSync(`${T}/steamlib/released`) ? fs.readFileSync(`${T}/steamlib/released`, "utf8").split("\n").filter(Boolean) : [];
 
+const statuses = (id) => (ev[pageUrl(id)] ?? []).map((e) => e.status).filter(Boolean);
+const waitUrl = async (id, from, ms = 5000) => { for (let i = 0; i < ms / 50; i++) { if (urls().slice(from).some((x) => x.includes(id))) return true; await sleep(50); } return false; };
+const NOTE = "Opened in Steam: subscribe there and it downloads here"; // a download waiting on its page (WorkshopDownloader.OpenedInSteam)
+
 // a. the Steam client does it
 let n0 = urls().length;
 let r = await Promise.race([download("710000001"), ceiling(60000)]);
@@ -48,17 +52,22 @@ await until(() => !alive(childPid()) && released().includes("user") && released(
 let rel = released();
 out(!alive(childPid()) && rel.includes("user") && rel.includes("pipe"), "the helper released its Steam user + pipe and exited", `pid ${childPid()} alive ${alive(childPid())}, released [${rel}]`);
 
-// b. Steam refuses (not running / WE not owned) → the download FAILS with the reason; it never switches to the page / the
-// to-do / a sign-in (a failure, not a fallback)
+// b. Steam refuses (not running / WE not owned) and no sign-in here → the fallback order's last step: the item's page through
+// the Steam to-do, with its note (never a failure while a step is left); Stop ends the download as skipped
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length;
-r = await Promise.race([download("710000002"), ceiling(60000)]);
-body = r ? await r.json().catch(() => null) : null;
+const pB = download("710000002");
+const openedB = await waitUrl("710000002", n0, 60000);
+await until(() => statuses("710000002").includes(NOTE), 5000);
 const todoB = await (await fetch(U + "/steam-todo")).json();
-out(r?.status === 500 && /Couldn't use the Steam app/.test(body?.error ?? "") && urls().length === n0 && todoB.finished === true,
-  "Steam refused the helper → the download fails with the reason, nothing opened, nothing in the to-do",
-  `${r?.status} ${JSON.stringify(body)?.slice(0, 160)} | opened ${urls().length - n0} | to-do ${JSON.stringify(todoB).slice(0, 80)}`);
+out(openedB && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/710000002" && statuses("710000002").includes(NOTE) && todoB.current?.id === "710000002",
+  "Steam refused the helper, no sign-in → the item's page opens through the Steam to-do, its status says \"" + NOTE + "\"",
+  `opened ${urls().slice(n0).join(" ")} | ${statuses("710000002").join(" | ")} | to-do ${JSON.stringify(todoB).slice(0, 120)}`);
 fs.rmSync(`${T}/steamlib/fail-init`);
+await post("/steam-todo/stop");
+r = await Promise.race([pB, ceiling(10000)]);
+body = r ? await r.json().catch(() => null) : null;
+out(body?.skipped === true, "…Stop in the to-do ends that download as skipped", JSON.stringify(body));
 
 // c. cancel from the page mid-download: the child releases Steam and exits, nothing imported
 const r0 = released().length;
@@ -69,17 +78,18 @@ ac.abort(); await pc; await until(() => !alive(childPid()) && released().length 
 const pid3 = childPid();
 out(!alive(pid3) && released().length >= r0 + 2 && !(await lib()).some((i) => i.workshopId === "710000003"),
   "cancelled mid-download: the child released Steam + exited, nothing imported", `pid ${pid3} alive ${alive(pid3)}, released +${released().length - r0}`);
-// d. "Open in the Steam app" (steampage): the page opens even though the Steam client would answer — no helper started
+// d. "Subscribe with Steam login" signed out: straight to the page even though the Steam client would answer — the client
+// never stands in for that mode, no helper started
 const settings = await (await fetch(U + "/settings")).json();
-await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settings, workshopDownloadMode: "steampage" }) });
+await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...settings, workshopDownloadMode: "subscribe" }) });
 const pidBefore = childPid();
 n0 = urls().length;
 const pd = download("710000004");
 let u = null;
 for (let i = 0; i < 100 && !u; i++) { await sleep(100); u = urls().slice(n0).find((x) => x.includes("710000004")) ?? null; }
-out(u === "steam://url/CommunityFilePage/710000004" && childPid() === pidBefore, "Open in the Steam app: the page opens, the Steam-client helper isn't used", `${u ?? "nothing opened"}, helper pid ${childPid() === pidBefore ? "unchanged" : "NEW"}`);
+out(u === "steam://url/CommunityFilePage/710000004" && childPid() === pidBefore, "Subscribe with Steam login, signed out: the page opens, the Steam-client helper isn't used", `${u ?? "nothing opened"}, helper pid ${childPid() === pidBefore ? "unchanged" : "NEW"}`);
 const st4 = (ev[pageUrl("710000004")] ?? []).map((e) => e.status).filter(Boolean);
-out(st4.includes("Click Subscribe in Steam, then it downloads by itself…"), "…its status says to click Subscribe", st4.join(" | "));
+out(st4.includes(NOTE), "…its status says \"" + NOTE + "\"", st4.join(" | "));
 const d4 = `${T}/ws3/431960/710000004`; fs.mkdirSync(d4, { recursive: true });
 fs.copyFileSync(`${T}/clip.mp4`, `${d4}/v.mp4`); fs.writeFileSync(`${d4}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: "ws-710000004" }));
 r = await Promise.race([pd, ceiling(60000)]);
@@ -116,24 +126,25 @@ out(ok5 && had && !fs.existsSync(`${T}/steamlib/sub-710000005`) && urls().length
 // the user's own unsubscribe reports its progress (the toast), counted 0 of 1 then 1 of 1
 out(unsub.some((e) => !e.finished && e.total === 1 && e.done === 0 && e.currentId === "710000005") && unsub.some((e) => !e.finished && e.total === 1 && e.done === 1),
   "…and reports its progress (0 of 1, then 1 of 1): unsub-progress stays for the user's own unsubscribes", JSON.stringify(unsub));
-// Steam unreachable → the unsubscribe FAILS with the reason and stays queued; nothing opens
+// Steam unreachable, no sign-in → the fallback order's last step: its page through the Steam to-do, pending until Next
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
-n0 = urls().length;
+n0 = urls().length; todo.length = 0;
 const ok1 = await dropAndDrain("710000001");
-const failMsg = unsub.find((e) => e.message)?.message ?? "";
-out(ok1 && urls().length === n0 && (await queue()).includes("710000001") && /Couldn't use the Steam app/.test(failMsg) && /tries again with your next unsubscribe/.test(failMsg),
-  "…Steam unreachable: the unsubscribe fails with the reason, stays queued, nothing opens", `opened ${urls().length - n0} | ${failMsg}`);
+const pageMsg = unsub.find((e) => e.message)?.message ?? "";
+await waitUrl("710000001", n0);
+out(ok1 && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/710000001" && (await queue()).includes("710000001")
+  && todo.at(-1)?.action === "unsubscribe" && pageMsg === "Click Unsubscribe on the page Steam opened, then Next.",
+  "…Steam unreachable, no sign-in: its page opens through the Steam to-do, pending until Next, the status says what to click", `opened ${urls().slice(n0).join(" ")} | ${pageMsg}`);
 fs.rmSync(`${T}/steamlib/fail-init`);
-// Steam reachable again → the next drain finishes it through the Steam client
-unsub.length = 0;
-await fetch(U + "/workshop/drain", { method: "POST" });
-await until(() => unsub.some((e) => e.finished));
+// Steam reachable again → the to-do's "Let the Steam app do all 1" unsubscribes it through the Steam client
+await post("/steam-todo/use-steam-app");
+await until(async () => !fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001"));
 out(!fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001"),
-  "…and the next drain (Steam back) unsubscribes it through the Steam client", `still subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}`);
+  "…and \"Let the Steam app do all 1\" (Steam back) unsubscribes it through the Steam client", `still subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}`);
 
 // g. Undo after Steam already
-// unsubscribed → subscribed again, the way the mode subscribes. 710000001 is the latest batch (the Steam client unsubscribed
-// it on the second drain), 710000005 the one before (the Steam client unsubscribed it).
+// unsubscribed → subscribed again, by the fallback order. 710000001 is the latest batch (the Steam client unsubscribed it from
+// the to-do), 710000005 the one before (the Steam client unsubscribed it).
 const undo = async () => (await (await fetch(U + "/library/undo", { method: "POST" })).json());
 // 710000001: Steam reachable → the Steam client subscribes it again
 const relBefore = released().length;
@@ -144,15 +155,16 @@ await until(() => released().length >= relBefore + 2);
 out(fs.existsSync(`${T}/steamlib/sub-710000001`) && !(await queue()).includes("710000001") && !!(await item("710000001")),
   "Undo after Steam unsubscribed it: subscribed again through the Steam client, back in the library, off the queue",
   `subscribed ${fs.existsSync(`${T}/steamlib/sub-710000001`)}, in library ${!!(await item("710000001"))}`);
-// 710000005 with Steam unreachable → the undo happens (back in the library) but the re-subscribe FAILS with the reason; nothing
-// opens, the status bar says so
+// 710000005 with Steam unreachable, no sign-in → the undo happens (back in the library) and the re-subscribe takes the order's
+// last step: its page through the Steam to-do; the status bar says what to click
 fs.writeFileSync(`${T}/steamlib/fail-init`, "");
 n0 = urls().length; unsub.length = 0;
 await undo();
 await until(() => unsub.some((e) => e.message));
 const msg = unsub.find((e) => e.message)?.message ?? "";
-out(urls().length === n0 && /^Undone, but couldn't use the Steam app/.test(msg) && !!(await item("710000005")),
-  "…Steam unreachable: back in the library, the re-subscribe fails with the reason, nothing opens", `opened ${urls().length - n0} | ${msg}`);
+await waitUrl("710000005", n0);
+out(urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/710000005" && /^Undone\. To keep it subscribed, click Subscribe on the page Steam opened/.test(msg) && !!(await item("710000005")),
+  "…Steam unreachable, no sign-in: back in the library, the re-subscribe opens its page through the Steam to-do", `opened ${urls().slice(n0).join(" ")} | ${msg}`);
 await post("/steam-todo/stop");
 fs.rmSync(`${T}/steamlib/fail-init`);
 
@@ -162,13 +174,11 @@ const setMode = async (mode) => { const c = await (await fetch(U + "/settings"))
 const helpersLog = () => fs.existsSync(`${T}/steamlib/helpers.log`) ? fs.readFileSync(`${T}/steamlib/helpers.log`, "utf8").split("\n").filter(Boolean) : [];
 const lastTodo = () => todo.at(-1) ?? null;
 const waitTodo = async (pred, ms = 5000) => { for (let i = 0; i < ms / 50 && !pred(lastTodo()); i++) await sleep(50); return lastTodo(); };
-const waitUrl = async (id, from, ms = 5000) => { for (let i = 0; i < ms / 50; i++) { if (urls().slice(from).some((x) => x.includes(id))) return true; await sleep(50); } return false; };
 const dropItem = (id) => { const d = `${T}/steamlib/${id}`; /* the WE folder setting is $T/wslink → steamlib since e. */ fs.mkdirSync(d, { recursive: true });
   fs.copyFileSync(`${T}/clip.mp4`, `${d}/v.mp4`); fs.writeFileSync(`${d}/project.json`, JSON.stringify({ type: "video", file: "v.mp4", title: `ws-${id}` })); };
 const settle = (p, ms = 15000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), ceiling(ms)]);
-const statuses = (id) => (ev[pageUrl(id)] ?? []).map((e) => e.status).filter(Boolean);
 
-await setMode("steampage");
+await setMode("subscribe"); // signed out here: every download goes to its page
 let h0 = helpersLog().length;
 n0 = urls().length; todo.length = 0;
 const ids3 = ["720000001", "720000002", "720000003"];
@@ -178,11 +188,11 @@ for (const [k, id] of ids3.entries()) { dl3.push(download(id)); await waitTodo((
 let t = await waitTodo((x) => x?.total === 3);
 await sleep(800);
 out(urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/720000001",
-  "bulk download of 3 (Open in the Steam app): only the FIRST page opens", urls().slice(n0).join(" ") || "nothing opened");
+  "bulk download of 3 by the page: only the FIRST page opens", urls().slice(n0).join(" ") || "nothing opened");
 out(t?.action === "subscribe" && t.index === 1 && t.total === 3 && t.remaining === 3 && t.current?.id === "720000001" && t.current?.title === "ws-720000001",
   "…WS steam-todo: subscribe, 1 of 3, the first item's id + title", JSON.stringify(t));
-out(statuses("720000002").at(-1)?.includes("Steam to-do") && statuses("720000003").at(-1)?.includes("Steam to-do") && /click Subscribe/i.test(statuses("720000001").at(-1) ?? ""),
-  "…the queued ones say \"In the Steam to-do\", the current one \"click Subscribe\"", ids3.map((id) => statuses(id).at(-1)).join(" | "));
+out(statuses("720000002").at(-1)?.includes("Steam to-do") && statuses("720000003").at(-1)?.includes("Steam to-do") && statuses("720000001").at(-1) === NOTE,
+  "…the queued ones say \"In the Steam to-do\", the current one \"" + NOTE + "\"", ids3.map((id) => statuses(id).at(-1)).join(" | "));
 out(t?.autoNext === true, "…item 1 wasn't on disk when its page opened → autoNext", JSON.stringify(t));
 dropItem("720000001"); // Steam delivers item 1 (the user clicked Subscribe)
 const r1 = await settle(dl3[0]);
@@ -207,7 +217,7 @@ await sleep(300);
 out(r3?.body?.skipped === true && t?.finished === true && urls().length === n0 + 3, "Stop → the rest ends as skipped, the to-do finished, nothing more opens", `${JSON.stringify(r3)} | ${JSON.stringify(t)}`);
 out(helpersLog().length === h0, "…the page route never started a Steam-client helper", `${helpersLog().length - h0} helper log lines`);
 
-// Delete from source of 3 (Open in the Steam app): the two Steam has in its Workshop folder (720000001 dropped there, 710000001
+// Delete from source of 3 (by the page, signed out): the two Steam has in its Workshop folder (720000001 dropped there, 710000001
 // installed by the fake during g.) get their pages, one at a time; 710000004 has no folder in any Steam root now (it came from
 // $T/ws3, not the WE folder setting since e. — like an owned one-off copy, never a subscription) →
 // no page, blocked at once. Next = unsubscribed (blocked), Skip = kept subscribed (out of pending + blocked).
@@ -218,7 +228,7 @@ await post("/workshop/drain");
 await waitTodo((x) => x?.total >= 2);
 await sleep(600);
 out(delItems.length === 3 && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/720000001" && lastTodo()?.action === "unsubscribe" && lastTodo()?.total === 2,
-  "bulk Delete from source of 3 (Open in the Steam app): ONE page — the first item's, never the subscriptions list; Unsubscribe 1 of 2", `${urls().slice(n0).join(" ")} | ${JSON.stringify(lastTodo())}`);
+  "bulk Delete from source of 3 (signed out, by the page): ONE page — the first item's, never the subscriptions list; Unsubscribe 1 of 2", `${urls().slice(n0).join(" ")} | ${JSON.stringify(lastTodo())}`);
 out(!(await queue()).includes("710000004") && !urls().slice(n0).some((x) => x.includes("710000004")),
   "…the one with no Steam folder (an owned one-off copy): no page, no entry, off pending");
 out((await queue()).includes("720000001"), "…the current one's id stays pending until Next");
@@ -230,7 +240,7 @@ t = await waitTodo((x) => x?.finished);
 out(t?.finished === true && !(await queue()).includes("710000001"), "Skip → kept subscribed: off pending (and blocked), the to-do finished");
 out(helpersLog().length === h0, "…no Steam-client helper for the page route's unsubscribes either");
 
-// "Let the Steam app do all N": the remaining entries go through the (fake) Steam client — the saved mode stays steampage.
+// "Let the Steam app do all N": the remaining entries go through the (fake) Steam client — the saved mode stays subscribe.
 // First with Steam unreachable: the panel says so and the to-do stays as it was.
 n0 = urls().length; todo.length = 0;
 const idsU = ["730000001", "730000002"];
@@ -249,7 +259,7 @@ out(!ru.error && ra.every((x, i) => x?.status === 200 && x.body?.workshopId === 
 out(lastTodo()?.finished === true && urls().length === n0 + 1, "…the to-do finished, no further page opened", JSON.stringify(lastTodo()));
 out(idsU.some((id) => statuses(id).includes("Waiting for the Steam app…")), "…one waited its turn: \"Waiting for the Steam app…\"",
   idsU.map((id) => statuses(id).join(" > ")).join(" || "));
-out((await (await fetch(U + "/settings")).json()).workshopDownloadMode === "steampage", "…the saved mode is unchanged (steampage)");
+out((await (await fetch(U + "/settings")).json()).workshopDownloadMode === "subscribe", "…the saved mode is unchanged (subscribe)");
 // the same for unsubscribes: Delete from source → the to-do → "Let the Steam app do all 2" → the Steam client unsubscribes
 todo.length = 0;
 await post("/workshop/delete-from-source", { items: [await item("730000001"), await item("730000002")].filter(Boolean) });
@@ -490,8 +500,8 @@ out(wasOwn && rs.status === 200 && bs?.subscribed === true && !!kBefore && kBefo
   `own before ${wasOwn} ${rs.status} ${JSON.stringify(bs)} | link ${isLink(kLink)} items ${JSON.stringify(kNow.map((i) => [i.videoPath, i.subscribed]))}`);
 await post("/settings", { autoAddWeWallpapersToLibrary: false });
 
-// "Open in the Steam app" (steampage): the toggle goes through the Steam to-do — never the Steam client
-await setMode("steampage");
+// "Subscribe with Steam login" signed out: the toggle goes through the Steam to-do — never the Steam client
+await setMode("subscribe");
 h0 = helpersLog().length; todo.length = 0;
 n0 = urls().length;
 ru = await post("/workshop/unsubscribe", { workshopId: "740000002", title: "ws-740000002" });
@@ -500,14 +510,14 @@ t = await waitTodo((x) => x?.current?.id === "740000002", 9000); // after the Un
 for (let i = 0; i < 30 && !urls().slice(n0).includes("steam://url/CommunityFilePage/740000002"); i++) await sleep(100);
 st = await state(["740000002"]);
 out(t?.action === "unsubscribe" && urls().slice(n0).includes("steam://url/CommunityFilePage/740000002") && st["740000002"]?.pending === "unsubscribe",
-  "Unsubscribe (Open in the Steam app): a Steam to-do unsubscribe entry, its page opened, state pending unsubscribe", `${JSON.stringify(t)} | ${JSON.stringify(st["740000002"])} | opened ${JSON.stringify(urls().slice(n0))}`);
+  "Unsubscribe (signed out, by the page): a Steam to-do unsubscribe entry, its page opened, state pending unsubscribe", `${JSON.stringify(t)} | ${JSON.stringify(st["740000002"])} | opened ${JSON.stringify(urls().slice(n0))}`);
 await post("/steam-todo/next");
 t = await waitTodo((x) => x?.finished);
 st = await state(["740000002"]);
 out(t?.finished === true && !(await queue()).includes("740000002") && st["740000002"]?.subscribed === false && st["740000002"].pending === null,
   "…Next → unsubscribed (off pending), state not subscribed", JSON.stringify(st["740000002"]));
 
-// Subscribe (Open in the Steam app): a to-do subscribe entry without a download; Next finishes it, nothing imported
+// Subscribe (signed out, by the page): a to-do subscribe entry without a download; Next finishes it, nothing imported
 libN = (await lib()).length; n0 = urls().length; todo.length = 0;
 rs = await post("/workshop/subscribe", { workshopId: "760000003", title: "sub-only 3" });
 bs = await rs.json().catch(() => null);
@@ -516,7 +526,7 @@ await waitUrl("760000003", n0); // the stub xdg-open runs detached (setsid) — 
 st = await state(["760000003"]);
 out(rs.status === 200 && bs?.inSteamTodo === true && bs.subscribed === false && t?.action === "subscribe" && t?.autoNext === true
   && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/760000003" && st["760000003"]?.pending === "subscribe",
-  "Subscribe (Open in the Steam app): a Steam to-do subscribe entry (no download), its page opened, state pending subscribe", `${JSON.stringify(bs)} | ${JSON.stringify(t)}`);
+  "Subscribe (signed out, by the page): a Steam to-do subscribe entry (no download), its page opened, state pending subscribe", `${JSON.stringify(bs)} | ${JSON.stringify(t)}`);
 await post("/steam-todo/next");
 t = await waitTodo((x) => x?.finished);
 for (let i = 0; i < 40 && !subEv.some((e) => e.id === "760000003" && e.done); i++) await sleep(50);
@@ -659,7 +669,7 @@ await setMode("steamapp");
   out(calls().includes("unsubscribe 3583880694") && !calls().includes("unsubscribe 3354740764") && fs.existsSync(`${T}/steamlib/sub-3354740764`) && !!(await item("3354740764")),
     "Delete from source of a preset (Use the Steam app): its base stays subscribed and in the library", calls().filter((l) => /33547|35838/.test(l)).join(", "));
 
-  // "Open in the Steam app", then the Steam to-do's "Let the Steam app do all 1": the user's switch for that batch. The client's
+  // by its page (signed out), then the Steam to-do's "Let the Steam app do all 1": the user's switch for that batch. The client's
   // subscribe shows no required-items prompt, so the base goes through the client right after its preset — never its own page,
   // never a wait for a base nobody asked Steam for. Made-up preset ids, each a fixture with its base id rewritten (cm.json).
   const presetTpl = (id, fixture, dep) => {
@@ -671,7 +681,7 @@ await setMode("steamapp");
   };
   presetTpl("910000101", "3009121253", "900000001");
   presetTpl("910000104", "3520333138", "900000006");
-  await setMode("steampage");
+  await setMode("subscribe"); // signed out: by the page
   const after = (l, a, b) => l.includes(`subscribe ${a}`) && l.indexOf(`subscribe ${b}`) > l.indexOf(`subscribe ${a}`);
   n0 = urls().length; todo.length = 0;
   const pT = settle(dl("910000101"), 60000);
@@ -682,7 +692,7 @@ await setMode("steamapp");
   const cT = calls();
   out(rT?.status === 200 && after(cT, "910000101", "900000001") && !!(await item("900000001")) && (await item("910000101"))?.presetReason === PLAYS
     && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000101",
-    "preset (Open in the Steam app → Let the Steam app do all 1): the client subscribes the preset, then its base; both imported, only the preset's page opened",
+    "preset (by its page → Let the Steam app do all 1): the client subscribes the preset, then its base; both imported, only the preset's page opened",
     `${rT?.status} | ${cT.filter((l) => /910000101|900000001/.test(l)).join(", ")} | ${(await item("910000101"))?.presetReason} | ${urls().slice(n0).join(" ")}`);
   n0 = urls().length; todo.length = 0;
   const rT2 = await post("/workshop/subscribe", { workshopId: "910000104", title: "preset" });
@@ -691,7 +701,7 @@ await setMode("steamapp");
   await until(() => calls().includes("subscribe 900000006"), 30000);
   await helpersDone();
   out(rT2.status === 200 && after(calls(), "910000104", "900000006") && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/910000104",
-    "Subscribe of a preset (Open in the Steam app → Let the Steam app do all 1): its base is subscribed through the client right after it, no page for it",
+    "Subscribe of a preset (by its page → Let the Steam app do all 1): its base is subscribed through the client right after it, no page for it",
     `${calls().filter((l) => /910000104|900000006/.test(l)).join(", ")} | ${urls().slice(n0).join(" ")}`);
 }
 ws.close();

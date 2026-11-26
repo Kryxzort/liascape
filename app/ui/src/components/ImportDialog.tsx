@@ -4,6 +4,7 @@ import { CloudCheck, Film, ImagePlay, Image as ImageIcon, Layers, Link2, LoaderC
 import { useStore } from "../store";
 import { api, type FoundItem, type ImportScan, type LinkTarget } from "../api/client";
 import { shortDownloadStatus } from "./downloadStatus";
+import { downloadHint } from "./subscribeMode";
 import { useFadeOff, useMotion, FADE } from "./motion";
 import { magnetRef } from "./magnet";
 import { FolderFlap } from "./icons";
@@ -95,7 +96,7 @@ export function ImportDialog() {
     }, linkTrim === req?.link?.trim() ? 0 : 350);
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [isLink, linkTrim, req]);
-  const linkReady = !!found?.target && !found.target.inLibrary && !found.target.blocked && !importing;
+  const linkReady = !!found?.target && !found.target.inLibrary && !importing;
   const goLink = async () => {
     const t = found?.target;
     if (!t || !linkReady) return;
@@ -251,6 +252,7 @@ function LinkLine({ text, found, importing, failed }: {
   const progress = useStore((s) => (importing ? s.downloads[importing.id] : undefined));
   const step = useStore((s) => (importing ? s.downloadStatus[importing.id] : undefined));
   const t = found?.target;
+  const wsHint = useStore((s) => (t?.kind === "workshop" ? downloadHint(s.settings, s.steam) : null));
   const key = !found ? "checking" : t ? `found:${t.id}` : `error:${found.error}`;
   // always mounted, so the first line in (the field's first character) fades in like every later change
   return (
@@ -269,7 +271,9 @@ function LinkLine({ text, found, importing, failed }: {
               </span>
               {t.inLibrary && <span className="imp-have">In your library</span>}
             </div>
-            {t.blocked && <p className="imp-link-why" data-import-link-blocked>{t.blocked}</p>}
+            {/* a Workshop item: which way its download goes in the chosen mode and sign-in, the Browse sidebar's line (the
+                page when there's no usable sign-in under "Subscribe with Steam login"). Guard: probe-import import:link:workshop */}
+            {wsHint && !t.inLibrary && <p className="imp-link-hint" data-import-link-hint>{wsHint}</p>}
             {/* the last import's failure: under the item, which stays so Import can try again */}
             <AnimatePresence initial={false}>
               {failed && !importing && (

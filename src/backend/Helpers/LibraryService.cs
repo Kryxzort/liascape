@@ -945,9 +945,7 @@ public static class LibraryService
         }
     }
 
-    // `only` (source, key): restore just those entries and keep the rest of the batch in the trash (an unsubscribe the app
-    // dropped brings back only its own items: Web/AppOps.DropUnsubscribes)
-    public static void RestoreBatch(string batchDir, Func<string, string, bool>? only = null)
+    public static void RestoreBatch(string batchDir)
     {
         if (!Directory.Exists(batchDir)) return;
         foreach (var sourceDir in Directory.GetDirectories(batchDir))
@@ -961,19 +959,17 @@ public static class LibraryService
                 try
                 {
                     var e = JsonSerializer.Deserialize<TrashedEntry>(File.ReadAllText(entryFile));
-                    if (e == null || (only != null && !only(source, e.Key))) continue;
+                    if (e == null) continue;
                     var folderSrc = Path.Combine(sourceDir, e.Key);            // scene + video both restore the folder
                     if (Directory.Exists(folderSrc) && !Directory.Exists(Path.Combine(target, e.Key)))
                         Directory.Move(folderSrc, Path.Combine(target, e.Key));
                     restored[e.Key] = e.Meta;
-                    if (only != null) File.Delete(entryFile);
                 }
                 catch { }
             }
             if (restored.Count > 0)
                 LibraryStore.UpdateIndex(source, idx => { foreach (var (k, m) in restored) idx[k] = m; return true; });
         }
-        if (only != null && Directory.EnumerateFiles(batchDir, "*.meta.json", SearchOption.AllDirectories).Any()) return;
         try { Directory.Delete(batchDir, recursive: true); } catch { }
     }
 

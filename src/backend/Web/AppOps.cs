@@ -231,7 +231,7 @@ public static class AppOps
         WallpaperDetail dl = detail;
         string? anim = animatedUrl;
         string? letGo = null; // a one-off's fetching subscription, unsubscribed once the library has its copy
-        bool viaSteamApp = false; // the Steam to-do's "Let the Steam app do all N" fetched it (WorkshopDownloader.TookSteamApp)
+        var route = WorkshopDownloader.Route.Direct; // how Steam's copy came (WorkshopDownloader.Took): a preset's base follows it
         try
         {
             if (detail.IsWorkshopAcquire && detail.WorkshopId != null)
@@ -250,7 +250,7 @@ public static class AppOps
                     using (WorkshopSubOps.Subscribing(detail.WorkshopId))
                     {
                         dir = await WorkshopDownloader.AcquireAsync(detail.WorkshopId, s, ap, ct, detail.Title);
-                        viaSteamApp = WorkshopDownloader.TookSteamApp(detail.WorkshopId);
+                        route = WorkshopDownloader.Took(detail.WorkshopId);
                     }
                 string url = dir;
                 if (!detail.IsScene)
@@ -277,7 +277,7 @@ public static class AppOps
             PreviewBackfill.Kick("download"); // its card's previews
             EventBus.Broadcast("download-progress", new { id = sourceId, value = 1.0, done = true });
             // a preset brings its base scene, by this download's own mode and action (in the background, never throws)
-            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) PresetDownloads.Start(item, () => PresetDownloads.FetchBaseAsync(item, oneOff, viaSteamApp));
+            if (detail.IsWorkshopAcquire && item.IsScene && Presets.Read(item.VideoPath) != null) PresetDownloads.Start(item, () => PresetDownloads.FetchBaseAsync(item, oneOff, route));
             // …and one added from the Wallpaper Engine folder (Browse's "Wallpaper Engine (Local)") its base from beside it
             else if (!detail.IsWorkshopAcquire && detail.WorkshopId != null && item.IsScene && Directory.Exists(detail.DownloadUrl)
                 && Presets.Read(item.VideoPath) != null)
@@ -552,48 +552,15 @@ public static class AppOps
             }
             _undo.RemoveAt(_undo.Count - 1);
         }
-        RestoreUndo(batch, whole: true, w.Unsubscribed);
+        RestoreUndo(batch, w.Unsubscribed);
         return new(true, batch.Items.Count, batch.Items.Count > 0 ? batch.Items[0].Title : null);
     }
 
-    // Unsubscribes the app won't send (signed out, or Steam turned the sign-in down, before the drain sent them): dropped the way
-    // their Undo would be, but only theirs. Each item of a Delete from source holding one comes back (library, playlist place;
-    // the rest of its batch stays undoable), and every id leaves the queue, so it stays subscribed (an "Unsubscribe without
-    // deleting" copy gives way to Steam's link again on the next sync). Returns how many library items came back.
-    // Guard: steam-selftest "sign-out in the Undo window", "unsub, signed out"
-    public static int DropUnsubscribes(IReadOnlyCollection<string> ids)
-    {
-        if (ids.Count == 0) return 0;
-        var set = ids.ToHashSet(StringComparer.Ordinal);
-        bool Dropped(LibraryItem i) => i.WorkshopId is string w && set.Contains(w);
-        var back = new List<(UndoBatch Part, bool Whole)>();
-        lock (_undoLock)
-            for (int k = _undo.Count - 1; k >= 0; k--)
-            {
-                var b = _undo[k];
-                if (!b.Items.Any(Dropped)) continue;
-                var keep = b.Items.Where(i => !Dropped(i)).ToList();
-                var goes = b.Items.Where(Dropped).Select(i => i.VideoPath).ToHashSet();
-                back.Add((new UndoBatch(b.BatchDir, b.Items.Where(Dropped).ToList(), b.FromPlaylist.Where(x => goes.Contains(x.Path)).ToList()), keep.Count == 0));
-                if (keep.Count == 0) _undo.RemoveAt(k);
-                else _undo[k] = b with { Items = keep, FromPlaylist = b.FromPlaylist.Where(x => !goes.Contains(x.Path)).ToList() };
-            }
-        foreach (var (part, whole) in back) RestoreUndo(part, whole);
-        foreach (var id in set) { WorkshopUnsubQueue.Restore(id); SteamTodo.DropUnsubscribe(id); }
-        EventBus.Broadcast("library-synced", new { count = 0 }); // the library and the Undo button follow
-        return back.Sum(x => x.Part.Items.Count);
-    }
-
-    // puts a trash batch's items back (`whole` = the batch; else only `batch.Items`, the rest stays in the trash). `withdrawn`:
+    // puts a trash batch's items back. `withdrawn`:
     // Undo took the unsubscribes back already (WorkshopUnsubQueue.Withdraw), these ones Steam had done; null = take them back here
-    private static void RestoreUndo(UndoBatch batch, bool whole, IReadOnlyCollection<string>? withdrawn = null)
+    private static void RestoreUndo(UndoBatch batch, IReadOnlyCollection<string>? withdrawn = null)
     {
-        if (whole) LibraryService.RestoreBatch(batch.BatchDir);
-        else
-        {
-            var keys = batch.Items.Select(i => LibraryStore.Locate(i.VideoPath)).OfType<(string Source, string Key)>().ToHashSet();
-            LibraryService.RestoreBatch(batch.BatchDir, (src, key) => keys.Contains((src, key)));
-        }
+        LibraryService.RestoreBatch(batch.BatchDir);
         // back into the playlist where they were (live — a running rotation picks them up again)
         if (batch.FromPlaylist.Count > 0 && PlaylistService.LoadCurrentState() is { } pl)
         {

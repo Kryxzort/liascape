@@ -211,16 +211,16 @@ public class AppSettings
     // UI: "Start with your desktop": Liascape's own XDG autostart entry running `liascape restore` (Helpers/Autostart.cs),
     // written or removed live by /settings
     public bool StartWithDesktop { get; set; } = false;
-    // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one click, Steam's
-    // own progress; it FAILS when Steam can't be reached, never a fallback — WorkshopDownloader), "subscribe" (real
-    // Steam subscription via the community endpoint with the sign-in, or the item's page in the Steam app without one),
-    // or "steampage" (always the item's page in the Steam app — the user clicks Subscribe there). Any other stored value reads
-    // as the default. Guard: steam-selftest "stored mode", test-settings-merge.sh, probe-steam steam:row:steamcmd
-    private string _workshopDownloadMode = "subscribe";
+    // "steamapp" (the default: the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one
+    // click, Steam's own progress) or "subscribe" (real Steam subscription via the community endpoint with the sign-in); what
+    // the chosen one can't do falls back down WorkshopDownloader's order to the item's page in the Steam app. Any other stored
+    // value (the dropped "steamcmd" and "steampage") reads as the default. Guard: steam-selftest "stored mode",
+    // test-settings-merge.sh, probe-steam steam:row:steamcmd
+    private string _workshopDownloadMode = "steamapp";
     public string WorkshopDownloadMode
     {
         get => _workshopDownloadMode;
-        set => _workshopDownloadMode = value is "steamapp" or "steampage" or "subscribe" ? value : "subscribe";
+        set => _workshopDownloadMode = value is "steamapp" or "subscribe" ? value : "steamapp";
     }
     // The Steam client's steamclient.so for "steamapp"; empty = find it (~/.steam/sdk64, the Steam dir, Flatpak).
     public string SteamClientLibPath { get; set; } = "";

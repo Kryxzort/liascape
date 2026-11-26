@@ -6,7 +6,8 @@ export function shortDownloadStatus(status: string | undefined): string {
   // waiting for its page's turn in the Steam to-do (components/SteamTodoPanel.tsx) / for the Steam client (one helper at a time)
   if (status.includes("Steam to-do")) return "In the Steam to-do";
   if (status.startsWith("Waiting for the Steam app")) return "Waiting for the Steam app…";
-  if (/click subscribe/i.test(status)) return "Click Subscribe in Steam";
+  // WorkshopDownloader.OpenedInSteam: its page waits in the Steam app (the fallback order's last step)
+  if (/click subscribe/i.test(status) || status.startsWith("Opened in Steam")) return "Click Subscribe in Steam";
   if (status.startsWith("Steam is downloading")) return "Steam is downloading…";
   if (status.startsWith("Steam is finishing")) return "Steam is finishing…";
   if (status.startsWith("Subscribing")) return "Subscribing…";

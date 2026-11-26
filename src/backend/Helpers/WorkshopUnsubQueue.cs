@@ -99,16 +99,6 @@ public static class WorkshopUnsubQueue
         lock (_gate) return new HashSet<string>(_quiet, StringComparer.Ordinal);
     }
 
-    // the pending ids still inside their Undo window (Web/SteamOps.DropHeldUnsubscribes: a sign-out drops them)
-    public static List<string> SnapshotHeld()
-    {
-        lock (_gate)
-        {
-            var now = DateTime.UtcNow;
-            return Load().Pending.Where(id => _holdUntil.TryGetValue(id, out var t) && t > now).ToList();
-        }
-    }
-
     // an explicit drain (SteamOps.DrainNow) doesn't wait out the window
     public static void ReleaseHolds() { lock (_gate) _holdUntil.Clear(); }
 
@@ -199,7 +189,7 @@ public static class WorkshopUnsubQueue
         }
     }
 
-    // An unsubscribe dropped like its Undo (AppOps.DropUnsubscribes: no usable sign-in): out of both lists. True = Steam had
+    // An unsubscribe taken back whole (AppOps.RestoreUndo without a Withdraw first): out of both lists. True = Steam had
     // ALREADY unsubscribed it (blocked, no longer pending). Undo itself goes through Withdraw.
     public static bool Restore(string id)
     {

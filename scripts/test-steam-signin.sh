@@ -1,46 +1,49 @@
 #!/usr/bin/env bash
-# Hermetic test of the Steam paths that need no Steam account (a password sign-in beside the QR; Workshop downloads through
-# the sign-in, the Steam app's page or the Steam client, each the user's pick, and each failing with its reason, never
-# switching to another):
+# Hermetic test of the Steam paths that need no Steam account (a password sign-in beside the QR; Workshop downloads by the
+# fallback order: the chosen mode — the Steam client or the sign-in —, the sign-in standing in for the Steam app, then the
+# item's page in the Steam app, and nothing else):
 #  1. `liascape-backend steam-selftest` — the password sign-in's plumbing with a scripted sign-in in place of SteamKit2
 #     (email / authenticator / approve-in-the-app steps, a wrong code, cancel, replace, timeout, wrong password, Steam's
-#     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json); who may
-#     unsubscribe per mode and sign-in; signed out an unsubscribe in its Undo window (a sign-out, Steam turning the sign-in
-#     down) or due is dropped like its Undo (the item back, still subscribed, no page, no to-do); and "Open in the Steam app"'s
-#     unsubscribe through the Steam to-do (Web/SteamTodo.cs: one page at a time — never the subscriptions list —, pending
-#     until Next → blocked, Open again, Skip / Stop → kept subscribed, an item Steam doesn't have → no page, a second drain
-#     leaves the to-do's ids alone, WS steam-todo).
+#     rate limit + the hold after it, what's saved, the password nowhere in the events / console / settings.json); the one
+#     rule per mode × sign-in × action (only "Subscribe with Steam login"'s one-off without a sign-in is off); an unsubscribe
+#     in its Undo window stays queued through a sign-out or Steam turning the sign-in down, and without a usable sign-in the
+#     drain sends each item's page through the Steam to-do (Web/SteamTodo.cs: one page at a time — never the subscriptions
+#     list —, pending until Next → blocked, Open again, Skip / Stop → kept subscribed, an item Steam doesn't have → no page,
+#     a second drain leaves the to-do's ids alone, WS steam-todo); Undo's re-subscribe the same.
 #  2. A private backend whose PATH puts a stub `xdg-open` first (it only records the URL — the real Steam client is never
-#     started) and whose Workshop folder is a temp dir: POST /download of a Workshop item (no network: the result carries
-#     `trailerKnown`) under "Subscribe with Steam login" with no sign-in, then with a sign-in Steam turned down → refused up
-#     front, 400 "Sign in to Steam to download" (merged: "… to subscribe"), nothing opened in Steam, nothing in the to-do or
-#     the library (POST /workshop/subscribe: "Sign in to Steam to subscribe"), an item already on disk too ("Open in the Steam
-#     app" imports it, nothing opened). No mode borrows another's way (WorkshopDownloader.Blocked): the page mode's one-off is
-#     refused even signed in. Under "Open in the Steam app" the item's page is
-#     "opened in Steam" (steam://url/CommunityFilePage/<id>), `download-progress` says "click Subscribe", the test then drops
-#     the item into the Workshop folder (like Steam would) and the download finishes into the library; a download cancelled
-#     from the page stops waiting and imports nothing. "Download without subscribing" (one-off: GET /workshop/one-off, POST
-#     /download {oneOff}) takes each mode's own way: its route per mode × sign-in; signed out under "Subscribe with
-#     Steam login" → none, the download refused (400 "Sign in to Steam…"), nothing sent; signed in (a pasted cookie, the sign-in's subscribe / unsubscribe answered by a fake
-#     community, scripts/test-fixtures/fake-steam-community.mjs) → subscribe, the test drops Steam's files, the library's own
-#     copy, unsubscribed at once (no unsub-progress for the UI), the lingering folder blocked; an item already subscribed is copied, its subscription untouched. Without a usable sign-in the unsubscribe endpoints refuse (400
-#     + "Sign in to Steam to unsubscribe") under "Subscribe with Steam login": nothing queued, trashed or opened. A stored
-#     "steamcmd" mode (dropped) reads as "subscribe". Presets (Web/PresetDownloads.cs; real Workshop ids from
-#     scripts/test-fixtures/presets/, Steam's details from a CM fixture): a preset's download brings its base scene by the same
-#     mode and action — the page mode opens only the preset's page and imports the base once Steam delivers it (a base that
-#     never comes: given up, "Needs its base scene"); signed in the base is subscribed after the preset, a one-off's base is a
-#     one-off too; a download & apply waits for the base, then applies (or says why not); a base in the library is reused;
-#     a web base is never asked for; a Subscribe of a preset subscribes its base; unsubscribing the preset leaves the base alone.
-#  3. "Subscribe through the Steam client" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
+#     started), no Steam client, and whose Workshop folder is a temp dir: POST /download of a Workshop item (no network: the
+#     result carries `trailerKnown`) under "Subscribe with Steam login" with no sign-in, then with a sign-in Steam turned
+#     down (and merged, auto-import on) → the item's page "opened in Steam" (steam://url/CommunityFilePage/<id>) through the
+#     Steam to-do, `download-progress` says "Opened in Steam: subscribe there and it downloads here", the test drops the item
+#     into the Workshop folder (like Steam would) and the download finishes into the library; the sidebar's Subscribe the
+#     same (a to-do entry); an item already on disk imports, nothing opened; under "Use the Steam app" with no Steam client
+#     and no usable sign-in the page too, and with a usable sign-in (a pasted cookie, the sign-in's subscribe / unsubscribe
+#     answered by a fake community, scripts/test-fixtures/fake-steam-community.mjs) the sign-in subscribes, nothing opened.
+#     A download cancelled from the page stops waiting and imports nothing. An unsubscribe without a usable sign-in → its
+#     page through the to-do once its Undo window ends. "Download without subscribing" (one-off: GET /workshop/one-off, POST
+#     /download {oneOff}) takes each mode's own way, never a page: its route per mode × sign-in; signed out under
+#     "Subscribe with Steam login" → none, the download refused (400 "Sign in to Steam…"), nothing sent; signed in →
+#     subscribe, the test drops Steam's files, the library's own copy, unsubscribed at once (no unsub-progress for the UI),
+#     the lingering folder blocked; an item already subscribed is copied, its subscription untouched; under "Use the Steam
+#     app" with no Steam client, the sign-in's way. Stored "steamcmd" and "steampage" modes (dropped) read as "steamapp".
+#     Presets (Web/PresetDownloads.cs; real Workshop ids from scripts/test-fixtures/presets/, Steam's details from a CM
+#     fixture): a preset's download brings its base scene by the route the preset took — through its page only the
+#     preset's page opens and the base is imported once Steam delivers it (a base that never comes: given up, "Needs its
+#     base scene"); signed in the base is subscribed after the preset, a one-off's base is a one-off too; a download & apply
+#     waits for the base, then applies (or says why not); a base in the library is reused; a web base is never asked for; a
+#     Subscribe of a preset subscribes its base; unsubscribing the preset leaves the base alone.
+#  3. "Use the Steam app" (Helpers/SteamClientUgc.cs) against a FAKE steamclient.so
 #     (scripts/test-fixtures/fake_steamclient.c, built here; driver drive-steam-client.mjs): a real percent between 0 and 1,
 #     "Steam is downloading it…", imported from the folder Steam reported, nothing opened in the Steam app, the helper
-#     released Steam + exited; Steam refusing → the download fails with the reason; a cancel → the helper
-#     releases Steam + exits, nothing imported. Then the Steam to-do (h.): a bulk download of 3 under "Open in the Steam app"
-#     opens only the first page, a delivered item 1 doesn't advance it, Next opens page 2, Skip page 3 and ends item 2's
-#     /download as skipped at once, Stop the rest; a bulk Delete from source (one page at a time, no page for an item with no
-#     Steam folder, Next / Skip); "Let the Steam app do all 2" with Steam unreachable (unchanged + the message) and reachable
-#     (downloads and unsubscribes through the fake client, the saved mode unchanged); the page route never starts a
-#     `steam-ugc` child (the fake's helpers.log); 3 steamapp downloads at once never run two helpers at the same time. A
+#     released Steam + exited; Steam refusing (no sign-in here) → the item's page through the to-do; a cancel → the helper
+#     releases Steam + exits, nothing imported; "Subscribe with Steam login" signed out opens the page and never starts a
+#     helper. Then the Steam to-do (h.): a bulk download of 3 by the page opens only the first page, a delivered item 1
+#     doesn't advance it, Next opens page 2, Skip page 3 and ends item 2's /download as skipped at once, Stop the rest; a
+#     bulk Delete from source (one page at a time, no page for an item with no Steam folder, Next / Skip); "Let the Steam
+#     app do all 2" with Steam unreachable (unchanged + the message) and reachable (downloads and unsubscribes through the
+#     fake client, the saved mode unchanged); the page route never starts a `steam-ugc` child (the fake's helpers.log); 3
+#     steamapp downloads at once never run two helpers at the same time; an unsubscribe and Undo's re-subscribe with Steam
+#     unreachable → the page. A
 #     subscribe entry whose files weren't on disk when its page opened finishes by itself once Steam delivers (no Next); one
 #     whose folder was already there waits for Next. Then (i.) the Browse sidebar: POST /steam/open-page → steam://url/
 #     CommunityFilePage/<id> (a non-digit id → 400, nothing opened), /workshop/state, Subscribe without importing (the Steam
@@ -51,11 +54,11 @@
 #     the same path, Steam's folder untouched, nothing trashed; a copy that fails unsubscribes nothing; GET /library's
 #     `subscribed` true before, false after). Then (j.) "Download without subscribing" through the client: DownloadItem, no
 #     subscription, the library's own copy, the lingering folder blocked; a client that refuses DownloadItem → subscribe, copy,
-#     unsubscribe through the client; an item already subscribed stays so; Steam unreachable → the reason. Then (k.) presets
-#     through the client (the fake installs $FAKE_UGC_DIR/template-<id>/): the preset then its base subscribed, a one-off's
-#     both DownloadItem'd, a Subscribe of a preset subscribes its base, a Delete from source of the preset keeps the base; under
-#     "Open in the Steam app" a preset's download or Subscribe handed to "Let the Steam app do all 1" brings its base through
-#     the client too (no page for it).
+#     unsubscribe through the client; an item already subscribed stays so; Steam unreachable (no sign-in) → the reason. Then
+#     (k.) presets through the client (the fake installs $FAKE_UGC_DIR/template-<id>/): the preset then its base subscribed, a
+#     one-off's both DownloadItem'd, a Subscribe of a preset subscribes its base, a Delete from source of the preset keeps the
+#     base; a preset fetched by its page whose download or Subscribe was handed to "Let the Steam app do all 1" brings its
+#     base through the client too (no page for it).
 #  Where the sign-in's secrets live (Helpers/SecretStore.cs; never plaintext in settings.json): § 1 also
 #     checks settings.json never holds a token, the 0600 steam-auth.json fallback (no session bus here), sign-out, and the
 #     keyring path against a STUB secret-tool (the value on stdin, never argv; a refused lookup → signed out, not asked
@@ -121,7 +124,7 @@ privhome "$T/h1"
 grep -E "^(ok|FAIL)" "$T/selftest.log" | sed 's/^/      /'
 [ $rc = 0 ] && grep -q "STEAM-SELFTEST PASS" "$T/selftest.log" && ok "steam-selftest" || { bad "steam-selftest (rc $rc)"; tail -5 "$T/selftest.log"; }
 
-echo "== 2. Workshop download through the Steam app (private backend, stub xdg-open)"
+echo "== 2. Workshop downloads by the fallback order (private backend, stub xdg-open, no Steam client)"
 privhome "$T/h2"
 mkdir -p "$T/bin" "$T/ws/431960"
 cat > "$T/bin/xdg-open" <<EOF
@@ -205,26 +208,11 @@ const lib = async () => (await (await fetch(U + "/library")).json());
 const inLib = async (id) => (await lib()).some((i) => i.workshopId === id);
 
 const setMode = async (mode) => { await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workshopDownloadMode: mode }) }); };
-// "Subscribe with Steam login" without a usable sign-in: the download (and a plain Subscribe) is refused up front, 400 with the
-// one rule's words (WorkshopDownloader.Blocked) — never the item's page in the Steam app (that's "Open in the Steam app"'s
-// job), nothing sent, queued or imported
-async function noSignIn(id, label) {
-  const n0 = urls().length, t0 = todo.length;
-  const r = await Promise.race([download(id), sleep(15000).then(() => null)]);
-  const body = r ? await r.json().catch(() => null) : null;
-  await sleep(500);
-  out(r && r.status === 400 && body?.error === "Sign in to Steam to download",
-    `${label}: the download is refused, 400 "Sign in to Steam to download"`, r ? `${r.status} ${JSON.stringify(body).slice(0, 200)}` : "timed out (waiting on a page?)");
-  out(urls().length === n0 && !todo.slice(t0).some((x) => x.current?.id === id) && !(await inLib(id)),
-    `${label}: nothing opened in Steam, nothing in the to-do, nothing imported`, `${urls().length - n0} opened, to-do ${JSON.stringify(todo.slice(t0).at(-1) ?? null)}`);
-  const rs = await fetch(U + "/workshop/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workshopId: id, title: `ws-${id}` }) });
-  const bs = await rs.json().catch(() => null);
-  await sleep(300);
-  out(rs.status === 400 && bs?.error === "Sign in to Steam to subscribe" && urls().length === n0,
-    `${label}: Subscribe (the sidebar's) is refused, 400 "Sign in to Steam to subscribe", nothing opened`, `${rs.status} ${JSON.stringify(bs).slice(0, 160)}`);
-}
+const fakeLog = async () => (await realFetch(process.env.FAKE + "/__log")).json();
+const subCalls = async (id) => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path) && e.form.id === id).map((e) => `${e.path.slice(13)}${e.signedIn && e.sessionPair ? "" : "(no sign-in)"}`);
 
-// "Open in the Steam app": the item's page in the Steam app, through the to-do
+// the fallback order's last step: the item's page in the Steam app, through the to-do, its note on the card; nothing sent with
+// a sign-in
 async function viaSteam(id, label) {
   const n0 = urls().length;
   const p = download(id);
@@ -233,7 +221,7 @@ async function viaSteam(id, label) {
   out(u === `steam://url/CommunityFilePage/${id}`, `${label}: the item's page opens in the Steam app`, u ?? "nothing opened");
   await sleep(300);
   const st = (status[pageUrl(id)] ?? []).join(" | ");
-  out(st.includes("Click Subscribe in Steam"), `${label}: download-progress says "Click Subscribe in Steam"`, st);
+  out(st.includes("Opened in Steam: subscribe there and it downloads here"), `${label}: download-progress says "Opened in Steam: subscribe there and it downloads here"`, st);
   // Steam's staging folder (<workshop>/downloads/431960/<id>; this test's content root is $T/ws/431960 → <workshop> = $T): the
   // card's "Steam is downloading…" phase, then "Steam is finishing…" once the files are in but not yet steady
   const stage = `${T}/downloads/431960/${id}`; fs.mkdirSync(stage, { recursive: true });
@@ -252,9 +240,24 @@ async function viaSteam(id, label) {
   const mine = todo.filter((x) => x.current?.id === id);
   out(mine.length > 0 && mine.every((x) => x.index === 1 && x.total === 1 && x.autoNext === true) && todo.at(-1)?.finished === true,
     `${label}: the Steam to-do (1 of 1, autoNext) finished by itself once Steam delivered — no Next`, JSON.stringify(mine.at(-1) ?? null));
+  out((await subCalls(id)).length === 0, `${label}: nothing sent with a sign-in`, (await subCalls(id)).join(" "));
 }
 
-await noSignIn("700000001", "no sign-in");
+// the sidebar's Subscribe (nothing imported) without a usable sign-in: a Steam to-do subscribe entry, its page opened
+async function subscribeViaPage(id, label) {
+  const n0 = urls().length;
+  const rs = await fetch(U + "/workshop/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workshopId: id, title: `ws-${id}` }) });
+  const bs = await rs.json().catch(() => null);
+  let u = null;
+  for (let i = 0; i < 50 && !u; i++) { await sleep(100); u = urls().slice(n0).find((x) => x.includes(id)) ?? null; }
+  out(rs.status === 200 && bs?.inSteamTodo === true && bs.subscribed === false && u === `steam://url/CommunityFilePage/${id}` && (await subCalls(id)).length === 0,
+    `${label}: Subscribe (the sidebar's) → a Steam to-do entry, its page opened, nothing sent`, `${rs.status} ${JSON.stringify(bs).slice(0, 160)} | ${u}`);
+  await fetch(U + "/steam-todo/stop", { method: "POST" });
+  for (let i = 0; i < 40 && !todo.at(-1)?.finished; i++) await sleep(50);
+}
+
+await viaSteam("700000001", "Subscribe with Steam login, no sign-in (the page, the order's last step)");
+await subscribeViaPage("700000011", "Subscribe with Steam login, no sign-in");
 // a sign-in Steam turned down (the flag the cookie mint sets): no request to Steam, straight to the app. The token sits in the
 // secret store's file fallback (no Secret Service here: steam-auth.json, 0600), the flag in settings.json (never printed)
 const sf = `${process.env.XDG_CONFIG_HOME}/liascape/settings.json`;
@@ -271,66 +274,64 @@ const gs = await (await fetch(U + "/settings")).text();
 out(!gs.includes(fakeJwt), "GET /settings carries no token");
 const bl = fs.readFileSync(`${T}/backend.log`, "utf8");
 out(bl.includes("secrets: file fallback") && !bl.includes(fakeJwt), "backend log: says which store, never the token");
-await noSignIn("700000002", "sign-in rejected");
-// merged (auto-import on + "subscribe": the Download button says Subscribe): the same refusal in the button's words
+await viaSteam("700000002", "Subscribe with Steam login, sign-in rejected (the page)");
+await subscribeViaPage("700000015", "Subscribe with Steam login, sign-in rejected");
+// merged (auto-import on + "subscribe": the Download button says Subscribe): the page all the same
 await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoAddWeWallpapersToLibrary: true }) });
 {
-  const rMerged = await download("700000001"), bMerged = await rMerged.json().catch(() => null);
-  out(rMerged.status === 400 && bMerged?.error === "Sign in to Steam to subscribe", "merged (auto-import on), signed out: the download is refused in the Subscribe button's words",
-    `${rMerged.status} ${JSON.stringify(bMerged).slice(0, 160)}`);
+  const n1 = urls().length, ac1 = new AbortController();
+  const pm = download("700000012", ac1.signal).catch(() => "aborted");
+  let u1 = null;
+  for (let i = 0; i < 100 && !u1; i++) { await sleep(100); u1 = urls().slice(n1).find((x) => x.includes("700000012")) ?? null; }
+  await sleep(300);
+  out(u1 === "steam://url/CommunityFilePage/700000012" && (status[pageUrl("700000012")] ?? []).includes("Opened in Steam: subscribe there and it downloads here"),
+    "merged (auto-import on), sign-in rejected: the download opens its page with the note", `${u1} | ${(status[pageUrl("700000012")] ?? []).join(" | ")}`);
+  ac1.abort(); await pm;
+  for (let i = 0; i < 40 && !todo.at(-1)?.finished; i++) await sleep(50);
 }
 await fetch(U + "/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoAddWeWallpapersToLibrary: false }) });
 
-// already on disk: refused up front all the same under "Subscribe with Steam login" signed out (one rule, every action);
-// "Open in the Steam app" imports it from disk, nothing opened
+// already on disk: the order reaches the page, but Steam already has it → imported, nothing opened
 drop("700000003");
 let n0 = urls().length;
 let r = await download("700000003");
-out(r.status === 400 && !(await inLib("700000003")), "already on disk, signed out (Subscribe with Steam login): refused, nothing imported", String(r.status));
-await setMode("steampage");
-r = await download("700000003");
-out(r.status === 200 && urls().length === n0, "already on disk (Open in the Steam app): imported, nothing opened in Steam",
+out(r.status === 200 && (await inLib("700000003")) && urls().length === n0, "already on disk, sign-in rejected (Subscribe with Steam login): imported, nothing opened in Steam",
   `${r.status}, ${urls().length - n0} opened`);
-await setMode("subscribe");
-// a stored "steamcmd" (the dropped mode) reads as the default
-await setMode("steamcmd");
-{
+// stored "steamcmd" and "steampage" (dropped modes) read as the default, "steamapp"
+for (const m0 of ["steamcmd", "steampage"]) {
+  await setMode(m0);
   const m = (await (await fetch(U + "/settings")).json()).workshopDownloadMode;
-  out(m === "subscribe", "a \"steamcmd\" download mode (dropped) saves and reads as \"subscribe\"", String(m));
+  out(m === "steamapp", `a "${m0}" download mode (dropped) saves and reads as "steamapp", the default`, String(m));
 }
 await setMode("subscribe");
 
-// unsubscribe refused: without a usable sign-in (here one Steam turned down) the sign-in's mode stays disconnected from Steam
-// — every unsubscribe endpoint answers 400 with the reason before anything is trashed, copied or queued, and nothing opens in
-// Steam (WorkshopDownloader.Blocked; the CLI / API can't get round the UI's disabled Unsubscribe)
-for (const [mode, why] of [["subscribe", "Sign in to Steam to unsubscribe"]]) {
-  await setMode(mode);
-  const it = (await lib()).find((i) => i.workshopId === "700000003");
-  const post = (p, b) => fetch(U + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
-  n0 = urls().length;
-  const got = [];
-  for (const [p, b] of [["/workshop/unsubscribe", { workshopId: "700000003", title: "ws" }], ["/workshop/unsubscribe-keep", { workshopId: "700000003", title: "ws" }],
-    ["/workshop/delete-from-source", { items: [it] }]]) {
-    const rr = await post(p, b); got.push(`${p} ${rr.status} ${(await rr.json().catch(() => ({}))).error ?? ""}`);
-  }
-  await sleep(300);
+// an unsubscribe without a usable sign-in (here one Steam turned down): accepted, and once its Undo window ends the drain opens
+// its page through the Steam to-do (the order's last step); Stop keeps it subscribed
+{
+  n0 = urls().length; unsubEv.length = 0;
+  const ru = await fetch(U + "/workshop/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workshopId: "700000003", title: "ws" }) });
+  let u = null;
+  for (let i = 0; i < 100 && !u; i++) { await sleep(100); u = urls().slice(n0).find((x) => x.includes("700000003")) ?? null; }
+  for (let i = 0; i < 30 && !unsubEv.some((e) => e.message); i++) await sleep(100);
+  const msg = unsubEv.find((e) => e.message)?.message ?? "";
   const q = await (await fetch(U + "/workshop/queue")).json();
-  out(!!it && got.every((g) => g.endsWith(` 400 ${why}`)) && q.pending.length === 0 && urls().length === n0 && (await inLib("700000003")),
-    `unsubscribe refused (${mode}, sign-in rejected): each endpoint 400 "${why}", nothing queued, trashed or opened`, `${got.join(" | ")} | pending [${q.pending}]`);
+  out(ru.status === 200 && u === "steam://url/CommunityFilePage/700000003" && msg === "Click Unsubscribe on the page Steam opened, then Next." && q.pending.includes("700000003")
+    && (await subCalls("700000003")).length === 0,
+    "unsubscribe, sign-in rejected: once its Undo window ends its page opens through the to-do, pending until Next, nothing sent", `${ru.status} | ${u} | ${msg} | pending [${q.pending}]`);
+  await fetch(U + "/steam-todo/stop", { method: "POST" });
+  await sleep(300);
 }
 
 // "Download without subscribing" (POST /download {oneOff}; WorkshopDownloader.OneOffRouteFor / AcquireOneOffAsync): each
 // download mode's own way (GET /workshop/one-off, asked before the menu opens) — "Subscribe with Steam login" signed in:
 // subscribe → Steam's copy → the library's own copy → unsubscribe (no Undo window); signed out: none, "Sign in to Steam…";
-// "Open in the Steam app": none ("A Steam page can only subscribe"); "Use the Steam app": the client's own (§ 3 j.).
-// Never a page in Steam or the to-do; the copy is the library's own workshop/<id> folder; an item already subscribed stays so
+// "Use the Steam app": the client's own (§ 3 j.), the sign-in when the client can't. Never a page in Steam or the to-do (a
+// page can only subscribe); the copy is the library's own workshop/<id> folder; an item already subscribed stays so
 {
   const json = { "Content-Type": "application/json" };
   const setS = (patch) => fetch(U + "/settings", { method: "POST", headers: json, body: JSON.stringify(patch) });
   const route = async () => { const r = await fetch(U + "/workshop/one-off"); return r.ok ? r.json() : { status: r.status }; };
   const oneOff = (id) => fetch(U + "/download", { method: "POST", headers: json, body: JSON.stringify({ source: src, result: result(id), apply: false, oneOff: true }) });
-  const fakeLog = async () => (await realFetch(process.env.FAKE + "/__log")).json();
-  const subCalls = async (id) => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path) && e.form.id === id).map((e) => `${e.path.slice(13)}${e.signedIn && e.sessionPair ? "" : "(no sign-in)"}`);
   const SIGN_IN = "Sign in to Steam to download without subscribing";
   const uf = `${process.env.XDG_CONFIG_HOME}/liascape/workshop_unsub.json`;
   const unsubState = () => { try { return JSON.parse(fs.readFileSync(uf, "utf8")); } catch { return { Pending: [], Blocked: [] }; } };
@@ -344,8 +345,8 @@ for (const [mode, why] of [["subscribe", "Sign in to Steam to unsubscribe"]]) {
     routes[mode] = await route();
   }
   const R = (k) => JSON.stringify(routes[k]);
-  out(routes.steampage.route === null && routes.steampage.missing === "A Steam page can only subscribe",
-    "one-off route, Open in the Steam app: none, \"A Steam page can only subscribe\" (never another mode's way)", R("steampage"));
+  out(routes.steampage.route === "steamapp" && routes.steampage.missing == null,
+    "one-off route, a stored \"steampage\" (the default, Use the Steam app): the Steam client's own", R("steampage"));
   out(routes.subscribe.route === null && routes.subscribe.missing === SIGN_IN,
     "one-off route, Subscribe with Steam login, no usable sign-in: none, \"Sign in to Steam to download without subscribing\"", R("subscribe"));
   out(routes.steamapp.route === "steamapp" && routes.steamapp.missing == null, "one-off route, Use the Steam app: the Steam client's own", R("steamapp"));
@@ -363,12 +364,18 @@ for (const [mode, why] of [["subscribe", "Sign in to Steam to unsubscribe"]]) {
   await setS({ workshopDownloadMode: "subscribe" });
   const rs = await route();
   out(rs.route === "subscribe" && rs.missing == null, "one-off route, Subscribe with Steam login, signed in: the sign-in's own", JSON.stringify(rs));
-  // "Open in the Steam app"'s one-off refused even with a usable sign-in (never another mode's way)
+  // "Use the Steam app" with no Steam client here and a usable sign-in: the sign-in's one-off (the Steam app's backup)
   {
-    await setS({ workshopDownloadMode: "steampage" });
-    const rp = await oneOff("700000013"), bp = await rp.json().catch(() => null);
-    out(rp.status === 400 && bp?.error === "A Steam page can only subscribe" && !(await inLib("700000013")),
-      "one-off under Open in the Steam app, signed in: refused, 400 \"A Steam page can only subscribe\"", `${rp.status} ${JSON.stringify(bp)}`);
+    await setS({ workshopDownloadMode: "steamapp" });
+    const p13 = oneOff("700000013");
+    let sub13 = false;
+    for (let i = 0; i < 100 && !sub13; i++) { await sleep(100); sub13 = (await subCalls("700000013")).includes("subscribe"); }
+    drop("700000013");
+    const r13 = await Promise.race([p13, sleep(20000).then(() => null)]), b13 = r13 ? await r13.json().catch(() => null) : null;
+    let c13 = [];
+    for (let i = 0; i < 60; i++) { c13 = await subCalls("700000013"); if (c13.includes("unsubscribe")) break; await sleep(100); }
+    out(r13?.status === 200 && ownCopy(b13, "700000013") && c13.join(" ") === "subscribe unsubscribe",
+      "one-off under Use the Steam app, no Steam client, signed in: the sign-in's way (subscribe, the library's own copy, unsubscribe)", `${r13?.status} ${c13.join(" ")} ${JSON.stringify(b13).slice(0, 120)}`);
     await setS({ workshopDownloadMode: "subscribe" });
   }
   const n2 = urls().length, t2 = todo.length;
@@ -397,6 +404,21 @@ for (const [mode, why] of [["subscribe", "Sign in to Steam to unsubscribe"]]) {
   out((q9.Blocked ?? []).includes("700000009") && !(q9.Pending ?? []).includes("700000009") && st9?.subscribed === false && st9.onDisk === true,
     "…Steam's lingering folder blocked from auto-import, not called subscribed, nothing left queued", JSON.stringify({ q9, st9 }));
   out(urls().length === n2 && !todo.slice(t2).some((x) => x.current?.id === "700000009"), "…nothing opened in Steam, nothing in the Steam to-do", `${urls().length - n2} opened`);
+  // "Use the Steam app" with no Steam client here and a usable sign-in: the download subscribes with the sign-in (the Steam
+  // app's backup), Steam's files finish it, nothing opened in Steam
+  {
+    await setS({ workshopDownloadMode: "steamapp" });
+    const n14 = urls().length, t14 = todo.length;
+    const p14 = download("700000014");
+    let sub14 = false;
+    for (let i = 0; i < 100 && !sub14; i++) { await sleep(100); sub14 = (await subCalls("700000014")).includes("subscribe"); }
+    drop("700000014");
+    const r14 = await Promise.race([p14, sleep(20000).then(() => null)]), b14 = r14 ? await r14.json().catch(() => null) : null;
+    out(r14?.status === 200 && b14?.workshopId === "700000014" && sub14 && urls().length === n14 && !todo.slice(t14).some((x) => x.current?.id === "700000014"),
+      "Use the Steam app, no Steam client, signed in: the sign-in subscribes, the download finishes, nothing opened in Steam",
+      `${r14?.status} | ${(await subCalls("700000014")).join(" ")} | ${urls().length - n14} opened | ${fs.readFileSync(`${T}/backend.log`, "utf8").split("\n").filter((l) => /700000014/.test(l)).slice(-3).join(" / ")}`);
+    await setS({ workshopDownloadMode: "subscribe" });
+  }
   // an item already subscribed (its folder in the Workshop folder, nothing queued): copied, never subscribed or unsubscribed
   drop("700000010");
   const r10 = await oneOff("700000010"), b10 = await r10.json().catch(() => null);
@@ -407,9 +429,10 @@ for (const [mode, why] of [["subscribe", "Sign in to Steam to unsubscribe"]]) {
   fs.writeFileSync(af, authBefore, { mode: 0o600 });
 }
 
-// "Open in the Steam app": the page, then Steam's files finish the download
-await setMode("steampage");
-await viaSteam("700000006", "Open in the Steam app");
+// "Use the Steam app" with no Steam client here and no usable sign-in: the page, then Steam's files finish the download
+await setMode("steamapp");
+await viaSteam("700000006", "Use the Steam app, no Steam client, sign-in rejected (the page)");
+await setMode("subscribe");
 
 // cancelled from the page (the UI's Cancel aborts the request): the wait stops, a later download of it by Steam imports nothing
 n0 = urls().length;
@@ -427,8 +450,8 @@ const std = `${process.env.HOME}/.local/share/Steam/steamapps/workshop/content`;
 fs.mkdirSync(std, { recursive: true }); fs.symlinkSync(`${T}/ws/431960`, `${std}/431960`);
 await viaSteam("700000005", "Workshop folder reached through a symlink");
 
-// A preset brings its base scene (Web/PresetDownloads.cs), by the preset's own mode and action, never another route: "Open in
-// the Steam app" opens only the preset's page (Steam's required-items prompt fetches the base) and waits for the base with no
+// A preset brings its base scene (Web/PresetDownloads.cs), by the preset's own route and action, never another: through its
+// page only the preset's page opens (Steam's required-items prompt fetches the base) and the base is waited for with no
 // page; the sign-in subscribes the base after the preset; a one-off gets a one-off base; a base in the library is reused; a
 // base that isn't a scene is never asked for. The test plays Steam's part: it drops each folder into the Workshop folder.
 {
@@ -450,7 +473,6 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const item = async (id) => (await lib()).find((i) => i.workshopId === id);
   const until = async (pred, ms) => { for (let i = 0; i < ms / 100; i++) { if (await pred()) return true; await sleep(100); } return !!(await pred()); };
   const settle = (p, ms = 30000) => Promise.race([p.then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })), sleep(ms).then(() => null)]);
-  const fakeLog = async () => (await realFetch(process.env.FAKE + "/__log")).json();
   const subCalls = async (id) => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path) && e.form.id === id).map((e) => e.path.slice(13));
   const order = async () => (await fakeLog()).filter((e) => /^\/sharedfiles\/(un)?subscribe$/.test(e.path)).map((e) => `${e.path.slice(13)} ${e.form.id}`);
   const beLog = () => fs.readFileSync(`${T}/backend.log`, "utf8");
@@ -458,8 +480,9 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   const libDir = (src, id) => `${process.env.XDG_DATA_HOME}/liascape/library/${src}/${id}`;
   const own = (id) => fs.existsSync(libDir("workshop", id)) && !fs.lstatSync(libDir("workshop", id)).isSymbolicLink();
 
-  // "Open in the Steam app": the preset's page only; the base arrives by Steam's prompt (the test drops it) → both imported
-  await setS({ workshopDownloadMode: "steampage" });
+  // through the page (Subscribe with Steam login, the sign-in Steam turned down): the preset's page only; the base arrives by
+  // Steam's prompt (the test drops it) → both imported
+  await setS({ workshopDownloadMode: "subscribe" });
   let n0 = urls().length;
   const pA = settle(dl("3583880694"));
   await until(() => urls().slice(n0).includes("steam://url/CommunityFilePage/3583880694"), 10000);
@@ -470,7 +493,7 @@ await viaSteam("700000005", "Workshop folder reached through a symlink");
   await until(async () => (await item("3354740764")) && (await item("3583880694"))?.presetReason === PLAYS, 15000);
   const pa = await item("3583880694"), ba = await item("3354740764");
   out(rA?.status === 200 && pa?.isPreset === true && !!ba && pa.presetReason === PLAYS,
-    "preset (Open in the Steam app): the preset, then its base scene once Steam delivers it — both in the library, the preset no longer needs its base",
+    "preset (through its page): the preset, then its base scene once Steam delivers it — both in the library, the preset no longer needs its base",
     `${rA?.status} | preset ${JSON.stringify(pa && { r: pa.presetReason, b: pa.baseWorkshopId })} base ${!!ba}`);
   out(waitingA && urls().slice(n0).join(" ") === "steam://url/CommunityFilePage/3583880694",
     "…only the preset's page opened (Steam's required-items prompt brings the base); the base waited with no page", `${waitingA} | ${urls().slice(n0).join(" ")}`);

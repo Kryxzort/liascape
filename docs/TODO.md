@@ -32,28 +32,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and Liascape
        watches that item's favourite state every few seconds for a few minutes after, updating the favourites cache
        (`Helpers/WorkshopFavorites.cs`) when it flips. The cache's once-per-50 s hold on its count check wins: the watch
-       never goes through that check, it reads that one item's state. The Steam page is #116's last resort, so this is
+       never goes through that check, it reads that one item's state. The Steam page is the Workshop downloads' last
+       resort (`docs/decisions.md` § "Offer two Workshop download modes, the Steam page the last resort"), so this is
        that rule applied to the social controls.
-116. [ ] Two Workshop download modes, the Steam page the last resort. Owner: the page needs no login and gives Liascape
-       nothing, so falling back to it never exceeds the trust chosen; the Steam sign-in backs up the Steam app because
-       the user signed in themselves. Nothing else stands in for a chosen mode.
-       Rewrite `docs/decisions.md` § "Offer three Workshop download modes" to this in the same commit.
-       - Settings → Getting Workshop wallpapers drops the "Open in the Steam app" radio. A saved `steampage` reads as
-         the default mode; no migration, since nothing has shipped.
-       - The fallback order, each step only when the one before can't do it:
-         - the chosen mode;
-         - in "Use the Steam app" (Steam not running, Wallpaper Engine not owned, the client refused), the Steam
-           sign-in when one is usable (owner: the sign-in is the Steam app's backup; the user gave that trust by
-           signing in);
-         - the item's Steam page, with a short note: "Opened in Steam: subscribe there and it downloads here".
-       - Signed out under "Subscribe with Steam login" goes straight to the page.
-       - A one-off download stays disabled with why.
-       - "Use the Steam app" becomes the default mode (owner): the Settings model's default and the UI's
-         `g("workshopDownloadMode", …)` fallback. The page fallback covers its failures (no Steam running, no Wallpaper
-         Engine), so a fresh install works either way. The README's download lines name the new default.
-       - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
-         (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
-         mode cells.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

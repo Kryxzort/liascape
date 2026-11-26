@@ -261,9 +261,9 @@ export interface ImportScan { roots: string[]; folders: string[]; items: FoundIt
   truncated: boolean; scenesOff: boolean; autoImport: boolean; watched: string[]; copy: boolean }
 // API: POST /library/link (Web/LinkImportOps.cs Resolved): kind workshop | site | direct; id = the item's source id (also
 // the download-progress id); source = the Browse source's name (a direct file: its server's host); media = video | gif |
-// image | scene | preset (null: an unknown site's file not looked at); blocked = why the Workshop download mode can't now
+// image | scene | preset (null: an unknown site's file not looked at)
 export interface LinkTarget { kind: "workshop" | "site" | "direct"; id: string; title: string; source: string;
-  media: "video" | "gif" | "image" | "scene" | "preset" | null; inLibrary: boolean; blocked: string | null }
+  media: "video" | "gif" | "image" | "scene" | "preset" | null; inLibrary: boolean }
 // AppSettings.WatchedFolders (backend-owned: POST /settings never changes it)
 export interface WatchedFolder { path: string; copy: boolean; skip: string[] }
 export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }

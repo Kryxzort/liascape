@@ -620,7 +620,7 @@ export const Settings = memo(function Settings() {
     setMonitors(detected.map((d) => ({ name: d.name, fps: WE_DEFAULT_FPS })));
   }, [detected, g("allowScenes", false)]); // eslint-disable-line
 
-  const mode = g<string>("workshopDownloadMode", "subscribe");
+  const mode = g<string>("workshopDownloadMode", "steamapp");
   const mute = g("noAudio", false);          // disables the volume row (parity: muted = no volume)
   const am = g("autoMute", false);           // gates the auto-mute children
 
@@ -831,21 +831,21 @@ export const Settings = memo(function Settings() {
       )}
 
       <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
-        {/* three ways, one radio group (docs/decisions.md § "Offer three Workshop download modes, the user's choice") — each
-            route its own radio, never a switch inside another or a silent fallback */}
+        {/* two ways, one radio group; what the chosen one can't do falls back to the sign-in (under "Use the Steam app", when
+            one is usable) and last to the wallpaper's Steam page (docs/decisions.md § "Offer two Workshop download modes, the
+            Steam page the last resort"). Guard: probe-steam steam:row:steamApp */}
         <Row label="Use the Steam app" hint="like Wallpaper Engine does it, with a live progress bar. Needs Wallpaper Engine. Steam shows you playing it from your first download until a minute after you leave the Workshop." wk="workshopDownloadMode">
           <input type="radio" data-wsmode="steamapp" checked={mode === "steamapp"} onChange={() => set("workshopDownloadMode", "steamapp")} /></Row>
-        <Row label="Open in the Steam app" hint="opens the wallpaper's page in Steam. You subscribe there and it downloads here.">
-          <input type="radio" data-wsmode="steampage" checked={mode === "steampage"} onChange={() => set("workshopDownloadMode", "steampage")} /></Row>
         <Row label="Subscribe with Steam login" hint="another way to subscribe from the app, but you log in to Steam here">
           <input type="radio" data-wsmode="subscribe" checked={mode === "subscribe"} onChange={() => set("workshopDownloadMode", "subscribe")} /></Row>
         {mode === "steamapp" && (
-          <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated.</Help>
+          <Help>Needs Steam running and Wallpaper Engine in your Steam account. Steam subscribes, downloads and keeps it updated. When it can't, your Steam login (if you signed in) or the wallpaper's Steam page takes over.</Help>
         )}
-        {mode === "subscribe" &&
-          /* Signing in is optional: without a usable
-             sign-in a Download opens the item in the Steam app, where the user clicks Subscribe (WorkshopDownloader) — so the
-             row says what happens either way. Sign in with QR (the Steam mobile app) or with a password (SteamPasswordModal). */
+        {/* the sign-in, under both modes: "Subscribe with Steam login"'s own way and "Use the Steam app"'s backup (and the
+            Workshop favourites and comments). Signing in is optional: without a usable sign-in a download falls down the order
+            to the item's page in the Steam app, where the user clicks Subscribe (WorkshopDownloader), so the row says what
+            happens either way. Sign in with QR (the Steam mobile app) or with a password (SteamPasswordModal).
+            Guard: probe-steam steam:row:signedOut, steam:row:steamApp */}
           <Row label="Steam">
               {steam?.signedIn && !steam.rejected
                 ? <div className="hms" data-steam-state="signed-in"><span className="shint">Signed in as <b>{steam.accountName}</b> · ~{steam.daysLeft}d left</span>
@@ -855,12 +855,13 @@ export const Settings = memo(function Settings() {
                       /* Steam ended the saved sign-in (backend `SteamSignInRejected`, set when finalizelogin answers AccessDenied) —
                          else the row says "Signed in as …" while every download fails */
                       ? <span className="shint s-warn-text">Steam signed <b>{steam.accountName}</b> out. Sign in again.</span>
-                      : <span className="shint">Not signed in.</span>}
+                      : <span className="shint">{mode === "subscribe" ? "Not signed in. Downloads open the wallpaper's Steam page for you to subscribe."
+                        : "Not signed in. Signed in, your Steam login takes over when the Steam app can't."}</span>}
                     <span className="steam-row-btns">
                       <button className="btn accent" onClick={startQr} data-steam-signin="qr">Sign in with QR</button>
                       <button className="btn ghost" onClick={openPwLogin} data-steam-signin="password">Sign in with password</button>
                     </span></div>}
-            </Row>}
+            </Row>
       </Section>
 
       <Section title="Under the hood" icon={<Wrench size={15} />} lv="advanced">

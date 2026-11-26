@@ -42,7 +42,7 @@
 //   fonts:gone        no "Use Windows fonts in scenes" / "Windows fonts folder" row at any level, old keys in settings.json
 //                     bring none back (scene fonts come from fontconfig)
 //   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; a
-//                     stored "steamcmd" download mode (dropped) brings back none of its rows at any level
+//                     stored "steamcmd" or "steampage" download mode (dropped) brings back none of its rows at any level
 //   levels:noEmptySection  at every level no section heading shows without a row; Video and Startup open at
 //                     Basic with one row each, Playback with "Pause behind windows"; pictures settings-levels-<level>-<n>.png
 //   cache:lines       Housekeeping's cache picker: one line per cache (AppOps.CacheCategories) with its words, a themed tick
@@ -944,7 +944,7 @@ app.whenReady().then(async () => {
       "Video frame rate cap": "standard", "Hardware decoding": "advanced", "toggle-mute": "standard", "Clear cached files": "basic",
     };
     // the dropped steamcmd mode's rows: none at any level, even with "steamcmd" stored (it reads as the default)
-    const GONE = ["Download via steamcmd", "steamcmd path", "Steam username", "Sign in"];
+    const GONE = ["Download via steamcmd", "steamcmd path", "Steam username", "Sign in", "Open in the Steam app"];
     // every shown section (a heading on screen) holds a row or a button; the headings per level
     const sectionsAt = () => js(`return [...document.querySelectorAll(".settings .ssection")].filter((s) => getComputedStyle(s).display !== "none").map((s) => ({
       title: s.querySelector("h3")?.textContent.trim(), rows: [...s.querySelectorAll(".srow")].filter((r) => r.getClientRects().length).length,
@@ -956,18 +956,18 @@ app.whenReady().then(async () => {
       const eng = (await http("GET", "/player-engine")).json;
       if (eng?.available !== true) return [`the stack's liascape-player isn't available (${J(eng?.reason)}) — proved nothing`];
       try {
-        await setSettings({ NormalizeAudio: true, NoAudio: false, LimitVramPerScene: true, WorkshopDownloadMode: "steamcmd" });
-        for (const lv of LEVELS) {
+        for (const [k, lv] of LEVELS.entries()) {
+          await setSettings({ NormalizeAudio: true, NoAudio: false, LimitVramPerScene: true, WorkshopDownloadMode: k % 2 ? "steampage" : "steamcmd" });
           await setSettings({ SettingsLevel: lv }); await load();
           const seen = await js(`return Object.fromEntries(${J([...Object.keys(MOVED), ...GONE])}.map((l) => [l, !!window.__x.row(l)]))`);
           for (const [label, from] of Object.entries(MOVED)) {
             const want = LEVELS.indexOf(lv) >= LEVELS.indexOf(from);
             if (seen[label] !== want) v.push(`${lv}: "${label}" ${seen[label] ? "shows" : "is missing"} (it's a ${from} row)`);
           }
-          for (const label of GONE) if (seen[label]) v.push(`${lv}: the dropped steamcmd mode's "${label}" row shows`);
+          for (const label of GONE) if (seen[label]) v.push(`${lv}: a dropped download mode's "${label}" row shows`);
         }
       } finally {
-        await setSettings({ SettingsLevel: "standard", NormalizeAudio: false, LimitVramPerScene: false, WorkshopDownloadMode: "subscribe" });
+        await setSettings({ SettingsLevel: "standard", NormalizeAudio: false, LimitVramPerScene: false, WorkshopDownloadMode: "steamapp" });
       }
       return v;
     });

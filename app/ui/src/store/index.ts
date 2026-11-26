@@ -313,7 +313,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   autoThrottleScenes: true, sceneSpareWorker: true, limitVramPerScene: false, sceneVramLimitMib: 2048, sceneVramStopShows: "last_frame", vramLowMode: "stop",
   thumbnailAspect: "1:1", cardSize: "Medium", previewOnHover: ["gif", "video", "image"], previewNotHovered: ["image", "gif", "video"], videoPreviewQuality: "mid", gifPreviewsAsVideo: false, glows: true, textShadow: false, morphs: true,
   copyFilesInsteadOfSymlinking: false, allowScenes: false, autoAddWeWallpapersToLibrary: true, sceneMonitors: [],
-  workshopDownloadMode: "subscribe",
+  workshopDownloadMode: "steamapp",
   theme: "Catppuccin Mocha",
   // pause when covered, the playlist start, while parked
   pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", rotateWhileParked: true,

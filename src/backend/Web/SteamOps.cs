@@ -213,21 +213,11 @@ public static class SteamOps
         SignInLost();
     }
 
-    // The sign-in is gone (signed out here, or Steam turned it down: SteamAuthService): the Unsubscribe controls follow (WS
-    // steam-status), and an unsubscribe still inside its Undo window is dropped like its Undo — the app stays disconnected from
-    // Steam for unsubscribes, so nothing waits for a later sign-in. The modes that don't need the sign-in keep theirs.
+    // The sign-in is gone (signed out here, or Steam turned it down: SteamAuthService): the Workshop controls follow (WS
+    // steam-status). An unsubscribe still inside its Undo window stays queued: its drain takes the next step of the fallback
+    // order, the item's Steam page (WorkshopDownloader.DrainUnsubQueueAsync).
     // Guard: steam-selftest "sign-out in the Undo window", "sign-in rejected in the Undo window"
-    public static void SignInLost()
-    {
-        EventBus.Broadcast("steam-status", Status());
-        if (WorkshopDownloader.UnsubscribeBlocked(SettingsService.Load()) is not { } why) return;
-        var held = WorkshopUnsubQueue.SnapshotHeld();
-        if (held.Count == 0) return;
-        int back = AppOps.DropUnsubscribes(held);
-        Console.WriteLine($"workshop: unsubscribe {string.Join(", ", held)}: the Steam sign-in ended inside the Undo window — dropped");
-        EventBus.Broadcast("unsub-progress", new { done = 0, total = 0, currentId = "", finished = true, openedInSteam = 0,
-            message = WorkshopDownloader.DroppedMessage(held.Count, back, why) });
-    }
+    public static void SignInLost() => EventBus.Broadcast("steam-status", Status());
 
     // How long an Unsubscribe (the Library's, the Browse sidebar's) waits before it reaches Steam: its Undo window. An Undo
     // inside it takes the id out of the queue, so Steam is never asked (nor asked to subscribe again: WorkshopUnsubQueue.Withdraw

@@ -1,24 +1,25 @@
 // Steam sign-in and the Workshop's subscribe / download controls — `scripts/test-ui-matrix.sh --probe probe-steam.js` (the
 // matrix's hermetic stack). docs/decisions.md § "Offer a password sign-in beside the QR": a password sign-in
-// (SteamPasswordModal) next to the QR one, and Workshop downloads through the Steam app's page ("Open in the Steam app"). NOTHING here reaches
+// (SteamPasswordModal) next to the QR one, and the Workshop's two download modes with the Steam page as their last resort. NOTHING here reaches
 // Steam: a script injected before the page's own (CDP Page.addScriptToEvaluateOnNewDocument) answers /steam/status (the state
 // a cell wants), /steam/login* and /steam/qr/* itself (recording each body), stubs POST /browse (Workshop items), the
 // favourites and the library set's details (GET /workshop/my-favorites, POST /workshop/details: yours:*) and /download
 // (held until the cell lets go / cancels), wraps WebSocket so a cell can push fake WS events (steam-login-code, steam-signed-in,
 // steam-login-error, download-progress, workshop-favorites) through the page's own socket, and records every request body +
 // console line. browse:fixture and yours:stack open a page without the stub on the stack's own backend and its fake Steam.
-//   steam:row:signedOut   Settings → Getting Workshop wallpapers → Steam: "Not signed in." (no Steam-app fallback offered),
-//                         Sign in with QR + Sign in with password; no tooltips
+//   steam:row:signedOut   Settings → Getting Workshop wallpapers → Steam: "Not signed in." and what a download does then (opens
+//                         the wallpaper's Steam page), Sign in with QR + Sign in with password; no tooltips
 //   steam:row:rejected    a sign-in Steam turned down: the warning (in the warn colour), both sign-in buttons, no Sign out
 //   steam:row:signedIn    "Signed in as …" + Sign out, no sign-in buttons
-//   steam:row:steamcmd    a "steamcmd" download mode (dropped) saves and reads as "subscribe": its radio checked, the Steam
-//                         row, no steamcmd rows
+//   steam:row:steamcmd    a "steamcmd" or "steampage" download mode (dropped) saves and reads as "steamapp", the default: its
+//                         radio checked, the Steam row, no steamcmd / page rows; a fresh install's default is "steamapp"
 //   look:toggles          every Settings checkbox / radio is the themed control: dark when off, accent when on, the tick centred
 //                         in its drawn box (pixel-centre.js); a click anywhere on a checkbox / radio row ticks it, a slider
 //                         row's name doesn't
 //                         (shots steam-toggles.png, steam-tick.png)
-//   steam:row:steamApp    the three download-mode radios (steamapp, steampage, subscribe): a click saves each, the
-//                         Steam app's note, the sign-in row only under subscribe
+//   steam:row:steamApp    the two download-mode radios (steamapp, subscribe), no "Open in the Steam app": a click saves each,
+//                         the Steam app's note (its fallbacks named), the sign-in row under both (signed out under the Steam
+//                         app: the login takes over when the Steam app can't)
 //   steam:modal:email     the password button → the modal (a labelled dialog: account name autocomplete=username focused,
 //                         password type=password autocomplete=current-password); real typing + Enter → POST /steam/login once
 //                         with both, the field emptied at once, "Signing in…"; WS email step → its text + the hint, the code field
@@ -32,7 +33,7 @@
 //   steam:modal:cancel    Escape on a code step → closed + POST /steam/login/cancel; a click outside doesn't close it; Cancel
 //   steam:modal:keys      Tab order account → password → Cancel → Sign in; nothing in the modal has a title (tooltip)
 //   steam:dlStatus        a Workshop download from the Browse sidebar while the backend waits on the Steam app: the sidebar and the
-//                         status bar show download-progress's status ("Click Subscribe in Steam…"); the card the step in short
+//                         status bar show download-progress's status ("Opened in Steam: subscribe there…"); the card the step in short
 //                         words over a sweeping bar (each phase, + "In the Steam to-do" / "Waiting for the Steam app…"); Cancel
 //                         aborts the request
 //   steam:todo            the Steam to-do panel (components/SteamTodoPanel.tsx) for a fake WS steam-todo: "Subscribe in Steam · 2 of
@@ -68,9 +69,9 @@
 //                         status says "Unsubscribing from ws-1. It stays in your library."; the left-click still posts
 //                         /workshop/unsubscribe; no menu for an item not in the library; no-glow + bg-live (its own fill, no glow). Shots steam-keepmenu*.png
 //   steam:subToggle:keepMenuOff  motion off: the menu fades in and out in place (motion-off.js)
-//   steam:subToggle:signedOut  signed out: the Browse sidebar's Unsubscribe aria-disabled, its sub-line "Sign in to Steam to
-//                         unsubscribe" (no tooltip), a click posts nothing, its right-click entry disabled with that note; "Use the
-//                         Steam app" keeps it. Shot steam-subtoggle-signedout.png
+//   steam:subToggle:signedOut  signed out under "Subscribe with Steam login": the Browse sidebar's Unsubscribe stays on (its
+//                         drain opens the item's Steam page), no "Sign in" sub-line, a click posts /workshop/unsubscribe, its
+//                         right-click entry on with no note; "Use the Steam app" the same. Shot steam-subtoggle-signedout.png
 //   side:oneOff:menu      the Browse sidebar's Download and "Download & Apply" (and, merged, "Subscribe"): a real right-click
 //                         opens a menu at the pointer with that button's own entry only (Download: "Download then unsubscribe"
 //                         under "Subscribe with Steam login", "… & apply" for Download & Apply; focused, grows
@@ -84,26 +85,26 @@
 //   side:oneOff:menuOff   motion off: the menu fades in and out in place (motion-off.js)
 //   side:oneOff:modes     per download mode, each button's menu holds its own entry in the mode's words ("Download then
 //                         unsubscribe" under "Subscribe with Steam login", else "Download without subscribing"), and the route
-//                         the stack's own backend gives (its sign-in: none): "Use the Steam app"
-//                         enabled; "Subscribe with Steam login" disabled, "Sign in to Steam to download without
-//                         subscribing"; "Open in the Steam app" always disabled, "A Steam page can only subscribe" (no mode
-//                         borrows another's way); a mode change (WS settings-changed) or a sign-out (WS
-//                         steam-status) is asked again at the next right-click
-//   side:blocked:download  "Subscribe with Steam login" signed out (components/subscribeMode.ts actionBlocked): the Browse
-//                         sidebar's Download / Download & Apply aria-disabled, "Sign in to Steam to download" on a line under them,
-//                         the card's button dimmed with that tooltip, the selection toolbar's Download N too, and neither a click,
-//                         Enter nor a double-click posts /download (Enter: the status bar says why); merged (auto-import on): "…
-//                         to subscribe"; the other modes keep them; a sign-out under an open sidebar (WS steam-status): the line
-//                         rises in (per frame; motion off: only fades, motion-off.js); hovered, a disabled button stays still;
-//                         no-glow + bg-live. Shots steam-blocked*.png
-//   side:getHint          the line under the Browse sidebar's download buttons says what they do in each mode (they subscribe in
-//                         every mode), the card's Subscribe that it subscribes only (auto-import on: it then joins the
-//                         library); merged no line; signed out the reason in its place; a live mode change swaps the words in one
+//                         the stack's own backend gives (its sign-in: none): "Use the Steam app" enabled (a saved
+//                         "steampage" the same: it reads as the default); "Subscribe with Steam login" disabled, "Sign in to
+//                         Steam to download without subscribing" (a page can't make a one-off); a mode change (WS
+//                         settings-changed) or a sign-out (WS steam-status) is asked again at the next right-click
+//   side:blocked:download  no mode blocks a download (components/subscribeMode.ts actionBlocked: the Steam page is every
+//                         mode's last resort): "Subscribe with Steam login" signed out keeps the Browse sidebar's Download /
+//                         Download & Apply on with "Opens its Steam page for you to subscribe, …" under them, no "Sign in"
+//                         line; a click posts /download; the card's button and the selection toolbar's Download N on;
+//                         merged (auto-import on) the same words under the Subscribe buttons; "Use the Steam app"
+//                         keeps them; a sign-out under an open sidebar (WS steam-status): the page words take the line's place
+//                         (per frame: they rise in; motion off: only fade, motion-off.js); no-glow + bg-live: no glow, the
+//                         words' drop shadow. Shots steam-blocked*.png
+//   side:getHint          the line under the Browse sidebar's download buttons says what they do in each mode and sign-in (they
+//                         subscribe in every way), the card's Subscribe that it subscribes only (auto-import on: it then joins
+//                         the library); merged no line; signed out under "Subscribe with Steam login" the page's words; a live
+//                         mode change swaps the words in one
 //                         cell (on: rising in per frame; off: a fade in place); bg-live drop shadow. Shots steam-gethint*.png
 //   side:aboutTall        the About text of a long description: ≥ 300 px in a 900 px window, ≤ 45 % of the window, scrolls inside
-//   side:blocked:subscribe  the Browse sidebar's Subscribe: "Subscribe with Steam login" signed out → aria-disabled, "Sign in to
-//                         Steam to subscribe" as its sub-line, a click posts nothing; "Use the Steam app" / "Open in the Steam
-//                         app" keep it
+//   side:blocked:subscribe  the Browse sidebar's Subscribe stays on in every mode and sign-in (signed out it goes to the item's
+//                         Steam page): no "Sign in" sub-line, a click posts /workshop/subscribe
 //   side:unsub:names      auto-import on: a subscribed Workshop item's Library tiles have no Delete but "Unsubscribe" (the cloud-off
 //                         icon, a tooltip naming the right-click and Undo); the card's button is named Unsubscribe; the library's
 //                         own copy and a plain item keep Delete; the tile and the card's button post /workshop/delete-from-source for
@@ -115,16 +116,14 @@
 //                         hands focus back; picking it → ONE POST /workshop/unsubscribe-keep; the tile becomes Delete, sliding in
 //                         (per frame); no-glow + bg-live. Shots steam-unsub-keepmenu*.png
 //   side:unsub:keepOff    motion off: the menu fades in / out in place, the Delete tile only fades in
-//   side:unsub:signedOut  signed out ("Subscribe with Steam login"): the Unsubscribe tile aria-disabled with "Sign in to
-//                         Steam to unsubscribe" as its tooltip, not danger red, a click posts nothing; its right-click entry disabled
-//                         with that note; the card's button named so, its click posts nothing and the status bar says it; a mixed
-//                         selection gets "Unsubscribe 1" (disabled) + "Delete 1" and the Delete key trashes only the plain item;
-//                         auto-import off: "Delete and unsubscribe" disabled the same; "Use the Steam app" and "Open in the Steam
-//                         app" (through the item's Steam page) keep it; WS steam-status turns it
-//                         on / off live; no-glow + bg-live: the tile keeps its fill, no glow.
+//   side:unsub:signedOut  signed out ("Subscribe with Steam login"): every unsubscribe control stays on (its drain opens the
+//                         item's Steam page): the Unsubscribe tile (no "Sign in" tooltip), a click posts delete-from-source
+//                         [s1]; its right-click entry on, no note; the card's button named Unsubscribe; auto-import off:
+//                         "Delete and unsubscribe" on; "Use the Steam app" the same; a sign-out under an open sidebar (WS
+//                         steam-status) changes nothing; no-glow + bg-live: the tile keeps its fill, no glow.
 //                         Shot steam-unsub-signedout.png
 //   steam:subMerge:labels auto-import on + "subscribe": "Subscribe & Apply" / "Subscribe" (cloud-download), no subscription card
-//                         until subscribed; "Subscribe" posts /download; steamapp, steampage and auto-import off keep Download and
+//                         until subscribed; "Subscribe" posts /download; steamapp and auto-import off keep Download and
 //                         the card; the cards' button ("Subscribe & apply", the cloud glyph) and the selection toolbar ("Subscribe
 //                         2") follow; subscribed: the card, Unsubscribe; no-glow + bg-live. Shots steam-submerge*.png
 //   steam:subMerge:appear the card rises in once subscribed while what follows glides down (per frame), and leaves (fade, what
@@ -528,7 +527,7 @@ app.whenReady().then(async () => {
       if (!r) return ["no Steam row"];
       if (r.state !== "signed-out") v.push(`state ${r.state}`);
       if (!/^Not signed in\./.test(r.text)) v.push(`the row doesn't say it's not signed in: "${r.text}"`);
-      if (/Steam app|Subscribe/.test(r.text)) v.push(`the row still offers the Steam app's page (no fallback in this mode): "${r.text}"`);
+      if (!/Downloads open the wallpaper's Steam page for you to subscribe\./.test(r.text)) v.push(`the row doesn't say a download opens the wallpaper's Steam page: "${r.text}"`);
       if (!r.qr || !r.pw) v.push(`sign-in buttons: qr ${r.qr}, password ${r.pw}`);
       if (r.titles) v.push(`${r.titles} tooltip(s) in the row`);
       await page(`const el = document.querySelector("[data-steam-state]"), sc = el.closest(".scroll"); sc.scrollTop += el.getBoundingClientRect().top - innerHeight / 2;`); await sleep(900); await shot("row-signed-out");
@@ -556,38 +555,47 @@ app.whenReady().then(async () => {
       return v;
     });
     await cell("steam:row:steamcmd", async () => {
-      const v = []; await setSettings({ workshopDownloadMode: "steamcmd" }); await load(SIGNED_OUT); await tab("Settings");
-      const saved = (await http("GET", "/settings")).json?.workshopDownloadMode;
-      if (saved !== "subscribe") v.push(`"steamcmd" reads as ${J(saved)}, not the default "subscribe"`);
-      if (!(await page(`return !!document.querySelector('[data-wsmode="subscribe"]')?.checked;`))) v.push("Subscribe with Steam login isn't the checked radio");
-      if (!(await steamRow())) v.push("no Steam row under the default mode");
-      if (await page(`return !!document.querySelector('[data-wsmode="steamcmd"], [placeholder="/usr/bin/steamcmd"]');`)) v.push("a steamcmd radio or row shows");
+      const v = [];
+      for (const dropped of ["steamcmd", "steampage"]) {
+        await setSettings({ workshopDownloadMode: dropped }); await load(SIGNED_OUT); await tab("Settings");
+        const saved = (await http("GET", "/settings")).json?.workshopDownloadMode;
+        if (saved !== "steamapp") v.push(`"${dropped}" reads as ${J(saved)}, not the default "steamapp"`);
+        if (!(await page(`return !!document.querySelector('[data-wsmode="steamapp"]')?.checked;`))) v.push(`"${dropped}": Use the Steam app isn't the checked radio`);
+        if (!(await steamRow())) v.push(`"${dropped}": no Steam sign-in row under the default mode`);
+        if (await page(`return !!document.querySelector('[data-wsmode="steamcmd"], [data-wsmode="steampage"], [placeholder="/usr/bin/steamcmd"]');`)) v.push(`"${dropped}": a steamcmd / page radio or row shows`);
+      }
+      // the page's own fallback before the settings come in: the default too
+      const def = await page(`return [...document.querySelectorAll("[data-wsmode]")].map((r) => r.dataset.wsmode).join();`);
+      if (def !== "steamapp,subscribe") v.push(`the modes: ${def}`);
       await setSettings({ workshopDownloadMode: "subscribe" });
       return v;
     });
 
-    // "Use the Steam app" (docs/decisions.md § "Drive the Steam client through its own `steamclient.so`") is the FIRST of the
-    // download-mode radios; picking it saves workshopDownloadMode "steamapp", shows its note and hides the Steam
-    // sign-in row (only Subscribe via Steam uses it)
+    // "Use the Steam app" (docs/decisions.md § "Offer two Workshop download modes, the Steam page the last resort") is the
+    // FIRST of the two download-mode radios; picking it saves workshopDownloadMode "steamapp" and shows its note (naming its
+    // fallbacks); the Steam sign-in row shows under both, saying what a sign-in does in each
     await cell("steam:row:steamApp", async () => {
       const v = []; await setSettings({ workshopDownloadMode: "subscribe" }); await load(SIGNED_OUT); await tab("Settings");
       const radios = await page(`return [...document.querySelectorAll("[data-wsmode]")].map((r) => ({ m: r.dataset.wsmode, type: r.type, name: r.closest(".srow")?.textContent.slice(0, 40) }));`);
       console.log(`        ${J(radios)}`);
-      if (radios.map((r) => r.m).join() !== "steamapp,steampage,subscribe" || radios.some((r) => r.type !== "radio"))
-        v.push(`the modes: ${J(radios)} (expected three radios steamapp, steampage, subscribe)`);
+      if (radios.map((r) => r.m).join() !== "steamapp,subscribe" || radios.some((r) => r.type !== "radio"))
+        v.push(`the modes: ${J(radios)} (expected two radios steamapp, subscribe)`);
+      if (await page(`return [...document.querySelectorAll(".settings .srow")].some((r) => /Open in the Steam app/.test(r.textContent));`)) v.push("an \"Open in the Steam app\" row still shows");
       await page(`document.querySelector('[data-wsmode="steamapp"]').click();`); await sleep(900); // the debounced save
       const saved = (await http("GET", "/settings")).json?.workshopDownloadMode;
       if (saved !== "steamapp") v.push(`a click saved workshopDownloadMode = ${saved}`);
       const after = await page(`return { checked: document.querySelector('[data-wsmode="steamapp"]').checked,
-        note: /Needs Steam running/.test(document.querySelector(".settings")?.textContent ?? ""), steamRow: !!document.querySelector("[data-steam-state]") };`);
+        note: (document.querySelector(".settings")?.textContent ?? "").includes("When it can't, your Steam login (if you signed in) or the wallpaper's Steam page takes over."),
+        steamRow: document.querySelector("[data-steam-state]")?.closest(".srow")?.textContent ?? null };`);
       if (!after.checked) v.push("the radio isn't checked after the click");
-      if (!after.note) v.push("no note under Use the Steam app");
-      if (after.steamRow) v.push("the Steam sign-in row shows under Use the Steam app");
-      // "Open in the Steam app": saved, no sign-in row either
-      await page(`document.querySelector('[data-wsmode="steampage"]').click();`); await sleep(900);
+      if (!after.note) v.push("no note under Use the Steam app naming its fallbacks");
+      if (!/Not signed in\. Signed in, your Steam login takes over when the Steam app can't\./.test(after.steamRow ?? "")) v.push(`the Steam row under Use the Steam app, signed out: ${J(after.steamRow)}`);
+      // back to "Subscribe with Steam login": saved, the sign-in row back
+      await page(`document.querySelector('[data-wsmode="subscribe"]').click();`); await sleep(900);
       const saved2 = (await http("GET", "/settings")).json?.workshopDownloadMode;
-      if (saved2 !== "steampage") v.push(`the Open in the Steam app click saved ${saved2}`);
-      if (await page(`return !!document.querySelector("[data-steam-state]");`)) v.push("the Steam sign-in row shows under Open in the Steam app");
+      if (saved2 !== "subscribe") v.push(`the Subscribe with Steam login click saved ${saved2}`);
+      const row2 = await page(`return document.querySelector("[data-steam-state]")?.closest(".srow")?.textContent ?? null;`);
+      if (!/Downloads open the wallpaper's Steam page for you to subscribe\./.test(row2 ?? "")) v.push(`the Steam row under Subscribe with Steam login, signed out: ${J(row2)}`);
       await setSettings({ workshopDownloadMode: "subscribe" });
       return v;
     });
@@ -646,11 +654,11 @@ app.whenReady().then(async () => {
         const t = row.querySelector(${J(part)}); const r = t.getBoundingClientRect(); return { x: r.x + Math.min(20, r.width / 2), y: r.y + r.height / 2 };`);
       const click = async (p) => { win.webContents.sendInputEvent({ type: "mouseDown", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: 1 });
         win.webContents.sendInputEvent({ type: "mouseUp", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: 1 }); await sleep(900); };
-      const pageRow = `document.querySelector('[data-wsmode="steampage"]')?.closest(".srow")`;
-      let pt = await rowPt(pageRow, ".shint"); await sleep(300); pt = await rowPt(pageRow, ".shint");
-      if (!pt) v.push("no Open in the Steam app row");
+      const appRow = `document.querySelector('[data-wsmode="steamapp"]')?.closest(".srow")`;
+      let pt = await rowPt(appRow, ".shint"); await sleep(300); pt = await rowPt(appRow, ".shint");
+      if (!pt) v.push("no Use the Steam app row");
       else { await click(pt); const m = (await http("GET", "/settings")).json?.workshopDownloadMode;
-        if (m !== "steampage") v.push(`a click on the radio row's hint saved ${m} (expected steampage)`); }
+        if (m !== "steamapp") v.push(`a click on the radio row's hint saved ${m} (expected steamapp)`); }
       const ckRow = `[...document.querySelectorAll(".srow[data-row-toggle]")].find((r) => r.querySelector('input[type=checkbox]:not(:disabled)'))`;
       const before = await page(`return ${ckRow}?.querySelector("input").checked ?? null;`);
       pt = await rowPt(ckRow, ".slabel-row"); await sleep(300); pt = await rowPt(ckRow, ".slabel-row");
@@ -869,7 +877,7 @@ app.whenReady().then(async () => {
     });
 
     await cell("steam:dlStatus", async () => {
-      const v = []; await load(SIGNED_IN); // signed out the download is off (side:blocked:download)
+      const v = []; await load(SIGNED_IN);
       const srcs = (await http("GET", "/sources")).json;
       const ws = srcs.find((s) => s.supportsTagFilter)?.name;
       if (!ws) return ["no Workshop source"];
@@ -881,13 +889,13 @@ app.whenReady().then(async () => {
       if (!btn) return ["no Download button in the Browse sidebar"];
       const dl = await waitFor(() => js(`window.__st.dl && window.__st.dl.body`), 2000);
       if (!dl) return ["no POST /download"];
-      // "Open in the Steam app"'s step ("Subscribe with Steam login" never waits on a page: no sign-in = a failed download)
-      const STATUS = "Click Subscribe in Steam, then it downloads by itself…";
+      // the fallback order's last step: its page waits in the Steam app (WorkshopDownloader.OpenedInSteam)
+      const STATUS = "Opened in Steam: subscribe there and it downloads here";
       await ev("download-progress", { id: dl.result.pageUrl, value: 0, status: STATUS }); await sleep(300);
       const r = await page(`return { side: document.querySelector("[data-side-download-status]")?.textContent ?? null, bar: document.querySelector(".status")?.textContent ?? null };`);
       console.log(`        ${J(r)}`);
       if (r.side !== STATUS) v.push(`the sidebar says "${r.side}"`);
-      if (!/click Subscribe in Steam/i.test(r.bar ?? "")) v.push(`the status bar says "${r.bar}"`);
+      if (!(r.bar ?? "").includes(STATUS)) v.push(`the status bar says "${r.bar}"`);
       // a bare "Downloading…" over an empty bar for a minute looks like a hang: the CARD says the step in
       // short words, over a sweeping (indeterminate) bar — each phase the backend reports, in order
       const card = (sel) => page(`const c = [...document.querySelectorAll("[data-morph-id]")].find((e) => e.getAttribute("data-morph-id") === ${J("br-" + dl.result.pageUrl)});
@@ -1641,7 +1649,8 @@ app.whenReady().then(async () => {
       const cases = [
         ["Use the Steam app", { workshopDownloadMode: "steamapp" }, null],
         ["Subscribe with Steam login, signed out", { workshopDownloadMode: "subscribe" }, new RegExp(`^${SIGN_IN}$`)],
-        ["Open in the Steam app", { workshopDownloadMode: "steampage" }, /^A Steam page can only subscribe$/],
+        // a saved "steampage" (the dropped page mode) reads as the default: the Steam client's route, from the stack's backend
+        ["a saved \"steampage\" (reads as Use the Steam app)", { workshopDownloadMode: "steampage" }, null],
       ];
       try {
         await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false });
@@ -1672,77 +1681,71 @@ app.whenReady().then(async () => {
         shadow: b.map((x) => getComputedStyle(x).boxShadow), tf: b.map((x) => getComputedStyle(x).transform) };`);
     const cardBtn = () => page(`const b = document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn"); return b ? { off: b.getAttribute("aria-disabled") === "true", title: b.getAttribute("title") } : null;`);
     const statusText = () => js(`document.querySelector(".status")?.textContent ?? ""`);
+    // no mode blocks a download: every one ends on the item's Steam page (docs/decisions.md § "Offer two Workshop download
+    // modes, the Steam page the last resort"), so signed out under "Subscribe with Steam login" every Download stays on and the
+    // line under the sidebar's buttons says the page's words
     await cell("side:blocked:download", async () => {
       const v = [];
-      const WHY_DL = "Sign in to Steam to download", WHY_SUB = "Sign in to Steam to subscribe";
+      const PAGE = "Opens its Steam page for you to subscribe, then adds it to your library";
+      const LOGIN = "Subscribes with your Steam login, then adds it to your library";
+      const hintOf = () => js(`document.querySelector("${SIDE} [data-side-get-hint]")?.textContent ?? null`);
       try {
         await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
         await browseWs(SIGNED_OUT); await openSide(0);
-        let g = await sideGet(); console.log(`        signed out: ${J(g)}`);
-        if (J(g.off) !== J([true, true]) || g.why !== WHY_DL) v.push(`signed out, the sidebar's buttons: ${J(g)}`);
+        let g = await sideGet(); console.log(`        signed out: ${J(g)} | ${await hintOf()}`);
+        if (J(g.off) !== J([false, false]) || g.why) v.push(`signed out, the sidebar's buttons: ${J(g)} (want both on, no "Sign in" line)`);
+        if ((await hintOf()) !== PAGE) v.push(`signed out, the line under them: ${J(await hintOf())}, want ${J(PAGE)}`);
+        await shot("blocked");
         await js(`window.__st.dl = null; true`);
-        const ab = await getBox("apply");
-        if (ab) {
-          await mvTo(ab.x, ab.y, 350);
-          g = await sideGet();
-          if (g.tf[0] !== "none" || /rgba?\((?!0, 0, 0)/.test(g.shadow[0])) v.push(`a hovered disabled button moves or glows: ${J(g)}`);
-          await shot("blocked");
-          await clickAt(ab.x, ab.y); await sleep(400);
-        }
-        await page(`document.querySelector("${SIDE} [data-side-get=only]")?.click();`); await sleep(300);
-        if (await heldDl()) v.push(`a click on a disabled download button posted ${J(await heldDl())}`);
-        // the card's button: dimmed, the tooltip says why, a click posts nothing
+        await page(`document.querySelector("${SIDE} [data-side-get=only]")?.click();`); await sleep(400);
+        if (!(await heldDl())) v.push("signed out, a click on Download posted no /download");
+        // the card's button: on
+        await browseWs(SIGNED_OUT); await sleep(300);
         const cb = await cardBtn();
-        if (!cb?.off || cb.title !== WHY_DL) v.push(`the card's download button: ${J(cb)}`);
-        await page(`document.querySelector(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .dl-btn")?.click();`); await sleep(300);
-        // Enter on the focused card and a double-click: nothing posted, the status bar says why. The clicks above left the focus
-        // on a button (where Enter is the button's own, hooks/gridKeys.ts gridOwnsKey): a click on the card gives the keys back
-        await page(`document.activeElement?.blur?.(); document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[0]?.click();`); await sleep(400);
-        await key("Enter"); await sleep(400);
-        const st1 = await statusText();
-        await page(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[1]?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));`); await sleep(400);
-        if (await heldDl()) v.push(`the card's button, Enter or a double-click posted ${J(await heldDl())}`);
-        if (st1 !== WHY_DL) v.push(`Enter: the status bar says "${st1}"`);
-        // the selection toolbar's Download N
+        if (!cb || cb.off) v.push(`the card's download button: ${J(cb)} (want on)`);
+        // the selection toolbar's Download N: on
         await page(`for (const i of [2, 3]) document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving]) .thumb-wrap")[i]?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));`); await sleep(400);
         const tb = await page(`const b = document.querySelector(".sel-toolbar .btn.accent"); return b ? { off: b.getAttribute("aria-disabled"), title: b.getAttribute("title"), text: b.textContent } : null;`);
-        await page(`document.querySelector(".sel-toolbar .btn.accent")?.click();`); await sleep(400);
-        if (!tb || tb.off !== "true" || tb.title !== WHY_DL || (await heldDl())) v.push(`the selection toolbar: ${J(tb)}, posted ${J(await heldDl())}`);
+        if (!tb || tb.off === "true" || /Sign in/.test(tb.title ?? "")) v.push(`the selection toolbar: ${J(tb)} (want on)`);
         await key("Escape"); await sleep(200);
-        // merged: the Subscribe buttons say the subscribe's words
+        // merged: the Subscribe buttons on, the page's words under them
         await setSettings({ autoAddWeWallpapersToLibrary: true });
         await browseWs(SIGNED_OUT); await openSide(0);
         g = await sideGet();
-        if (J(g.off) !== J([true, true]) || g.why !== WHY_SUB) v.push(`merged, signed out: ${J(g)}`);
+        if (J(g.off) !== J([false, false]) || g.why || (await hintOf()) !== PAGE) v.push(`merged, signed out: ${J(g)} | ${J(await hintOf())}`);
         await setSettings({ autoAddWeWallpapersToLibrary: false });
-        // every other mode keeps them (signed out: none of them needs the sign-in)
-        for (const mode of ["steamapp", "steampage"]) {
-          await setSettings({ workshopDownloadMode: mode });
-          await browseWs(SIGNED_OUT); await openSide(0);
-          g = await sideGet(); const c2 = await cardBtn();
-          if (J(g.off) !== J([false, false]) || g.why || c2?.off) v.push(`${mode}, signed out: ${J(g)}, card ${J(c2)}`);
-        }
-        // live: a sign-out under an open sidebar — the reason rises in (motion on) / only fades (motion off)
+        // "Use the Steam app" keeps them
+        await setSettings({ workshopDownloadMode: "steamapp" });
+        await browseWs(SIGNED_OUT); await openSide(0);
+        g = await sideGet(); const c2 = await cardBtn();
+        if (J(g.off) !== J([false, false]) || g.why || c2?.off) v.push(`steamapp, signed out: ${J(g)}, card ${J(c2)}`);
+        // live: a sign-out under an open sidebar — the page's words take the line's place, rising in (motion on) / only fading
+        const NOTE = `(() => { const n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return null;
+          return { hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e);
+            return [e.textContent, +(+cs.opacity).toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2)]; }) }; })()`;
         for (const motion of [true, false]) {
           await setSettings({ workshopDownloadMode: "subscribe", morphs: motion });
-          await browseWs(SIGNED_IN); await openSide(0);
-          if ((await sideGet()).why) { v.push(`motion ${motion}: signed in, a reason shows`); continue; }
-          const smp = js(MO.SAMPLE({ why: "[data-side-get-why]" }, 450)); await sleep(30);
+          await browseWs(SIGNED_IN); await openSide(0); await sleep(300);
+          if ((await hintOf()) !== LOGIN) { v.push(`motion ${motion}: signed in, the line says ${J(await hintOf())}, want ${J(LOGIN)}`); continue; }
+          const fr = frames("", NOTE, 700); await sleep(30);
           await ev("steam-status", SIGNED_OUT);
-          const fr = (await smp).why;
-          if (motion) {
-            const ys = fr.filter((f) => f[1] != null).map((f) => f[3]);
-            if (new Set(ys).size < 3) v.push(`motion on: the reason didn't rise in (y per frame ${J(ys.slice(0, 12))})`);
-            if (motion) await shot("blocked-live");
-          } else v.push(...MO.judge("motion off: the reason appearing", fr, { appear: true }));
-          if ((await sideGet()).why !== WHY_DL) v.push(`motion ${motion}: after WS steam-status (signed out) the line says "${(await sideGet()).why}"`);
+          if (motion) { await sleep(70); await shot("blocked-live"); }
+          const nw = (await fr).filter((x) => x).map((x) => x.hs.find((h) => h[0] === PAGE)).filter((x) => x);
+          const ops = nw.map((x) => x[1]), ys = nw.map((x) => x[2]);
+          if (!nw.length) { v.push(`motion ${motion}: the page's words never showed after WS steam-status — proved nothing`); continue; }
+          if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion ${motion}: the page's words popped in (opacity ${J(ops.slice(0, 10))})`);
+          if (motion && new Set(ys).size < 3) v.push(`motion on: the page's words didn't rise in (y ${J(ys.slice(0, 10))})`);
+          if (!motion && ys.some((y) => Math.abs(y) > 0.01)) v.push(`motion off: the page's words moved (y ${J(ys.slice(0, 10))})`);
+          g = await sideGet();
+          if (J(g.off) !== J([false, false]) || g.why) v.push(`motion ${motion}: after WS steam-status (signed out) the buttons: ${J(g)}`);
         }
-        // no-glow + bg-live: the reason stays readable over the wallpaper (its drop shadow), the buttons don't glow
+        // no-glow + bg-live: the words stay readable over the wallpaper (their drop shadow), the buttons don't glow
         await setSettings({ morphs: true, glows: false, liveWallpaperBehindAllTabs: true });
         await browseWs(SIGNED_OUT); await openSide(0); await sleep(300);
         g = await sideGet();
+        const hf = await js(`(() => { const h = document.querySelector("${SIDE} [data-side-get-hint]"); return h ? getComputedStyle(h).filter : null; })()`);
         const html = await js(`document.documentElement.className`);
-        if (!/no-glow/.test(html) || !/bg-live/.test(html) || !/drop-shadow/.test(g.whyFilter ?? "") || g.shadow.some((x) => /rgba?\((?!0, 0, 0)/.test(x))) v.push(`no-glow + bg-live: ${J(g)} (${html})`);
+        if (!/no-glow/.test(html) || !/bg-live/.test(html) || !/drop-shadow/.test(hf ?? "") || g.shadow.some((x) => /rgba?\((?!0, 0, 0)/.test(x))) v.push(`no-glow + bg-live: ${J(g)}, the words' filter ${hf} (${html})`);
         await shot("blocked-live-bg");
       } finally {
         await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
@@ -1757,8 +1760,8 @@ app.whenReady().then(async () => {
       const btnOff = () => js(`document.querySelector("[data-side-sub-btn=subscribe]")?.getAttribute("aria-disabled") ?? null`);
       try {
         await setSettings({ autoAddWeWallpapersToLibrary: false, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
-        for (const [mode, status, why] of [["subscribe", SIGNED_OUT, "Sign in to Steam to subscribe"],
-          ["steamapp", SIGNED_OUT, null], ["steampage", SIGNED_OUT, null], ["subscribe", SIGNED_IN, null]]) {
+        // signed out under "Subscribe with Steam login" it goes to the item's Steam page: never off, in any mode or sign-in
+        for (const [mode, status, why] of [["subscribe", SIGNED_OUT, null], ["steamapp", SIGNED_OUT, null], ["subscribe", SIGNED_IN, null]]) {
           await setSettings({ workshopDownloadMode: mode });
           const x = await open(status);
           const off = await btnOff();
@@ -1768,47 +1771,45 @@ app.whenReady().then(async () => {
           console.log(`        ${mode} (${status.signedIn ? "signed in" : "signed out"}): ${J({ hint: x?.hint, off })}`);
           if (why ? (off !== "true" || x?.hint !== why || sent.length) : (off !== null || sent.length !== 1))
             v.push(`${mode} (${status.signedIn ? "signed in" : "signed out"}): ${J(x)}, aria-disabled ${off}, posted ${sent.length}`);
-          if (why) await shot("blocked-subscribe");
+          if (mode === "subscribe" && !status.signedIn) await shot("blocked-subscribe");
         }
       } finally { await setSettings({ workshopDownloadMode: "subscribe" }); }
       return v;
     });
     // side:getHint — what the download buttons do in the chosen mode, on the line under them (components/subscribeMode.ts
     // downloadHint), and the subscription card's Subscribe saying it subscribes only, so the two never read as contradicting:
-    // per mode (subscribe, the Steam app, the Steam page) and with "Import new Workshop wallpapers" on; merged: no
-    // line; signed out under "Subscribe with Steam login": the reason takes the line's place. A mode change under the open
+    // per mode and sign-in (subscribe signed in, the Steam app, subscribe signed out: the page's words) and with "Import new
+    // Workshop wallpapers" on; merged: no line. A mode change under the open
     // sidebar swaps the words in one cell (never stacked: the line's box never grows past the taller of the two): on, the new
     // words rise in per frame; off, they only fade in place. bg-live: the words' drop shadow. Shots steam-gethint*.png
     await cell("side:getHint", async () => {
       const v = [];
       const NOT = { subscribed: false, pending: null, inLibrary: false, onDisk: false };
       const HINTS = { subscribe: "Subscribes with your Steam login, then adds it to your library", steamapp: "Subscribes through the Steam app, then adds it to your library",
-        steampage: "Opens its Steam page for you to subscribe, then adds it to your library" };
+        page: "Opens its Steam page for you to subscribe, then adds it to your library" };
       const SUBHINT = { off: "Subscribe only, without adding it to your library", on: "Subscribe only, it joins your library once Steam has it" };
       const line = () => js(`(() => { const h = document.querySelector("${SIDE} [data-side-get-hint]"), w = document.querySelector("${SIDE} [data-side-get-why]");
         return { hint: h?.textContent ?? null, why: w?.textContent ?? null, filter: h ? getComputedStyle(h).filter : null }; })()`);
       try {
-        for (const [mode, auto, status] of [["subscribe", false, SIGNED_IN], ["steamapp", false, SIGNED_OUT], ["steampage", false, SIGNED_OUT],
+        for (const [mode, auto, status] of [["subscribe", false, SIGNED_IN], ["steamapp", false, SIGNED_OUT], ["subscribe", false, SIGNED_OUT],
           ["steamapp", true, SIGNED_OUT]]) {
           await setSettings({ workshopDownloadMode: mode, autoAddWeWallpapersToLibrary: auto, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
           await browseWs(status); await setWs("930000", NOT); await openSide(0);
           const x = await waitFor(() => sub().then((y) => y && y.state === "not-subscribed" ? y : null), 3000);
           const l = await line();
-          const label = `${mode}${auto ? " + auto-import" : ""}`;
+          const label = `${mode}${auto ? " + auto-import" : ""}${status.signedIn ? "" : ", signed out"}`;
+          const want = mode === "subscribe" && !status.signedIn ? HINTS.page : HINTS[mode];
           console.log(`        ${label}: ${J({ line: l.hint ?? l.why, sub: x?.hint })}`);
-          if (l.hint !== HINTS[mode] || l.why) v.push(`${label}: the line under the buttons says ${J(l)}, want ${J(HINTS[mode])}`);
+          if (l.hint !== want || l.why) v.push(`${label}: the line under the buttons says ${J(l)}, want ${J(want)}`);
           const wantSub = SUBHINT[auto ? "on" : "off"];
           if (x?.hint !== wantSub) v.push(`${label}: the card's Subscribe says ${J(x?.hint)}, want ${J(wantSub)}`);
-          if (mode === "subscribe") await shot("gethint");
+          if (mode === "subscribe" && status.signedIn) await shot("gethint");
         }
         await setSettings({ workshopDownloadMode: "subscribe", autoAddWeWallpapersToLibrary: true });
         await browseWs(SIGNED_IN); await openSide(0);
         let l = await line();
         if (l.hint || l.why) v.push(`merged: ${J(l)} (want no line: the buttons say Subscribe)`);
         await setSettings({ autoAddWeWallpapersToLibrary: false });
-        await browseWs(SIGNED_OUT); await openSide(0);
-        l = await line();
-        if (l.hint || l.why !== "Sign in to Steam to download") v.push(`signed out: ${J(l)} (want only the reason)`);
         const NOTE = `(() => { const n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return null;
           return { h: +n.getBoundingClientRect().height.toFixed(1), hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e);
             return [e.textContent, +(+cs.opacity).toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2)]; }) }; })()`;
@@ -1817,14 +1818,14 @@ app.whenReady().then(async () => {
           await browseWs(SIGNED_OUT); await openSide(0); await sleep(300);
           const h0 = (await js(NOTE))?.h;
           const fr = frames("", NOTE, 700); await sleep(30);
-          await setSettings({ workshopDownloadMode: "steampage" }); await ev("settings-changed", { workshopDownloadMode: "steampage" });
+          await setSettings({ workshopDownloadMode: "subscribe" }); await ev("settings-changed", { workshopDownloadMode: "subscribe" });
           if (motion) { await sleep(70); await shot("gethint-swap"); }
           const f = (await fr).filter((x) => x);
           const h1 = (await js(NOTE))?.h;
-          const nw = f.map((x) => x.hs.find((h) => h[0] === HINTS.steampage)).filter((x) => x);
+          const nw = f.map((x) => x.hs.find((h) => h[0] === HINTS.page)).filter((x) => x);
           const ops = nw.map((x) => x[1]), ys = nw.map((x) => x[2]), maxH = Math.max(...f.map((x) => x.h));
           console.log(`        motion ${motion}: heights ${h0} → ${h1} (max ${maxH}), new opacity ${J(ops.slice(0, 8))} y ${J(ys.slice(0, 8))}`);
-          if (!nw.length) { v.push(`motion ${motion}: the steampage words never showed — proved nothing`); continue; }
+          if (!nw.length) { v.push(`motion ${motion}: the page's words never showed — proved nothing`); continue; }
           if (maxH > Math.max(h0, h1) + 1) v.push(`motion ${motion}: the old and new words stacked (the line grew to ${maxH}, from ${h0} to ${h1})`);
           if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion ${motion}: the new words popped in (opacity ${J(ops.slice(0, 10))})`);
           if (motion && new Set(ys).size < 3) v.push(`motion on: the new words didn't rise in (y ${J(ys.slice(0, 10))})`);
@@ -2094,102 +2095,77 @@ app.whenReady().then(async () => {
       const tile = (sel = "[data-unsubscribe]") => page(`const t = document.querySelector("${SIDE} ${sel}"); if (!t) return null; const cs = getComputedStyle(t);
         return { off: t.getAttribute("aria-disabled") === "true", title: t.getAttribute("title"), text: t.textContent.trim(), color: cs.color, bg: cs.backgroundColor,
           shadow: cs.boxShadow, icoShadow: getComputedStyle(t.querySelector(".side-tile-ico")).boxShadow };`);
-      const danger = () => js(`(() => { const d = document.createElement("i"); d.style.color = "var(--danger)"; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; })()`);
-      const status = () => js(`document.querySelector(".status")?.textContent ?? ""`);
       await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "subscribe", morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       await libSub({ "900000001": true });
       await load(SIGNED_OUT);
       if (!(await openLib("s1"))) { await unsubDone(); return ["no sidebar for s1 — proved nothing"]; }
       await sleep(600);
       let t = await tile(); console.log(`        signed out: ${J(t)}`);
-      if (!t?.off || t.title !== WHY || t.text !== "Unsubscribe") v.push(`the Unsubscribe tile: ${J(t)}`);
-      if (t && t.color === (await danger())) v.push(`the disabled tile is still danger red (${t.color})`);
-      let n0 = (await calls()).length;
+      if (!t || t.off || t.title === WHY || t.text !== "Unsubscribe") v.push(`the Unsubscribe tile: ${J(t)} (want on, no "Sign in" tooltip)`);
       const b = await unsubBox();
       if (b) {
-        await clickAt(b.x, b.y); await sleep(500);
-        if ((await posted(n0)).length) v.push(`a click on the disabled tile posted ${J(await posted(n0))}`);
-        // its right-click menu: the entry disabled, the note says why; a click on the entry posts nothing
+        // its right-click menu: the entry on, no note
         await clickAt(b.x, b.y, "right"); await sleep(350);
         const m = await ctxItems(); console.log(`        its menu: ${J(m && { items: m.items, note: m.note })}`);
-        if (!m || m.items.length !== 1 || m.items[0].key !== "keep" || !m.items[0].off || m.note !== WHY) v.push(`the right-click menu: ${J(m)}`);
-        if (m) {
-          const it = await pickAt("keep"); await clickAt(it.x, it.y); await sleep(400);
-          if ((await posted(n0)).length) v.push(`the disabled entry posted ${J(await posted(n0))}`);
-          await key("Escape"); await sleep(300);
-        }
+        if (!m || m.items.length !== 1 || m.items[0].key !== "keep" || m.items[0].off || m.note) v.push(`the right-click menu: ${J(m)}`);
+        await key("Escape"); await sleep(300);
         await mvTo(b.x, b.y, 300);
         await shot("unsub-signedout");
-      } else v.push("no Unsubscribe tile to click");
-      // the card's button: its name says why; a click posts nothing, the status bar says why
-      const cd = await cardDel("s1");
-      await page(`[...document.querySelectorAll(".card.lib:not([data-leaving])")].find((x) => x.querySelector('[data-title="s1"]'))?.querySelector(".del")?.click();`); await sleep(500);
-      const st1 = await status();
-      if (cd !== WHY || (await posted(n0)).length || st1 !== WHY) v.push(`the card's button: named "${cd}", posted ${J(await posted(n0))}, status "${st1}"`);
-      // no-glow + bg-live: the tile keeps its own fill over the wallpaper, nothing glows
-      await setSettings({ glows: false, liveWallpaperBehindAllTabs: true }); await sleep(600);
-      t = await tile();
-      if (!t || t.shadow !== "none" || t.icoShadow !== "none" || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(t.bg)) v.push(`no-glow + bg-live: ${J(t)}`);
-      await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
-      // a mixed selection: "Unsubscribe 1" disabled + "Delete 1"; the Delete key trashes only the plain item and says why the other stays
-      await load(SIGNED_OUT); await tab("Library"); await sleep(400);
-      const plain = await plainTitle();
-      if (!plain) v.push("no non-Workshop library item — proved nothing about a mixed selection");
-      else {
-        for (const x of ["s1", plain]) {
-          const c = await cardBox(x); if (!c) { v.push(`no card ${x}`); continue; }
-          await mvTo(c.x, c.y, 60);
-          send({ type: "mouseDown", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(40);
-          send({ type: "mouseUp", x: Math.round(c.x), y: Math.round(c.y), button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(200);
-        }
-        await openLib("s1"); await sleep(500);
-        const d = await dangerTiles(); const uOff = (await tile())?.off;
-        console.log(`        mixed selection: ${J(d)}, unsubscribe off ${uOff}`);
-        if (J(d.map((x) => x.text)) !== J(["Unsubscribe 1", "Delete 1"]) || !uOff) v.push(`a mixed selection's tiles: ${J(d)}, the Unsubscribe one disabled ${uOff}`);
-        n0 = (await calls()).length;
-        await mvTo(40, 450, 60);
-        await key("Delete"); await sleep(900);
-        const got = await posted(n0), st2 = await status();
-        console.log(`        Delete key: ${J(got)} | "${st2}"`);
-        if (J(got) !== J([["/library/trash", [plain]]]) || st2 !== `Deleted ${plain}. ${WHY} s1`) v.push(`the Delete key posted ${J(got)}, status "${st2}"`);
-        await js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
-      }
-      // auto-import off: "Delete and unsubscribe" disabled the same way, the plain Delete stays
+        // the card's button: named Unsubscribe
+        if ((await cardDel("s1")) !== "Unsubscribe") v.push(`the card's button: named "${await cardDel("s1")}"`);
+        // no-glow + bg-live: the tile keeps its own fill over the wallpaper, no glow (the danger chip keeps only its inset ring)
+        await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+        await load(SIGNED_OUT);
+        if (!(await openLib("s1"))) v.push("no-glow + bg-live: no sidebar for s1");
+        await sleep(600); await mvTo(40, 450, 60); await sleep(300);
+        t = await tile();
+        const cls = await js(`document.documentElement.className`);
+        if (!/no-glow/.test(cls) || !/bg-live/.test(cls)) v.push(`no-glow + bg-live: the page's classes are "${cls}" — proved nothing`);
+        if (!t || t.shadow !== "none" || t.icoShadow.split(/,(?![^(]*\))/).some((p) => p.trim() !== "none" && !/inset/.test(p)) || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(t.bg)) v.push(`no-glow + bg-live: ${J(t)}`);
+        await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+        await load(SIGNED_OUT);
+        if (!(await openLib("s1"))) v.push("no sidebar for s1 after no-glow");
+        await sleep(500);
+        // a click posts the Delete from source (stubbed): its drain then opens the item's Steam page
+        const n0 = (await calls()).length;
+        const b2 = await unsubBox();
+        if (b2) { await clickAt(b2.x, b2.y); await sleep(500); }
+        const got = await posted(n0);
+        if (!got.some((x) => x[0] === "/workshop/delete-from-source" && J(x[1]) === J(["s1"]))) v.push(`a click on the tile posted ${J(got)}, want delete-from-source [s1]`);
+      } else v.push("no Unsubscribe tile");
+      // auto-import off: "Delete and unsubscribe" on too
+      await libSub({ "900000001": true });
       await setSettings({ autoAddWeWallpapersToLibrary: false });
       await load(SIGNED_OUT);
       if (!(await openLib("s1"))) v.push("auto-import off: no sidebar for s1");
       else {
         await sleep(500); t = await tile("[data-delete-source]");
-        n0 = (await calls()).length;
-        await page(`document.querySelector("${SIDE} [data-delete-source]")?.click();`); await sleep(500);
-        if (!t?.off || t.title !== WHY || (await posted(n0)).length) v.push(`auto-import off, "Delete and unsubscribe": ${J(t)}, posted ${J(await posted(n0))}`);
+        if (!t || t.off || t.title === WHY) v.push(`auto-import off, "Delete and unsubscribe": ${J(t)} (want on)`);
       }
-      // "Use the Steam app" (the running client is its sign-in) and "Open in the Steam app" (pages) keep their Unsubscribe
-      for (const mode of ["steamapp", "steampage"]) {
-        await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: mode });
-        await load(SIGNED_OUT);
-        if (!(await openLib("s1"))) { v.push(`${mode}: no sidebar for s1`); continue; }
+      // "Use the Steam app" the same
+      await setSettings({ autoAddWeWallpapersToLibrary: true, workshopDownloadMode: "steamapp" });
+      await load(SIGNED_OUT);
+      if (!(await openLib("s1"))) v.push("steamapp: no sidebar for s1");
+      else {
         await sleep(500); t = await tile();
-        if (!t || t.off || t.title === WHY || (await cardDel("s1")) !== "Unsubscribe") v.push(`${mode}, signed out: ${J(t)}, the card's "${await cardDel("s1")}"`);
+        if (!t || t.off || t.title === WHY || (await cardDel("s1")) !== "Unsubscribe") v.push(`steamapp, signed out: ${J(t)}, the card's "${await cardDel("s1")}"`);
       }
-      // the sign-in comes and goes under an open sidebar (WS steam-status): the tile follows at once
+      // a sign-out under an open sidebar (WS steam-status) changes nothing
       await setSettings({ workshopDownloadMode: "subscribe" });
       await load(SIGNED_IN);
       if (!(await openLib("s1"))) v.push("no sidebar for s1 (signed in)");
       else {
         await sleep(500);
         if ((await tile())?.off !== false) v.push(`signed in, the tile: ${J(await tile())}`);
-        await ev("steam-status", SIGNED_OUT);
-        if (!(await waitFor(async () => (await tile())?.off, 1500))) v.push("WS steam-status (signed out) didn't disable the tile");
-        await ev("steam-status", { ...SIGNED_IN, usable: true });
-        if (!(await waitFor(async () => (await tile())?.off === false, 1500))) v.push("WS steam-status (signed in) didn't enable the tile");
+        await ev("steam-status", SIGNED_OUT); await sleep(800);
+        if ((await tile())?.off !== false) v.push(`after WS steam-status (signed out) the tile: ${J(await tile())}`);
       }
       await js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); true`);
       await unsubDone();
       return v;
     });
-    // the Browse sidebar's Unsubscribe, signed out: disabled, the reason as its sub-line (no tooltip: the line shows it), its
-    // right-click entry disabled with the same note; "Use the Steam app" keeps it
+    // the Browse sidebar's Unsubscribe, signed out under "Subscribe with Steam login": on (its drain opens the item's Steam
+    // page), no "Sign in" sub-line, its right-click entry on; "Use the Steam app" the same
     await cell("steam:subToggle:signedOut", async () => {
       const v = [];
       await setSettings({ workshopDownloadMode: "subscribe", morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
@@ -2202,23 +2178,19 @@ app.whenReady().then(async () => {
       const btnOff = () => js(`document.querySelector("[data-side-sub-btn=unsubscribe]")?.getAttribute("aria-disabled") ?? null`);
       let s = await open(SIGNED_OUT);
       console.log(`        signed out: ${J(s)}, aria-disabled ${await btnOff()}`);
-      if (!s || s.btn !== "unsubscribe" || (await btnOff()) !== "true" || s.hint !== WHY) v.push(`signed out: ${J(s)}, aria-disabled ${await btnOff()}`);
-      if (s?.titles) v.push(`${s.titles} tooltip(s) in the toggle (the sub-line says why)`);
+      if (!s || s.btn !== "unsubscribe" || (await btnOff()) !== null || s.hint === WHY) v.push(`signed out: ${J(s)}, aria-disabled ${await btnOff()} (want on, no "Sign in" line)`);
+      if (s?.titles) v.push(`${s.titles} tooltip(s) in the toggle`);
       const b = await btnBox();
       if (b) {
-        let n0 = (await calls()).length;
-        await clickAt(b.x, b.y); await sleep(500);
-        if ((await posted(n0)).length) v.push(`a click posted ${J(await posted(n0))}`);
         await clickAt(b.x, b.y, "right"); await sleep(350);
         const m = await ctxItems(); console.log(`        its menu: ${J(m && { items: m.items, note: m.note })}`);
-        if (!m || m.items.length !== 1 || !m.items[0].off || m.note !== WHY) v.push(`the right-click menu: ${J(m)}`);
-        if (m) {
-          const it = await pickAt("keep"); await clickAt(it.x, it.y); await sleep(400);
-          if ((await posted(n0)).length) v.push(`the disabled entry posted ${J(await posted(n0))}`);
-          await key("Escape"); await sleep(300);
-        }
+        if (!m || m.items.length !== 1 || m.items[0].off || m.note) v.push(`the right-click menu: ${J(m)}`);
+        await key("Escape"); await sleep(300);
         await mvTo(b.x, b.y, 300);
         await shot("subtoggle-signedout");
+        const n0 = (await calls()).length;
+        await clickAt(b.x, b.y); await sleep(500);
+        if (!(await posted(n0)).some((x) => x[0] === "/workshop/unsubscribe")) v.push(`a click posted ${J(await posted(n0))}, want /workshop/unsubscribe`);
       } else v.push("no Unsubscribe button");
       await setSettings({ workshopDownloadMode: "steamapp" });
       s = await open(SIGNED_OUT);
@@ -2241,7 +2213,7 @@ app.whenReady().then(async () => {
     const SUBD = { subscribed: true, pending: null, inLibrary: true, onDisk: true };
     await cell("steam:subMerge:labels", async () => {
       const v = [];
-      for (const [auto, mode, merged] of [[true, "subscribe", true], [true, "steamapp", false], [true, "steampage", false], [false, "subscribe", false]]) {
+      for (const [auto, mode, merged] of [[true, "subscribe", true], [true, "steamapp", false], [false, "subscribe", false]]) {
         await setSettings({ autoAddWeWallpapersToLibrary: auto, workshopDownloadMode: mode, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
         await mergedSide(NOT_SUB);
         const c = await ctas(), card = await hasCard();

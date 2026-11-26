@@ -203,7 +203,7 @@ public static class ServerHost
         if (source < 0 || source >= Providers.Length) return Results.BadRequest("bad source");
         // a Workshop item the download mode can't fetch now (WorkshopDownloader.Blocked; a one-off's route): 400 {error}
         // before anything reaches Steam. A WE-local folder's item (a path, not a page) only imports from disk.
-        // Guard: test-steam-signin.sh § 2 (refused)
+        // Guard: test-steam-signin.sh § 2 (one-off)
         if (!string.IsNullOrEmpty(result.WorkshopId) && result.PageUrl.StartsWith("http", StringComparison.Ordinal)
             && (oneOff ? WorkshopDownloader.OneOffRouteFor(SettingsService.Load()).Missing
                 : WorkshopDownloader.Blocked(SettingsService.Load(), WorkshopDownloader.WorkshopAction.Download)) is { } refused)
@@ -753,9 +753,8 @@ public static class ServerHost
         app.MapPost("/steam/login/code", async (CodeReq r) =>
             await SteamOps.SubmitLoginCode(r.Code) is { } why ? Results.Json(new { error = why }, statusCode: 409) : Results.Ok());
         app.MapPost("/steam/login/cancel", () => { SteamOps.CancelPasswordLogin(); return Results.Ok(); });
-        // an action the download mode can't do now (WorkshopDownloader.Blocked: signed out, a page's one-off) →
-        // 400 {error} before anything is trashed, copied, queued or sent, so the CLI / API can't get round the UI's disabled
-        // controls. Guard: test-steam-signin.sh § 2 (refused)
+        // an action the download mode can't do now (WorkshopDownloader.Blocked) → 400 {error} before anything is trashed,
+        // copied, queued or sent, so the CLI / API can't get round the UI's disabled controls. Guard: steam-selftest "action rule"
         static IResult? Refused(WorkshopDownloader.WorkshopAction a) => WorkshopDownloader.Blocked(SettingsService.Load(), a) is { } why
             ? Results.Json(new { error = why }, statusCode: 400) : null;
         static IResult? NoUnsubscribe() => Refused(WorkshopDownloader.WorkshopAction.Unsubscribe);

@@ -69,16 +69,16 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const openOnSteam = useStore((s) => s.openOnSteam);
   // auto-import on + the "subscribe" download mode: a subscription lands in the library anyway, so Download IS Subscribe —
   // the buttons say so, and the subscription card shows only once subscribed (SubToggle only="subscribed"). The other modes
-  // (the Steam app / page) keep Download and the card. Guard: probe-steam steam:subMerge:*
+  // ("Use the Steam app") keeps Download and the card. Guard: probe-steam steam:subMerge:*
   const subIsDownload = useStore((s) => subscribeIsDownload(s.settings)) && isWorkshopItem(w);
   const GetIcon = subIsDownload ? CloudDownload : Download;
-  // a download the mode can't do now (components/subscribeMode.ts actionBlocked: signed out under "Subscribe with Steam
-  // login"): both buttons disabled up front, the line under them says why; their right-click menu still opens (its entries say
-  // their own). Guard: probe-steam side:blocked:download
+  // a download the mode can't do now (components/subscribeMode.ts actionBlocked; none in either mode, every download falls
+  // back to the item's Steam page): both buttons disabled up front, the line under them says why; their right-click menu
+  // still opens (its entries say their own). Guard: probe-steam side:blocked:download
   const getOff = useStore((s) => isWorkshopItem(w) ? actionBlocked(s.settings, s.steam, "download") : null);
-  // otherwise that line says what the buttons do in the chosen mode (components/subscribeMode.ts downloadHint): in three of
-  // the four modes they subscribe, which the subscription card under them must not seem to contradict
-  const getHint = useStore((s) => isWorkshopItem(w) ? downloadHint(s.settings) : null);
+  // otherwise that line says what the buttons do in the chosen mode and sign-in (components/subscribeMode.ts downloadHint):
+  // they subscribe, which the subscription card under them must not seem to contradict
+  const getHint = useStore((s) => isWorkshopItem(w) ? downloadHint(s.settings, s.steam) : null);
   const mode = useStore((s) => s.settings?.workshopDownloadMode);
   const motionOn = useMotion();
   // A Workshop item's download / subscribe buttons have a right-click menu (components/ContextMenu.tsx) with the button's own

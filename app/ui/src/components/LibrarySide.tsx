@@ -66,7 +66,7 @@ export function LibrarySide({
   onPlay, onReveal, onTrash, onDeleteSource, onKeep, onShowInBrowse,
 }: {
   // unsubN / deleteN: how many of the targets onTrash unsubscribes / deletes (views/Library.tsx doTrash); unsubOff: why they
-  // can't unsubscribe now (signed out), else null
+  // can't unsubscribe now (components/subscribeMode.ts unsubBlocked), else null
   item: LibraryItem; targets: LibraryItem[]; playing: boolean; keepCurrent: boolean; unsubN: number; deleteN: number; unsubOff: string | null;
   showDeleteFromSource: boolean; globalVolume: number; globalSpeed: number;
   onPlay: () => void; onReveal: () => void; onTrash: () => void; onDeleteSource: () => void; onKeep: () => void;
@@ -335,7 +335,7 @@ export function LibrarySide({
           ) : steam && <a className="side-tile" href={steam} target="_blank" rel="noreferrer"><span className="side-tile-ico"><ExternalLink size={15} /></span>Open on Steam</a>}
           {/* with auto-import on, a subscribed Workshop item's Delete is Unsubscribe (views/Library.tsx doTrash), named so and
               with the Browse sidebar's Unsubscribe icon and right-click menu ("Unsubscribe without deleting"); a mixed selection
-              says what happens to each part. When the mode can't unsubscribe (unsubOff: signed out) the Unsubscribe tiles and the right-click entry are disabled with
+              says what happens to each part. When the rule blocks the unsubscribe (unsubOff; none today) the Unsubscribe tiles and the right-click entry are disabled with
               the reason (the tooltip, the menu's note), and a mixed selection's own items get a Delete tile of their own.
               Guard: probe-steam side:unsub:*, side:unsub:signedOut, side:deleteSource:names */}
           {unsubN > 0 ? (

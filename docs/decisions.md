@@ -80,11 +80,12 @@ Owner: "a 'everyone' user encountering a untagged 'mature' is a tragedy". Any ag
 of the allowed ages, which drops the few hundred items with no age tag; other groups' excludes keep untagged items.
 `WorkshopTags.Build`.
 
-### Offer three Workshop download modes, the user's choice — 2026-11-18
-`steampage` (no login), `steamapp` (none given to Liascape), `subscribe` (default, the sign-in): one per level of trust.
-It replaced a steamcmd mode, dropped: it needs a Steam login too and the sign-in already downloads without subscribing.
-A mode never uses another's way (owner's rule: no mode the user didn't choose): what it can't do is disabled
-with why; the to-do's "Let the Steam app do all N" is the user's own switch. `.claude/rules/backend/sources-steam.md`.
+### Offer two Workshop download modes, the Steam page the last resort — 2026-11-26
+`steamapp` (the default, no login given to Liascape) and `subscribe` (the sign-in). What the chosen mode can't do falls to
+the sign-in (under `steamapp`, when usable: the user gave that trust by signing in), then the item's Steam page; nothing
+else stands in. Owner: the page needs no login and gives Liascape nothing, so it never exceeds the trust chosen. It replaced
+a third mode, "Open in the Steam app", and "no mode uses another's way"; a page can't make a one-off copy, so that stays
+off with why. `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
 `libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a
@@ -100,7 +101,7 @@ hold it). `Helpers/SteamClientHold.cs`.
 ### Queue the Steam pages the user must click, one at a time, advanced by Next — 2026-11-11
 Opening N pages at once lost all but one (Steam shows one), and a bulk Delete from Source opened the whole subscriptions
 list. The to-do opens one page and waits for Next; it never reads Steam's subscribed state (that needs a Steam-client
-connection a `steampage` user may avoid, and "not on disk" doesn't mean unsubscribed). The only auto-advance (the owner's
+connection the page route avoids, and "not on disk" doesn't mean unsubscribed). The only auto-advance (the owner's
 ask): a subscribe entry absent at its turn whose files then appear. `Web/SteamTodo.cs`.
 
 ### Report Workshop download phases, not a percent — 2026-11-11
@@ -109,7 +110,7 @@ a large item. The poll reports phases over an indeterminate bar; only `steamapp`
 `Helpers/WorkshopDownloader.cs`.
 
 ### Open an unsubscribe page only for items in a Steam Workshop folder — 2026-11-11
-"Open in the Steam app"'s unsubscribe: a `local/<id>` link is a subscription, an owned `workshop/<id>` copy (a one-off)
+An unsubscribe through the item's page: a `local/<id>` link is a subscription, an owned `workshop/<id>` copy (a one-off)
 never one, so ids without a folder are blocked at once, no page. `WorkshopDownloader.UnsubscribeInSteamApp`.
 
 ### Offer a password sign-in beside the QR — 2026-11-11
