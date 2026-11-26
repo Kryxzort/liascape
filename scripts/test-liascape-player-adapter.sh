@@ -2460,6 +2460,33 @@ jq --arg a "$SS1" --arg b "$SS2" '.AllowScenes = false | .LastSession = {Playlis
 LIASCAPE_PLAYER_BIN=$HB/liascape-player "$DOTNET" "$DLL" restore > "$T/restore-np.log" 2>&1; rc=$?; SP=$(sup_pid); CP=$(comp_pid)
 [ "$rc" != 0 ] && grep -q "Nothing in this playlist can play" "$T/restore-np.log" && ok "restore × a last session that can't play → exit $rc with why" || bad "restore × a last session that can't play: exit $rc, said: $(tail -c 300 "$T/restore-np.log")"
 jq --argjson o "$sf0" '. + $o' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
+# A session start after a session that ended with `stop` (boot / autostart): the last session comes back, a playlist as
+# its program, a single wallpaper on screen — whether the player quit (`ctl quit`) or was SIGTERMed (a shutdown). A
+# stop mid-session holds only until then (`play` after `stop` replays it: § "start over: CLI stop → play" above).
+stop_then_session_start() {   # $1 = quit | term: how the stopped player ends before the next session starts
+  cli stop; waitfor $WAIT eval 'nothing_shown && [ -z "$(pst)" ]' || bad "precondition: stop → cur $(cur path), program $(pst)"
+  if [ "$1" = term ]; then local sp; sp=$(sup_pid); kill -TERM "$sp"; waitfor 60000 eval '! kill -0 "$sp" 2>/dev/null' || bad "SIGTERM: supervisor $sp lived on"
+  else player_quit; fi
+  restore_cli
+}
+set_file '.GlobalPlaylistStart = "start_over"'
+restore_cli; waitfor $WAIT eval '[ -n "$(pst)" ] && [ "$(ncur)" -gt 0 ] && settled' || bad "precondition: restore → program $(pst)"
+for how in quit term; do
+  stop_then_session_start "$how"
+  waitfor $WAIT eval '[ -n "$(pst)" ] && [ "$(ncur)" -gt 0 ] && settled'
+  [ "$(first_cur | jq -c '{p, r}')" = "{\"p\":\"$(base "$QA")\",\"r\":\"play\"}" ] && [ -n "$(pst)" ] \
+    && ok "stop → player $how → restore (a session start) × a playlist: the program plays from item 1 ($(base "$QA"))" \
+    || bad "stop → player $how → restore × a playlist: first $(first_cur), program $(pst), cur $(cur path), $(grep 'restore:' "$T/cli.log" | tail -1)"
+done
+sl0=$(jq -c .LastSession "$SF"); set_file ".LastSession = {\"Playlist\":false,\"Paths\":[\"$QB\"]}"
+cli stop; waitfor $WAIT nothing_shown; restore_cli; waitfor $WAIT cur_is path "$QB" || bad "precondition: restore → cur $(cur path)"
+for how in quit term; do
+  stop_then_session_start "$how"
+  waitfor $WAIT cur_is path "$QB" && [ -z "$(pst)" ] \
+    && ok "stop → player $how → restore (a session start) × a single wallpaper: $(base "$QB") on screen" \
+    || bad "stop → player $how → restore × a single wallpaper: cur $(cur path), program $(pst), $(grep 'restore:' "$T/cli.log" | tail -1)"
+done
+set_file ".LastSession = $sl0"; cli stop; waitfor $WAIT nothing_shown
 # A replayed playlist rotates as it is set now (here the globals: the bar doesn't override them), never as it was when it
 # started: a change since then (applied live to the program, never to LastSession) holds across a restore
 [ "$(jq -r '.LastSession.Paths | length' "$SF")" = 3 ] || bad "precondition: LastSession $(jq -c .LastSession "$SF")"

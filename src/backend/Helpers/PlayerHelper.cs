@@ -207,9 +207,10 @@ public static class PlayerHelper
     // Whatever the player then shows — a wallpaper (on screen, coming or parked) or a program — IS the session: done
     // (`play` while something plays does nothing). Nothing (first boot, after `stop`, no snapshot) → LastSession
     // replayed: a playlist as the program (`from` = its effective start mode — a Resume finds its point in the player's
-    // resume.json), a single wallpaper applied. A replay that doesn't happen (nothing in it can play, the player refused
-    // or didn't answer) throws with why: `liascape restore` says so and exits 1. Guard:
-    // scripts/test-liascape-player-adapter.sh § "a restore whose last session can't play"
+    // resume.json), a single wallpaper applied. A `stop` leaves the player an empty snapshot and no program, so a session
+    // start after it replays LastSession too: a stop holds only until then. A replay that doesn't happen (nothing in it
+    // can play, the player refused or didn't answer) throws with why: `liascape restore` says so and exits 1. Guards:
+    // scripts/test-liascape-player-adapter.sh § "a restore whose last session can't play", § "stop → player quit → restore"
     public static void Restore()
     {
         var settings = SettingsService.Load();
