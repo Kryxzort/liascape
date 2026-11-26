@@ -7,7 +7,8 @@
 #  private headless liascape-player with a page connected · a /media download whose reader stopped reading (a paused
 #  <video>) · the library's clip sweep encoding (its nice'd ffmpeg children stopped with it) · a Steam client session open
 #  (the anonymous one a Workshop item's facts open, a QR sign-in waiting for the phone: a stand-in CM on loopback, whose
-#  TCP session SteamKit2 runs on a foreground thread) · the backend in a systemd
+#  TCP session SteamKit2 runs on a foreground thread) · a Steam session still asking Steam's directory for a server (a
+#  stand-in that never answers; SteamKit2's disconnect waits for that lookup) · the backend in a systemd
 #  unit (KillMode=control-group) that spawned the player itself: `systemctl stop` of that unit leaves the player playing,
 #  and a second backend adopts it rather than starting another (Helpers/UserScope.cs).
 # Runs in its own user, network, cgroup and mount namespaces (`unshare -rnCm`), a temp HOME + XDG dirs, its own backend,
@@ -243,8 +244,9 @@ took=$(stop_ms); judge "libop" "$took"
 for _ in $(seq 1 30); do pgrep -f "ffmpeg .*$T/" >/dev/null || break; sleep 0.1; done
 check "libop: no encode outlived the backend" "$(pgrep -fc "ffmpeg .*$T/")" 0
 
-# A stand-in for Steam's CM servers (LIASCAPE_STEAM_CM_SERVER, Helpers/SteamAnonymous.cs Connect): it accepts the TCP
-# connection and never answers, so the backend's Steam session stays open (connecting) as long as the backend keeps it.
+# A stand-in for Steam's CM servers (LIASCAPE_STEAM_CM_SERVER, Helpers/SteamAnonymous.cs Connect) and, later, for its
+# directory web API (LIASCAPE_STEAM_DIRECTORY, SteamAnonymous.NewClient): it accepts the TCP connection and never answers,
+# so the backend's Steam session stays open (connecting), or its server lookup pending, as long as the backend keeps it.
 python3 -I - "$T/cm" <<'PY' & CMP=$!
 import socket, sys, threading
 out = sys.argv[1]
@@ -279,7 +281,21 @@ api -X POST "$U/steam/qr/start" >/dev/null
 for _ in $(seq 1 100); do cm_opened "$n0" && break; sleep 0.1; done
 check "qr: the sign-in opened a Steam session (else this proved nothing)" "$(cm_opened "$n0" && echo yes || echo no)" yes
 took=$(stop_ms); judge "qr" "$took"
-unset LIASCAPE_STEAM_CM_SERVER; gentle "$CMP"; CMP=""
+unset LIASCAPE_STEAM_CM_SERVER
+
+echo "== a Steam session still finding its server: Steam's directory never answers"
+# With no CM named, SteamKit2 asks Steam's directory for one first, and its Disconnect waits for that request, which
+# nothing cancels: the stop must not wait for it.
+export LIASCAPE_STEAM_DIRECTORY=127.0.0.1:$(cat "$T/cm.port")
+mkdir -p "$LIB/workshop/900000001"; cp "$W" "$LIB/workshop/900000001/w.mp4"
+printf '{"900000001":{"title":"w"}}' > "$LIB/workshop/index.json"
+n0=$(cm_n)
+start lookup
+for _ in $(seq 1 100); do cm_opened "$n0" && break; sleep 0.1; done
+check "lookup: the session asked the directory (else this proved nothing)" "$(cm_opened "$n0" && echo yes || echo no)" yes
+took=$(stop_ms); judge "lookup" "$took"
+rm -rf "$LIB/workshop"
+unset LIASCAPE_STEAM_DIRECTORY; gentle "$CMP"; CMP=""
 
 echo "== the backend in a systemd unit (a private user manager), the player started by it"
 # A unit's stop (KillMode=control-group) signals every process in its cgroup; `setsid` doesn't leave it. The player the

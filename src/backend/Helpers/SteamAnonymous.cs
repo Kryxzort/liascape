@@ -26,7 +26,8 @@ namespace Liascape.Helpers;
 //   - `serve` stopping closes it and opens no other (Shutdown): SteamKit2 runs a TCP session's network loop on a
 //     foreground thread, so an open session keeps a SIGTERMed backend alive past its host's stop until the idle
 //     disconnect (up to IdleMinutes), far beyond a service manager's stop timeout.
-//     Guard: scripts/test-backend-stop.sh "steam", "qr".
+//     Guard: scripts/test-backend-stop.sh "steam", "qr", "lookup".
+//   - A session Steam logs off closes at once (SteamKit2 keeps its connection open). Guard: steam-selftest "steam session".
 public static class SteamAnonymous
 {
     private const int IdleMinutes = 3, RetryAfterFailSeconds = 60, WarmBackoffMinutes = 5;
@@ -34,12 +35,13 @@ public static class SteamAnonymous
 
     private sealed class Conn
     {
-        public readonly SteamClient Client = new();
+        public readonly SteamClient Client = NewClient();
         public readonly CallbackManager Manager;
         public readonly SteamUser User;
         public readonly PublishedFile Pub;
         public readonly TaskCompletionSource<bool> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public volatile bool Dead;
+        public volatile bool Dead; // no use for a request any more: logged off, disconnected or closed
+        private int _closed;       // Close ran: the transport was told to go, whatever Dead said
 
         public Conn()
         {
@@ -49,19 +51,24 @@ public static class SteamAnonymous
             Manager.Subscribe<SteamClient.ConnectedCallback>(_ => User.LogOnAnonymous());
             Manager.Subscribe<SteamClient.DisconnectedCallback>(_ => { Dead = true; Ready.TrySetResult(false); });
             Manager.Subscribe<SteamUser.LoggedOnCallback>(cb => Ready.TrySetResult(cb.Result == EResult.OK));
-            Manager.Subscribe<SteamUser.LoggedOffCallback>(_ => Dead = true);
+            // SteamKit2 keeps the transport open after Steam logs a session off: it goes now, not when the next request
+            // opens another session or `serve` stops
+            Manager.Subscribe<SteamUser.LoggedOffCallback>(_ => Close());
             // the callback pump: lives as long as the connection
             new Thread(() => { while (!Dead) Manager.RunWaitCallbacks(TimeSpan.FromMilliseconds(250)); })
             { IsBackground = true, Name = "lia-steam-cm" }.Start();
             Connect(Client);
         }
 
+        // Once per session, and even when Dead already holds: a session that is no use any more may still hold its
+        // connection (and the foreground thread under it). Disconnect can wait on a connect still asking Steam's directory
+        // for a server (Shutdown says why that matters).
         public void Close()
         {
-            if (Dead) return;
-            try { User.LogOff(); Client.Disconnect(); } catch { }
+            if (Interlocked.Exchange(ref _closed, 1) == 1) return;
             Dead = true;
             Ready.TrySetResult(false); // a connect still waiting for its logon ends now (the pump may stop before the callback)
+            try { User.LogOff(); Client.Disconnect(); } catch { }
         }
     }
 
@@ -70,11 +77,25 @@ public static class SteamAnonymous
     // test can hold a session open without reaching Steam.
     internal static void Connect(SteamClient client)
     {
-        if (Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_SERVER") is { Length: > 0 } v
-            && IPEndPoint.TryParse(v, out var ep) && IPAddress.IsLoopback(ep.Address))
+        if (Loopback("LIASCAPE_STEAM_CM_SERVER") is { } ep)
             client.Connect(SteamKit2.Discovery.ServerRecord.CreateSocketServer(ep));
         else client.Connect();
     }
+
+    // Every SteamKit2 client (this session's, the sign-ins'). A connect with no CM named first asks Steam's directory web
+    // API for one; in a test LIASCAPE_STEAM_DIRECTORY (a loopback ip:port, nothing else is accepted) answers for that
+    // directory, so a test can hold a connect in that lookup without reaching Steam.
+    internal static SteamClient NewClient() =>
+        Loopback("LIASCAPE_STEAM_DIRECTORY") is { } ep
+            ? new SteamClient(SteamConfiguration.Create(b => b.WithWebAPIBaseAddress(new Uri($"http://{ep}/"))))
+            : new SteamClient();
+
+    private static IPEndPoint? Loopback(string variable) =>
+        Environment.GetEnvironmentVariable(variable) is { Length: > 0 } v && IPEndPoint.TryParse(v, out var ep) && IPAddress.IsLoopback(ep.Address)
+            ? ep : null;
+
+    // steam-selftest: a session of its own, never the shared one, on whatever Connect reaches (the selftest's stand-in CM).
+    internal static (SteamClient Client, Action Close) OpenTestSession() { var c = new Conn(); return (c.Client, c.Close); }
 
     private static readonly SemaphoreSlim _one = new(1, 1);
     private static readonly object _gate = new(); // a new session vs Shutdown
@@ -89,13 +110,17 @@ public static class SteamAnonymous
     // `serve` is stopping (ServerHost's ApplicationStopping): the session goes now, no request or warm-up opens another, and
     // every other Steam client session ends too — the sign-ins' and the token renewal's tokens link Stopping (SteamOps,
     // SteamAuthService): each holds the same kind of TCP session, and a QR sign-in waits for the phone without end.
+    // The session closes off the stopping callback: SteamKit2's Disconnect waits for a connect still asking Steam's directory
+    // for a server, a web request nothing cancels, and the host's stop would wait for it. Nothing keeps the process alive
+    // meanwhile (that connect has no connection thread yet), and a connected session's thread holds the exit only until
+    // Close ends it. Guard: scripts/test-backend-stop.sh "lookup".
     public static void Shutdown()
     {
         Conn? c;
         lock (_gate) { _stopped = true; c = _conn; _conn = null; }
         _idle.Change(Timeout.Infinite, Timeout.Infinite);
-        c?.Close();
         _stopping.Cancel();
+        if (c != null) _ = Task.Run(c.Close);
     }
 
     private static void CloseIfIdle()

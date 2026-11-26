@@ -3,6 +3,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -209,6 +212,49 @@ public static class SteamSelfTest
             "favourites merge: a star a later diff lacks kept inside 10 min");
         Check(WorkshopFavorites.Settled(new(false, 3, now.AddMinutes(-11)), onSteam: true, diffStarted: 4, now),
             "favourites merge: an edit dropped after 10 min");
+    }
+
+    // A session Steam logs off (its ClientLoggedOff, SteamKit2's LoggedOffCallback) lets go of its connection at once:
+    // SteamKit2 keeps the transport open after a logoff, and the foreground thread it runs on, so a logged-off session
+    // would hold a stopping backend alive and leave its socket open when the next request opens another session. A stand-in
+    // CM on loopback (it accepts the TCP connection and never answers) shows whether the connection goes. The logoff is
+    // SteamKit2's own callback (its constructor wants a packet, so made without it), posted the way its handler posts it.
+    private static async Task LoggedOffSessionLetsGo()
+    {
+        const string what = "steam session: Steam's logoff closes its connection at once";
+        string? cmVar = Environment.GetEnvironmentVariable("LIASCAPE_STEAM_CM_SERVER");
+        var cm = new TcpListener(IPAddress.Loopback, 0);
+        cm.Start();
+        Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_SERVER", cm.LocalEndpoint.ToString());
+        try
+        {
+            var (client, close) = SteamAnonymous.OpenTestSession();
+            try
+            {
+                TcpClient peer;
+                try { peer = await cm.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                catch (TimeoutException) { Check(false, $"{what} (the session never reached the stand-in, so this proved nothing)"); return; }
+                using (peer)
+                {
+                    var loggedOff = (CallbackMsg)RuntimeHelpers.GetUninitializedObject(typeof(SteamUser.LoggedOffCallback));
+                    loggedOff.JobID = JobID.Invalid; // what CallbackMsg's constructor sets: not a job's answer
+                    client.PostCallback(loggedOff);
+                    Check(await ClosedWithinAsync(peer.GetStream(), TimeSpan.FromSeconds(3)), what);
+                }
+            }
+            finally { close(); }
+        }
+        finally { cm.Stop(); Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_SERVER", cmVar); }
+    }
+
+    // true once the other end closed (or reset) the connection within `within`
+    private static async Task<bool> ClosedWithinAsync(NetworkStream s, TimeSpan within)
+    {
+        using var cts = new CancellationTokenSource(within);
+        var buf = new byte[4096];
+        try { while (await s.ReadAsync(buf, cts.Token) > 0) { } return true; }
+        catch (OperationCanceledException) { return false; }
+        catch (IOException) { return true; }
     }
 
     // The Browse warm-up (SteamAnonymous.Warm) never reaches Steam from a test: while a fixture answers for Steam, or the
@@ -451,6 +497,7 @@ public static class SteamSelfTest
         OneOffRoutes();
         ReconcileSkipsBlocked();
         WarmUp();
+        await LoggedOffSessionLetsGo();
         await HoldTickWhileTurnHeld();
         FavouritesMerge();
         await NoNetwork();
