@@ -361,7 +361,7 @@ public static class ApiSecurity
     }
 
     // The first `max` bytes of a regular file, else null (a directory, a FIFO, a socket or a device reads as an error or empty).
-    private static byte[]? ReadHead(string path, int max)
+    internal static byte[]? ReadHead(string path, int max)
     {
         int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) return null;

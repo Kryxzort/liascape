@@ -154,7 +154,13 @@ at the top of Settings tells you about it.
 
 ### Restore your wallpaper at login
 
-Add `liascape restore` to your compositor's startup. It puts back what was playing without opening the window.
+Turn on **Start with your desktop** in Settings. Liascape then adds its own autostart entry, which runs
+`liascape restore` when you log in: it puts back what was playing without opening the window. Turning the setting off
+removes the entry again.
+
+KDE, GNOME, Xfce and other desktops run autostart entries, and so does a session started through uwsm or systemd. A
+compositor started straight from a terminal, like plain Hyprland or Sway, doesn't. Settings tells you when that's the
+case and gives you the line to add to your compositor's config instead:
 
 ```ini
 # Hyprland (hyprland.conf)

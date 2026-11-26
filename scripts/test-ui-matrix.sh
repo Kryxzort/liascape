@@ -295,6 +295,11 @@ export LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1 LIASCAPE_SCENE_WORKER_BIN=${B%/*
 export LIASCAPE_PLAYER_VRAM_PROBE=fake:$T/vram.json LIASCAPE_PLAYER_VRAM_TIMING=200,600,2000,300,600
 printf '{"total_mib":8192,"free_mib":6000,"procs":{}}' > "$T/vram.json"
 unset LIASCAPE_PLAYER_SOCKET LD_LIBRARY_PATH WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE SWAYSOCK LIASCAPE_PORT
+# "Start with your desktop" (Helpers/Autostart.cs): the stack's session is none the backend knows (its autostart check
+# reads "unknown" on every machine, whatever desktop runs the matrix) and its entry runs a fixed launcher path
+unset XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP DESKTOP_SESSION KDE_FULL_SESSION GNOME_DESKTOP_SESSION_ID APPIMAGE
+for v in $(env | sed -n 's/^\(UWSM_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+export LIASCAPE_LAUNCHER=/opt/liascape-matrix/bin/liascape
 # audio: every pulse client of the stack (the backend's pactl/parec, the probe's paplay) resolves the PRIVATE server
 # started below ($XDG_RUNTIME_DIR/pulse/native) — never the session's
 unset PULSE_SERVER PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH

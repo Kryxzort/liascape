@@ -312,6 +312,7 @@ export const SETTINGS_DEFAULTS: Record<string, unknown> = {
   theme: "Catppuccin Mocha",
   // pause when covered, the playlist start, while parked
   pauseWhenCovered: "maximized", globalPlaylistStart: "start_over", rotateWhileParked: true,
+  startWithDesktop: false,
 };
 
 // `wallpaper-changed` events seen so far (setPlaying). A Play's reply can come before or after the event of what it started.

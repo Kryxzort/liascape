@@ -147,6 +147,13 @@ async function jpost<T = void>(path: string, body?: unknown, signal?: AbortSigna
 
 // ---- types (mirror the C# camelCase DTOs) ----
 export interface FeatureHealth { id: string; label: string; ok: boolean | null; reason: string | null; affects: string[]; inUse?: boolean }
+// API: GET /autostart (Helpers/Autostart.cs Status). state: runs | compositor (its config already runs restore: configFile) |
+// wontRun (put `line` in the compositor's config) | unknown. entry: none | ours | foreign. missing: why no command resolves.
+export interface AutostartStatus {
+  enabled: boolean; state: "runs" | "compositor" | "wontRun" | "unknown"; reason: string; via: string | null;
+  compositor: string | null; line: string; configFile: string | null; entry: "none" | "ours" | "foreign"; entryPath: string;
+  exec: string | null; missing: string | null; error: string | null;
+}
 
 // API: POST /browse `filter` (Workshop only). `include` / `exclude` are Steam tag names (age rating, type, resolution, genre,
 // feature — one flat set each; a tag is in at most one of them). The backend owns the semantics: within a group any included
@@ -305,6 +312,8 @@ export const api = {
   // API: /health/features — features a missing build piece / tool breaks here (FeatureHealth.cs); `affects` = the
   // settings keys whose rows get a warning icon. ok null = not known yet.
   featureHealth: () => jget<{ features: FeatureHealth[] }>("/health/features"),
+  // API: "Start with your desktop": what this session runs, the compositor line, the entry as it is (Helpers/Autostart.cs)
+  autostart: () => jget<AutostartStatus>("/autostart"),
   // API: a folder's (or dropped files') wallpapers listed before anything lands (Web/FolderImportOps.cs Scan), then the ticked
   // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked, which a watch never
   // imports and a preset never brings as its base; `roots`: the folders scanned, where a ticked preset's base is looked for)

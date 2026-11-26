@@ -1219,6 +1219,27 @@ input[type=range]:focus-visible { outline: none; }
 .health-sum-head { display: flex; align-items: center; gap: 7px; color: var(--warn); font-weight: 600; }
 .health-sum ul { margin: 6px 0 0; padding-left: 20px; }
 .health-sum b { color: var(--text); font-weight: 600; }
+/* Settings → Startup's note under "Start with your desktop" (Settings.tsx StartupRows): the notice look above (a --warn edge
+   on a --tr-strong fill), a --success edge when the compositor's config already starts Liascape; its status glyph glows
+   still (none under no-glow), the compositor line and the shared Copy button under the words. It rises in and fades out;
+   motion off, it only fades. Guard: probe-settings autostart:* */
+.as-note { display: flex; gap: 9px; align-items: flex-start; margin: 2px 0 8px; padding: 9px 12px; border-radius: 10px;
+  font-size: 12px; line-height: 1.45; color: var(--subtext);
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--surface0) var(--tr-strong), transparent);
+  animation: as-note-in .26s ease-out both; }
+.as-note.as-ok { border-color: color-mix(in srgb, var(--success) 50%, transparent); }
+.as-note-ico { flex: none; display: grid; place-items: center; height: 17px; color: var(--warn); }
+.as-note.as-ok .as-note-ico { color: var(--success); }
+.as-note-ico > svg { display: block; filter: drop-shadow(0 0 3px currentColor); }
+.as-note-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.as-note-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.as-note-line .kb { color: var(--text); overflow-wrap: anywhere; }
+.as-note.leaving { pointer-events: none; animation: as-note-out .2s ease-in forwards; }
+@keyframes as-note-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes as-note-out { to { opacity: 0; transform: translateY(-4px); } }
+:root.no-motion .as-note { animation: nm-in var(--fade-dur) linear both; }
+:root.no-motion .as-note.leaving { animation: nm-out var(--fade-dur) linear forwards; }
 .help { font-size: 11.5px; color: var(--subtext); margin: 2px 2px 9px; line-height: 1.45; }
 .help .kb { font-size: 11px; }
 .srow.disabled { opacity: .45; }
@@ -1436,7 +1457,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-open:hover { box-shadow: none; }
 :root.no-glow :is(.ws-creator:hover:not(:disabled), .ws-pill-x:hover, .ws-post textarea:focus) { box-shadow: none; }
 :root.no-glow .side-crash::before { box-shadow: none; }
-:root.no-glow .side-crash-ico > svg { filter: none; }
+:root.no-glow .side-crash-ico > svg, :root.no-glow .as-note-ico > svg { filter: none; }
 :root.no-glow .sp-fold .sp-chev { filter: none; }
 :root.no-glow .side-panel input[type=range]::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent); }
 :root.no-glow .pw-modal h2 svg { filter: none; }

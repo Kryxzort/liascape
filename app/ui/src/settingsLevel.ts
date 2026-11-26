@@ -16,6 +16,7 @@ export const LEVEL_OF_KEY: Record<string, Level> = {
   volume: "basic", noAudio: "basic", normalizeAudio: "basic", autoMute: "basic", pauseWhenCovered: "basic",
   globalSwitchWhenVideoEnds: "basic", globalIntervalSeconds: "basic", globalTransitionEnabled: "basic",
   videoScale: "basic", cardSize: "basic", thumbnailAspect: "basic", morphs: "basic", allowScenes: "basic",
+  startWithDesktop: "basic",
   // standard
   speed: "standard", autoMuteOnlyIfMprisActive: "standard",
   globalMaxPlaySeconds: "standard", globalSeparateSceneTiming: "standard", globalSwitchScenesAfterSeconds: "standard",

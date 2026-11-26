@@ -8,6 +8,7 @@ paths:
   - "src/backend/Web/SceneLoudnessOps.cs"
   - "src/backend/Web/PreviewBackfill.cs"
   - "src/backend/Helpers/FeatureHealth.cs"
+  - "src/backend/Helpers/Autostart.cs"
   - "src/backend/Program.cs"
 ---
 
@@ -38,6 +39,7 @@ paths:
 - Never bind a whole `AppSettings` from a body: `POST /settings` is PATCH (`SettingsService.Patch`), `/playlist/state` merges (`JsonMerge.Over`). A bad value → 400 that saves nothing. `LastSession` and the Steam sign-in fields keep their saved values whatever the body says. Guard: `scripts/test-settings-merge.sh`.
 - `/settings` applies the EFFECTIVE value (`override ?? global`) live, through `PlayerHelper.ApplyEffectiveLive`. A new setting must get its live path too.
 - `POST /cache/clear {ids}` deletes only the regular files directly in each named category's folder (`AppOps.CacheCategories`, the folder its writer uses), never a symlink, a subfolder, a folder that is a link or a writer's file in progress (`Busy`); an unknown or empty id list → 400 that deletes nothing. Guard: `scripts/test-cache-clear.sh`.
+- "Start with your desktop" (`Helpers/Autostart.cs` `Sync`: `/settings` on a change, `GET /autostart`, `serve`'s start) writes and removes only `$XDG_CONFIG_HOME/autostart/liascape.desktop`, and removes it only while it carries `X-Liascape-Autostart=true`; a compositor config is only searched, never written, and one that already runs `liascape restore` gets no entry. Ask `systemctl --user` only when the runtime dir has its own manager (`systemd/private`). Guard: `scripts/test-autostart.sh`.
 - A no-op `/settings` must stay cheap: run library-wide work off the request thread (`KickLoudnessBackfill`). Guard: `scripts/test-settings-latency.sh`.
 - `/next` `/prev` `/random` with nothing playable → 409 `{error}`, never 500.
 - The volume keys move what `VolumeKeyTarget` says (`auto` / `item` / `global`); an item change broadcasts `library-item-changed`, a global one `settings-changed`.

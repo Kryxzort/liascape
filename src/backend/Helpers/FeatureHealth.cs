@@ -27,7 +27,8 @@ public static class FeatureHealth
         JsonElement? PlayerHealth,     // hello.health / `liascape-player health` (null: no answer)
         (bool ok, string? reason) Scenes,
         Func<string, bool> OnPath,
-        bool SessionBus = true);       // a D-Bus session bus is reachable (the Signal's MPRIS check reads it)
+        bool SessionBus = true,        // a D-Bus session bus is reachable (the Signal's MPRIS check reads it)
+        Autostart.Status? Autostart = null); // "Start with your desktop": whether its entry runs here (null: not reported)
 
     public static List<Feature> Report(AppSettings s)
     {
@@ -46,7 +47,9 @@ public static class FeatureHealth
                 catch (Exception e) { scenes = (false, $"couldn't check scene support: {e.Message}"); }
         }
         else scenes = (false, missing);
-        return Build(new Inputs(missing, ph, scenes, OnPath, SessionBusReachable()))
+        Autostart.Status? auto = null;
+        try { auto = Autostart.Check(s); } catch (Exception e) { Console.WriteLine($"/health/features: autostart: {e.Message}"); }
+        return Build(new Inputs(missing, ph, scenes, OnPath, SessionBusReachable(), auto))
             .Select(f => f with { inUse = InUse(f.id, s) }).ToList();
     }
 
@@ -60,6 +63,7 @@ public static class FeatureHealth
         "hwdec-interop" => !string.Equals(s.HwDec, "no", StringComparison.OrdinalIgnoreCase),
         "auto-mute" => s.AutoMute,
         "mpris" => s.AutoMute && s.AutoMuteOnlyIfMprisActive,
+        "autostart" => s.StartWithDesktop,
         _ => true, // ffmpeg: imports, thumbnails, durations — always
     };
 
@@ -150,6 +154,15 @@ public static class FeatureHealth
         f.Add(new("ffmpeg", "ffmpeg", ff.Length == 0,
             ff.Length == 0 ? null : $"{string.Join(" and ", ff)} not found in PATH — loudness can't be measured (Even out loudness), and imports, thumbnails, video previews and video durations fail",
             ["normalizeAudio", "previewNotHovered"]));
+        // "Start with your desktop": its entry runs only where something runs autostart entries (Autostart.Detect); a
+        // compositor config that already runs restore needs none; unknown stays unknown
+        if (i.Autostart is { } a)
+        {
+            bool? ok = a.state == "compositor" ? true : a.missing != null ? false
+                : a.state switch { "runs" => true, "wontRun" => false, _ => null };
+            string? why = ok != false ? null : a.missing ?? $"{a.reason}, so its autostart entry never runs. Add \"{a.line}\" to its config instead";
+            f.Add(new("autostart", "Start with your desktop", ok, why, ["startWithDesktop"]));
+        }
         return f;
     }
 }

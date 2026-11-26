@@ -55,6 +55,11 @@ sealed class Program
             case "scraper-selftest":
                 Environment.Exit(Liascape.Scrapers.ScraperSelfTest.Run(args.Skip(1).ToArray()));
                 return;
+            // hidden: what "Start with your desktop" sees here (Helpers/Autostart.cs Check, read-only), as JSON: the
+            // detection cases of scripts/test-autostart.sh
+            case "autostart-check":
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Autostart.Check(SettingsService.Load())));
+                return;
             // hidden: the Workshop through the running Steam client as Wallpaper Engine (Helpers/SteamClientUgc.cs) — the
             // backend's child (`session`: JSON commands on stdin, JSON lines on stdout; `probe`); never run by hand
             case "steam-ugc":

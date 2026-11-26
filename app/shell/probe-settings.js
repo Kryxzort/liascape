@@ -4,7 +4,20 @@
 //   copy:feedback     Keyboard shortcuts' Copy turns into a green "Copied" and settles back to "Copy" (hooks/useCopied.ts, the
 //                     sidebar pill's timing): the two faces roll (motion on) or only cross-fade (motion off, prefers-reduced-motion),
 //                     the button keeps its width and the command beside it never moves
-//   copy:commands     what lands on the clipboard: a shortcut's command and Autostart's
+//   copy:commands     what lands on the clipboard: two shortcuts' commands
+//   autostart:toggle  Startup → "Start with your desktop" at Basic, a whole-row themed checkbox: a click saves it and the stack's
+//                     backend writes $XDG_CONFIG_HOME/autostart/liascape.desktop (the launcher's Exec, Liascape's marker); the
+//                     stack's session is unknown, so the "unknown" note shows with the launcher's line and its Copy copies it;
+//                     a second click removes the entry and the note; other.desktop beside it never changes
+//   autostart:notes   each case's note from a stubbed GET /autostart: plain Hyprland / Sway (their line + Copy), already in
+//                     the Hyprland config (shown off too, --success edge, no line), a liascape.desktop of the user's, no
+//                     command (line + Copy); none where autostart runs or while it's off; --warn / --success edges, plain
+//                     words; pictures settings-autostart-wontRun.png, settings-autostart-compositor.png
+//   autostart:motion:<m>  the note on a click: motion on it rises in and fades out while the section under Startup glides
+//                     down and back up (in-between frames); off and prefers-reduced-motion it only fades and the section
+//                     takes its place at once; pictures settings-autostart-in-mid.png, -out-mid.png, -shown-<m>.png
+//   autostart:look    the note's status glyph glows still (none under no-glow, never animates), its Copy glows hovered (none
+//                     under no-glow), bg-live: a see-through fill; pictures settings-autostart-look*.png
 //   preview:monitors  removing a scene monitor saves sceneMonitors without it (the other kept), and the list on screen agrees
 //   hint:transition   the Transition style hint explains only the chosen style; Settings has no Pre-measure scenes row
 //   playtime:maxFloor:<where>  the maximum play time is 0 (off) or at least the minimum, in Settings (global) and the
@@ -30,7 +43,7 @@
 //                     bring none back (scene fonts come from fontconfig)
 //   levels:rows       each row the Settings re-tier moved (and a neighbour that stayed) shows from exactly its level; a
 //                     stored "steamcmd" download mode (dropped) brings back none of its rows at any level
-//   levels:noEmptySection  at every level no section heading shows without a row; Video and Keyboard shortcuts open at
+//   levels:noEmptySection  at every level no section heading shows without a row; Video and Startup open at
 //                     Basic with one row each, Playback with "Pause behind windows"; pictures settings-levels-<level>-<n>.png
 //   cache:lines       Housekeeping's cache picker: one line per cache (AppOps.CacheCategories) with its words, a themed tick
 //                     and the size of exactly its folder on disk (the shader cache's absent folder reads "Empty"); the
@@ -69,6 +82,7 @@ const path = require("path");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const MO = require("./motion-off");
 const OUT = E.LIASCAPE_OUT;
 const ONLY = E.LIASCAPE_ONLY ? new RegExp(E.LIASCAPE_ONLY) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -331,7 +345,7 @@ app.whenReady().then(async () => {
     }
     await setSettings({ Morphs: true });
 
-    await cell("copy:commands — a shortcut and Autostart copy what they show", async () => {
+    await cell("copy:commands — a shortcut's Copy copies what it shows", async () => {
       const v = [];
       await setSettings({ SettingsLevel: "standard" }); await load();
       // the page's own writes too: a cross-check when the session's clipboard can't be read
@@ -339,7 +353,7 @@ app.whenReady().then(async () => {
         navigator.clipboard.writeText = (t) => { window.__wrote.push(t); return w(t); }; return true`);
       const want = [
         ["volume-up shortcut", '[data-copy="liascape volume up"]', "liascape volume up"],
-        ["Autostart", '[data-copy="liascape restore"]', "liascape restore"],
+        ["toggle-loop-current shortcut", '[data-copy="liascape toggle-loop-current"]', "liascape toggle-loop-current"],
       ];
       for (const [what, sel, text] of want) {
         const p = await js(`return await window.__x.show(document.querySelector(${J(sel)}))`);
@@ -352,6 +366,209 @@ app.whenReady().then(async () => {
         if (got !== text) v.push(`${what}: the clipboard holds ${J(got.slice(0, 80))}${wrote.length ? ` (the page wrote ${J(wrote[0]?.slice(0, 80))})` : " (no write)"}, want ${J(text.slice(0, 80))}`);
         if (!(await js(`return document.querySelector(${J(sel)})?.hasAttribute("data-copied")`))) v.push(`${what}: the button didn't turn into "Copied"`);
       }
+      return v;
+    });
+
+    // ---- "Start with your desktop" (views/Settings.tsx StartupRows, src/backend/Helpers/Autostart.cs). The stack's session
+    // is none the backend knows (test-ui-matrix.sh unsets the desktop's variables: "unknown") and its launcher is fixed.
+    const AD = path.join(E.XDG_CONFIG_HOME || path.join(E.HOME, ".config"), "autostart");
+    const ENTRY = path.join(AD, "liascape.desktop");
+    const AS_LINE = `${E.LIASCAPE_LAUNCHER || "/opt/liascape-matrix/bin/liascape"} restore`;
+    const AS_ROW = "Start with your desktop";
+    // GET /autostart answered in the page by `st` (the backend's other answers untouched), read again by a fresh Settings
+    const AS_BASE = { enabled: true, state: "runs", reason: "", via: null, compositor: null, line: "liascape restore", configFile: null,
+      entry: "none", entryPath: "/home/u/.config/autostart/liascape.desktop", exec: "/usr/bin/liascape restore", missing: null, error: null };
+    async function stubAutostart(st) {
+      await js(`window.__asStub = ${J({ ...AS_BASE, ...st })}; if (!window.__asWrapped) { window.__asWrapped = true; const of = window.fetch.bind(window);
+        window.fetch = (u, o) => String(u).includes("/autostart") && window.__asStub
+          ? Promise.resolve(new Response(JSON.stringify(window.__asStub), { status: 200, headers: { "Content-Type": "application/json" } })) : of(u, o); }
+        await window.__x.tab("Library"); await window.__x.tab("Settings"); return true`);
+      await waitFor(() => js(`return !!window.__x.row(${J(AS_ROW)})`), 5000);
+      await sleep(400);
+    }
+    // the Startup section brought into view, as a capture rectangle inside the window
+    const asRect = () => js(`const s = window.__x.row(${J(AS_ROW)}).closest(".ssection"); await window.__x.show(s); const b = s.getBoundingClientRect();
+      const y = Math.max(0, Math.round(b.y)); return { x: Math.round(b.x), y, width: Math.round(b.width), height: Math.max(1, Math.min(Math.round(b.bottom), innerHeight) - y) }`);
+    const asNote = () => js(`const n = document.querySelector("[data-autostart-note]"); if (!n) return null; const cs = getComputedStyle(n);
+      return { key: n.dataset.autostartNote, tone: n.dataset.tone, text: n.querySelector(".as-note-text")?.textContent ?? "",
+        line: n.querySelector("[data-autostart-line]")?.textContent ?? null, copy: !!n.querySelector("[data-copy]"), border: cs.borderTopColor,
+        section: n.closest(".ssection")?.querySelector("h3")?.textContent.trim(), leaving: n.hasAttribute("data-leaving") }`);
+    const asClickRow = async () => { const p = await js(`return await window.__x.show(window.__x.row(${J(AS_ROW)}).querySelector(".slabel"))`); await clickAt(p.x, p.y); };
+
+    await cell("autostart:toggle — the Startup row at Basic writes Liascape's autostart entry and removes it, nothing else in the folder touched", async () => {
+      const v = [];
+      fs.mkdirSync(AD, { recursive: true });
+      const decoy = path.join(AD, "other.desktop"), decoyText = "[Desktop Entry]\nType=Application\nName=Other\nExec=other\n";
+      fs.writeFileSync(decoy, decoyText); fs.utimesSync(decoy, 1e9, 1e9);
+      try { fs.unlinkSync(ENTRY); } catch { /* not there */ }
+      try {
+        await setSettings({ SettingsLevel: "basic", StartWithDesktop: false, Morphs: true }); await load();
+        const r = await js(`const r = window.__x.row(${J(AS_ROW)}); if (!r) return null; const c = r.querySelector("input[type=checkbox]"), cs = c && getComputedStyle(c);
+          return { section: r.closest(".ssection")?.querySelector("h3")?.textContent.trim(), tag: r.tagName, themed: cs ? cs.appearance === "none" && cs.width === "18px" : false,
+            checked: c?.checked, hint: r.querySelector(".shint")?.textContent ?? "" }`);
+        if (!r) return [`no "${AS_ROW}" row at Basic`];
+        if (r.section !== "Startup") v.push(`the row sits in ${J(r.section)}, want Startup`);
+        if (r.tag !== "LABEL" || !r.themed) v.push(`not a whole-row themed checkbox (${J(r)})`);
+        if (r.checked) v.push("ticked with the setting off");
+        if (await asNote()) v.push(`a note shows with it off: ${J(await asNote())}`);
+        await asClickRow();
+        if (!(await waitFor(async () => (await field("startWithDesktop")) === true, SAVE_MS))) v.push("a click on the row didn't save startWithDesktop");
+        if (!(await waitFor(() => fs.existsSync(ENTRY), 5000))) v.push(`no ${ENTRY} after turning it on`);
+        else {
+          const t = fs.readFileSync(ENTRY, "utf8");
+          if (!t.includes(`\nExec=${AS_LINE}\n`)) v.push(`the entry's Exec isn't ${J(AS_LINE)}: ${J(t)}`);
+          if (!/^X-Liascape-Autostart=true$/m.test(t)) v.push("the entry lacks Liascape's marker");
+        }
+        // the stack's session is unknown: the note says so, with the line and its Copy
+        if (!(await waitFor(async () => (await asNote())?.key === "unknown", 4000))) v.push(`no "unknown" note while on: ${J(await asNote())}`);
+        else {
+          const n = await asNote();
+          if (n.line !== AS_LINE) v.push(`the note's line is ${J(n.line)}, want ${J(AS_LINE)}`);
+          if (n.section !== "Startup") v.push(`the note sits in ${J(n.section)}`);
+          const cp = await js(`return await window.__x.show(document.querySelector("[data-autostart-note] [data-copy]"))`);
+          await clipboard.writeText("");
+          await clickAt(cp.x, cp.y);
+          await waitFor(async () => (await clipboard.readText()) !== "", 1500);
+          if ((await clipboard.readText()) !== AS_LINE) v.push(`Copy put ${J(await clipboard.readText())} on the clipboard, want ${J(AS_LINE)}`);
+          if ((await field("startWithDesktop")) !== true) v.push("the note's Copy toggled the setting");
+        }
+        await sleep(1500);
+        await asClickRow();
+        if (!(await waitFor(async () => (await field("startWithDesktop")) === false, SAVE_MS))) v.push("a second click didn't save it off");
+        if (!(await waitFor(() => !fs.existsSync(ENTRY), 5000))) v.push("the entry stayed after turning it off");
+        if (!(await waitFor(async () => !(await asNote()), 3000))) v.push(`the note stayed after turning it off: ${J(await asNote())}`);
+        if (fs.readFileSync(decoy, "utf8") !== decoyText || Math.round(fs.statSync(decoy).mtimeMs) !== 1e12) v.push("other.desktop beside it changed");
+        const left = fs.readdirSync(AD).sort();
+        if (J(left) !== J(["other.desktop"])) v.push(`the folder holds ${J(left)}, want only other.desktop`);
+      } finally {
+        await setSettings({ StartWithDesktop: false, SettingsLevel: "standard" });
+        try { fs.unlinkSync(decoy); } catch { /* gone */ }
+      }
+      return v;
+    });
+
+    await cell("autostart:notes — each case's note: the line and Copy where a compositor line is the way, none where autostart runs", async () => {
+      const v = [];
+      try {
+        const CASES = [
+          { name: "Hyprland without autostart", on: true, st: { state: "wontRun", compositor: "Hyprland", line: "exec-once = liascape restore" },
+            key: "wontRun", tone: "warn", words: /Hyprland was started without anything that runs autostart entries.*Hyprland config/, line: "exec-once = liascape restore" },
+          { name: "Sway without autostart", on: true, st: { state: "wontRun", compositor: "Sway", line: "exec liascape restore" },
+            key: "wontRun", tone: "warn", words: /Sway was started/, line: "exec liascape restore" },
+          { name: "already in the Hyprland config (off)", on: false, st: { state: "compositor", compositor: "Hyprland", configFile: "~/.config/hypr/autostart.conf", line: "exec-once = liascape restore" },
+            key: "compositor", tone: "ok", words: /already starts Liascape \(~\/\.config\/hypr\/autostart\.conf\)/, line: null },
+          { name: "a liascape.desktop of the user's", on: true, st: { state: "runs", entry: "foreign" },
+            key: "foreign", tone: "warn", words: /liascape\.desktop is already there and isn't Liascape's/, line: null },
+          { name: "no command", on: true, st: { state: "runs", exec: null, missing: "Liascape couldn't find its liascape command" },
+            key: "missing", tone: "warn", words: /couldn't find its liascape command, so it can't add an autostart entry/, line: "liascape restore" },
+          { name: "autostart runs (uwsm)", on: true, st: { state: "runs", via: "uwsm", entry: "ours" }, key: null },
+          { name: "Hyprland without autostart, off", on: false, st: { state: "wontRun", compositor: "Hyprland", line: "exec-once = liascape restore" }, key: null },
+        ];
+        await setSettings({ SettingsLevel: "basic", Morphs: true }); await load();
+        const C = (expr) => js(`const p = document.createElement("i"); p.style.color = ${J(expr)}; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c`);
+        for (const c of CASES) {
+          await setSettings({ StartWithDesktop: c.on });
+          await waitFor(async () => (await field("startWithDesktop")) === c.on, SAVE_MS);
+          await load(); await stubAutostart(c.st);
+          const n = await asNote();
+          if (!c.key) { if (n) v.push(`${c.name}: a note shows (${J(n)}), want none`); continue; }
+          if (!n) { v.push(`${c.name}: no note`); continue; }
+          if (n.key !== c.key || n.tone !== c.tone) v.push(`${c.name}: note ${n.key}/${n.tone}, want ${c.key}/${c.tone}`);
+          if (!c.words.test(n.text)) v.push(`${c.name}: its words ${J(n.text)} don't match ${c.words}`);
+          if (n.line !== c.line) v.push(`${c.name}: line ${J(n.line)}, want ${J(c.line)}`);
+          if (!!c.line !== n.copy) v.push(`${c.name}: Copy ${n.copy ? "shows" : "is missing"}`);
+          const want = await C(c.tone === "ok" ? "color-mix(in srgb, var(--success) 50%, transparent)" : "color-mix(in srgb, var(--warn) 55%, transparent)");
+          if (n.border !== want) v.push(`${c.name}: its edge is ${n.border}, want ${want} (the theme's ${c.tone === "ok" ? "--success" : "--warn"})`);
+          if (/[—;·]/.test(n.text)) v.push(`${c.name}: an em dash, semicolon or · in ${J(n.text)}`);
+          if ((c.key === "wontRun" && c.name.startsWith("Hyprland")) || c.key === "compositor") await shot(`autostart-${c.key}`, await asRect());
+        }
+      } finally { await setSettings({ StartWithDesktop: false, SettingsLevel: "standard" }); }
+      return v;
+    });
+
+    // per frame: the note (opacity as seen, its box) and the section under Startup (its box), as motion-off.js records them
+    const AS_SAMPLE = (ms) => MO.SAMPLE({ note: "[data-autostart-note]", next: "[data-probe-next]" }, ms);
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`autostart:motion:${mode} — the note ${mode === "on" ? "rises in and fades out, the sections below glide" : "only fades, nothing moves"}`, async () => {
+        const v = [];
+        try {
+          await setSettings({ SettingsLevel: "standard", StartWithDesktop: false, Morphs: mode !== "off" }); await reducedMotion(mode === "reduced"); await load();
+          await stubAutostart({ state: "wontRun", compositor: "Hyprland", line: "exec-once = liascape restore" });
+          const noMotion = await js(`return document.documentElement.classList.contains("no-motion")`);
+          if (noMotion !== (mode !== "on")) return [`:root.no-motion is ${noMotion} under motion ${mode} — proved nothing`];
+          const marked = await js(`const s = window.__x.row(${J(AS_ROW)}).closest(".ssection"), n = s.nextElementSibling; if (!n) return false; n.setAttribute("data-probe-next", ""); return true`);
+          if (!marked) return ["no section under Startup — proved nothing"];
+          // in: a click on the row
+          const p = await js(`return await window.__x.show(window.__x.row(${J(AS_ROW)}).querySelector(".slabel"))`);
+          await mv(5, 5, 200);
+          const sIn = js(`return await ${AS_SAMPLE(1100)}`);
+          await sleep(60); await clickAt(p.x, p.y);
+          if (mode === "on") { await sleep(90); await shot("autostart-in-mid"); }
+          const fin = await sIn;
+          // out: a second click
+          await sleep(500);
+          await shot(`autostart-shown-${mode}`);
+          const sOut = js(`return await ${AS_SAMPLE(1300)}`);
+          await sleep(60); await clickAt(p.x, p.y);
+          if (mode === "on") { await sleep(110); await shot("autostart-out-mid"); }
+          const fout = await sOut;
+          const ys = (fr) => fr.filter((f) => f[1] != null).map((f) => f[3]);
+          const between = (arr, a, b) => arr.filter((y) => y > Math.min(a, b) + 0.75 && y < Math.max(a, b) - 0.75).length;
+          const nIn = fin.next.filter((f) => f[1] != null), nOut = fout.next.filter((f) => f[1] != null);
+          if (!nIn.length || !nOut.length) return ["the section under Startup wasn't on screen — proved nothing"];
+          const y0 = nIn[0][3], y1 = nIn[nIn.length - 1][3], y2 = nOut[nOut.length - 1][3];
+          if (!(y1 > y0 + 10)) v.push(`the section below didn't make room for the note (${y0} → ${y1}) — proved nothing`);
+          if (Math.abs(y2 - y0) > 0.75) v.push(`the section below didn't come back (${y0} → ${y2})`);
+          if (mode === "on") {
+            v.push(...MO.judge("the note in", fin.note, { appear: true, still: false, maxMs: 600 }).filter((x) => !/took/.test(x)));
+            const rising = fin.note.filter((f, i, a) => f[1] != null && f[1] > 0.05 && f[1] < 0.95 && a.at(-1)[1] != null && Math.abs(f[3] - a.at(-1)[3]) > 0.75).length;
+            if (rising < 2) v.push(`motion on: the note didn't rise in (${rising} frames mid-rise)`);
+            if (between(ys(fin.next), y0, y1) < 2) v.push(`motion on: the section below jumped down (${between(ys(fin.next), y0, y1)} frames between, ${MO.brief(fin.next)})`);
+            v.push(...MO.judge("the note out", fout.note, { leave: true, still: false, maxMs: 600 }).filter((x) => !/took/.test(x)));
+            if (between(ys(fout.next), y1, y2) < 2) v.push(`motion on: the section below jumped back up (${between(ys(fout.next), y1, y2)} frames between)`);
+          } else {
+            v.push(...MO.judge(`motion ${mode}, the note in`, fin.note, { appear: true }));
+            v.push(...MO.judge(`motion ${mode}, the note out`, fout.note, { leave: true }));
+            if (between(ys(fin.next), y0, y1) || between(ys(fout.next), y1, y2)) v.push(`motion ${mode}: the section below glided (it takes its place at once)`);
+          }
+        } finally { await reducedMotion(false); await setSettings({ StartWithDesktop: false, Morphs: true, SettingsLevel: "standard" }); }
+        return v;
+      });
+    }
+
+    await cell("autostart:look — the note's glyph glows still (none under no-glow), bg-live, its Copy glows on hover; pictures", async () => {
+      const v = [];
+      try {
+        await setSettings({ SettingsLevel: "standard", StartWithDesktop: true, Morphs: true }); await load();
+        await stubAutostart({ state: "wontRun", compositor: "Hyprland", line: "exec-once = liascape restore" });
+        if ((await asNote())?.key !== "wontRun") return [`no wontRun note: ${J(await asNote())}`];
+        const cp = await js(`return await window.__x.show(document.querySelector("[data-autostart-note] [data-copy]"))`);
+        const rect = await js(`const b = document.querySelector("[data-autostart-note]").closest(".ssection").getBoundingClientRect();
+          return { x: Math.round(b.x), y: Math.max(0, Math.round(b.y)), width: Math.round(b.width), height: Math.round(Math.min(b.height, innerHeight - Math.max(0, b.y))) }`);
+        const ico = () => js(`return getComputedStyle(document.querySelector("[data-autostart-note] .as-note-ico > svg")).filter`);
+        const copy = () => js(`return getComputedStyle(document.querySelector("[data-autostart-note] [data-copy]")).boxShadow`);
+        const lit = (sh) => !!sh && sh !== "none" && sh.split(/,(?![^(]*\))/).some((part) => {
+          const m = /rgba?\(([^)]*)\)/.exec(part); if (!m) return false; const c = m[1].split(",").map(Number); return c.length < 4 || c[3] > 0; });
+        await mv(5, 5, 300);
+        if (!/drop-shadow/.test(await ico())) v.push(`the glyph doesn't glow (${await ico()})`);
+        const anims = await js(`return document.querySelector("[data-autostart-note] .as-note-ico").getAnimations({ subtree: true }).length`);
+        if (anims) v.push(`the status glyph moves (${anims} animations)`);
+        await shot("autostart-look", rect);
+        await mv(cp.x, cp.y, 400);
+        if (!lit(await copy())) v.push(`its Copy doesn't glow hovered (${await copy()})`);
+        await shot("autostart-look-hover", rect);
+        await js(`document.documentElement.classList.add("no-glow"); return true`); await sleep(300);
+        if ((await ico()) !== "none") v.push(`no-glow: the glyph still glows (${await ico()})`);
+        if (lit(await copy())) v.push(`no-glow: its Copy still glows (${await copy()})`);
+        await shot("autostart-look-noglow", rect);
+        await js(`document.documentElement.classList.remove("no-glow"); document.documentElement.classList.add("bg-live"); return true`); await sleep(300);
+        const bg = await js(`return getComputedStyle(document.querySelector("[data-autostart-note]")).backgroundColor`);
+        const a = /\/\s*([0-9.]+)\s*\)$/.exec(bg)?.[1] ?? /rgba\([^)]*,\s*([0-9.]+)\)/.exec(bg)?.[1] ?? 1;
+        if (!(+a < 1)) v.push(`bg-live: the note's fill ${bg} is opaque (want --tr-strong translucency)`);
+        await shot("autostart-look-bglive", rect);
+        await js(`document.documentElement.classList.remove("bg-live"); return true`);
+        await mv(5, 5, 200);
+      } finally { await setSettings({ StartWithDesktop: false, SettingsLevel: "standard" }); }
       return v;
     });
 
@@ -722,7 +939,7 @@ app.whenReady().then(async () => {
       "Stopped scene shows": "expert", "Keep a scene renderer ready": "advanced",
       "Thumbnail shape": "basic", "Smooth window animations": "basic", "Text shadow": "advanced", "On hover": "advanced",
       "Not hovered": "advanced", "Wallpaper behind every tab": "standard",
-      "Autostart": "basic", "Forget the whole library": "advanced",
+      "Start with your desktop": "basic", "Forget the whole library": "advanced",
       // neighbours that stay: their sections' other rows keep their own levels
       "Video frame rate cap": "standard", "Hardware decoding": "advanced", "toggle-mute": "standard", "Clear cached files": "basic",
     };
@@ -770,9 +987,9 @@ app.whenReady().then(async () => {
             await shot(`levels-${lv}-${i}`);
           }
           await js(`document.querySelector(".scroll.settings").scrollTop = 0; return true`);
-          // Basic: the Video, Keyboard shortcuts and Playback sections open for their one Basic row each
+          // Basic: the Video, Startup and Playback sections open for their one Basic row each
           if (lv === "basic") {
-            for (const [t, row] of [["Video", "Fit to screen"], ["Keyboard shortcuts", "Autostart"], ["Playback", "Pause behind windows"]]) {
+            for (const [t, row] of [["Video", "Fit to screen"], ["Startup", "Start with your desktop"], ["Playback", "Pause behind windows"]]) {
               const s = secs.find((x) => x.title === t);
               if (!s) v.push(`basic: no "${t}" section (its "${row}" row is Basic)`);
               else if (s.rows !== 1) v.push(`basic: "${t}" shows ${s.rows} rows, want just "${row}"`);

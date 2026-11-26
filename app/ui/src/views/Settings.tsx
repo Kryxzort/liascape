@@ -2,11 +2,11 @@ import { isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo,
 import {
   X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
-  Film, ImagePlay, Image as ImageIcon, FolderSync,
+  Film, ImagePlay, Image as ImageIcon, FolderSync, Power, Check,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useStore, SETTINGS_DEFAULTS } from "../store";
-import { api, type FeatureHealth, type ClipQuality, type WatchedFolder } from "../api/client";
+import { api, type AutostartStatus, type FeatureHealth, type ClipQuality, type WatchedFolder } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { Select } from "../components/Select";
 import { Segmented } from "../components/Segmented";
@@ -24,7 +24,8 @@ import { WarnIcon } from "../components/FeatureWarn";
 import { HealthCtx, healthWarnings } from "../components/featureHealth";
 import { CopyButton } from "../components/CopyButton";
 import { MuteButton } from "../components/MuteButton";
-import { useMotion, useFadeOff } from "../components/motion";
+import { useMotion, useFadeOff, FADE_EXIT_MS } from "../components/motion";
+import { glideFlip, snapFlip, type FlipSnap } from "../components/flipGlide";
 import { importFolder } from "../components/importPick";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
 
@@ -411,6 +412,90 @@ function CardPreviewRows({ level }: { level: Level }) {
 }
 const Help = ({ children }: { children: React.ReactNode }) => <p className="help">{children}</p>;
 
+// Settings → Startup → "Start with your desktop" (startWithDesktop): the backend writes or removes Liascape's own autostart
+// entry (Helpers/Autostart.cs). Under the row, a note when the entry isn't the whole story: the compositor's config already
+// starts Liascape (shown on or off), or, while it's on, the entry won't run (Hyprland / Sway with nothing that runs autostart
+// entries), it can't tell, a liascape.desktop of the user's own is in the way, or no command resolves. Where a line in the
+// compositor's config is the way, it shows with the shared Copy button. The note rises in and fades out (motion off: fades
+// only) and the sections below glide into the room it makes or leaves (a FLIP measured just before the change).
+// Guard: probe-settings autostart:*
+// API: GET /autostart
+type AutostartNote = { key: string; tone: "ok" | "warn"; text: string; line?: string };
+const AS_GLIDE = ".settings > *";
+const AS_LEAVE_MS = 200;
+function autostartNote(st: AutostartStatus | null, on: boolean): AutostartNote | null {
+  if (!st) return null;
+  const where = st.compositor ?? "compositor";
+  if (st.state === "compositor")
+    return { key: "compositor", tone: "ok", text: `Your ${where} config already starts Liascape (${st.configFile}), so Liascape adds no autostart entry of its own. To stop it, remove that line.` };
+  if (!on) return null;
+  if (st.entry === "foreign")
+    return { key: "foreign", tone: "warn", text: `${st.entryPath} is already there and isn't Liascape's, so Liascape leaves it alone.` };
+  if (st.missing)
+    return { key: "missing", tone: "warn", text: `${st.missing}, so it can't add an autostart entry. Add this to your ${st.compositor ? `${where} config` : "compositor's startup"} instead:`, line: st.line };
+  if (st.error) return { key: "error", tone: "warn", text: `Couldn't write the autostart entry: ${st.error}` };
+  if (st.state === "wontRun")
+    return { key: "wontRun", tone: "warn", text: `${where} was started without anything that runs autostart entries (no uwsm, systemd autostart or dex), so the entry won't run. Add this line to your ${where} config instead:`, line: st.line };
+  if (st.state === "unknown")
+    return { key: "unknown", tone: "warn", text: "Liascape can't tell whether your session runs autostart entries. If your wallpaper doesn't come back when you log in, add this to your compositor's startup:", line: st.line };
+  return null;
+}
+function StartupRows({ rootRef }: { rootRef: React.RefObject<HTMLDivElement | null> }) {
+  const on = useStore((s) => s.settings?.startWithDesktop === true);
+  const set = useStore((s) => s.setSetting);
+  const motion = useMotion();
+  const [st, setSt] = useState<AutostartStatus | null>(null);
+  const snap = useRef<FlipSnap | null>(null);
+  // where everything below stands just before a change that can add or take away the note (a user's tick, an answer)
+  const before = useCallback(() => { snap.current = motion ? snapFlip(rootRef.current, AS_GLIDE) : null; }, [motion, rootRef]);
+  const read = useCallback(() => api.autostart().then((r) => { before(); setSt(r); }).catch(() => {}), [before]);
+  useEffect(() => { void read(); }, []); // eslint-disable-line
+  // after a tick the backend has written or removed the entry (its save is debounced): read what it did
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const t = setTimeout(() => { void read(); }, 700);
+    return () => clearTimeout(t);
+  }, [on]); // eslint-disable-line
+  const note = autostartNote(st, on);
+  // the note shown: follows `note` during render; a note going away stays, leaving, for its fade, then goes
+  const [shown, setShown] = useState<AutostartNote | null>(note);
+  if (note && (note.key !== shown?.key || note.text !== shown.text || note.line !== shown.line)) setShown(note);
+  const leaving = !note && !!shown;
+  useEffect(() => {
+    if (!leaving) return;
+    const t = setTimeout(() => { before(); setShown(null); }, motion ? AS_LEAVE_MS : FADE_EXIT_MS);
+    return () => clearTimeout(t);
+  }, [leaving, motion, before]);
+  useLayoutEffect(() => {
+    if (!snap.current) return;
+    glideFlip(snap.current, rootRef.current, AS_GLIDE);
+    snap.current = null;
+  });
+  return (
+    <>
+      <Row label="Start with your desktop" hint="puts your wallpaper back when you log in, without opening the window" rk="startWithDesktop">
+        <input type="checkbox" checked={on} onChange={(e) => { before(); set("startWithDesktop", e.target.checked); }} />
+      </Row>
+      {shown && (
+        <div key={shown.key} className={`as-note${shown.tone === "ok" ? " as-ok" : ""}${leaving ? " leaving" : ""}`} data-tone={shown.tone} data-autostart-note={shown.key}
+          data-leaving={leaving ? "" : undefined} role="status">
+          <span className="as-note-ico">{shown.tone === "ok" ? <Check size={14} /> : <AlertTriangle size={14} />}</span>
+          <div className="as-note-body">
+            <span className="as-note-text">{shown.text}</span>
+            {shown.line && (
+              <span className="as-note-line">
+                <code className="kb" data-autostart-line>{shown.line}</code>
+                <CopyButton text={shown.line} what={shown.line} />
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // COOL: the global Volume/Speed sliders drag-preview LIVE like the per-wallpaper modal's: a throttled
 // (~90 ms, trailing) `/preview {global:true}` moves every playing wallpaper that follows the global (the
 // backend leaves one with its own override alone — override ?? global); the store's debounced
@@ -782,17 +867,18 @@ export const Settings = memo(function Settings() {
         {g("debugMode", false) && <Row label="Show debug overlay" hint="the on-screen FPS / metrics readout" rk="debugOverlay"><input type="checkbox" checked={g("debugOverlay", true)} onChange={(e) => set("debugOverlay", e.target.checked)} /></Row>}
       </Section>
 
-      <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />}>
-        {/* Basic shows only Autostart: the bind-these-keys line goes with the command list */}
-        {rank(level) >= rank("standard") && <Help>Bind these commands to keys in your compositor's config.</Help>}
+      <Section title="Startup" icon={<Power size={15} />}>
+        <StartupRows rootRef={scrollRef} />
+      </Section>
+
+      <Section title="Keyboard shortcuts" icon={<Keyboard size={15} />} lv="standard">
+        <Help>Bind these commands to keys in your compositor's config.</Help>
         {actions.map((a) => (
           <Row key={a} label={a} lv="standard">
             <code className="kb">liascape {a.replace("volume-", "volume ")}</code>
             <CopyButton text={`liascape ${a.replace("volume-", "volume ")}`} what={`liascape ${a.replace("volume-", "volume ")}`} />
           </Row>
         ))}
-        <Row label="Autostart" hint="run it when you log in, and your wallpapers come back"><code className="kb">liascape restore</code>
-          <CopyButton text="liascape restore" what="liascape restore" /></Row>
       </Section>
 
       <Section title="Housekeeping" icon={<LibraryIcon size={15} />}>

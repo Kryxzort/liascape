@@ -63,10 +63,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 125. [ ] (owner) Import from a link: Import accepts a pasted web link (a Workshop item page, a MoeWalls or DesktopHut
        page, or a direct video / picture URL) and downloads it through the matching source's own download path; an
        unknown site says it isn't supported.
-127. [ ] (owner) A native "Start with your desktop" setting: Liascape adds its own autostart entry (XDG autostart
-       `.desktop` running `liascape restore`) and detects when that entry won't run — e.g. Hyprland or Sway started
-       without a session manager that reads XDG autostart (no uwsm / systemd user session) — and then says what to
-       add to the compositor's config instead (`exec-once = liascape restore`), with a copy button.
 129. [ ] The adapter IT reaches Steam's real CM servers: its backends' startup library facts log on anonymously to
        Steam for their Workshop items, against "tests are hermetic". Point them at a stand-in (the stop suite's
        `LIASCAPE_STEAM_CM_SERVER`, once the switch-over lands) or run the IT with no network (`unshare -n` /

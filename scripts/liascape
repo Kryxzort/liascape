@@ -22,6 +22,9 @@ lib="$prefix/lib/liascape"
 libexec="$prefix/libexec/liascape"
 [ -e "$libexec/liascape-backend" ] || [ ! -e "$lib/liascape-backend" ] || libexec="$lib"
 
+# the command an autostart entry runs ("Start with your desktop", src/backend/Helpers/Autostart.cs): bin/liascape of this
+# prefix, which under Nix is the wrapper around this file (the AppImage's own path wins there, from $APPIMAGE)
+export LIASCAPE_LAUNCHER="${LIASCAPE_LAUNCHER:-$prefix/bin/liascape}"
 export LIASCAPE_UI_DIR="${LIASCAPE_UI_DIR:-$lib/ui}"
 export LIASCAPE_TRANSITIONS_DIR="${LIASCAPE_TRANSITIONS_DIR:-$lib/transitions}"
 export LIASCAPE_BACKEND="${LIASCAPE_BACKEND:-$libexec/liascape-backend}"

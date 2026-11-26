@@ -208,6 +208,9 @@ public class AppSettings
     // sidebar's Download under the "subscribe" mode is Subscribe); a file that says false keeps false
     public bool AutoAddWeWallpapersToLibrary { get; set; } = true;
     public bool IsPlaylistBarCollapsed { get; set; } = false;
+    // UI: "Start with your desktop": Liascape's own XDG autostart entry running `liascape restore` (Helpers/Autostart.cs),
+    // written or removed live by /settings
+    public bool StartWithDesktop { get; set; } = false;
     // "steamapp" (the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one click, Steam's
     // own progress; it FAILS when Steam can't be reached, never a fallback — WorkshopDownloader), "subscribe" (real
     // Steam subscription via the community endpoint with the sign-in, or the item's page in the Steam app without one),

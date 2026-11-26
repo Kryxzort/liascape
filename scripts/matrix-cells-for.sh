@@ -46,6 +46,8 @@ for f in $FILES; do
     scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
     scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-preview-backfill.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|scripts/test-presets.sh|\
     scripts/test-steam-signin.sh|scripts/test-fixtures/drive-steam-client.mjs|scripts/test-fixtures/fake_steamclient.c|src/backend/Web/SteamSelfTest.cs|scripts/test-steam-app-hold.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
+    # "Start with your desktop": the entry and the detection have their own script, the Settings row its probe cells
+    src/backend/Helpers/Autostart.cs|scripts/test-autostart.sh) echo "  $f → nothing in the matrix (bash scripts/test-autostart.sh; --probe probe-settings.js --only autostart)" >&2 ;;
     # how long "Use the Steam app" holds Steam: the page's word (the Workshop on Browse) and the shell's window-shown signal
     app/ui/src/hooks/useSteamAppPresence.ts|app/shell/preload.js) echo "  $f → nothing in the matrix (--probe probe-steam.js --only browse:appPresence; bash scripts/test-steam-app-hold.sh)" >&2 ;;
     # the library's background operations and the top bar's line that shows them: their own script + probe

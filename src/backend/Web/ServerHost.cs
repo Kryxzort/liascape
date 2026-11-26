@@ -154,6 +154,8 @@ public static class ServerHost
             LibraryFactsOps.Kick("startup"); // Steam tags, trailers and frame sizes the library doesn't have yet
             PreviewBackfill.Kick("startup"); // every card's previews it doesn't have yet
             FolderWatch.Start(); // the watched folders: what changed while the app was closed, then live
+            // the autostart entry follows the setting and this install's command (an AppImage moved, a new install)
+            try { Autostart.Sync(SettingsService.Load()); } catch (Exception e) { Console.WriteLine($"autostart: {e.Message}"); }
         });
 
         // the preview clips no card can ask for any more (sources gone or changed, replaced variants, unfinished encodes)
@@ -524,6 +526,8 @@ public static class ServerHost
                 || prev.AutoMuteMinLevelDb != s.AutoMuteMinLevelDb
                 || prev.AutoMuteOnlyIfMprisActive != s.AutoMuteOnlyIfMprisActive;
             if (amChanged) AudioMonitor.ReconcileEngine(settingChanged: true);
+            // "Start with your desktop": the autostart entry is written or removed now
+            if (prev.StartWithDesktop != s.StartWithDesktop) Autostart.Sync(s);
             Mark("rest");
             if (psw.ElapsedMilliseconds > 100 || Environment.GetEnvironmentVariable("LIASCAPE_PROFILE_SETTINGS") == "1")
                 Console.WriteLine($"/settings: {psw.ElapsedMilliseconds} ms ({string.Join(", ", phases)})");
@@ -535,6 +539,9 @@ public static class ServerHost
         // API: which features can't work here because a build piece / runtime tool is missing (FeatureHealth) — the
         // Settings page's warning icons (one quick player hello; CLI checks cached 30 s).
         app.MapGet("/health/features", () => Results.Json(new { features = FeatureHealth.Report(SettingsService.Load()) }));
+        // API: "Start with your desktop" — whether this session runs autostart entries, the line for the compositor's config
+        // when it doesn't, and the entry as it is after making it match the setting (Autostart.Sync)
+        app.MapGet("/autostart", () => Results.Json(Autostart.Sync(SettingsService.Load())));
         app.MapPost("/library/import", async (ImportReq r) =>
         {
             var item = await ImportService.ImportAsync(r.Path, r.Title);
