@@ -42,6 +42,7 @@ public static class LiascapePlayerSelfTest
             RendererLatchAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
             if (fails.Count == 0) VramCapRaceAssertions(fails);
+            if (fails.Count == 0) VramLearnAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
         catch (Exception e) { fails.Add($"{e.GetType().Name}: {e.Message}"); }
@@ -1104,6 +1105,39 @@ public static class LiascapePlayerSelfTest
             DrainAll();
             lock (sent)
                 if (sent.Count == 0 || sent[^1] != 8192) fails.Add($"the VRAM total learned with a 20000 MiB cap on: the guard ended on {(sent.Count == 0 ? "nothing" : sent[^1])}, want 8192");
+        }
+        finally { LiascapePlayerMedia.TestPlayerProp = null; PlayerStatus.VramTotalForTest = keep; }
+    }
+
+    // A new player's health before its VRAM sample is in (`vram.ok` null): the total is asked for again until it comes, and
+    // the playing wallpaper's guard then gets the bound; no measurement (`ok: false`) is asked once; a sample that never
+    // comes stops after the tries.
+    private static void VramLearnAssertions(List<string> fails)
+    {
+        var keep = PlayerStatus.VramTotalForTest;
+        var sent = new List<double>();
+        LiascapePlayerMedia.TestPlayerProp = (p, v) => { if (p == "scene_vram_limit_mib") lock (sent) sent.Add(Convert.ToDouble(v)); };
+        const string Pending = """{"vram":{"ok":null,"reason":null,"pending":true}}""";
+        const string Known = """{"vram":{"ok":true,"reason":null,"probe":"fake","total_mib":8192}}""";
+        const string None = """{"vram":{"ok":false,"reason":"no VRAM measurement here","probe":"none","total_mib":null}}""";
+        var on = new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = 20000 };
+        (int? total, int asked, double? last) Learn(params string[] answers)
+        {
+            PlayerStatus.VramTotalForTest = null; lock (sent) sent.Clear();
+            int asked = 0;
+            JsonElement? H() { var a = answers[Math.Min(asked, answers.Length - 1)]; asked++; return JsonDocument.Parse(a).RootElement.Clone(); }
+            LiascapePlayerMedia.LearnVramTotal(H, LiascapePlayerMedia.VramLearnTries, next => next(), () => on);
+            for (int i = 0; i < 10 && LiascapePlayerMedia.QueueDepth > 0; i++) try { LiascapePlayerMedia.Drain().Wait(5000); } catch { }
+            lock (sent) return (PlayerStatus.VramTotalMib, asked, sent.Count == 0 ? null : sent[^1]);
+        }
+        try
+        {
+            var a = Learn(Pending, Pending, Known);
+            if (a != (8192, 3, 8192)) fails.Add($"a new player's VRAM sample still running, then 8192: total {a.total}, asked {a.asked}, the guard {a.last}; want 8192, 3, 8192 (asked again until the total came)");
+            var b = Learn(None);
+            if (b != (null, 1, null)) fails.Add($"no VRAM measurement: total {b.total}, asked {b.asked}, the guard {b.last}; want unknown, asked once, nothing sent");
+            var c = Learn(Pending);
+            if (c != (null, LiascapePlayerMedia.VramLearnTries, null)) fails.Add($"a VRAM sample that never comes: total {c.total}, asked {c.asked}, want unknown after {LiascapePlayerMedia.VramLearnTries} tries");
         }
         finally { LiascapePlayerMedia.TestPlayerProp = null; PlayerStatus.VramTotalForTest = keep; }
     }

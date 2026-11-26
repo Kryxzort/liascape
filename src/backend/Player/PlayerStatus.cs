@@ -80,6 +80,11 @@ public static class PlayerStatus
             && v.TryGetProperty("total_mib", out var t) && t.ValueKind == JsonValueKind.Number && t.TryGetDouble(out var d) && d >= 1
             ? (int)Math.Min(Math.Round(d), int.MaxValue) : null;
 
+    // the player's VRAM sample hasn't answered yet (`health.vram.ok` null), or no health answer at all
+    public static bool VramPending(JsonElement? health) =>
+        health is not { ValueKind: JsonValueKind.Object } h || !h.TryGetProperty("vram", out var v) || v.ValueKind != JsonValueKind.Object
+        || !v.TryGetProperty("ok", out var ok) || ok.ValueKind is not (JsonValueKind.True or JsonValueKind.False);
+
     // A health answer read anywhere: a total newly known (or changed) moves the playing wallpaper's guard at once, so a saved
     // cap above the card holds at its total live, not from the next player start. The set reads the settings when it runs
     // (`settings`, the saved file unless a test hands its own), never a snapshot taken here: an edit saved meanwhile wins.

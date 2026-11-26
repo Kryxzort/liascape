@@ -291,11 +291,29 @@ public static class LiascapePlayerMedia
 
     private static int _sceneFpsGen = -1;
 
+    // A new player's VRAM sample runs off its loop (`health.vram` `ok: null` until it's in): asked again this often, this
+    // many times, until it carries the card's total
+    internal const int VramLearnTries = 40, VramLearnEveryMs = 250;
+
+    // The card's VRAM total for the cap's bound (PlayerStatus.NoteVramTotal), from the player's health; while that sample
+    // is still running, asked again a little later on the queue, so the playing wallpaper's guard gets the bound without
+    // Settings being opened. No measurement (`ok: false`) ends it: 65536 stays the bound. `later` runs the next try (the
+    // selftest runs it at once).
+    // Guard: player-selftest VramLearnAssertions
+    internal static void LearnVramTotal(Func<JsonElement?> health, int triesLeft, Action<Action> later, Func<AppSettings>? settings = null)
+    {
+        if (PlayerStatus.VramTotalMib != null || triesLeft <= 0) return;
+        var h = health();
+        if (PlayerStatus.VramTotalOf(h) != null) { PlayerStatus.NoteVramTotal(h, settings); return; }
+        if (PlayerStatus.VramPending(h)) later(() => LearnVramTotal(health, triesLeft - 1, later, settings));
+    }
+
     // every SceneMonitors entry onto this player process (a monitor not plugged in: logged, harmless), and the
     // player-level GPU / VRAM settings (a fresh player starts at its own defaults)
     private static void AssertSceneFps(LiascapePlayerClient client, AppSettings s)
     {
-        if (PlayerStatus.VramTotalMib == null) PlayerStatus.NoteVramTotal(client.Health().Health); // the cap's bound (GpuProps)
+        if (PlayerStatus.VramTotalMib == null) // the cap's bound (GpuProps)
+            LearnVramTotal(() => client.Health().Health, VramLearnTries, next => _ = Task.Delay(VramLearnEveryMs).ContinueWith(_ => QueueSet("vram-total", next)));
         foreach (var (name, fps) in SceneFpsMap(s.SceneMonitors)) SetSceneFps(client, name, fps);
         foreach (var (prop, v) in GpuProps(s)) SetPlayerProp(client, prop, v);
         SetPlayerProp(client, "pause_when_covered", AppSettings.CoverMode(s.PauseWhenCovered));
