@@ -772,13 +772,18 @@ public static class ServerHost
         app.MapPost("/workshop/drain", () => { SteamOps.DrainNow(); return Results.Ok(); });
         // "Open on Steam" → the item's page in the Steam CLIENT, not the browser — its
         // own route, never /open (http(s) only): a digits-only id becomes steam://url/CommunityFilePage/<id>, nothing else.
-        // {ok: false} = the Steam app couldn't be opened → the UI opens the https page in the browser instead.
-        app.MapPost("/steam/open-page", (WorkshopIdReq r) =>
+        // {ok: false} = the Steam app couldn't be opened → the UI opens the https page in the browser instead. `watch: "favorite"`
+        // ("Favourite on Steam", no usable sign-in): its favourite state is watched through the Steam app a few minutes after
+        // (Helpers/SteamFavoriteWatch.cs), opened in the Steam app or not; `watching` = a watch started.
+        app.MapPost("/steam/open-page", (OpenPageReq r) =>
         {
             if (!WorkshopSubOps.ValidId(r.WorkshopId)) return Results.BadRequest(new { error = "workshopId must be digits" });
+            if (r.Watch is not (null or "favorite")) return Results.BadRequest(new { error = "watch must be favorite" });
             bool ok = WorkshopDownloader.OpenInSteamApp(SteamTodo.PageUrl(r.WorkshopId!));
             Console.WriteLine($"workshop: {r.WorkshopId}: Open on Steam — {(ok ? "opened its page in the Steam app" : "the Steam app couldn't be opened")}");
-            return Results.Json(new { ok });
+            var s = SettingsService.Load();
+            bool watching = r.Watch == "favorite" && !SteamAuthService.HasUsableSignIn(s) && SteamFavoriteWatch.Start(r.WorkshopId!, s);
+            return Results.Json(new { ok, watching });
         });
         // how "Download without subscribing" (POST /download {oneOff}) would get an item: {route: "steamapp" | "subscribe" | null, missing}
         // (WorkshopDownloader.OneOffRouteFor) — the Browse sidebar's right-click menu asks as it opens. Local only: no Steam request
@@ -1112,6 +1117,7 @@ public static class ServerHost
     public record MuteReq(bool User, bool Value);
     public record TrashReq(List<LibraryItem> Items);
     public record WorkshopIdReq(string? WorkshopId, string? Title = null);
+    public record OpenPageReq(string? WorkshopId, string? Watch = null);
     public record PresenceReq(bool Showing);
     public record IdsReq(List<string>? Ids);
     public record FavoriteReq(string? WorkshopId, bool Favorite);

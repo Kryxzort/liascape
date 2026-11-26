@@ -151,8 +151,8 @@
 //                         once (never on mount; Off: no pop), the tile keeps its box; a refusal reverts with the reason; no-glow
 //                         + bg-live
 //   ws:favoriteSteam[Off] no usable sign-in: the tile's words roll over to "Favourite on Steam" as the state lands (Off: fade, nothing
-//                         moves), the tile keeps its box; a click opens the item's page in the Steam app (POST /steam/open-page),
-//                         sends no favourite; no-glow + bg-live
+//                         moves), the tile keeps its box; a click opens the item's page in the Steam app (POST /steam/open-page
+//                         {watch: "favorite"}), sends no favourite; no-glow + bg-live
 //   ws:comments[Off]      the comments: read only once in view, 10 of 23 newest first, the creator's marked, the text plain (markup
 //                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out no box;
 //                         a failed read a quiet line, Retry; bg-live
@@ -2798,7 +2798,8 @@ app.whenReady().then(async () => {
 
     // no usable sign-in: the favourite tile becomes "Favourite on Steam" — its words roll over in their one cell as the state lands
     // (motion off: they fade, nothing moves) and the tile keeps its box; a click opens the item's page in the Steam app (POST
-    // /steam/open-page) and sends no favourite; the tile stays as it was (Steam's own page takes the star). Shots
+    // /steam/open-page {watch: "favorite"}: the backend watches its state there) and sends no favourite; the tile stays as it was
+    // (Steam's own page takes the star). Shots
     // steam-ws-fav-steam-roll.png, steam-ws-fav-steam.png, steam-ws-fav-steam-live.png
     for (const motion of [true, false]) {
       await cell(`ws:favoriteSteam${motion ? "" : "Off"}`, async () => {
@@ -2832,7 +2833,7 @@ app.whenReady().then(async () => {
           v.push(...MO.judge("motion off: \"Favourite on Steam\"", s1.face, { appear: true }), ...MO.judge("motion off: \"Favourite\"", s1.old, { leave: true }),
             ...MO.judge("motion off: the tile", s1.tile));
         }
-        v.push(...await steamOpenClick(FAV, {}, "/workshop/favorite"));
+        v.push(...await steamOpenClick(FAV, { watch: "favorite" }, "/workshop/favorite"));
         const t2 = await page(`const t = document.querySelector(${J(FAV)}); return { state: t.dataset.wsFav, pop: !!t.querySelector(".ico-pop") };`);
         if (t2.state !== "signed-out" || t2.pop) v.push(`after the click: ${J(t2)} (want unchanged, no pop)`);
         if (motion) {

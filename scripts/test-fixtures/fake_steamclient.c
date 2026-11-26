@@ -18,6 +18,14 @@
 //   $FAKE_UGC_OPEN_DELAY_MS (env) → every helper takes that long to connect (CreateInterface): a loaded or cold machine, where
 //   starting a helper takes seconds, made repeatable (a rerun of the suite with it shows which waits assume a fast helper)
 //   SteamAppId must be 431960 (the helper sets it in its child only) — else ConnectToGlobalUser returns 0
+//   The account and its favourites (the `steamid` / `favorites` commands): "SteamUser021" BLoggedOn 1, GetSteamID 2 (76561190000000042,
+//   or $FAKE_UGC_DIR/steamid's number); "SteamUtils010" IsAPICallCompleted 11, GetAPICallResult 13 (a 280-byte
+//   SteamUGCQueryCompleted_t, callback 3401, nothing else); ISteamUGC CreateQueryUserUGCRequest 0 (the account's own id, the
+//   favourited list, Wallpaper Engine as creator and consumer app, else an invalid handle), SendQueryUGCRequest 4,
+//   GetQueryUGCResult 5, ReleaseQueryUGCRequest 19, SetReturnOnlyIDs 23. The favourites: $FAKE_UGC_DIR/favorites, an id a
+//   line, 50 a page.
+//   $FAKE_UGC_DIR/offline exists → BLoggedOn false; $FAKE_UGC_DIR/query-fail exists → every query answers EResult 2
+//   $FAKE_UGC_DIR/queries ← a line "<pid> <page> <unix s>" per query sent; $FAKE_UGC_DIR/queries-released ← a line per handle released
 //   $FAKE_UGC_DIR/child.pid ← the caller's pid; $FAKE_UGC_DIR/released ← a line per pipe released
 //   $FAKE_UGC_DIR/sub-<id> = subscribed (a file: each helper run is a NEW process — an unsubscribe run must see what an
 //   earlier download subscribed); UnsubscribeItem deletes it
@@ -47,8 +55,8 @@ static void helper_log(const char *what, int stamp) {
 static void note(const char *file, const char *text) { char p[4096]; snprintf(p, sizeof p, "%s/%s", dir(), file); FILE *f = fopen(p, "a"); if (f) { fputs(text, f); fclose(f); } }
 
 typedef struct { void **vt; } Obj;
-static void *client_vt[32], *ugc_vt[80];
-static Obj client = { client_vt }, ugc = { ugc_vt };
+static void *client_vt[32], *ugc_vt[80], *user_vt[8], *utils_vt[16];
+static Obj client = { client_vt }, ugc = { ugc_vt }, user = { user_vt }, utils = { utils_vt };
 
 static void install(uint64_t id) {
   char d[4096], p[4200]; snprintf(d, sizeof d, "%s/%llu", dir(), (unsigned long long)id);
@@ -90,9 +98,52 @@ static int32_t connect_user(Obj *s, int32_t pipe) {
   return 3;
 }
 static void release_user(Obj *s, int32_t pipe, int32_t user) { (void)s; (void)pipe; (void)user; note("released", "user\n"); }
-static void *generic(Obj *s, int32_t user, int32_t pipe, const char *ver) {
-  (void)s; return user == 3 && pipe == 7 && strcmp(ver, "STEAMUGC_INTERFACE_VERSION018") == 0 ? &ugc : NULL;
+static void *generic(Obj *s, int32_t u, int32_t pipe, const char *ver) {
+  (void)s; if (u != 3 || pipe != 7) return NULL;
+  if (strcmp(ver, "STEAMUGC_INTERFACE_VERSION018") == 0) return &ugc;
+  if (strcmp(ver, "SteamUser021") == 0) return &user;
+  if (strcmp(ver, "SteamUtils010") == 0) return &utils;
+  return NULL;
 }
+
+// ---- the account and its favourites ----
+static uint64_t steam_id(void) {
+  char p[4096]; snprintf(p, sizeof p, "%s/steamid", dir()); FILE *f = fopen(p, "r"); unsigned long long v = 0;
+  if (f) { if (fscanf(f, "%llu", &v) != 1) v = 0; fclose(f); }
+  return v ? (uint64_t)v : 76561190000000042ULL;
+}
+static bool logged_on(Obj *s) { (void)s; return !exists("offline"); }
+static uint64_t get_steamid(Obj *s) { (void)s; return steam_id(); }
+#define MAXFAV 4096
+static uint64_t favs[MAXFAV]; static int nfav;
+static void read_favs(void) {
+  char p[4096]; snprintf(p, sizeof p, "%s/favorites", dir()); FILE *f = fopen(p, "r"); nfav = 0;
+  if (!f) return; unsigned long long v; while (nfav < MAXFAV && fscanf(f, "%llu", &v) == 1) favs[nfav++] = v; fclose(f);
+}
+static uint32_t q_page; // the one query in flight (the helper sends one at a time)
+static uint64_t create_user_query(Obj *s, uint32_t account, int list, int matching, int sort, uint32_t creator, uint32_t consumer, uint32_t page) {
+  (void)s; (void)matching; (void)sort;
+  if (account != (uint32_t)(steam_id() & 0xffffffffu) || list != 5 || creator != 431960 || consumer != 431960 || page == 0) return ~0ULL;
+  q_page = page; read_favs();
+  char line[96]; snprintf(line, sizeof line, "%d %u %.3f\n", getpid(), page, wall()); note("queries", line);
+  return 0x5000 + page;
+}
+static bool set_only_ids(Obj *s, uint64_t h, bool on) { (void)s; (void)h; (void)on; return true; }
+static uint64_t send_query(Obj *s, uint64_t h) { (void)s; return h == 0x5000 + q_page ? h + 0x1000 : 0; }
+static bool call_done(Obj *s, uint64_t call, bool *failed) { (void)s; (void)call; *failed = false; return true; }
+static bool call_result(Obj *s, uint64_t call, void *out, int size, int expected, bool *failed) {
+  (void)s; if (size != 280 || expected != 3401 || call != 0x6000 + q_page) { *failed = true; return false; }
+  memset(out, 0, (size_t)size); char *b = out; uint64_t h = 0x5000 + q_page; memcpy(b, &h, 8);
+  int32_t er = exists("query-fail") ? 2 : 1; int first = (int)(q_page - 1) * 50;
+  uint32_t n = first >= nfav ? 0 : (uint32_t)(nfav - first < 50 ? nfav - first : 50), total = (uint32_t)nfav;
+  memcpy(b + 8, &er, 4); memcpy(b + 12, &n, 4); memcpy(b + 16, &total, 4);
+  *failed = false; return true;
+}
+static bool query_result(Obj *s, uint64_t h, uint32_t i, void *details) {
+  (void)s; int k = (int)(q_page - 1) * 50 + (int)i; if (h != 0x5000 + q_page || k >= nfav || i >= 50) return false;
+  memcpy(details, &favs[k], 8); return true;
+}
+static bool release_query(Obj *s, uint64_t h) { (void)s; (void)h; note("queries-released", "x\n"); return true; }
 static void subfile(uint64_t id, char *p, size_t n) { snprintf(p, n, "%s/sub-%llu", dir(), (unsigned long long)id); }
 static uint64_t subscribe(Obj *s, uint64_t id) {
   (void)s; helper_log("use", 0); sub_id = id; t_sub = now(); char p[4096]; subfile(id, p, sizeof p); FILE *f = fopen(p, "w"); if (f) fclose(f);
@@ -141,6 +192,9 @@ void *CreateInterface(const char *ver, int *ret) {
   client_vt[4] = (void *)release_user; client_vt[12] = (void *)generic;
   ugc_vt[68] = (void *)subscribe; ugc_vt[69] = (void *)unsubscribe; ugc_vt[72] = (void *)item_state; ugc_vt[73] = (void *)install_info; ugc_vt[74] = (void *)download_info;
   ugc_vt[75] = (void *)download_item;
+  ugc_vt[0] = (void *)create_user_query; ugc_vt[4] = (void *)send_query; ugc_vt[5] = (void *)query_result; ugc_vt[19] = (void *)release_query;
+  ugc_vt[23] = (void *)set_only_ids;
+  user_vt[1] = (void *)logged_on; user_vt[2] = (void *)get_steamid; utils_vt[11] = (void *)call_done; utils_vt[13] = (void *)call_result;
   helper_log("open", 1);
   char pid[32]; snprintf(pid, sizeof pid, "%d\n", getpid());
   char p[4096]; snprintf(p, sizeof p, "%s/child.pid", dir()); FILE *f = fopen(p, "w"); if (f) { fputs(pid, f); fclose(f); }

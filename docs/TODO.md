@@ -28,13 +28,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
        silent, assuming WE never plays a video texture's sound).
 
-115. [ ] Favourite and comment through Steam where Liascape has no Steam login: the sidebar's star and comment box
-       become "Favourite on Steam" / "Comment on Steam", opening the item's page in the Steam app, and Liascape
-       watches that item's favourite state every few seconds for a few minutes after, updating the favourites cache
-       (`Helpers/WorkshopFavorites.cs`) when it flips. The cache's once-per-50 s hold on its count check wins: the watch
-       never goes through that check, it reads that one item's state. The Steam page is the Workshop downloads' last
-       resort (`docs/decisions.md` § "Offer two Workshop download modes, the Steam page the last resort"), so this is
-       that rule applied to the social controls.
 137. [ ] (owner) Hold the Steam app connection ("Playing Wallpaper Engine") while the Liascape window is open, not only
        while Browse shows the Workshop: no flicker as the user moves between tabs, released when the window closes (the
        page's heartbeat stops) plus the existing 60 s tail. Never for the backend's lifetime: that would block the real

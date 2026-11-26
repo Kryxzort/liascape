@@ -25,7 +25,12 @@ namespace Liascape.Helpers;
 //   ISteamClient "SteamClient020" CreateSteamPipe 0, BReleaseSteamPipe 1, ConnectToGlobalUser 2, ReleaseUser 4,
 //   GetISteamGenericInterface 12; ISteamUGC "STEAMUGC_INTERFACE_VERSION018" SubscribeItem 68, UnsubscribeItem 69, GetItemState 72,
 //   GetItemInstallInfo 73, GetItemDownloadInfo 74, DownloadItem 75 (the slot after GetItemDownloadInfo in every version's
-//   wrappers: 014 0x210 → 0x218, 021 0x270 → 0x278).
+//   wrappers: 014 0x210 → 0x218, 021 0x270 → 0x278). The account's favourites (`favorites`): ISteamUGC 018
+//   CreateQueryUserUGCRequest 0, SendQueryUGCRequest 4, GetQueryUGCResult 5, ReleaseQueryUGCRequest 19, SetReturnOnlyIDs 23
+//   (017's order, which 018 keeps up to SubscribeItem 68: 014's wrappers have 0, 4, 5, 15, 19, and the four added before
+//   ReleaseQueryUGCRequest are 017's tag and content-descriptor getters); "SteamUser021" BLoggedOn 1, GetSteamID 2 (a CSteamID
+//   returned in RAX: the wrapper calls it with `this` in %rdi, no hidden return pointer); "SteamUtils010" IsAPICallCompleted
+//   11, GetAPICallResult 13 (014-era wrappers: `jmp *0x58` / `jmp *0x68`).
 // - In a CHILD SESSION (`liascape-backend steam-ugc session <steamclient.so>…`, SteamAppId=431960 in ITS environment only),
 //   so a crash in Steam's library can't take the backend down: JSON commands on its stdin, JSON lines on its stdout; a
 //   closed stdin = release Steam + exit. It stays connected between operations only while the user browses the Workshop,
@@ -138,7 +143,7 @@ public static class SteamClientUgc
     // Sends one command and reads its lines up to its `done`. Ended = the child answered `done` (false: it died or was
     // killed on the way). A cancel asks the child to stop the command; one that doesn't answer within 3 s is killed.
     static async Task<RunResult> RunCommandAsync(SteamClientHold.Child child, string verb, IReadOnlyList<string> ids,
-        IProgress<(double, string)>? progress, Action<string>? onUnsubscribed, CommandState cmd, CancellationToken ct)
+        IProgress<(double, string)>? progress, Action<string>? onUnsubscribed, CommandState cmd, CancellationToken ct, Action<JsonElement>? onOther = null)
     {
         bool accepted = false, refused = false, wasSubscribed = false, ended = false; string? folder = null, error = null; var shown = "";
         if (ct.IsCancellationRequested) { cmd.Ended = true; ct.ThrowIfCancellationRequested(); } // nothing sent: the child is as it was
@@ -168,6 +173,7 @@ public static class SteamClientUgc
                         break;
                     case "installed": folder = e.GetProperty("folder").GetString(); break;
                     case "error": error = e.GetProperty("message").GetString(); break;
+                    default: onOther?.Invoke(e); break;
                 }
                 if (ended) break;
             }
@@ -252,6 +258,45 @@ public static class SteamClientUgc
         return why;
     }
 
+    /// The Steam app's account and its favourited Wallpaper Engine items, as Steam lists them now (every page). Works for a
+    /// private profile: Steam's client asks as the account itself.
+    public sealed record FavoriteList(ulong SteamId, IReadOnlyList<string> Ids);
+
+    /// The account the Steam app is signed in to (ISteamUser::GetSteamID). 0 + why when Steam can't be reached.
+    public static async Task<(ulong SteamId, string? Why)> SteamIdAsync(AppSettings s, CancellationToken ct)
+    {
+        var (e, why) = await AskAsync("steamid", s, ct).ConfigureAwait(false);
+        return e is { } a && ulong.TryParse(a.GetProperty("id").GetString(), out var id) && id != 0 ? (id, null) : (0, why ?? "Steam named no account");
+    }
+
+    /// The account's favourited Workshop items for Wallpaper Engine (ISteamUGC CreateQueryUserUGCRequest, k_EUserUGCList_Favorited,
+    /// every page). Null + why when Steam can't be reached or a page didn't answer: never a partial list.
+    public static async Task<(FavoriteList? List, string? Why)> FavoritesAsync(AppSettings s, CancellationToken ct)
+    {
+        var (e, why) = await AskAsync("favorites", s, ct).ConfigureAwait(false);
+        if (e is not { } a || !ulong.TryParse(a.GetProperty("steamId").GetString(), out var id) || id == 0) return (null, why ?? "Steam named no account");
+        return (new FavoriteList(id, a.GetProperty("ids").EnumerateArray().Select((x) => x.GetString() ?? "").Where((x) => x.Length > 0).ToList()), null);
+    }
+
+    // One question to the held child (`steamid`, `favorites`), with the turn held: its answer event (named like the verb), or
+    // null + why. Like an item command, Steam's own "no" never costs the held child.
+    static async Task<(JsonElement? Answer, string? Why)> AskAsync(string verb, AppSettings s, CancellationToken ct)
+    {
+        await TakeTurnAsync(null, ct).ConfigureAwait(false);
+        try
+        {
+            var (child, why) = await SteamClientHold.AcquireAsync(s, ct).ConfigureAwait(false);
+            if (child == null) return (null, why);
+            var cmd = new CommandState();
+            JsonElement? answer = null;
+            RunResult r;
+            try { r = await RunCommandAsync(child, verb, [], null, null, cmd, ct, (e) => { if (e.GetProperty("event").GetString() == verb) answer = e; }).ConfigureAwait(false); }
+            finally { SteamClientHold.Done(child, drop: !cmd.Ended); }
+            return answer != null ? (answer, null) : (null, r.Error ?? "Steam didn't answer");
+        }
+        finally { Turn.Release(); }
+    }
+
     static async Task<(HashSet<string> Done, string? Fallback)> UnsubscribeCoreAsync(IReadOnlyList<string> ids, AppSettings s,
         Action<string>? onDone, CancellationToken ct)
     {
@@ -269,6 +314,15 @@ public static class SteamClientUgc
 
     const int ClientCreatePipe = 0, ClientReleasePipe = 1, ClientConnectUser = 2, ClientReleaseUser = 4, ClientGenericInterface = 12;
     const int UgcSubscribe = 68, UgcUnsubscribe = 69, UgcState = 72, UgcInstallInfo = 73, UgcDownloadInfo = 74, UgcDownload = 75;
+    const int UgcCreateUserQuery = 0, UgcSendQuery = 4, UgcQueryResult = 5, UgcReleaseQuery = 19, UgcOnlyIds = 23;
+    const int UserLoggedOn = 1, UserSteamId = 2, UtilsCallDone = 11, UtilsCallResult = 13;
+    // EUserUGCList Favorited, EUGCMatchingUGCType Items, EUserUGCListSortOrder CreationOrderDesc; k_unNumUGCResultsPerPage
+    const int ListFavorited = 5, MatchingItems = 0, SortCreationDesc = 0, QueryPageSize = 50, MaxQueryPages = 200;
+    // SteamUGCQueryCompleted_t (k_iSteamUGCCallbacks + 1): {handle u64, EResult i32 @8, returned u32 @12, total u32 @16, cached
+    // bool, cursor char[256]} = 280 bytes under Valve's 4-byte callback packing on Linux; 24 before the cursor came
+    const int QueryCompleted = 3401, QueryCompletedSize = 280, QueryCompletedSizeOld = 24, EResultOk = 1;
+    // SteamUGCDetails_t is ~10 KB (its description alone 8000): room to spare, only its first field (the id) is read
+    const int UgcDetailsRoom = 64 * 1024;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr CreateInterfaceFn([MarshalAs(UnmanagedType.LPStr)] string version, IntPtr ret);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int PipeFn(IntPtr self);
@@ -282,6 +336,15 @@ public static class SteamClientUgc
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool DlInfoFn(IntPtr self, ulong id, out ulong done, out ulong total);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool DownloadFn(IntPtr self, ulong id, [MarshalAs(UnmanagedType.I1)] bool highPriority);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool InstallInfoFn(IntPtr self, ulong id, out ulong size, byte[] folder, uint folderSize, out uint timestamp);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool BoolFn(IntPtr self);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate ulong U64Fn(IntPtr self);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate ulong UserQueryFn(IntPtr self, uint account, int list, int matching, int sort, uint creatorApp, uint consumerApp, uint page);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool QueryResultFn(IntPtr self, ulong handle, uint index, IntPtr details);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool HandleFn(IntPtr self, ulong handle);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool HandleBoolFn(IntPtr self, ulong handle, [MarshalAs(UnmanagedType.I1)] bool on);
+    // the out `bool *pbFailed` as a byte: one byte, whatever the marshaller would make of a bool
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool CallDoneFn(IntPtr self, ulong call, out byte failed);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool CallResultFn(IntPtr self, ulong call, IntPtr result, int size, int expected, out byte failed);
     // steamclient.so's own exports: the pipe's callback queue (drained so it never grows while we poll)
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool GetCallbackFn(int pipe, IntPtr msg);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] [return: MarshalAs(UnmanagedType.I1)] delegate bool FreeCallbackFn(int pipe);
@@ -359,7 +422,8 @@ public static class SteamClientUgc
     sealed record Command(string Op, List<ulong> Ids, int Gen);
 
     // The session's loop: one JSON command a line on stdin — {"op": "subscribe" | "download" | "unsubscribe", "ids": [...]},
-    // {"op": "ping"} (answers `done` once Steam's library answered),
+    // {"op": "ping"} (answers `done` once Steam's library answered), {"op": "steamid"} / {"op": "favorites"} (the account, its
+    // favourited items: one `steamid` / `favorites` event, or an `error`),
     // {"op": "cancel"} (stops the running command and any sent before it), {"op": "release"} — each command's events on stdout,
     // then {"event": "done", "rc": N}. A closed stdin = release: the parent's choice, or the parent gone.
     static void RunSession(Session session)
@@ -402,6 +466,8 @@ public static class SteamClientUgc
             int rc;
             if (stop.IsSet) { Emit(new { @event = "error", message = "cancelled" }); rc = 1; }
             else if (cmd.Op == "ping") rc = Ping(session);
+            else if (cmd.Op == "steamid") rc = SteamId(session);
+            else if (cmd.Op == "favorites") rc = Favorites(session, stop);
             else if (cmd.Ids.Count == 0 || cmd.Op is not ("subscribe" or "download" or "unsubscribe") || (cmd.Op != "unsubscribe" && cmd.Ids.Count != 1))
             { Emit(new { @event = "error", message = "one Workshop id to subscribe or download, one or more to unsubscribe" }); rc = 2; }
             else rc = cmd.Op switch { "subscribe" => Subscribe(session, cmd.Ids[0], stop), "download" => Download(session, cmd.Ids[0], stop), _ => Unsubscribe(session, cmd.Ids, stop) };
@@ -416,6 +482,97 @@ public static class SteamClientUgc
     {
         Slot<StateFn>(s.Ugc, UgcState)(s.Ugc, 0);
         Pump(s)();
+        return 0;
+    }
+
+    // another of the session's interfaces by its version string (IntPtr.Zero = this Steam has no such version)
+    static IntPtr Iface(Session s, string version) =>
+        Slot<GenericFn>(s.Client, ClientGenericInterface)(s.Client, s.User, s.Pipe, version);
+
+    // the account the Steam client is signed in to; 0 + the reason when it can't say (offline: no Workshop query answers)
+    static ulong Account(Session s, out string why)
+    {
+        why = "this Steam has no SteamUser021";
+        var user = Iface(s, "SteamUser021");
+        if (user == IntPtr.Zero) return 0;
+        if (!Slot<BoolFn>(user, UserLoggedOn)(user)) { why = "Steam isn't signed in (offline)"; return 0; }
+        var id = Slot<U64Fn>(user, UserSteamId)(user);
+        if (id == 0) why = "Steam named no account";
+        return id;
+    }
+
+    static int SteamId(Session s)
+    {
+        var id = Account(s, out var why);
+        if (id == 0) { Emit(new { @event = "error", message = why }); return 3; }
+        Emit(new { @event = "steamid", id = id.ToString() });
+        return 0;
+    }
+
+    // Every page of the account's favourited Wallpaper Engine items (ids only), then one `favorites` event; any page that doesn't
+    // answer whole → an `error` and no list (a partial one would read as items unfavourited). Each query handle is released.
+    static int Favorites(Session s, ManualResetEventSlim stop)
+    {
+        var id = Account(s, out var why);
+        if (id == 0) { Emit(new { @event = "error", message = why }); return 3; }
+        var utils = Iface(s, "SteamUtils010");
+        if (utils == IntPtr.Zero) { Emit(new { @event = "error", message = "this Steam has no SteamUtils010" }); return 3; }
+        var create = Slot<UserQueryFn>(s.Ugc, UgcCreateUserQuery);
+        var send = Slot<SubscribeFn>(s.Ugc, UgcSendQuery); // same shape: SteamAPICall_t (this, handle)
+        var result = Slot<QueryResultFn>(s.Ugc, UgcQueryResult);
+        var release = Slot<HandleFn>(s.Ugc, UgcReleaseQuery);
+        var onlyIds = Slot<HandleBoolFn>(s.Ugc, UgcOnlyIds);
+        var callDone = Slot<CallDoneFn>(utils, UtilsCallDone);
+        var callResult = Slot<CallResultFn>(utils, UtilsCallResult);
+        var pump = Pump(s);
+        var ids = new List<string>();
+        var details = Marshal.AllocHGlobal(UgcDetailsRoom);
+        var done = Marshal.AllocHGlobal(QueryCompletedSize);
+        string? error = null;
+        bool whole = false;
+        try
+        {
+            for (uint page = 1; page <= MaxQueryPages && error == null && !whole; page++)
+            {
+                // the account id is the SteamID's low 32 bits
+                var q = create(s.Ugc, (uint)(id & 0xffffffff), ListFavorited, MatchingItems, SortCreationDesc, WallpaperEngineAppId, WallpaperEngineAppId, page);
+                if (q == ulong.MaxValue) { error = "Steam turned the favourites query down"; break; }
+                try
+                {
+                    onlyIds(s.Ugc, q, true);
+                    var call = send(s.Ugc, q);
+                    if (call == 0) { error = "Steam turned the favourites query down"; break; }
+                    var sw = Stopwatch.StartNew();
+                    bool answered = false; byte failed = 0;
+                    while (sw.Elapsed < TimeSpan.FromSeconds(30) && !stop.IsSet)
+                    {
+                        pump();
+                        if (callDone(utils, call, out failed)) { answered = true; break; }
+                        stop.Wait(100);
+                    }
+                    if (stop.IsSet) { error = "cancelled"; break; }
+                    if (!answered) { error = "Steam didn't answer the favourites query within 30 s"; break; }
+                    // the result's size as this Steam has it (a mismatched size is refused, not misread)
+                    bool got = failed == 0 && (callResult(utils, call, done, QueryCompletedSize, QueryCompleted, out failed)
+                        || callResult(utils, call, done, QueryCompletedSizeOld, QueryCompleted, out failed)) && failed == 0;
+                    if (!got) { error = "Steam's favourites query failed"; break; }
+                    int eresult = Marshal.ReadInt32(done, 8);
+                    uint returned = (uint)Marshal.ReadInt32(done, 12), total = (uint)Marshal.ReadInt32(done, 16);
+                    if (eresult != EResultOk) { error = $"Steam answered the favourites query with result {eresult}"; break; }
+                    for (uint i = 0; i < returned; i++)
+                    {
+                        if (!result(s.Ugc, q, i, details)) { error = "Steam's favourites query lost an item"; break; }
+                        ids.Add(((ulong)Marshal.ReadInt64(details)).ToString());
+                    }
+                    whole = returned < QueryPageSize || ids.Count >= total;
+                }
+                finally { release(s.Ugc, q); }
+            }
+        }
+        finally { Marshal.FreeHGlobal(details); Marshal.FreeHGlobal(done); }
+        if (error == null && !whole) error = $"more than {MaxQueryPages * QueryPageSize} favourites";
+        if (error != null) { Emit(new { @event = "error", message = error }); return 4; }
+        Emit(new { @event = "favorites", steamId = id.ToString(), ids });
         return 0;
     }
 

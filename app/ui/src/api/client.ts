@@ -428,7 +428,8 @@ export const api = {
   workshopQueue: () => jget<{ pending: string[]; hasPending: boolean }>("/workshop/queue"),
   // API: "Open on Steam" → the Steam CLIENT (steam://url/CommunityFilePage/<id>, its own route — /open is http(s) only);
   // ok:false = the Steam app couldn't be opened → the caller falls back to the https page (openOnSteam below)
-  openSteamPage: (workshopId: string) => jpost<{ ok: boolean }>("/steam/open-page", { workshopId }),
+  openSteamPage: (workshopId: string, watch?: "favorite") =>
+    jpost<{ ok: boolean; watching: boolean }>("/steam/open-page", watch ? { workshopId, watch } : { workshopId }),
   // API: the Browse sidebar's subscription toggle (Web/WorkshopSubOps.cs) — state from disk + the queue + the to-do only
   workshopState: (ids: string[]) => jpost<Record<string, WorkshopSubState>>("/workshop/state", { ids }),
   // API: how "Download without subscribing" would get an item: the mode's own route, or none + why (in their words)

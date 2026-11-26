@@ -13,6 +13,14 @@
 #  h. the held child hangs (the fake's hang-once): its ping before the next download goes unanswered, one fresh child does it
 #  i. Steam refuses a one-off's DownloadItem (refuse-download): subscribe, copy, unsubscribe, all on the same held child
 #  j. a download cancelled midway (hold-install): the held child stays and the next download reads its own answer
+#  k. "Favourite on Steam" (POST /steam/open-page {watch: "favorite"}), no sign-in: the page opens in the Steam app, and the
+#     watch (Helpers/SteamFavoriteWatch.cs) reads the Steam app's favourites: a favourite and an unfavourite made there, a
+#     second apart, each reach the account's favourites cache within its window, never through the cache's count check
+#     (no `count check` in the log); a plain open-page starts no watch
+#  l. the watch's window over: no more reads, a later flip stays out of the cache; the child it held (the UI gone meanwhile)
+#     stayed connected for the window, past the linger, then released Steam a linger after its last read
+#  m. no Steam app (fail-init): the page still opens, no watch: one helper tried, none held, nothing read; Steam offline
+#     (no account): the page opens, no favourites query sent
 #  g. SIGTERM with the child held: serve exits within 3 s and the child released Steam first
 # Never touches Steam, the network (LIASCAPE_TEST_NO_NETWORK) or ~/.config/liascape (temp HOME + every XDG dir); everything
 # it started is stopped on exit.
@@ -72,7 +80,9 @@ echo '{}' > "$T/cm.json"
 printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
 LINGER=2500 BEAT=4000
+WATCH=6000 WATCH_POLL=400
 (cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_LINGER_MS=$LINGER LIASCAPE_STEAM_APP_HEARTBEAT_MS=$BEAT LIASCAPE_WORKSHOP_POLL_MS=300 \
+  LIASCAPE_FAV_WATCH_MS=$WATCH LIASCAPE_FAV_WATCH_POLL_MS=$WATCH_POLL \
   LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
@@ -202,11 +212,88 @@ out(started !== null && pjr === "aborted" && rj?.status === 200 && rj.body?.work
   "j. cancelled midway: the held child stays, and the next download on it finished with its own item",
   `cancelled ${pjr}, next ${rj ? rj.status + " " + JSON.stringify(rj.body)?.slice(0, 80) : "never answered"}, pid ${pidH} → ${childPid()}, children +${opens().length - nJ}`);
 
+// k. "Favourite on Steam" with no sign-in: the page opens in the Steam app and the watch reads the Steam app's favourites; a
+// favourite made there, then an unfavourite a second later, each reach the account's favourites cache within the window — never
+// through the cache's count check, whose 50 s hold would have kept the second out
+const WATCH_POLL_GRACE = 1500; // a read in flight when the window closed lands within this
+const WATCH = +process.env.WATCH, SID = "76561190000000042", FAVF = `${T}/steamlib/favorites`, ITEM = "720000200", OTHER = "720000101";
+const CACHE = `${process.env.XDG_CACHE_HOME}/liascape/workshop/favorites-${SID}.json`;
+fs.mkdirSync(`${process.env.XDG_CACHE_HOME}/liascape/workshop`, { recursive: true });
+fs.writeFileSync(CACHE, JSON.stringify({ ids: [OTHER], viaPage: false, total: 1 }));
+fs.writeFileSync(FAVF, `${OTHER}\n`);
+const cacheIds = () => { try { return JSON.parse(fs.readFileSync(CACHE, "utf8")).ids ?? []; } catch { return []; } };
+const urls = () => fs.readFileSync(`${T}/xdg-open.urls`, "utf8").split("\n").filter(Boolean);
+const log = () => fs.readFileSync(`${T}/backend.log`, "utf8");
+const openPage = async (body) => { const r = await fetch(U + "/steam/open-page", { method: "POST", headers: H, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+beat(false); await presence(false);
+// a plain "Open on Steam" (the Steam page's own tile) watches nothing
+const qPlain = lines("queries").length, plain = await openPage({ workshopId: OTHER });
+await sleep(1200);
+const plainQueries = lines("queries").length - qPlain;
+const u0 = urls().length, q0 = lines("queries").length, tK = Date.now();
+const rk = await openPage({ workshopId: ITEM, watch: "favorite" });
+const opened = await until(() => urls().slice(u0).includes(`steam://url/CommunityFilePage/${ITEM}`), 3000);
+const read1 = await until(() => lines("queries").length > q0, 5000);
+await sleep(WATCH / 10);
+fs.writeFileSync(FAVF, `${ITEM}\n${OTHER}\n`);
+const fav = await until(() => cacheIds().includes(ITEM), 3000);
+await sleep(1000);
+fs.writeFileSync(FAVF, `${OTHER}\n`);
+const unfav = await until(() => !cacheIds().includes(ITEM) && cacheIds().includes(OTHER), 3000);
+const kDone = Date.now() - tK, counted = (log().match(/workshop-favorites: count check/g) ?? []).length;
+const pidK = childPid();
+out(plain.status === 200 && plainQueries === 0 && rk.status === 200 && rk.body?.ok === true && rk.body?.watching === true && opened !== null && read1 !== null
+  && fav !== null && unfav !== null && kDone < WATCH && counted === 0,
+  "k. \"Favourite on Steam\": the page opened in the Steam app; a favourite and an unfavourite made there both reached the cache within the window, no count check",
+  `plain open ${plain.status} (${plainQueries} reads), open ${rk.status} ${JSON.stringify(rk.body)}, page opened ${opened !== null}, first read ${read1} ms, favourite seen ${fav} ms, `
+  + `unfavourite seen ${unfav} ms, all within ${kDone} ms (window ${WATCH}), count checks ${counted}, cache ${JSON.stringify(cacheIds())}`);
+
+// l. the window over: no more reads, a later flip stays out; the child the watch held (no UI beating since before k.) stayed
+// past the linger for the window, then let go a linger after the last read
+const heldMid = await (async () => { await sleep(Math.max(0, tK + WATCH - 1200 - Date.now())); return alive(pidK) && await connected(); })();
+await sleep(Math.max(0, tK + WATCH + WATCH_POLL_GRACE - Date.now()));
+const qEnd = lines("queries").length;
+fs.writeFileSync(FAVF, `${ITEM}\n${OTHER}\n`);
+const goneL = await until(() => !alive(pidK), LINGER + 4000);
+await sleep(500);
+const lateReads = lines("queries").length - qEnd;
+out(heldMid && lateReads === 0 && !cacheIds().includes(ITEM) && goneL !== null && /favourites watch: its window is over/.test(log())
+  && lines("queries").length === +lines("queries-released").length,
+  "l. the watch's window over: no more reads, a later favourite stays out; Steam held through the window, released a linger after",
+  `held ${WATCH - 1200} ms in (the linger ${LINGER}) ${heldMid}, reads after the window ${lateReads}, cache ${JSON.stringify(cacheIds())}, released ${goneL} ms after the window, `
+  + `queries ${lines("queries").length} / released ${lines("queries-released").length}`);
+
+// m. no Steam app: the page still opens, no watch — one helper tried and gone, nothing held, nothing read
+fs.writeFileSync(`${T}/steamlib/fail-init`, "");
+const nM = lines("helpers.log").filter((l) => l.startsWith("start ")).length, qM = lines("queries").length, uM = urls().length;
+const rm = await openPage({ workshopId: ITEM, watch: "favorite" });
+const openedM = await until(() => urls().slice(uM).includes(`steam://url/CommunityFilePage/${ITEM}`), 3000);
+const noWatch = await until(() => /favourites watch: no watch — /.test(log()), 5000);
+await sleep(WATCH_POLL_GRACE);
+const triedM = lines("helpers.log").filter((l) => l.startsWith("start ")).length - nM;
+out(rm.status === 200 && rm.body?.ok === true && openedM !== null && noWatch !== null && triedM === 1 && lines("queries").length === qM && !(await connected()),
+  "m. no Steam app: the page opened, no watch (one helper tried, none held, nothing read)",
+  `open ${rm.status} ${JSON.stringify(rm.body)}, page opened ${openedM !== null}, "no watch" logged ${noWatch !== null}, helpers tried ${triedM}, reads ${lines("queries").length - qM}, appConnected ${await connected()}`);
+fs.rmSync(`${T}/steamlib/fail-init`);
+// …and Steam running but offline (no account to watch): the page opens, no favourites query is ever sent
+fs.writeFileSync(`${T}/steamlib/offline`, "");
+const qO = lines("queries").length, lO = (log().match(/favourites watch: no watch — /g) ?? []).length;
+const ro = await openPage({ workshopId: ITEM, watch: "favorite" });
+const offNoWatch = await until(() => (log().match(/favourites watch: no watch — /g) ?? []).length > lO, 5000);
+await sleep(WATCH_POLL_GRACE);
+out(ro.status === 200 && ro.body?.ok === true && offNoWatch !== null && /no watch — Steam isn't signed in/.test(log()) && lines("queries").length === qO,
+  "m. Steam offline: the page opened, no watch, no favourites query sent",
+  `open ${ro.status} ${JSON.stringify(ro.body)}, "no watch" logged ${offNoWatch !== null}, reads ${lines("queries").length - qO}`);
+fs.rmSync(`${T}/steamlib/offline`);
+
+// g. below needs a held child: one more download while the UI beats
+beat(true); const rg = await download("720000012");
+if (rg !== 200) out(false, "a download for g.'s held child", `status ${rg}`);
 fs.writeFileSync(`${T}/held.pid`, String(childPid()));
 fs.writeFileSync(`${T}/released.before`, String(lines("released").length));
 beat(false);
 EOF
-(cd "$T" && U=$U T=$T LINGER=$LINGER BEAT=$BEAT timeout 300 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
+(cd "$T" && U=$U T=$T LINGER=$LINGER BEAT=$BEAT WATCH=$WATCH timeout 300 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
 cat "$T/drive.log"
 PASS=$((PASS + $(grep -c '^PASS' "$T/drive.log"))); FAIL=$((FAIL + $(grep -c '^FAIL' "$T/drive.log")))
 [ $rc = 0 ] || bad "drive.mjs exited $rc"

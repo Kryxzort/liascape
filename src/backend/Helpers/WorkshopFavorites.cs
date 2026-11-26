@@ -134,6 +134,18 @@ public static class WorkshopFavorites
         }
     }
 
+    // Whether the account's whole list has this id; null = no whole list kept (nothing to compare with). The state a watch
+    // through the Steam app starts from (Helpers/SteamFavoriteWatch.cs): a star set before its first read still counts.
+    // Guard: scripts/test-steam-app-hold.sh k.
+    internal static bool? Lists(ulong steamId, string workshopId)
+    {
+        lock (_lock)
+        {
+            var a = Of(steamId);
+            return a.Complete ? a.Ids.Contains(workshopId) : null;
+        }
+    }
+
     // Single-flight, in the background: the first load when the account has no whole list yet (a failed one is tried
     // again by the next Sync), else the id diff; a private profile read whole within PageDiffEvery gets the count check
     // instead. The page asks for it when it shows the list, not on a timer.

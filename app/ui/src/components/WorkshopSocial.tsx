@@ -171,7 +171,8 @@ export function BaseRow({ presetId, local, onShowInLibrary, onShowInBrowse }: {
 // The favourite: a toggle tile (the sidebar's tiles' material) — a star that fills when it's in the account's Steam favourites,
 // the words "Favourite" / "Favourited" sharing one cell (index.css .xfade) so the tile keeps its size; the new state's star
 // pops once on a user change, never on mount (index.css .ico-pop). Without a usable sign-in it becomes "Favourite on Steam"
-// (the words roll over in the same cell as the state lands), which opens the item's page in the Steam app.
+// (the words roll over in the same cell as the state lands), which opens the item's page in the Steam app; the backend then
+// watches that item's favourite state there for a few minutes (Helpers/SteamFavoriteWatch.cs).
 // Guard: probe-steam ws:favorite, ws:favoriteOff, ws:favoriteSteam, ws:favoriteSteamOff
 export function FavoriteTile({ workshopId }: { workshopId: string }) {
   const settled = useSettled(workshopId);
@@ -191,7 +192,8 @@ export function FavoriteTile({ workshopId }: { workshopId: string }) {
   const signedOut = st?.signedIn === false;
   const openOnSteam = useStore((s) => s.openOnSteam);
   const toggle = async () => {
-    if (signedOut) { void openOnSteam(workshopId); return; }
+    // the backend watches the Steam app's favourites a few minutes after, so the Favourites list follows what the user does there
+    if (signedOut) { void openOnSteam(workshopId, "favorite"); return; }
     if (!st?.signedIn || busy) return;
     const want = !on;
     setBusy(true); setErr(null);

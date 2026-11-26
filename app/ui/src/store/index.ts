@@ -182,8 +182,10 @@ interface State {
   subscribeWorkshop(id: string, title: string): Promise<void>;
   unsubscribeWorkshop(id: string, title: string): Promise<void>;
   unsubscribeKeepWorkshop(id: string, title: string): Promise<void>;
-  // "Open on Steam": the item's page in the Steam app; its https page in the browser when that couldn't be opened
-  openOnSteam(workshopId: string): Promise<void>;
+  // "Open on Steam": the item's page in the Steam app; its https page in the browser when that couldn't be opened. `watch`
+  // "favorite" ("Favourite on Steam"): the backend then watches its favourite state through the Steam app a few minutes
+  // (Helpers/SteamFavoriteWatch.cs)
+  openOnSteam(workshopId: string, watch?: "favorite"): Promise<void>;
   // shared
   themes: Theme[]; theme: Theme | null; settings: Record<string, unknown> | null; playingPath: string | null;
   // `liascape toggle-loop-current`: the rotation holds what plays (the player's prog:main.keep; /current.keep, WS toggle-loop-current)
@@ -859,9 +861,9 @@ export const useStore = create<State>((set, get) => ({
   setLibraryOps(ops) { set({ libraryOps: ops }); },
 
   openExternal(body) { api.open(body).catch(() => {}); },
-  async openOnSteam(workshopId) {
+  async openOnSteam(workshopId, watch) {
     let ok = false;
-    try { ok = (await api.openSteamPage(workshopId)).ok; } catch { /* the backend refused / is away: the browser below */ }
+    try { ok = (await api.openSteamPage(workshopId, watch)).ok; } catch { /* the backend refused / is away: the browser below */ }
     // the Steam app couldn't be opened: the page in the user's browser (main.js' window-open handler → shell.openExternal)
     if (!ok) window.open(steamPageUrl(workshopId), "_blank", "noreferrer");
   },
