@@ -37,8 +37,9 @@
 //! seconds for a cold LWE build) the protocol thread answers `Ping`s itself, so a slow load is
 //! never read as a hang (bounded: `LIASCAPE_SCENE_LOAD_TIMEOUT_MS`, default 30 s).
 //!
-//! A third, `lia-scene-audio` (`audio.rs`; started only once the loaded scene turns
-//! out to have a sound — a soundless scene has none): the scene's sound as a PipeWire stream
+//! A third, `lia-scene-audio` (`audio.rs`; started only once the scene turns out to have a
+//! sound — at its load, or when a `startsilent` sound first plays; a soundless scene has none):
+//! the scene's sound as a PipeWire stream
 //! on the player bus — pulled from LWE (or the synthetic tone), time-stretched to the scene's
 //! speed (`stretch.rs`), gated and gained in dB. The protocol thread applies `Gain`, `Paused`,
 //! `NoAudio`, `Route` and `Speed` to it directly; a quit waits until the stream is silent.
@@ -615,6 +616,9 @@ const LOAD_TIMEOUT_MAX_FACTOR: u32 = 4;
 /// The longest a quit waits for an audible stream to fade out (its gate takes 30 ms; a stalled
 /// graph never holds the exit for longer).
 const QUIT_FADE_MAX: Duration = Duration::from_millis(200);
+/// How long a sound that started after the load waits for the compositor's gain
+/// (`Renderer::watch_sound`); its answer takes a loop iteration, well under a frame.
+const GAIN_WAIT: Duration = Duration::from_millis(250);
 
 /// What the protocol (reader) thread knows about the renderer: whether it is inside a load,
 /// and whether that load is still making progress.
@@ -757,7 +761,15 @@ fn reader(
                     send(&sock, &FromWorker::Pong { seq })
                 }
                 Ok(Some((ToWorker::Quit, _))) if gate.loading() => quit_now(&audio),
-                Ok(Some((m, _))) if audio.apply(&m) => {}
+                Ok(Some((m, fds))) if audio.apply(&m) => {
+                    // a sound waiting for this gain (`Renderer::watch_sound`) starts as it lands
+                    if matches!(m, ToWorker::Gain { .. })
+                        && audio.take_gain_wanted()
+                        && tx.send((m, fds)).is_err()
+                    {
+                        quit_now(&audio)
+                    }
+                }
                 Ok(Some(m)) => {
                     audio.start(&m.0);
                     if tx.send(m).is_err() {
@@ -792,6 +804,10 @@ struct Renderer {
     /// The scene's audio stream (its thread starts when a sound is installed).
     audio: Arc<audio::Control>,
     audio_started: bool,
+    /// A sound that started after the load, waiting to be installed until the compositor's
+    /// `Gain` answers our `HasAudio` (the `Gain` count when we sent it) or until the instant
+    /// (`watch_sound`).
+    late_sound: Option<(Box<dyn stretch::Pull>, u64, Instant)>,
     gfx: Gfx,
     /// `sync: fdpoll` — wait on our own fence before `Frame`, send no fd.
     fdpoll: bool,
@@ -875,6 +891,7 @@ impl Renderer {
         self.dead = true;
         self.ring = None;
         self.audio.remove(); // stop pulling before the scene goes
+        self.late_sound = None;
         self.scene = None;
         self.pending = None;
     }
@@ -1114,6 +1131,38 @@ impl Renderer {
                 }
             }
             Err(e) => warn(&format!("dup the socket for audio: {e}")),
+        }
+    }
+
+    /// A scene whose sound objects all start silent (`startsilent`) has no sound at its load
+    /// (`Ready.has_audio` false: no stream, no audio thread); a script's `play()` — on a user
+    /// property the user turns on, a click — gives one its slot in LWE's mixer later. Its first
+    /// slot opens the scene's stream: `HasAudio` tells the compositor, whose answer is the gain it
+    /// held back while the scene had no sound (`SceneSource::send_gain`: Liascape's volume,
+    /// auto-mute); the sound is installed once that `Gain` arrived, so its first sample already
+    /// plays at it (`GAIN_WAIT` bounds a compositor that never answers). Guard:
+    /// `tests/api.rs::a_scene_whose_sounds_all_start_silent_plays_what_its_script_starts`.
+    fn watch_sound(&mut self) {
+        if let Some((src, gains, until)) = self.late_sound.take() {
+            if self.audio.gains() != gains || Instant::now() >= until {
+                self.install_audio(src);
+            } else {
+                self.late_sound = Some((src, gains, until));
+            }
+            return;
+        }
+        #[cfg(feature = "lwe")]
+        if let Some(SceneImpl::Lwe(s)) = self.scene.as_mut()
+            && !s.has_audio
+            && s.audio_streams() > 0
+        {
+            s.has_audio = true;
+            let pull: Box<dyn stretch::Pull> = Box::new(s.audio_puller());
+            self.log("lwe: a sound object started after the load: the audio stream opens".into());
+            let gains = self.audio.gains();
+            self.audio.want_gain();
+            self.send(&FromWorker::HasAudio { on: true });
+            self.late_sound = Some((pull, gains, Instant::now() + GAIN_WAIT));
         }
     }
 
@@ -1434,6 +1483,7 @@ impl Renderer {
                     self.lost_at,
                     lost_exit,
                     self.stall.map(|s| s.1),
+                    self.late_sound.as_ref().map(|l| l.2),
                 ]
                 .into_iter()
                     .flatten()
@@ -1456,6 +1506,7 @@ impl Renderer {
                 self.on_message(m, fds);
             }
             self.render();
+            self.watch_sound();
         }
     }
 }
@@ -1548,6 +1599,7 @@ fn run_renderer(sock: OwnedFd, k: Knobs, preload: PreloadArgs) -> ! {
         gate,
         audio,
         audio_started: false,
+        late_sound: None,
         gfx,
         fdpoll,
         ring: None,

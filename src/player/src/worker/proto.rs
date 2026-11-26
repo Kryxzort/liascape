@@ -190,6 +190,8 @@ pub enum FromWorker {
         ok: bool,
         reason: Option<String>,
     },
+    /// The scene has sound after all: a sound object took its first slot in LWE's mixer after
+    /// the load (`startsilent`, started by a script). Answered with the current `Gain`.
     HasAudio {
         on: bool,
     },

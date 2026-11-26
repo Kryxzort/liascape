@@ -19,7 +19,12 @@ PipeWire unreachable → the same timer (no flow reported), retried every 1 s. A
 on the gate, then rebuilds.
 
 The thread starts only once a sound is installed (LWE's stream count > 0); a soundless scene has no audio thread at
-all — an always-on null timer cost the worker ~2 % CPU for nothing.
+all — an always-on null timer cost the worker ~2 % CPU for nothing. A `startsilent` sound object takes its slot in
+LWE's mixer only when it first plays (a script's `play()`: a user property turned on, a click), so a scene whose
+sounds all start silent loads without sound (`Ready.has_audio` false). The renderer watches the stream count after
+every frame; the first slot sends `HasAudio`, and the sound is installed once the compositor's answer — the gain it
+held back while the scene had none (Liascape's volume, auto-mute) — arrived (≤ `GAIN_WAIT`), so it plays at that gain
+from its first sample.
 
 **Why RT:** at a 64-frame quantum (1.33 ms per cycle) a normal-priority callback scheduled late under load misses
 cycles: one quantum of silence on the bus at random times, `pw-top` ERR on the scene stream only. mpv's AO already

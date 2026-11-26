@@ -51,7 +51,7 @@ refresh. Each output presents its frames at most at `eff_fps(scene_fps, refresh)
 Prop semantics: `kind` change and `color` → `unsupported`; `loop`, `hwdec`, `fps_cap`, `cache`, `demuxer_*`, `af`,
 `audio_delay`, `preview` are stored only; `gain.*`, `no_audio` and `speed` drive the worker's stream. Observed:
 `ready`, `time_pos`, `duration` 0, `width`/`height` (export size), `has_audio` (from the worker's `Ready`, `true`
-until then), `loading`, `broken`.
+until then; turned `true` by `HasAudio` when a `startsilent` sound first plays), `loading`, `broken`.
 
 ## Transitions with scenes
 

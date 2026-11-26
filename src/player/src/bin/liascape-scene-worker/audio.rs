@@ -124,6 +124,11 @@ pub struct Control {
     meter: AtomicBool,
     /// Bumped on every arming change (see the module doc).
     arm: AtomicU64,
+    /// Bumped on every `Gain`: a sound that starts after the load waits for the compositor's
+    /// answer to `HasAudio` (`Renderer::watch_sound`).
+    gains: AtomicU64,
+    /// The renderer waits for the next `Gain` (`want_gain`): the protocol thread wakes it.
+    gain_wanted: AtomicBool,
     quitting: AtomicBool,
     /// The quit's second half — the audio thread disconnects its PipeWire stream and waits
     /// for the server to answer (`closed`) before the process exits.
@@ -154,6 +159,8 @@ impl Default for Control {
             speed: AtomicU64::new(f64_bits(1.0)),
             meter: AtomicBool::new(true),
             arm: AtomicU64::new(0),
+            gains: AtomicU64::new(0),
+            gain_wanted: AtomicBool::new(false),
             quitting: AtomicBool::new(false),
             close_req: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -202,7 +209,10 @@ impl Control {
     /// Apply an audio message; `false` = not one.
     pub fn apply(&self, m: &ToWorker) -> bool {
         match m {
-            ToWorker::Gain { db } => self.gain_db.store(f64_bits(*db), Ordering::SeqCst),
+            ToWorker::Gain { db } => {
+                self.gain_db.store(f64_bits(*db), Ordering::SeqCst);
+                self.gains.fetch_add(1, Ordering::SeqCst);
+            }
             ToWorker::Paused { paused } => {
                 if self.paused.swap(*paused, Ordering::SeqCst) && !*paused {
                     self.arm.fetch_add(1, Ordering::SeqCst);
@@ -225,6 +235,22 @@ impl Control {
             _ => return false,
         }
         true
+    }
+
+    /// How many `Gain`s arrived so far.
+    pub fn gains(&self) -> u64 {
+        self.gains.load(Ordering::SeqCst)
+    }
+
+    /// The renderer waits for the next `Gain`: the protocol thread hands it the message too
+    /// (`take_gain_wanted`), so it wakes as the gain lands rather than at its next tick.
+    pub fn want_gain(&self) {
+        self.gain_wanted.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the renderer waits for a `Gain` (cleared: one wake per `want_gain`).
+    pub fn take_gain_wanted(&self) -> bool {
+        self.gain_wanted.swap(false, Ordering::SeqCst)
     }
 
     /// The scene's sound is ready to pull (after its load).

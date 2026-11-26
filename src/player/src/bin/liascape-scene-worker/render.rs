@@ -44,7 +44,8 @@ pub struct LweScene {
     fbo: Fbo,
     /// `project.json` `general.supportsaudioprocessing`.
     pub wants_audio_input: bool,
-    /// The scene plays sound (LWE built ≥ 1 audio stream).
+    /// The scene plays sound (LWE has ≥ 1 audio stream): at the load, or since a `startsilent`
+    /// sound object first played (`Renderer::watch_sound`).
     pub has_audio: bool,
     /// Wall time of the context + project load and of the renderer build with its first frame
     /// (the worker's log line: `src/player/tests/onmachine/scene_load.py` splits a load with them).
@@ -277,6 +278,12 @@ impl LweScene {
             fbo,
             gl_errors: 0,
         })
+    }
+
+    /// The sound objects holding a slot in LWE's mixer: a `startsilent` one takes its slot only
+    /// when it first plays.
+    pub fn audio_streams(&self) -> i32 {
+        self.scene.audio_streams()
     }
 
     /// The scene's sound for the audio thread.

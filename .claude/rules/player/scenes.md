@@ -165,8 +165,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - Never let a create/destroy stall the loop. Guard: `tests/api.rs::scene_create_and_destroy_never_stall_the_loop`.
 
 ## Scene audio (`bin/liascape-scene-worker/audio.rs`, `stretch.rs`)
-- Start the audio thread only once a sound is installed; a soundless scene has no audio thread. Guard:
-  `tests/scene.rs::audio_thread_only_for_a_scene_with_sound`.
+- Start the audio thread only once a sound is installed (at the load, or a `startsilent` one's first play: `HasAudio`, install on the compositor's `Gain`, `Renderer::watch_sound`); a soundless scene has none.
+  Guards: `tests/scene.rs::audio_thread_only_for_a_scene_with_sound`, `tests/api.rs::a_scene_whose_sounds_all_start_silent_plays_what_its_script_starts`, `a_radio_turned_on_right_after_the_scene_is_applied_is_heard_at_once`.
 - Run the process callback with `RT_PROCESS`; the callback owns the `Dsp` and the main loop never locks it
   while streaming (`try_lock` only). Guard: `tests/api.rs::scene_gain_ramp_reaches_the_bus`.
 - Make the stream an async node (`node.async`) and leave the graph cleanly before exit (deactivate,

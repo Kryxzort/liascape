@@ -27,8 +27,7 @@
 //!   until a script starts it.
 //! - [`Model::Lwe`] (the default: what liascape-player really plays — LWE `next-v2` + the fork's
 //!   patch 0018, which plays sound objects by WE's rules above). The same plan as `we`; only the
-//!   fingerprint's prefix and the scripts note differ (LWE's SceneScript has no sound methods, so
-//!   a script can't start a `startsilent` sound there). Before 0018 LWE played every file of an
+//!   fingerprint's prefix differs. Before 0018 LWE played every file of an
 //!   object at once at unity gain and ignored `volume`/`startsilent`/`mintime`/`maxtime`: that is
 //!   [`SOUND_SEMANTICS`] 1, and why the fingerprint carries the version.
 //!
@@ -300,8 +299,8 @@ pub struct Plan {
 }
 
 /// Which tracks play under `model` with the property values `props` (module doc: both models
-/// play WE's rules since fork patch 0018).
-pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) -> Plan {
+/// play WE's rules since fork patch 0018, so the plan is the same under both).
+pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, _model: Model) -> Plan {
     let mut p = Plan::default();
     for s in sounds {
         if s.files.is_empty() {
@@ -319,23 +318,14 @@ pub fn plan(sounds: &[SoundObject], props: &Map<String, Value>, model: Model) ->
         }
         if s.startsilent {
             p.silent.push((s.id, "startsilent".into()));
-            p.notes.push(match model {
-                // LWE's SceneScript has no sound methods: nothing can start it
-                Model::Lwe => (
-                    0,
-                    format!(
-                        "sound {}: startsilent — LWE never starts it (no script sound API)",
-                        s.id
-                    ),
+            // a script's play() can start it under both models (fork patch 0038)
+            p.notes.push((
+                2,
+                format!(
+                    "sound {}: startsilent — silent until something starts it",
+                    s.id
                 ),
-                Model::We => (
-                    2,
-                    format!(
-                        "sound {}: startsilent — silent until something starts it",
-                        s.id
-                    ),
-                ),
-            });
+            ));
             continue;
         }
         // WE sends volume² (× the wallpaper volume) to the stream
@@ -1685,7 +1675,7 @@ mod tests {
                 .iter()
                 .any(|n| n.0 == 2 && n.1.contains("startsilent"))
         );
-        // under LWE it is certain: no script can start it there
+        // the same under LWE: a script's play() starts it there too
         let p = plan(
             &parse_sounds(&json!({"objects": [s, t]})),
             &Map::new(),
@@ -1695,7 +1685,7 @@ mod tests {
         assert!(
             p.notes
                 .iter()
-                .any(|n| n.0 == 0 && n.1.contains("startsilent"))
+                .any(|n| n.0 == 2 && n.1.contains("startsilent"))
         );
     }
 

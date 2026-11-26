@@ -8344,6 +8344,17 @@ fn scene_audio_serve_at(
     serial: MutexGuard<'static, ()>,
     extra: &[&str],
 ) -> Serve {
+    scene_audio_serve_env(pw, root, serial, extra, &[])
+}
+
+/// [`scene_audio_serve_at`] with extra environment (`LIASCAPE_WE_ASSETS_DIR` for a real scene).
+fn scene_audio_serve_env(
+    pw: &PrivatePw,
+    root: PathBuf,
+    serial: MutexGuard<'static, ()>,
+    extra: &[&str],
+    envs: &[(&str, &Path)],
+) -> Serve {
     let run = pw.run_dir();
     let mut args = vec![
         "--ao",
@@ -8354,10 +8365,11 @@ fn scene_audio_serve_at(
         "debug",
     ];
     args.extend_from_slice(extra);
-    let env = [
+    let mut env = vec![
         ("PIPEWIRE_RUNTIME_DIR", run.as_path()),
         ("LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES", Path::new("1")),
     ];
+    env.extend_from_slice(envs);
     let mut srv = Serve::spawn_env(root, &args, &env, Some(serial));
     // The player's graph thread (the bus and its meter) asks rtkit for real-time like the
     // daemon's; a refusal (the suite's own burst, `common::pw::RT_WAIT`) is retried the same way.
@@ -8723,6 +8735,417 @@ fn scene_no_audio_toggle_is_live() {
     println!("no_audio off: {db:.2} dB");
     assert!((db + 23.0).abs() < 3.0, "{db}");
     assert_eq!(worker_of(&mut c, &id)["pid"], pid, "same worker");
+}
+
+/// The radio of Workshop 2922240701 ("Bocchi The Rock! - Ending 1 Scrapbook"): its 14 sound
+/// objects as its `scene.json` has them (every one `startsilent`, `single`), its `radio` /
+/// `radio_shuffle` / `style_preset` user properties as its `project.json` declares them, and the
+/// radio half of its SceneScript as written (`applyUserProperties` → `radioChangeState("play")`
+/// → `Track_N.sound.play()`; `update` → `checkRadio` → `isPlaying()` → the next track). The
+/// script's host is a group (the real one is a compose layer, which needs WE's assets); each mp3
+/// is a 1.5 s 1 kHz tone at −20 dBFS, so the radio moves to the next track within the test.
+/// `None` without an ffmpeg that encodes MP3.
+fn radio_scene(root: &Path) -> Option<PathBuf> {
+    const TRACKS: [(i64, &str, u32); 14] = [
+        (4569, "01. Seisyun Complex.mp3", 204),
+        (4574, "02. Hitoribocchi Tokyo.mp3", 232),
+        (4575, "03. Distortion!!.mp3", 204),
+        (4576, "04. Secret Base.mp3", 232),
+        (4577, "05. Guitar, Loneliness and Blue Planet.mp3", 229),
+        (4578, "06. I Can't Sing A Love Song.mp3", 189),
+        (4579, "07. That Band.mp3", 214),
+        (4580, "08. Karakara.mp3", 274),
+        (4581, "09. The Little Sea.mp3", 224),
+        (4582, "10. What Is Wrong With.mp3", 227),
+        (4583, "11. Never Forget.mp3", 223),
+        (4584, "12. If I Could Be A Constellation.mp3", 258),
+        (4585, "13. Flashbacker.mp3", 275),
+        (4586, "14. Rockn' Roll, Morning Light Falls on You.mp3", 272),
+    ];
+    let d = root.join("radio-scene");
+    std::fs::create_dir_all(d.join("sounds")).unwrap();
+    let tone = d.join("tone.mp3");
+    let encoded = Command::new("ffmpeg")
+        .args(["-loglevel", "error", "-y", "-f", "lavfi"])
+        // both channels at −20 dBFS peak (a mono source would be upmixed 3 dB lower)
+        .args(["-i", "aevalsrc=0.1*sin(2*PI*1000*t)|0.1*sin(2*PI*1000*t):s=48000:d=1.5"])
+        .args(["-c:a", "libmp3lame", "-b:a", "192k"])
+        .arg(&tone)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !encoded {
+        return None;
+    }
+    let mut objects = Vec::new();
+    let mut tracks = String::new();
+    for (n, (id, file, secs)) in TRACKS.iter().enumerate() {
+        std::fs::copy(&tone, d.join("sounds").join(file)).unwrap();
+        objects.push(json!({"id": id, "maxtime": 5.0, "mintime": 1.0, "muteineditor": true,
+            "name": format!("Track_{}", n + 1), "playbackmode": "single",
+            "sound": [format!("sounds/{file}")], "startsilent": true, "volume": 1.0}));
+        tracks += &format!("\ttracks.push(new Track({}, {secs}, \"Track_{}\"));\n", n + 1, n + 1);
+    }
+    std::fs::remove_file(&tone).unwrap();
+    let script = RADIO_SCRIPT.replace("\t//<<TRACKS>>\n", &tracks);
+    objects.push(json!({"id": 13, "name": "Code", "origin": "960 540 0",
+        "visible": {"value": true, "script": script}}));
+    let project = json!({"title": "radio", "type": "scene", "file": "scene.json", "general": {"properties": {
+        "radio": {"index": 6, "order": 106, "text": "Radio", "type": "bool", "value": false},
+        "radio_shuffle": {"condition": "radio.value == true", "index": 7, "order": 107, "text": "Shuffle",
+            "type": "bool", "value": false},
+        "style_preset": {"index": 1, "order": 101, "text": "Style Preset", "type": "combo", "value": "preset1",
+            "options": [{"label": "Band", "value": "preset1"}, {"label": "Radio Dark", "value": "preset100"},
+                        {"label": "Radio Light", "value": "preset101"}]}}}});
+    let scene = json!({"camera": {"center": "0 0 -1", "eye": "0 0 0", "up": "0 1 0"},
+        "general": {"clearcolor": "0 0 0", "orthogonalprojection": {"width": 1920, "height": 1080}},
+        "objects": objects});
+    std::fs::write(d.join("project.json"), project.to_string()).unwrap();
+    std::fs::write(d.join("scene.json"), scene.to_string()).unwrap();
+    Some(d)
+}
+
+/// The radio half of 2922240701's SceneScript, as written there (the poster, time bar and GIF
+/// calls left out: they drive image layers).
+const RADIO_SCRIPT: &str = r#"'use strict';
+let tracks = null;
+let currentTrack = null;
+let currentTrackIndex = 0;
+let radioPlaylist = null;
+
+class Track
+{
+	constructor(number, duration, layerName)
+	{
+		this.number = number;
+		this.duration = duration;
+		this.sound = thisScene.getLayer(layerName);
+		this.timePlayed = 0;
+	}
+}
+
+export function init(value)
+{
+	shared.radioChangeState = radioChangeState;
+	shared.volume = 50;
+	tracks = [];
+	//<<TRACKS>>
+	return value;
+}
+
+export function applyUserProperties(userProperties)
+{
+	if (userProperties.volume != null) shared.volume = userProperties.volume;
+	if (userProperties.style_preset != null) shared.current_preset = userProperties.style_preset;
+	if (userProperties.radio_shuffle != null) { shared.radio_shuffle = userProperties.radio_shuffle; radioShuffle(); }
+	if (userProperties.radio != null)
+	{
+		if (shared.radio) radioShuffle();
+		shared.radio = userProperties.radio;
+		radioChangeState(shared.radio ? "play" : "stop");
+		if (shared.radio == false)
+		{
+			currentTrackIndex = 0;
+			currentTrack = null;
+		}
+	}
+}
+
+export function update(value)
+{
+	var ms = engine.frametime * 1000;
+	if (shared.radio) checkRadio(ms);
+	return value;
+}
+
+function radioChangeState(state, number)
+{
+	if (radioPlaylist == null) radioShuffle();
+
+	var index = number != null ? getTrackIndexByNumber(number) : currentTrackIndex;
+
+	switch (state)
+	{
+		case "play":
+		{
+			if (currentTrack == null || number == null || currentTrack.number != radioPlaylist[index].number)
+			{
+				radioChangeState("stop");
+				currentTrackIndex = index != null ? index : 0;
+				currentTrack = radioPlaylist[currentTrackIndex];
+				currentTrack.sound.play();
+			}
+			break;
+		}
+		case "stop":
+		{
+			if (currentTrack != null)
+			{
+				currentTrack.sound.stop();
+				currentTrack.timePlayed = 0;
+				currentTrack = null;
+			}
+			break;
+		}
+		case "next":
+		{
+			index = currentTrackIndex;
+			if (index + 1 < radioPlaylist.length) index++;
+			else
+			{
+				index = 0;
+				if (shared.radio_shuffle) radioShuffle();
+			}
+			radioChangeState("play", radioPlaylist[index].number);
+			break;
+		}
+	}
+}
+
+function radioShuffle()
+{
+	radioPlaylist = [];
+	for (const track of tracks)
+		radioPlaylist.push(track);
+
+	if (shared.radio_shuffle) shuffleArray(radioPlaylist);
+
+	currentTrackIndex = currentTrack != null ? getTrackIndexByNumber(currentTrack.number) : 0;
+}
+
+function getTrackIndexByNumber(number)
+{
+	for (var i = 0; i < radioPlaylist.length; i++)
+	{
+		var track = radioPlaylist[i];
+		if (currentTrack == null || track.number == number) return i;
+	}
+}
+
+function checkRadio(ms)
+{
+	if (currentTrack != null && currentTrack.sound.isPlaying() == false && shared.volume > 0) radioChangeState("next");
+	else if (currentTrack != null && currentTrack.sound.isPlaying())
+	{
+		currentTrack.timePlayed += ms;
+	}
+}
+
+function shuffleArray(a)
+{
+	var j, x, i;
+	for (i = a.length - 1; i > 0; i--)
+	{
+		j = Math.floor(Math.random() * (i + 1));
+		x = a[i];
+		a[i] = a[j];
+		a[j] = x;
+	}
+}
+"#;
+
+/// The power mean (dB) of the bus over `[from, to)` ms of the bus clock, in `bin` ms bins.
+fn bus_bins(c: &mut Client, from: f64, to: f64, bin: usize) -> Vec<f64> {
+    meter_samples(c, from, to)
+        .chunks(bin)
+        .map(power_mean_db)
+        .collect()
+}
+
+/// A scene whose sounds all start silent still gets an audio path: the sound its script starts
+/// (2922240701's radio, [`radio_scene`]) is heard on the bus, whether the property that starts it
+/// arrives after the load (the user turns the radio on: the load counted no sound) or with it.
+/// The worker opens the stream when the scene's first sound object takes its audio slot
+/// (`FromWorker::HasAudio`), not only at `Ready`; a gain set while nothing played (Liascape's
+/// volume, auto-mute) applies from its first sample; the script's `isPlaying()` moves the radio to
+/// the next track; `stop()` silences it.
+#[test]
+fn a_scene_whose_sounds_all_start_silent_plays_what_its_script_starts() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let Some(dir) = radio_scene(&root) else {
+        println!("SKIP: no ffmpeg that encodes MP3");
+        return;
+    };
+    let assets = fake_assets(&root);
+    let srv = scene_audio_serve_env(
+        &pw,
+        root,
+        serial,
+        &[],
+        &[("LIASCAPE_WE_ASSETS_DIR", assets.as_path())],
+    );
+    let mut c = srv.client();
+    let has_audio = |c: &mut Client, id: &str| {
+        get(c, &format!("{id}.has_audio"))["result"]["value"].clone()
+    };
+    let ready = |c: &mut Client, id: &str| {
+        wait_for(Duration::from_secs(20), "the scene ready", || {
+            (get(c, &format!("{id}.ready"))["result"]["value"] == json!(true)).then_some(())
+        })
+    };
+    // Loaded with the radio off (its default): no sound object has played, no stream.
+    let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+    show_all(&mut c, &id);
+    ready(&mut c, &id);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(has_audio(&mut c, &id), json!(false), "nothing has played yet");
+    let now = bus_now(&mut c);
+    let window = meter_samples(&mut c, now - 300.0, now);
+    assert!(!window.is_empty(), "the meter captured the bus");
+    let quiet = power_mean_db(&window);
+    assert!(quiet < -90.0, "silent while the radio is off: {quiet}");
+    // Liascape's volume lowered while nothing plays, then the user's settings: radio on.
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.gain.user"), "value": -20.0}),
+    );
+    let t0 = bus_now(&mut c);
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.scene_props"),
+               "value": {"radio": true, "radio_shuffle": true, "style_preset": "preset100"}}),
+    );
+    wait_for(Duration::from_secs(5), "the radio on the bus", || {
+        (bus_db(&mut c, 100.0) > -60.0).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(400));
+    let now = bus_now(&mut c);
+    let since = meter_samples(&mut c, t0, now);
+    let onset = since.iter().map(|s| s.1).fold(-200.0, f64::max);
+    let delay = since.iter().find(|s| s.1 > -60.0).map(|s| s.0 - t0).unwrap();
+    let low = bus_db(&mut c, 300.0);
+    println!(
+        "radio on after the load at gain.user −20: first sound {delay:.0} ms after the set, {low:.1} dB \
+         (loudest 1 ms block since {onset:.1}); worker audio {}",
+        worker_of(&mut c, &id)["audio"]
+    );
+    assert_eq!(has_audio(&mut c, &id), json!(true), "has_audio once it plays");
+    assert!((low + 43.0).abs() < 3.0, "the gain set before it played: {low}");
+    assert!(onset < -36.0, "never louder than its gain, from the first sample: {onset}");
+    // WE starts it on the frame that runs applyUserProperties; here the stream opens then too
+    // (a PipeWire stream and the gain's round trip: tens of ms).
+    assert!(delay < 400.0, "the radio starts as the property is set: {delay:.0} ms");
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.gain.user"), "value": 0.0}),
+    );
+    // 1.5 s tracks: past the first one, `isPlaying()` false → the script plays the next.
+    std::thread::sleep(Duration::from_millis(100));
+    let t1 = bus_now(&mut c);
+    std::thread::sleep(Duration::from_millis(4200));
+    let bins = bus_bins(&mut c, t1, t1 + 4000.0, 500);
+    println!(
+        "4 s of the radio at gain.user 0 (500 ms bins): {:?}",
+        bins.iter().map(|b| (b * 10.0).round() / 10.0).collect::<Vec<_>>()
+    );
+    assert_eq!(bins.len(), 8, "the meter covered 4 s: {bins:?}");
+    assert!(
+        bins.iter().all(|b| (b + 23.0).abs() < 3.0),
+        "the radio plays track after track at the tone's level: {bins:?}"
+    );
+    // Off: `stop()` → silent.
+    c.ok(
+        "set",
+        json!({"path": format!("{id}.scene_props"), "value": {"radio": false}}),
+    );
+    let t2 = bus_now(&mut c);
+    std::thread::sleep(Duration::from_millis(600));
+    let window = meter_samples(&mut c, t2 + 300.0, t2 + 550.0);
+    assert!(!window.is_empty(), "the meter captured the bus after the stop");
+    let loudest = window.iter().map(|s| s.1).fold(-200.0, f64::max);
+    println!("radio off: loudest 1 ms block 300–550 ms after: {loudest:.1} dB");
+    assert!(loudest <= -90.0, "stop() silenced it: {loudest}");
+    c.ok("destroy", json!({"id": id}));
+    std::thread::sleep(Duration::from_millis(300));
+    // The radio on from the load: the script's first tick plays it.
+    let id = create_src(
+        &mut c,
+        json!({"kind": "scene", "path": s(&dir), "scene_props":
+               {"radio": true, "radio_shuffle": true, "style_preset": "preset100"}}),
+    );
+    show_all(&mut c, &id);
+    ready(&mut c, &id);
+    wait_for(Duration::from_secs(5), "the radio on the bus", || {
+        (bus_db(&mut c, 100.0) > -30.0).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(400));
+    let full = bus_db(&mut c, 300.0);
+    println!("radio on at the load: {full:.1} dB");
+    assert_eq!(has_audio(&mut c, &id), json!(true));
+    assert!((full + 23.0).abs() < 3.0, "{full}");
+}
+
+/// The radio turned on at once after the scene is applied, and 100 ms, 500 ms, 2 s and 10 s after
+/// (before its load ends, as its first frame shows, later on): heard within 400 ms of the set, or
+/// of the load's end for a set made during the load — never silent until something reloads the
+/// scene. A set before the worker's `Start` rides in it (the script plays it in the load); every
+/// later one reaches a scene that loaded without sound.
+#[test]
+fn a_radio_turned_on_right_after_the_scene_is_applied_is_heard_at_once() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let Some(dir) = radio_scene(&root) else {
+        println!("SKIP: no ffmpeg that encodes MP3");
+        return;
+    };
+    let assets = fake_assets(&root);
+    let srv = scene_audio_serve_env(
+        &pw,
+        root,
+        serial,
+        &[],
+        &[("LIASCAPE_WE_ASSETS_DIR", assets.as_path())],
+    );
+    let mut c = srv.client();
+    let mut late = Vec::new();
+    for after_ms in [0u64, 100, 500, 2000, 10_000] {
+        // the previous round's radio gone from the bus first: nothing of it counts as heard
+        wait_for(Duration::from_secs(5), "a silent bus", || {
+            (bus_db(&mut c, 200.0) < -90.0).then_some(())
+        });
+        let id = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+        show_all(&mut c, &id);
+        std::thread::sleep(Duration::from_millis(after_ms));
+        let t_set = bus_now(&mut c);
+        c.ok(
+            "set",
+            json!({"path": format!("{id}.scene_props"),
+                   "value": {"radio": true, "radio_shuffle": true, "style_preset": "preset100"}}),
+        );
+        let heard = (|| {
+            let end = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < end {
+                let now = bus_now(&mut c);
+                if let Some(s) = meter_samples(&mut c, t_set, now).iter().find(|s| s.1 > -60.0) {
+                    return Some(s.0);
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            None
+        })();
+        let ready = logs_of(&mut c, "source.ready")
+            .iter()
+            .find(|e| e["id"] == json!(id))
+            .and_then(|e| e["t_mono_ms"].as_f64())
+            .unwrap_or_else(|| panic!("{id} never ready"));
+        let from = t_set.max(ready);
+        let delay = heard.map(|h| h - from);
+        println!(
+            "radio on {after_ms} ms after the apply ({:+.0} ms from the load's end): {}",
+            t_set - ready,
+            delay.map_or("never heard in 20 s".into(), |d| format!("heard {d:.0} ms later"))
+        );
+        if delay.is_none_or(|d| d >= 400.0) {
+            late.push((after_ms, delay));
+        }
+        c.ok("destroy", json!({"id": id}));
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    assert!(late.is_empty(), "late or never: {late:?}");
 }
 
 fn settled(c: &mut Client) {

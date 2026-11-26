@@ -80,8 +80,8 @@ first second; the backend runs it on import, at startup and on every property co
 - **What plays** follows Wallpaper Engine's decompiled sound-object rules (`docs/player/spikes/we-sound-semantics.md`),
   which the patched LWE also plays: amplitude = `volume²` (unclamped; a bound property's value), `sound` a string or
   a list, unknown `playbackmode` = `loop`, `loop` = one random file at a time back to back (time-weighted),
-  `random` = plus the mean `mintime`..`maxtime` gap, `single` = once, `startsilent` = silent. Model `lwe` (default) =
-  what the player plays; `we` = the same plan with WE-only confidence notes.
+  `random` = plus the mean `mintime`..`maxtime` gap, `single` = once, `startsilent` = silent until a script plays it (a low-confidence note).
+  Model `lwe` (default) = what the player plays; `we` = the same plan under its own fingerprint prefix.
 - **Per-file stats**: each file is decoded once by ffmpeg (stereo 48 kHz f32, so a mono file is −3 dB per channel
   like LWE's resampler) and reduced through the same `SegmentMeter`; cached in memory and in
   `$XDG_CACHE_HOME/liascape/scene-loudness/` keyed by path, size, mtime (and the package entry). A re-estimate for

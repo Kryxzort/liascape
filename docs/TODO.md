@@ -68,6 +68,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          there and a Claude session drives the editor. Write the per-family spec (what each scene must use, how
          it is captured) before that session.
        - Check LWE's logic per row against the decompiled WE; fix what differs, starting with puppets.
+       - Sound a script starts: 2922240701 (every sound object `startsilent`, its radio started by a user property
+         and by track clicks) against WE — the delay from the property to the first sample, track after track,
+         stop, and the wallpaper's volume and auto-mute on it. The scenes with some sounds started by a click:
+         2325974975, 3289734539, 3371313623.
        - The audio piece: a private PipeWire with a null sink fed a fixed track, so music-reactive scenes compare too.
        - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
          and GPU time per frame, ours beside WE's; a gap is a row to fix like a wrong picture (read how WE loads,

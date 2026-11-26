@@ -1980,10 +1980,11 @@ impl SceneSource {
     }
 
     /// Send the effective gain (the sum of the `gain.*` slots) if it changed. F6b: a loaded
-    /// scene without sound (`Ready.has_audio` false — its worker never opens a stream) only
-    /// records it for the next `Start` (a restart or a new path, which re-learns
-    /// `has_audio`): a fade's 1 kHz push train would otherwise be a message (and a worker
-    /// wake-up) per scene per millisecond for nothing. `gain_sent` stays the last value
+    /// scene without sound (`Ready.has_audio` false — its worker has no stream) only records it
+    /// for the next `Start` (a restart or a new path, which re-learns `has_audio`) or the
+    /// worker's `HasAudio` (a `startsilent` sound a script started, whose worker waits for
+    /// this gain before it plays): a fade's 1 kHz push train would otherwise be a message (and a
+    /// worker wake-up) per scene per millisecond for nothing. `gain_sent` stays the last value
     /// the worker really got, so the next push after the scene turns out to have sound
     /// goes out.
     fn send_gain(&mut self) {
