@@ -14,8 +14,9 @@ namespace Liascape.Helpers;
 // (Helpers/WorkshopFavorites.cs Apply) when it flips. It reads the list itself, never through the cache's count check or its
 // 50 s hold: that check gates the page's own asks, and a watch reading through it would miss a flip for up to 50 s.
 // - One loop for every item watched: each read answers all of them; a click on an item already watched starts its window again.
-// - Each read is an operation on the held child (SteamClientHold): reads `Every` apart keep it connected, so a watch is one
-//   connection ("Playing Wallpaper Engine") for its window plus the hold's tail, never one per read.
+// - Each read is an operation on the held child (SteamClientHold): reads `Every` apart (well inside the hold's tail) keep it
+//   connected, so a watch is one connection ("Playing Wallpaper Engine") until its window ends plus the hold's tail, the
+//   Liascape window open or closed meanwhile, never one per read.
 // - No watch without the Steam app: not "Use the Steam app", no steamclient.so, or no account from it (`steamid`: Steam not
 //   running, offline, Wallpaper Engine not owned), or a first list read failing ends it at once; the page opened anyway. A
 //   later read that fails is skipped.

@@ -12,10 +12,12 @@ namespace Liascape.Helpers;
 
 // The one `steam-ugc session` child of "Use the Steam app" (Helpers/SteamClientUgc.cs) and how long it stays connected.
 // While it is, Steam shows the user "Playing Wallpaper Engine", so it is held only while that buys something: from the first
-// operation (nothing connects before one), for as long as the UI says the Workshop shows on Browse (`POST /steam/app-presence`,
-// repeated as a heartbeat; none for `HeartbeatTimeout` = left), then `Linger` more; past that the child releases Steam and
-// exits. Coming back inside the linger keeps it. Why not per operation or for the app's lifetime: docs/decisions.md § "Hold
-// the Steam app connection while the Workshop shows on Browse".
+// operation (nothing connects before one), for as long as the Liascape window is open (its page's heartbeat, `POST
+// /steam/app-presence` every `HeartbeatEvery`), until `Tail` after the later of the last beat and the last operation; past
+// that the child releases Steam and exits. The tail only covers a reload or a renderer recovery and a late beat: a closed or
+// crashed window lets go within it. Operations keep it too: a favourites watch's reads (Helpers/SteamFavoriteWatch.cs, every
+// few seconds) hold it to the watch's own end, the window open or not. Why not per operation, per Browse visit or for the
+// backend's lifetime: docs/decisions.md § "Hold the Steam app connection while the Liascape window is open".
 // - Every start, use and release of the child happens under SteamClientUgc.Turn, so there is never a second one, not even
 //   one still releasing while the next starts; the timer's release skips when an operation holds the turn (its end re-checks).
 // - A dead child is never connected: its exit clears it at once, and the next operation starts a fresh one. A held child
@@ -27,30 +29,31 @@ public static class SteamClientHold
 {
     static TimeSpan Ms(string env, int dflt) =>
         TimeSpan.FromMilliseconds(int.TryParse(Environment.GetEnvironmentVariable(env), out var v) && v >= 0 ? v : dflt);
-    // the tests shorten both (LIASCAPE_STEAM_APP_LINGER_MS 0 = released after every operation; steam-selftest sets them)
-    public static TimeSpan Linger { get; internal set; } = Ms("LIASCAPE_STEAM_APP_LINGER_MS", 60_000);
-    public static TimeSpan HeartbeatTimeout { get; internal set; } = Ms("LIASCAPE_STEAM_APP_HEARTBEAT_MS", 90_000);
+    // how often the open window's page beats (it reads this from the answer to each beat, so the two can't drift apart); the
+    // tests shorten it (LIASCAPE_STEAM_APP_BEAT_MS; 0 = released after every operation; steam-selftest sets it)
+    public static TimeSpan HeartbeatEvery { get; internal set; } = Ms("LIASCAPE_STEAM_APP_BEAT_MS", 5_000);
+    // beats missed before the window counts as closed: a reload or a renderer recovery beats again within about a second, a
+    // busy page's timer can slip by one
+    // Guard: scripts/test-steam-app-hold.sh c., d., e.
+    public const int TailBeats = 3;
+    public static TimeSpan Tail => HeartbeatEvery * TailBeats;
     // a reused child must answer a ping this fast, else it is replaced before the operation (a hung library, a Steam gone)
     const int PingMs = 3000;
 
     static readonly object Gate = new();
     static Child? child;
-    static bool busy, showing, stopping;
-    static long lastBeat, leftAt, opEnd;
+    static bool busy, stopping;
+    static long lastBeat, opEnd;
     static readonly Timer Tick = new(_ => OnTick(), null, Timeout.Infinite, Timeout.Infinite);
     static long Now => Environment.TickCount64;
 
     /// Connected to Steam right now (a live child that said it was ready).
     public static bool Connected { get { lock (Gate) return child is { Alive: true }; } }
 
-    /// The UI's word: the Workshop shows on Browse in a visible window (true, repeated as the heartbeat) or not.
-    public static void SetShowing(bool on)
+    /// The open window's heartbeat: the held child stays until `Tail` after the last one. Never connects by itself.
+    public static void Beat()
     {
-        lock (Gate)
-        {
-            if (on) { showing = true; lastBeat = Now; }
-            else if (showing) { showing = false; leftAt = Math.Min(Now, lastBeat + (long)HeartbeatTimeout.TotalMilliseconds); }
-        }
+        lock (Gate) lastBeat = Now;
         Tick.Change(0, Timeout.Infinite);
     }
 
@@ -108,8 +111,8 @@ public static class SteamClientHold
         lock (Gate) { child = c; busy = false; opEnd = Now; }
     }
 
-    /// An operation ended (the caller still holds the turn): the linger counts from here unless the Workshop shows; with
-    /// it already over (or 0), the child goes now, before the next operation's turn.
+    /// An operation ended (the caller still holds the turn): the tail counts from here unless a later beat came; with it
+    /// already over (or 0), the child goes now, before the next operation's turn.
     internal static void Done(Child c, bool drop = false)
     {
         lock (Gate) { busy = false; opEnd = Now; if (drop && child == c) child = null; }
@@ -125,7 +128,7 @@ public static class SteamClientHold
         try { Evaluate(); } finally { SteamClientUgc.Turn.Release(); }
     }
 
-    // with the turn held: release the child once the user has been away for the linger, else wake when that comes
+    // with the turn held: release the child once the tail after the last beat and the last operation is over, else wake then
     static void Evaluate()
     {
         Child? go = null;
@@ -133,14 +136,11 @@ public static class SteamClientHold
         {
             if (child == null || busy) return;
             if (!child.Alive) { child.Dispose(); child = null; return; }
-            long now = Now, hb = (long)HeartbeatTimeout.TotalMilliseconds;
-            if (showing && now - lastBeat < hb) { Tick.Change(lastBeat + hb - now, Timeout.Infinite); return; }
-            long left = showing ? lastBeat + hb : leftAt;
-            long due = Math.Max(left, opEnd) + (long)Linger.TotalMilliseconds;
+            long now = Now, due = Math.Max(lastBeat, opEnd) + (long)Tail.TotalMilliseconds;
             if (now < due) { Tick.Change(due - now, Timeout.Infinite); return; }
             go = child; child = null;
         }
-        Console.WriteLine("steam-app: away from the Workshop past the linger; releasing Steam");
+        Console.WriteLine("steam-app: no window and no operation for the tail; releasing Steam");
         go.Release();
     }
 

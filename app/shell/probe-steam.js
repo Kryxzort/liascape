@@ -218,11 +218,9 @@
 //   browse:warm           the Browse tab hovered while it shows the Workshop, or a Workshop pill hovered: one POST /steam/warm
 //                         (Steam's session connects ahead of the page), at most one per 20 s; none from the tab while another
 //                         source shows there, none from another source's pill
-//   browse:appPresence    "Use the Steam app": the Workshop shown on Browse → POST /steam/app-presence {showing: true}, again
-//                         at each 30 s heartbeat (one interval, none once it doesn't show); the Library tab, another source,
-//                         the window hidden (the shell's onShownChange, one listener) → {showing: false}, each way back → true;
-//                         pagehide → a keepalive false; a page loaded hidden (the shell's isShown) sends nothing until shown;
-//                         under another download mode the page never sends one
+//   browse:appPresence    "Use the Steam app": the window open, on any tab → POST /steam/app-presence at the interval the
+//                         backend names (no gap across tab switches, no body, nothing on pagehide); another mode: none, and a
+//                         switch to one stops them at once
 //   lib:ws:order         a Workshop item's Library sidebar: its counts in the hero row, the creator under it, then Playback, the
 //                         scene properties, the favourite and the comments, last, 12 px apart; none off the Workshop, for a plain
 //                         item, for a multi-selection
@@ -272,18 +270,6 @@ const STUB = `(() => {
     constructor(...a) { super(...a); sockets.push(this); }
     send(d) { st.wsSent.push(String(d)); return super.send(d); }
   };
-  // the shell's window-shown signal (browse:appPresence), only when a cell asks: the page sees no window.liascape otherwise.
-  // isShown answers "hidden" with __probe_shell_hidden; every interval is recorded (window.__beat(ms) runs those of that period
-  // now), and a request sent keepalive is noted in st.keepalive
-  if (localStorage.getItem("__probe_shell_shown") === "1") {
-    st.shownSubs = 0;
-    window.liascape = { onShownChange: (cb) => { window.__shown = cb; st.shownSubs++; return () => { st.shownSubs--; }; },
-      isShown: () => Promise.resolve(localStorage.getItem("__probe_shell_hidden") !== "1") };
-    const si = window.setInterval.bind(window), ci = window.clearInterval.bind(window), live = new Map();
-    window.setInterval = (fn, ms, ...a) => { const id = si(fn, ms, ...a); live.set(id, { fn, ms }); return id; };
-    window.clearInterval = (id) => { live.delete(id); return ci(id); };
-    window.__beat = (ms) => { let n = 0; for (const x of [...live.values()]) if (x.ms === ms) { x.fn(); n++; } return n; };
-  }
   window.__fakeWs = (type, payload) => { let n = 0; for (const s of sockets) if (s.readyState === 1 && s.onmessage) { s.onmessage({ data: JSON.stringify({ type, payload }) }); n++; } return n; };
   // the page's socket dropped (the app reconnects and re-reads what it mirrors: yours:oneOpen)
   window.__wsDrop = () => { for (const s of sockets) if (s.readyState === 1) s.close(); return true; };
@@ -327,6 +313,12 @@ const STUB = `(() => {
       const lib = Y().lib;
       return f(u, o).then((r) => r.json()).then((list) => { const ks = list.filter((x) => /^k\\d$/.test(x.title)).sort((a, b) => a.title.localeCompare(b.title));
         return res(lib.map((l, i) => ({ ...ks[i], ...l }))); });
+    }
+    // the window's heartbeat (browse:appPresence): each one's time in st.beats; __probe_beat_ms = the interval the backend names
+    if (p === "/steam/app-presence") (st.beats ??= []).push(performance.now());
+    if (p === "/steam/app-presence" && localStorage.getItem("__probe_beat_ms")) {
+      st.calls.push({ p, body: o.body ? JSON.parse(o.body) : null });
+      return res({ connected: false, beatMs: +localStorage.getItem("__probe_beat_ms") });
     }
     if (p.startsWith("/steam/")) {
       st.calls.push({ p, body: o.body ? JSON.parse(o.body) : null });
@@ -4543,58 +4535,44 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // browse:appPresence — "Use the Steam app" holds its Steam connection only while the page says the Workshop shows on
-    // Browse in a shown window (hooks/useSteamAppPresence.ts → Helpers/SteamClientHold.cs); every change is one POST
+    // browse:appPresence — "Use the Steam app" holds its Steam connection while the Liascape window is open
+    // (hooks/useSteamAppPresence.ts → Helpers/SteamClientHold.cs): the page beats on every tab at the interval the backend
+    // names, without a gap as the user moves between tabs, says nothing on pagehide (the backend's tail runs from the last
+    // beat), and never under another download mode
     await cell("browse:appPresence", async () => {
-      const v = [];
-      const srcs = (await http("GET", "/sources")).json;
-      const wsName = srcs.find((s) => s.supportsTagFilter && s.available)?.name, other = srcs.find((s) => s.supportsLocalFilter && s.available)?.name;
-      if (!wsName || !other) return [`no Workshop source (${wsName}) or no other source (${other}) — proved nothing`];
-      const sent = async () => (await calls()).filter((c) => c.p === "/steam/app-presence").map((c) => c.body?.showing);
-      const pill = (name) => page(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(name)})?.click();`);
-      const expect = async (want, what) => {
-        const got = await waitFor(async () => { const x = await sent(); return J(x) === J(want) ? x : null; }, 2500) || await sent();
-        if (J(got) !== J(want)) v.push(`${what}: sent ${J(got)}, want ${J(want)}`);
-      };
+      const v = [], EVERY = 250;
+      const beats = () => js(`window.__st.beats ?? []`);
       const mode0 = (await http("GET", "/settings")).json?.workshopDownloadMode ?? "subscribe";
-      await js(`localStorage.setItem("__probe_shell_shown", "1"); localStorage.setItem("__probe_we_local", "1"); true`);
+      await js(`localStorage.setItem("__probe_beat_ms", "${EVERY}"); true`);
       try {
         await setSettings({ workshopDownloadMode: "steamapp" });
-        await browseWs(SIGNED_OUT);
-        await expect([true], "the Workshop shown on Browse");
-        // the heartbeat: one 30 s interval while it shows, each beat another `true`; gone once it doesn't
-        const beats = await js(`window.__beat(30000)`);
-        if (beats !== 1) v.push(`${beats} heartbeat interval(s) of 30 s while the Workshop shows, want 1`);
-        await expect([true, true], "a heartbeat");
-        await tab("Library"); await expect([true, true, false], "the Library tab");
-        if (await js(`window.__beat(30000)`)) v.push("a 30 s heartbeat still runs on the Library tab");
-        await tab("Browse"); await expect([true, true, false, true], "back on Browse");
-        await pill(other); await sleep(300); await expect([true, true, false, true, false], `${other} on Browse`);
-        await pill(wsName); await sleep(300); await expect([true, true, false, true, false, true], "the Workshop again");
-        if (!(await js(`typeof window.__shown === "function"`))) v.push("the page never listened to the shell's onShownChange");
-        else {
-          await js(`window.__shown(false); true`); await expect([true, true, false, true, false, true, false], "the window hidden");
-          await js(`window.__shown(true); true`); await expect([true, true, false, true, false, true, false, true], "the window shown again");
-        }
-        const subs = await js(`window.__st.shownSubs`);
-        if (subs !== 1) v.push(`${subs} onShownChange listener(s) registered, want 1`);
-        // the page going away while it shows: a last `false`, sent keepalive so it outlives the page
-        await js(`dispatchEvent(new Event("pagehide")); true`);
-        await expect([true, true, false, true, false, true, false, true, false], "pagehide");
-        if (!(await js(`(window.__st.keepalive || []).includes("/steam/app-presence")`))) v.push("pagehide's `false` wasn't sent keepalive");
-        // a page loaded while the window is hidden (a reload behind the tray): nothing until the shell says it shows
-        await js(`localStorage.setItem("__probe_shell_hidden", "1"); true`);
-        await browseWs(SIGNED_OUT); await sleep(500);
-        if ((await sent()).length) v.push(`loaded hidden, on Browse's Workshop: sent ${J(await sent())}, want nothing`);
-        await js(`window.__shown(true); true`); await expect([true], "loaded hidden, then shown");
-        await js(`localStorage.removeItem("__probe_shell_hidden"); true`);
-        // another download mode: nothing at all, on load or on Browse
-        await setSettings({ workshopDownloadMode: "subscribe" });
-        await browseWs(SIGNED_OUT); await tab("Library"); await tab("Browse"); await sleep(500);
-        if ((await sent()).length) v.push(`under "Subscribe with Steam login": sent ${J(await sent())}, want nothing`);
+        await load(SIGNED_OUT); await tab("Library");
+        const a0 = (await beats()).length; await sleep(1500);
+        const onLib = (await beats()).length - a0;
+        if (!a0 && !onLib) return ["no beat at all on the Library tab — the window open is the hold, any tab"];
+        if (onLib < 4 || onLib > 9) v.push(`on the Library tab: ${onLib} beats in 1.5 s at the backend's ${EVERY} ms, want ≈ 6`);
+        const bodies = (await calls()).filter((c) => c.p === "/steam/app-presence" && c.body != null);
+        if (bodies.length) v.push(`a beat carried a body: ${J(bodies[0].body)}`);
+        // moving between tabs: the beats go on, never a gap past two intervals
+        const b0 = (await beats()).length;
+        for (const t of ["Browse", "Settings", "Library", "Browse"]) { await tab(t); await sleep(200); }
+        const bs = (await beats()).slice(Math.max(0, b0 - 1));
+        const gap = Math.max(...bs.slice(1).map((t, i) => t - bs[i]));
+        console.log(`        ${bs.length - 1} beats across four tab switches, the longest gap ${Math.round(gap)} ms`);
+        if (bs.length < 6 || gap > EVERY * 2) v.push(`across tab switches: ${bs.length - 1} beats, the longest gap ${Math.round(gap)} ms (want ≤ ${EVERY * 2})`);
+        // the page going away says nothing more: the backend lets go a tail after the last beat
+        await js(`dispatchEvent(new Event("pagehide")); true`); await sleep(100);
+        if (await js(`(window.__st.keepalive || []).length`)) v.push("pagehide sent a request (keepalive)");
+        // another download mode (as the page hears it: its own save, or settings-changed): the beats stop at once, and a fresh
+        // page sends none
+        await setSettings({ workshopDownloadMode: "subscribe" }); await ev("settings-changed", { workshopDownloadMode: "subscribe" }); await sleep(EVERY * 2);
+        const s0 = (await beats()).length; await sleep(1000);
+        if ((await beats()).length > s0) v.push(`under "Subscribe with Steam login": ${(await beats()).length - s0} beat(s) after the switch`);
+        await load(SIGNED_OUT); await tab("Browse"); await sleep(800);
+        if ((await beats()).length) v.push(`a fresh page under "Subscribe with Steam login" beat ${(await beats()).length} time(s)`);
       } finally {
         await setSettings({ workshopDownloadMode: mode0 });
-        await js(`localStorage.removeItem("__probe_shell_shown"); localStorage.removeItem("__probe_we_local"); localStorage.removeItem("__probe_shell_hidden"); true`);
+        await js(`localStorage.removeItem("__probe_beat_ms"); true`);
       }
       return v;
     });

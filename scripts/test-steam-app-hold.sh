@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Hermetic test of how long "Use the Steam app" stays connected to Steam (Helpers/SteamClientHold.cs): one `steam-ugc
-# session` child, held while the UI says the Workshop shows on Browse (POST /steam/app-presence, a heartbeat), then a linger.
+# session` child, held while the Liascape window is open (its page's heartbeat, POST /steam/app-presence), then a tail of
+# three beats (SteamClientHold.Tail).
 # A private backend whose Steam client is the FAKE steamclient.so (scripts/test-fixtures/fake_steamclient.c, built here: its
-# helpers.log says when each child connected, used Steam and let go), the linger and heartbeat timeout shortened
-# (LIASCAPE_STEAM_APP_LINGER_MS / LIASCAPE_STEAM_APP_HEARTBEAT_MS):
-#  a. the Workshop showing, nothing downloaded: no child, /steam/status `appConnected` false
-#  b. four downloads (two after each other, two at once) on Browse: ONE child serves them all, and stays while the UI beats
-#  c. the UI leaves: inside the linger the child stays; it comes back: past the linger's end the child is still there
-#  d. the UI leaves for good: the child releases Steam (its user + pipe) and exits once the linger is over, not before
-#  e. the UI stops beating without a word (a crashed page): the heartbeat times out, then the linger, then the release
+# helpers.log says when each child connected, used Steam and let go), the heartbeat (and so the tail) shortened
+# (LIASCAPE_STEAM_APP_BEAT_MS):
+#  a. the window open, nothing downloaded: no child, /steam/status `appConnected` false; each beat's answer names the interval
+#  b. four downloads (two after each other, two at once) while the window is open: ONE child serves them all, and stays past
+#     the tail while the window beats
+#  c. the beats stop for less than the tail (a reload, a renderer recovery) and come back: the same child stays
+#  d. the window closes (the beats just stop): the child releases Steam (its user + pipe) and exits a tail after the last
+#     beat, not before
+#  e. no window at all (a download from the CLI): the child goes a tail after the operation
 #  f. the child killed: `appConnected` false at once; the next download starts a fresh child and finishes
 #  h. the held child hangs (the fake's hang-once): its ping before the next download goes unanswered, one fresh child does it
 #  i. Steam refuses a one-off's DownloadItem (refuse-download): subscribe, copy, unsubscribe, all on the same held child
@@ -18,7 +21,7 @@
 #     second apart, each reach the account's favourites cache within its window, never through the cache's count check
 #     (no `count check` in the log); a plain open-page starts no watch
 #  l. the watch's window over: no more reads, a later flip stays out of the cache; the child it held (the UI gone meanwhile)
-#     stayed connected for the window, past the linger, then released Steam a linger after its last read
+#     stayed connected for the window, past the tail, then released Steam a tail after its last read
 #  m. no Steam app (fail-init): the page still opens, no watch: one helper tried, none held, nothing read; Steam offline
 #     (no account): the page opens, no favourites query sent
 #  g. SIGTERM with the child held: serve exits within 3 s and the child released Steam first
@@ -79,9 +82,9 @@ ffmpeg -nostdin -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=30" -
 echo '{}' > "$T/cm.json"
 printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
-LINGER=2500 BEAT=4000
+BEAT=800 TAIL=2400 # the tail is three beats (SteamClientHold.TailBeats)
 WATCH=6000 WATCH_POLL=400
-(cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_LINGER_MS=$LINGER LIASCAPE_STEAM_APP_HEARTBEAT_MS=$BEAT LIASCAPE_WORKSHOP_POLL_MS=300 \
+(cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_BEAT_MS=$BEAT LIASCAPE_WORKSHOP_POLL_MS=300 \
   LIASCAPE_FAV_WATCH_MS=$WATCH LIASCAPE_FAV_WATCH_POLL_MS=$WATCH_POLL \
   LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
@@ -92,7 +95,7 @@ for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.
 
 cat > "$T/drive.mjs" <<'EOF'
 import fs from "node:fs";
-const { U, T } = process.env, LINGER = +process.env.LINGER, BEAT = +process.env.BEAT;
+const { U, T } = process.env, TAIL = +process.env.TAIL, BEAT = +process.env.BEAT;
 const TOKEN = fs.readFileSync(`${process.env.XDG_CONFIG_HOME}/liascape/serve.token`, "utf8").trim();
 const H = { "X-Liascape-Token": TOKEN, "Content-Type": "application/json" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -115,56 +118,58 @@ const dl = async (id, extra = {}, signal) => { const r = await fetch(U + "/downl
   return { status: r.status, body: await r.json().catch(() => null) }; };
 const download = async (id) => (await dl(id)).status;
 const inLibrary = async (id) => (await (await fetch(U + "/library", { headers: H })).json()).some((i) => i.workshopId === id);
-let presStatus = 0;
-const presence = async (showing) => { presStatus = (await fetch(U + "/steam/app-presence", { method: "POST", headers: H, body: JSON.stringify({ showing }) })).status; };
-// the page's heartbeat while the Workshop shows (every BEAT / 4)
+let presStatus = 0, presBody = null, lastBeatAt = 0;
+const presence = async () => { lastBeatAt = Date.now(); const r = await fetch(U + "/steam/app-presence", { method: "POST", headers: H });
+  presStatus = r.status; presBody = await r.json().catch(() => null); };
+// the open window's heartbeat, every BEAT (the interval the backend names in its answer)
 let beating = null;
-const beat = (on) => { clearInterval(beating); beating = null; if (on) { presence(true); beating = setInterval(() => presence(true), BEAT / 4); } };
+const beat = (on) => { clearInterval(beating); beating = null; if (on) { presence(); beating = setInterval(() => presence(), BEAT); } };
 
-// a. on Browse with nothing downloaded: no connection
+// a. the window open, nothing downloaded: no connection; each beat's answer names the interval to beat at
 beat(true); await sleep(1500);
-out(opens().length === 0 && !(await connected()) && presStatus === 200, "a. the Workshop showing, nothing downloaded: no Steam connection",
-  `presence ${presStatus}, ${opens().length} children connected, appConnected ${await connected()}`);
+out(opens().length === 0 && !(await connected()) && presStatus === 200 && presBody?.beatMs === BEAT,
+  "a. the window open, nothing downloaded: no Steam connection; the beat's answer names its interval",
+  `presence ${presStatus} ${JSON.stringify(presBody)}, ${opens().length} children connected, appConnected ${await connected()}`);
 
-// b. downloads on Browse: one child for all of them, held while the UI beats
+// b. downloads while the window is open: one child for all of them, held while the window beats
 const rb = [await download("720000001"), await download("720000002"), ...(await Promise.all([download("720000003"), download("720000004")]))];
 const pidB = childPid();
 out(rb.every((s) => s === 200) && opens().length === 1 && users().length === 1 && users()[0] === String(pidB),
-  "b. four downloads (two at once) while the Workshop shows: one child served them all", `statuses ${rb}, children ${opens()}, used by ${users()}`);
-await sleep(LINGER + 1000);
-out(alive(pidB) && await connected() && opens().length === 1, "b. …and stays connected past the linger while the UI beats",
+  "b. four downloads (two at once) while the window is open: one child served them all", `statuses ${rb}, children ${opens()}, used by ${users()}`);
+await sleep(TAIL + 1000);
+out(alive(pidB) && await connected() && opens().length === 1, "b. …and stays connected past the tail while the window beats",
   `alive ${alive(pidB)}, appConnected ${await connected()}`);
 
-// c. leave, come back inside the linger: still the same child after the linger would have ended
-beat(false); await presence(false); const tLeft = Date.now();
-await sleep(LINGER / 2);
-const midLinger = alive(pidB);
+// c. a reload or a renderer recovery: the beats stop for less than the tail, then come back — the same child, still held
+// after the tail would have ended
+beat(false); const tGap = lastBeatAt;
+await sleep(TAIL / 2);
+const midTail = alive(pidB);
 beat(true);
-await sleep(Math.max(0, tLeft + LINGER + 1500 - Date.now()));
-out(midLinger && alive(pidB) && opens().length === 1 && await connected(), "c. left, back within the linger: the linger cancelled, the same child held",
-  `mid-linger alive ${midLinger}, now alive ${alive(pidB)}, children ${opens().length}`);
+await sleep(Math.max(0, tGap + TAIL + 1500 - Date.now()));
+out(midTail && alive(pidB) && opens().length === 1 && await connected(), "c. the beats back within the tail (a reload): the same child held",
+  `alive mid-gap ${midTail}, now alive ${alive(pidB)}, children ${opens().length}`);
 
-// d. leave for good: released after the linger, not before
+// d. the window closes (no word, the beats just stop): released a tail after the last beat, not before
 const rel0 = lines("released").length;
-beat(false); await presence(false); const tD = Date.now();
-await sleep(LINGER - 800);
+beat(false); const tD = lastBeatAt;
+await sleep(Math.max(0, tD + TAIL - 700 - Date.now()));
 const early = alive(pidB);
 const gone = await until(() => !alive(pidB), 8000);
 const dt = Date.now() - tD, rel = lines("released").slice(rel0);
-out(early && gone !== null && dt >= LINGER - 300 && rel.includes("user") && rel.includes("pipe") && !(await connected()),
-  "d. left for good: the child released Steam (user + pipe) and exited once the linger was over",
-  `alive at ${LINGER - 800} ms ${early}, gone after ${dt} ms (linger ${LINGER}), released [${rel}], appConnected ${await connected()}`);
+out(early && gone !== null && dt >= TAIL - 300 && dt < TAIL + 2500 && rel.includes("user") && rel.includes("pipe") && !(await connected()),
+  "d. the window closed: the child released Steam (user + pipe) and exited a tail after the last beat",
+  `alive ${TAIL - 700} ms after the last beat ${early}, gone after ${dt} ms (tail ${TAIL}), released [${rel}], appConnected ${await connected()}`);
 
-// e. the page stops beating without a word: heartbeat timeout, then the linger
-beat(true); const re = await download("720000005"); const pidE = childPid();
-beat(false); const tE = Date.now(); // the last beat went out just now
-await sleep(BEAT - 1000);
+// e. no window at all (a download from the CLI): released a tail after the operation
+const re = await download("720000005"); const tE = Date.now(); const pidE = childPid();
+await sleep(TAIL - 700);
 const eHeld = alive(pidE);
-await until(() => !alive(pidE), BEAT + LINGER + 6000);
+await until(() => !alive(pidE), TAIL + 4000);
 const dE = Date.now() - tE;
-out(re === 200 && pidE !== pidB && eHeld && !alive(pidE) && dE >= BEAT + LINGER - 1500 && dE < BEAT + LINGER + 5000,
-  "e. no heartbeat: counted as left after the timeout, released after the linger",
-  `download ${re}, new child ${pidE !== pidB}, alive at ${BEAT - 1000} ms ${eHeld}, gone after ${dE} ms (timeout ${BEAT} + linger ${LINGER})`);
+out(re === 200 && pidE !== pidB && eHeld && !alive(pidE) && dE >= TAIL - 300 && dE < TAIL + 2500,
+  "e. no window (a download from the CLI): released a tail after the operation",
+  `download ${re}, new child ${pidE !== pidB}, alive at ${TAIL - 700} ms ${eHeld}, gone after ${dE} ms (tail ${TAIL})`);
 
 // f. the child killed: never reported connected, the next download starts a fresh one
 beat(true); const rf1 = await download("720000006"); const pidF = childPid(); const nF = opens().length;
@@ -225,7 +230,7 @@ const cacheIds = () => { try { return JSON.parse(fs.readFileSync(CACHE, "utf8"))
 const urls = () => fs.readFileSync(`${T}/xdg-open.urls`, "utf8").split("\n").filter(Boolean);
 const log = () => fs.readFileSync(`${T}/backend.log`, "utf8");
 const openPage = async (body) => { const r = await fetch(U + "/steam/open-page", { method: "POST", headers: H, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
-beat(false); await presence(false);
+beat(false);
 // a plain "Open on Steam" (the Steam page's own tile) watches nothing
 const qPlain = lines("queries").length, plain = await openPage({ workshopId: OTHER });
 await sleep(1200);
@@ -249,18 +254,18 @@ out(plain.status === 200 && plainQueries === 0 && rk.status === 200 && rk.body?.
   + `unfavourite seen ${unfav} ms, all within ${kDone} ms (window ${WATCH}), count checks ${counted}, cache ${JSON.stringify(cacheIds())}`);
 
 // l. the window over: no more reads, a later flip stays out; the child the watch held (no UI beating since before k.) stayed
-// past the linger for the window, then let go a linger after the last read
+// past the tail for the window, then let go a tail after the last read
 const heldMid = await (async () => { await sleep(Math.max(0, tK + WATCH - 1200 - Date.now())); return alive(pidK) && await connected(); })();
 await sleep(Math.max(0, tK + WATCH + WATCH_POLL_GRACE - Date.now()));
 const qEnd = lines("queries").length;
 fs.writeFileSync(FAVF, `${ITEM}\n${OTHER}\n`);
-const goneL = await until(() => !alive(pidK), LINGER + 4000);
+const goneL = await until(() => !alive(pidK), TAIL + 4000);
 await sleep(500);
 const lateReads = lines("queries").length - qEnd;
 out(heldMid && lateReads === 0 && !cacheIds().includes(ITEM) && goneL !== null && /favourites watch: its window is over/.test(log())
   && lines("queries").length === +lines("queries-released").length,
-  "l. the watch's window over: no more reads, a later favourite stays out; Steam held through the window, released a linger after",
-  `held ${WATCH - 1200} ms in (the linger ${LINGER}) ${heldMid}, reads after the window ${lateReads}, cache ${JSON.stringify(cacheIds())}, released ${goneL} ms after the window, `
+  "l. the watch's window over: no more reads, a later favourite stays out; Steam held through the window, released a tail after",
+  `held ${WATCH - 1200} ms in (the tail ${TAIL}) ${heldMid}, reads after the window ${lateReads}, cache ${JSON.stringify(cacheIds())}, released ${goneL} ms after the window, `
   + `queries ${lines("queries").length} / released ${lines("queries-released").length}`);
 
 // m. no Steam app: the page still opens, no watch — one helper tried and gone, nothing held, nothing read
@@ -293,7 +298,7 @@ fs.writeFileSync(`${T}/held.pid`, String(childPid()));
 fs.writeFileSync(`${T}/released.before`, String(lines("released").length));
 beat(false);
 EOF
-(cd "$T" && U=$U T=$T LINGER=$LINGER BEAT=$BEAT WATCH=$WATCH timeout 300 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
+(cd "$T" && U=$U T=$T TAIL=$TAIL BEAT=$BEAT WATCH=$WATCH timeout 300 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
 cat "$T/drive.log"
 PASS=$((PASS + $(grep -c '^PASS' "$T/drive.log"))); FAIL=$((FAIL + $(grep -c '^FAIL' "$T/drive.log")))
 [ $rc = 0 ] || bad "drive.mjs exited $rc"

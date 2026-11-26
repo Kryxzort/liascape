@@ -633,9 +633,9 @@ mkdir -p "$T/ws3/431960" "$T/steamlib"
 : > "$T/xdg-open.urls"
 printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws3/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
-# no linger: with no page saying the Workshop shows, every Steam-client child lets go right after its operation, so the
+# no tail (a 0 ms heartbeat): with no window beating, every Steam-client child lets go right after its operation, so the
 # checks below see one connection per operation (how long it is held otherwise: scripts/test-steam-app-hold.sh)
-(cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_LINGER_MS=0 LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
+(cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_BEAT_MS=0 LIASCAPE_WORKSHOP_POLL_MS=300 LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend3.log" 2>&1) & BP3=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP3 2>/dev/null || break; sleep 0.1; done
 U3=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port" 2>/dev/null)

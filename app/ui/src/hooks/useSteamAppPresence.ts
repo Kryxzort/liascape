@@ -1,42 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { api } from "../api/client";
 
-// How often the page repeats "the Workshop shows" while it does: well inside the backend's 90 s heartbeat timeout
-// (Helpers/SteamClientHold.cs), so one late beat never counts as leaving.
-const BEAT_MS = 30_000;
+// Until the backend names its interval (its first answer), the page beats this often: the backend's own default
+// (Helpers/SteamClientHold.cs HeartbeatEvery).
+const BEAT_MS = 5_000;
 
-type ShellBridge = { onShownChange?: (cb: (v: boolean) => void) => (() => void) | void; isShown?: () => Promise<boolean> };
-const shell = () => (window as unknown as { liascape?: ShellBridge }).liascape;
-
-// The window is on screen: not hidden or minimized. The shell says so (preload `isShown` once, then `onShownChange`): with
-// background throttling off, Chromium keeps `visibilityState` "visible" in a hidden window. Until the shell answers it
-// counts as not shown (a page reloaded while hidden). In a plain browser `visibilityState` is all there is.
-function useWindowShown(): boolean {
-  const [shown, setShown] = useState<boolean | null>(() => (shell()?.isShown ? null : true));
-  const [visible, setVisible] = useState(() => document.visibilityState === "visible");
-  useEffect(() => {
-    const sync = () => setVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", sync);
-    let heard = false; // an event that came first is newer than the answer
-    const off = shell()?.onShownChange?.((v) => { heard = true; setShown(v); });
-    shell()?.isShown?.().then((v) => { if (!heard) setShown(!!v); }, () => { if (!heard) setShown(true); });
-    return () => { heard = true; document.removeEventListener("visibilitychange", sync); if (typeof off === "function") off(); };
-  }, []);
-  return shown === true && visible;
-}
-
-// Tells the backend whether "Use the Steam app" may keep its Steam connection: while the Workshop shows on Browse in a
-// shown window it does (Steam shows the user playing Wallpaper Engine, one connection for the visit instead of a blink per
-// download); on leaving, a linger starts there. `onBrowseWorkshop` = the Browse tab with the Workshop source, in that mode.
+// Tells the backend the Liascape window is open, so "Use the Steam app" keeps its Steam connection (Steam shows the user
+// playing Wallpaper Engine) from its first Workshop operation until the window closes: one connection while the app is open,
+// none flickering on and off as the user moves between tabs. A beat every few seconds at the interval the backend names in
+// its answer; the backend lets go a few beats after the last one (a closed or crashed window), never for its own lifetime
+// (docs/decisions.md § "Hold the Steam app connection while the Liascape window is open"). `on` = that download mode.
 // Guard: probe-steam browse:appPresence
-export function useSteamAppPresence(onBrowseWorkshop: boolean) {
-  const showing = useWindowShown() && onBrowseWorkshop;
+export function useSteamAppPresence(on: boolean) {
   useEffect(() => {
-    if (!showing) return;
-    api.steamAppPresence(true);
-    const beat = setInterval(() => api.steamAppPresence(true), BEAT_MS);
-    const leave = () => api.steamAppPresence(false, true); // the window closes or reloads
-    addEventListener("pagehide", leave);
-    return () => { clearInterval(beat); removeEventListener("pagehide", leave); api.steamAppPresence(false); };
-  }, [showing]);
+    if (!on) return;
+    let timer: ReturnType<typeof setTimeout> | undefined, alive = true;
+    const beat = async () => {
+      const every = await api.steamAppPresence().then((r) => r?.beatMs ?? BEAT_MS, () => BEAT_MS);
+      if (alive) timer = setTimeout(beat, every > 0 ? every : BEAT_MS);
+    };
+    void beat();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [on]);
 }

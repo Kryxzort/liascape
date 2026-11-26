@@ -136,13 +136,6 @@ ipcMain.handle("liascape:pick", async (e, kind) => {
   return files ? r.filePaths : r.filePaths[0];
 });
 
-// whether the asking page's window is on screen now (not hidden, not minimized): a page loaded while it was hidden starts
-// from this, not from the shown/hidden events it missed (app/ui/src/hooks/useSteamAppPresence.ts)
-ipcMain.handle("liascape:is-shown", (e) => {
-  const w = isAppUrl(e.senderFrame?.url ?? "") ? BrowserWindow.fromWebContents(e.sender) : null;
-  return !!w && w.isVisible() && !w.isMinimized();
-});
-
 // Chromium restarts a GPU process that dies; log each one (a run of them is the NVIDIA crash-loop above)
 app.on("child-process-gone", (_e, d) => {
   if (d.type === "GPU") console.error(`[gpu] GPU process gone: ${d.reason} (exit code ${d.exitCode})`);
@@ -177,14 +170,6 @@ function openWindow(loadUrl) {
   win.on("minimize", () => sendActive(false));
   win.on("show", () => sendActive(true));
   win.on("restore", () => sendActive(true));
-  // the window on screen or not (hidden, minimized), apart from focus: with backgroundThrottling off Chromium keeps
-  // `visibilityState` "visible" in a hidden window. "Use the Steam app" holds Steam only while the Workshop shows
-  // (app/ui/src/hooks/useSteamAppPresence.ts)
-  const sendShown = (v) => { try { win.webContents.send("liascape:shown", v); } catch {} };
-  win.on("hide", () => sendShown(false));
-  win.on("minimize", () => sendShown(false));
-  win.on("show", () => sendShown(true));
-  win.on("restore", () => sendShown(true));
   // a page whose renderer dies or hangs comes back by itself; each reload carries the token the backend has now
   require("./renderer-recovery").recoverRenderer(win, () => withToken(loadUrl));
   win.loadURL(loadUrl);

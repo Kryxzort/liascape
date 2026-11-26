@@ -92,11 +92,13 @@ off with why. `.claude/rules/backend/sources-steam.md`.
 copy. A short-lived child loads the installed client's `steamclient.so` and calls ISteamUGC by vtable slot, slots read
 from Valve's wrappers with objdump. `Helpers/SteamClientUgc.cs`.
 
-### Hold the Steam app connection while the Workshop shows on Browse — 2026-11-22
-Connected, Steam shows "Playing Wallpaper Engine": a connection per download blinked it, each a friends' popup; one for
-the app's lifetime shows the user in-game all day and blocks the real Wallpaper Engine. It starts at the first download,
-stays while Browse shows the Workshop, ends 60 s after the user leaves or the page's heartbeat stops (a crashed UI can't
-hold it). `Helpers/SteamClientHold.cs`.
+### Hold the Steam app connection while the Liascape window is open — 2026-11-26
+Connected, Steam shows "Playing Wallpaper Engine": a connection per download blinked it, each a friends' popup, and holding
+it only while Browse showed the Workshop (what this replaced) blinked it again as the user moved between tabs. One for the
+backend's lifetime would show the user in-game all day, block the real Wallpaper Engine and pause Steam's other downloads.
+It starts at the first Steam-app operation (never for the window alone), stays while the window's page beats (every 5 s),
+and ends three beats (15 s) after the last beat or operation: enough for a reload or a renderer recovery, not a long tail.
+A running favourites watch keeps it to the watch's end. `Helpers/SteamClientHold.cs`, `scripts/test-steam-app-hold.sh`.
 
 ### Queue the Steam pages the user must click, one at a time, advanced by Next — 2026-11-11
 Opening N pages at once lost all but one (Steam shows one), and a bulk Delete from Source opened the whole subscriptions

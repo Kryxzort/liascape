@@ -749,9 +749,13 @@ public static class ServerHost
         app.MapGet("/steam/status", () => Results.Json(SteamOps.Status()));
         // the UI expects a Workshop Browse request soon: connect the anonymous session ahead of it (never waits, never fails)
         app.MapPost("/steam/warm", () => Results.Json(new { warm = SteamAnonymous.Warm() }));
-        // the UI's word that the Workshop shows on Browse (repeated as a heartbeat) or not: how long "Use the Steam app" keeps
-        // its Steam connection (Helpers/SteamClientHold.cs); never connects by itself
-        app.MapPost("/steam/app-presence", (PresenceReq r) => { SteamClientHold.SetShowing(r.Showing); return Results.Json(new { connected = SteamClientHold.Connected }); });
+        // the open window's heartbeat: how long "Use the Steam app" keeps its Steam connection (Helpers/SteamClientHold.cs);
+        // never connects by itself. `beatMs` = when the page beats next
+        app.MapPost("/steam/app-presence", () =>
+        {
+            SteamClientHold.Beat();
+            return Results.Json(new { connected = SteamClientHold.Connected, beatMs = (int)SteamClientHold.HeartbeatEvery.TotalMilliseconds });
+        });
         app.MapPost("/steam/qr/start", () => { SteamOps.StartQr(); return Results.Ok(); });
         app.MapPost("/steam/qr/cancel", () => { SteamOps.CancelQr(); return Results.Ok(); });
         app.MapPost("/steam/signout", () => { SteamOps.SignOut(); return Results.Ok(); });
@@ -1118,7 +1122,6 @@ public static class ServerHost
     public record TrashReq(List<LibraryItem> Items);
     public record WorkshopIdReq(string? WorkshopId, string? Title = null);
     public record OpenPageReq(string? WorkshopId, string? Watch = null);
-    public record PresenceReq(bool Showing);
     public record IdsReq(List<string>? Ids);
     public record FavoriteReq(string? WorkshopId, bool Favorite);
     public record CommentReq(string? WorkshopId, string? Owner, string? Text, int? Count);

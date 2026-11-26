@@ -454,13 +454,13 @@ public static class SteamSelfTest
         }
     }
 
-    // "Use the Steam app"'s held child (Helpers/SteamClientHold.cs): the linger's tick can land while something holds the
+    // "Use the Steam app"'s held child (Helpers/SteamClientHold.cs): the tail's tick can land while something holds the
     // Steam client's turn without ending in Done (an unsubscribe whose claim came back empty); the release must still come.
     // A `cat` stands in for the child: it exits once its stdin closes, as the real one releases Steam.
     private static async Task HoldTickWhileTurnHeld()
     {
         System.Diagnostics.Process? cat = null;
-        var (linger, hb) = (SteamClientHold.Linger, SteamClientHold.HeartbeatTimeout);
+        var every = SteamClientHold.HeartbeatEvery;
         try
         {
             cat = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cat")
@@ -468,13 +468,13 @@ public static class SteamSelfTest
             if (cat == null) { Check(false, "steam-app hold: can't start the stand-in child (cat)"); return; }
             int pid = cat.Id;
             static bool Exited(int pid) { try { using var p = System.Diagnostics.Process.GetProcessById(pid); return p.HasExited; } catch { return true; } }
-            SteamClientHold.Linger = TimeSpan.FromMilliseconds(200);
-            SteamClientHold.AdoptForTest(cat); // idle, its operation just over, the Workshop not showing
+            SteamClientHold.HeartbeatEvery = TimeSpan.FromMilliseconds(70); // a 210 ms tail
+            SteamClientHold.AdoptForTest(cat); // idle, its operation just over, no window beating
             await SteamClientUgc.Turn.WaitAsync();
             bool heldMeanwhile;
             try
             {
-                SteamClientHold.SetShowing(false); // a tick now, and the linger's end, both find the turn taken
+                SteamClientHold.Beat(); // a tick now, and the tail's end, both find the turn taken
                 await Task.Delay(700);
                 heldMeanwhile = SteamClientHold.Connected;
             }
@@ -485,7 +485,7 @@ public static class SteamSelfTest
         }
         finally
         {
-            SteamClientHold.Linger = linger; SteamClientHold.HeartbeatTimeout = hb;
+            SteamClientHold.HeartbeatEvery = every;
             try { if (cat is { HasExited: false }) cat.Kill(); } catch { }
             cat?.Dispose();
         }

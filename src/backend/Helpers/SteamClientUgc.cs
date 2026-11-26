@@ -33,8 +33,8 @@ namespace Liascape.Helpers;
 //   11, GetAPICallResult 13 (014-era wrappers: `jmp *0x58` / `jmp *0x68`).
 // - In a CHILD SESSION (`liascape-backend steam-ugc session <steamclient.so>…`, SteamAppId=431960 in ITS environment only),
 //   so a crash in Steam's library can't take the backend down: JSON commands on its stdin, JSON lines on its stdout; a
-//   closed stdin = release Steam + exit. It stays connected between operations only while the user browses the Workshop,
-//   plus a linger (Helpers/SteamClientHold.cs: one connection per visit, not a "Playing" blink per download).
+//   closed stdin = release Steam + exit. It stays connected between operations only while the Liascape window is open, plus a
+//   short tail (Helpers/SteamClientHold.cs: one connection while the app is open, not a "Playing" blink per download).
 // - Any failure before Steam accepts the subscribe (Steam not running, WE not owned) → null + the reason; the caller takes
 //   the fallback order's next step (WorkshopDownloader.AcquireViaSubscribeAsync), or fails with `FailureMessage` where no step
 //   is left (a one-off without a sign-in, the Steam to-do's "Let the Steam app do all N").

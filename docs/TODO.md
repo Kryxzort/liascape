@@ -28,11 +28,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
        silent, assuming WE never plays a video texture's sound).
 
-137. [ ] (owner) Hold the Steam app connection ("Playing Wallpaper Engine") while the Liascape window is open, not only
-       while Browse shows the Workshop: no flicker as the user moves between tabs, released when the window closes (the
-       page's heartbeat stops) plus the existing 60 s tail. Never for the backend's lifetime: that would block the real
-       Wallpaper Engine and pause Steam's other downloads all day. Rewrite `docs/decisions.md` § "Hold the Steam app
-       connection while the Workshop shows on Browse" in the same commit; guard in `scripts/test-steam-app-hold.sh`.
 138. [ ] (owner) Right-click a card for Unsubscribe and Hide, and a "Hidden" filter. A Workshop card's right-click menu
        (Library and Browse; extend the menu cards already have, or add one in its look) offers Unsubscribe, through
        the download modes' order (signed out: the item's Steam page), and Hide; any card offers Hide. A hidden item
