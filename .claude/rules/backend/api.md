@@ -45,8 +45,9 @@ paths:
 ## Session and playlist operations (`AppOps`)
 - `PlayFrom` persists the playlist bar in its own order, not the play order.
 - Removing the playing item from the bar keeps it playing; the rotation goes on from its place (the program's items, `LiascapePlayerProgram.SetItems` → the player's `Order::reorder`).
-- Trash removes the items from the playlist too; Undo puts each back at its index. If one was on screen or incoming (`LiascapePlayerMedia.ShownOrIncomingPaths`) a playlist plays on from the next surviving item, a single wallpaper stops.
-- A transition change re-arms the program's already-armed aligned switch: a global one from `/settings` (`PlayerHelper.RearmAlignedSwitch`), the playlist's own from the bar (`AppOps.ApplyToProgram` → `LiascapePlayerProgram.SetTransition`).
+- Trash removes the items from the playlist too; Undo puts each back at its index. If one was on screen, incoming or parked (`LiascapePlayerMedia.ShownOrIncomingPaths`) a playlist plays on from the next surviving item, a single wallpaper stops.
+- A playlist Play / play-from with nothing playable (`PlayerHelper.LoadProgram` → null) answers its reason (`NoPlayableInPlaylist`), leaves what plays alone and saves no session; a play-from's index names a path of the bar, sent as that path's index in the program's items (a set).
+- A transition change reaches an armed switch from `/settings` (`PlayerHelper.RearmAlignedSwitch`, the globals) and from the bar (`AppOps.ApplyToProgram` → `LiascapePlayerProgram.SetTransition`, the playlist's own); what it does to that switch: `.claude/rules/backend/player-adapter.md` § Rotation.
 
 ## CLI forwarding (`Web/ActionForward.cs`)
 - `liascape <action>` goes to a running backend (`serve.port` → `GET /health` → `POST /action` with the token), runs locally only when no backend answers `/health`, and never falls back once the POST was sent.

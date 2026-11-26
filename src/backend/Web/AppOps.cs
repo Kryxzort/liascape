@@ -56,8 +56,11 @@ public static class AppOps
         bool adv = EffAdvance(s, ps);
         if (!adv && interval == 0 && paths.Count > 1) return "Set an interval greater than 0 to use timed playlists";
         var bar = PlaylistService.LoadCurrentState();
-        PlayerHelper.LoadProgram(paths, s, ps, shuffle, interval, adv, from: playFrom != null ? "index" : null, index: playFrom ?? 0,
-            key: LiascapePlayerProgram.KeyOf(bar?.Name));
+        // nothing in it can play (scenes off and every item a scene, …): refused with why, what plays is left alone and the
+        // session isn't saved. Guard: scripts/test-liascape-player-adapter.sh § "a playlist with nothing playable"
+        if (PlayerHelper.LoadProgram(paths, s, ps, shuffle, interval, adv, from: playFrom != null ? "index" : null, index: playFrom ?? 0,
+                key: LiascapePlayerProgram.KeyOf(bar?.Name)) == null)
+            return PlayerHelper.NoPlayableInPlaylist;
         Save(s, new LastSession { IsTimedPlaylist = true, Paths = paths, Shuffle = shuffle, TimedIntervalSeconds = interval, SwitchWhenVideoEnds = adv, OverrideGlobalSettings = ps.OverrideGlobalSettings });
         return "";
     }
@@ -65,7 +68,7 @@ public static class AppOps
     // Clicked path plays first, the rest follow (shuffled if shuffle).
     public static string PlayFrom(List<string> paths, int startIndex, PlaylistSettings ps)
     {
-        if (paths.Count == 0 || startIndex < 0 || startIndex >= paths.Count) return "bad index";
+        if (paths.Count == 0 || startIndex < 0 || startIndex >= paths.Count || string.IsNullOrEmpty(paths[startIndex])) return "bad index";
         // the clicked item is a preset that can't play: refused with its reason, as /apply is, never quietly the item
         // after it. Guard: scripts/test-liascape-player-adapter.sh § presets
         if (PlayerHelper.PresetUnplayableReason(paths[startIndex]) is string why) return why;
@@ -471,7 +474,7 @@ public static class AppOps
         return paths.Distinct().ToList();
     }
 
-    // what's on screen or about to be (either output, the incoming side of a switch)
+    // what's on screen or about to be (either output, the incoming side of a switch), or parked while no output shows it
     private static List<string> ShownOrIncoming() => LiascapePlayerMedia.ShownOrIncomingPaths();
 
     // `playing` (trashed, or a preset of a trashed base: `off`) was on screen. A playlist session plays on from the next
@@ -518,11 +521,8 @@ public static class AppOps
                 // item on screen; none left → stop
                 var next = Enumerable.Range(1, playlistBar.Count).Select(k => playlistBar[(at + k) % playlistBar.Count])
                     .FirstOrDefault(p => !del.Contains(p) && PlayerHelper.PresetUnplayableReason(p) == null);
-                if (next != null)
-                {
-                    PlayFrom(survivors, survivors.IndexOf(next), ps); // saves the playlist bar's survivors as the playlist
-                    return;
-                }
+                // saves the playlist bar's survivors as the playlist; refused (none of them can play) → stopped below
+                if (next != null && PlayFrom(survivors, survivors.IndexOf(next), ps) == "") return;
             }
             else
             {

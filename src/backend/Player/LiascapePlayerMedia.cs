@@ -244,7 +244,8 @@ public static class LiascapePlayerMedia
         lock (_qLock) return (_pending.Last?.Value ?? _running)?.Done.Task ?? Task.CompletedTask;
     }
 
-    public static void QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg) =>
+    // completes with the switch's corr, or null when the player didn't take it (a restore reports that)
+    public static Task<string?> QueueSwitch(string path, AppSettings s, TransitionService.Config? tcfg) =>
         QueueEssential(() => Switch(path, s, tcfg));
 
     public static void QueueStop() => QueueEssential(Stop);
@@ -663,20 +664,19 @@ public static class LiascapePlayerMedia
     private static volatile Intent? _intent;
     private static volatile string? _requesting; // the path of the `transition` request in flight (its events can beat the reply)
 
+    // a failed / cancelled switch of ours is Record's (ClearIntentOf): it runs for the events and the log poll alike
     private static void TrackIntent(string kind, JsonElement e)
     {
-        var corr = e.TryGetProperty("corr", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
-        switch (kind)
-        {
-            case "transition.scheduled":
-                var path = Str(e, "path");
-                if (path.Length > 0 && path != _requesting && path != _intent?.Path)
-                    _intent = null; // another client's switch: what shows is theirs
-                break;
-            case "transition.cancelled" or "transition.failed" when corr != null:
-                if (_intent?.Corr == corr) _intent = null; // ours didn't show (failed / taken over): the player's state stands
-                break;
-        }
+        if (kind != "transition.scheduled") return;
+        var path = Str(e, "path");
+        if (path.Length > 0 && path != _requesting && path != _intent?.Path)
+            _intent = null; // another client's switch: what shows is theirs
+    }
+
+    // ours didn't show (failed / taken over): the player's state stands
+    private static void ClearIntentOf(string corr)
+    {
+        if (_intent?.Corr == corr) _intent = null;
     }
 
     // Queued by OnRestarted, so ordered with every switch and stop: the screen shows `_intent` again. A
@@ -833,6 +833,7 @@ public static class LiascapePlayerMedia
     {
         long now = Environment.TickCount64;
         _recent[corr] = (outcome, now);
+        if (outcome != "handoff") ClearIntentOf(corr); // a failed / cancelled switch of ours (Requested checks the other order)
         if (_recent.Count > 256)
             foreach (var (k, v) in _recent) if (now - v.at > 120_000) _recent.TryRemove(k, out _);
         if (_waiters.Count > 256) // abandoned (timed-out) waits on corrs that never ended
@@ -1128,7 +1129,10 @@ public static class LiascapePlayerMedia
     {
         var client = C;
         if (!client.EnsureRunning()) return null;
-        if (client.StaleReason() is string why) client.UpgradeInPlace(why); // A comes back as it was, then switches
+        // A comes back as it was, then switches — never across a pending transition or an armed program switch (the
+        // restart would cut it and drop its timing): the 10 s check upgrades once it's quiet.
+        // Guard: scripts/test-liascape-player-adapter.sh § "a rebuilt player binary" ("…not mid-transition")
+        if (client.StaleReason() is string why && !Switching(client)) client.UpgradeInPlace(why);
         client.StartEvents();
         // VideoScale is a layer property; (re)assert it so a hotplugged output or a restarted player
         // matches. item 6: QuickMs — a plain property set, not worth the 2000 ms default.
@@ -1194,6 +1198,9 @@ public static class LiascapePlayerMedia
         if (corr.Length == 0) return null;
         _lastCorr = corr;
         _intent = new Intent(path, corr);
+        // its failure or cancellation can beat this reply (the event thread): then it never becomes what a restart puts
+        // back. Record clears it the other way round; set-then-check on both sides, so one of them sees the other.
+        if (_recent.TryGetValue(corr, out var done) && done.outcome != "handoff") ClearIntentOf(corr);
         return corr;
     }
 
@@ -1796,14 +1803,16 @@ public static class LiascapePlayerMedia
     // Paths on screen now or about to be: every layer's content (an effect's incoming side, never its
     // outgoing one — that is leaving anyway) plus the B of every requested switch that isn't an aligned
     // one still waiting for A's end (the rotation retargets those). `cur:*` alone misses a switch that
-    // was requested but isn't running yet (trashing an item right after applying it kept it playing).
+    // was requested but isn't running yet (trashing an item right after applying it kept it playing),
+    // and the parked wallpaper (no output: what the next one shows).
     // A still-queued switch is waited for (bounded) so it counts too.
+    // Guard: scripts/test-liascape-player-adapter.sh § I4 ("trash of the parked wallpaper")
     public static List<string> ShownOrIncomingPaths()
     {
         var client = C;
         if (!client.SocketExists) return [];
         try { Drain().Wait(1000); } catch { }
-        return ShownOrIncoming(client, parked: false) ?? [];
+        return ShownOrIncoming(client, parked: true) ?? [];
     }
 
     // One `state` read (no drain — ReconcileShown runs ON the queue's worker): every layer's content (an

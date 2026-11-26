@@ -76,7 +76,12 @@ public static class PlayerHelper
         catch { }
     }
 
-    public static void Apply(string videoPath)
+    public static void Apply(string videoPath) => Apply(videoPath, keepPause: false);
+
+    // `keepPause`: a user next/prev/random from a pause with "Stay paused when switching" on — the switch plays on the
+    // still frames, no new session. Returns the queued switch (its corr, null when the player didn't take it), or null when
+    // nothing was queued.
+    private static Task<string?>? Apply(string videoPath, bool keepPause)
     {
         // a preset that can't play: its reason, never its plain base scene
         if (PresetUnplayableReason(videoPath) is string presetWhy) throw new InvalidOperationException(presetWhy);
@@ -92,8 +97,8 @@ public static class PlayerHelper
             // a single wallpaper replaces a rotation: `destroy prog:main` queued before the switch
             LiascapePlayerProgram.End();
             // I1: a new session plays — unless it's a user next/prev/random keeping the pause
-            if (!_keepPauseNextSwitch) LiascapePlayerMedia.QueueNewSession();
-            SwitchToFile(videoPath);
+            if (!keepPause) LiascapePlayerMedia.QueueNewSession();
+            return SwitchToFile(videoPath);
         }
     }
 
@@ -121,15 +126,15 @@ public static class PlayerHelper
     // The one switch chokepoint: ONE `transition` request (a cut when transitions are off) does the whole switch, a scene
     // too (`kind: scene`, kind-agnostic in the player). A scene that can't play stops playback here (the pickers never
     // hand one over).
-    private static void SwitchToFile(string path)
+    private static Task<string?>? SwitchToFile(string path)
     {
-        _keepPauseNextSwitch = false;
         var settings = SettingsService.Load();
-        if (IsScenePath(path) && !PlayerStatus.ScenesPlayable(settings)) { LiascapePlayerMedia.QueueStop(); return; }
+        if (IsScenePath(path) && !PlayerStatus.ScenesPlayable(settings)) { LiascapePlayerMedia.QueueStop(); return null; }
         var cfg = TransitionService.CurrentConfig();
         // with its transition even while paused: the player plays it on the still frames and keeps the pause
-        LiascapePlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null); // queued: we may hold _lock
+        var switched = LiascapePlayerMedia.QueueSwitch(path, settings, cfg.Enabled ? cfg : null); // queued: we may hold _lock
         OnWallpaperChanged?.Invoke(path);
+        return switched;
     }
 
     public static string? QueryCurrentPath() => LiascapePlayerMedia.CurrentPath();
@@ -164,43 +169,37 @@ public static class PlayerHelper
     // switches with its transition and plays — single and playlist alike. On: the pause stays and the rotation's
     // countdown with it; the player plays the transition on the still frames (A's paused frame → B's first) and
     // leaves B paused on its first frame (`Transitions::plays_on_still_frames`). A rotation never switches while paused.
-    private static bool _keepPauseNextSwitch; // consumed by the next SwitchToFile (and Apply)
-
+    // The decision travels with its own switch (never through shared state another Apply could take), and nothing
+    // resumes before the switch has a target: a next/random with nothing to switch to leaves the pause alone.
+    // Guard: scripts/test-liascape-player-adapter.sh § "a user switch from a pause"
     public static bool IsPausedNow() => LiascapePlayerMedia.IsPlayerPaused();
 
-    // Before a user switch: resume (default) — or leave the pause for the switch to keep (true)
-    private static bool BeforeUserSwitch()
-    {
-        if (!IsPausedNow()) return false;
-        if (SettingsService.Load().StayPausedWhenSwitching) return true;
-        LiascapePlayerMedia.QueueNewSession(); // `set player.paused false`, queued ahead of the switch
-        return false;
-    }
+    // Before a user switch: whether the player is paused, and whether the switch keeps that pause (the setting on)
+    private static (bool Paused, bool Keep) PauseOnUserSwitch() =>
+        IsPausedNow() ? (true, SettingsService.Load().StayPausedWhenSwitching) : (false, false);
 
-    // Runs a non-timed user switch with the keep-pause flag set for its SwitchToFile, never leaving it set.
-    private static void UserSwitch(bool keep, Action run)
+    // A rotation's verb from a pause that doesn't stay: `set player.paused false`, queued ahead of the verb
+    private static void ResumeForRotation((bool Paused, bool Keep) p)
     {
-        _keepPauseNextSwitch = keep;
-        try { run(); }
-        finally { _keepPauseNextSwitch = false; }
+        if (p.Paused && !p.Keep) LiascapePlayerMedia.QueueNewSession();
     }
 
     public static void NextWallpaper()
     {
-        bool keep = BeforeUserSwitch();
-        if (IsTimedPlaylistActive()) { LiascapePlayerProgram.Next(); return; }
+        var pause = PauseOnUserSwitch();
+        if (IsTimedPlaylistActive()) { ResumeForRotation(pause); LiascapePlayerProgram.Next(); return; }
         // Single-wallpaper sessions (single, random) — step the library.
-        UserSwitch(keep, () => TryStepLibrary(forward: true));
+        TryStepLibrary(forward: true, keepPause: pause.Keep);
     }
 
     public static void PreviousWallpaper()
     {
         // previous at the rotation's first item does nothing — and leaves a user pause alone (matrix
-        // `programHeld × prog:previous`; BeforeUserSwitch below would resume for a switch that cannot happen)
+        // `programHeld × prog:previous`: resuming would be for a switch that cannot happen)
         if (IsTimedPlaylistActive() && LiascapePlayerProgram.PrevIsNoOp()) return;
-        bool keep = BeforeUserSwitch();
-        if (IsTimedPlaylistActive()) { LiascapePlayerProgram.Prev(); return; }
-        UserSwitch(keep, () => TryStepLibrary(forward: false));
+        var pause = PauseOnUserSwitch();
+        if (IsTimedPlaylistActive()) { ResumeForRotation(pause); LiascapePlayerProgram.Prev(); return; }
+        TryStepLibrary(forward: false, keepPause: pause.Keep);
     }
 
     // For single-wallpaper sessions (no playlist context), `next`/`prev`
@@ -212,7 +211,7 @@ public static class PlayerHelper
     // the library so an all-unplayable library can't spin forever. Throws InvalidOperationException (never calls Apply on an
     // unplayable path) when NOT ONE library item is playable — callers turn that into a
     // 4xx/clear message instead of letting Apply()'s own scene check 500 the request.
-    private static bool TryStepLibrary(bool forward)
+    private static bool TryStepLibrary(bool forward, bool keepPause)
     {
         var settings = SettingsService.Load();
         var session = settings.LastSession;
@@ -242,7 +241,7 @@ public static class PlayerHelper
             throw new InvalidOperationException(NoPlayableMessage);
 
         var pickPath = library[pickIdx].VideoPath;
-        Apply(pickPath);
+        Apply(pickPath, keepPause);
         SettingsService.Update(s => s.LastSession = new LastSession { Paths = [pickPath] });
         return true;
     }
@@ -269,7 +268,9 @@ public static class PlayerHelper
     // Whatever the player then shows — a wallpaper (on screen, coming or parked) or a program — IS the session: done
     // (`play` while something plays does nothing). Nothing (first boot, after `stop`, no snapshot) → LastSession
     // replayed: a playlist as the program (`from` = its effective start mode — a Resume finds its point in the player's
-    // resume.json), a single wallpaper applied.
+    // resume.json), a single wallpaper applied. A replay that doesn't happen (nothing in it can play, the player refused
+    // or didn't answer) throws with why: `liascape restore` says so and exits 1. Guard:
+    // scripts/test-liascape-player-adapter.sh § "a restore whose last session can't play"
     public static void Restore()
     {
         var settings = SettingsService.Load();
@@ -297,13 +298,19 @@ public static class PlayerHelper
         bool playlist = session.IsTimedPlaylist || session.IsPlaylist;
         if (!playlist || (session.IsPlaylist && session.Paths.Count == 1 && !IsScenePath(session.Paths[0])))
         {
-            Apply(session.Paths[0]);
+            var switched = Apply(session.Paths[0], keepPause: false)
+                ?? throw new InvalidOperationException($"the last wallpaper ({Path.GetFileName(session.Paths[0].TrimEnd('/'))}) can't play");
+            if (!switched.Wait(15_000) || switched.Result == null)
+                throw new InvalidOperationException($"liascape-player didn't take the switch to the last wallpaper ({Path.GetFileName(session.Paths[0].TrimEnd('/'))}): {LiascapePlayerClient.Shared.LastError ?? "see liascape-player-adapter.log"}");
             return;
         }
         var ps = PlaylistService.LoadCurrentState()?.Settings;
-        var task = LoadProgram(session.Paths, settings, ps, session.Shuffle, session.TimedIntervalSeconds,
-            session.IsTimedPlaylist ? session.SwitchWhenVideoEnds : true, from: null);
-        try { task?.Wait(15_000); } catch { } // `liascape restore` exits right after
+        var load = LoadProgram(session.Paths, settings, ps, session.Shuffle, session.TimedIntervalSeconds,
+            session.IsTimedPlaylist ? session.SwitchWhenVideoEnds : true, from: null)
+            ?? throw new InvalidOperationException(NoPlayableInPlaylist);
+        // `liascape restore` exits right after: the load's own outcome, never a silent exit 0
+        if (!load.Wait(15_000)) throw new InvalidOperationException("liascape-player didn't load the last session's playlist within 15 s");
+        if (load.Result is string why) throw new InvalidOperationException($"the last session's playlist didn't load: {why}");
     }
 
     // Pick a random video and apply it as a single wallpaper. A running rotation picks its own (`program.random`);
@@ -315,12 +322,12 @@ public static class PlayerHelper
     // instead of letting Apply() 500.
     public static void ApplyRandom()
     {
-        bool keep = BeforeUserSwitch();
-        if (IsTimedPlaylistActive()) { LiascapePlayerProgram.Random(); return; }
-        UserSwitch(keep, ApplyRandomNow);
+        var pause = PauseOnUserSwitch();
+        if (IsTimedPlaylistActive()) { ResumeForRotation(pause); LiascapePlayerProgram.Random(); return; }
+        ApplyRandomNow(pause.Keep);
     }
 
-    private static void ApplyRandomNow()
+    private static void ApplyRandomNow(bool keepPause)
     {
         var settings = SettingsService.Load();
         var library = LibraryService.LoadAll();
@@ -333,7 +340,7 @@ public static class PlayerHelper
 
         var current = settings.LastSession?.Paths.FirstOrDefault();
         var pick = PickRandomExcluding(pool, current);
-        Apply(pick);
+        Apply(pick, keepPause);
         SettingsService.Update(s => s.LastSession = new LastSession { IsRandom = true, Paths = [pick] });
     }
 
@@ -540,23 +547,29 @@ public static class PlayerHelper
     public static void OnProgramSwitched(string path) => OnWallpaperChanged?.Invoke(path);
 
     // Load `paths` (the playlist bar's order; the player shuffles) as the player's program. `from`: "start" | "resume" |
-    // "index" (+ index); null = the playlist's effective start mode (a start: Play, a restore). Returns the queued load.
-    public static Task? LoadProgram(IReadOnlyList<string> paths, AppSettings s, PlaylistSettings? ps, bool shuffle, int intervalSeconds, bool advance,
+    // "index" (+ `index` into `paths`); null = the playlist's effective start mode (a start: Play, a restore). Returns the
+    // queued load (its result: null = loaded, else why not), or null when nothing in it can play — then nothing is
+    // queued and what plays is left alone; the caller says why (NoPlayableInPlaylist).
+    public static Task<string?>? LoadProgram(IReadOnlyList<string> paths, AppSettings s, PlaylistSettings? ps, bool shuffle, int intervalSeconds, bool advance,
         string? from, int index = 0, string? key = null)
     {
         if (paths.Count == 0) return null;
         var spec = LiascapePlayerProgram.BuildSpec(paths, s, ps, shuffle, intervalSeconds, advance, key);
         if (spec.Items.All(i => i.Skip))
         {
-            // nothing in it can play: playback stops
-            LiascapePlayerClient.Log("program: no item of the playlist can play — stopping");
-            LiascapePlayerProgram.End();
-            lock (_lock) LiascapePlayerMedia.QueueStop();
+            LiascapePlayerClient.Log("program: no item of the playlist can play — not loaded");
             return null;
         }
+        // the program's items are a set (a path listed twice is one item): the index of the chosen path there, not in
+        // `paths`. Guard: scripts/test-liascape-player-adapter.sh § "play-from a path listed twice"
+        if (from == "index")
+            index = Math.Max(0, index >= 0 && index < paths.Count ? spec.Items.FindIndex(i => i.Path == paths[index]) : 0);
         from ??= EffectiveStart(s, ps) == "resume" ? "resume" : "start";
         return LiascapePlayerProgram.Load(spec, from, index, keepPause: false);
     }
+
+    public const string NoPlayableInPlaylist =
+        "Nothing in this playlist can play: scenes need \"Play scenes\" and Wallpaper Engine's assets, a crashed scene plays in a playlist only when whitelisted, and a preset needs its base scene";
 
     private const string NoPlayableMessage =
         "No playable wallpaper in the library — every item is a scene that can't play: scenes need \"Play scenes\" + Wallpaper Engine's assets (liascape-player), and a crashed scene plays only when whitelisted";

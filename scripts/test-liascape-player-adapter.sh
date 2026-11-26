@@ -811,6 +811,21 @@ waitfor $WAIT handed_more "$nh0" && ok "rotation resumes after the replug" || ba
 stop_now
 ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
 
+echo "== I4: trash of the parked wallpaper (no output shows it): it stops, an output that comes back shows nothing"
+parked() { ctl state | jq -r '.parked // empty'; }
+QP=$(lib_import "$A" parked-one)
+post /apply "{\"path\":\"$QP\"}" >/dev/null; waitfor $WAIT shows "$QP" || bad "precondition: /apply → cur $(basename "$(cur path)")"
+ctl headless.remove_output '{"name":"VIRTUAL-3"}' >/dev/null; ctl headless.remove_output '{"name":"VIRTUAL-2"}' >/dev/null
+waitfor $WAIT eval '[ -n "$(parked)" ]' || bad "precondition: no output, yet nothing parked — this proved nothing"
+item=$(curl -sf -m 5 "$U/library" | jq -c --arg p "$QP" '[.[] | select(.videoPath==$p)][0]')
+post /library/trash "{\"items\":[$item]}" >/dev/null
+waitfor $WAIT eval '[ -z "$(parked)" ]' && ok "trash of the parked wallpaper → nothing parked" || bad "trash of the parked wallpaper: still parked ($(parked))"
+ctl headless.add_output '{"name":"VIRTUAL-3","width":640,"height":360,"hz":60}' >/dev/null
+ctl headless.add_output '{"name":"VIRTUAL-2","width":320,"height":180,"hz":60}' >/dev/null
+sleep 1
+nothing_shown && ok "…and the outputs that come back show nothing" || bad "the trashed wallpaper came back with the outputs: cur $(basename "$(cur path)")"
+stop_now
+
 echo "== Task 20c: /next /prev /random skip scenes under liascape-player (never a 500, never land on one)"
 # Minimal fake scene items the way LibraryService/PlayerHelper actually recognize them (.claude/rules/backend/library.md):
 # a library-item FOLDER with project.json {"type":"scene"} and NO media file — exactly
@@ -848,10 +863,22 @@ step_many /next 20
 step_many /prev 20
 step_many /random 20
 
+echo "== a user switch from a pause: \"Stay paused when switching\" on keeps it, off resumes (a single wallpaper stepping the library)"
+waitfor $WAIT settled
+post /pause '{}' >/dev/null; waitfor $WAIT paused_is true || bad "precondition: /pause → player.paused $(playerPaused)"
+setting '.StayPausedWhenSwitching = true'
+p0=$(cur path); post /next '{}' >/dev/null
+waitfor $WAIT eval '! cur_is path "$p0" && settled' && paused_is true && ok "Stay paused on: /next switched ($(basename "$p0") → $(basename "$(cur path)")) and the pause stayed" || bad "Stay paused on: /next → cur $(basename "$(cur path)"), player.paused $(playerPaused)"
+setting '.StayPausedWhenSwitching = false'
+p0=$(cur path); post /next '{}' >/dev/null
+waitfor $WAIT eval '! cur_is path "$p0" && settled' && waitfor $WAIT paused_is false && ok "Stay paused off: /next switched and resumed" || bad "Stay paused off: /next → cur $(basename "$(cur path)"), player.paused $(playerPaused)"
+
 echo "== Task 20c: an all-scene library → 409, no hang, no crash, current wallpaper untouched"
 mv "$LIB/imported/sv1" "$T/removed-sv1"; mv "$LIB/imported/sv2" "$T/removed-sv2"; mv "$LIB/imported/sv3" "$T/removed-sv3"
 mv "$(dirname "$LD")" "$T/removed-ld"; mv "$(dirname "$LB")" "$T/removed-lb"
 before=$(cur path)
+# from a pause: a next / random / previous with nothing to switch to must not resume it either
+post /pause '{}' >/dev/null; waitfor $WAIT paused_is true || bad "precondition: /pause → player.paused $(playerPaused)"
 code=$(postcode /next); body=$(postbody /next)
 [ "$code" = 409 ] && ok "/next on an all-scene library → 409 (not a 500, not a hang)" || bad "/next on all-scene library → $code"
 echo "$body" | jq -e '.error | contains("No playable wallpaper")' >/dev/null \
@@ -862,6 +889,18 @@ code=$(postcode /random)
 [ "$code" = 409 ] && ok "/random on an all-scene library → 409 too" || bad "/random on all-scene library → $code"
 code=$(postcode /prev)
 [ "$code" = 409 ] && ok "/prev on an all-scene library → 409 too" || bad "/prev on all-scene library → $code"
+sleep 0.5
+paused_is true && ok "…and none of them lifted the pause" || bad "a 409 next/random/prev resumed the paused wallpaper (player.paused $(playerPaused))"
+
+echo "== a playlist with nothing playable (every item a scene, scenes can't play): refused with why, what plays stays"
+ls0=$(jq -c .LastSession "$XDG_CONFIG_HOME/liascape/settings.json")
+msg=$(post /playlist/play "{\"paths\":[\"$SS1\",\"$SS2\"],\"settings\":{\"order\":0}}" | jq -r '.message // ""')
+sleep 1
+case "$msg" in *"Nothing in this playlist can play"*) ok "/playlist/play → \"$msg\"" ;; *) bad "/playlist/play of only scenes → message \"$msg\"" ;; esac
+progs=$(ctl state | jq -c '[.programs[]?]')
+[ "$(cur path)" = "$before" ] && [ "$progs" = "[]" ] && ok "…the current wallpaper untouched, no program" || bad "after the refused play: cur $(basename "$(cur path)"), programs $progs"
+[ "$(jq -c .LastSession "$XDG_CONFIG_HOME/liascape/settings.json")" = "$ls0" ] && ok "…and the session it would have started isn't saved" || bad "a refused play saved LastSession: $(jq -c .LastSession "$XDG_CONFIG_HOME/liascape/settings.json")"
+post /pause '{}' >/dev/null; waitfor $WAIT paused_is false || bad "unpause → player.paused $(playerPaused)"
 
 mv "$T/removed-sv1" "$LIB/imported/sv1"; mv "$T/removed-sv2" "$LIB/imported/sv2"; mv "$T/removed-sv3" "$LIB/imported/sv3"
 mv "$T/removed-ld" "$(dirname "$LD")"; mv "$T/removed-lb" "$(dirname "$LB")"
@@ -1775,6 +1814,14 @@ echo "$st" | jq -e '.settings.order == 1' >/dev/null && ok "play-from kept the p
   || bad "play-from overwrote the saved order: $(echo "$st" | jq -c '.settings.order')"
 stop_now
 
+echo "== play-from a path listed twice: the program's items are a set, the chosen path still plays first"
+# the program's first switch, not what shows now: its short clips move on by themselves
+c0=$(ncur)
+post /playlist/play-from "$(jq -nc --arg a "$SV1" --arg b "$SV2" '{paths:[$a,$a,$b], startIndex:2, settings:{order:0}}')" >/dev/null
+waitfor $WAIT eval '[ "$(ncur)" -gt "$c0" ]'
+[ "$(curs_after "$c0" | jq -c '.[0] | {p, r}')" = '{"p":"sv2.mp4","r":"play"}' ] && ok "play-from [sv1, sv1, sv2] at 2 → sv2 plays first" || bad "play-from at index 2 of [sv1, sv1, sv2]: program.current $(curs_after "$c0") (want sv2 first)"
+stop_now
+
 # A rotation's aligned (wait-for-video-end) switch waits for A's real end: A's remaining time moves with its CURRENT
 # speed and stands still while the player is paused (the player re-derives its align deadline for both) — a bound
 # fixed when it was armed gave up early: cancel + switch now, cutting A long before its end (and switching while paused).
@@ -2157,6 +2204,25 @@ curl -sf -m 5 "$U/player-engine" | jq -e '.running.stale == null' >/dev/null && 
 post /pause '{}' >/dev/null
 stop_now
 
+echo "== …not mid-transition: a switch made while one runs leaves the stale player to the quiet check"
+post /apply "{\"path\":\"$A\"}" >/dev/null; waitfor $WAIT shows "$A" || bad "precondition: /apply a → cur $(basename "$(cur path)")"
+setting '.GlobalTransitionEnabled = true | .GlobalTransitionEffectIds = ["fade"] | .GlobalTransitionDurationMs = 8000 | .GlobalTransitionDurationMaxMs = 0'
+running_tr() { ctl state | jq -e '[.transitions[]? | select(.phase == "running")] | length > 0' >/dev/null; }
+rebuild_prep
+post /apply "{\"path\":\"$C\"}" >/dev/null; waitfor $WAIT running_tr || bad "precondition: no transition running after /apply c: $(ctl state | jq -c '[.transitions[]? | .phase]')"
+rebuild_commit; CP0=$(comp_pid)
+sleep 2.5   # past the 2 s a new copy settles before it's compared: the player reads as stale from here
+running_tr || bad "precondition: the transition to c ended before the stale check — this proved nothing"
+n0=$(nsch); post /apply "{\"path\":\"$D\"}" >/dev/null
+waitfor $WAIT eval '[ -n "$(corr_to "$D" "$n0" now)" ]' || bad "precondition: the switch to d was never requested"
+c=$(comp_pid)
+[ -n "$c" ] && [ "$c" = "$CP0" ] && ok "a switch while a transition runs: no upgrade then (compositor $CP0)" || bad "upgraded mid-transition: compositor $CP0 → $c"
+waitfor 60000 newcomp "$CP0" && ok "…the quiet check upgraded it afterwards (compositor $CP0 → $(comp_pid))" || bad "never upgraded after the transitions ended: compositor $(comp_pid)"
+waitfor $WAIT shows "$D" && ok "…d on screen after the upgrade" || bad "after the deferred upgrade: cur $(basename "$(cur path)")"
+SP=$(sup_pid); CP=$(comp_pid)
+setting '.GlobalTransitionDurationMs = 300'
+stop_now
+
 echo "== …never across an armed end-of-video switch: an advance-on-end playlist upgrades at its next switch"
 # armed for THIS play: an aligned switch to E2 scheduled after it (earlier sections armed E2 too — a
 # stale corr returned at once and the window below was timed from before LU even started)
@@ -2379,6 +2445,13 @@ player_quit; mv "$SNAP" "$T/snapshot-aside2.json"; restore_cli; waitfor $WAIT ev
 [ "$(first_cur | jq -c '{p, resumed}')" = "{\"p\":\"$(base "$QB")\",\"resumed\":true}" ] \
   && ok "restore × no snapshot × resume: LastSession at its resume point ($(base "$QB"))" || bad "restore × no snapshot × resume: first $(first_cur)"
 [ -z "$(legacy_daemons)" ] && [ "$(grep -c . "$HB/spawned.log")" = 5 ] && ok "5 restores: one player start each, no timer-daemon / restart-daemon" || bad "restores: $(grep -c . "$HB/spawned.log") player starts, daemons: $(legacy_daemons)"
+# a restore whose last session can't play (every item a scene, scenes off): it says why and exits 1, never a silent 0
+cli stop; waitfor $WAIT nothing_shown; player_quit
+SF=$XDG_CONFIG_HOME/liascape/settings.json; sf0=$(jq -c '{AllowScenes, LastSession}' "$SF")
+jq --arg a "$SS1" --arg b "$SS2" '.AllowScenes = false | .LastSession = {IsTimedPlaylist: true, Paths: [$a, $b], SwitchWhenVideoEnds: true}' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
+LIASCAPE_PLAYER_BIN=$HB/liascape-player "$DOTNET" "$DLL" restore > "$T/restore-np.log" 2>&1; rc=$?; SP=$(sup_pid); CP=$(comp_pid)
+[ "$rc" != 0 ] && grep -q "Nothing in this playlist can play" "$T/restore-np.log" && ok "restore × a last session that can't play → exit $rc with why" || bad "restore × a last session that can't play: exit $rc, said: $(tail -c 300 "$T/restore-np.log")"
+jq --argjson o "$sf0" '. + $o' "$SF" > "$T/sf.json" && mv "$T/sf.json" "$SF"
 set_file '.GlobalPlaylistStart = "start_over"'
 # `serve` start stops a daemon a legacy session left (its cmdline says it is one) — and never what a stale pid file
 # names by now (a pid file outlives a reboot): an unrelated process lives on, both pid files go

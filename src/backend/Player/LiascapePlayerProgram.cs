@@ -282,7 +282,8 @@ public static class LiascapePlayerProgram
     // intent, never dropped, a barrier): the program is created (or, when it exists, its key set first — the player
     // keeps the old playlist's resume point — then every other prop), the pause lifted (I1, unless `keepPause`), then
     // `program.play {from}`. The same key already playing + `resume` → the player keeps playing where it is.
-    public static Task Load(Spec spec, string from, int index, bool keepPause)
+    // The task's result: null = loaded and playing, else why not (a restore reports it).
+    public static Task<string?> Load(Spec spec, string from, int index, bool keepPause)
     {
         lock (_lock)
         {
@@ -292,24 +293,28 @@ public static class LiascapePlayerProgram
             _exists = true; // /current.timed at once; the events confirm (or LoadNow clears it on failure)
             _key = spec.Key;
         }
-        return LiascapePlayerMedia.QueueEssential(() => LoadNow(spec, from, index, unpause: !keepPause));
+        return LiascapePlayerMedia.QueueEssential<string?>(() =>
+        {
+            try { return LoadNow(spec, from, index, unpause: !keepPause); }
+            catch (Exception e) { LiascapePlayerClient.Log($"program: loading the rotation threw — {e.Message}"); return e.Message; }
+        });
     }
 
-    private static void LoadNow(Spec spec, string from, int index, bool unpause)
+    private static string? LoadNow(Spec spec, string from, int index, bool unpause)
     {
         var s = SettingsService.Load();
         if (LiascapePlayerMedia.Ready(s) is not { } client)
         {
             LiascapePlayerClient.Log("program: no liascape-player to load the rotation into");
             lock (_lock) _exists = false;
-            return;
+            return $"no liascape-player to load it into ({C.LastError ?? "it didn't start"})";
         }
         LiascapePlayerMedia.ForgetIntent();
         var props = Props(spec);
         if (Exists(client, 2000) is not bool exists)
         {
             LiascapePlayerClient.Log("program: the player didn't answer — the rotation isn't loaded (R81 re-applies when it does)");
-            return;
+            return "liascape-player didn't answer";
         }
         try
         {
@@ -336,11 +341,13 @@ public static class LiascapePlayerProgram
             LiascapePlayerClient.Log($"program: {(exists ? "reloaded" : "loaded")} {spec.Items.Count} items ({spec.Key}, {spec.Mode}, {spec.Order}), play {from}"
                 + (from == "index" ? $" {index}" : "") + $" → {Path.GetFileName(Str(res, "path"))}"
                 + (res.TryGetProperty("resumed", out var r) && r.ValueKind == JsonValueKind.True ? " (resumed)" : ""));
+            return null;
         }
         catch (LiascapePlayerException e)
         {
             LiascapePlayerClient.Log($"program: loading the rotation failed — {e}");
             if (!exists) lock (_lock) _exists = Exists(client, LiascapePlayerClient.QuickMs) == true;
+            return e.Message;
         }
         finally { LiascapePlayerMedia.InvalidateSources(); }
     }
@@ -360,11 +367,17 @@ public static class LiascapePlayerProgram
     }
 
     // A single wallpaper replaces the rotation (`Apply`): `destroy prog:main` (the player keeps its resume point; a
-    // pre-Running armed switch is cancelled, what shows stays) — queued before the switch.
+    // pre-Running armed switch is cancelled, what shows stays) — queued before the switch. Sent too while the mirror isn't
+    // seeded for this player (its `state` read failed): a program it never saw would rotate away from the wallpaper. No
+    // I/O here (callers hold PlayerHelper._lock); a destroy with no program is a `no_such_node` DestroyNow ignores.
     public static void End()
     {
         bool had;
-        lock (_lock) { had = _exists || _model != null; _model = null; _paths = null; _exists = false; _path = null; _index = -1; _wantKey = null; }
+        lock (_lock)
+        {
+            had = _exists || _model != null || !_known || _gen != C.Generation;
+            _model = null; _paths = null; _exists = false; _path = null; _index = -1; _wantKey = null;
+        }
         if (!had) return;
         LiascapePlayerMedia.QueueEssential(DestroyNow);
     }
@@ -403,7 +416,7 @@ public static class LiascapePlayerProgram
 
     // `previous` at the session's first item has nothing before it (the player's `can_prev` false — it counts a switch still on its
     // way, so a `next` then a `previous` a moment later is not a no-op): the keybind must not lift a user pause
-    // (BeforeUserSwitch resumes first) for a switch that cannot happen. False when it can't tell.
+    // (PlayerHelper resumes first) for a switch that cannot happen. False when it can't tell.
     public static bool PrevIsNoOp()
     {
         var client = C;
@@ -448,7 +461,7 @@ public static class LiascapePlayerProgram
     }
 
     // ---- user switches (thin verbs; essential — a keybind's intent) -------------------------------------------
-    // A pause stays as the caller left it (PlayerHelper.BeforeUserSwitch): in a pause the player plays the
+    // A pause stays as the caller left it (PlayerHelper.ResumeForRotation): in a pause the player plays the
     // switch's transition on the still frames and B stays paused on its first frame.
     public static void Next() => Verb("next");
     public static void Prev() => Verb("prev");

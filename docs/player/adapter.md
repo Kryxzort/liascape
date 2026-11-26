@@ -55,8 +55,8 @@ evidence.
   `--restore` → the same wallpaper at the same place, ~0.2 s. Every wait is on the real condition: the old
   supervisor's exit within 10 s + 3 × the player's last snapshot write time (≤ 120 s: a final `fsync` took up to
   11.8 s under I/O load), then the new player's `hello` (≤ 30 s). Never twice onto the same build. It runs before
-  every switch, after a program's own commit (`UpgradeAfterCommit`), and from a 10 s check only while nothing is
-  pending.
+  a switch, after a program's own commit (`UpgradeAfterCommit`), and from a 10 s check — the first and the last only
+  while no transition or armed program switch is pending (`Switching`).
 - **`QuitOrKill`:** `quit` → SIGCONT+SIGTERM the supervisor → SIGKILL the supervisor (its child dies by
   PDEATHSIG; a compositor still alive after that is SIGKILLed too). `/player-engine` → `running {pid, supervisor, exe,
   started, stale}`.
@@ -68,7 +68,7 @@ evidence.
 | `SwitchToFile` | `QueueSwitch` → `transition {outputs: "out:*", to: {path, props}, effect from `TransitionService.Pick` or null, align: now}`; a picked duration 0 = a cut (`effect_id: null`), never a 0 ms effect |
 | `SendCommand` | `Mpv(args)` → `MpvPropertyMap` → a resolver pass (volume/speed literal, mute) or a `Set` |
 | `Stop` | a queued `stop` (the process stays up) |
-| `AppOps.Trash` | `ShownOrIncomingPaths()`: every layer's content (an effect's `to`) + each requested switch's B unless aligned and still waiting |
+| `AppOps.Trash` | `ShownOrIncomingPaths()`: every layer's content (an effect's `to`) + each requested switch's B unless aligned and still waiting + the parked wallpaper |
 
 ## Rotation wiring (`LiascapePlayerProgram`)
 

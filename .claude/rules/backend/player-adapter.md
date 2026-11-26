@@ -42,7 +42,7 @@ and `Player/PlayerStatus.cs` says where its binary is and why nothing or no scen
 ## Pause
 - The player owns pause (`player.paused`, kept in its snapshot). Keep no copy: `TogglePause` reads `get player.paused` and sets the opposite; R81 never re-asserts it.
 - A new session (`Apply`, a restore's replay) queues `set player.paused false` (`QueueNewSession`), a Play of a playlist loads its program unpaused (`keepPause: false`); a rotation keeps the pause.
-- A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`). With the setting on: the pause stays and the switch goes with its transition, which the player plays on the still frames (`.claude/rules/player/runtime-api.md` § Runtime loop); never send it as a cut. Guard: matrix `paused × cli:next-keep`.
+- A user next/prev/random while paused resumes first (`StayPausedWhenSwitching` off, the default), except a `previous` that can't happen (`LiascapePlayerProgram.PrevIsNoOp`) or one with nothing to switch to (409); the keep-pause decision is an argument of its own switch, never shared state. With the setting on: the pause stays and the switch goes with its transition, which the player plays on the still frames (`.claude/rules/player/runtime-api.md` § Runtime loop); never send it as a cut. Guard: matrix `paused × cli:next-keep`.
 
 ## Reconnection (R81) and switches the player missed
 - `Restarted` (new compositor pid) and `Recovered` (breaker closed) both queue `ReapplyAll` — a Fresh resolver pass — fire-and-forget; never `Drain().Wait()` inside the client's callback.
@@ -82,7 +82,7 @@ Every rule runs in the player's program `prog:main` (`.claude/rules/player/runti
 - Load via `BuildSpec` + `Load` (essential); reuse an existing `prog:main` (`set key` first, so the old playlist keeps its resume point). A single `Apply` destroys `prog:main` first.
 - Verbs: next/prev/random → `program.next|prev|random`.
 - A `timed_state.json` or `pending_action.txt` an older build left in the config dir is never read. Guard: adapter IT § "a legacy rotation's files".
-- Restore (`liascape restore`, `play`, `toggle-play` from stopped): start `serve --restore --session-start`; replay `LastSession` only when the player shows nothing.
+- Restore (`liascape restore`, `play`, `toggle-play` from stopped): start `serve --restore --session-start`; replay `LastSession` only when the player shows nothing. A replay that doesn't happen (nothing in it can play, the load or switch refused or unanswered) throws with why: the CLI exits 1.
 - Trash of the shown/incoming item: `SetItems` with the bar's survivors, then `program.next`.
 
 ## Scenes and loudness (adapter side)
