@@ -63,7 +63,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Every row of `docs/player/spikes/we-lwe-gap-audit.md` with a real Workshop scene that uses it (a library
          scene, else Workshop items downloaded one-off into a private test corpus outside the owner's library and
          Steam subscriptions, scanned for the feature, kept if they cover a row or another test, deleted if not,
-         repeated until each row has one; never committed); no hand-built scenes. A feature with no scene is
+         repeated until each row has one; never committed); no hand-built scenes. Find candidates with the Workshop's
+         own feature tags (Browse's Features filter: Audio responsive, HDR, 3D, Customizable, Media Integration,
+         Puppet Warp, Video Texture), else a keyword search (an effect's or object's name); keep trying new items
+         until one uses the feature. A feature with no scene is
          unverified, not done; each row marked pass / fail against WE with its evidence.
        - Check LWE's logic per row against the decompiled WE; fix what differs, starting with puppets.
        - The audio piece: a private PipeWire with a null sink fed a fixed track, so music-reactive scenes compare too.
