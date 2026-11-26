@@ -103,6 +103,18 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        requests to steamcommunity.com than now (`SteamGate`). Guard: the benchmark scenario's numbers before / after,
        and a probe cell per behaviour added.
 
+12. [ ] (owner) One sidebar for a Workshop item, the same in the Library and Browse (today they are separate
+       components that disagree: `LibrarySide.tsx` and `BrowseSide.tsx`).
+       - Not in the library: the actions are "Subscribe" and "Subscribe and apply" (in place of Download / Download and
+         apply), through the download modes' order; the one-off download stays in their right-click menu. The
+         subscription card below (`SubToggle`) goes: being offered Subscribe already says it isn't subscribed.
+       - In the library: the Library's red Unsubscribe tile with its right-click menu ("Unsubscribe without deleting",
+         "Delete and unsubscribe") and its mixed-selection wording, in both tabs.
+       - Both tabs: a Play button, and a click on the sidebar's picture plays the preview (the Library has no Play
+         button, Browse no click-to-play today).
+       Share one component (or one actions list) so the two can't drift again. Guard: probe cells that open the same item
+       in both tabs and find the same actions, labels and behaviour; the design checklist for each control.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
