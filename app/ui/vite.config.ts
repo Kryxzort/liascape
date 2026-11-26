@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -34,9 +35,26 @@ function devApiToken(): Plugin {
   };
 }
 
+// The window's opening draws the app logo in the page's first frame (index.html #intro), before any of the app's code: its two
+// pictures (Night, and Lavender on a light theme: :root.intro-light) come inline with the page as CSS data URLs, so no frame
+// waits on an image request or a decode. Read from public/ (app/icon/generate.py writes them) on every build and dev request.
+// The hand-over's tiles (.intro-card-logo, components/Intro.tsx) draw the same picture. Guard: probe-intro intro:firstFrame
+function introLogos(): Plugin {
+  const pic = (f: string) => {
+    const svg = readFileSync(fileURLToPath(new URL(`./public/${f}`, import.meta.url)), "utf8").trim();
+    return `url("data:image/svg+xml,${svg.replace(/[%#<>"\n]/g, encodeURIComponent)}")`;
+  };
+  return {
+    name: "liascape-intro-logos",
+    transformIndexHtml: () => [{ tag: "style", injectTo: "head",
+      children: `.intro-img,.intro-card-logo{background-image:${pic("favicon.svg")}}`
+        + `:root.intro-light :is(.intro-img,.intro-card-logo){background-image:${pic("logo-lavender.svg")}}` }],
+  };
+}
+
 export default defineConfig({
   base: "./",
-  plugins: [react(), devApiToken()],
+  plugins: [react(), devApiToken(), introLogos()],
   // dev HMR server (systemd liascape-vite). strictPort so Electron's auto-detect URL is stable.
   server: { port: 5173, strictPort: true },
   build: {

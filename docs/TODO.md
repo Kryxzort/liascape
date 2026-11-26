@@ -89,16 +89,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        card preview), and the item sidebar's type chip too (owner 2026-11-27: "scene type also icon"). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
        (icon present / absent, the tooltip, no pill), and screenshots over light and dark thumbnails.
 
-16. [ ] (owner) The window opens blank, then the opening often falls back to the plain lift. The window is shown at once
-       with only its background (`app/shell/main.js`) while the logo waits for the app's JavaScript (seconds under the
-       Vite dev build); then `HOLD_MAX_MS` (700 ms from the logo, `components/Intro.tsx`) passes before the first data
-       on a busy start, so the split / cascade is skipped. Draw a static logo + cover in `app/ui/index.html` that the
-       Intro takes over seamlessly (first frame = the logo, both builds), show the window on `ready-to-show`, and count
-       the data wait from that static logo with a longer cap (~1.2 s; input passes through meanwhile). Measure window
-       shown → logo → cover gone in the shipped and the dev build on the owner's machine before and after. Guard:
-       probe-intro cells: the logo in the first painted frame, no blank frame, the cards path taken when the data
-       comes within the cap.
-
 17. [ ] (owner) The filter half of `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` § Filters: the top-bar
        creator / presets pills go (`components/SourcePills.tsx`); the filter column gets two editable fields, Author (a
        Steam ID, a profile URL, or a name seen before) and Presets of (a scene's Workshop ID or URL); the sidebar's creator
@@ -256,6 +246,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       (2–10 ms) don't count as failures unless the owner hears them.
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
+- [ ] The window's opening on the owner's own window (the Vite dev build, a busy start: the backend still scanning):
+      the window opens on the logo, and the split / cascade plays rather than the lift; measured only in the agent
+      window so far (`scripts/agent-window.sh`), where every start took the cards path before and after.
 
 ## Before the first release
 - [ ] Turn compatibility back on: CLAUDE.md § Hard rules, `.claude/rules/backend/state-files.md` and

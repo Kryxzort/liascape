@@ -5,8 +5,103 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Liascape</title>
+    <!-- Before the first frame, before any of the app's own code (which takes seconds under Vite's dev server): the theme's
+         colours from the copy the store keeps (store applyThemeVars), and whether the window's opening plays and how it
+         looks (components/Intro.tsx takes it over). Classic and inline: nothing to fetch. Guard: probe-intro look:theme,
+         intro:firstFrame -->
+    <script>
+      (function () {
+        var d = document.documentElement;
+        var kept = function (k) { try { return localStorage.getItem("liascape." + k); } catch (e) { return null; } };
+        // the store's 16 theme colours (ThemeService's keys → the CSS vars applyThemeVars sets), only when all are there
+        var vars = { bgBase: "--bg-base", bgMantle: "--bg-mantle", bgCrust: "--bg-crust", surface0: "--surface0",
+          surface1: "--surface1", surface2: "--surface2", textColor: "--text", subtext: "--subtext", muted: "--muted",
+          accent: "--accent", accentFg: "--accent-fg", accentHover: "--accent-hover", danger: "--danger",
+          dangerBg: "--danger-bg", success: "--success", warn: "--warn" };
+        var t = null, k, whole = false;
+        try { t = JSON.parse(kept("themeVars") || "null"); } catch (e) { t = null; }
+        if (t && typeof t === "object") { whole = true; for (k in vars) if (typeof t[k] !== "string") whole = false; }
+        if (!whole) t = null; // a copy missing colours: the defaults (Guard: probe-intro look:themePartial)
+        if (t) for (k in vars) d.style.setProperty(vars[k], t[k]);
+        // the opening: only when the shell asks (`?intro`), once per window (Intro.tsx's header)
+        var want = false;
+        try { want = new URLSearchParams(location.search).has("intro"); } catch (e) { want = false; }
+        if (want) {
+          try { if (sessionStorage.getItem("liascape.introShown")) want = false; else sessionStorage.setItem("liascape.introShown", "1"); }
+          catch (e) { /* storage off: once per page load */ }
+        }
+        if (!want) return;
+        var still = kept("introMotion") === "0";
+        try { still = still || matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { /* no media queries */ }
+        // the logo's two grounds: Lavender on a light theme (relative luminance over 0.4), Night (the installed icon) on a dark one
+        var m = /^#?([0-9a-f]{6})$/i.exec(t ? t.bgBase : ""), light = false;
+        if (m) {
+          var n = parseInt(m[1], 16), lin = function (c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+          light = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255) > 0.4;
+        }
+        d.classList.add("intro-on");
+        if (still) d.classList.add("intro-still");
+        if (kept("introGlow") === "0") d.classList.add("intro-no-glow");
+        if (light) d.classList.add("intro-light");
+        // the frame the logo first shows: the opening's hold counts from it
+        var boot = (window.__liascapeIntro = { at: 0 });
+        requestAnimationFrame(function () { boot.at = performance.now(); });
+      })();
+    </script>
+    <style>
+      /* What the window's first frame needs, here rather than in src/index.css (which the dev server loads only with the
+         app's code): the theme's defaults (Catppuccin Mocha; the store sets the user's on :root, index.html's script the
+         kept copy), the motion springs, the page's ground, and the window's opening up to the cover opening. */
+      :root {
+        --bg-base: #1e1e2e; --bg-mantle: #181825; --bg-crust: #11111b;
+        --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
+        --text: #cdd6f4; --subtext: #a6adc8; --muted: #6c7086;
+        --accent: #89b4fa; --accent-fg: #11111b; --accent-hover: #74c7ec;
+        --danger: #f38ba8; --danger-bg: #2a1820; --success: #a6e3a1; --warn: #f9e2af;
+        /* COOL: the motion springs — one set for every icon (and the magnet), read by components/iconMotion.ts too. Damped
+           springs sampled into linear(): --spring ζ ≈ 0.42 (≈ 23 % overshoot, an icon's own gesture), --spring-soft ζ ≈ 0.62
+           (≈ 8 %, turns and returns). .claude/rules/ui/design.md § Icon motion (the springs) */
+        --spring: linear(0, .074, .258, .492, .729, .936, 1.091, 1.188, 1.23, 1.228, 1.194, 1.143, 1.086, 1.034, .993, .964, .949, .946,
+          .951, .961, .974, .987, .998, 1.006, 1.011, 1.013, 1.012, 1.01, 1.007, 1.004, 1.001, .999, .998, .997, .997, .997, 1);
+        --spring-dur: .65s;
+        --spring-soft: linear(0, .048, .167, .32, .483, .638, .773, .882, .966, 1.024, 1.06, 1.078, 1.084, 1.079, 1.069, 1.057, 1.043,
+          1.03, 1.019, 1.01, 1.003, .998, .995, .993, .993, .993, .994, .995, .996, .998, 1);
+        --spring-soft-dur: .5s;
+      }
+      html { background: var(--bg-base); }
+      /* COOL: the window's opening, as the first frame draws it (components/Intro.tsx; the cover opening and the hand-over:
+         index.css § the window's opening). The app logo at the window's centre over the page's own ground, in the theme's
+         colours, shown from the first frame: it pops in on the soft spring (scale alone, the logo whole from the first
+         frame) while one accent ring ripples off it, like Play's. `:root.intro-still` (motion off when it started): the logo
+         shows still, nothing moves. It never takes a pointer event. Over everything (dropdowns 90/91). The logo's pictures
+         come inline with the page (vite.config.ts introLogos): nothing to wait for. Guard: probe-intro */
+      #intro { display: none; }
+      :root.intro-on #intro { display: grid; }
+      .intro { position: fixed; inset: 0; z-index: 100; place-items: center; pointer-events: none; }
+      .intro-bg { position: absolute; inset: 0; background: radial-gradient(120% 120% at 50% 0%, var(--bg-mantle), var(--bg-base) 60%); }
+      .intro-logo { position: relative; width: clamp(88px, 12vmin, 128px); aspect-ratio: 1; }
+      /* the logo's own corner radius (app/icon/generate.py: rx 58 of 256), so its halo and its ring follow the tile's edge */
+      .intro-tile, .intro-ring { position: absolute; inset: 0; border-radius: 22.66%; }
+      .intro-tile { box-shadow: 0 10px 34px -14px rgba(0, 0, 0, .6), 0 0 64px -12px var(--accent); }
+      /* Glow effects off (the copy kept for the first frame, or the settings once in): the depth stays, the accent halo goes */
+      :root:is(.intro-no-glow, .no-glow) .intro-tile { box-shadow: 0 10px 34px -14px rgba(0, 0, 0, .6); }
+      .intro-img { position: absolute; inset: 0; }
+      .intro-img, .intro-card-logo { background-size: 100% 100%; background-repeat: no-repeat; }
+      .intro-ring { border: 2px solid var(--accent); opacity: 0; }
+      :root:not(.intro-still) .intro-tile { animation: intro-pop var(--spring-soft-dur) var(--spring-soft) backwards; }
+      :root:not(.intro-still) .intro-ring { animation: intro-ring .64s cubic-bezier(.2, .7, .3, 1) .14s; }
+      @keyframes intro-pop { from { scale: .84; } }
+      @keyframes intro-ring { 0% { opacity: 0; scale: .96; } 15% { opacity: .8; scale: 1.03; } 100% { opacity: 0; scale: 1.5; } }
+    </style>
   </head>
   <body>
+    <div id="intro" class="intro" data-phase="play" aria-hidden="true">
+      <div class="intro-bg"></div>
+      <div class="intro-logo">
+        <div class="intro-tile"><div class="intro-img"></div></div>
+        <span class="intro-ring"></span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

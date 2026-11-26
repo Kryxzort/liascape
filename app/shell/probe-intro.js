@@ -1,14 +1,21 @@
 // The window's opening probe — `scripts/test-ui-matrix.sh --probe probe-intro.js` (the matrix's hermetic stack). The app
-// logo plays once when the shell opens a window (app/shell/main.js adds `?intro`; app/ui/src/components/Intro.tsx). Every
-// cell opens a NEW window (a fresh sessionStorage, as a new app window has) and samples the overlay per animation frame from
-// the page's first script on (a sampler injected before the app's own scripts).
+// logo plays once when the shell opens a window (app/shell/main.js adds `?intro`; app/ui/index.html draws it in the page's
+// first frame, app/ui/src/components/Intro.tsx plays the rest). Every cell opens a NEW window (a fresh sessionStorage, as a
+// new app window has) and samples the overlay per animation frame from the page's first script on (a sampler injected
+// before the page's own scripts); "the logo starts" = the first frame it shows in.
 //   intro:absent      a page loaded without `?intro` (every other probe, a browser tab): no overlay ever
-//   intro:plays       motion on: the logo, its picture decoded, fades and scales in through in-between frames, its accent
-//                     ring ripples out, then the ground dissolves (in-between opacities); only opacity / scale / transform
-//                     animate; the halo glows (Glow effects on). Every cell's deadlines: the overlay never takes a pointer
-//                     event, the UI shows through (the ground under half) by SEE_MS after the logo starts and by USABLE_MS
-//                     after the page's navigation began, the overlay is gone by END_MS after the logo starts.
-//                     Screenshots intro-plays-{in,mid,open}.png
+//   intro:firstFrame  the window's frames as Chromium draws them (a CDP screencast from before the navigation): the first
+//                     frame of the page is the logo on its cover, and so is every frame up to the cover opening (no blank
+//                     or ground-only frame, no logo popping in late). Screenshot intro-firstFrame.png (that frame)
+//   intro:plays       motion on: the logo, its picture inline (nothing to load), whole from the first frame and scaling in
+//                     through in-between frames, its accent ring ripples out, then the ground dissolves (in-between
+//                     opacities); only opacity / scale / transform animate; the halo glows (Glow effects on). Every cell's
+//                     deadlines: the overlay never takes a pointer event, the UI shows through (the ground under half) by
+//                     SEE_MS after the logo starts and by USABLE_MS after the page's navigation began, the overlay is gone
+//                     by END_MS after the logo starts. Screenshots intro-plays-{in,mid,open}.png
+//   intro:slowData    the first data in after the old 700 ms hold but within HOLD_MAX_MS of the logo (a stubbed /settings,
+//                     answered SLOW_DATA_MS after the logo's first frame; the 8-screen library): the hand-over plays, not
+//                     the lift
 //   intro:cards       the hand-over, on a library of 8 screens (a stubbed /library): as the ground dissolves no card of the
 //                     Library shows; the logo splits into one tile per card of its first row (all of them, in its order),
 //                     the tiles together covering the whole logo box; each glides through in-between places, lands on its
@@ -23,8 +30,8 @@
 //   intro:fallback:empty  an empty library (a stubbed /library): no tiles, the logo lifts away (grows, fades) as before
 //   intro:fallback:tab    another page showing when the cover dissolves (Browse, opened by a script's click): no tiles, the
 //                     logo lifts away
-//   intro:fallback:late   the first data not in by HOLD_MAX_MS (a stubbed /settings, answered late): the cover dissolves
-//                     anyway (no earlier than HELD_MS), no tiles, the logo lifts away, within the HOLD_MAX_MS deadlines
+//   intro:fallback:late   the first data not in by HOLD_MAX_MS (a stubbed /settings, answered 2.4 s late): the cover
+//                     dissolves anyway (no earlier than HELD_MS), no tiles, the logo lifts away, within the HOLD_MAX_MS deadlines
 //   intro:once        the same window loaded again with `?intro` (a reload: Vite's, the renderer recovery's): nothing plays
 //   intro:click       a Ctrl+click on a card of the second row before it has joined (the 8-screen library): the card is
 //                     selected at once, and the opening plays on to its end (the same hand-over and reading order, the
@@ -33,18 +40,20 @@
 //   intro:scroll      the grid scrolled (a wheel) while the tiles fly: the tiles land on their cards where they are now, and
 //                     no card in view is left hidden once the opening ends
 //   intro:clickThrough a click on the Settings tab while the cover dissolves: the tab opens, the opening plays on
-//   intro:off         "Smooth window animations" off (at the window before: the next one plays still): the logo fades in
-//                     and out in place, nothing moves or resizes, only opacity animates (app/shell/motion-off.js), no ring,
-//                     no tiles, and the cards show throughout (no hidden grid, no joining)
+//   intro:off         "Smooth window animations" off (at the window before: the next one plays still): the logo whole and
+//                     still in the window's first drawn frame (the screencast), then it and the ground fade out in place,
+//                     nothing moves or resizes, only opacity animates (app/shell/motion-off.js), no ring, no tiles, and the
+//                     cards show throughout (no hidden grid, no joining)
 //   intro:reduced     the same under prefers-reduced-motion, read at once
 //   look:toggles      Glow effects off + the live wallpaper behind every tab: no accent halo on the logo or the tiles (the
 //                     depth shadows stay), the tiles still hand over, the ground covers the wallpaper and the UI until it
 //                     dissolves; screenshots intro-toggles-{mid,cards}.png
+//   look:themePartial a kept theme missing colours: the opening plays, in the default theme's colours
 //   look:theme        a light theme (Catppuccin Latte, at the window before): the ground in the theme's colour from its
-//                     first frame (the store's kept theme), the Lavender logo, the ring in the accent; screenshot
-//                     intro-theme-mid.png
+//                     first frame (the store's kept theme, applied by index.html), the Lavender logo, the ring in the
+//                     accent; screenshot intro-theme-mid.png
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, nativeImage } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
@@ -69,9 +78,13 @@ const RISE_BELOW = 10;   // px: a rising card's first shown frame sits this far 
 const OVER_PX = 0.75;    // px: past its place by more than this (the measurement's resolution), it overshot
 const SETTLE_PX = 0.5;   // px: on its place at the end
 const USABLE_MS = 2500;  // from the page's navigation start to the UI showing through: the user's whole wait
-const LATE = { see: 1050, end: 1250 }; // the same two with the cover opening at HOLD_MAX_MS 700 instead of REVEAL_MS
+const LATE = { see: 1550, end: 1750 }; // the same two with the cover opening at HOLD_MAX_MS 1200 instead of REVEAL_MS
 const LAND_PX = 3;       // a landed tile on its card's box: subpixel layout and a frame's last spring residue
-const HELD_MS = 520;     // the cover opening later than this after the logo started: it waited for HOLD_MAX_MS (REVEAL_MS 320)
+const HELD_MS = 1100;    // the cover opening later than this after the logo started: it waited for HOLD_MAX_MS (1200)
+const SLOW_DATA_MS = 1050; // intro:slowData's first data, this long after the logo's first frame: after the old hold (700 ms
+                         // from a logo the app's code drew, about 200 ms after the page's first frame) and within HOLD_MAX_MS
+const FIRST_MS = 280;    // the first drawn frames judged: up to here the cover is closed whatever the data does
+const LOGO_PART = 0.5;   // a screencast frame shows the logo when this share of its middle differs from the ground beside it
 const SHOWN = 0.05;      // a card's opacity as seen above this: shown
 const END_SETTLE_MS = 100; // the cards all shown this long after the overlay went (a few frames of animation start and timer slack)
 
@@ -93,7 +106,7 @@ const SAMPLER = `(() => { const S = { root: ".intro", bg: ".intro-bg", logo: ".i
   const box = (e) => { const r = e.getBoundingClientRect(); return [+r.x.toFixed(1), +r.y.toFixed(1), +r.width.toFixed(1), +r.height.toFixed(1)]; };
   window.__intro = out;
   const f = () => { const t = Math.round(performance.now());
-    const root = document.querySelector(".intro");
+    const root = [...document.querySelectorAll(".intro")].find((x) => x.getClientRects().length);
     out.phase.push([t, root?.dataset.phase ?? null]);
     if (out.ui == null && document.querySelector(".topbar .tab")) out.ui = t;
     const c = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
@@ -122,13 +135,17 @@ async function shot(name) { const img = await win.webContents.capturePage(); fs.
 
 // the page's own answers changed before its first request: `empty` / `few` = GET /library answers no items / its first 2, `many`
 // = its items 8 times over (each copy its own path, the same pictures: rows to join and room to scroll), `late` = GET
-// /settings answers 1.6 s late (the first data, read as one, comes in after HOLD_MAX_MS)
-const STUB = (kind) => `(() => { const f = window.fetch.bind(window);
+// /settings answers 2.4 s late (the first data, read as one, comes in after HOLD_MAX_MS), `slow` = `many` with GET /settings
+// answered SLOW_DATA_MS after the page's first frame (the sampler's)
+const STUB = (kind) => `(() => { const f = window.fetch.bind(window), many = ${J(kind)} === "many" || ${J(kind)} === "slow";
   window.fetch = async (u, o) => { const p = new URL(String(u?.url ?? u), location.href).pathname, get = !o?.method || o.method === "GET";
     // the copies have no files: the backend is never asked to make their previews ahead (it would work at files that aren't there
     // through the cells after this one)
-    if (${J(kind)} === "many" && p === "/previews/seen") return new Response(null, { status: 204 });
-    if (${J(kind)} === "late" && get && p === "/settings") { await new Promise((r) => setTimeout(r, 1600)); return f(u, o); }
+    if (many && p === "/previews/seen") return new Response(null, { status: 204 });
+    if (${J(kind)} === "late" && get && p === "/settings") { await new Promise((r) => setTimeout(r, 2400)); return f(u, o); }
+    if (${J(kind)} === "slow" && get && p === "/settings") { const r = await f(u, o);
+      const at = (window.__intro?.phase[0]?.[0] ?? 0) + ${SLOW_DATA_MS};
+      await new Promise((ok) => setTimeout(ok, Math.max(0, at - performance.now()))); return r; }
     if (${J(kind)} !== "late" && get && p === "/library") { const r = await f(u, o); const all = await r.json();
       const out = ${J(kind)} === "empty" ? [] : ${J(kind)} === "few" ? all.slice(0, 2)
         : Array.from({ length: 8 }, (_, n) => all.map((it) => (n ? { ...it, videoPath: it.videoPath + ".copy" + n, title: it.title + " " + n } : it))).flat();
@@ -136,8 +153,10 @@ const STUB = (kind) => `(() => { const f = window.fetch.bind(window);
     return f(u, o); }; })();`;
 
 // a new window (its own sessionStorage, as a new app window has), the sampler in before the app's scripts; `intro` adds the
-// shell's ask to the address
-async function open({ intro = true, reduced = false, stub = null } = {}) {
+// shell's ask to the address. `cast`: the window's frames as Chromium draws them, from the page's first one (a CDP screencast
+// started on the blank page before it; a frame counts once the navigation has committed): an array filled as they come,
+// [{ t (ms, this process's clock), png }]
+async function open({ intro = true, reduced = false, stub = null, cast = false } = {}) {
   // the new one before the old one goes: with no window left the app would quit
   const old = win;
   win = new BrowserWindow({ show: true, useContentSize: true, width: 1200, height: 800, webPreferences: { backgroundThrottling: false } });
@@ -148,8 +167,49 @@ async function open({ intro = true, reduced = false, stub = null } = {}) {
   if (stub) await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: STUB(stub) });
   await d.sendCommand("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "" }] });
   win.focus();
+  let frames = null;
+  if (cast) {
+    frames = [];
+    let committed = false;
+    d.on("message", (_e, method, p) => {
+      if (method === "Page.frameNavigated" && !p.frame.parentId && p.frame.url.startsWith(U)) committed = true;
+      if (method !== "Page.screencastFrame") return;
+      d.sendCommand("Page.screencastFrameAck", { sessionId: p.sessionId }).catch(() => {});
+      if (committed) frames.push({ t: Date.now(), png: Buffer.from(p.data, "base64") });
+    });
+    await d.sendCommand("Page.startScreencast", { format: "png", everyNthFrame: 1 });
+    await sleep(300); // the blank page's frames go by first
+  }
   const u = new URL(withToken(U + "/")); if (intro) u.searchParams.set("intro", "");
   win.loadURL(u.toString()).catch(() => {}); // not awaited: the logo starts before the page's load event
+  return frames;
+}
+// Does a screencast frame show the logo at the window's centre? The middle of the logo's box (its CSS size: clamp(88px,
+// 12vmin, 128px), at least .84 of it while it pops in) against the ground beside it, a third of the window to the left:
+// the share of its pixels that differ clearly (over 60 summed over r, g, b). A blank or ground-only frame shows none.
+function logoShare(png) {
+  const img = nativeImage.createFromBuffer(png), { width: w, height: h } = img.getSize(), px = img.toBitmap(); // BGRA
+  const at = (x, y) => { const i = (Math.round(y) * w + Math.round(x)) * 4; return [px[i], px[i + 1], px[i + 2]]; };
+  const side = Math.min(128, Math.max(88, 0.12 * Math.min(w, h))) * 0.84 * 0.6, cx = w / 2, cy = h / 2;
+  const ground = at(cx - w / 3, cy);
+  let n = 0, off = 0;
+  for (let y = cy - side / 2; y < cy + side / 2; y += 2) for (let x = cx - side / 2; x < cx + side / 2; x += 2) {
+    const c = at(x, y); n++;
+    if (Math.abs(c[0] - ground[0]) + Math.abs(c[1] - ground[1]) + Math.abs(c[2] - ground[2]) > 60) off++;
+  }
+  return n ? off / n : 0;
+}
+// the page's drawn frames over its first FIRST_MS (the cover can't open sooner: Intro.tsx REVEAL_MS 320): each shows the
+// logo; the first one saved as intro-<shot>.png
+function firstFrames(frames, shot, v) {
+  if (!frames.length) { v.push("no frame of the page was drawn — proved nothing"); return []; }
+  const upto = frames.filter((f) => f.t - frames[0].t < FIRST_MS);
+  const shares = upto.map((f) => +logoShare(f.png).toFixed(2));
+  fs.writeFileSync(path.join(OUT, `intro-${shot}.png`), frames[0].png);
+  if (shares[0] < LOGO_PART) v.push(`the page's first drawn frame shows no logo (${Math.round(shares[0] * 100)} % of its middle differs from the ground; want ≥ ${LOGO_PART * 100} %)`);
+  const blank = shares.map((s, i) => [i, s]).filter(([, s]) => s < LOGO_PART);
+  if (blank.length && shares[0] >= LOGO_PART) v.push(`${blank.length} of the first ${shares.length} drawn frames show no logo (frame ${blank[0][0]}: ${Math.round(blank[0][1] * 100)} %)`);
+  return shares;
 }
 async function until(fn, ms = 6000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn().catch(() => null); if (v) return v; await sleep(15); } return null; }
 const phaseNow = () => js(`document.querySelector(".intro")?.dataset.phase ?? ""`);
@@ -365,6 +425,16 @@ app.whenReady().then(async () => {
       return v;
     });
 
+    await cell("intro:firstFrame", async () => {
+      const cast = await open({ cast: true });
+      const s = await frames(); if (!s) return ["the sampler never finished"];
+      const v = [], tm = deadlines(s, v);
+      console.log(`        ${tm.line}`);
+      const shares = firstFrames(cast, "firstFrame", v);
+      console.log(`        ${cast.length} drawn frames; the logo's share of the middle in the first ${shares.length}: ${J(shares)}`);
+      return v;
+    });
+
     await cell("intro:plays", async () => {
       await open();
       // mid-animation screenshots: as the logo comes in, as the cover dissolves
@@ -372,7 +442,8 @@ app.whenReady().then(async () => {
       if (await until(async () => (await phaseNow()) === "open", 1500)) { await sleep(90); await shot("plays-open"); }
       const anim = await props();
       const glow = await js(`getComputedStyle(document.querySelector(".intro-tile") ?? document.body).boxShadow`);
-      const decoded = await js(`(() => { const i = document.querySelector(".intro-img"); return i ? i.complete && i.naturalWidth > 0 : null; })()`);
+      // the picture comes with the page (a data URL): nothing to load before it shows
+      const inline = await js(`(() => { const i = document.querySelector(".intro-img"); return i ? getComputedStyle(i).backgroundImage.startsWith('url("data:image/svg+xml') : null; })()`);
       const s = await frames(); if (!s) return ["the sampler never finished"];
       const v = [], tm = deadlines(s, v);
       console.log(`        ${tm.line}`);
@@ -380,7 +451,7 @@ app.whenReady().then(async () => {
       const tile = s.tile.filter((f) => f[0] >= tm.play);
       const restW = restWidth(s, tm);
       const ins = tile.filter((f) => f[0] < tm.play + 320);
-      if (mids(ins) < MID) v.push(`the logo popped in: ${mids(ins)} in-between opacity frames (want ≥ ${MID}; ${MO.brief(ins)})`);
+      if (!(ins[0]?.[1] >= 0.95)) v.push(`the logo wasn't whole in its first frame (opacity ${ins[0]?.[1]}; want it shown from the first frame, popping in on scale alone)`);
       const growing = ins.filter((f) => shown(f) && f[4] < restW * 0.97).length;
       if (growing < MID) v.push(`the logo didn't scale in: ${growing} frames under 97 % of its width ${restW} (want ≥ ${MID})`);
       const ring = s.ring.filter((f) => f[0] >= tm.play && shown(f));
@@ -393,7 +464,7 @@ app.whenReady().then(async () => {
       else { const bad = anim.filter((p) => !["opacity", "scale", "transform", "translate"].includes(p)); if (bad.length) v.push(`animates ${bad.join(", ")} (only opacity / scale / transform / translate)`); }
       if (!/rgb/.test(glow ?? "") || (glow.match(/rgb/g) ?? []).length < 2) v.push(`no accent halo with Glow effects on (box-shadow ${glow})`);
       if (!restW) v.push("the logo never showed — proved nothing");
-      if (decoded === false) v.push("the logo's picture wasn't loaded while it showed");
+      if (inline !== true) v.push(`the logo's picture isn't inline with the page (${inline === null ? "no .intro-img" : "a request to wait for"})`);
       console.log(`        frames: logo in ${mids(ins)} fading / ${growing} scaling, ring ${ringWide} wide, ground out ${mids(outs)} fading; tile opacity ${MO.brief(ins)}; ground ${MO.brief(outs)}`);
       return v;
     });
@@ -411,24 +482,31 @@ app.whenReady().then(async () => {
     });
 
     // the hand-over onto the first row (all of it, or the first 2 of a 2-item library), then the rest joining
-    const cardsCell = (name, stub, wantN) => cell(name, async () => {
+    const cardsCell = (name, stub, wantN, budget) => cell(name, async () => {
       await open({ stub });
       let glow = null, anim = null;
       if (await until(async () => (await js(`!!document.querySelector(".intro-card")`)) || null, 3000)) {
         // read before the screenshots: each capture takes a while, and the tiles live a few hundred ms
         anim = await props();
         glow = await js(`(() => { const c = document.querySelector(".intro-card"); return c && getComputedStyle(c).boxShadow; })()`);
-        if (stub === "many") { await shot("cards-split"); await sleep(110); await shot("cards-mid"); await sleep(140); await shot("cards-land"); await sleep(150); await shot("cards-cascade"); }
+        if (stub === "many" || stub === "slow") { const p = stub === "many" ? "cards" : "slow"; await shot(`${p}-split`); await sleep(110); await shot(`${p}-mid`); await sleep(140); await shot(`${p}-land`); await sleep(150); await shot(`${p}-cascade`); }
       }
       const s = await frames(); if (!s) return ["the sampler never finished"];
-      const v = [], tm = deadlines(s, v);
+      const v = [], tm = deadlines(s, v, budget);
       console.log(`        ${tm.line}`);
       if (tm.play == null) return v;
+      if (stub === "slow") {
+        // the first data's arrival, as the page saw it: the frame its first card was in the grid
+        const inAt = s.grid.find(([, a]) => a.length)?.[0];
+        console.log(`        the first data in ${inAt == null ? "never" : `${inAt - tm.play} ms`} after the logo's first frame`);
+        if (inAt == null || inAt - tm.play < 750 || inAt - tm.play > HELD_MS) return [...v, `the first data came in ${inAt == null ? "never" : `${inAt - tm.play} ms`} after the logo's first frame (want between the old hold and HOLD_MAX_MS: 750–${HELD_MS}) — proved nothing`];
+        if (!s.cards.some(([, a]) => a.length)) v.push(`the logo lifted away though the first data came in within HOLD_MAX_MS (the cover opened ${tm.open == null ? "never" : `${tm.open - tm.play} ms`} after the logo's first frame; want the hand-over)`);
+      }
       const row = await firstRow();
       if (!row?.length) return [...v, "no cards in the Library's first row — proved nothing"];
       if (wantN != null && row.length !== wantN) v.push(`the first row has ${row.length} cards (want ${wantN} from the stub) — proved nothing`);
       const got = await handedOver(s, tm, row, v);
-      const join = stub === "many" ? joined(s, tm, row, v) : null;
+      const join = stub === "many" || stub === "slow" ? joined(s, tm, row, v) : null;
       if (stub === "many" && tm.open != null && tm.gone != null) FULL.cards = tm.gone - tm.open;
       if (join) console.log(`        joining: ${join.rest} cards after the first row in ${join.steps} frames, first row from ${join.row1At} ms, the rest ${join.restAt}–${join.lastAt} ms, ${join.fading} fading, ${join.below} from below, ${join.over} past their place (rising up to ${join.rise} px)`);
       if (glow == null) v.push("no tile showed");
@@ -442,6 +520,7 @@ app.whenReady().then(async () => {
     });
     await cardsCell("intro:cards", "many", null);
     await cardsCell("intro:fewCards", "few", 2);
+    await cardsCell("intro:slowData", "slow", null, { see: SLOW_DATA_MS + SEE_MS, end: SLOW_DATA_MS + END_CARDS_MS });
 
     // nothing to land on: the lift as before
     const liftCell = (name, stub, before, budget) => cell(name, async () => {
@@ -459,7 +538,8 @@ app.whenReady().then(async () => {
       return v;
     });
     await liftCell("intro:fallback:empty", "empty", async () => {
-      const empty = await until(async () => (await js(`!!document.querySelector(".center-msg") && !document.querySelector(".lib-scroll .card")`)) || null, 1500);
+      // an empty library shows the welcome in the grid's place (components/Welcome.tsx)
+      const empty = await until(async () => (await js(`!!document.querySelector('.welcome[data-welcome="empty"]') && !document.querySelector(".lib-scroll .card")`)) || null, 1500);
       return empty ? null : "the library wasn't empty under the logo — proved nothing";
     });
     await liftCell("intro:fallback:tab", null, async () => {
@@ -553,7 +633,7 @@ app.whenReady().then(async () => {
     const offCell = (name, reduced) => cell(name, async () => {
       // the window before this one learns the setting (the look is fixed when a window opens)
       if (!reduced) { await open(); await frames(); }
-      await open({ reduced });
+      const cast = await open({ reduced, cast: true });
       // what the overlay animates while the logo shows, and a screenshot of it (the fade's middle)
       const anim = await until(async () => ((await phaseNow()) === "play" ? props() : null));
       await sleep(70); await shot(`${name.split(":")[1]}-mid`);
@@ -562,10 +642,13 @@ app.whenReady().then(async () => {
       console.log(`        ${tm.line}`);
       if (tm.play == null) return v;
       const after = (fr) => fr.filter((f) => f[0] >= tm.play - 20);
-      console.log(`        frames: logo ${MO.brief(after(s.tile))}; ground ${MO.brief(after(s.bg))}; animates ${J(anim)}`);
+      const shares = firstFrames(cast, `${name.split(":")[1]}-first`, v);
+      console.log(`        frames: logo ${MO.brief(after(s.tile))}; ground ${MO.brief(after(s.bg))}; animates ${J(anim)}; the logo's share of the middle in the first ${shares.length} drawn: ${J(shares)}`);
       const bad = (anim ?? []).filter((p) => p !== "opacity");
       if (bad.length) v.push(`animates ${bad.join(", ")} with motion off (only opacity)`);
-      v.push(...MO.judge("the logo", after(s.tile), { appear: true }));
+      // still: whole from the window's first frame, never moving, then a plain fade out
+      if (!(s.tile.find((f) => f[1] != null)?.[1] >= 0.95)) v.push(`the logo wasn't whole in its first frame (${MO.brief(s.tile)})`);
+      v.push(...MO.judge("the logo", after(s.tile)));
       v.push(...MO.judge("the logo", after(s.logo), { leave: true }));
       v.push(...MO.judge("the ground", after(s.bg), { leave: true }));
       if (s.ring.some((f) => f[1] != null && f[1] > 0.02)) v.push("the ring showed with motion off");
@@ -590,7 +673,7 @@ app.whenReady().then(async () => {
         await open();
         let glow = null, cls = "", cardGlow = null, still = null;
         if (await until(async () => (await phaseNow()) === "play")) {
-          still = await js(`document.querySelector(".intro")?.classList.contains("still")`);
+          still = await js(`document.documentElement.classList.contains("intro-still")`);
           await sleep(200); await shot("toggles-mid");
           glow = await js(`getComputedStyle(document.querySelector(".intro-tile")).boxShadow`);
           cls = await js(`document.documentElement.className`);
@@ -629,19 +712,37 @@ app.whenReady().then(async () => {
           got = await js(`(() => { const p = document.createElement("i"); p.style.color = "var(--accent)"; p.style.background = "var(--bg-base)"; document.body.append(p);
             const cs = getComputedStyle(p), accent = cs.color, base = cs.backgroundColor; p.remove();
             const img = [...document.querySelectorAll(".intro-img")].find((i) => i.getClientRects().length);
+            const pic = img ? getComputedStyle(img).backgroundImage : "";
+            // the two pictures differ in their tile's colour (app/icon/generate.py): Night's #3a3352, Lavender's #b48fd0
             return { accent, base, ring: getComputedStyle(document.querySelector(".intro-ring")).borderTopColor,
-              bg: getComputedStyle(document.querySelector(".intro-bg")).backgroundImage, variant: img?.dataset.variant ?? null, decoded: !!img?.complete && img.naturalWidth > 0 }; })()`);
+              bg: getComputedStyle(document.querySelector(".intro-bg")).backgroundImage,
+              variant: /b48fd0/i.test(pic) ? "lavender" : /3a3352/i.test(pic) ? "night" : null, decoded: pic.startsWith('url("data:image/svg+xml') }; })()`);
         }
         const s = await frames(); if (!s) return ["the sampler never finished"];
         const v = []; deadlines(s, v);
         if (!got) return [...v, "the logo never started"];
         if (got.variant !== "lavender") v.push(`the ${got.variant} logo on a light theme (want lavender)`);
-        if (!got.decoded) v.push("the logo's picture wasn't loaded when it showed");
+        if (!got.decoded) v.push("the logo's picture isn't inline with the page");
         if (got.ring !== got.accent) v.push(`the ring is ${got.ring}, the theme's accent ${got.accent}`);
         if (!got.bg.includes(got.base)) v.push(`the ground (${got.bg}) isn't in the theme's base colour ${got.base}`);
         if (!s.firstBg?.includes(got.base)) v.push(`the ground's first frame (${s.firstBg}) isn't in the theme's base colour ${got.base} (the kept theme)`);
         return v;
       } finally { await setSettings({ theme: "Catppuccin Mocha" }); }
+    });
+
+    await cell("look:themePartial", async () => {
+      // a kept theme missing colours (a copy from an older build, a hand edit): the defaults, and the opening still plays
+      if (!win) { await open({ intro: false }); await frames(); } // a page of the app's origin to write its storage from
+      await js(`localStorage.setItem("liascape.themeVars", JSON.stringify({ bgBase: "#ffffff" }))`);
+      try {
+        await open();
+        const s = await frames(); if (!s) return ["the sampler never finished"];
+        const v = [], tm = deadlines(s, v);
+        console.log(`        ${tm.line}; the ground's first frame ${s.firstBg}`);
+        if (tm.play == null) return v;
+        if (!/rgb\(24, 24, 37\)/.test(s.firstBg ?? "") || !/rgb\(30, 30, 46\)/.test(s.firstBg ?? "")) v.push(`the ground's first frame (${s.firstBg}) isn't the default theme's (Mocha's mantle and base)`);
+        return v;
+      } finally { await js(`localStorage.removeItem("liascape.themeVars")`).catch(() => {}); }
     });
   } catch (e) {
     console.log(`ERROR ${e.stack || e}`);

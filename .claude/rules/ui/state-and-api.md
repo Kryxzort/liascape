@@ -37,7 +37,7 @@ and § Settings & state.
 - Removing a scene that library presets play (Delete, the Delete key, Delete and unsubscribe, the Browse sidebar's
   Unsubscribe) asks first through `app/ui/src/components/baseConfirm.ts` `confirmBaseRemoval`, naming how many; a preset's own delete
   never asks. Guard: probe-sidebar `lib:baseDelete`.
-- The theme's colours are also kept in localStorage (`themeVars`, store `applyThemeVars`) for the next start's first frames only (the page and the window's opening paint in the user's theme before the backend answers); settings.json decides. Guard: probe-intro `look:theme`.
+- The theme's colours are also kept in localStorage (`themeVars`, store `applyThemeVars`) for the next start's first frames only: `app/ui/index.html`'s first script applies them before the first frame (the page and the window's opening paint in the user's theme before the app's code or the backend answers); settings.json decides. Guard: probe-intro `look:theme`.
 - The production origin is `http://127.0.0.1:<port>`; the shell reuses the last port (`LIASCAPE_PORT`, when it and the media port after it are free) so localStorage prefs survive a relaunch.
 
 ## Settings page

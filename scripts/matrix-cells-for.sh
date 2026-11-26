@@ -151,7 +151,7 @@ for f in $FILES; do
     # the shell's outside-link rules: the sidebar probe runs them with a recording openExternal
     app/shell/outside-links.js) echo "  $f → nothing in the matrix (--probe probe-sidebar.js --only preview:ytLink)" >&2 ;;
     # the window's opening: only a page the shell opens with ?intro plays it, so no matrix cell sees it
-    app/ui/src/components/Intro.tsx|app/ui/public/logo-lavender.svg|app/shell/probe-intro.js) echo "  $f → nothing in the matrix (--probe probe-intro.js)" >&2 ;;
+    app/ui/src/components/Intro.tsx|app/ui/public/logo-lavender.svg|app/ui/public/favicon.svg|app/shell/probe-intro.js) echo "  $f → nothing in the matrix (--probe probe-intro.js)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
     # the pixel-centre judge for round icon buttons: the probes that call it
     app/shell/pixel-centre.js) echo "  $f → nothing in the matrix (--probe probe-icons.js --only icon:centre, probe-sidebar.js --only look:iconCentre, probe-filters.js --only wf:emblem:centre)" >&2 ;;

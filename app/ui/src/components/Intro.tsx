@@ -1,42 +1,54 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "../store";
 import { FADE_EXIT_MS, reducedMotion, useMotion } from "./motion";
 import { softSpringCss } from "./flipGlide";
 
-// COOL: the window's opening. The app logo pops in at the window's centre on the soft spring while one accent ring ripples
-// off it (Play's ring: the app launching), then the logo becomes the library: the whole logo splits into pieces, one per
-// card of the Library's first row, that glide to those cards and become them while the cover dissolves behind; then the
-// rest of the cards in view rise into place in reading order (row by row, left to right): each comes up from a little
-// below its place, past it and back on the spring as it fades in. The library stays unseen until its cards arrive. Without cards to land on (an empty library, another page
-// showing, the first data not in by HOLD_MAX_MS) the logo lifts away toward the viewer instead and the page shows as it
-// is. Motion off: the logo fades in, holds, and everything fades out on opacity alone. index.css § the window's opening.
-// Guard: probe-intro (every cell).
+// COOL: the window's opening. The app logo shows at the window's centre from the window's first frame and pops in on the soft
+// spring while one accent ring ripples off it (Play's ring: the app launching), then the logo becomes the library: the whole
+// logo splits into pieces, one per card of the Library's first row, that glide to those cards and become them while the
+// cover dissolves behind; then the rest of the cards in view rise into place in reading order (row by row, left to right):
+// each comes up from a little below its place, past it and back on the spring as it fades in. The library stays unseen
+// until its cards arrive. Without cards to land on (an empty library, another page showing, the first data not in by
+// HOLD_MAX_MS) the logo lifts away toward the viewer instead and the page shows as it is. Motion off: the logo shows still,
+// holds, and everything fades out on opacity alone. index.css § the window's opening. Guard: probe-intro (every cell).
 //
-// It plays only when the shell asks for it (app/shell/main.js opens the page with `?intro`), so the probes and a plain
-// browser tab never see it unless they ask, and once per window: sessionStorage outlives a reload in the same window (Vite's
-// full reload, the renderer recovery's) and starts empty in a new one. Read once when the module loads; a hot update that
-// re-runs this module finds the mark and stays quiet. Guard: probe-intro intro:once, intro:absent
-const SHOWN_KEY = "liascape.introShown";
-function wanted(): boolean {
-  if (!new URLSearchParams(location.search).has("intro")) return false;
-  try {
-    if (sessionStorage.getItem(SHOWN_KEY)) return false;
-    sessionStorage.setItem(SHOWN_KEY, "1");
-  } catch { /* storage off: once per page load */ }
-  return true;
+// The cover, the logo and its pop are the page's own markup (index.html #intro), drawn before any of the app's JavaScript
+// has loaded: the window's first frame is the logo, in the production build and under Vite's dev server alike (whose
+// module graph takes seconds to load), and the shell shows the window once that frame is drawn (app/shell/main.js
+// ready-to-show). index.html's first script decides, before that frame, whether it plays and how it looks: only when the
+// shell asks for it (main.js opens the page with `?intro`), so the probes and a plain browser tab never see it unless they
+// ask, and once per window (sessionStorage outlives a reload in the same window, Vite's full reload or the renderer
+// recovery's, and starts empty in a new one); still with motion off, the theme's colours and the logo's ground from the
+// copies kept for the first frame. This component takes the overlay over where it is, the same element mid-pop, and plays
+// the rest. Its ask (window.__liascapeIntro) is read once when the module loads and taken: a hot update that re-runs this
+// module finds none and ends a cover still showing. Guard: probe-intro intro:firstFrame, intro:once, intro:absent
+type Boot = { at: number };
+const BOOT: Boot | null = (() => {
+  const w = window as { __liascapeIntro?: Boot };
+  const b = w.__liascapeIntro ?? null;
+  delete w.__liascapeIntro;
+  return b;
+})();
+const OVERLAY = BOOT ? document.getElementById("intro") : null;
+const ROOT_CLASSES = ["intro-on", "intro-still", "intro-no-glow", "intro-light"];
+// the overlay leaves the page with the classes that drew it
+function finish() {
+  document.getElementById("intro")?.remove();
+  document.documentElement.classList.remove(...ROOT_CLASSES);
 }
-const WANTED = wanted();
+if (!OVERLAY) finish();
 
-// It starts with the page, before the backend answers, so it covers the first data load instead of adding to it: the
-// theme's colours come from the copy the store keeps for the first frames (store applyThemeVars), "Smooth window
-// animations" from the copy kept here (the OS's reduced motion is read live). The logo shows once its picture is decoded
-// (at most DECODE_MAX_MS: it must never pop in half-way). The cover starts to dissolve REVEAL_MS after the logo starts once
-// the first data is in (the library's cards built under it, never under a moving logo), and at HOLD_MAX_MS whatever the
-// backend does; it is gone OUT_MS later (the lift) or once the last card has joined (the hand-over).
+// The cover starts to dissolve REVEAL_MS after the logo first showed (index.html) once the first data is in (the library's
+// cards built under it, never under a moving logo), and HOLD_MAX_MS after it whatever the backend does, but never before
+// the app's code has had DATA_MIN_MS to ask for that data: under Vite's dev server the code alone takes longer than
+// HOLD_MAX_MS to load, and a hold over before the first request could only ever lift. It is gone OUT_MS later (the lift)
+// or once the last card has joined (the hand-over).
 // Nothing holds input and nothing ends it early: the overlay and its tiles never take a pointer event, every click, key,
 // wheel and drag reaches the page at once (a card not shown yet is there to be clicked or focused), and the opening plays
-// on to its end meanwhile. Guard: probe-intro intro:plays (the deadlines), intro:click, intro:key, intro:scroll
-const DECODE_MAX_MS = 200, REVEAL_MS = 320, HOLD_MAX_MS = 700;
+// on to its end meanwhile. Guard: probe-intro intro:plays (the deadlines), intro:slowData, intro:click, intro:key,
+// intro:scroll
+const REVEAL_MS = 320, HOLD_MAX_MS = 1200, DATA_MIN_MS = 600;
 const OUT_MS = 320, OUT_STILL_MS = FADE_EXIT_MS;
 // the hand-over: each tile glides GLIDE_MS on `--spring-soft`'s curve, the next one a little after it in reading order (all
 // of them within TILE_SPREAD_MS); under its piece of the logo the card's picture fades in (FACE_MS), then the piece fades
@@ -46,27 +58,15 @@ const OUT_MS = 320, OUT_STILL_MS = FADE_EXIT_MS;
 // RISE_PX below its place and comes up on `--spring`'s curve over RISE_MS (past its place by the spring's overshoot, about
 // 23 %, a few px, then back with a smaller dip), fading in over RISE_FADE_MS, so the overshoot shows. `--spring-soft`'s 8 %
 // was too small to see at a rise this short. Measured with 6 columns and 5 rows in view: done about 1.1 s after the cover
-// opens, about 1.4 s after the logo starts.
+// opens.
 const GLIDE_MS = 260, TILE_SPREAD_MS = 80, FACE_MS = 50, SWAP_AT_MS = 40, SWAP_MS = 150, TILE_FADE_MS = 100;
 const CASCADE_LEAD_MS = 60, CASCADE_GAP_MS = 12, CASCADE_SPREAD_MS = 300, RISE_MS = 480, RISE_PX = 24, RISE_FADE_MS = 100;
 // DEBUG: `?introSlow=<n>` (the Vite dev build only) plays the opening n times slower, its timers and every animation in it,
 // for a recording to judge it frame by frame; a production build always plays it at 1.
 const SLOW = import.meta.env.DEV ? Math.max(1, Number(new URLSearchParams(location.search).get("introSlow")) || 1) : 1;
 const ms = (t: number) => t * SLOW;
-const MOTION_KEY = "liascape.introMotion";
-const keptMotion = () => { try { return localStorage.getItem(MOTION_KEY) !== "0"; } catch { return true; } };
-
-const BASE = import.meta.env.BASE_URL;
-const LOGO = { night: `${BASE}favicon.svg`, lavender: `${BASE}logo-lavender.svg` } as const;
-type Variant = keyof typeof LOGO;
-// the logo's two grounds: Lavender on a light theme, Night (the installed icon) on a dark one
-function themeVariant(): Variant {
-  const m = /^#?([0-9a-f]{6})$/i.exec(getComputedStyle(document.documentElement).getPropertyValue("--bg-base").trim());
-  if (!m) return "night";
-  const n = parseInt(m[1], 16), lin = (c: number) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
-  const y = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-  return y > 0.4 ? "lavender" : "night";
-}
+// "Smooth window animations" and "Glow effects" for the next window's first frame (index.html reads them)
+const MOTION_KEY = "liascape.introMotion", GLOW_KEY = "liascape.introGlow";
 
 // scroll-driven animations (Chromium 115+); the DOM types this TypeScript ships don't have them yet
 const ScrollTimelineCtor = (globalThis as unknown as { ScrollTimeline?: new (o: { source: Element; axis: "block" }) => AnimationTimeline }).ScrollTimeline;
@@ -135,58 +135,68 @@ function timeline(n: number, m: number) {
   return { stagger, gap, cascadeAt, end: Math.max(lastLand + TILE_FADE_MS, m ? cascadeAt + (m - 1) * gap + RISE_MS : 0) + 20 };
 }
 
-// cover: the page's ground while the logo decodes; play: the logo in; open: the cover dissolving (and the hand-over)
-type Phase = "cover" | "play" | "open" | "gone";
+// play: the logo showing; open: the cover dissolving (and the hand-over)
+type Phase = "play" | "open" | "gone";
 
 export function Intro() {
-  const [phase, setPhase] = useState<Phase>(WANTED ? "cover" : "gone");
-  // the look is fixed for the whole sequence: a setting landing mid-way changes nothing on screen
-  const [look] = useState(() => (WANTED ? { still: reducedMotion() || !keptMotion(), variant: themeVariant() } : null));
+  const [phase, setPhase] = useState<Phase>(OVERLAY ? "play" : "gone");
+  // the look is fixed for the whole sequence (index.html chose it for the first frame): a setting landing mid-way changes
+  // nothing on screen
+  const [still] = useState(() => document.documentElement.classList.contains("intro-still"));
   const ready = useStore((s) => s.settings != null);
+  const glows = useStore((s) => s.settings?.glows !== false);
   const motion = useMotion();
-  const img = useRef<HTMLImageElement>(null);
-  const logo = useRef<HTMLDivElement>(null);
-  const root = useRef<HTMLDivElement>(null);
-  const started = useRef(0);
+  const logo = useRef<HTMLElement | null>(OVERLAY?.querySelector<HTMLElement>(".intro-logo") ?? null);
+  // the frame the logo first showed (index.html; else the first time the hold is counted): the hold counts from it; and when
+  // the app's code first counted it
+  const started = useRef(0), mounted = useRef(0);
   // the hand-over, measured as the cover starts to dissolve; null = the logo lifts away
   const [plan, setPlan] = useState<Plan | null>(null);
 
-  // "Smooth window animations" for the next window's opening, once the saved settings are in (not while the OS asks for
-  // reduced motion: that answer is read live)
+  // "Smooth window animations" (not while the OS asks for reduced motion: that answer is read live) and "Glow effects" for
+  // the next window's opening, once the saved settings are in
   useEffect(() => {
-    if (!ready || reducedMotion()) return;
-    try { localStorage.setItem(MOTION_KEY, motion ? "1" : "0"); } catch { /* storage off: motion next time */ }
-  }, [ready, motion]);
-
-  useEffect(() => {
-    if (!WANTED) return;
-    let go = true;
-    const start = () => { if (!go) return; go = false; started.current = performance.now(); setPhase((p) => (p === "cover" ? "play" : p)); };
-    const t = setTimeout(start, ms(DECODE_MAX_MS));
-    img.current?.decode().then(start, start);
-    return () => { go = false; clearTimeout(t); };
-  }, []);
+    if (!ready) return;
+    try {
+      if (!reducedMotion()) localStorage.setItem(MOTION_KEY, motion ? "1" : "0");
+      localStorage.setItem(GLOW_KEY, glows ? "1" : "0");
+    } catch { /* storage off: motion and glow next time */ }
+  }, [ready, motion, glows]);
 
   // timers, not animation ends. The cover's opening waits for the first data (`ready`: the settings and the library come in
-  // one store update, so the Library's cards are built in the render that sets it), at most HOLD_MAX_MS.
+  // one store update, so the Library's cards are built in the render that sets it), at most HOLD_MAX_MS from the logo.
   useEffect(() => {
     if (phase !== "play") return;
-    const left = ms(ready ? REVEAL_MS : HOLD_MAX_MS) - (performance.now() - started.current);
+    const now = performance.now();
+    started.current ||= BOOT?.at || now;
+    mounted.current ||= now;
+    const left = ready ? ms(REVEAL_MS) - (now - started.current)
+      : Math.max(ms(HOLD_MAX_MS) - (now - started.current), ms(DATA_MIN_MS) - (now - mounted.current));
     let f = 0;
     const t = setTimeout(() => {
       // the cards as this frame draws them; the plan and the phase land in one render
-      f = requestAnimationFrame(() => { setPlan(look?.still ? null : measurePlan(logo.current)); setPhase("open"); });
+      f = requestAnimationFrame(() => { setPlan(still ? null : measurePlan(logo.current)); setPhase("open"); });
     }, Math.max(0, left));
     return () => { clearTimeout(t); cancelAnimationFrame(f); };
-  }, [phase, ready, look]);
+  }, [phase, ready, still]);
   // once open, its end is fixed by what opened (data landing meanwhile doesn't move it); the plan goes with it, and with it
   // the hand-over's listeners
   useEffect(() => {
     if (phase !== "open") return;
-    const out = look?.still ? OUT_STILL_MS : plan ? timeline(plan.tiles.length, plan.rest.length).end : OUT_MS;
+    const out = still ? OUT_STILL_MS : plan ? timeline(plan.tiles.length, plan.rest.length).end : OUT_MS;
     const t = setTimeout(() => { setPhase("gone"); setPlan(null); }, ms(out));
     return () => clearTimeout(t);
-  }, [phase, look, plan]);
+  }, [phase, still, plan]);
+
+  // the overlay's state on the element index.html drew, in the frame that renders it (the tiles' animations start in the
+  // same frame, below); gone = it leaves the page
+  useLayoutEffect(() => {
+    if (!OVERLAY) return;
+    if (phase === "gone") { finish(); return; }
+    OVERLAY.dataset.phase = phase;
+    OVERLAY.classList.toggle("open", phase === "open");
+    OVERLAY.classList.toggle("cards", !!plan);
+  }, [phase, plan]);
 
   // COOL: the tiles fly from the logo to their cards and the rest of the cards rise into place after them. Web Animations, all started
   // before the frame that first draws the tiles: no frame shows a tile on its card un-animated or a card before its turn
@@ -196,7 +206,7 @@ export function Intro() {
   // `translate` on a ScrollTimeline of the grid, composed with the glide's `transform`), and a resize re-places them where
   // their cards are now. Guard: probe-intro intro:cards, intro:scroll
   useLayoutEffect(() => {
-    if (!plan || !root.current) return;
+    if (!plan || !OVERLAY) return;
     const { tiles, rest, logo: L } = plan;
     const tl = timeline(tiles.length, rest.length);
     const ease = softSpringCss().e;
@@ -212,7 +222,7 @@ export function Intro() {
     // a card's box as it would be at the scroll offset the tiles were laid out at (the scroll-linked translate does the rest)
     const atStart = (r: DOMRect): Box => ({ ...boxOf(r), y: r.top + (linked ? scroller!.scrollTop - s0 : 0) });
     for (const t of tiles) {
-      const el = root.current.querySelector<HTMLElement>(`.intro-card[data-tile="${t.i}"]`);
+      const el = OVERLAY.querySelector<HTMLElement>(`.intro-card[data-tile="${t.i}"]`);
       if (!el) continue;
       const d = t.i * tl.stagger, to = atStart(t.card.getBoundingClientRect());
       if (linked) scrolls.push(el.animate(span(), { timeline: new ScrollTimelineCtor!({ source: scroller!, axis: "block" }), fill: "both" }));
@@ -274,10 +284,10 @@ export function Intro() {
   // DEBUG: the slowed opening (SLOW) slows the stylesheet's animations too, from the frame after each one starts
   const shown = phase !== "gone";
   useEffect(() => {
-    if (SLOW === 1 || !shown) return;
+    if (SLOW === 1 || !shown || !OVERLAY) return;
     let f = 0;
     const tick = () => {
-      for (const a of root.current?.getAnimations({ subtree: true }) ?? [])
+      for (const a of OVERLAY.getAnimations({ subtree: true }))
         if (a.timeline === document.timeline && a.playbackRate !== 1 / SLOW) a.playbackRate = 1 / SLOW;
       f = requestAnimationFrame(tick);
     };
@@ -285,25 +295,13 @@ export function Intro() {
     return () => cancelAnimationFrame(f);
   }, [shown]);
 
-  if (phase === "gone" || !look) return null;
-  const cls = ["intro", phase !== "cover" && "started", look.still && "still", phase === "open" && "open", plan && "cards"].filter(Boolean).join(" ");
-  return (
-    <div ref={root} className={cls} data-phase={phase} aria-hidden>
-      <div className="intro-bg" />
-      <div ref={logo} className="intro-logo">
-        <div className="intro-tile">
-          <img ref={img} className="intro-img" data-variant={look.variant} src={LOGO[look.variant]} alt="" draggable={false} />
-        </div>
-        <span className="intro-ring" />
-      </div>
-      {/* over the logo: as they leave, its pieces are the whole of its picture while the logo itself fades out under them;
-          laid out and animated in the layout effect above */}
-      {plan?.tiles.map((t) => (
-        <div key={t.key} className="intro-card" data-tile={t.i} data-key={t.key}>
-          <div className="intro-card-face">{t.thumb && <img src={t.thumb} alt="" draggable={false} />}</div>
-          <img className="intro-card-logo" src={LOGO[look.variant]} alt="" draggable={false} />
-        </div>
-      ))}
+  // over the logo: as they leave, its pieces are the whole of its picture while the logo itself fades out under them; laid
+  // out and animated in the layout effect above
+  if (!plan || !OVERLAY) return null;
+  return createPortal(plan.tiles.map((t) => (
+    <div key={t.key} className="intro-card" data-tile={t.i} data-key={t.key}>
+      <div className="intro-card-face">{t.thumb && <img src={t.thumb} alt="" draggable={false} />}</div>
+      <div className="intro-card-logo" />
     </div>
-  );
+  )), OVERLAY);
 }

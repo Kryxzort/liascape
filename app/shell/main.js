@@ -134,6 +134,7 @@ app.on("child-process-gone", (_e, d) => {
   if (d.type === "GPU") console.error(`[gpu] GPU process gone: ${d.reason} (exit code ${d.exitCode})`);
 });
 
+const SHOW_MAX_MS = 3000;
 function openWindow(loadUrl) {
   try { appOrigin = new URL(loadUrl).origin; if (appOrigin === "null") appOrigin = null; } catch { appOrigin = null; }
   const ALLOWED_PERMISSIONS = new Set(["clipboard-sanitized-write", "fullscreen"]);
@@ -141,8 +142,13 @@ function openWindow(loadUrl) {
   // LIASCAPE_WINDOW=<w>x<h>: that size with no frame — the agent window's private compositor (scripts/agent-window.sh)
   // neither tiles nor decorates windows, so the page gets exactly the output's size
   const fixed = /^(\d+)x(\d+)$/.exec(process.env.LIASCAPE_WINDOW || "");
+  // Shown once the page has drawn its first frame (ready-to-show), never before: shown at once it stood blank (its
+  // background colour) while the page loaded, and the page's first frame is the window's opening, the logo on its cover
+  // (app/ui/index.html), so the window opens on the logo. Chromium draws that frame while the window is still hidden
+  // (paintWhenInitiallyHidden). A page that never draws one (a renderer that died on its way) still gets its window after
+  // SHOW_MAX_MS. Guard: probe-intro intro:firstFrame (what that first frame is); probe-recover runs this window
   const win = new BrowserWindow({
-    width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "Liascape",
+    width: 1400, height: 900, backgroundColor: "#1e1e2e", title: "Liascape", show: false,
     ...(fixed ? { width: Number(fixed[1]), height: Number(fixed[2]), frame: false, roundedCorners: false } : {}),
     webPreferences: {
       backgroundThrottling: false, preload: path.join(__dirname, "preload.js"),
@@ -152,6 +158,10 @@ function openWindow(loadUrl) {
     },
   });
   win.setMenuBarVisibility(false);
+  let shown = false;
+  const show = () => { if (shown || win.isDestroyed()) return; shown = true; win.show(); };
+  win.once("ready-to-show", show);
+  setTimeout(show, SHOW_MAX_MS);
   // FREEZE FIX: authoritative active/idle signal from the WM (OS-level focus), more reliable than DOM
   // visibilitychange — on X11 an occluded window (you fullscreened another app over it) never reports
   // hidden, so the renderer would keep decoding all the autoplay gifs forever → ThreadPool backlog →
