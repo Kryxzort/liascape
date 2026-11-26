@@ -171,6 +171,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        find where a dying worker blocks the shared audio graph or the compositor loop, fix it, and pin it with a
        hermetic test (a killed / hung worker under a private PipeWire, the other source's tone without a drop).
 
+26. [ ] (owner) Pick the sidebar's presets row look: A (built: the creator row's look, "Made for this scene", a
+       sliding chevron), B (three fanned preset thumbnails leading, "2 presets made for this scene") or C (an accent
+       left edge, a tinted glyph and a count pill). Mock-up screenshots: the night notes of 2026-11-27.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
@@ -277,6 +281,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `restore_waits_for_ready_no_seam`).
 
 ## UI
+- [ ] Probe cells out of step with today's app: `probe-sidebar lib:preset:needsBase` / `needsBaseOff` still expect
+      the base-scene button disabled while signed out (no download mode blocks a download now); `probe-steam
+      ws:comment*` assume a window short enough for the comments to start below the fold (pass at 480 px, fail on a
+      taller one: size the window in the cell); `probe-steam steam:sub:keepMenu` fails about one full run in two.
 - [ ] An item trashed outside this page (`POST /library/trash` from another window or client) never reaches an open
       page: `AppOps.Trash` broadcasts nothing (only `library-synced` for presets it greys out), so the Library keeps
       the card and the live background (`components/WallpaperBg.tsx`) keeps a removed video until the next library
