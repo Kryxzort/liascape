@@ -7,6 +7,8 @@ msg=$1
 title=$(grep -v '^#' "$msg" | sed -n '/./{p;q}')
 fail() { echo "commit-msg: $*" >&2; echo "commit-msg: (message kept in $msg)" >&2; exit 1; }
 [ -n "$title" ] || exit 0
+# Session links point at a private chat, not at anything a reader of this public repo can open: drop them.
+sed -i '/^Claude-Session: /d' "$msg"
 case "$title" in fixup!*|squash!*|amend!*|Merge\ *|Revert\ *) exit 0 ;; esac
 [[ "$title" =~ ^[A-Z0-9#] ]] || fail "the title starts with a capital: \"$title\""
 [[ "$title" == *. ]] && fail "the title ends without a period: \"$title\""
