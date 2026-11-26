@@ -357,6 +357,16 @@ public static class ScraperSelfTest
         {
             Title = "Gone", PreviewUrl = "", DownloadUrl = site + "/files/gone.mp4",
         }, thumb: site + "/thumbs/neon.jpg", sourceId: "https://www.desktophut.com/gone", library: LibraryStore.Desktophut);
+        // a title that leaves no file name ("/" sanitized is "", "." and ".." name a folder that is already there), into a
+        // library folder not made yet: a name of its own, never the library folder itself
+        await Download("download: a title that is no file name", new WallpaperDetail
+        {
+            Title = "/", PreviewUrl = "", DownloadUrl = site + "/files/neon.mp4",
+        }, sourceId: "https://example.invalid/slash");
+        await Download("download: a title of ..", new WallpaperDetail
+        {
+            Title = "..", PreviewUrl = "", DownloadUrl = site + "/files/neon.mp4",
+        }, sourceId: "https://example.invalid/dots");
         // a file on this PC (no Workshop id): linked, or copied under "Copy files instead of linking"
         string own = Path.Combine(tmp, "own");
         Directory.CreateDirectory(own);

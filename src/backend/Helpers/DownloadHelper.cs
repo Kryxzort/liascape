@@ -95,7 +95,8 @@ public static class DownloadHelper
         lock (KeyGate)
         {
             string dir = LibraryStore.SourceDir(source);
-            string name = LibraryService.SanitizeName(d.Title);
+            // a title that leaves no name would make the key "" and the item's folder the library folder itself
+            string name = LibraryService.SanitizeName(d.Title) is { Length: > 0 } n ? n : "wallpaper";
             key = Enumerable.Range(0, int.MaxValue).Select((n) => n == 0 ? name : $"{name} ({n})")
                 .First((k) => !Directory.Exists(Path.Combine(dir, k)) && !File.Exists(Path.Combine(dir, k)));
             folder = Directory.CreateDirectory(Path.Combine(dir, key)).FullName;

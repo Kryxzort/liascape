@@ -331,6 +331,20 @@
           "sourceUrl": "$TMP/own/mine.mp4",
           "title": "Mine Copied",
           "whitelist": false
+        },
+        "wallpaper": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/slash",
+          "title": "/",
+          "whitelist": false
+        },
+        "wallpaper (1)": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/dots",
+          "title": "..",
+          "whitelist": false
         }
       }
     },
@@ -351,7 +365,6 @@
       "workshopId": null
     },
     "library": {
-      "$LIB/imported": "dir",
       "$LIB/imported/Mine": "dir",
       "$LIB/imported/Mine/Mine.jpg": "-\u003E $TMP/own/mine.jpg",
       "$LIB/imported/Mine/Mine.mp4": "-\u003E $TMP/own/mine.mp4",
@@ -362,9 +375,101 @@
           "sourceUrl": "$TMP/own/mine.mp4",
           "title": "Mine",
           "whitelist": false
+        },
+        "wallpaper": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/slash",
+          "title": "/",
+          "whitelist": false
+        },
+        "wallpaper (1)": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/dots",
+          "title": "..",
+          "whitelist": false
+        }
+      }
+    },
+    "progress": 1
+  },
+  "download: a title of ..": {
+    "asked": [
+      {
+        "path": "/files/neon.mp4",
+        "referer": null,
+        "userAgent": "$UA"
+      }
+    ],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "https://example.invalid/dots",
+      "thumbnailPath": "",
+      "title": "..",
+      "videoPath": "$LIB/imported/wallpaper (1)/wallpaper (1).mp4",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/imported/index.json": {
+        "wallpaper": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/slash",
+          "title": "/",
+          "whitelist": false
+        },
+        "wallpaper (1)": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/dots",
+          "title": "..",
+          "whitelist": false
         }
       },
-      "$LIB/imported/index.json.lock": ""
+      "$LIB/imported/wallpaper (1)": "dir",
+      "$LIB/imported/wallpaper (1)/wallpaper (1).mp4": "neon video bytes"
+    },
+    "progress": 1
+  },
+  "download: a title that is no file name": {
+    "asked": [
+      {
+        "path": "/files/neon.mp4",
+        "referer": null,
+        "userAgent": "$UA"
+      }
+    ],
+    "item": {
+      "animatedThumbnailPath": "",
+      "copiedSceneDir": "",
+      "isScene": false,
+      "pageUrl": null,
+      "resolution": null,
+      "sourceId": "https://example.invalid/slash",
+      "thumbnailPath": "",
+      "title": "/",
+      "videoPath": "$LIB/imported/wallpaper/wallpaper.mp4",
+      "workshopId": null
+    },
+    "library": {
+      "$LIB/imported": "dir",
+      "$LIB/imported/index.json": {
+        "wallpaper": {
+          "crashed": false,
+          "isScene": false,
+          "sourceUrl": "https://example.invalid/slash",
+          "title": "/",
+          "whitelist": false
+        }
+      },
+      "$LIB/imported/index.json.lock": "",
+      "$LIB/imported/wallpaper": "dir",
+      "$LIB/imported/wallpaper/wallpaper.mp4": "neon video bytes"
     },
     "progress": 1
   },

@@ -1022,10 +1022,14 @@ public static class LibraryService
     internal static bool IsSymlink(string path)
     { try { return new FileInfo(path).LinkTarget != null || new DirectoryInfo(path).LinkTarget != null; } catch { return false; } }
 
+    // A title as one file name: what a file name can't hold left out. "" when nothing usable is left, "." and ".." too
+    // (each names a folder already there, the parent's own or its parent), so every caller's fallback name takes over.
+    // Guard: scraper-selftest "download: a title that is no file name", "download: a title of .."
     public static string SanitizeName(string name)
     {
         var invalid = Path.GetInvalidFileNameChars();
-        return new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
+        string clean = new string((name ?? "").Where(c => !invalid.Contains(c)).ToArray()).Trim();
+        return clean is "." or ".." ? "" : clean;
     }
 
     // Extracts the numeric workshop item ID from a Steam community URL (?id=NNN / &id=NNN).
