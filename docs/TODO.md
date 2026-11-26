@@ -90,6 +90,15 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        its link some way neither handler sees (a frame navigation: `will-frame-navigate`), or the click blocked.
        Guard: a probe cell that clicks the embed's logo and sees one openExternal call with the watch URL.
 
+11. [ ] (owner) Browse feels slow: measure, then fix the biggest part. Time a Workshop browse end to end in the agent
+       window (`node scripts/bench-live-ui.mjs`, a new scenario): the session connect, each `QueryFiles` page, the
+       thumbnails / previews to first paint, the gate's spacing, React's render; first visit, next page, a filter
+       change, going back. Then fix the largest share first. Candidates: the next page fetched while the current one
+       shows, recent queries cached (back / re-filter instant), thumbnails on screen first and at the card's size, and
+       in "Use the Steam app" mode the queries through the already-held Steam app connection (no connect). Never more
+       requests to steamcommunity.com than now (`SteamGate`). Guard: the benchmark scenario's numbers before / after,
+       and a probe cell per behaviour added.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
