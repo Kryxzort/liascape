@@ -60,9 +60,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (`docs/player/spikes/we-proton.md`: `scripts/dev/we-ref-capture.sh`, `scene_we_compare.sh`).
        - The harness as a gate: rerun every library scene, set a fail line per scene (masks for WE's unseeded
          randomness), look at every failing side-by-side; rerun nightly and on every new download.
-       - Every row of `docs/player/spikes/we-lwe-gap-audit.md` with a test scene: a library scene that uses it, a
-         public Workshop sample found by its feature, or a small synthetic scene built for it (a feature with no
-         scene is unverified, not done); each row marked pass / fail against WE with its evidence.
+       - Every row of `docs/player/spikes/we-lwe-gap-audit.md` with a real Workshop scene that uses it (a library
+         scene, else Workshop items downloaded one-off into a private test corpus outside the owner's library and
+         Steam subscriptions, scanned for the feature, kept if they cover a row or another test, deleted if not,
+         repeated until each row has one; never committed); no hand-built scenes. A feature with no scene is
+         unverified, not done; each row marked pass / fail against WE with its evidence.
        - Check LWE's logic per row against the decompiled WE; fix what differs, starting with puppets.
        - The audio piece: a private PipeWire with a null sink fed a fixed track, so music-reactive scenes compare too.
        - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
