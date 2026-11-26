@@ -40,6 +40,12 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        page's heartbeat stops) plus the existing 60 s tail. Never for the backend's lifetime: that would block the real
        Wallpaper Engine and pause Steam's other downloads all day. Rewrite `docs/decisions.md` § "Hold the Steam app
        connection while the Workshop shows on Browse" in the same commit; guard in `scripts/test-steam-app-hold.sh`.
+138. [ ] (owner) Right-click a card for Unsubscribe and Hide, and a "Hidden" filter. A Workshop card's right-click menu
+       (Library and Browse; extend the menu cards already have, or add one in its look) offers Unsubscribe, through
+       the download modes' order (signed out: the item's Steam page), and Hide; any card offers Hide. A hidden item
+       leaves the grid it was hidden from, with Undo like a removal, and a "Hidden" filter row shows hidden items, with
+       Unhide in their menu. Keep the hidden ids in a state file (field-level, atomic). Multi-select: the menu acts on
+       the selection. Guards: probe cells for the menu, Hide/Undo/Unhide and the filter; a backend test for the file.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
