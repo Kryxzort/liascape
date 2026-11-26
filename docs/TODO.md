@@ -163,6 +163,25 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        full UI matrix green before and after, the same cell list), and trim comments that only restate the code
        (`.claude/rules/writing-rules.md` § Code comments).
 
+22. [ ] (owner) Trim the rules to well under their caps without losing a rule an agent needs. Today `player/scenes.md` is at
+       250 / 250 lines, `backend/sources-steam.md` ~28k / 30k chars, `ui/design.md` and `backend/library.md` ~21k; the
+       reference docs and `docs/decisions.md` sit at their caps. Method (community guidance on CLAUDE.md / rules: a
+       buried rule is a dropped rule; spend the instruction budget only on what an agent can't infer or a check can't
+       enforce):
+       - Per bullet: keep it if an agent would otherwise get it wrong; cut it if the code makes it obvious; when a test,
+         hook or `check-rules.sh` enforces it, keep one line + the guard's name only where a "fix" would undo it.
+       - Move "how it works" prose to the reference docs (`docs/player/modules/`, linked); rules keep musts / nevers.
+       - Narrow the globs and split a file that serves two areas (scenes.md: core vs audio vs presets) so a task loads
+         fewer bullets; merge overlapping bullets across files (one fact, one place).
+       - Fold old `docs/decisions.md` entries the code no longer needs defending; keep each reference doc ≤ ~12k.
+       - A recall check after: an agent opened on a file in each area recites that area's rules for a set task; a
+         critical rule it misses moves higher, gets clearer, or becomes a hook / check.
+       Target: every rule file ≤ 80 % of its line and char caps. `check-rules.sh` green; no guard citation lost.
+
+23. [ ] (owner) Clean up `docs/TODO.md` (106 KB, much of it backlog written before the switch-over): check every
+       backlog item against the code, delete what is done or obsolete (the legacy engine, mpvpaper, LWE-subprocess
+       items), merge duplicates, and say for each kept item what is still missing. Report what was cut and why.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
