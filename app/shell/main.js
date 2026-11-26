@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const { configDir, tokenFile, withToken } = require("./api-auth");
 const { liascapeViteUp } = require("./vite-detect");
+const { guardWebContents } = require("./outside-links");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const uiDir = path.join(repoRoot, "app", "ui", "dist");
@@ -102,21 +103,13 @@ function viteUp(cb) {
 }
 
 // ── Hardening (.claude/rules/backend/api.md § Security) ────────────
-// The window shows the app's own UI and nothing else: a link / window.open / a page trying to navigate elsewhere goes to
-// the user's browser (http(s) only) — before, an "Open on Steam" link opened steamcommunity.com INSIDE the app, with the
-// preload's bridge and the app's session. No permissions but the clipboard write (Copy ID) and the trailer's fullscreen.
+// The window shows the app's own UI and nothing else: a link, a window.open or a frame trying to leave goes to the user's
+// browser instead (outside-links.js). No permissions but the clipboard write (Copy ID) and the trailer's fullscreen.
 let appOrigin = null; // the UI's origin (the backend's or Vite's); file:// has none — then only file: pages count
 const isAppUrl = (u) => {
   try { const x = new URL(u); return appOrigin ? x.origin === appOrigin : x.protocol === "file:"; } catch { return false; }
 };
-function openOutside(u) {
-  try { const x = new URL(u); if (x.protocol === "http:" || x.protocol === "https:") shell.openExternal(x.toString()); } catch { /* not a URL */ }
-}
-app.on("web-contents-created", (_e, wc) => {
-  wc.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: "deny" }; });
-  wc.on("will-navigate", (e, url) => { if (!isAppUrl(url)) { e.preventDefault(); openOutside(url); } });
-  wc.on("will-attach-webview", (e) => e.preventDefault());
-});
+app.on("web-contents-created", (_e, wc) => guardWebContents(wc, { isAppUrl, openExternal: (u) => shell.openExternal(u) }));
 
 // Native folder picker (Settings' folders, the Library's Import) — only for the app's own page. `kind` "files": wallpaper
 // files instead (the Import's right-click), several at once → their paths. Each one opens where the last pick was made:

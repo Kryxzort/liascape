@@ -13,6 +13,9 @@
 //   lib:preview          the picture's preview switch: only the options the item has (k1 GIF + Video, k2 none, s2 none, s1 with
 //                        a trailer Picture + YouTube), a pick shows its layer and is kept for the next item; the first preview
 //                        ever opens muted; the trailer (stubbed) remembers the shared mute + level
+//   preview:ytLink       the trailer's links (a stand-in embed, the shell's outside-links.js with a recording openExternal):
+//                        a real click on its logo (new window), its title (the frame navigating itself) and a top-page link
+//                        each → exactly one openExternal of the watch page; the embed and the app stay where they are
 //   preview:volume       the Video preview's own volume slider beside the mute chip: opens muted (slider 0); unmute plays at the
 //                        item's wallpaper volume; the slider sets the <video>'s volume and the saved level; 0 shows the
 //                        muted glyph and unmuting brings the last level back; the wheel steps it (the sidebar doesn't scroll);
@@ -755,6 +758,70 @@ app.whenReady().then(async () => {
         fs.writeFileSync(idx, idx0);
         win.webContents.session.webRequest.onBeforeRequest(null);
         await page(`await m.closeAll();`); await loadUi();
+      }
+      return v;
+    });
+
+    // The trailer's own links go to the user's browser: the shell's rules (outside-links.js, as main.js installs them) with
+    // a recording openExternal, and a stand-in for YouTube's embed (no network): its logo / "Watch on YouTube" (a new
+    // window), its title (no target: the frame navigating itself) and a link to the top page. Each real click → exactly one
+    // openExternal of the watch page; the embed stays on its embed page and the app on the app.
+    await cell("preview:ytLink", async () => {
+      const v = [];
+      const { guardWebContents } = require("./outside-links");
+      const opened = [];
+      guardWebContents(win.webContents, { isAppUrl: (u) => { try { return new URL(u).origin === new URL(U).origin; } catch { return false; } },
+        openExternal: async (u) => { opened.push(u); } });
+      const WATCH = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+      const standIn = `<!doctype html><body style="margin:0;background:#000">
+        <a id="title" href="${WATCH}" style="position:absolute;left:8px;top:8px;width:120px;height:24px;background:#444">title</a>
+        <a id="top" href="${WATCH}&top=1" target="_top" style="position:absolute;left:8px;top:48px;width:120px;height:24px;background:#446">top</a>
+        <a id="logo" href="${WATCH}" target="_blank" rel="noopener" style="position:absolute;right:8px;bottom:8px;width:90px;height:24px;background:#c00">YouTube</a></body>`;
+      const ses = win.webContents.session;
+      ses.protocol.handle("https", (req) => new URL(req.url).hostname === "www.youtube.com"
+        ? new Response(new URL(req.url).pathname.startsWith("/embed/") ? standIn : "<!doctype html><title>watch page</title>left the embed",
+          { headers: { "content-type": "text/html" } })
+        : new Response("", { status: 404 }));
+      const idx = path.join(path.dirname(SC[0]), "index.json"), idx0 = fs.readFileSync(idx, "utf8");
+      const j = JSON.parse(idx0); j["900000001"].youtubeUrl = WATCH; fs.writeFileSync(idx, JSON.stringify(j));
+      try {
+        await loadUi();
+        const open = async () => {
+          await page(`await m.closeAll(); await m.openSide("s1"); await m.sleep(400);
+            m.side().querySelector('[data-preview-src="youtube"]')?.click(); await m.sleep(300);`);
+          for (let i = 0; i < 50; i++) {
+            const f = win.webContents.mainFrame.frames.find((x) => /^https:\/\/www\.youtube\.com\/embed\//.test(x.url));
+            if (f && await f.executeJavaScript(`!!document.getElementById("logo")`).catch(() => false)) return f;
+            await sleep(100);
+          }
+          return null;
+        };
+        for (const id of ["logo", "title", "top"]) {
+          const f = await open();
+          if (!f) { v.push(`${id}: the stand-in embed never loaded`); continue; }
+          const fr = await page(`const r = m.side().querySelector(".yt-frame").getBoundingClientRect(); return { x: r.x, y: r.y };`);
+          const a = await f.executeJavaScript(`(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+          const x = Math.round(fr.x + a.x), y = Math.round(fr.y + a.y);
+          const n0 = opened.length;
+          // through the debugger's input: it is routed to the frame under the pointer like a real click (sendInputEvent
+          // reaches only the top page's own renderer, never a cross-site frame's)
+          const d = win.webContents.debugger; if (!d.isAttached()) d.attach("1.3");
+          const mouse = (type) => d.sendCommand("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+          await mouse("mouseMoved"); await sleep(100); await mouse("mousePressed"); await sleep(40); await mouse("mouseReleased");
+          await sleep(800);
+          const got = opened.slice(n0);
+          const frames = win.webContents.mainFrame.frames.map((x) => x.url);
+          console.log(`        ${id}: openExternal ${JSON.stringify(got)}, frames ${JSON.stringify(frames)}`);
+          if (got.length !== 1 || !got[0].startsWith(WATCH)) v.push(`${id}: openExternal got ${JSON.stringify(got)}, expected one call with ${WATCH}`);
+          if (!frames.some((u) => /^https:\/\/www\.youtube\.com\/embed\//.test(u))) v.push(`${id}: the embed left its embed page (${JSON.stringify(frames)})`);
+          if (frames.some((u) => /\/watch\?/.test(u))) v.push(`${id}: the watch page opened inside the app (${JSON.stringify(frames)})`);
+          if (new URL(win.webContents.getURL()).origin !== new URL(U).origin) v.push(`${id}: the app navigated away (${win.webContents.getURL()})`);
+          if (BrowserWindow.getAllWindows().length !== 1) v.push(`${id}: a new window opened`);
+        }
+      } finally {
+        fs.writeFileSync(idx, idx0);
+        ses.protocol.unhandle("https");
+        await loadUi();
       }
       return v;
     });

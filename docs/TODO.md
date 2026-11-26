@@ -87,13 +87,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          them.
        Reuse the app's notice / hint look (`.claude/rules/ui/design.md` checklist); probe cells for the welcome, each
        tip's once-only rule and the empty states.
-10. [ ] (owner) The YouTube logo in a trailer (`components/YouTubeEmbed.tsx`) opens nothing: it should open the video in
-       the user's browser like every other outside link. The shell sends a window.open or navigation away to
-       `shell.openExternal` (`app/shell/main.js` `setWindowOpenHandler` / `will-navigate`) and the default browser
-       is set, so find where the click is lost: an overlay of ours over the player's logo, YouTube's embed opening
-       its link some way neither handler sees (a frame navigation: `will-frame-navigate`), or the click blocked.
-       Guard: a probe cell that clicks the embed's logo and sees one openExternal call with the watch URL.
-
 11. [ ] (owner) Browse feels slow: measure, then fix the biggest part. Time a Workshop browse end to end in the agent
        window (`node scripts/bench-live-ui.mjs`, a new scenario): the session connect, each `QueryFiles` page, the
        thumbnails / previews to first paint, the gate's spacing, React's render; first visit, next page, a filter

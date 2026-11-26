@@ -138,6 +138,8 @@ for f in $FILES; do
     app/shell/probe-cardpreview.js|app/shell/probe-libops.js|app/shell/probe-presence.js) echo "  $f → nothing (another probe — run it with --probe)" >&2 ;;
     # the shell itself: no matrix cell loads main.js; probe-recover.js runs it as a child per cell
     app/shell/main.js|app/shell/renderer-recovery.js|app/shell/probe-recover.js) echo "  $f → nothing in the matrix (--probe probe-recover.js; the page's flags: --probe probe-intro.js)" >&2 ;;
+    # the shell's outside-link rules: the sidebar probe runs them with a recording openExternal
+    app/shell/outside-links.js) echo "  $f → nothing in the matrix (--probe probe-sidebar.js --only preview:ytLink)" >&2 ;;
     # the window's opening: only a page the shell opens with ?intro plays it, so no matrix cell sees it
     app/ui/src/components/Intro.tsx|app/ui/public/logo-lavender.svg|app/shell/probe-intro.js) echo "  $f → nothing in the matrix (--probe probe-intro.js)" >&2 ;;
     # the motion-off judge the probes share: the matrix's appear:morphs + every probe's motion-off cells
