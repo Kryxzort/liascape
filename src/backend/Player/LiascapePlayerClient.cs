@@ -615,7 +615,7 @@ public sealed class LiascapePlayerClient
     // Is `pid` CURRENTLY some liascape-player process? (no prior identity to compare against — a liveness +
     // name check via `/proc/<pid>/exe`, never a cmdline substring.)
     // A rebuilt binary leaves the running one as "liascape-player (deleted)" — still the player.
-    private static bool IsPlayerProcess(int pid)
+    internal static bool IsPlayerProcess(int pid)
     {
         try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget)?.Replace(" (deleted)", "") is "liascape-player" or ".liascape-player-wrapped"; }
         catch { return false; }
@@ -947,10 +947,10 @@ public sealed class LiascapePlayerClient
             // alive but not answering (stopped/stalled): a second `serve` would only lose the instance lock
             if (IsStalled && SocketExists) { LastError = "liascape-player is not responding"; return false; }
             // none cached → looked for again: a binary that appeared since (a rebuild, a store path after boot) starts
-            // now, and a missing one isn't a failed start (no 10 s backoff). Guard: scripts/test-player-binary.sh
-            // § appears later
-            var bin = PlayerStatus.ResolveBinary() ?? PlayerStatus.ResolveBinary(fresh: true);
-            if (bin == null) { LastError = PlayerStatus.UnavailableReason; Log(LastError); return false; }
+            // now, and a missing one isn't a failed start (no 10 s backoff); ResolveBinary logs why, once per reason.
+            // Guard: scripts/test-player-binary.sh § appears later, § missing ("logged once")
+            var bin = PlayerStatus.ResolveBinary();
+            if (bin == null) { LastError = PlayerStatus.UnavailableReason; return false; }
             Process? p;
             // the last player's own arguments + --restore (it went away: a failed upgrade, its supervisor gave up
             // or was killed) — the same outputs/socket/audio, showing what it showed until the switch lands; a

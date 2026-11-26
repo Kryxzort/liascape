@@ -64,6 +64,9 @@ sealed class Program
         {
             case "kill":
                 PlayerHelper.Stop();
+                // an older build's wallpaper still on screen goes too (no `serve` or `restore` may have run since the upgrade)
+                // Guard: scripts/test-player-binary.sh § kill
+                LegacyTakeover.StopWallpapers();
                 DrainLiascapePlayerBeforeExit();
                 return;
             case "restore":

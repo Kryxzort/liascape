@@ -36,6 +36,7 @@ public static class LiascapePlayerSelfTest
             ProgramSpecAssertions(fails);
             OutboxAckAssertions(fails);
             StaleThroughWrapperAssertions(fails);
+            BinaryResolutionAssertions(fails);
             StartupGraceAssertions(fails);
             StartArgsAssertions(fails);
             RendererLatchAssertions(fails);
@@ -1543,6 +1544,8 @@ public static class LiascapePlayerSelfTest
                 Thread.Sleep(20);
             }
             if (exe == null || Path.GetFileName(exe) != ".liascape-player-wrapped") { fails.Add($"stale: the wrapper never exec'ed its wrapped binary (exe {exe})"); return; }
+            // the round trip's "QuitOrKill left no process" reads liveness the same way: a wrapped player must count
+            if (!StillRunning(p.Id)) fails.Add("StillRunning: a live `.liascape-player-wrapped` process reads as gone (QuitOrKill's check would pass vacuously)");
             foreach (var (bin, what) in new[] { (link, "the libexec symlink"), (wrapperB, "the wrapper"), (Path.Combine(tmp, "pkg-b", "bin", ".liascape-player-wrapped"), "the wrapped binary") })
                 if (LiascapePlayerClient.StaleReasonFor(p.Id, bin) is string why)
                     fails.Add($"stale: the player started through {what} reads as out of date: {why}");
@@ -1681,12 +1684,34 @@ public static class LiascapePlayerSelfTest
         finally { try { Directory.Delete(tmp, true); } catch { } }
     }
 
-    // Is `pid` (still) an liascape-player process? item 5: via `/proc/<pid>/exe`'s link target (the real
-    // resolved binary path), never a cmdline substring — same check as LiascapePlayerClient.IsPlayerProcess,
-    // duplicated here since that one is private.
-    private static bool StillRunning(int pid)
+    // Is `pid` (still) a liascape-player process — the plain binary or a Nix `.liascape-player-wrapped`? By
+    // `/proc/<pid>/exe`'s link target, never a cmdline substring: the client's own check.
+    private static bool StillRunning(int pid) => LiascapePlayerClient.IsPlayerProcess(pid);
+
+    // ---- binary resolution: a binary removed since it was found is looked for again ----------------------------------
+    // A cached path whose file is gone let MissingReason pass and a switch queue a start that couldn't happen.
+    private static void BinaryResolutionAssertions(List<string> fails)
     {
-        try { return Path.GetFileName(new FileInfo($"/proc/{pid}/exe").LinkTarget) == "liascape-player"; } catch { return false; }
+        var env = Environment.GetEnvironmentVariable("LIASCAPE_PLAYER_BIN");
+        var tmp = Path.Combine(Path.GetTempPath(), $"lsp-bin-{Environment.ProcessId}");
+        try
+        {
+            Directory.CreateDirectory(tmp);
+            var bin = Path.Combine(tmp, "liascape-player");
+            File.WriteAllText(bin, "#!/bin/sh\nexit 1\n");
+            Environment.SetEnvironmentVariable("LIASCAPE_PLAYER_BIN", bin);
+            if (PlayerStatus.ResolveBinary(fresh: true) != bin) fails.Add($"binary resolution: LIASCAPE_PLAYER_BIN={bin} not found ({PlayerStatus.ResolveBinary()})");
+            else if (PlayerStatus.ResolveBinary() != bin) fails.Add("binary resolution: the binary found isn't kept while it's there");
+            File.Delete(bin);
+            if (PlayerStatus.ResolveBinary() == bin) fails.Add("binary resolution: a binary removed since it was found still resolves (the cached path)");
+        }
+        catch (Exception e) { fails.Add($"binary resolution: {e.GetType().Name}: {e.Message}"); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LIASCAPE_PLAYER_BIN", env);
+            PlayerStatus.ResolveBinary(fresh: true);
+            try { Directory.Delete(tmp, true); } catch { }
+        }
     }
 
     // A synthetic scene item folder (what liascape-player's tests/common::synthetic_scene writes): plays the

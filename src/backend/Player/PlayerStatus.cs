@@ -20,10 +20,10 @@ public static class PlayerStatus
     public static string UnavailableReason =>
         "liascape-player binary not found (LIASCAPE_PLAYER_BIN, next to liascape-backend, <prefix>/libexec/liascape, <prefix>/lib/liascape, src/player/target/{release,debug}, PATH) — build it with `cargo build --manifest-path src/player/Cargo.toml`";
 
-    // Why nothing can play here: no player binary resolves (a cached miss is looked for again, so one that appeared
-    // since counts), else null. A switch refuses with it rather than queue one that can't start.
-    // Guard: scripts/test-player-binary.sh § missing, § appears later
-    public static string? MissingReason() => (ResolveBinary() ?? ResolveBinary(fresh: true)) == null ? UnavailableReason : null;
+    // Why nothing can play here: no player binary resolves (looked for again unless the one found before is still there,
+    // so one that appeared since counts and one removed since doesn't), else null. A switch refuses with it rather than
+    // queue one that can't start. Guard: scripts/test-player-binary.sh § missing, § appears later, § removed again
+    public static string? MissingReason() => ResolveBinary() == null ? UnavailableReason : null;
 
     // Can a scene item play right now? Scene support on, and the player has the `scene` capability — its
     // liascape-scene-worker AND WE's assets dir resolve (`LiascapePlayerClient.ScenesAvailable`).
@@ -70,12 +70,14 @@ public static class PlayerStatus
 
     // env LIASCAPE_PLAYER_BIN → next to the running liascape-backend / libexec/liascape/ / lib/liascape/ → the repo dev tree
     // src/player/target/{release,debug}/liascape-player → PATH (release first: debug is opt-level 0 and the
-    // player mixes audio itself). Cached; `fresh` resolves again (the upgrade check, a status read, a start that found none).
+    // player mixes audio itself). Cached while the file found is still there: a miss, or a binary removed since, is looked
+    // for again on every call; `fresh` resolves again regardless (the upgrade check, a status read). Guard: player-selftest
+    // "binary resolution"
     public static string? ResolveBinary(bool fresh = false)
     {
         lock (_lock)
         {
-            if (_binResolved && !fresh) return _bin;
+            if (_binResolved && !fresh && _bin != null && File.Exists(_bin)) return _bin;
             string? envMiss = null;
             _bin = Resolve(ref envMiss);
             _binResolved = true;

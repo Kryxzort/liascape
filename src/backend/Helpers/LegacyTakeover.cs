@@ -17,6 +17,10 @@ namespace Liascape.Helpers;
 public static class LegacyTakeover
 {
     [DllImport("libc")] private static extern int kill(int pid, int sig);
+    [DllImport("libc", SetLastError = true)] private static extern long syscall(long number, int a, nint b, nint c, uint d);
+    [DllImport("libc")] private static extern int close(int fd);
+    // pidfd_open / pidfd_send_signal: the same number on every architecture (Linux 5.1 / 5.3)
+    private const long SysPidfdSendSignal = 424, SysPidfdOpen = 434;
     private const int SIGTERM = 15, SIGKILL = 9;
     // how long a process asked to stop gets before it is killed (one budget for the whole batch)
     private const int TermGraceMs = 2000;
@@ -24,16 +28,14 @@ public static class LegacyTakeover
     private static string ConfigFile(string name) => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "liascape", name);
 
-    // Both halves; returns how many wallpaper processes it stopped (the caller replays the session when any).
-    public static int Run()
-    {
-        StopDaemons();
-        return StopWallpapers();
-    }
+    // Both halves; returns how many processes of an older build's session it stopped (the caller replays the session when
+    // any: a timer-daemon alone is a rotation between two wallpapers).
+    // Guard: scripts/test-player-binary.sh § a timer-daemon alone
+    public static int Run() => StopDaemons() + StopWallpapers();
 
     // A timer-daemon / restart-daemon / monitor-daemon an older build left: verified by its command line (a pid file
-    // outlives a reboot: its number may belong to anything by now); its pid file goes with it.
-    public static void StopDaemons()
+    // outlives a reboot: its number may belong to anything by now); its pid file goes with it. Returns how many it stopped.
+    public static int StopDaemons()
     {
         var stopping = new List<(int pid, ulong start, string what)>();
         foreach (var (pidFile, verb) in new[] { (ConfigFile("timer.pid"), "timer-daemon"), (ConfigFile("restart.pid"), "restart-daemon"), (ConfigFile("monitor.pid"), "monitor-daemon") })
@@ -53,6 +55,7 @@ public static class LegacyTakeover
             catch { }
         }
         Stop(stopping);
+        return stopping.Count;
     }
 
     // Every wallpaper process of an older build's session of THIS user: matched by program name (argv[0] or the
@@ -93,36 +96,77 @@ public static class LegacyTakeover
 
     // SIGTERM each with its process tree (a daemon's children, a wallpaper's helpers — a whole-tree kill, as the build
     // that started them did), then SIGKILL whatever is still there once the grace ran out. Each process is known by its
-    // pid AND its start time (`/proc/<pid>/stat` field 22) from the moment it was matched: a pid that exited and was
-    // reused meanwhile is never signalled. Guard: scripts/test-player-binary.sh § a legacy settings file
+    // pid AND its start time (`/proc/<pid>/stat` field 22) from the moment it was matched, and signalled through a pidfd
+    // opened before that start time is checked again: the fd stays bound to the process checked, so a pid that exited and
+    // was reused meanwhile is never signalled (a kernel without pidfds: the start-time check right before kill(2)).
+    // Guard: scripts/test-player-binary.sh § a legacy settings file
     private static void Stop(List<(int pid, ulong start, string what)> procs)
     {
         if (procs.Count == 0) return;
-        var targets = new List<(int pid, ulong start)>();
+        var targets = new List<Target>();
         var all = Snapshot();
-        foreach (var (pid, start, what) in procs)
+        try
         {
-            if (!all.TryGetValue(pid, out var root) || root.start != start) continue; // gone already (or its pid reused)
-            var tree = new List<(int pid, ulong start)> { (pid, start) };
-            for (int i = 0; i < tree.Count; i++)
-                foreach (var (child, st) in all)
-                    if (st.ppid == tree[i].pid && !tree.Any(t => t.pid == child)) tree.Add((child, st.start));
-            foreach (var t in tree) if (Same(t)) kill(t.pid, SIGTERM);
-            targets.AddRange(tree);
-            LiascapePlayerClient.Log($"stopped {what} (pid {pid}){(tree.Count > 1 ? $" with {tree.Count - 1} child process(es)" : "")}");
+            foreach (var (pid, start, what) in procs)
+            {
+                if (!all.TryGetValue(pid, out var root) || root.start != start) continue; // gone already (or its pid reused)
+                var tree = new List<(int pid, ulong start)> { (pid, start) };
+                for (int i = 0; i < tree.Count; i++)
+                    foreach (var (child, st) in all)
+                        if (st.ppid == tree[i].pid && !tree.Any(t => t.pid == child)) tree.Add((child, st.start));
+                foreach (var (p, st) in tree)
+                {
+                    var t = Target.Open(p, st);
+                    if (t == null) continue; // gone already
+                    targets.Add(t);
+                    t.Signal(SIGTERM);
+                }
+                LiascapePlayerClient.Log($"stopped {what} (pid {pid}){(tree.Count > 1 ? $" with {tree.Count - 1} child process(es)" : "")}");
+            }
+            var deadline = Environment.TickCount64 + TermGraceMs;
+            var left = targets.Where(t => t.Alive).ToList();
+            while (left.Count > 0 && Environment.TickCount64 < deadline)
+            {
+                Thread.Sleep(50);
+                left.RemoveAll(t => !t.Alive);
+            }
+            foreach (var t in left)
+            {
+                if (!t.Alive) continue;
+                t.Signal(SIGKILL);
+                LiascapePlayerClient.Log($"pid {t.Pid} ignored SIGTERM for {TermGraceMs} ms — SIGKILL");
+            }
         }
-        var deadline = Environment.TickCount64 + TermGraceMs;
-        var left = targets.Where(Same).ToList();
-        while (left.Count > 0 && Environment.TickCount64 < deadline)
+        finally { foreach (var t in targets) t.Dispose(); }
+    }
+
+    // One process to stop: its pid, the start time it was matched with, and a pidfd bound to it (-1: no pidfd support).
+    private sealed class Target(int pid, ulong start, int fd) : IDisposable
+    {
+        public int Pid => pid;
+        private int _fd = fd;
+
+        // null when the process is gone or its pid now names another process
+        public static Target? Open(int pid, ulong start)
         {
-            Thread.Sleep(50);
-            left.RemoveAll(t => !Same(t));
+            int fd = (int)syscall(SysPidfdOpen, pid, 0, 0, 0);
+            if (Same((pid, start))) return new Target(pid, start, fd);
+            if (fd >= 0) close(fd);
+            return null;
         }
-        foreach (var t in left)
+
+        public bool Alive => Same((pid, start));
+
+        public void Signal(int sig)
         {
-            if (!Same(t)) continue;
-            kill(t.pid, SIGKILL);
-            LiascapePlayerClient.Log($"pid {t.pid} ignored SIGTERM for {TermGraceMs} ms — SIGKILL");
+            if (_fd >= 0) syscall(SysPidfdSendSignal, _fd, sig, 0, 0);
+            else if (Same((pid, start))) kill(pid, sig);
+        }
+
+        public void Dispose()
+        {
+            if (_fd >= 0) close(_fd);
+            _fd = -1;
         }
     }
 

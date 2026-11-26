@@ -9,8 +9,12 @@
 #          alone; an /apply plays on exactly one player (`serve` on this run's socket); the next save drops PlayerEngine and
 #          RestartMpvpaperEverySeconds.
 #  missing: no binary resolves → /player-engine says why, /apply answers non-2xx with that reason, /health/features
-#          marks liascape-player missing; the log says why once over attempts 11 s apart.
-#  appears later: the binary appears (a rebuild, a store path after boot) → the next /apply plays, no backend restart.
+#          marks liascape-player missing; the log says why once over attempts 11 s apart (a `play` among them).
+#  a timer-daemon alone: an older build's rotation between two wallpapers (no wallpaper process) is stopped at `serve`
+#          start and LastSession plays on the player.
+#  kill:   `liascape kill` stops a legacy wallpaper of this HOME too.
+#  appears later: the binary appears (a rebuild, a store path after boot) → the next /apply plays, no backend restart;
+#          removed again → the next /apply refuses with the reason.
 #  stub never plays: LIASCAPE_PLAYER_BIN at an `exit 1` stub (what the other hermetic suites use to keep a player
 #          away) → an /apply tries it and no real `liascape-player serve` ever runs.
 # The player is the repo's debug build behind a wrapProgram-style wrapper that adds `--headless --outputs 640x360@60
@@ -67,9 +71,20 @@ export HOME=$H XDG_CONFIG_HOME=$H/.config XDG_CACHE_HOME=$H/.cache XDG_DATA_HOME
 export LIASCAPE_PLAYER_SOCKET=$XDG_RUNTIME_DIR/liascape-player.sock
 export DBUS_SESSION_BUS_ADDRESS=unix:path=$T/no-bus LIASCAPE_SECRETS=file DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 export LIASCAPE_TRANSITIONS_DIR=$ROOT/transitions
-# no liascape-player on PATH: § missing must find none anywhere
-PATH=$(printf '%s' "$PATH" | tr ':' '\n' | while read -r d; do [ -n "$d" ] && [ ! -e "$d/liascape-player" ] && printf '%s:' "$d"; done)
-export PATH=${PATH%:}
+# no liascape-player on PATH (§ missing must find none anywhere), every other program kept: a PATH folder that holds one
+# (an installed player in /usr/bin, next to ln, cat and ffmpeg) is replaced by a folder of links to everything else in it
+np=""; i=0
+IFS=: read -ra pdirs <<<"$PATH"
+for d in "${pdirs[@]}"; do
+  [ -n "$d" ] || continue
+  if [ -e "$d/liascape-player" ]; then
+    i=$((i + 1)); mkdir -p "$T/path/$i"
+    find "$d" -mindepth 1 -maxdepth 1 ! -name liascape-player -exec ln -s -t "$T/path/$i" {} + 2>/dev/null
+    d=$T/path/$i
+  fi
+  np=$np${np:+:}$d
+done
+export PATH=$np
 SJ=$XDG_CONFIG_HOME/liascape/settings.json
 LOG=$T/backend.log
 PASS=0; FAIL=0
@@ -186,6 +201,30 @@ api -o /dev/null -X POST "$U/settings" -d '{"Volume":70}'
 stopbe
 kill "$MP_OTHER" 2>/dev/null
 
+echo "== an older build's timer-daemon alone (between two wallpapers): stopped, and the last session plays on the player"
+# nothing to bring back from the player's own snapshot: what plays can only be the replayed LastSession
+rm -f "$XDG_STATE_HOME/liascape/liascape-player/snapshot.json"
+jq --arg v "$V1" '.LastSession = {Paths: [$v]}' "$SJ" > "$SJ.tmp" && mv "$SJ.tmp" "$SJ"
+(exec -a liascape-backend bash -c 'sleep 300 & wait' liascape-backend timer-daemon) & TD=$!
+echo "$TD" > "$XDG_CONFIG_HOME/liascape/timer.pid"
+disown $TD
+sleep 0.3
+[ -z "$(players)" ] && [ -z "$(named_with_home mpvpaper "$HOME")" ] || bad "precondition: a player or a legacy wallpaper still runs — this proved nothing"
+startbe
+for _ in $(seq 1 50); do kill -0 "$TD" 2>/dev/null || break; sleep 0.1; done
+! kill -0 "$TD" 2>/dev/null && ok "serve start stopped the leftover timer-daemon" || bad "the leftover timer-daemon outlived serve start"
+waitcur "$V1" 300 && ok "…and the session it was rotating plays on liascape-player (v1.mp4)" || bad "a stopped timer-daemon alone didn't replay the last session: /current $(current)"
+stopbe
+
+echo "== kill: an older build's wallpaper left on screen goes too"
+(fake mpvpaper 'exit 0') & MP_OURS=$!
+disown $MP_OURS
+sleep 0.3
+[ "$(named_with_home mpvpaper "$HOME")" = "$MP_OURS" ] || bad "precondition: the fake mpvpaper isn't what this run sees — this proved nothing"
+(cd /tmp && timeout 30 "$DOTNET" "$DLL" kill >> "$LOG" 2>&1)
+for _ in $(seq 1 30); do kill -0 "$MP_OURS" 2>/dev/null || break; sleep 0.1; done
+! kill -0 "$MP_OURS" 2>/dev/null && ok "\`liascape kill\` stopped this session's legacy mpvpaper" || bad "a legacy mpvpaper of this HOME outlived \`liascape kill\`"
+
 echo "== missing: no player binary anywhere"
 export LIASCAPE_PLAYER_BIN=$T/bin/absent
 startbe
@@ -199,8 +238,11 @@ case "$code" in 2??) bad "/apply without a binary → HTTP $code (a silent black
 hf=$(api "$U/health/features" | jq -c '.features[] | select(.id == "liascape-player") | [.ok, .inUse, (.reason // "" | test("binary not found"))]')
 [ "$hf" = '[false,true,true]' ] && ok "/health/features: liascape-player missing, in use, with the reason" || bad "/health/features liascape-player: $hf"
 # every attempt looks again; the log says why once, not once per attempt (past the log's own 10 s repeat limit)
+api -o /dev/null -X POST "$U/action" -d '{"name":"play"}'
 sleep 11
 api -o /dev/null -X POST "$U/apply" -d "{\"path\":\"$V1\"}"; api -o /dev/null "$U/player-engine"; api -o /dev/null "$U/health/features"
+# `play` (Restore) asks EnsureRunning, which must not say it again either
+api -o /dev/null -X POST "$U/action" -d '{"name":"play"}'
 AL=$XDG_CACHE_HOME/liascape/liascape-player-adapter.log
 nf=$(grep -c "liascape-player binary not found" "$AL" 2>/dev/null); ne=$(grep -c "LIASCAPE_PLAYER_BIN=.* does not exist" "$AL" 2>/dev/null)
 [ "${nf:-0}" = 1 ] && [ "${ne:-0}" = 1 ] && ok "the missing binary's reason is logged once over attempts 11 s apart" \
@@ -212,6 +254,14 @@ t0=$(date +%s%3N)
 code=$(api -o "$T/apply.txt" -w '%{http_code}' -X POST "$U/apply" -d "{\"path\":\"$V1\"}")
 if waitcur "$V1" 100; then ok "/apply → HTTP $code, v1.mp4 plays $(( $(date +%s%3N) - t0 )) ms after the binary appeared"
 else bad "/apply after the binary appeared: HTTP $code $(head -c 300 "$T/apply.txt"), /current $(current) after 10 s"; fi
+
+echo "== removed again: the binary found before is gone → the next /apply refuses with the reason (no backend restart)"
+"$B" ctl --timeout-ms 1000 quit >/dev/null 2>&1
+for _ in $(seq 1 50); do [ -z "$(players)" ] && break; sleep 0.1; done
+rm -f "$T/bin/absent" "$T/bin/.absent-wrapped"
+code=$(api -o "$T/apply.txt" -w '%{http_code}' -X POST "$U/apply" -d "{\"path\":\"$V2\"}")
+case "$code" in 2??) bad "/apply after the binary was removed → HTTP $code (a silent black screen)" ;;
+  *) grep -q "liascape-player binary not found" "$T/apply.txt" && ok "/apply → HTTP $code with the reason" || bad "/apply → HTTP $code without the reason: $(head -c 300 "$T/apply.txt")" ;; esac
 stopbe
 
 echo "== the stub never plays: an /apply tries it, no real player runs"

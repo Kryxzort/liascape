@@ -36,8 +36,8 @@ evidence.
 
 - **Binary** (`PlayerStatus.ResolveBinary`): `LIASCAPE_PLAYER_BIN` → next to the running liascape executable → the
   dev tree `src/player/target/{release,debug}/liascape-player` (release first: debug is `opt-level 0` and the player
-  mixes audio itself) → `PATH`. Missing → every apply fails with the reason (`/player-engine` too, logged once per
-  reason); one that appears later plays.
+  mixes audio itself) → `PATH`. Cached while the file found is there. Missing → every apply fails with the reason
+  (`/player-engine` too, logged once per reason); one that appears later plays, one removed since is missing again.
 - **Start** (`EnsureRunning`, only from a switch): `setsid [systemd-run --scope] sh -c 'exec … serve'` with the
   session's environment, waiting ≤ 3 s for the socket. Once this client has talked to a player it restarts with that player's
   own arguments + `--restore` (`UserServeArgs`, from the supervisor's cmdline minus `--supervised`, `--restore`,
