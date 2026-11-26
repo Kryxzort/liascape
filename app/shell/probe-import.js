@@ -50,7 +50,9 @@
 //   import:link:workshop  a Workshop item's link (/library/link answered in the page) says which way its download goes, the
 //                       Browse sidebar's line (components/subscribeMode.ts downloadHint), in --subtext, Import on: "Subscribe
 //                       with Steam login" signed out (the stack has no sign-in) → "Opens its Steam page for you to subscribe,
-//                       …"; under "Use the Steam app" → "Subscribes through the Steam app, …"
+//                       …"; under "Use the Steam app" → "Subscribes through the Steam app, …"; a sign-in turning usable
+//                       while the dialog is open (WS steam-status) cross-fades the words in place (per frame; motion off and
+//                       reduced motion: only fade, nothing moves, motion-off.js)
 //   import:link:look    the error line in --danger, where it comes from in --subtext, the chip in --accent, the progress fill
 //                       in --accent with its glow (none under no-glow), bg-live keeps the dialog's fill; pictures
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
@@ -779,7 +781,50 @@ app.whenReady().then(async () => {
         h = await hint();
         if (h?.text !== APP) v.push(`under Use the Steam app: ${J(h)}, want ${J(APP)}`);
         await closeDialog();
-      } finally { await setSettings({ WorkshopDownloadMode: "steamapp" }); }
+        // live: the sign-in turns usable (a WS steam-status the page's socket gets, its sockets kept from before the app's
+        // own scripts) while the dialog shows the link — the page's words give way to the login's in place
+        const LOGIN = "Subscribes with your Steam login, then adds it to your library";
+        // per frame, the line holding these words: motion-off.js's frame [t, op, x, y, w, h] (op as seen, the product up the
+        // tree), [t, null] while it isn't there
+        const BY_WORDS = (words, ms) => `(() => new Promise((res) => { const W = ${J(words)}, out = {}; for (const k in W) out[k] = [];
+          const t0 = performance.now();
+          const f = () => { const t = Math.round(performance.now() - t0);
+            for (const k in W) { const e = [...document.querySelectorAll("[data-import-link-hint]")].find((x) => x.textContent === W[k] && x.getClientRects().length);
+              if (!e) { out[k].push([t, null]); continue; }
+              let op = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
+              const r = e.getBoundingClientRect(); out[k].push([t, +op.toFixed(3), +r.x.toFixed(1), +r.y.toFixed(1), +r.width.toFixed(1), +r.height.toFixed(1)]); }
+            if (t < ${ms}) requestAnimationFrame(f); else res(out); };
+          requestAnimationFrame(f); }))()`;
+        const d = win.webContents.debugger;
+        if (!d.isAttached()) d.attach("1.3");
+        await d.sendCommand("Page.enable"); // the script below runs on the next load only with the Page domain on
+        const { identifier } = await d.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const R = window.WebSocket, socks = [];
+          window.WebSocket = class extends R { constructor(...a) { super(...a); socks.push(this); } };
+          window.__fakeWs = (type, payload) => { let n = 0; for (const s of socks) if (s.readyState === 1 && s.onmessage) { s.onmessage({ data: JSON.stringify({ type, payload }) }); n++; } return n; }; })()` });
+        try {
+          for (const mode of ["on", "off", "reduced"]) {
+            await setSettings({ WorkshopDownloadMode: "subscribe", Morphs: mode !== "off" }); await reducedMotion(mode === "reduced");
+            why = await open();
+            if (why) { v.push(`live, motion ${mode}: ${why}`); continue; }
+            if (!(await waitFor(() => js(`return (window.__fakeWs?.("noop", null) ?? 0) > 0`), 5000))) { v.push(`live, motion ${mode}: the page's socket never opened — proved nothing`); continue; }
+            if ((await hint())?.text !== PAGE) { v.push(`live, motion ${mode}: signed out, the line reads ${J((await hint())?.text ?? null)} — proved nothing`); continue; }
+            // the line's own fade in (the dialog's link line) over first: its in-between frames would pass for the swap's
+            const settled = await waitFor(() => js(`const e = document.querySelector("[data-import-link-hint]"); if (!e) return false;
+              let op = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity; return op >= 0.99`), 3000, 50);
+            if (!settled) { v.push(`live, motion ${mode}: the line never settled at full opacity — proved nothing`); await closeDialog(); continue; }
+            await sleep(100);
+            const smp = js(`return await ${BY_WORDS({ old: PAGE, now: LOGIN }, 700)}`); await sleep(50);
+            await js(`window.__fakeWs("steam-status", ${J({ signedIn: true, rejected: false, usable: true, accountName: "probe", daysLeft: 200, mode: "subscribe", appConnected: false })}); return true`);
+            if (mode === "on") { await sleep(60); fs.writeFileSync(path.join(OUT, "import-link-workshop-live.png"), (await win.webContents.capturePage()).toPNG()); } // mid cross-fade
+            const fr = await smp;
+            const still = mode !== "on"; // motion on: the new words rise 4 px as they fade in
+            v.push(...judge(`live, motion ${mode}: the login's words`, fr.now, { appear: true, still }),
+              ...judge(`live, motion ${mode}: the page's words`, fr.old, { leave: true, still }));
+            if ((await hint())?.text !== LOGIN) v.push(`live, motion ${mode}: after the sign-in the line reads ${J((await hint())?.text ?? null)}, want ${J(LOGIN)}`);
+            await closeDialog();
+          }
+        } finally { await d.sendCommand("Page.removeScriptToEvaluateOnNewDocument", { identifier }); await reducedMotion(false); }
+      } finally { await setSettings({ WorkshopDownloadMode: "steamapp", Morphs: true }); }
       return v;
     });
 

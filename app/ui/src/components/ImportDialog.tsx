@@ -272,8 +272,17 @@ function LinkLine({ text, found, importing, failed }: {
               {t.inLibrary && <span className="imp-have">In your library</span>}
             </div>
             {/* a Workshop item: which way its download goes in the chosen mode and sign-in, the Browse sidebar's line (the
-                page when there's no usable sign-in under "Subscribe with Steam login"). Guard: probe-import import:link:workshop */}
-            {wsHint && !t.inLibrary && <p className="imp-link-hint" data-import-link-hint>{wsHint}</p>}
+                page when there's no usable sign-in under "Subscribe with Steam login"); a live change (a sign-out, the mode)
+                cross-fades the words in one cell (index.css .imp-link-hints), motion off on opacity alone.
+                Guard: probe-import import:link:workshop */}
+            <div className="imp-link-hints">
+              <AnimatePresence initial={false}>
+                {wsHint && !t.inLibrary && (
+                  <motion.p key={wsHint} className="imp-link-hint" data-import-link-hint
+                    {...fadeOff({ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.16 } })}>{wsHint}</motion.p>
+                )}
+              </AnimatePresence>
+            </div>
             {/* the last import's failure: under the item, which stays so Import can try again */}
             <AnimatePresence initial={false}>
               {failed && !importing && (

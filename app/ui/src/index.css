@@ -2368,6 +2368,9 @@ button.side-pill.copy { overflow: hidden; }
 .imp-link-what .imp-title { font-weight: 600; font-size: 14px; }
 .imp-link-what .imp-dir { flex: none; font-size: 12px; color: var(--subtext); }
 /* a Workshop item's line: which way its download goes (components/subscribeMode.ts downloadHint) */
+.imp-link-hints { display: grid; }
+.imp-link-hints > * { grid-area: 1 / 1; align-self: start; } /* the old words and the new overlap while they cross-fade */
+.imp-link-hints:empty { display: none; }
 .imp-link-hint { margin: 6px 0 0; padding: 0 6px; font-size: 12px; color: var(--subtext); }
 /* the last import's failure, under the item it was for (Import tries again) */
 .imp-link-failed { margin: 6px 0 0; padding: 0 6px; }
