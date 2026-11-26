@@ -60,6 +60,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (a parked or ramped-out source that `ShowsAnything` counts as shown?) and that a session start after `stop` puts
        a wallpaper on screen. Not `play` / `toggle-play` mid-session: a stop there still holds. Guard:
        `scripts/test-liascape-player-adapter.sh` (stop → player restart as a session start → a wallpaper on screen).
+141. [ ] (owner) A thumbnail follows its file when the file changes in place: Steam re-downloading an item (or a
+       Redownload) rewrites `preview.gif` at the same path, the backend's still / anim / clip caches are keyed by the
+       file's mtime, but the card's URL (`/still?u=<path>&w=`) never changes, so the window keeps the old (here empty)
+       picture until its HTTP cache is cleared. Version the media URLs by the file (mtime / size in the query, from the
+       library item), and have a Workshop folder that changes on disk broadcast `library-item-changed` (also clearing
+       `downloadIncomplete`). Guard: a probe cell that rewrites a fixture's preview in place and sees the card's
+       picture change without a reload.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
