@@ -1,7 +1,7 @@
 From c18727cce7ceff53ab8da83089e9f7a60e7346b0 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Thu, 26 Nov 2026 15:30:40 +0530
-Subject: [PATCH 143/143] video: a video file in a slot opens only as MP4,
+Subject: [PATCH 143/144] video: a video file in a slot opens only as MP4,
  QuickTime, Matroska or WebM
 
 A host's video file in a texture slot (a Wallpaper Engine preset's own `files/<name>.mp4`, from someone else's Workshop

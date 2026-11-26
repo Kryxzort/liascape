@@ -1,7 +1,7 @@
 From 5a14aee43cae93eaa8371fd9fb58e6de5925b1d8 Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Fri, 20 Nov 2026 02:03:27 +0530
-Subject: [PATCH 135/143] video: the host chooses its video players' hwdec and
+Subject: [PATCH 135/144] video: the host chooses its video players' hwdec and
  interop
 
 Every video player (a video texture, a video wallpaper) asked libmpv for `hwdec=auto` and left `gpu-hwdec-interop` at

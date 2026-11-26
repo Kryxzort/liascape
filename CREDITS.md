@@ -175,3 +175,4 @@ https://github.com/gl-transitions/gl-transitions — MIT (`transitions/LICENSE.g
 | lwe | `0141-render-an-image-file-over-64-Mpx-keeps-the-slot-s-te.patch` | render: an image file over 64 Mpx keeps the slot's texture, and none is read past the cap | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0142-render-a-scenetexture-set-to-a-video-file-s-path-pla.patch` | render: a scenetexture set to a video file's path plays that video | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
 | lwe | `0143-video-a-video-file-in-a-slot-opens-only-as-MP4-Quick.patch` | video: a video file in a slot opens only as MP4, QuickTime, Matroska or WebM | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |
+| lwe | `0144-puppet-a-skeleton-s-explicit-matrices-are-its-rest-p.patch` | puppet: a skeleton's explicit matrices are its rest pose | ours | Kryxzort <101042137+Kryxzort@users.noreply.github.com> |

@@ -1,7 +1,7 @@
 From 1656c24445b147c7d330bda4ddc3460a204bde2b Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 08:08:21 +0530
-Subject: [PATCH 140/143] render: an image file over 64 MiB or 16384 px a side
+Subject: [PATCH 140/144] render: an image file over 64 MiB or 16384 px a side
  keeps the slot's texture
 
 Any texture name that is an absolute path ending in an image extension takes the image-file route, and a scene's own

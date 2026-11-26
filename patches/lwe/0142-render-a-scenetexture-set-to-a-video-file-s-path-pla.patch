@@ -1,7 +1,7 @@
 From d4d351b55118de49f8ab6c204121e9f8dddbcd4b Mon Sep 17 00:00:00 2001
 From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 17:50:18 +0530
-Subject: [PATCH 142/143] render: a scenetexture set to a video file's path
+Subject: [PATCH 142/144] render: a scenetexture set to a video file's path
  plays that video
 
 A Wallpaper Engine preset can put a video of its own (`files/<name>.mp4`) where its base scene has an image slot, and

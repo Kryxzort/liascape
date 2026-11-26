@@ -1,0 +1,383 @@
+From 50eca85eb0dd37b95be9817cfe1486ee928a7173 Mon Sep 17 00:00:00 2001
+From: Kryxzort <101042137+Kryxzort@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 20:14:22 +0530
+Subject: [PATCH 144/144] puppet: a skeleton's explicit matrices are its rest
+ pose
+
+A puppet whose skeleton (MDLS v2+) carries its flagged block of explicit matrices drew its parts apart under its
+animation layers. Workshop 3071833748's fringe hung over the lower face as a dark blob beside a bald forehead, and
+3102766419's hair and pink pieces floated off a bald head. The loader skipped that block as redundant inverse binds and
+took the bone matrices for both the bind and the rest pose. But in these files the bone matrices sit on the parts as
+the puppet's image lays them out (apart), the explicit matrices are where the parts go (together), and the animations
+are keyed at the explicit pose, up to 960 px from the bone matrices. An additive layer adds its sample minus the rest,
+so each one moved the parts only that fraction of the way: a third, in 3071833748.
+
+Wallpaper Engine 2.8.797 reads a bone's rest matrix through one getter (GH 0x140249ec0; the IK targets' GH 0x140249ef0):
+the explicit matrix when the file has them, else the bone's own. Its animator (GH 0x14024d9a0) takes that for the rest
+pose the layers mix from and for the pose with no layer, while the inverse binds come from the bone matrices
+(GH 0x14024b710). So the core now keeps both per bone: `local`, the bind the inverse binds are built from, and `rest`,
+the explicit matrix when there is one; `restPose` (was `bindPose`) decomposes the rest, and an IK target's matrix is its
+explicit one. A puppet whose rest isn't its bind is skinned even without an animation, and the autosize canvas measures
+its rest pose too.
+
+Tested by liascape's patches/lwe/tests/puppet_test.cpp, which compiles this file in and poses 3071833748's own skeleton
+values: at frame 0 its two additive layers leave a fringe vertex where the rest pose puts it, its bone's rest world
+minus its bind world (560.2, -652.5) px from the mesh, and at frame 30 they turn it about bones 1 and 2 as worked out
+by hand; a skeleton without the block rests at its bone matrices and skins to the mesh. Red on c18727c (the fringe a
+third of the way: (190.5, -221.9) px).
+
+Origin: ours
+Why: Workshop scenes 3071833748 and 3102766419 (and 3013489778's other puppet) drew their characters apart
+Status: candidate-for-upstream
+Co-Authored-By: Claude Opus 5.5, effort high <noreply@anthropic.com>
+---
+ .../WallpaperEngine/Render/Objects/CImage.cpp | 49 +++++++++++--------
+ .../WallpaperEngine/Render/Objects/CImage.h   |  6 +--
+ .../WallpaperEngine/Render/Objects/CModel.cpp |  6 +--
+ .../WallpaperEngine/Render/Objects/CModel.h   |  2 +-
+ .../WallpaperEngine/Render/Objects/Puppet.cpp | 46 ++++++++++-------
+ .../WallpaperEngine/Render/Objects/Puppet.h   | 26 ++++++----
+ 6 files changed, 81 insertions(+), 54 deletions(-)
+
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.cpp b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+index e25ae86..1b89220 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.cpp
+@@ -507,8 +507,8 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	    return false;
+ 	}
+ 
+-	this->m_puppetBind = Puppet::bindPose (this->m_puppet);
+-	this->m_puppetTargetBind = Puppet::targetBindPose (this->m_puppet);
++	this->m_puppetRest = Puppet::restPose (this->m_puppet);
++	this->m_puppetTargetRest = Puppet::targetRestPose (this->m_puppet);
+ 	Puppet::bindWorldMatrices (this->m_puppet, this->m_puppetBindWorldInverse);
+ 	for (auto& m : this->m_puppetBindWorldInverse) {
+ 	    m = glm::inverse (m);
+@@ -518,7 +518,11 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ 	    this->m_puppetLayers.push_back ({ .blendIn = layer->blendIn, .layer = layer.get (),
+ 					      .key = this->m_nextAnimationLayerKey++, .name = layer->name });
+ 	}
+-	this->m_puppetSkinned = !this->m_puppet.bones.empty () && !this->m_puppet.animations.empty ();
++	// a skeleton whose rest pose isn't its bind (MDLS v2's explicit matrices) poses the mesh with no animation too
++	const bool restMoves = std::ranges::any_of (this->m_puppet.bones, [] (const Puppet::Bone& bone) {
++	    return bone.rest != bone.local;
++	});
++	this->m_puppetSkinned = !this->m_puppet.bones.empty () && (!this->m_puppet.animations.empty () || restMoves);
+ 	this->m_puppetMorphed = !this->m_puppetShapes.empty ();
+ 	// a vertex alpha (genericimage4's SKINNING_ALPHA and MORPHING both multiply v_VertexAlpha in): bone alpha tracks
+ 	// or target alphas below 1
+@@ -576,22 +580,27 @@ bool CImage::loadPuppetMesh (const glm::vec2& size) {
+ }
+ 
+ glm::vec2 CImage::puppetCanvasSize (const glm::vec2& size) const {
+-    // (PR #625's autosize: measure the mesh in every frame of every animation, grow the canvas symmetrically)
++    // (PR #625's autosize: measure the mesh in every frame of every animation, grow the canvas symmetrically; the rest
++    // pose too, which places the parts on its own when it isn't the bind)
+     float maxX = size.x / 2.0f, maxY = size.y / 2.0f;
+     std::vector<glm::mat4> world, skinning (this->m_puppet.bones.size ());
++    const auto measure = [&] (const std::vector<Puppet::Key>& pose) {
++	Puppet::worldMatrices (this->m_puppet, pose, world);
++	for (size_t b = 0; b < world.size (); b++) {
++	    skinning[b] = world[b] * this->m_puppetBindWorldInverse[b];
++	}
++	for (const auto& vertex : this->m_puppetVertices) {
++	    const glm::vec3 p = Puppet::skin (vertex, skinning);
++	    maxX = std::max (maxX, std::abs (p.x));
++	    maxY = std::max (maxY, std::abs (p.y));
++	}
++    };
++    measure (this->m_puppetRest);
+     for (const auto& animation : this->m_puppet.animations) {
+ 	for (uint32_t frame = 0; frame <= animation.frames; frame++) {
+-	    std::vector<Puppet::Key> pose = this->m_puppetBind;
+-	    Puppet::mix (pose, this->m_puppetBind, animation, static_cast<float> (frame) / animation.fps, 1.0f, false);
+-	    Puppet::worldMatrices (this->m_puppet, pose, world);
+-	    for (size_t b = 0; b < world.size (); b++) {
+-		skinning[b] = world[b] * this->m_puppetBindWorldInverse[b];
+-	    }
+-	    for (const auto& vertex : this->m_puppetVertices) {
+-		const glm::vec3 p = Puppet::skin (vertex, skinning);
+-		maxX = std::max (maxX, std::abs (p.x));
+-		maxY = std::max (maxY, std::abs (p.y));
+-	    }
++	    std::vector<Puppet::Key> pose = this->m_puppetRest;
++	    Puppet::mix (pose, this->m_puppetRest, animation, static_cast<float> (frame) / animation.fps, 1.0f, false);
++	    measure (pose);
+ 	}
+     }
+     return { std::ceil (maxX) * 2.0f, std::ceil (maxY) * 2.0f };
+@@ -610,9 +619,9 @@ void CImage::updatePuppetPose () {
+     this->m_puppetPoseDirty = false;
+ 
+     // GH 0x140228470: from the bind pose, every visible layer in order; its clock runs at dt · rate
+-    std::vector<Puppet::Key> pose = this->m_puppetBind;
++    std::vector<Puppet::Key> pose = this->m_puppetRest;
+     // the IK targets move with the animations as the bones do (their MDLA v2 tracks)
+-    std::vector<Puppet::Key> targets = this->m_puppetTargetBind;
++    std::vector<Puppet::Key> targets = this->m_puppetTargetRest;
+     std::vector<float> boneAlpha (this->m_puppet.bones.size (), 1.0f);
+     std::vector<std::vector<float>> shapeWeights = this->m_puppetShapeWeights;
+     for (auto& weights : shapeWeights) {
+@@ -645,8 +654,8 @@ void CImage::updatePuppetPose () {
+ 	}
+ 	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
+ 						  layer.blendOut, layer.blendTime);
+-	Puppet::mix (pose, this->m_puppetBind, *match, state.clock.time, weight, layer.additive);
+-	Puppet::mixTargets (targets, this->m_puppetTargetBind, *match, state.clock.time, weight, layer.additive);
++	Puppet::mix (pose, this->m_puppetRest, *match, state.clock.time, weight, layer.additive);
++	Puppet::mixTargets (targets, this->m_puppetTargetRest, *match, state.clock.time, weight, layer.additive);
+ 	Puppet::mixExtras (boneAlpha, shapeWeights, *match, state.clock.time, weight, layer.additive);
+     }
+     for (const auto& [index, weight] : this->m_shapeOverrides) {
+@@ -809,7 +818,7 @@ void CImage::puppetBonePose (std::vector<glm::mat4>& local, std::vector<glm::mat
+ 	    local[b] = glm::translate (glm::mat4 (1.0f), key.position) * glm::mat4_cast (key.rotation)
+ 		* glm::scale (glm::mat4 (1.0f), key.scale);
+ 	} else {
+-	    local[b] = bones[b].local;
++	    local[b] = bones[b].rest;
+ 	}
+     }
+     world.assign (bones.size (), glm::mat4 (1.0f));
+diff --git a/src/core/WallpaperEngine/Render/Objects/CImage.h b/src/core/WallpaperEngine/Render/Objects/CImage.h
+index 65b4900..b24be77 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CImage.h
++++ b/src/core/WallpaperEngine/Render/Objects/CImage.h
+@@ -222,9 +222,9 @@ private:
+     std::vector<GLfloat> m_puppetRawPositions = {};
+     std::vector<Puppet::Vertex> m_puppetVertices = {};
+     Puppet::Model m_puppet = {};
+-    std::vector<Puppet::Key> m_puppetBind = {};
+-    /** the IK targets' bind keys (Puppet::targetBindPose) */
+-    std::vector<Puppet::Key> m_puppetTargetBind = {};
++    std::vector<Puppet::Key> m_puppetRest = {};
++    /** the IK targets' rest keys (Puppet::targetRestPose) */
++    std::vector<Puppet::Key> m_puppetTargetRest = {};
+     std::vector<glm::mat4> m_puppetBindWorldInverse = {};
+     std::vector<glm::mat4> m_puppetWorld = {};
+     std::vector<PuppetLayerState> m_puppetLayers = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.cpp b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+index fb0e516..e2c32b9 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.cpp
+@@ -578,7 +578,7 @@ WPENGINE_HEALTH ("missing_asset", { { "kind", "model" }, { "path", file }, { "me
+     // bone count: GH 0x140230ec0 sets them for every skinned mesh); blend shapes (MDMP) through MORPHING
+     this->m_animated = !this->m_model.bones.empty () && !this->m_model.animations.empty ();
+     if (this->m_animated) {
+-	this->m_bind = Puppet::bindPose (this->m_model);
++	this->m_rest = Puppet::restPose (this->m_model);
+ 	Puppet::bindWorldMatrices (this->m_model, this->m_bindWorldInverse);
+ 	for (auto& m : this->m_bindWorldInverse) {
+ 	    m = glm::inverse (m);
+@@ -724,7 +724,7 @@ void CModel::updatePose () {
+     const float dt = this->m_poseTime < 0.0f ? 0.0f : std::max (now - this->m_poseTime, 0.0f);
+     this->m_poseTime = now;
+ 
+-    std::vector<Puppet::Key> pose = this->m_bind;
++    std::vector<Puppet::Key> pose = this->m_rest;
+     std::vector<float> alpha (this->m_model.bones.size (), 1.0f);
+     for (auto& weights : this->m_shapeWeights) {
+ 	std::fill (weights.begin (), weights.end (), 0.0f);
+@@ -739,7 +739,7 @@ void CModel::updatePose () {
+ 	Puppet::advance (*match, state.clock, dt * layer.rate->value->getFloat ());
+ 	const float weight = Puppet::layerWeight (*match, state.clock, layer.blend->value->getFloat (), state.blendIn,
+ 						  layer.blendOut, layer.blendTime);
+-	Puppet::mix (pose, this->m_bind, *match, state.clock.time, weight, layer.additive);
++	Puppet::mix (pose, this->m_rest, *match, state.clock.time, weight, layer.additive);
+ 	Puppet::mixExtras (alpha, this->m_shapeWeights, *match, state.clock.time, weight, layer.additive);
+     }
+     std::vector<glm::mat4> world;
+diff --git a/src/core/WallpaperEngine/Render/Objects/CModel.h b/src/core/WallpaperEngine/Render/Objects/CModel.h
+index 9221ceb..ff2643f 100644
+--- a/src/core/WallpaperEngine/Render/Objects/CModel.h
++++ b/src/core/WallpaperEngine/Render/Objects/CModel.h
+@@ -132,7 +132,7 @@ private:
+     uint32_t m_scriptVersion = 0;
+     uint32_t m_scriptRebuilt = 0;
+     std::vector<LayerState> m_layers = {};
+-    std::vector<Puppet::Key> m_bind = {};
++    std::vector<Puppet::Key> m_rest = {};
+     std::vector<glm::mat4> m_bindWorldInverse = {};
+     /** world (pose) · bindWorld⁻¹ per bone, as the shaders' mat4x3 */
+     std::vector<glm::mat4x3> m_skinning = {};
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+index f113f50..c411b23 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.cpp
+@@ -232,6 +232,7 @@ void parseSkeleton (Reader& r, int version, Model& out, SkeletonCounts& counts)
+ 	float m[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+ 	std::memcpy (m, r.data + at, std::min<size_t> (length, sizeof (m)));
+ 	std::memcpy (&bone.local, m, sizeof (m));
++	bone.rest = bone.local;
+ 	// the simulation settings (JSON, GH 0x14028bbd0): the IK keys
+ 	const std::string settings = r.str ();
+ 	if (settings.find ("\"ik\"") != std::string::npos) {
+@@ -264,10 +265,21 @@ void parseSkeleton (Reader& r, int version, Model& out, SkeletonCounts& counts)
+ 	    out.ikTargets.push_back (std::move (target));
+ 	}
+ 	if (r.u8 ()) {
+-	    // explicit matrices for the bones and the targets (the inverse binds WE recomputes anyway)
+-	    const size_t bytes = size_t (boneCount + counts.targets) * 64;
+-	    r.need (bytes);
+-	    r.at += bytes;
++	    // The rest matrices: one per bone (relative to its parent), then one per IK target. WE 2.8.797 reads a
++	    // bone's and a target's through one getter each (GH 0x140249ec0 / 0x140249ef0): these when the file has
++	    // them, else the bone's or target's own matrix. Its animator (GH 0x14024d9a0) takes them for the rest pose
++	    // the layers mix from (an additive layer's reference), while the inverse binds still come from the bone
++	    // matrices (GH 0x14024b710). The bone matrices lay the parts out as the puppet's image has them and the
++	    // rest pose puts them together, so the mesh is skinned even at rest: 3071833748's hair and face are apart
++	    // in its image, and its animations are keyed at this pose, up to 960 px from the bone matrices
++	    r.need (size_t (boneCount + counts.targets) * 64);
++	    const size_t firstBone = out.bones.size () - boneCount, firstTarget = out.ikTargets.size () - counts.targets;
++	    for (uint32_t i = 0; i < boneCount; i++, r.at += 64) {
++		out.bones[firstBone + i].rest = r.mat4 (r.at);
++	    }
++	    for (uint32_t i = 0; i < counts.targets; i++, r.at += 64) {
++		out.ikTargets[firstTarget + i].matrix = r.mat4 (r.at);
++	    }
+ 	}
+ 	counts.constraints = r.u32 ();
+ 	for (uint32_t i = 0; i < counts.constraints; i++) {
+@@ -677,15 +689,15 @@ float layerWeight (const Animation& animation, const Clock& clock, float blend,
+     return weight;
+ }
+ 
+-std::vector<Key> bindPose (const Model& model) {
++std::vector<Key> restPose (const Model& model) {
+     std::vector<Key> pose (model.bones.size ());
+     for (size_t b = 0; b < model.bones.size (); b++) {
+ 	glm::vec3 skew;
+ 	glm::vec4 perspective;
+ 	glm::quat rotation;
+-	if (!glm::decompose (model.bones[b].local, pose[b].scale, rotation, pose[b].position, skew, perspective)) {
++	if (!glm::decompose (model.bones[b].rest, pose[b].scale, rotation, pose[b].position, skew, perspective)) {
+ 	    pose[b] = Key ();
+-	    pose[b].position = glm::vec3 (model.bones[b].local[3]);
++	    pose[b].position = glm::vec3 (model.bones[b].rest[3]);
+ 	    continue;
+ 	}
+ 	pose[b].rotation = rotation;
+@@ -703,22 +715,22 @@ glm::quat nlerp (const glm::quat& from, const glm::quat& to, float t) {
+ } // namespace
+ 
+ namespace {
+-void mixTracks (std::vector<Key>& pose, const std::vector<Key>& bind, const std::vector<Track>& tracks,
++void mixTracks (std::vector<Key>& pose, const std::vector<Key>& rest, const std::vector<Track>& tracks,
+ 		const Animation& animation, float time, float weight, bool additive);
+ }
+ 
+-void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation& animation, float time, float weight,
++void mix (std::vector<Key>& pose, const std::vector<Key>& rest, const Animation& animation, float time, float weight,
+ 	  bool additive) {
+-    mixTracks (pose, bind, animation.tracks, animation, time, weight, additive);
++    mixTracks (pose, rest, animation.tracks, animation, time, weight, additive);
+ }
+ 
+-void mixTargets (std::vector<Key>& targets, const std::vector<Key>& bind, const Animation& animation, float time,
++void mixTargets (std::vector<Key>& targets, const std::vector<Key>& rest, const Animation& animation, float time,
+ 		 float weight, bool additive) {
+-    mixTracks (targets, bind, animation.targetTracks, animation, time, weight, additive);
++    mixTracks (targets, rest, animation.targetTracks, animation, time, weight, additive);
+ }
+ 
+ namespace {
+-void mixTracks (std::vector<Key>& pose, const std::vector<Key>& bind, const std::vector<Track>& tracks,
++void mixTracks (std::vector<Key>& pose, const std::vector<Key>& rest, const std::vector<Track>& tracks,
+ 		const Animation& animation, float time, float weight, bool additive) {
+     // GH 0x1401a00a0: a = clamp (⌊t / frame⌋, 0, frames − 1), b = min (a + 1, frames), the fraction within the frame
+     const float frame = 1.0f / animation.fps;
+@@ -741,9 +753,9 @@ void mixTracks (std::vector<Key>& pose, const std::vector<Key>& bind, const std:
+ 
+ 	Key& out = pose[i];
+ 	if (additive) {
+-	    out.position += (sample.position - bind[i].position) * weight;
+-	    out.scale += (sample.scale - bind[i].scale) * weight;
+-	    const glm::quat delta = sample.rotation * glm::conjugate (bind[i].rotation);
++	    out.position += (sample.position - rest[i].position) * weight;
++	    out.scale += (sample.scale - rest[i].scale) * weight;
++	    const glm::quat delta = sample.rotation * glm::conjugate (rest[i].rotation);
+ 	    out.rotation = glm::normalize (nlerp (glm::quat (1.0f, 0.0f, 0.0f, 0.0f), delta, weight) * out.rotation);
+ 	} else {
+ 	    out.position = sample.position * weight + out.position * (1.0f - weight);
+@@ -766,7 +778,7 @@ void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vecto
+     }
+ }
+ 
+-std::vector<Key> targetBindPose (const Model& model) {
++std::vector<Key> targetRestPose (const Model& model) {
+     std::vector<Key> keys (model.ikTargets.size ());
+     for (size_t t = 0; t < model.ikTargets.size (); t++) {
+ 	glm::vec3 skew;
+diff --git a/src/core/WallpaperEngine/Render/Objects/Puppet.h b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+index 781213b..f08b4b5 100644
+--- a/src/core/WallpaperEngine/Render/Objects/Puppet.h
++++ b/src/core/WallpaperEngine/Render/Objects/Puppet.h
+@@ -72,8 +72,13 @@ struct Bone {
+     std::string name;
+     uint32_t flags = 0;
+     int parent = -1;
+-    /** the bind transform relative to the parent */
++    /** the bind transform relative to the parent: the inverse binds' (bindWorldMatrices) */
+     glm::mat4 local = glm::mat4 (1.0f);
++    /**
++     * The rest transform relative to the parent, the pose the animation layers mix from (restPose): MDLS v2's
++     * explicit matrix when the file has them, else `local`
++     */
++    glm::mat4 rest = glm::mat4 (1.0f);
+     /**
+      * The bone's simulation JSON (MDLS, parsed by GH 0x14028bbd0): `ik` (settings flag 0x4000) makes it the end of an
+      * IK chain `ikd` bones long (≥ 1, settings +0x5c); `ikr` (flag 0x40) turns it to its target's rotation
+@@ -106,6 +111,7 @@ struct IkTarget {
+     std::string name;
+     int bone = -1;
+     uint32_t type = 0;
++    /** its rest matrix (targetRestPose): MDLS v2's explicit one when the file has them, else the target's own */
+     glm::mat4 matrix = glm::mat4 (1.0f);
+ };
+ 
+@@ -191,28 +197,28 @@ std::vector<std::pair<std::string, int>> passedEvents (const Animation& animatio
+ float layerWeight (const Animation& animation, const Clock& clock, float blend, bool& blendIn, bool blendOut,
+                    float blendTime);
+ 
+-/** The bind pose: every bone's local bind matrix, decomposed */
+-std::vector<Key> bindPose (const Model& model);
++/** The rest pose the layers mix from (GH 0x14024d9a0's rest block): every bone's rest matrix, decomposed */
++std::vector<Key> restPose (const Model& model);
+ 
+ /**
+  * Mixes one layer into `pose` (GH 0x140223b90 / 0x140224390). The animation is sampled between frames
+  * a = ⌊t · fps⌋ and a + 1 (nlerp), then:
+  *  - normal: pose = lerp (pose, sample, weight) (rotation nlerp on the shorter arc);
+- *  - additive: position += (sample − bind) · weight; rotation = nlerp (1, sample · bind⁻¹, weight) · rotation;
+- *    scale += (sample − bind) · weight.
++ *  - additive: position += (sample − rest) · weight; rotation = nlerp (1, sample · rest⁻¹, weight) · rotation;
++ *    scale += (sample − rest) · weight (`rest` restPose ()'s).
+  * A track with flag bit 0 leaves its bone alone
+  */
+-void mix (std::vector<Key>& pose, const std::vector<Key>& bind, const Animation& animation, float time, float weight,
++void mix (std::vector<Key>& pose, const std::vector<Key>& rest, const Animation& animation, float time, float weight,
+           bool additive);
+ 
+ /** World matrices of a pose: world = parent world · local */
+ void worldMatrices (const Model& model, const std::vector<Key>& pose, std::vector<glm::mat4>& world);
+ 
+-/** The IK targets' bind keys (their matrices decomposed), in the model's order */
+-std::vector<Key> targetBindPose (const Model& model);
++/** The IK targets' rest keys (their matrices decomposed), in the model's order */
++std::vector<Key> targetRestPose (const Model& model);
+ 
+ /** An animation's IK target tracks mixed into `targets` as mix () mixes the bones */
+-void mixTargets (std::vector<Key>& targets, const std::vector<Key>& bind, const Animation& animation, float time,
++void mixTargets (std::vector<Key>& targets, const std::vector<Key>& rest, const Animation& animation, float time,
+ 		 float weight, bool additive);
+ 
+ /**
+@@ -222,7 +228,7 @@ void mixTargets (std::vector<Key>& targets, const std::vector<Key>& bind, const
+  */
+ void solveIk (const Model& model, std::vector<Key>& pose, const std::vector<Key>& targets);
+ 
+-/** The bind world matrices (GH 0x1402261c0) */
++/** The bind world matrices (GH 0x1402261c0), from the bones' `local`: the inverse binds skin by */
+ void bindWorldMatrices (const Model& model, std::vector<glm::mat4>& world);
+ 
+ /** A float track's value at `time` (frames a, b and the fraction as `mix`) */

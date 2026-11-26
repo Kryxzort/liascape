@@ -165,7 +165,8 @@ what it added (`fonts: aliases added; …`) and each stand-in (`fonts: Consolas 
 ## Tests
 
 `bash scripts/lwe.sh test` runs `host_api_test.cpp` (EGL tests skip without a surfaceless context; audio-mix and
-WE-asset tests need `LIASCAPE_WE_ASSETS_DIR`; `HOST_API_TEST_ONLY=<substring>` runs a subset).
+WE-asset tests need `LIASCAPE_WE_ASSETS_DIR`; `HOST_API_TEST_ONLY=<substring>` runs a subset) and
+`puppet_test.cpp` (compiles in `Puppet.cpp`).
 `src/player/tests/lwe_build.rs` checks the exported symbols, that the core is the pinned one, that only the worker
 links it, and that the PIN matches the flake; core tests skip without `LIASCAPE_LWE_CORE_DIR` and fail instead under
 `LIASCAPE_REQUIRE_SCENES=1`.

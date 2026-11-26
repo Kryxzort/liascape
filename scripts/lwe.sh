@@ -11,7 +11,8 @@
 #   bash scripts/lwe.sh prepare          # copy it, without VCS dirs, to build/lwe-src-<rev>
 #   bash scripts/lwe.sh build            # CMake: the core target only → $LIASCAPE_LWE_CORE_DIR (default build/lwe-core)
 #   bash scripts/lwe.sh check            # the built core exports only wp_* and ships its headers
-#   bash scripts/lwe.sh test             # compile + run patches/lwe/tests/host_api_test.c against the built core
+#   bash scripts/lwe.sh test             # compile + run patches/lwe/tests/host_api_test.c against the built core, and
+#                                        # puppet_test.cpp against its source
 #   bash scripts/lwe.sh verify           # base + patches/lwe/*.patch == PIN.rev's tree
 #   bash scripts/lwe.sh patches          # regenerate patches/lwe/*.patch from base..rev (git format-patch)
 #   bash scripts/lwe.sh rebase <rev>     # re-apply every patch onto upstream <rev> in a scratch copy; ok/conflict each
@@ -211,6 +212,17 @@ cmd_test() {
         "$out" "$PATCH_DIR/tests/fixtures" "$empty" ${LIASCAPE_WE_ASSETS_DIR:+"$LIASCAPE_WE_ASSETS_DIR"} || rc=$?
     rmdir "$empty"
     rm -rf "$nv"
+    # the puppet math (loader, mixing, skinning) on values decoded from real Workshop puppets: the core's own source,
+    # compiled in (the built core exports only wp_*)
+    local puppet="$PREP/src/core/WallpaperEngine/Render/Objects/Puppet.cpp"
+    if [ -f "$puppet" ]; then
+        c++ -std=c++20 -O1 -g -Wall "$PATCH_DIR/tests/puppet_test.cpp" "$puppet" -I"$PREP/src/core" \
+            -I"$PREP/src/External/json/include" -o "$ROOT/build/lwe-puppet-test"
+        "$ROOT/build/lwe-puppet-test" || rc=$?
+    else
+        # a core built elsewhere (the devShell's) comes without its source
+        echo "puppet_test: SKIP, no core source at $PREP (run fetch prepare, or set LWE_DEV_SRC)"
+    fi
     return "$rc"
 }
 
