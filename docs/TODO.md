@@ -5,7 +5,7 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
+1. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
        spawn → `Hello` for every apply after a run's first: warm 65–135 ms, cold 70–215 ms faster). Left: a first-ever
@@ -19,7 +19,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        403, 452 → 455 ms; fastest build 289 / 288, 220 / 222, 269 / 267). Likely the render thread then just waits
        longer for the texture uploads at the first frame (inferred, not measured). Worth retrying only once those stop
        being the build's tail.
-97. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
+2. [ ] (owner) How fast is WE on native Windows: the switches of `docs/player/reports/scene-load-we.md` (done under
        Proton) timed on the owner's Windows install (needs the owner to boot it): from WE's open of B's `project.json`
        to B's first frame and complete picture, cold / after a boot / warm. Include 3426575339, whose video textures
        crash WE under Proton. Also record each scene's GPU memory while it plays (Task Manager → Details, the
@@ -28,41 +28,41 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
        silent, assuming WE never plays a video texture's sound).
 
-143. [ ] The app icon shows square in Qt-drawn launchers (the owner's shell launcher): its rounding is a `<clipPath>`
+3. [ ] The app icon shows square in Qt-drawn launchers (the owner's shell launcher): its rounding is a `<clipPath>`
        (`app/ui/public/favicon.svg`, `app/icon/`), and Qt's SVG renderer (SVG Tiny 1.2) ignores clip paths, so the
        rounded tile draws as a full square. Draw the tile's shape itself (a rounded `<rect>` / path, no clip needed
        for the outline; the diagonal shadow clip likewise), and install hicolor PNGs (48–512) beside the SVG in the
        flake, `scripts/install.sh`, the PKGBUILD and the AppImage. Guard: a check that renders the installed SVG with
        Qt's renderer (or rsvg with clip paths ignored) and finds transparent corners.
 
-138. [ ] (owner) Right-click a card for Unsubscribe and Hide, and a "Hidden" filter. A Workshop card's right-click menu
+4. [ ] (owner) Right-click a card for Unsubscribe and Hide, and a "Hidden" filter. A Workshop card's right-click menu
        (Library and Browse; extend the menu cards already have, or add one in its look) offers Unsubscribe, through
        the download modes' order (signed out: the item's Steam page), and Hide; any card offers Hide. A hidden item
        leaves the grid it was hidden from, with Undo like a removal, and a "Hidden" filter row shows hidden items, with
        Unhide in their menu. Keep the hidden ids in a state file (field-level, atomic). Multi-select: the menu acts on
        the selection. Guards: probe cells for the menu, Hide/Undo/Unhide and the filter; a backend test for the file.
-139. [ ] (owner) Opening animation, a prototype: the logo becomes the first library cards. The tile breaks into a few
+5. [ ] (owner) Opening animation, a prototype: the logo becomes the first library cards. The tile breaks into a few
        rounded tiles that glide to the first row's real card positions (measured once the cards are built) and hand
        over to them; the cover dissolves behind. Same budget and rules as now (`components/Intro.tsx`: gone within
        about 0.7 s of the window showing, never holds input, skips on any input, theme / glow / no-motion = plain
        fade / bg-live); fewer cards than tiles, an empty library or a non-Library start tab falls back to today's lift.
        A prototype first: a slowed recording (about 5 s) from the agent window for the owner before it lands. Guard:
        probe-intro cells for the hand-over, the fallbacks and motion off.
-140. [ ] (owner) A session start always plays a wallpaper, even after `liascape stop` in the last session: `liascape
+6. [ ] (owner) A session start always plays a wallpaper, even after `liascape stop` in the last session: `liascape
        restore` (boot / autostart, `serve --restore --session-start`) brings the last session back whatever the user
        stopped. `PlayerHelper.Restore` already replays `LastSession` when the player shows nothing, but every boot's log
        says "the player shows its restored wallpaper — nothing to replay": check what a snapshot taken after `stop` holds
        (a parked or ramped-out source that `ShowsAnything` counts as shown?) and that a session start after `stop` puts
        a wallpaper on screen. Not `play` / `toggle-play` mid-session: a stop there still holds. Guard:
        `scripts/test-liascape-player-adapter.sh` (stop → player restart as a session start → a wallpaper on screen).
-141. [ ] (owner) A thumbnail follows its file when the file changes in place: Steam re-downloading an item (or a
+7. [ ] (owner) A thumbnail follows its file when the file changes in place: Steam re-downloading an item (or a
        Redownload) rewrites `preview.gif` at the same path, the backend's still / anim / clip caches are keyed by the
        file's mtime, but the card's URL (`/still?u=<path>&w=`) never changes, so the window keeps the old (here empty)
        picture until its HTTP cache is cleared. Version the media URLs by the file (mtime / size in the query, from the
        library item), and have a Workshop folder that changes on disk broadcast `library-item-changed` (also clearing
        `downloadIncomplete`). Guard: a probe cell that rewrites a fixture's preview in place and sees the card's
        picture change without a reload.
-142. [ ] (owner) Scenes checked against real Wallpaper Engine, every feature, every scene, and as fast and lean as
+8. [ ] (owner) Scenes checked against real Wallpaper Engine, every feature, every scene, and as fast and lean as
        WE. Nothing about scenes counts as done until it matches WE's own frames
        (`docs/player/spikes/we-proton.md`: `scripts/dev/we-ref-capture.sh`, `scene_we_compare.sh`).
        - The harness as a gate: rerun every library scene, set a fail line per scene (masks for WE's unseeded
@@ -85,8 +85,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - The audio piece: a private PipeWire with a null sink fed a fixed track, so music-reactive scenes compare too.
        - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
          and GPU time per frame, ours beside WE's; a gap is a row to fix like a wrong picture (read how WE loads,
-         caches and shares textures and shaders where it beats us). Folds in item 48's remaining load work.
-144. [ ] (owner) First-run help: no step-by-step tour.
+         caches and shares textures and shaders where it beats us). Folds in item 1's remaining load work.
+9. [ ] (owner) First-run help: no step-by-step tour.
        - A welcome in place of the empty library, for the big choices: use the Wallpaper Engine Workshop (find
          Steam, pick a download mode), import a folder of videos, browse wallpapers. Gone once there are wallpapers;
          reachable again from Settings.
