@@ -82,7 +82,8 @@ build() {
     export PathMap="$_map"
     # staged into $srcdir so package() is a copy; the runtime paths are /usr, the internal executables in
     # /usr/lib/liascape/ (Arch's package guidelines rule out /usr/libexec)
-    DESTDIR="$srcdir/pkg-stage" PREFIX=/usr LIBEXECDIR=/usr/lib bash scripts/install.sh
+    # electron45 is a depend, so never the bundled copy (it would also need the network build() goes without)
+    DESTDIR="$srcdir/pkg-stage" PREFIX=/usr LIBEXECDIR=/usr/lib LIASCAPE_BUNDLE_ELECTRON=0 bash scripts/install.sh
 }
 
 package() {

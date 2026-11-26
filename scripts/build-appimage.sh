@@ -19,26 +19,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a s
 APPDIR="$ROOT/AppDir"
 IMAGE="$ROOT/liascape-x86_64.AppImage"
 
-echo "==> the install tree, staged as AppDir/usr"
+echo "==> the install tree, staged as AppDir/usr, with Electron from app/shell's lockfile"
 rm -rf "$APPDIR"
-DESTDIR="$APPDIR" PREFIX=/usr bash "$ROOT/scripts/install.sh"
-
-echo "==> Electron, from app/shell's lockfile"
-# the npm package fetches its binary on first use, not at install: install.js fetches it now (checked against the
-# package's checksums.json)
-(cd "$ROOT/app/shell" && npm ci --no-audit --no-fund && node node_modules/electron/install.js) \
-  || { echo "ERROR: couldn't get Electron (npm ci, then node_modules/electron/install.js, in app/shell)" >&2; exit 1; }
-ELECTRON="$ROOT/app/shell/node_modules/electron/dist"
-[ -x "$ELECTRON/electron" ] || { echo "ERROR: no Electron binary in $ELECTRON" >&2; exit 1; }
-mkdir -p "$APPDIR/usr/lib/electron"
-cp -a "$ELECTRON/." "$APPDIR/usr/lib/electron/"
+# the image's own Electron always, whatever the build machine has: it must run where nothing is installed
+DESTDIR="$APPDIR" PREFIX=/usr LIASCAPE_BUNDLE_ELECTRON=1 bash "$ROOT/scripts/install.sh"
+[ -x "$APPDIR/usr/lib/liascape/electron/electron" ] || { echo "ERROR: install.sh bundled no Electron" >&2; exit 1; }
 
 echo "==> AppRun, the desktop entry and the icon"
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/bash
 # the image's own Electron, unless the user names another; the launcher resolves the rest from its own path
 HERE="$(dirname "$(readlink -f "$0")")"
-export LIASCAPE_ELECTRON="${LIASCAPE_ELECTRON:-$HERE/usr/lib/electron/electron}"
+export LIASCAPE_ELECTRON="${LIASCAPE_ELECTRON:-$HERE/usr/lib/liascape/electron/electron}"
 exec "$HERE/usr/bin/liascape" "$@"
 APPRUN
 chmod 755 "$APPDIR/AppRun"

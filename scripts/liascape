@@ -9,7 +9,9 @@
 #   <prefix>/lib/liascape/{ui,shell,transitions}   the React UI, the Electron shell, the effect catalogue
 #   (Arch's package puts the internal executables in lib/liascape/ itself: its guidelines rule out /usr/libexec)
 #
-#   liascape                 open the app (Electron: $LIASCAPE_ELECTRON, else `electron45`, else `electron` on PATH)
+#   liascape                 open the app (Electron: $LIASCAPE_ELECTRON, else `electron45` on PATH, else
+#                            lib/liascape/electron/electron, the copy install.sh bundles when the system has none, else
+#                            `electron` on PATH)
 #   liascape ctl <verb> …    the running player's control socket (state, logs, probe, …)
 #   liascape <command> …     everything else goes to the backend (`liascape help` lists it)
 #
@@ -42,10 +44,17 @@ case "${1-}" in
     # (app/shell/renderer-recovery.js). Soft limit only, so a process that wants dumps can raise it back; it reaches
     # what the shell starts too (its own backend and player when no other backend runs).
     ulimit -S -c 0
-    # electron45 first: distros that carry several majors name each one (Arch's AUR electron45-bin), and a plain
-    # `electron` may be another major (.claude/rules/build-and-packaging.md § Electron)
+    # LIASCAPE_ELECTRON, then electron45 (distros that carry several majors name each one: Arch's AUR electron45-bin),
+    # then the copy install.sh bundles when the system had none, and only then a plain `electron`: it may be another
+    # major, so one installed after the bundle never takes over (.claude/rules/build-and-packaging.md § Electron).
+    # Guard: scripts/test-electron-bundle.sh
     electron="${LIASCAPE_ELECTRON:-}"
-    [ -n "$electron" ] || { command -v electron45 >/dev/null 2>&1 && electron=electron45; } || electron=electron
+    if [ -z "$electron" ]; then
+      for e in electron45 "$lib/electron/electron" electron; do
+        if command -v "$e" >/dev/null 2>&1; then electron="$e"; break; fi
+      done
+    fi
+    [ -n "$electron" ] || { echo "liascape: no Electron (LIASCAPE_ELECTRON, electron45 on PATH, $lib/electron/electron or electron on PATH); re-run scripts/install.sh to bundle one" >&2; exit 127; }
     exec "$electron" "$lib/shell" ;;
   ctl)
     shift

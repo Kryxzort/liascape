@@ -28,6 +28,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Folder import and watched folders (the scan, link / copy, live pickup, removals; sources never touched): `bash scripts/test-folder-import.sh`
 - Settings' cache clear (per-category sizes, 400s, nothing outside the ticked folders deleted): `bash scripts/test-cache-clear.sh`
 - The shell's dev mode only on Liascape's own Vite, never another server on its port: `bash scripts/test-vite-detect.sh`
+- Liascape's own Electron where the system has none (install.sh's decision, the bundled copy, the launcher's order): `bash scripts/test-electron-bundle.sh`
 - "Start with your desktop" (which sessions run autostart entries, the entry written / removed, nothing else touched): `bash scripts/test-autostart.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`

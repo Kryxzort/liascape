@@ -112,9 +112,12 @@ It doesn't check for .NET or Node.js, so install those first (see below).
 Add `--no-scenes` to build without Wallpaper Engine scenes. That needs fewer packages and changes nothing else.
 Building with scenes downloads the linux-wallpaperengine source, so it needs network access.
 
-The script doesn't install Electron, which runs Liascape's window. Put an `electron45` or `electron` binary on your
-`PATH` (on Arch, `electron45-bin` from the AUR) or point `LIASCAPE_ELECTRON` at one. Liascape targets Electron 45; versions older than 42
-are known to crash on NVIDIA. Only the window needs Electron: the commands work without it.
+Liascape's window runs on Electron 45. If your system has one, the script uses it: `LIASCAPE_ELECTRON` if you set it,
+else an `electron45` or `electron` binary on your `PATH` (on Arch, `electron45-bin` from the AUR). Without one, as on
+Debian/Ubuntu and Fedora, which don't package Electron, the script installs Liascape's own copy of Electron 45 next to the
+app (about 300 MB), the way Discord and VS Code bring theirs. Re-running the script replaces it. `--dry-run` shows
+which one you'll get. Versions older than 42 are known to crash on NVIDIA. Only the window needs Electron: the commands
+work without it.
 
 <details>
 <summary>Build dependencies</summary>

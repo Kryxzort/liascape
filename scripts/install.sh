@@ -10,7 +10,11 @@
 #   DESTDIR            staging root             (default: empty; PKGBUILD/AppImage set $pkgdir/$AppDir)
 #   LIBEXECDIR         the internal executables go in $LIBEXECDIR/liascape (default: $PREFIX/libexec; the PKGBUILD sets
 #                      /usr/lib, Arch's place for them, so they sit in lib/liascape/ beside backend/ and ui/)
-#   LIASCAPE_ELECTRON  read at RUNTIME by `liascape` (default: 'electron' on PATH; the AppImage bundles one)
+#   LIASCAPE_ELECTRON  read at RUNTIME by `liascape`, first in its order: LIASCAPE_ELECTRON, then `electron45`, then
+#                      the copy in lib/liascape/electron/, then `electron` on PATH. Set (or `electron45` / `electron` on
+#                      PATH) at install time, nothing is bundled.
+#   LIASCAPE_BUNDLE_ELECTRON  auto (default: bundle app/shell's lockfile Electron into lib/liascape/electron/ only when
+#                      none of the above is there) | 1: always (the AppImage) | 0: never (the PKGBUILD)
 #
 # Options:
 #   --no-scenes  build without Wallpaper Engine scene support under liascape-player (no LWE core, no
@@ -22,6 +26,7 @@
 #   $LIBEXECDIR/liascape/                   liascape-backend (→ lib/liascape/backend/), liascape-player,
 #                                           liascape-scene-worker
 #   $PREFIX/lib/liascape/                   backend/ ui/ shell/ transitions/ + LWE's core library
+#                                           (+ electron/ when bundled, scripts/electron-bundle.sh)
 #   $PREFIX/share/applications/liascape.desktop
 #   $PREFIX/share/icons/hicolor/scalable/apps/liascape.svg   (app/ui/public/favicon.svg: one icon for the page, the
 #                                           desktop entry and the AppImage)
@@ -34,7 +39,7 @@ for arg in "$@"; do
   case "$arg" in
     --no-scenes) NO_SCENES=1 ;;
     --dry-run) DRY=1 ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "install.sh: unknown option '$arg' (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -64,6 +69,7 @@ install.sh --dry-run (PREFIX=$PREFIX${DESTDIR:+, staged under $DESTDIR}$([ "$NO_
 $([ "$NO_SCENES" = 0 ] && echo "  $S_LIB/liblinux-wallpaperengine-core.so*")
   $S_APPS/liascape.desktop
   $S_ICONS/liascape.svg
+  Electron: $(bash "$ROOT/scripts/electron-bundle.sh" describe)
 EOF
   exit 0
 fi
@@ -165,14 +171,12 @@ fi
 install -Dm755 "$ROOT/src/player/target/release/liascape-player" "$S_LIBEXEC/liascape-player"
 install -Dm755 "$ROOT/src/player/target/release/liascape-scene-worker" "$S_LIBEXEC/liascape-scene-worker"
 
-echo "==> ensuring Electron is available for the GUI"
-# The GUI runs: <electron> <shell-dir>. By default a system 'electron' (PATH) — the bundled prebuilt
-# can't load its libs on some distros (NixOS) and pulls 200MB. Packages provide electron their own way:
-# the PKGBUILD depends on electron45; the AppImage bundles one and sets LIASCAPE_ELECTRON. Only warn here.
-if [ -z "${LIASCAPE_ELECTRON:-}" ] && ! command -v electron45 >/dev/null 2>&1 && ! command -v electron >/dev/null 2>&1; then
-  echo "    WARN: no 'electron45' or 'electron' on PATH — install Electron 45 (Arch: AUR 'electron45-bin'; elsewhere from npm or electronjs.org)"
-  echo "          or set LIASCAPE_ELECTRON=/path/to/electron. The CLI works without it; only the GUI needs it."
-fi
+echo "==> Electron for the GUI"
+# The GUI runs: <electron> <shell-dir>. The system's Electron when there is one (LIASCAPE_ELECTRON, electron45, electron);
+# else app/shell's lockfile Electron goes into lib/liascape/electron/, the way Discord or VS Code bring their own. A
+# reinstall replaces that copy (or removes it once a system one is there). NixOS never gets here: the flake brings its
+# own. Guard: scripts/test-electron-bundle.sh
+bash "$ROOT/scripts/electron-bundle.sh" install "$S_LIB"
 
 # OPTIONAL: secret-tool (libsecret) keeps the Steam sign-in in the system keyring (Helpers/SecretStore.cs); without it (or
 # without a keyring) the sign-in goes to ~/.config/liascape/steam-auth.json (0600). Only a note.

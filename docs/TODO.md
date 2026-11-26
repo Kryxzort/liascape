@@ -67,10 +67,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 130. [ ] `scripts/test-backend-stop.sh`'s systemd-unit case leaves a `/tmp/liascape-stop-*` folder per run that its own
        cleanup can't delete (`inaccessible/*` permission denied); make the cleanup restore permissions first, and
        clear the ones already left.
-133. [ ] (owner) Bring Electron with Liascape outside Nix, the way Discord / VS Code / Slack ship their own copy: when no
-       `electron45` / `electron` is on PATH and `LIASCAPE_ELECTRON` is unset, `install.sh` installs the Electron 45 that
-       npm already fetches for `app/shell` into Liascape's own folder and the launcher uses it. NixOS keeps the
-       flake's. Update the README's Debian / Fedora "no Electron package" lines and `build-and-packaging.md`.
 134. [ ] probe-layout `perf:sidebar` fails when run alone (`--only perf:sidebar`, 3/3, on lp-player's build too; it
        passed inside the whole probe-layout run): "open: 1 layouts forced from script", the `scroll` listener
        (`onScroll`) in `app/ui/src/components/WsSetLoad.tsx` reading `sc.scrollTop` while layout is dirty (a scroll
