@@ -119,7 +119,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        in the card's corner with a soft shadow that reads on any picture: a cube for a scene, sliders for a preset
        (its current icon), nothing for a video (the default). Hover gives "Scene" / "Preset" as a tooltip; the sidebar
        still names the type in words. Every grid and card that shows the badge today (Library, Browse, the Settings
-       card preview). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
+       card preview), and the item sidebar's type chip too (owner 2026-11-27: "scene type also icon"). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
        (icon present / absent, the tooltip, no pill), and screenshots over light and dark thumbnails.
 
 16. [ ] (owner) The window opens blank, then the opening often falls back to the plain lift. The window is shown at once
@@ -151,6 +151,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        required / optional "You'll need"; `docs/preview/` holds its images, untracked). Bring it up to date with today's
        app (only liascape-player, the download modes, Start with your desktop, the welcome …), keep the owner's voice and
        layout, make it `README.md`, delete the branch and the untracked copies.
+
+20. [ ] (owner) One shared notice when Steam is limiting requests: wherever Steam data is missing because of the cooldown
+       (`Helpers/SteamGate.cs`: Browse, the sidebar's comments / favourite / creator, downloads), say "Steam is limiting
+       requests from this connection — back in N min" in the app's notice look, instead of the sidebar's parts going
+       quiet. One source of truth for the cooldown's end (the backend's), live countdown, gone when it ends. Guard: probe
+       cells with the stack's cooldown fixture for each place, and motion-off.
+
+21. [ ] (owner) Split the biggest files so agents can work in them: `src/player/src/runtime.rs`, `app/ui/src/index.css`
+       and `app/shell/probe-matrix.js` into modules / partials by area, no behaviour change (the full player suite and the
+       full UI matrix green before and after, the same cell list), and trim comments that only restate the code
+       (`.claude/rules/writing-rules.md` § Code comments).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
