@@ -92,6 +92,8 @@ public static class ImportService
         await Gate.WaitAsync();
         try
         {
+            // a library no import has filled yet has no imported/ to place a link or a moved copy in
+            Directory.CreateDirectory(LibraryStore.SourceDir(LibraryStore.Imported));
             string key = KeyFor(sourceId, title);
             await place(Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key), key);
             LibraryStore.UpdateIndex(LibraryStore.Imported, (index) =>

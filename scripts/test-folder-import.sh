@@ -149,6 +149,22 @@ meta() { jq -c --arg k "$1" '.[$k] // null' "$IMP/index.json" 2>/dev/null; }
 
 startbe LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=800 LIASCAPE_WATCH_RESCAN_MS=60000
 
+echo "== first import: a folder into a library that has no imported/ yet"
+# a library no file import has filled: the folder import makes imported/ itself, linked or copied
+FIRST=$T/first; wevid "$FIRST/copied" "First Copied"; wevid "$FIRST/linked" "First Linked"
+for mode in copied linked; do
+  [ "$mode" = copied ] && copy=true || copy=false
+  t="First ${mode^}"
+  if [ -e "$IMP" ]; then bad "imported/ is there before the $mode folder import (proved nothing)"; fi
+  post /library/import-found "$(jq -nc --arg p "$FIRST/$mode" --argjson c $copy '{paths: [$p], copy: $c}')" > /dev/null
+  wait_for 30 idle; wait_for 10 has "$t"
+  check "a first folder import, $mode, lands" "$(item "$t" | jq -r .videoPath)" "$IMP/$t/v.mp4"
+  post /library/delete "$(item "$t")" > /dev/null
+  hasnt "$t" || bad "the first $mode import didn't delete"
+  rm -rf "$IMP"
+done
+rm -rf "$FIRST"
+
 echo "== scan"
 post /library/import "$(jq -nc --arg p "$S/already.mp4" '{path: $p, title: "already"}')" >/dev/null
 BEFORE=$(cd "$LIB" && find . | sort | sha1sum)
