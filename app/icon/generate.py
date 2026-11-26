@@ -1,12 +1,19 @@
-# Generates the app icon: liascape-night.svg (the installed icon, copied to app/ui/public/favicon.svg) and
-# liascape-lavender.svg (the light variant, copied to app/ui/public/logo-lavender.svg: the window's opening on a light
-# theme). Run: python3 app/icon/generate.py (writes next to this file).
-# Also liascape-night-256.png, the Night icon at 256 px for what takes no SVG (an AppImage's .DirIcon,
-# scripts/build-appimage.sh): committed, so no build needs a renderer; this run redraws it with rsvg-convert or ImageMagick
-# when one is installed, and otherwise says the png is now behind the svg.
+# Generates the app icon: liascape-night.svg (the installed icon; also written to app/ui/public/favicon.svg) and
+# liascape-lavender.svg (the light variant; also written to app/ui/public/logo-lavender.svg: the window's opening on a
+# light theme), plus liascape-night-<N>.png at the hicolor sizes launchers ask for (48, 64, 128, 256, 512;
+# scripts/install-icons.sh installs them, the 256 one is also the AppImage's .DirIcon). The PNGs are committed, so no
+# build needs an SVG renderer. Writes next to this file. Needs picosvg (pip install picosvg) and rsvg-convert or
+# ImageMagick; on Nix:
+#   nix shell --impure --expr 'with import (builtins.getFlake "nixpkgs") {}; { py = python3.withPackages (p: [ p.picosvg ]); inherit librsvg; }' py librsvg -c python3 app/icon/generate.py
 import os
+import re
 import shutil
 import subprocess
+import sys
+try:
+    from picosvg.svg import SVG
+except ImportError:
+    sys.exit("generate.py needs picosvg: see the command at the top of this file")
 HERE = os.path.dirname(os.path.abspath(__file__))
 OTHER={"L":"#b48fd0","M":"#3a3352"}
 PAPER={"L":("#cfc6e0","#f6f3fa"),"M":("#d7c8e6","#fbf8fd")}
@@ -205,19 +212,35 @@ def icon(bg, hair, shade, face, neck, collar, ribbon, clip, sfx, clipstroke="non
 57 64 82 92 25 28 49 51 53 51 5 0 15 7 23 15 9 8 20 15 25 15 5 0 9 -7 9 -15z"/></g></g></g><path d="M-32.0 207.0 C-30.9 206.2 -27.3 203.8 -24.9 202.5 C-22.5 201.2 -20.1 200.3 -17.8 199.5 C-15.4 198.7 -13.0 198.3 -10.6 197.9 C-8.2 197.5 -5.8 197.2 -3.5 197.2 C-1.1 197.2 1.3 197.6 3.7 197.9 C6.1 198.2 8.5 198.7 10.8 199.3 C13.2 199.9 15.6 200.6 18.0 201.4 C20.4 202.2 22.8 203.1 25.1 204.1 C27.5 205.1 29.9 206.2 32.3 207.3 C34.7 208.4 37.1 209.6 39.4 210.8 C41.8 212.0 44.2 213.1 46.6 214.4 C49.0 215.7 51.4 217.1 53.8 218.4 C56.1 219.7 58.5 221.0 60.9 222.1 C63.3 223.2 65.7 224.2 68.0 225.1 C70.4 226.0 72.8 226.7 75.2 227.3 C77.6 227.9 80.0 228.3 82.3 228.7 C84.7 229.0 87.4 229.3 89.5 229.4 C91.6 229.5 93.2 229.5 95.0 229.4 C96.8 229.3 98.7 229.1 100.5 228.8 C102.3 228.6 104.2 228.2 106.0 227.9 C107.8 227.6 109.7 227.1 111.5 226.7 C113.3 226.2 115.2 225.8 117.0 225.2 C118.8 224.6 120.7 223.6 122.5 222.9 C124.3 222.2 126.2 221.7 128.0 221.1 C129.8 220.5 131.7 220.0 133.5 219.6 C135.3 219.2 137.2 218.8 139.0 218.4 C140.8 218.1 142.7 217.8 144.5 217.5 C146.3 217.2 148.2 217.1 150.0 216.9 C151.8 216.7 153.7 216.6 155.5 216.5 C157.3 216.4 159.2 216.4 161.0 216.4 C162.8 216.4 164.7 216.4 166.5 216.5 C168.3 216.6 170.2 216.8 172.0 216.9 C173.8 217.0 175.7 217.2 177.5 217.3 C179.3 217.5 181.2 217.6 183.0 217.8 C184.8 218.0 186.7 218.2 188.5 218.4 C190.3 218.6 192.2 218.8 194.0 219.0 C195.8 219.2 197.7 219.3 199.5 219.5 C201.3 219.7 203.2 219.8 205.0 219.9 C206.8 220.0 208.7 220.1 210.5 220.1 C212.3 220.1 214.2 220.2 216.0 220.2 C217.8 220.2 219.7 220.1 221.5 220.0 C223.3 219.9 225.2 219.7 227.0 219.5 C228.8 219.3 230.7 219.0 232.5 218.7 C234.3 218.4 236.2 217.7 238.0 217.7 C239.8 217.7 241.7 218.5 243.5 218.8 C245.3 219.1 247.2 219.3 249.0 219.5 C250.8 219.7 252.7 219.9 254.5 220.0 C256.3 220.1 259.1 220.2 260.0 220.2 V260 H0Z" fill="#7d5fb3"/><path d="M-33.7 229.9 C-32.5 229.3 -28.9 227.2 -26.5 226.1 C-24.2 225.0 -21.8 224.2 -19.4 223.4 C-17.0 222.7 -14.6 222.0 -12.2 221.6 C-9.9 221.2 -7.5 220.9 -5.1 220.8 C-2.7 220.7 -0.3 220.7 2.0 220.8 C4.4 220.9 6.8 221.2 9.2 221.5 C11.6 221.8 14.0 222.2 16.3 222.7 C18.7 223.2 21.1 223.8 23.5 224.5 C25.9 225.2 28.3 225.8 30.6 226.6 C33.0 227.3 35.4 228.2 37.8 229.0 C40.2 229.8 42.6 230.8 44.9 231.7 C47.3 232.6 49.7 233.4 52.1 234.3 C54.5 235.2 56.9 236.2 59.2 237.2 C61.6 238.1 64.0 239.2 66.4 240.0 C68.8 240.8 71.2 241.6 73.5 242.2 C75.9 242.8 78.3 243.4 80.7 243.8 C83.1 244.2 85.5 244.7 87.8 244.9 C90.2 245.2 92.9 245.2 95.0 245.3 C97.1 245.4 98.7 245.3 100.5 245.2 C102.3 245.1 104.2 244.9 106.0 244.7 C107.8 244.5 109.7 244.3 111.5 244.0 C113.3 243.7 115.2 243.4 117.0 243.1 C118.8 242.8 120.7 242.4 122.5 241.9 C124.3 241.4 126.2 240.8 128.0 240.1 C129.8 239.4 131.7 238.6 133.5 238.0 C135.3 237.4 137.2 236.8 139.0 236.3 C140.8 235.8 142.7 235.3 144.5 234.9 C146.3 234.5 148.2 234.1 150.0 233.8 C151.8 233.5 153.7 233.3 155.5 233.1 C157.3 232.9 159.2 232.7 161.0 232.6 C162.8 232.5 164.7 232.4 166.5 232.4 C168.3 232.4 170.2 232.4 172.0 232.5 C173.8 232.6 175.7 232.7 177.5 232.8 C179.3 233.0 181.2 233.2 183.0 233.4 C184.8 233.6 186.7 233.8 188.5 234.1 C190.3 234.3 192.2 234.6 194.0 234.9 C195.8 235.2 197.7 235.4 199.5 235.7 C201.3 236.0 203.2 236.2 205.0 236.5 C206.8 236.8 208.7 237.0 210.5 237.2 C212.3 237.4 214.2 237.5 216.0 237.6 C217.8 237.7 219.7 237.8 221.5 237.8 C223.3 237.8 225.2 237.7 227.0 237.5 C228.8 237.3 230.7 237.2 232.5 236.9 C234.3 236.6 236.2 235.9 238.0 235.9 C239.8 235.9 241.7 236.6 243.5 236.9 C245.3 237.2 247.2 237.3 249.0 237.5 C250.8 237.7 252.7 237.8 254.5 237.8 C256.3 237.8 259.1 237.6 260.0 237.5 V260 H0Z" fill="#6b4a96"/></g><path d="M255.6 204.9 L253.9 203.6 L252.1 202.2 L250.2 200.9 L248.3 199.7 L246.3 198.6 L244.3 197.5 L242.2 196.5 L240.1 195.6 L238.0 194.8 L235.8 194.1 L233.6 193.5 L231.4 192.9 L229.2 192.4 L227.0 192.1 L224.7 191.8 L222.4 191.6 L220.2 191.4 L217.9 191.4 L215.6 191.5 L213.3 191.6 L211.1 191.9 L208.8 192.2 L206.6 192.6 L204.4 193.1 L202.2 193.7 L200.0 194.4 L197.8 195.2 L195.7 196.0 L193.6 196.9 L191.6 198.0 L189.6 199.0 L187.7 200.2 L185.7 201.5 L183.9 202.8 L182.1 204.2 L180.3 205.6 L178.6 207.2 L178.6 207.2 L126.7 256.0 Z" transform="translate(-1.6 -2)" fill="#000" opacity=".2"/><path d="M255.6 204.9 L253.9 203.6 L252.1 202.2 L250.2 200.9 L248.3 199.7 L246.3 198.6 L244.3 197.5 L242.2 196.5 L240.1 195.6 L238.0 194.8 L235.8 194.1 L233.6 193.5 L231.4 192.9 L229.2 192.4 L227.0 192.1 L224.7 191.8 L222.4 191.6 L220.2 191.4 L217.9 191.4 L215.6 191.5 L213.3 191.6 L211.1 191.9 L208.8 192.2 L206.6 192.6 L204.4 193.1 L202.2 193.7 L200.0 194.4 L197.8 195.2 L195.7 196.0 L193.6 196.9 L191.6 198.0 L189.6 199.0 L187.7 200.2 L185.7 201.5 L183.9 202.8 L182.1 204.2 L180.3 205.6 L178.6 207.2 L178.6 207.2 L126.7 256.0 Z" fill="url(#fl{sfx})"/></g></svg>'''
 L = icon("#3a3352","#e9e7ec","#bcaec8","#fbefe8","#e8c6be","#f3f2f5","#6b4a96","#ffffff","L")
 M = icon("#b48fd0","#efe9f4","#d9c8e8","#f9ecd2","#c9a08f","#ffffff","#5b3f86","#ffffff","M","none","#b58b7a",fop=".4")
-open(os.path.join(HERE, "liascape-night.svg"), "w").write(L)
-open(os.path.join(HERE, "liascape-lavender.svg"), "w").write(M)
+
+def tiny(svg):
+    # Qt's SVG renderer (what KDE's and Quickshell's launchers draw icons with) implements SVG Tiny 1.2, which has no clip
+    # paths: the tile's rounding and the peeled corner's diagonal, drawn above as clips, came out square there. picosvg
+    # bakes every clip into the shapes' own outlines (skia's path ops), so every renderer draws the same rounded tile.
+    # Element opacity, also outside Tiny 1.2, becomes fill-opacity: after picosvg each element is one filled path.
+    # Guard: scripts/test-app-icon.sh
+    out = SVG.fromstring(svg).topicosvg().tostring()
+    for tag in re.findall(r"<path\b[^>]*\sopacity=[^>]*>", out):
+        assert "stroke" not in tag and "fill-opacity" not in tag, tag
+    return re.sub(r"(<path\b[^>]*?)\sopacity=", r"\1 fill-opacity=", out)
+
+for svg, names in ((L, ("liascape-night.svg", "../ui/public/favicon.svg")), (M, ("liascape-lavender.svg", "../ui/public/logo-lavender.svg"))):
+    svg = tiny(svg)
+    for name in names:
+        with open(os.path.join(HERE, name), "w") as f:
+            f.write(svg)
 
 def png(svg, out, size):
     if shutil.which("rsvg-convert"):
         cmd = ["rsvg-convert", "-w", str(size), "-h", str(size), "-o", out, svg]
     elif shutil.which("magick"):
-        # librsvg through ImageMagick when it has it: drawn at 384 dpi (4x the 256-unit viewBox at 96), scaled down, saved as
-        # 8-bit RGBA (its default keeps 16 bits a channel: twice the bytes for nothing an icon shows)
-        cmd = ["magick", "-background", "none", "-density", "384", svg, "-resize", f"{size}x{size}", f"PNG32:{out}"]
+        # librsvg through ImageMagick when it has it: drawn at 4x the size (the 256-unit viewBox is 256 px at 96 dpi),
+        # scaled down, saved as 8-bit RGBA (its default keeps 16 bits a channel: twice the bytes for nothing an icon shows)
+        cmd = ["magick", "-background", "none", "-density", str(384 * size // 256), svg, "-resize", f"{size}x{size}", f"PNG32:{out}"]
     else:
         print(f"no rsvg-convert or magick: {os.path.basename(out)} was NOT redrawn and may no longer match the svg")
         return
     subprocess.run(cmd, check=True)
 
-png(os.path.join(HERE, "liascape-night.svg"), os.path.join(HERE, "liascape-night-256.png"), 256)
+for n in (48, 64, 128, 256, 512):
+    png(os.path.join(HERE, "liascape-night.svg"), os.path.join(HERE, f"liascape-night-{n}.png"), n)

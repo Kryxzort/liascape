@@ -28,8 +28,9 @@
 #   $PREFIX/lib/liascape/                   backend/ ui/ shell/ transitions/ + LWE's core library
 #                                           (+ electron/ when bundled, scripts/electron-bundle.sh)
 #   $PREFIX/share/applications/liascape.desktop
-#   $PREFIX/share/icons/hicolor/scalable/apps/liascape.svg   (app/ui/public/favicon.svg: one icon for the page, the
-#                                           desktop entry and the AppImage)
+#   $PREFIX/share/icons/hicolor/scalable/apps/liascape.svg   (app/icon/liascape-night.svg = app/ui/public/favicon.svg:
+#                                           one icon for the page, the desktop entry and the AppImage) and
+#                                           hicolor/<N>x<N>/apps/liascape.png at 48–512 (scripts/install-icons.sh)
 set -e
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"  # physical path: a symlinked alias makes MSBuild delete its own outputs
 
@@ -55,7 +56,7 @@ S_BIN="$DESTDIR$BINDIR"
 S_LIBEXEC="$DESTDIR$LIBEXEC"
 S_LIB="$DESTDIR$LIBDIR"
 S_APPS="$DESTDIR$APPSDIR"
-S_ICONS="$DESTDIR$PREFIX/share/icons/hicolor/scalable/apps"
+S_ICONS="$DESTDIR$PREFIX/share/icons/hicolor"
 
 if [ "$DRY" = 1 ]; then
   cat <<EOF
@@ -68,7 +69,7 @@ install.sh --dry-run (PREFIX=$PREFIX${DESTDIR:+, staged under $DESTDIR}$([ "$NO_
   $S_LIB/ui/  $S_LIB/shell/  $S_LIB/transitions/
 $([ "$NO_SCENES" = 0 ] && echo "  $S_LIB/liblinux-wallpaperengine-core.so*")
   $S_APPS/liascape.desktop
-  $S_ICONS/liascape.svg
+  $S_ICONS/scalable/apps/liascape.svg  $S_ICONS/{48,64,128,256,512}x…/apps/liascape.png
   Electron: $(bash "$ROOT/scripts/electron-bundle.sh" describe)
 EOF
   exit 0
@@ -204,7 +205,7 @@ EOF
 # only for a direct install: in a package the cache belongs to the system (its package manager rebuilds it), and a staged
 # mimeinfo.cache would clash with the one already on disk
 if [ -z "$DESTDIR" ]; then update-desktop-database "$S_APPS" 2>/dev/null || true; fi
-install -Dm644 "$ROOT/app/ui/public/favicon.svg" "$S_ICONS/liascape.svg"
+bash "$ROOT/scripts/install-icons.sh" "$DESTDIR$PREFIX/share/icons"
 if [ -z "$DESTDIR" ]; then gtk-update-icon-cache -qtf "$PREFIX/share/icons/hicolor" 2>/dev/null || true; fi
 
 echo ""

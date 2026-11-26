@@ -255,7 +255,8 @@
           Keywords=wallpaper;live wallpaper;animated;video;scene;Wallpaper Engine;Wayland;
           StartupWMClass=liascape
           EOF
-          install -Dm644 ${./app/ui/public/favicon.svg} $out/share/icons/hicolor/scalable/apps/liascape.svg
+          # the scalable icon and its hicolor PNGs (48–512), the same list install.sh installs
+          bash ${./scripts/install-icons.sh} $out/share/icons ${./app/icon}
 
           runHook postInstall
         '';
