@@ -48,6 +48,9 @@
 #     details in the background) and holds against a later diff whose Steam answer lacks it; a private profile's check
 #     reads page 1 only, and a grown page 1 → the pages again, with any listed id still missing its details asked again;
 #     a 200 page that isn't the favourites page (a login page as page 1, a blank page 2) is no answer: the list is kept.
+#     Every favourite removed on Steam: a private list (the count check's page 1, then the diff) and a public one (no ids,
+#     then the community page) empty on the account's own empty favourites page, written; a failed read before each (Steam's
+#     error page or login page, a 429, the client protocol not answering) keeps the list.
 #     The list's file is 0600; a restarted backend's version counts above the last run's; a diff keeps Steam's own total
 #     (a count check right after finds no change); a private profile read whole lately gets the page-1 check on a visit.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
@@ -574,6 +577,94 @@ if (process.argv[2]?.startsWith("fav")) {
       "private profile: the pages answering again → the next diff reads all three and keeps the same 66", J({ pages: await ownPages(n0), log: blog().slice(L) }));
     process.exit(0);
   }
+
+  // every favourite removed on Steam: the list empties on the account's own empty favourites page, and only there — a
+  // failed read (Steam's error page, its login page, a 429, the client protocol not answering) keeps it. Phases: two
+  // failed reads of the private list (the 429's cooldown ends with the backend restart), the private list emptied, then a
+  // public list's failed reads and its emptying.
+  const ownPages = async (n) => (await since(n)).filter((x) => x.path === `/profiles/${ME}/myworkshopfiles/`).map((x) => x.query.p);
+  const PRIV66 = ["pfav-new", ...PRIV.map((_, i) => `pfav-${i}`)];
+  const PUB = ["3500000001", "3500000002", "3500000003"];
+  if (MODE === "fav-gone-private") {
+    const before = fs.readFileSync(FF(ME), "utf8");
+    const same = async () => J(titles(await favs())) === J(PRIV66) && fs.readFileSync(FF(ME), "utf8") === before;
+    await fetch(`${FAKE}/__myfavs`, { method: "POST", body: J({ ids: [] }) });
+    // Steam's error page, served signed in, as a diff's page 1: no favourites tab, so no answer
+    await fetch(`${FAKE}/__oddpage?p=1&kind=error`);
+    let n0 = (await fakeLog()).length, L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 15000);
+    out(J(await ownPages(n0)) === J(["1"]) && /id diff stopped/.test(blog().slice(L)) && await same(),
+      "every favourite removed on Steam, private profile: a failed read (Steam's error page, signed in, as page 1) → the list kept, nothing written",
+      J({ pages: await ownPages(n0), log: blog().slice(L), n: titles(await favs()).length }));
+    // a 429 on page 1
+    await fetch(`${FAKE}/__ratelimit`);
+    n0 = (await fakeLog()).length; L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 15000);
+    out(J(await ownPages(n0)) === J(["1"]) && /id diff stopped, the list kept \(SteamCooldownException\)/.test(blog().slice(L)) && await same(),
+      "every favourite removed on Steam, private profile: a rate-limited read (429 on page 1) → the list kept, nothing written",
+      J({ pages: await ownPages(n0), log: blog().slice(L), n: titles(await favs()).length }));
+    process.exit(0);
+  }
+
+  if (MODE === "fav-gone-private-empty") {
+    // the count check (this run's first) reads page 1: the account's own favourites tab, listing nothing → the diff takes it
+    const n0 = (await fakeLog()).length, L = blog().length;
+    await favs("check");
+    await waitFor(() => /count check: not the favourites page|count check stopped|id diff (stopped|done)/.test(blog().slice(L)), 30000);
+    const r = await favs(), saved = readJson(FF(ME));
+    out(J(await ownPages(n0)) === J(["1"]) && /count check: changed/.test(blog().slice(L)) && /id diff done — 0 item\(s\), 0 added, 66 removed/.test(blog().slice(L))
+      && r.json?.signedIn === true && r.json.items?.length === 0 && r.json.error === null && J(saved?.ids) === "[]" && saved.viaPage === true,
+      "every favourite removed on Steam, private profile: the count check finds page 1 emptied, the diff takes the empty favourites page → no favourites, kept on disk",
+      J({ pages: await ownPages(n0), log: blog().slice(L), n: r.json?.items?.length, saved }));
+    // the next phase: a public list of 3 (the client protocol's), no cached list
+    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    fx["@userfiles"][`${ME}:myfavorites`] = PUB.map((id, i) => ({ publishedfileid: id, title: `pub-${i}`, creator: OWNER, time_created: 1700000000 + i,
+      time_updated: 1790000000 - i, tags: ["Video"] }));
+    fs.writeFileSync(FX, J(fx));
+    fs.rmSync(FF(ME), { force: true });
+    process.exit(0);
+  }
+
+  if (MODE === "fav-gone-public") {
+    evs.length = 0;
+    await favs("open");
+    await waitAsync(async () => (await favs()).json?.loading === null && fs.existsSync(FF(ME)));
+    const loaded = J(titles(await favs())) === J(["pub-0", "pub-1", "pub-2"]) && readJson(FF(ME))?.viaPage === false;
+    const before = fs.readFileSync(FF(ME), "utf8");
+    const same = async () => J(titles(await favs())) === J(["pub-0", "pub-1", "pub-2"]) && fs.readFileSync(FF(ME), "utf8") === before;
+    // every favourite removed: the client protocol lists none, the community page is the empty favourites tab
+    const fx = JSON.parse(fs.readFileSync(FX, "utf8"));
+    fx["@userfiles"][`${ME}:myfavorites`] = [];
+    // a failed read: the client protocol not answering (an unreadable fixture)
+    fs.writeFileSync(FX, "");
+    let n0 = (await fakeLog()).length, L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff: Steam didn't answer|id diff (stopped|done)/.test(blog().slice(L)), 15000);
+    out(loaded && /the id diff: Steam didn't answer, the list kept/.test(blog().slice(L)) && (await ownPages(n0)).length === 0 && await same(),
+      "every favourite removed on Steam, public profile: a failed read (the client protocol not answering) → the list kept, nothing written",
+      J({ loaded, log: blog().slice(L), n: titles(await favs()).length }));
+    fs.writeFileSync(FX, J(fx));
+    // a failed read: no ids, then Steam's login page as the community page 1
+    await fetch(`${FAKE}/__oddpage?p=1&kind=login`);
+    n0 = (await fakeLog()).length; L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 15000);
+    out(J(await ownPages(n0)) === J(["1"]) && /id diff stopped/.test(blog().slice(L)) && await same(),
+      "every favourite removed on Steam, public profile: a failed read (no ids, a login page as the community page) → the list kept, nothing written",
+      J({ pages: await ownPages(n0), log: blog().slice(L), n: titles(await favs()).length }));
+    // the diff: no ids, the community page the empty favourites tab → no favourites
+    n0 = (await fakeLog()).length; L = blog().length;
+    await favs("open");
+    await waitFor(() => /id diff (stopped|done)/.test(blog().slice(L)), 15000);
+    const r = await favs(), saved = readJson(FF(ME));
+    out(/ids-only page 1 /.test(blog().slice(L)) && J(await ownPages(n0)) === J(["1"]) && /id diff done — 0 item\(s\), 0 added, 3 removed/.test(blog().slice(L))
+      && r.json?.items?.length === 0 && r.json.error === null && J(saved?.ids) === "[]",
+      "every favourite removed on Steam, public profile: the ids come back empty, the community page is the empty favourites tab → no favourites, kept on disk",
+      J({ pages: await ownPages(n0), log: blog().slice(L), n: r.json?.items?.length, saved }));
+    process.exit(0);
+  }
 }
 
 // ---- 1. signed out ----
@@ -825,9 +916,10 @@ EOF
 stop_backend; start_backend
 (cd "$T" && timeout 60 node drive.mjs after-restart) >> "$T/drive.log" 2>&1 || rc=$?
 # § 7 on a backend without § 4's cooldown (a private profile's community pages must go out), restarted before each phase
+# (and without the cooldown a phase's own 429 started)
 stop_backend; rm -f "$XDG_CACHE_HOME/liascape/steam-cooldown.json"; start_backend
-for phase in fav fav-total fav-restart fav-private fav-private-grow fav-private-odd; do
-  [ $phase = fav ] || { stop_backend; start_backend; }
+for phase in fav fav-total fav-restart fav-private fav-private-grow fav-private-odd fav-gone-private fav-gone-private-empty fav-gone-public; do
+  [ $phase = fav ] || { stop_backend; rm -f "$XDG_CACHE_HOME/liascape/steam-cooldown.json"; start_backend; }
   (cd "$T" && timeout 60 node drive.mjs $phase) >> "$T/drive.log" 2>&1 || rc=$?
 done
 sed 's/^/      /' "$T/drive.log"

@@ -174,11 +174,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `mem_info_vram_total`); surface it to the UI, make it the field's `max`, and clamp a saved value above it with a
       line saying why. When the total is unknown, fall back to a sane ceiling (e.g. 65536) rather than 1 TiB. Guard: a
       probe-settings cell with a stubbed total.
-- [ ] The Favourites filter's list can't empty through the id diff (`Helpers/WorkshopFavorites.cs` `DiffCoreAsync`): a
-      list kept through the community pages (a private profile) never takes a page with no paging line as "none left",
-      and a public list whose ids come back empty goes to those pages too. A user who removes every favourite on Steam
-      keeps seeing the old list until a full re-read; give it one (a first load again when the pages say empty, or a
-      user's Refresh). Guard to add: `scripts/test-workshop-social.sh` § 7, every favourite removed on Steam.
 - [ ] The macro feature = the rules system: triggers → actions with exceptions, run inside the player (research in
       `docs/superpowers/specs/2026-10-29-rules-recon.md`). "A game is running" is one of its first triggers, not a
       separate setting: detection notes and the cases to compose with in

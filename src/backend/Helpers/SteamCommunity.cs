@@ -359,13 +359,20 @@ public static class SteamCommunity
     // caller keeping a list must read those as no answer, not as favourites removed.
     // Last = the paging line's "a-b of N" says b ≥ N: no page after this one (the line counts what the pages list, so it
     // ends where they end); null = no paging numbers read.
+    // Empty = the account's own favourites page listing nothing (an emptied list shows no paging line): no item, no paging
+    // line, served signed in as `viewer` (the page's g_steamID) and still the favourites tab (it names
+    // browsefilter=myfavorites). A login page (g_steamID false), a blank page, another account's page or a Steam error page
+    // is none of that, so Empty is the only page that may empty a kept list.
     // Guard: steam-selftest (scripts/test-steam-signin.sh § 1) "favourites page: ids parsed, the signed-out total left
     // unread", "favourites page: the last, short page", "favourites page: a listing, not its last page …", "favourites
     // page: the last page says so, …", "favourites page: the paging numbers read in another language and digit grouping",
-    // "favourites page: a login page or a blank one isn't a favourites listing".
-    public sealed record FavoritesPage(List<string> Ids, int? Total, bool Listing = false, bool? Last = null);
+    // "favourites page: a login page or a blank one isn't a favourites listing", "favourites page: the account's own empty
+    // list is Empty, …".
+    public sealed record FavoritesPage(List<string> Ids, int? Total, bool Listing = false, bool? Last = null, bool Empty = false);
 
-    public static FavoritesPage ParseFavoritesPage(string html)
+    static readonly Regex _favoritesTabRe = new(@"browsefilter(?:=|""\s+value="")myfavorites\b", RegexOptions.Compiled);
+
+    public static FavoritesPage ParseFavoritesPage(string html, ulong viewer = 0)
     {
         var seen = new HashSet<string>();
         var ids = _idRe.Matches(html).Select((m) => m.Groups[1].Value).Where(seen.Add).ToList();
@@ -377,7 +384,10 @@ public static class SteamCommunity
                 .Select((m) => long.TryParse(new string(m.Value.Where(char.IsAsciiDigit).ToArray()), out var v) ? v : -1).ToList();
             if (n.Count == 3 && n.All((v) => v >= 0)) last = n[1] >= n[2];
         }
-        return new FavoritesPage(ids, null, paging.Success, last);
+        bool empty = !paging.Success && ids.Count == 0 && viewer != 0
+            && _pageSteamId.Match(html) is { Success: true } who && who.Groups[2].Value == viewer.ToString()
+            && _favoritesTabRe.IsMatch(html);
+        return new FavoritesPage(ids, null, paging.Success, last, empty);
     }
 
     /// One page (30) of the signed-in account's Workshop favourites for Wallpaper Engine, paced as `kind` (the user's own
@@ -394,6 +404,6 @@ public static class SteamCommunity
         var (status, html) = await SendAsync(Request(HttpMethod.Get,
             $"/profiles/{who.SteamId}/myworkshopfiles/?appid={AppId}&browsefilter=myfavorites&numperpage=30&p={Math.Max(1, page)}", who.Cookie, null, null), ct, kind).ConfigureAwait(false);
         if (status is < 200 or >= 300) throw new InvalidOperationException($"Steam didn't return your favourites ({status})");
-        return ParseFavoritesPage(html);
+        return ParseFavoritesPage(html, who.SteamId);
     }
 }

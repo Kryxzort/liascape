@@ -331,6 +331,17 @@ public static class SteamSelfTest
             Check(SteamCommunity.ParseFavoritesPage("<html><head><title>Sign In</title></head><body><form name=\"logon\"></form></body></html>") is { Listing: false, Last: null, Ids.Count: 0 }
                 && SteamCommunity.ParseFavoritesPage("<html><body></body></html>") is { Listing: false },
                 "favourites page: a login page or a blank one isn't a favourites listing");
+            const ulong viewer = 76561198000000042;
+            string emptyPage = $"<html><head><script>g_steamID = \"{viewer}\";</script></head><body>"
+                + $"<a href=\"https://steamcommunity.com/profiles/{viewer}/myworkshopfiles/?appid=431960&browsefilter=myfavorites\">Favorites</a>"
+                + "<div class=\"no_items\">No items</div></body></html>";
+            Check(SteamCommunity.ParseFavoritesPage(emptyPage, viewer) is { Empty: true, Listing: false, Ids.Count: 0 }
+                && SteamCommunity.ParseFavoritesPage(emptyPage.Replace($"\"{viewer}\";", "false;"), viewer) is { Empty: false }
+                && SteamCommunity.ParseFavoritesPage(emptyPage, viewer + 1) is { Empty: false }
+                && SteamCommunity.ParseFavoritesPage(emptyPage.Replace("myfavorites", "myfiles"), viewer) is { Empty: false }
+                && SteamCommunity.ParseFavoritesPage("<html><body></body></html>", viewer) is { Empty: false }
+                && SteamCommunity.ParseFavoritesPage(SampleFavoritesPage(65, 1).Replace("<body>", $"<body><script>g_steamID = \"{viewer}\";</script>"), viewer) is { Empty: false, Listing: true },
+                "favourites page: the account's own empty list is Empty, never a signed-out, another account's, another tab's, a blank or a listing page");
         }
         finally { Environment.SetEnvironmentVariable("LIASCAPE_STEAM_CM_FIXTURE", was); }
     }

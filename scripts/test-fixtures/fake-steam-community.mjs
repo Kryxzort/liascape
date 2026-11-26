@@ -17,9 +17,11 @@
 //        account's, three ids); hold = a page number whose next request waits for POST /__release (a test acts in between)
 //        Guard: the default list, test-workshop-social.sh "favourites of a private profile: the community page …"; a set
 //        list and the hold: § 7 (the favourites cache)
-//   GET  /__oddpage?p=N&kind=login|blank  the next request for page N of a favourites list answers 200 with something
-//        else: Steam's login page (what an expired sign-in gets) or an empty page (a glitch). Guard: § 7 (the favourites
-//        cache) "private profile: a 200 login page …", "private profile: a blank 200 page 2 …"
+//   GET  /__oddpage?p=N&kind=login|blank|error  the next request for page N of a favourites list answers 200 with
+//        something else: Steam's login page (what an expired sign-in gets), an empty page (a glitch) or Steam's error page
+//        served signed in. Guard: § 7 (the favourites cache) "private profile: a 200 login page …", "private profile: a
+//        blank 200 page 2 …", "every favourite removed on Steam, …: a failed read …"
+//   An emptied favourites list is the profile's favourites tab (g_steamID, the tab links) with no paging line and no item.
 // Usage: node fake-steam-community.mjs <port file> <signed-in steamid> <cookie token>
 import http from "node:http";
 import fs from "node:fs";
@@ -155,14 +157,20 @@ const server = http.createServer(async (req, res) => {
     if (accountOf(ck) !== m[1] || !myFavs || u.searchParams.get("browsefilter") !== "myfavorites") return send(200, "<html>nothing</html>", "text/html");
     const p = Math.max(1, +u.searchParams.get("p") || 1), ids = myFavs.slice((p - 1) * 30, p * 30);
     if (holdPage && p === holdPage) { holdPage = 0; await new Promise((r) => { release = r; }); }
+    const head = (who) => `<!DOCTYPE html><html><head><script>g_steamID = ${who ? `"${who}"` : "false"};</script></head><body>`;
     if (oddPages[p]) {
       const kind = oddPages[p]; delete oddPages[p];
-      return send(200, kind === "login" ? `<!DOCTYPE html><html><head><title>Sign In</title></head><body><div class="login_area">
+      return send(200, kind === "login" ? `${head(null)}<div class="login_area">
 <form name="logon" action="https://steamcommunity.com/login/home/"><input type="text" name="username"></form></div></body></html>`
+        : kind === "error" ? `${head(m[1])}<div class="error_ctn"><h3>Sorry!</h3><p>An error was encountered while processing your request.</p></div></body></html>`
         : "<html><body></body></html>", "text/html");
     }
+    // the profile's Workshop tabs, the favourites one current; an emptied list shows no paging line and no item
+    const tabs = `<div class="sectionTabs"><a href="https://steamcommunity.com/profiles/${m[1]}/myworkshopfiles/?appid=431960">Items</a>`
+      + `<a class="active" href="https://steamcommunity.com/profiles/${m[1]}/myworkshopfiles/?appid=431960&browsefilter=myfavorites">Favorites</a></div>`;
     const paging = ids.length ? `<div class="workshopBrowsePagingInfo">Showing ${(p - 1) * 30 + 1}-${(p - 1) * 30 + ids.length} of ${myFavs.length.toLocaleString("en-US")} entries</div>` : "";
-    return send(200, `<html><body>${paging}${ids.map((id) => `<div class="workshopItem"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${id}&searchtext=">x</a></div>`).join("")}</body></html>`, "text/html");
+    const none = myFavs.length ? "" : `<div id="no_items">No items to show.</div>`;
+    return send(200, `${head(m[1])}${tabs}${paging}${none}${ids.map((id) => `<div class="workshopItem"><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=${id}&searchtext=">x</a></div>`).join("")}</body></html>`, "text/html");
   }
   if (req.method === "POST" && u.pathname === "/ISteamRemoteStorage/GetPublishedFileDetails/v1/") {
     const ids = Object.entries(form).filter(([k]) => k.startsWith("publishedfileids[")).map(([, v]) => v);

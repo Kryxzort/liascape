@@ -390,9 +390,11 @@ public static class WorkshopFavorites
     // The signed-in account's community favourites pages into `ids`, from page 1 (`page1`: already read) until the paging
     // line says the last page, a page is short or adds no new id; `onPage` after each page that added some. A page that
     // isn't a favourites listing (SteamCommunity.FavoritesPage.Listing: a login page, a blank one) throws — no answer,
-    // never the list's end — except an empty page 1 when `emptyOk` (no list kept yet: an empty favourites list shows no
-    // paging line). Each page is asked for this account only (`account:`): a sign-in switched to another account throws
-    // before anything is sent as it.
+    // never the list's end — except a page 1 that is the account's own empty favourites page (FavoritesPage.Empty: every
+    // favourite removed), or any empty page 1 when `emptyOk` (no list kept yet, nothing to lose). Each page is asked for
+    // this account only (`account:`): a sign-in switched to another account throws before anything is sent as it.
+    // Guard: scripts/test-workshop-social.sh § 7 "every favourite removed on Steam, private profile: …", "every favourite
+    // removed on Steam, public profile: …"
     // Guard: scripts/test-workshop-social.sh § 7 "private profile: 3 community pages with the cookie, …", "private
     // profile: a grown page 1 → the community pages again (page 1 not asked twice), …", "private profile: a 200 login page
     // as a diff's page 1 → the list kept, nothing written", "private profile: a blank 200 page 2 in a diff → not the list's
@@ -406,7 +408,7 @@ public static class WorkshopFavorites
                 : await SteamCommunity.MyFavoritesPageAsync(page, kind, account: steamId).ConfigureAwait(false);
             if (!got.Listing)
             {
-                if (page == 1 && emptyOk && got.Ids.Count == 0) break;
+                if (page == 1 && (got.Empty || emptyOk && got.Ids.Count == 0)) break;
                 throw new InvalidOperationException("Steam answered with a page that isn't the favourites list");
             }
             int added = 0;
@@ -440,10 +442,11 @@ public static class WorkshopFavorites
             {
                 // Background: a check the user didn't ask for waits its turn behind their own Steam requests
                 page1 = await SteamCommunity.MyFavoritesPageAsync(1, SteamGate.Kind.Background, account: steamId).ConfigureAwait(false);
-                // a login page (an expired sign-in) or a blank one lists nothing: no answer, not an emptied list
+                // a login page (an expired sign-in) or a blank one lists nothing: no answer, not an emptied list; the
+                // account's own empty favourites page (Empty) is a change, which the diff takes
                 // Guard: scripts/test-workshop-social.sh § 7 "private profile: a 200 login page as page 1 → the count check
-                // keeps the list (no diff, nothing written)"
-                if (!page1.Listing && !(page1.Ids.Count == 0 && first.Count == 0))
+                // keeps the list (no diff, nothing written)", "every favourite removed on Steam, private profile: …"
+                if (!page1.Listing && !page1.Empty && !(page1.Ids.Count == 0 && first.Count == 0))
                 { Console.WriteLine("workshop-favorites: count check: not the favourites page, the list kept"); return; }
                 changed = !page1.Ids.SequenceEqual(first);
             }
@@ -466,7 +469,10 @@ public static class WorkshopFavorites
     // `lastupdated` order), a private profile's through its community pages (Background: the user didn't click for this)
     // — then the details of every id to show that the details cache lacks (Heal), then Merge with the edits. A public
     // list that comes back empty takes the first load's rule: the community page (the profile turned private, or holds
-    // none). Steam unreachable, a page that isn't the favourites list, or a sign-in switched → nothing changes.
+    // none). The list empties only on the account's own empty favourites page (FavoritesPage.Empty); Steam unreachable or
+    // rate-limited, a page that isn't the favourites list, or a sign-in switched → nothing changes.
+    // Guard: scripts/test-workshop-social.sh § 7 "every favourite removed on Steam, …" (private and public, each after a
+    // failed read that kept the list)
     // Guard: scripts/test-workshop-social.sh § 7 "sync=open with a cached list: …", "private profile: a grown page 1 → …",
     // "private profile: the diff asks the details of every listed id still missing them (the new one and pfav-5, one
     // GetDetails of 2)", "private profile: a 200 login page as a diff's page 1 → …", "private profile: a blank 200 page 2
@@ -485,7 +491,8 @@ public static class WorkshopFavorites
             if (got.Ids.Count > 0) { fromSteam = got.Ids.Select((id) => id.ToString()).ToList(); total = got.Total; }
             else viaPage = true;
         }
-        // a kept list never empties on a page that lists nothing (emptyOk only while there's nothing to lose)
+        // a kept list empties only on the account's own empty favourites page, never on another page that lists nothing
+        // (emptyOk only while there's nothing to lose)
         if (viaPage) await CommunityIdsAsync(steamId, SteamGate.Kind.Background, fromSteam, page1, emptyOk, null).ConfigureAwait(false);
         bool detailsMissing = await HealAsync(a, fromSteam, started).ConfigureAwait(false);
         int added = 0, removed = 0;
