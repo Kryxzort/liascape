@@ -710,6 +710,14 @@
     "video/x-matroska https://x.test/a": ".mkv",
     "video/x-msvideo https://x.test/a": ".avi"
   },
+  "link: the stored extension, by the answer\u0027s file name": {
+    " https://x.test/dl/18 notes.txt": null,
+    "(none) https://x.test/dl/18 still.PNG": ".png",
+    "application/octet-stream https://x.test/a.mkv other.mp4": ".mkv",
+    "application/octet-stream https://x.test/dl/18 Wallpaper Loop.webm": ".webm",
+    "text/html https://x.test/dl/18 loop.mp4": null,
+    "video/mp4 https://x.test/dl/18 loop.webm": ".mp4"
+  },
   "link: what each link names": {
     "": {
       "error": "Paste a link to a wallpaper.",
@@ -1029,6 +1037,22 @@
       "media": null,
       "source": "Moewalls",
       "url": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+      "workshopId": null
+    },
+    "https://www.motionbgs.com/dl": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "MotionBgs",
+      "url": "https://www.motionbgs.com/dl",
+      "workshopId": null
+    },
+    "https://www.motionbgs.com/dl/4k/18": {
+      "error": null,
+      "kind": "Unknown",
+      "media": null,
+      "source": null,
+      "url": "https://www.motionbgs.com/dl/4k/18",
       "workshopId": null
     },
     "https://www.motionbgs.com/samurai-girl-rain-lantern": {
@@ -1527,6 +1551,17 @@
       "previewUrl": "https://moewalls.com/wp-content/uploads/preview/2026/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-preview.webm",
       "referrer": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
       "title": "Gojo And Black Cat Rainy Nights In Tokyo Jujutsu Kaisen"
+    }
+  },
+  "moewalls detail from a link, its page unnamed": {
+    "asked": [
+      "https://moewalls.com/anime/neon-rain-live-wallpaper/"
+    ],
+    "result": {
+      "downloadUrl": "https://go.moewalls.com/download.php?video=neon-rain-key",
+      "previewUrl": "https://moewalls.com/wp-content/uploads/preview/2026/neon-rain-preview.webm",
+      "referrer": "https://moewalls.com/anime/neon-rain-live-wallpaper/",
+      "title": "Neon Rain"
     }
   },
   "moewalls detail without video": {

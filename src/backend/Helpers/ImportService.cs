@@ -101,7 +101,17 @@ public static class ImportService
             // a library no import has filled yet has no imported/ to place a link or a moved copy in
             Directory.CreateDirectory(LibraryStore.SourceDir(LibraryStore.Imported));
             string key = KeyFor(sourceId, title);
-            await place(Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key), key);
+            string item = Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key);
+            // a placement that fails (a picture ffmpeg can't read) takes the folder it made with it: an empty imported/<key>
+            // would hold the name from the next import of that title. A re-import's folder was there before: it stays.
+            // Guard: scripts/test-item-actions.sh § link "a picture whose bytes can't be read"
+            bool fresh = !Directory.Exists(item) && !File.Exists(item);
+            try { await place(item, key); }
+            catch
+            {
+                if (fresh) LibraryService.TryDeleteDir(item);
+                throw;
+            }
             LibraryStore.UpdateIndex(LibraryStore.Imported, (index) =>
             {
                 var m = index.GetValueOrDefault(key) ?? new LibMeta();

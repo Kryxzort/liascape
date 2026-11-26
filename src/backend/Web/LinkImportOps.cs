@@ -149,7 +149,7 @@ public static class LinkImportOps
     {
         string? type = answer.Content.Headers.ContentType?.MediaType;
         string at = answer.RequestMessage?.RequestUri?.AbsoluteUri ?? "";
-        if (LinkImport.ExtFor(type, at) is { } ext) return ext;
+        if (LinkImport.ExtFor(type, at, Disposition(answer)) is { } ext) return ext;
         bool page = type is "text/html" or "application/xhtml+xml";
         throw new DownloadHelper.LinkRefused(kind == LinkImport.Kind.Unknown && page ? LinkImport.NotSupported
             : page ? "That link leads to a web page, not a video or picture."

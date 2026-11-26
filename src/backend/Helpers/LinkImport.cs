@@ -27,13 +27,14 @@ public static partial class LinkImport
     static readonly string[] VideoExts = [.. FolderScanner.VideoExts];
     static readonly string[] PictureExts = [.. ImportService.ImageExtensions];
 
-    // the web sources' sites: host (without www.) → the source's name, its page address prefix, and whether a page has one
-    // path segment (motionbgs, desktophut: /<slug>) or two (moewalls: /<category>/<slug>/)
-    static readonly (string Host, string Source, string Site, string Label, int Segments, bool Slash)[] Sites =
+    // the web sources' sites: host (without www.) → the source's name, its page address prefix, whether a page has one
+    // path segment (motionbgs, desktophut: /<slug>) or two (moewalls: /<category>/<slug>/), and the first segment of the site's
+    // own download links (motionbgs' /dl/4k/18, what its page's download button holds), which are files, not pages
+    static readonly (string Host, string Source, string Site, string Label, int Segments, bool Slash, string? Files)[] Sites =
     [
-        ("motionbgs.com", "MotionBgs", "https://www.motionbgs.com", "MotionBgs", 1, false),
-        ("moewalls.com", "Moewalls", "https://moewalls.com", "MoeWalls", 2, true),
-        ("desktophut.com", "Desktophut", "https://www.desktophut.com", "DesktopHut", 1, false),
+        ("motionbgs.com", "MotionBgs", "https://www.motionbgs.com", "MotionBgs", 1, false, "dl"),
+        ("moewalls.com", "Moewalls", "https://moewalls.com", "MoeWalls", 2, true, null),
+        ("desktophut.com", "Desktophut", "https://www.desktophut.com", "DesktopHut", 1, false, null),
     ];
     // a site's listing pages, never one wallpaper's: its paging, search, tags and categories
     static readonly string[] Listings = ["page", "search", "category", "tag", "tags", "author", "hx2"];
@@ -64,6 +65,8 @@ public static partial class LinkImport
         foreach (var site in Sites)
         {
             if (host != site.Host) continue;
+            // a download link: the file it answers with decides, like any address without a media name
+            if (site.Files != null && segs.Length > 1 && segs[0] == site.Files) return new(Kind.Unknown, u.AbsoluteUri);
             if (segs.Length != site.Segments || segs.Any((x) => Listings.Contains(x.ToLowerInvariant()) || x.Contains(':')))
                 return Refuse($"That {site.Label} page isn't one wallpaper's page.");
             return new(Kind.Site, site.Site + "/" + string.Join('/', segs) + (site.Slash ? "/" : ""), Source: site.Source);
@@ -82,13 +85,15 @@ public static partial class LinkImport
     }
 
     // The extension a fetched file is stored under (ImportService then keeps a video's and a gif's, makes a picture a png),
-    // from the server's Content-Type, else (none, or a generic binary type) from the address's own name; null = not a video or
-    // picture the library takes (a page, an SVG, a document).
-    public static string? ExtFor(string? contentType, string url)
+    // from the server's Content-Type, else (none, or a generic binary type) from the address's own name, else from the answer's
+    // own file name (`fileName`, its Content-Disposition); null = not a video or picture the library takes (a page, an SVG, a
+    // document). The file's first bytes are checked against the kind afterwards (ApiSecurity.HeadIsMedia).
+    public static string? ExtFor(string? contentType, string url, string? fileName = null)
     {
         string ct = (contentType ?? "").Split(';')[0].Trim().ToLowerInvariant();
-        string? named = Uri.TryCreate(url, UriKind.Absolute, out var u) ? System.IO.Path.GetExtension(Uri.UnescapeDataString(u.AbsolutePath)).ToLowerInvariant() : null;
-        if (named != null && MediaOf("x" + named) == null) named = null;
+        static string? MediaExt(string? name) => name is { Length: > 0 } && System.IO.Path.GetExtension(name.Trim().Trim('"')).ToLowerInvariant() is var e
+            && MediaOf("x" + e) != null ? e : null;
+        string? named = (Uri.TryCreate(url, UriKind.Absolute, out var u) ? MediaExt(Uri.UnescapeDataString(u.AbsolutePath)) : null) ?? MediaExt(fileName);
         return ct switch
         {
             "video/mp4" => ".mp4", "video/webm" => ".webm", "video/x-matroska" => ".mkv", "video/quicktime" => ".mov",

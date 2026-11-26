@@ -60,12 +60,14 @@ internal static class SitePage
 
     // A wallpaper's name from its own page, for a detail asked with no card behind it (an import from a link: the card's title
     // is ""): the page's og:title, else its <title>, without a leading "Download", the " Live Wallpaper" the sites append and
-    // whatever follows it (" - MoeWalls", " – Free Animated …"). Throws, like Needed, when the page names nothing.
+    // whatever follows it (" - MoeWalls", " – Free Animated …"). A page that names nothing is still the wallpaper's (its file is
+    // what the detail needs): it is named from its address, as the import dialog named it before (LinkImport.SlugTitle).
+    // Guard: scraper-selftest "moewalls detail from a link, its page unnamed"
     public static string PageName(HtmlDocument doc, string url)
     {
         string? full = Attr(doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']"), "content").Trim() is { Length: > 0 } og ? og
             : Text(doc.DocumentNode.SelectSingleNode("//title"));
-        if (string.IsNullOrEmpty(full)) throw new InvalidDataException($"the wallpaper's name not found on {url}");
+        if (string.IsNullOrEmpty(full)) return Liascape.Helpers.LinkImport.SlugTitle(url);
         string name = System.Text.RegularExpressions.Regex.Replace(full, @"^Download\s+|\s+live wallpaper\b.*$", "",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
         return name.Length > 0 ? name : full;

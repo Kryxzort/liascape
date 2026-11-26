@@ -161,6 +161,7 @@ public static class ScraperSelfTest
         mw.Map["https://moewalls.com/page/3/?s=black%20cat"] = ("search.html", null);
         mw.Map["https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/"] = ("detail.html", null);
         mw.Map["https://moewalls.com/no-video/"] = ("search.html", null);
+        mw.Map["https://moewalls.com/anime/neon-rain-live-wallpaper/"] = ("detail-unnamed.html", null);
         var mws = new MoewallsService();
         await Case(got, mw, "moewalls latest p2", () => mws.GetLatestAsync(2));
         await Case(got, mw, "moewalls search", () => mws.SearchAsync("rain", 1));
@@ -187,6 +188,8 @@ public static class ScraperSelfTest
         await Case(got, mb, "motionbgs detail from a link", () => mbs.GetDetailAsync(Result("", "https://www.motionbgs.com/samurai-girl-rain-lantern")));
         await Case(got, mw, "moewalls detail from a link", () => mws.GetDetailAsync(Result("",
             "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/")));
+        // …and a page that names nothing still gives its wallpaper, named from its address as the dialog named it
+        await Case(got, mw, "moewalls detail from a link, its page unnamed", () => mws.GetDetailAsync(Result("", "https://moewalls.com/anime/neon-rain-live-wallpaper/")));
         await Case(got, dh, "desktophut detail from a link", () => dhs.GetDetailAsync(Result("", "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb")));
         Links(got);
 
@@ -238,6 +241,8 @@ public static class ScraperSelfTest
             "https://motionbgs.com/samurai-girl-rain-lantern",
             "https://www.motionbgs.com/tag:car/",
             "https://www.motionbgs.com/search?q=rain",
+            "https://www.motionbgs.com/dl/4k/18",
+            "https://www.motionbgs.com/dl",
             "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
             "https://cdn.example.com/walls/Neon%20Rain.WEBM?sig=abc",
             "https://cdn.example.com/a/b/loop.mkv",
@@ -277,6 +282,17 @@ public static class ScraperSelfTest
         })
             ext[$"{ct ?? "(none)"} {url}"] = LinkImport.ExtFor(ct, url);
         got["link: the stored extension"] = ext;
+        // an address with no media name: the answer's own file name (Content-Disposition) names the kind, unless its type says
+        // it is something else
+        var named = new JsonObject();
+        foreach (var (ct, url, file) in new (string?, string, string?)[]
+        {
+            ("application/octet-stream", "https://x.test/dl/18", "Wallpaper Loop.webm"), (null, "https://x.test/dl/18", "still.PNG"),
+            ("", "https://x.test/dl/18", "notes.txt"), ("application/octet-stream", "https://x.test/a.mkv", "other.mp4"),
+            ("text/html", "https://x.test/dl/18", "loop.mp4"), ("video/mp4", "https://x.test/dl/18", "loop.webm"),
+        })
+            named[$"{ct ?? "(none)"} {url} {file}"] = LinkImport.ExtFor(ct, url, file);
+        got["link: the stored extension, by the answer's file name"] = named;
 
         got["link: names"] = new JsonObject
         {

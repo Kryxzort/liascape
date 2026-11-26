@@ -323,6 +323,8 @@ class H(http.server.BaseHTTPRequestHandler):
         if p in ("/files/neon.mp4", "/files/redir-target.mp4", "/files/again.mp4", "/files/creds-target.mp4"): self.send(200, V, "video/mp4")
         elif p == "/files/still.jpg": self.send(200, J, "image/jpeg")
         elif p == "/v/abc": self.send(200, V, "video/mp4", [("Content-Disposition", 'attachment; filename="Sunset Loop.mp4"')])
+        elif p == "/v/octet": self.send(200, V, "application/octet-stream", [("Content-Disposition", 'attachment; filename="Octet Loop.mp4"')])
+        elif p == "/files/broken.jpg": self.send(200, b"\xff\xd8\xff\xe0" + b"not a picture " * 8, "image/jpeg")
         elif p in ("/page", "/v/page"): self.send(200, b"<!doctype html><title>a page</title>", "text/html; charset=utf-8")
         elif p == "/files/fake.mp4": self.send(200, b"<!doctype html><title>log in</title>" + b" " * 64, "video/mp4")
         elif p == "/r/ok": go("/files/redir-target.mp4")
@@ -373,6 +375,11 @@ check "a picture's link → stored as a png" "$(importl "$S/files/still.jpg" .vi
 check "a redirect on the same server is followed" "$(importl "$S/r/ok" .videoPath)" "200 \"$LIB/imported/ok/ok.mp4\""
 check "an unknown site's address: its answer looked at, named by its Content-Disposition" "$(resolve "$S/v/abc" '[.kind, .title, .media]')" '200 ["direct","Sunset Loop","video"]'
 check "…and imported as that file" "$(importl "$S/v/abc" .videoPath)" "200 \"$LIB/imported/Sunset Loop/Sunset Loop.mp4\""
+check "a generic binary answer at a nameless address: its Content-Disposition's file name gives its kind" "$(importl "$S/v/octet" .videoPath)" \
+  "200 \"$LIB/imported/Octet Loop/Octet Loop.mp4\""
+check "a picture whose bytes can't be read → refused, no item folder left" \
+  "$(importl "$S/files/broken.jpg" .error) $([ -e "$LIB/imported/broken" ] && echo left || echo none) $(trash_left)" \
+  "400 \"The link's picture couldn't be read.\" none 0"
 unsupported='"That site isn'"'"'t supported. Import takes a Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture."'
 check "an unknown site's page → it isn't supported, in plain words (resolve)" "$(resolve "$S/page" .error)" "400 $unsupported"
 check "…and import, landing nothing" "$(importl "$S/v/page" .error) $(trash_left)" "400 $unsupported 0"
