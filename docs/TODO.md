@@ -121,7 +121,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Text in a state colour is excluded today (a black copy under it "reads as dirt"), so the red Unsubscribe tile
          washes out over a light wallpaper. Give that text a shadow that suits it (a softer or tinted one, not the plain
          black copy), at least for danger / warning text on tiles; judge it on a light and a dark wallpaper.
-       - `.playlist-bar-label` (`PlaylistBar.tsx`) joins the no-shadow list: its shadow looks wrong there.
+       - The playlist bar's PLAYLIST label (`.playlist-bar-label`, `PlaylistBar.tsx`), coloured text whose plain black
+         shadow looks wrong, gets the same suited shadow instead of none.
        Guard: probe cells reading the computed `text-shadow` of those elements with the setting on and off, and
        screenshots over a light and a dark `bg-live` wallpaper.
 
