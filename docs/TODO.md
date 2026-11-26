@@ -100,6 +100,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          the item is in the library (in Browse too), then Comments. Today: tags sit loose in the Library but inside
          About in Browse, the Library has no About, Favourite pairs with Open on Steam in Browse but sits alone under
          Scene properties in the Library, the chips' order differs, Apply exists only in Browse.
+       - Undo the card right-click menu (e022227c): the owner meant "in the sidebar", which right-click opens; a menu at
+         the pointer collides with it. Remove the card `ContextMenu` / `cardMenuItems` wiring in Library and Browse and the
+         "light" menu mode it needed, and the probe cells for it; put Hide / Unhide in the shared sidebar (acting on the
+         selection, like Unsubscribe). Keep `hidden.json`, the Hidden filter row and their tests. `docs/decisions.md`
+         § "Hide and Unsubscribe live in the sidebar, never a card menu".
        Share one component (or one actions list) so the two can't drift again. Guard: probe cells that open the same item
        in both tabs and find the same actions, labels and behaviour; the design checklist for each control.
 
