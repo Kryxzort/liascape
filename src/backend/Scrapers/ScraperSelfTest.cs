@@ -19,7 +19,8 @@ namespace Liascape.Scrapers;
 // parser reads, captured from the site — and the URLs it asked for and what it returned must equal `expected.json`. The
 // local Wallpaper Engine folder runs over a copy of `wallpaper-engine/` (fake items: video, scene, preset, the skipped kinds)
 // under a private HOME (the GIF thumbnails' cache), and downloads (DownloadHelper) land in a private library: a loopback
-// server stands in for the site, beside files on this PC and the fake folder's items. `--write` rewrites `expected.json`
+// server stands in for the site, beside files on this PC and the fake folder's items; ChildProcess (the GIF stills' and
+// imports' ffmpeg) runs small shell commands. `--write` rewrites `expected.json`
 // from what the code returns now — only to pin a deliberate change, after reading the diff. A site that changed its
 // markup: capture its page again, trim it the same way, and fix the parser until this passes.
 public static class ScraperSelfTest
@@ -184,6 +185,45 @@ public static class ScraperSelfTest
 
         await LocalFolder(Path.Combine(dir, "wallpaper-engine"), tmp, got);
         await Downloads(tmp, got);
+        await ChildProcesses(tmp, got);
+    }
+
+    // ChildProcess, which runs the ffmpeg of a GIF still (WallpaperEngineScraper) and of an import: what a tool printed and
+    // its exit code; one past its limit killed with its own children and reaped, quickly; one that isn't installed; a
+    // cancelled caller.
+    private static async Task ChildProcesses(string tmp, JsonObject got)
+    {
+        var answered = await ChildProcess.RunAsync("sh", ["-c", "echo out; echo err >&2; exit 3"], TimeSpan.FromSeconds(10));
+        got["child process: what it printed and its exit"] = Node(answered);
+
+        string pidFile = Path.Combine(tmp, "grandchild.pid");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var late = await ChildProcess.RunAsync("sh", ["-c", $"sleep 30 & echo $! > '{pidFile}'; wait"], TimeSpan.FromMilliseconds(500));
+        long took = clock.ElapsedMilliseconds;
+        // its own child (the sleep) went with it: gone, or a zombie waiting for init
+        string? pid = File.Exists(pidFile) ? File.ReadAllText(pidFile).Trim() : null;
+        string? state = null;
+        for (int i = 0; pid != null && i < 20; i++)
+        {
+            state = File.Exists($"/proc/{pid}/stat") ? File.ReadAllText($"/proc/{pid}/stat").Split(") ").LastOrDefault()?[..1] : "gone";
+            if (state is "gone" or "Z") break;
+            await Task.Delay(50);
+        }
+        got["child process: past its limit"] = new JsonObject
+        {
+            ["result"] = Node(late),
+            ["killed within 5 s"] = took < 5000,
+            ["its child"] = pid == null ? "never started" : state is "gone" or "Z" ? "dead" : $"still running ({state})",
+        };
+
+        got["child process: not installed"] = Node(await ChildProcess.RunAsync(Path.Combine(tmp, "no-such-tool"), [], TimeSpan.FromSeconds(10)));
+
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        string outcome;
+        clock.Restart();
+        try { outcome = $"returned {(await ChildProcess.RunAsync("sleep", ["30"], TimeSpan.FromSeconds(60), cancel.Token)).Exit}"; }
+        catch (OperationCanceledException) { outcome = clock.ElapsedMilliseconds < 5000 ? "cancelled" : "cancelled late"; }
+        got["child process: its caller cancels"] = outcome;
     }
 
     // A download (DownloadHelper) as /download makes it — a web source's file from a loopback server standing in for the

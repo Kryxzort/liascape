@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
 using Liascape.Models;
@@ -186,32 +184,10 @@ internal static class WallpaperEngineScraper
         }
     }
 
+    // throws when ffmpeg failed, timed out or isn't there: each caller tries its next frame
     private static async Task RunFfmpeg(params string[] args)
     {
-        var psi = new ProcessStartInfo("ffmpeg")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
-        using var proc = Process.Start(psi);
-        if (proc == null) return;
-        proc.BeginOutputReadLine();
-        proc.BeginErrorReadLine();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        try
-        {
-            await proc.WaitForExitAsync(cts.Token);
-            if (proc.ExitCode != 0) throw new InvalidOperationException($"ffmpeg exited with code {proc.ExitCode}");
-        }
-        catch (OperationCanceledException)
-        {
-            try { proc.Kill(entireProcessTree: true); } catch { }
-            using var killCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            try { await proc.WaitForExitAsync(killCts.Token); } catch { }
-            throw;
-        }
+        var run = await ChildProcess.RunAsync("ffmpeg", args, TimeSpan.FromSeconds(10));
+        if (!run.Ok) throw new InvalidOperationException($"ffmpeg failed (exit {run.Exit?.ToString() ?? "none"})");
     }
 }

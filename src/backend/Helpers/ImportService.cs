@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -13,6 +12,8 @@ namespace Liascape.Helpers;
 // watched folder). The source stays where it is and is never written: the item holds a copy of it or a link to it, and a
 // link is unlinked on delete (LibraryService.TryDeleteDir), never deleted through. The index names the source
 // (SourceUrl "import:<path>"), so importing it again is the same item at the same key, in the form it already has.
+// Both kinds come in through AdmitAsync and answer with the item as /library lists it (LibraryService.LoadOne); a kind
+// adds only how its source is placed and what its index entry says.
 // Guard: scripts/test-item-actions.sh § import, scripts/test-folder-import.sh
 public static class ImportService
 {
@@ -21,7 +22,7 @@ public static class ImportService
     // One import at a time picks a key and fills it: two imports titled alike would otherwise both find the same key free.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    // ffmpeg runs inside Gate; one that hangs must not stop every later import
+    // ffmpeg runs inside Gate (a png conversion); one that hangs must not stop every later import
     private static readonly TimeSpan FfmpegLimit = TimeSpan.FromSeconds(60);
 
     private static string Ext(string path) => Path.GetExtension(path).ToLowerInvariant();
@@ -36,38 +37,23 @@ public static class ImportService
     {
         if (!File.Exists(sourcePath)) return null;
         string src = Path.GetFullPath(sourcePath);
-        string sourceId = FolderScanner.ImportPrefix + src;
         bool picture = ImageExtensions.Contains(Ext(src));
         string ext = picture ? ".png" : LibraryService.ImportedMediaExts.Contains(Ext(src)) ? Ext(src) : ".mp4";
 
-        string media, thumb, key;
-        await Gate.WaitAsync();
-        try
+        string key = await AdmitAsync(src, title, async (item, name) =>
         {
-            key = KeyFor(sourceId, title);
-            string dir = Directory.CreateDirectory(Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key)).FullName;
-            media = Path.Combine(dir, key + ext);
-            thumb = Path.Combine(dir, key + ".jpg");
-            if (media != src)
-            {
-                if (picture && Ext(src) != ".png") await ConvertToPngAsync(src, media);
-                // a re-import keeps the item's form: a link stays a link, a copy is copied again
-                else if (File.Exists(media) ? LibraryService.IsSymlink(media) : link) await PlaceAsync(media, (part) => { File.CreateSymbolicLink(part, src); return Task.CompletedTask; });
-                else await PlaceAsync(media, (part) => Task.Run(() => File.Copy(src, part)));
-            }
-            // in the index before the slow thumbnail, so a /library meanwhile lists it
-            LibraryStore.SetMeta(media, (m) => { m.Title = key; m.SourceUrl = sourceId; meta?.Invoke(m); });
-        }
-        finally { Gate.Release(); }
+            string media = Path.Combine(Directory.CreateDirectory(item).FullName, name + ext);
+            if (media == src) return;
+            if (picture && Ext(src) != ".png") await ConvertToPngAsync(src, media);
+            // a re-import keeps the item's form: a link stays a link, a copy is copied again
+            else if (File.Exists(media) ? LibraryService.IsSymlink(media) : link) await PlaceAsync(media, (part) => { File.CreateSymbolicLink(part, src); return Task.CompletedTask; });
+            else await PlaceAsync(media, (part) => Task.Run(() => File.Copy(src, part)));
+        }, (m, name) => { m.Title = name; meta?.Invoke(m); });
 
-        await ThumbnailAsync(media, thumb, picture);
-        return new LibraryItem
-        {
-            Title = key,
-            VideoPath = media,
-            ThumbnailPath = File.Exists(thumb) ? thumb : null,
-            SourceId = sourceId,
-        };
+        // outside the gate: a slow ffmpeg holds up no other import, and the item is listed (without its card picture) meanwhile
+        string dir = Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key);
+        await ThumbnailAsync(Path.Combine(dir, key + ext), Path.Combine(dir, key + ".jpg"), picture);
+        return LibraryService.LoadOne(LibraryStore.Imported, key);
     }
 
     // A Wallpaper Engine item folder (a scene, a preset, or a video beside its project.json) → imported/<key> itself: a link
@@ -78,33 +64,47 @@ public static class ImportService
     {
         if (!f.Folder || !Directory.Exists(f.Path)) return null;
         string src = Path.GetFullPath(f.Path);
-        string sourceId = FolderScanner.ImportPrefix + src;
-        string key;
-        await Gate.WaitAsync();
-        try
+        string key = await AdmitAsync(src, f.Title, async (item, _) =>
         {
-            key = KeyFor(sourceId, f.Title);
-            string item = Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key);
             bool there = Directory.Exists(item) || File.Exists(item);
             if (there ? LibraryService.IsSymlink(item) : link)
             {
                 if (!there) File.CreateSymbolicLink(item, src);
             }
             else await CopyFolderInAsync(src, item);
+        }, (m, _) =>
+        {
+            m.Title = f.Title;
+            m.IsScene = f.Kind == "scene";
+            m.WorkshopId = f.WorkshopId;
+            meta?.Invoke(m);
+        });
+        return LibraryService.LoadOne(LibraryStore.Imported, key);
+    }
+
+    // An import's way in, all under Gate: its key, `place` putting the source at imported/<key> (the item's path and key
+    // given), then its index entry (SourceUrl, and what `describe` adds). The order is forced, not chosen: a key is only
+    // known free while Gate is held, and the entry is written once its file is whole, so /library never lists an item with
+    // nothing behind it and a placement that throws leaves the index as it was. The key back.
+    private static async Task<string> AdmitAsync(string src, string title, Func<string, string, Task> place, Action<LibMeta, string> describe)
+    {
+        string sourceId = FolderScanner.ImportPrefix + src;
+        await Gate.WaitAsync();
+        try
+        {
+            string key = KeyFor(sourceId, title);
+            await place(Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key), key);
             LibraryStore.UpdateIndex(LibraryStore.Imported, (index) =>
             {
                 var m = index.GetValueOrDefault(key) ?? new LibMeta();
-                m.Title = f.Title;
                 m.SourceUrl = sourceId;
-                m.IsScene = f.Kind == "scene";
-                m.WorkshopId = f.WorkshopId;
-                meta?.Invoke(m);
+                describe(m, key);
                 index[key] = m;
                 return true;
             });
+            return key;
         }
         finally { Gate.Release(); }
-        return LibraryService.LoadOne(LibraryStore.Imported, key);
     }
 
     // The key this source already has, else the title's name made free with " (n)" (the way a file manager names a copy).
@@ -140,7 +140,7 @@ public static class ImportService
 
     private static Task ConvertToPngAsync(string src, string dest) => PlaceAsync(dest, async (part) =>
     {
-        if (!await FfmpegAsync("-y", "-i", src, "-frames:v", "1", part) || !File.Exists(part))
+        if (!(await Ffmpeg("-y", "-i", src, "-frames:v", "1", part)).Ok || !File.Exists(part))
             throw new InvalidDataException($"ffmpeg couldn't turn {Path.GetFileName(src)} into a png");
     });
 
@@ -181,34 +181,10 @@ public static class ImportService
         foreach (var input in tries)
         {
             try { File.Delete(thumb); } catch { }
-            if (await FfmpegAsync(["-y", .. input, "-frames:v", "1", thumb]) && File.Exists(thumb)) return;
+            if ((await Ffmpeg(["-y", .. input, "-frames:v", "1", thumb])).Ok && File.Exists(thumb)) return;
         }
     }
 
-    // ffmpeg with `args`: true when it exited 0 within FfmpegLimit (past it, killed with its children and reaped)
-    private static async Task<bool> FfmpegAsync(params string[] args)
-    {
-        var start = new ProcessStartInfo("ffmpeg") { RedirectStandardOutput = true, RedirectStandardError = true };
-        start.ArgumentList.Add("-nostdin");
-        foreach (var a in args) start.ArgumentList.Add(a);
-        Process? ffmpeg;
-        try { ffmpeg = Process.Start(start); }
-        catch { return false; }
-        if (ffmpeg == null) return false;
-        using (ffmpeg)
-        {
-            // drained, or a chatty ffmpeg blocks on a full pipe
-            _ = ffmpeg.StandardOutput.ReadToEndAsync();
-            _ = ffmpeg.StandardError.ReadToEndAsync();
-            using var limit = new CancellationTokenSource(FfmpegLimit);
-            try { await ffmpeg.WaitForExitAsync(limit.Token); }
-            catch (OperationCanceledException)
-            {
-                try { ffmpeg.Kill(entireProcessTree: true); } catch { }
-                await ffmpeg.WaitForExitAsync();
-                return false;
-            }
-            return ffmpeg.ExitCode == 0;
-        }
-    }
+    private static Task<ChildProcess.Result> Ffmpeg(params string[] args) =>
+        ChildProcess.RunAsync("ffmpeg", ["-nostdin", .. args], FfmpegLimit);
 }

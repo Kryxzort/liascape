@@ -369,20 +369,10 @@ public static class LibraryService
     // Quick check for an audio stream (ffprobe). Assumes yes on any failure (don't wrongly skip).
     private static async System.Threading.Tasks.Task<bool> HasAudioAsync(string path)
     {
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo("ffprobe")
-            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in new[] { "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", path })
-                psi.ArgumentList.Add(a);
-            using var p = System.Diagnostics.Process.Start(psi);
-            if (p == null) return true;
-            string o = await p.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
-            _ = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } return true; }
-            return o.Contains("audio");
-        }
-        catch { return true; }
+        var probe = await ChildProcess.RunAsync("ffprobe",
+            ["-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", path],
+            TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+        return probe.Exit == null || probe.Out.Contains("audio");
     }
 
     // ffmpeg loudnorm pass 1 → JSON on stderr; parse the input_* fields (the file's measured loudness).
@@ -391,20 +381,12 @@ public static class LibraryService
         if (!File.Exists(mediaPath)) return null;
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg")
-            {
-                UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true,
-            };
-            // -vn → don't decode video (loudness is audio-only). ~4× faster on 4K clips (the old path
-            // wastefully decoded full video frames just to measure the audio track).
-            foreach (var a in new[] { "-hide_banner", "-nostdin", "-vn", "-i", mediaPath,
-                "-af", "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-" })
-                psi.ArgumentList.Add(a);
-            using var p = System.Diagnostics.Process.Start(psi);
-            if (p == null) return null;
-            string err = await p.StandardError.ReadToEndAsync().ConfigureAwait(false);
-            _ = p.StandardOutput.ReadToEndAsync();
-            if (!p.WaitForExit(120000)) { try { p.Kill(); } catch { } return null; }
+            // -vn: loudness is audio-only, and decoding a 4K video's frames just to skip them is ~4× slower
+            var pass = await ChildProcess.RunAsync("ffmpeg",
+                ["-hide_banner", "-nostdin", "-vn", "-i", mediaPath, "-af", "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"],
+                TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+            if (pass.Exit == null) return null;
+            string err = pass.Err;
             // the JSON block is the last {...} in stderr
             int s = err.LastIndexOf('{'), e = err.LastIndexOf('}');
             if (s < 0 || e <= s) return null;

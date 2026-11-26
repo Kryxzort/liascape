@@ -1,4 +1,22 @@
 {
+  "child process: its caller cancels": "cancelled",
+  "child process: not installed": {
+    "err": "",
+    "out": ""
+  },
+  "child process: past its limit": {
+    "its child": "dead",
+    "killed within 5 s": true,
+    "result": {
+      "err": "",
+      "out": ""
+    }
+  },
+  "child process: what it printed and its exit": {
+    "err": "err\n",
+    "exit": 3,
+    "out": "out\n"
+  },
   "desktophut detail": {
     "asked": [
       "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb"

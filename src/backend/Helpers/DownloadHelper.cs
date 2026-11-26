@@ -132,19 +132,12 @@ public static class DownloadHelper
         using var ask = new HttpRequestMessage(HttpMethod.Get, from);
         ask.Headers.UserAgent.ParseAdd(HttpClientProvider.UserAgent);
         if (!string.IsNullOrEmpty(referer)) ask.Headers.Referrer = new Uri(referer);
+        // headers first: the body streams into the file as it arrives, never held whole in memory
         using var answer = await HttpClientProvider.Client.SendAsync(ask, HttpCompletionOption.ResponseHeadersRead, ct);
         answer.EnsureSuccessStatusCode();
-        long? size = answer.Content.Headers.ContentLength;
-        await using var body = await answer.Content.ReadAsStreamAsync(ct);
-        await using var file = new FileStream(to, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true);
-        var chunk = new byte[1 << 16];
-        long done = 0;
-        for (int n; (n = await body.ReadAsync(chunk, ct)) > 0;)
-        {
-            await file.WriteAsync(chunk.AsMemory(0, n), ct);
-            done += n;
-            if (size > 0) progress?.Report((double)done / size.Value);
-        }
+        await using var file = new ProgressStream(new FileStream(to, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true),
+            answer.Content.Headers.ContentLength, progress);
+        await answer.Content.CopyToAsync(file, ct);
     }
 
     // A picture beside the media as <key><its extension> (`fallbackExt` when the URL has none); null when there is none or it

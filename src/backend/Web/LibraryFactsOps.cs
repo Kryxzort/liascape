@@ -416,21 +416,15 @@ public static class LibraryFactsOps
     // stream or ffprobe can't read it (kept until the file changes); null = ffprobe couldn't run or didn't answer in time.
     private static async Task<string?> VideoSizeOfAsync(string path)
     {
+        var probe = await ChildProcess.RunAsync("ffprobe",
+            ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:stream_tags=rotate:stream_side_data=rotation",
+                "-of", "json", path],
+            TimeSpan.FromMilliseconds(ProbeTimeoutMs)).ConfigureAwait(false);
+        if (probe.Exit == null) return null;
+        if (!probe.Ok) return "";
         try
         {
-            var psi = new ProcessStartInfo("ffprobe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in new[] { "-v", "error", "-select_streams", "v:0", "-show_entries",
-                "stream=width,height:stream_tags=rotate:stream_side_data=rotation", "-of", "json", path })
-                psi.ArgumentList.Add(a);
-            using var p = Process.Start(psi);
-            if (p == null) return null;
-            var outTask = p.StandardOutput.ReadToEndAsync();
-            _ = p.StandardError.ReadToEndAsync();
-            using var cts = new CancellationTokenSource(ProbeTimeoutMs);
-            try { await p.WaitForExitAsync(cts.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { try { p.Kill(); } catch { } return null; }
-            if (p.ExitCode != 0) return "";
-            using var doc = JsonDocument.Parse(await outTask.ConfigureAwait(false));
+            using var doc = JsonDocument.Parse(probe.Out);
             if (!doc.RootElement.TryGetProperty("streams", out var ss) || ss.ValueKind != JsonValueKind.Array || ss.GetArrayLength() == 0) return "";
             var s = ss[0];
             if (!s.TryGetProperty("width", out var w) || !w.TryGetInt32(out var wi) || !s.TryGetProperty("height", out var h) || !h.TryGetInt32(out var hi)
@@ -443,7 +437,6 @@ public static class LibraryFactsOps
                 && rt.ValueKind == JsonValueKind.String && int.TryParse(rt.GetString(), out var rv2)) rot = rv2;
             return Math.Abs(rot) % 180 == 90 ? $"{hi} x {wi}" : $"{wi} x {hi}";
         }
-        catch (System.ComponentModel.Win32Exception) { return null; } // no ffprobe
-        catch { return ""; }
+        catch (Exception e) when (e is JsonException or InvalidOperationException) { return ""; } // not the JSON asked for
     }
 }
