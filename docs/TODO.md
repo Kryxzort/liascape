@@ -167,6 +167,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `restore_waits_for_ready_no_seam`).
 
 ## UI
+- [ ] probe-sidebar `lib:preset:needsBase` fails on lp-player's own UI: it expects a plain Workshop download disabled
+      under "subscribe" when signed out and sent as a one-off, but since the two download modes (`actionBlocked`)
+      only the one-off is blocked and a signed-out subscribe opens the item's page. Update the cell to the modes' order.
 - [ ] Matrix cell `single × appear:gifVideo` fails alone on lp-player `b73086f9` too: Settings' preview card "never
       showed a video of its gif in 6 s" (its `on` half; the `off` half then proves nothing). Cause not looked into yet.
 - [ ] Text that changes in place pops, against design.md's "content changes slide or cross-fade … numbers and bars
