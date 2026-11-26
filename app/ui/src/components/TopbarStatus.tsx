@@ -22,26 +22,14 @@ type Line =
 const OUT_MS = 220;
 
 // The low-VRAM hold's notice, leading the now-playing line as a pill in the notice look (index.css .st-hold: Settings'
-// feature-health summary's edge and fill). It is three unbreakable parts, the words in two halves and the numbers, so the
-// slot lays them out whole or not at all (index.css: one line, then the numbers on a second, then the words alone, then the
-// glyph alone); what a narrow slot leaves out is in the line's tooltip. Guard: probe-layout look:vramHold
+// feature-health summary's edge and fill): the glyph and "Low VRAM", the glyph alone where the slot has no room for the
+// words. The whole message (what's held, MB free and needed) is the line's tooltip and the pill's accessible name.
+// Guard: probe-layout look:vramHold
 function HoldNotice({ hold }: { hold: string }) {
-  const cut = hold.indexOf(" — ");
-  const lead = cut < 0 ? hold : hold.slice(0, cut), num = cut < 0 ? "" : hold.slice(cut + 3);
-  // the words' two halves, as even as the word breaks allow: the narrow form stacks them
-  const words = lead.split(" ");
-  let at = 1;
-  while (at < words.length - 1 && words.slice(0, at + 1).join(" ").length <= lead.length / 2) at++;
-  const parts = [words.slice(0, at).join(" "), words.slice(at).join(" ")].filter(Boolean);
   return (
-    <span className="st-hold">
+    <span className="st-hold" role="img" aria-label={hold}>
       <AlertTriangle size={13} className="st-hold-ico" aria-hidden />
-      {/* a part's leading space keeps the notice whole for a reader (textContent); a line's start drops it, the row's gap spaces them */}
-      <span className="st-hold-text">
-        {/* the dash leads to the numbers: it goes where they do */}
-        {parts.map((p, i) => <span key={i} className="st-hold-lead">{i > 0 ? ` ${p}` : p}{num && i === parts.length - 1 && <span className="st-hold-dash"> —</span>}</span>)}
-        {num && <span className="st-hold-num">{` ${num}`}</span>}
-      </span>
+      <span className="st-hold-text" aria-hidden>Low VRAM</span>
     </span>
   );
 }

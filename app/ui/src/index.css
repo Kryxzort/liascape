@@ -507,25 +507,18 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .st-op-more { flex: none; }
 :root.no-motion .st-layer { animation-duration: var(--fade-dur); animation-timing-function: linear; }
 /* COOL: the low-VRAM hold's notice (TopbarStatus.tsx HoldNotice) leads the now-playing line as a pill: the feature-health
-   summary's --warn edge and fill (below, shared), the warning glyph's amber glow, and it rises in on the soft spring. Its
-   parts (the words in two halves, the numbers) are never cut: the rest of the line gives way first (it shrinks to nothing),
-   then the numbers take a second line; a slot too narrow for that (the bar's other controls leave it 70–180 px between 761
-   and 1000 px wide) shows the words alone on two lines, and one too narrow for those the glyph alone, the whole notice in
-   the line's tooltip. Two lines stay inside the bar's own row height (the negative block margin takes back the words' box
-   padding), so the bar never grows. Guard: probe-layout look:vramHold, look:vramHold:off */
+   summary's --warn edge and fill (below, shared), the warning glyph's amber glow, and it rises in on the soft spring. It
+   reads "Low VRAM", never cut: the rest of the line gives way first (it shrinks to nothing), and a slot too narrow for the
+   words (the bar's other controls leave it 70–180 px between 761 and 1000 px wide) shows the glyph alone; the whole
+   message is the line's tooltip. Guard: probe-layout look:vramHold, look:vramHold:off */
 .topbar > .status { container: status / inline-size; }
-.st-layer.st-held { display: flex; align-items: center; justify-content: flex-end; overflow: visible; white-space: normal; text-align: left; margin-block: -3px; }
-.st-hold { flex: 0 0 auto; max-width: calc(100% - 10px); min-width: 0; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px;
-  padding: 2px 9px 2px 7px; border-radius: 8px; font-size: 12px; line-height: 13px; color: var(--text);
+.st-layer.st-held { display: flex; align-items: center; justify-content: flex-end; overflow: visible; }
+.st-hold { flex: 0 0 auto; max-width: 100%; min-width: 0; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px 2px 7px; border-radius: 8px; font-size: 12px; line-height: 15px; color: var(--text);
   box-shadow: 0 0 12px -4px var(--warn); animation: hold-in var(--spring-soft-dur) var(--spring-soft) both; }
-.st-hold:only-child { max-width: 100%; }
 .st-hold-ico { flex: none; color: var(--warn); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn) 60%, transparent)); }
-.st-hold-text { display: flex; flex-wrap: wrap; column-gap: .3em; min-width: 0; }
-.st-hold-lead, .st-hold-num { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@container status (max-width: 230px) { .st-hold-num, .st-hold-dash { display: none; } }
-@container status (max-width: 140px) { .st-hold-text { display: none; } .st-hold { padding-inline: 7px; } }
-.st-hold-lead { color: color-mix(in srgb, var(--warn) 75%, var(--text)); font-weight: 600; }
-.st-hold-num { font-variant-numeric: tabular-nums; }
+.st-hold-text { white-space: nowrap; color: color-mix(in srgb, var(--warn) 75%, var(--text)); font-weight: 600; }
+@container status (max-width: 100px) { .st-hold-text { display: none; } .st-hold { padding-inline: 7px; } }
 .st-held-rest { flex: 0 1 auto; min-width: 0; margin-left: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-layer.out .st-hold { animation: hold-out .2s ease-in forwards; }
 @keyframes hold-in { from { opacity: 0; transform: translateY(5px) scale(.94); } }
@@ -1477,7 +1470,7 @@ input[type=range]:focus-visible { outline: none; }
   .s-reset:hover, .s-warn, .s-warn-text, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
   .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title, .side-sub-ico.subscribed, .side-sub-ico.subscribing,
   .side-sub-ico.unsubscribing, .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
-  .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-hold-ico, .st-hold-lead, .st-msg, .st-name, .st-use,
+  .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-hold-ico, .st-hold-text, .st-msg, .st-name, .st-use,
   .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
   .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
   .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op, .ws-creator-ico) { text-shadow: none; }

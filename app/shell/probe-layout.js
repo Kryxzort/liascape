@@ -60,10 +60,10 @@
 //                         sidebar title draws it through its clamp; a light theme's crust turns it white; off: gone.
 //                         Screenshots look-textShadow-*.png
 //   look:vramHold[:off]   the low-VRAM hold's notice leads the now-playing line in the notice look (the --warn edge and glyph,
-//                         their glow, none under no-glow, a translucent fill under bg-live, Latte's own --warn); at any width
-//                         what the slot holds shows whole (the numbers on a second line, else the words, else the glyph; the top
-//                         bar's height kept), the whole notice the line's tooltip; it rises and fades in, fades out; motion off:
-//                         it fades in place. Screenshots look-vramHold-*.png
+//                         their glow, none under no-glow, a translucent fill under bg-live, Latte's own --warn): "Low VRAM",
+//                         never cut, the glyph alone in a slot too narrow for it (the top bar's height kept), the whole
+//                         message the line's tooltip; it rises and fades in, fades out; motion off: it fades in place.
+//                         Screenshots look-vramHold-*.png
 //   perf:idle             an idle page asks for no frames
 //   perf:skeleton         Browse's placeholder cards + the load bar (a /browse that never answers): nothing asks for a main frame
 //                         every refresh (≤ SKEL_RECALCS_PER_FRAME main-thread style recalcs per frame the compositor drew);
@@ -1021,9 +1021,9 @@ app.whenReady().then(async () => {
     // (the debug bridge's liascapeDbg.vramHold: a real hold needs a scene and a faked GPU, matrix vram:held). It leads the
     // now-playing line as a pill in the notice look (Settings' feature-health summary: the --warn edge on a --tr-strong fill,
     // the warning glyph glowing in --warn), its words and numbers whole; it rises and fades in, and fades out; the top bar
-    // keeps its height. No-glow: no glow on it or its glyph; bg-live: its fill goes translucent. Narrower, what the slot holds
-    // shows whole (never an ellipsis, two lines at most): the numbers on a second line, else the words alone, else the glyph
-    // alone, the whole notice always the line's tooltip. A light theme (Latte) takes its own --warn. Screenshots
+    // keeps its height. No-glow: no glow on it or its glyph; bg-live: its fill goes translucent. It reads "Low VRAM", never
+    // cut; a slot too narrow for that shows the glyph alone; the whole message is always the line's tooltip and the pill's
+    // accessible name. A light theme (Latte) takes its own --warn. Screenshots
     // look-vramHold-*.png (the top bar)
     const HOLD = "Paused: low video memory — 3940 MB free, needs 4368 MB";
     const holdPage = async () => { await win.loadURL(withToken(U + "/") + "&debug"); await js(PAGE);
@@ -1038,8 +1038,8 @@ app.whenReady().then(async () => {
       const tb = document.querySelector(".topbar").getBoundingClientRect(), st = document.querySelector(".topbar > .status").getBoundingClientRect();
       if (!p) return { pill: false, title: line?.title ?? null, text: document.querySelector(".status")?.textContent ?? "", bar: tb.height };
       const cs = getComputedStyle(p), ico = p.querySelector("svg"), b = p.getBoundingClientRect();
-      const words = [...p.querySelectorAll(".st-hold-lead, .st-hold-num")];
-      return { pill: true, text: p.textContent, title: line?.title ?? null, bar: tb.height, warn: col("var(--warn)"),
+      const words = [...p.querySelectorAll(".st-hold-text")];
+      return { pill: true, text: p.textContent, label: p.getAttribute("aria-label"), title: line?.title ?? null, bar: tb.height, warn: col("var(--warn)"),
         edge: col("color-mix(in srgb, var(--warn) 55%, transparent)"), border: cs.borderTopColor, borderW: parseFloat(cs.borderTopWidth),
         fill: cs.backgroundColor, glow: cs.boxShadow, ico: ico ? getComputedStyle(ico).color : null, icoGlow: ico ? getComputedStyle(ico).filter : null,
         cut: words.filter((w) => w.getClientRects().length && w.scrollWidth > w.clientWidth + 1).map((w) => w.textContent),
@@ -1049,12 +1049,12 @@ app.whenReady().then(async () => {
     const pillLook = (r, where) => {
       const v = [];
       if (!r.pill) return [`${where}: no notice pill on the now-playing line (it reads "${r.text}")`];
-      if (r.text !== HOLD) v.push(`${where}: the pill reads "${r.text}", want "${HOLD}"`);
+      if (r.text !== "Low VRAM") v.push(`${where}: the pill reads "${r.text}", want "Low VRAM"`);
       if (r.title !== HOLD) v.push(`${where}: the line's tooltip ${JSON.stringify(r.title)}, want the whole notice`);
-      if (r.nWords !== 3) v.push(`${where}: the notice isn't its words' two halves + its numbers (${r.nWords} parts)`);
+      if (r.label !== HOLD) v.push(`${where}: the pill's accessible name ${JSON.stringify(r.label)}, want the whole notice`);
       if (r.cut.length) v.push(`${where}: words cut: ${JSON.stringify(r.cut)} (pill ${r.box.map((x) => x.toFixed(0)).join(",")}, slot ${r.slot.map((x) => x.toFixed(0)).join("–")})`);
-      // what the slot's width has room for (index.css .st-hold's container queries): all of it, else the words, else the glyph
-      const slot = r.slot[1] - r.slot[0], want = slot > 232 ? "lead lead num" : slot > 142 ? "lead lead" : slot < 138 ? "" : null;
+      // what the slot's width has room for (index.css .st-hold's container query): the words, else the glyph alone
+      const slot = r.slot[1] - r.slot[0], want = slot > 102 ? "text" : slot < 98 ? "" : null;
       if (want !== null && r.shown !== want) v.push(`${where}: a ${slot.toFixed(0)} px slot shows "${r.shown}", want "${want}"`);
       // the device scale draws a 1 px border a hair thinner
       if (!(r.borderW >= 0.9) || r.border !== r.edge) v.push(`${where}: no --warn edge (border ${r.borderW}px ${r.border}, want ${r.edge})`);
@@ -1095,8 +1095,8 @@ app.whenReady().then(async () => {
         if (bl.fill === on.fill) v.push(`bg-live: the pill's fill doesn't go translucent (${bl.fill})`);
         await barShot("mocha-bglive");
         await page(`document.documentElement.classList.remove("bg-live");`);
-        // narrower: whatever the slot holds, whole (never an ellipsis), on two lines at most, the bar's height kept; a 1280 px
-        // window's slot has room for the words and numbers on two lines, the narrow ones for the words or the glyph alone
+        // narrower: whatever the slot holds, whole (never an ellipsis), on one line, the bar's height kept; the narrowest
+        // slots (860 px: ~73 px) hold the glyph alone
         const slots = [];
         for (const [w, h] of [[1280, 800], [1100, 700], [1000, 700], [860, 600], [761, 600]]) {
           await resize(w, h); await setHold(null); await sleep(450);
@@ -1105,14 +1105,14 @@ app.whenReady().then(async () => {
           const r = await page(HOLD_READ);
           v.push(...pillLook(r, `${w} px`));
           if (!r.pill) continue;
-          if (r.lines > 2) v.push(`${w} px: the notice takes ${r.lines} lines`);
+          if (r.lines > 1) v.push(`${w} px: the notice takes ${r.lines} lines`);
           if (Math.abs(r.bar - b0) > 0.5) v.push(`${w} px: the top bar's height moved with the notice (${b0} → ${r.bar})`);
           slots.push(r.shown);
           console.log(`        ${w} px: "${r.shown}" on ${r.lines} line(s), slot ${(r.slot[1] - r.slot[0]).toFixed(0)} px, pill ${(r.box[1] - r.box[0]).toFixed(0)}×${(r.box[3] - r.box[2]).toFixed(0)}, bar ${r.bar}`);
           await barShot(`mocha-${w}`);
         }
         // every form showed somewhere, or the tiers went untested
-        for (const f of ["lead lead num", "lead lead", ""]) if (!slots.includes(f)) v.push(`no window width showed the "${f}" form (${J(slots)}) — proved nothing about it`);
+        for (const f of ["text", ""]) if (!slots.includes(f)) v.push(`no window width showed the "${f}" form (${J(slots)}) — proved nothing about it`);
         // narrower still: the pill stays inside the window and the top bar, the whole notice the tooltip
         await resize(560, 430); await sleep(300);
         v.push(...pillLook(await page(HOLD_READ), "560 px"));

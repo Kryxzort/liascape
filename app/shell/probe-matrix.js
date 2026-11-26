@@ -3508,8 +3508,9 @@ C["vram:exceeded"] = { states: ["sceneS"], switch: true,
 // TopbarStatus's tooltip on the line
 C["vram:held"] = { states: ["scene"],
   async run(c) {
-    // the line coming in: the notice comes and goes as a line of its own, the one it replaces fading out beside it a moment
-    const status = async () => String(await ui(`return document.querySelector(".status .st-layer:not(.out)")?.textContent ?? "";`));
+    // the line coming in: the notice comes and goes as a line of its own, the one it replaces fading out beside it a moment;
+    // the pill reads "Low VRAM", the whole message is the line's tooltip
+    const status = async () => String(await ui(`const l = document.querySelector(".status .st-layer:not(.out)"); return (l?.title || l?.textContent) ?? "";`));
     c.pid = workerOf(c.before.st, SC[0])?.pid;
     vramFake({ [c.pid]: 3600 }, 300);
     c.engaged = await waitFor(async () => (c.s0 = await status()).includes("Paused: low video memory"), 8000, 100);
