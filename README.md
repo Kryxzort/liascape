@@ -154,7 +154,9 @@ If something a feature you use needs is missing, Settings says so at the top: wh
 ## Using it
 
 Run `liascape` or open Liascape from your app launcher. The app has three tabs: **Browse**, **Library** and
-**Settings**.
+**Settings**. While your library is empty it shows a welcome with the ways to bring wallpapers in, and a short tip
+appears the first time you meet something new. Settings → Getting started shows the welcome again and brings back the
+tips you dismissed.
 
 Settings has four levels, picked at the top while the Settings tab is open: Basic, Standard (the default), Advanced
 and Expert. Each level shows more settings. A setting you changed keeps working when its level is hidden, and a note

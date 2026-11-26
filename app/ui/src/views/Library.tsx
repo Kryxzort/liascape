@@ -26,8 +26,14 @@ import { confirmBaseRemoval } from "../components/baseConfirm";
 import { ContextMenu, type MenuAt } from "../components/ContextMenu";
 import { cardMenuItems, menuAt } from "../components/menuItems";
 import { CRASHED_TAG, HIDDEN_TAG, byFavorites, setModesOf } from "./localSet";
+import { Welcome } from "../components/Welcome";
+import { Tip } from "../components/Tip";
 
 const keyOfItem = (i: LibraryItem) => i.videoPath;
+// the welcome's leave over the grid coming in (index.css `.welcome.leaving`); motion off a fade (useLinger: FADE_EXIT_MS)
+const WELCOME_OUT_MS = 260;
+// how long the side coming in by a welcome / grid swap keeps its `entering` class (its animation's length and a little)
+const SWAP_IN_MS = 700;
 
 // library sort options.
 function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
@@ -49,6 +55,9 @@ function sortItems(items: LibraryItem[], idx: number): LibraryItem[] {
 export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrowse: () => void }) {
   const items = useStore((s) => s.libraryItems);
   const libQuery = useStore((s) => s.libQuery);
+  const setLibQuery = useStore((s) => s.setLibQuery);
+  const libraryRead = useStore((s) => s.libraryRead);
+  const welcomeOpen = useStore((s) => s.welcomeOpen);
   const libSort = useStore((s) => s.libSort);
   const playingPath = useStore((s) => s.playingPath);
   const playlist = useStore((s) => s.playlist);
@@ -167,6 +176,29 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const { list: gridItems } = usePresence(filtered, keyOfItem, gridRef, motion);
 
   const byPath = useMemo(() => Object.fromEntries(items.map((i) => [i.videoPath, i])), [items]);
+
+  // The welcome (components/Welcome.tsx) in the grid's place: while the library is empty, or asked for from Settings. A swap
+  // either way cross-fades: the welcome leaves over the grid coming in, or comes in where the grid was (motion on it rises a
+  // little; off, opacity alone). Each side's `entering` class is set only by a swap, so <Activity> showing the page again
+  // replays nothing. The last card a delete takes finishes leaving first (its presence list empty), then the welcome comes.
+  // Guard: --probe probe-firstrun.js welcome:*, motion:welcome
+  const welcomeWanted = libraryRead && ((items.length === 0 && gridItems.length === 0) || welcomeOpen);
+  const welcome = useLinger(welcomeWanted ? "welcome" : null, WELCOME_OUT_MS, motion);
+  const [swap, setSwap] = useState<{ wanted: boolean; entering: "welcome" | "grid" | null }>({ wanted: welcomeWanted, entering: null });
+  if (swap.wanted !== welcomeWanted) setSwap({ wanted: welcomeWanted, entering: welcomeWanted ? "welcome" : "grid" });
+  useEffect(() => {
+    if (!swap.entering) return;
+    const t = setTimeout(() => setSwap((x) => ({ ...x, entering: null })), SWAP_IN_MS);
+    return () => clearTimeout(t);
+  }, [swap.entering]);
+  // the grid showing nothing: what is empty, said with what fills it or the way back. Hidden ✓ with nothing hidden and
+  // Favourites ✓ with no favourite at all teach how to fill them; a search alone says what it looked for; every wallpaper
+  // hidden says where they are
+  const emptyKind = filtered.length || !items.length ? null
+    : hidOnly && !items.some((i) => hiddenLib[i.videoPath]) ? "hidden"
+    : favMode === "inc" && favSet && favSet.size === 0 ? "favourites"
+    : match || favSet || crashMode || hidOnly ? "filters" : libQuery.trim() ? "search"
+    : items.every((i) => hiddenLib[i.videoPath]) ? "allHidden" : null;
   // the order the backend makes the cards' missing previews in: the sidebar's item, the cards on screen, then this
   // (components/previewQueue.ts)
   useEffect(() => setPreviewOrder(filtered.map((i) => i.videoPath)), [filtered]);
@@ -240,6 +272,8 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   // arrows move the focus (the sidebar follows), Enter plays the focused card, Escape closes the sidebar + clears the selection.
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // the welcome stands in the grid's place: no key reaches cards the user can't see
+      if (welcomeWanted) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "a" && !typing()) { e.preventDefault(); setSel(new Set(filtered.map((i) => i.videoPath))); return; }
       if (e.key === "Delete" && sel.size && !typing() && !document.querySelector(".modal-backdrop")) { doTrash([...sel].map((p) => byPath[p]).filter(Boolean)); return; }
       if (!gridOwnsKey(e)) return;
@@ -332,14 +366,24 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
   const shown = useLinger(libFocus, SIDE_CLOSE_MS, motion);
   const sideItem = shown.value ? byPath[shown.value] ?? null : null;
 
-  if (items.length === 0) return <div className="center-msg">Library is empty — download wallpapers from Browse.</div>;
+  // nothing read yet: an empty page, never the welcome for a library that is only on its way
+  if (!libraryRead && items.length === 0) return null;
 
   return (
     <>
-    <div className="scroll lib-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
+    <div className={`scroll lib-scroll${welcome.value ? " has-welcome" : ""}`} ref={smoothRef} onClick={onBgClick} onPointerDown={welcomeWanted ? undefined : onMarquee}>
+      {welcome.value && <Welcome empty={items.length === 0} entering={swap.entering === "welcome"} leaving={welcome.closing} />}
+      {!welcomeWanted && <>
       <WsSetLoad scope="library" />
-      {(match || favSet || crashMode || hidOnly) && !filtered.length && <NoMatch onClear={() => clearTags("library")} />}
-      <div className="grid" ref={gridRef}>
+      {emptyKind === "favourites" && <NoMatch kind="favourites" text="No favourites yet. Star a Workshop wallpaper in its sidebar (right-click its card) and it shows here." onClear={() => clearTags("library")} />}
+      {emptyKind === "hidden" && <NoMatch kind="hidden" text="Nothing is hidden. A wallpaper you hide (right-click it) leaves the grid and shows here." onClear={() => clearTags("library")} />}
+      {emptyKind === "filters" && <NoMatch onClear={() => clearTags("library")} />}
+      {emptyKind === "search" && <NoMatch kind="search" text={`Nothing in your library matches “${libQuery.trim()}”.`} clear="Clear search" onClear={() => setLibQuery("")} />}
+      {emptyKind === "allHidden" && <NoMatch kind="allHidden" text="Every wallpaper here is hidden. The filter's Hidden row shows them." clear={null} onClear={() => {}} />}
+      {/* the item sidebar and what it holds are a right-click away: said once, above the cards. Guard: --probe probe-firstrun.js
+          tip:cardMenu */}
+      <Tip id="cardMenu" when={filtered.length > 0}>Right-click a wallpaper to open its sidebar: settings, Hide and more.</Tip>
+      <div className={`grid${swap.entering === "grid" ? " swap-in" : ""}`} ref={gridRef}>
         {gridItems.map((it) => (
           <LibraryCard key={it.videoPath} item={it}
             playing={it.videoPath === playingPath}
@@ -350,11 +394,12 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
             onClick={cardClick} onTrash={cardTrash} onToggle={cardToggle} onContextFocus={cardContext} />
         ))}
       </div>
+      </>}
     </div>
-    {col.panel.value && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
+    {col.panel.value && !welcomeWanted && <WorkshopFilterColumn mode={col.panel.value} scope="library" known={known} closing={col.panel.closing} entering={col.entering} onClose={col.close} />}
     <ContextMenu at={menu?.open ? menu.at : null} items={menuItems} onClose={closeMenu} light
       label={menuTargets.length > 1 ? `${menuTargets.length} wallpapers` : (menuTargets[0]?.title ?? "Wallpaper")} />
-    {sideItem && (() => {
+    {sideItem && !welcomeWanted && (() => {
       const targets = targetsFor(sideItem);
       const unsubN = targets.filter(unsubs).length;
       return (

@@ -1451,6 +1451,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .warn, :root.no-glow .s-warn, :root.no-glow .s-reset:hover, :root.no-glow .st-hold-ico { filter: none; }
 :root.no-glow .st-hold { box-shadow: none; }
 :root.no-glow .settings { background-image: none; }
+:root.no-glow :is(.tip-ico, .welcome-found > svg) { filter: none; }
 :root.no-glow .ssection::before, :root.no-glow .srow::before { box-shadow: none; }
 :root.no-glow :is(.ssection-ico, .wf-gico) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 :root.no-glow .settings input[type=range]:hover, :root.no-glow:not(.range-dragging) input[type=range]:focus-visible { filter: none; }
@@ -2452,3 +2453,69 @@ button.side-pill.copy { overflow: hidden; }
 .intro-card-logo { position: absolute; max-width: none; opacity: 0; }
 .intro.still .intro-tile { animation: nm-in var(--fade-dur) linear backwards; }
 .intro.still.open :is(.intro-bg, .intro-logo) { animation: nm-out var(--fade-dur) linear forwards; }
+
+/* ---- first-run help: the one-time tips (components/Tip.tsx) and the Library's welcome (components/Welcome.tsx) ---- */
+/* a tip: the notice look of Settings' "tucked away" note (.help) with a lit bulb and a dismiss chip. In a row (the playlist
+   bar's head) its words cut short rather than wrap */
+.tip { display: flex; align-items: center; gap: 7px; margin: 0 2px 10px; }
+.tip-ico { flex: none; color: var(--accent); filter: drop-shadow(0 0 3px var(--accent)); }
+.tip-text { flex: 1; min-width: 0; }
+.tip-act, .tip-x { flex: none; }
+.tip-x { display: inline-grid; place-items: center; padding: 3px; }
+.tip.inline { margin: 0; min-width: 0; }
+.tip.inline .tip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a tip arriving after its page: hidden for the frame its fade starts in (Tip.tsx, the ResizeObserver's first callback) */
+.tip.arriving { opacity: 0; }
+.tip.leaving { pointer-events: none; animation: tip-out .22s ease-in forwards; }
+@keyframes tip-out { to { opacity: 0; transform: scale(.97); } }
+/* in the item sidebar: the body's rhythm (.side-body > * + *), and as specific as its entrance rules, which would replace
+   the exit */
+.side-body > .tip { margin: 0 2px; }
+.side-body > * + .tip { margin-top: 12px; }
+.side-panel .side-content > .side-body:not(.wait) > .tip.leaving { animation: tip-out .22s ease-in forwards; animation-delay: 0s; }
+/* the playlist bar's head: the spacer holds it, and only the tip takes the pointer (the row's magnified items reach up
+   under the head) */
+.playlist-bar-head > .pl-tip-slot { display: flex; justify-content: center; min-width: 0; pointer-events: none; }
+.pl-tip-slot > .tip { pointer-events: auto; max-width: 100%; }
+:root.bg-live .tip-text { filter: drop-shadow(0 0 3.5px #000); }
+:root.no-motion .tip.leaving, :root.no-motion .side-panel .side-content > .side-body:not(.wait) > .tip.leaving {
+  animation: nm-out var(--fade-dur) linear forwards !important; }
+
+/* the welcome in the Library grid's place: a head, then the ways in as Settings' section cards (.ssection) side by side,
+   one column where the page is narrow. Its cascade plays only when it comes in by a swap (`.entering`, views/Library.tsx):
+   shown again by <Activity>, nothing replays */
+.welcome { max-width: 1080px; margin: 0 auto; padding: 4vh 8px 24px; }
+.welcome-head { display: grid; justify-items: center; gap: 6px; margin-bottom: 22px; text-align: center; }
+.welcome-head h2 { margin: 0; font-size: 24px; font-weight: 800; color: var(--text); }
+.welcome-sub { margin: 0; font-size: 13.5px; color: var(--subtext); }
+.welcome-back { margin-top: 6px; }
+.welcome-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: stretch; }
+.welcome .ssection { display: flex; flex-direction: column; gap: 10px; max-width: none; margin: 0; animation: none; }
+.welcome .ssection h3 { margin: 0; }
+.welcome.entering .welcome-head { animation: side-rise-sm .3s ease-out both; }
+.welcome.entering .ssection { animation: ssection-in .55s cubic-bezier(.2,.7,.3,1) both; }
+.welcome.entering .ssection:nth-child(2) { animation-delay: .08s; }
+.welcome.entering .ssection:nth-child(3) { animation-delay: .16s; }
+.welcome-what { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--subtext); }
+.welcome-found { display: flex; align-items: flex-start; gap: 7px; margin: 0; font-size: 12px; line-height: 1.4; color: var(--subtext); }
+.welcome-found > svg { flex: none; margin-top: 1px; }
+.welcome-found[data-welcome-found="yes"] > svg { color: var(--success); filter: drop-shadow(0 0 3px var(--success)); }
+.welcome-found:is([data-welcome-found="noFolder"], [data-welcome-found="noSteam"], [data-welcome-found="error"]) > svg { color: var(--warn); filter: drop-shadow(0 0 3px var(--warn)); }
+.welcome-found[data-welcome-found="unknown"] > svg { visibility: hidden; }
+.welcome-stack { flex: 1; display: grid; }
+.welcome-stack > span { grid-area: 1 / 1; transition: opacity var(--fade-dur) linear; }
+.welcome-stack > [data-off] { opacity: 0; visibility: hidden; transition: opacity var(--fade-dur) linear, visibility 0s var(--fade-dur); }
+.welcome-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.welcome-label { font-size: 12px; color: var(--subtext); }
+.welcome-mode-hint { flex: none; margin: 0; line-height: 1.4; }
+.welcome-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+/* leaving: laid over the top of the page while the grid comes in under it, fading (motion on: lifting a little) */
+.welcome.leaving { position: absolute; top: var(--gap); left: var(--gap); right: var(--gap); pointer-events: none;
+  animation: welcome-out .26s ease-in forwards; }
+@keyframes welcome-out { to { opacity: 0; transform: translateY(-8px); } }
+.grid.swap-in { animation: side-rise-sm .35s ease-out both; }
+:root.bg-live .welcome-head > :is(h2, p) { filter: drop-shadow(0 0 3.5px #000); }
+:root.no-motion .welcome.entering :is(.welcome-head, .ssection), :root.no-motion .grid.swap-in {
+  animation: nm-in var(--fade-dur) linear both; animation-delay: 0s; }
+:root.no-motion .welcome.leaving { animation: nm-out var(--fade-dur) linear forwards; }
+:root.no-motion .welcome:not(.entering) .ssection { animation: none; }

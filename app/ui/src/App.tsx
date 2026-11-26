@@ -99,6 +99,9 @@ export default function App() {
   if (tab === "library" && !libKept) setLibKept(true);
   const showInLibrary = useStableFn((p: string) => { s.focusLib(p); setTab("library"); });
   const showInBrowse = useStableFn(() => setTab("browse"));
+  // a tab asked for from a page (the Library's welcome, a tip's link: store navigate)
+  const nav = useStore((st) => st.nav);
+  useEffect(() => { if (nav) setTab(nav.tab); }, [nav?.n]); // eslint-disable-line
 
   useEffect(() => { s.init().catch(console.error); }, []); // eslint-disable-line
   useEffect(() => { startFreezeLog(); }, []); // diagnostic heartbeat → ~/.cache/liascape/freeze.log (catches the wedge)

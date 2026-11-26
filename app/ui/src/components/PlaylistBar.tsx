@@ -27,6 +27,7 @@ import { useBarFold } from "../hooks/useBarFold";
 import { useMotion } from "./motion";
 import { usePresence } from "../hooks/usePresence";
 import { revealCard } from "../hooks/gridKeys";
+import { Tip } from "./Tip";
 
 // The hovered item is the ROW's state (the hover must survive the gaps between playlist items):
 // entering an item hovers it, the 10 px gaps between items keep the last one, and leaving the row (or the empty space past
@@ -242,14 +243,18 @@ export function PlaylistBar() {
         <LocateButton target="bar" className="ico" size={15} label="Go to the playing wallpaper" disabled={collapsed || !playingPath || !playlist.includes(playingPath)}
           title={playingPath && playlist.includes(playingPath) ? "Show the playing wallpaper in the playlist" : "The playing wallpaper isn't in the playlist"}
           onClick={() => { if (playingPath && glideTo(rowRef.current, ".pl-item.playing", "x", motion)) { pickLib(playingPath); revealCard(`lib-${playingPath}`); } }} />
-        <div className="spacer" />
+        {/* the spacer holds the playlist's one-time tip (in the row: nothing moves when it comes or goes). Guard: --probe
+            probe-firstrun.js tip:playlists */}
+        <div className="spacer pl-tip-slot">
+          <Tip id="playlists" inline when={playlist.length > 0 && !collapsed}>Play goes through these in turn. Drag one to move it, and the sliders set how long each plays.</Tip>
+        </div>
         <button className="play-btn ico" ref={magnetRef} onClick={() => play()} disabled={playlist.length === 0}><Play size={15} /> Play</button>
       </div>
 
       {/* PERF: kept mounted while folded (index.css hides it once the fold has played, hooks/useBarFold.ts): a click
           neither tears down nor builds the items. Guard: probe-layout perf:plFold */}
       <div className="pl-body" ref={bodyRef}>{shown.length === 0 ? (
-        <div className="playlist-bar-empty">Add wallpapers with the toggle on library cards</div>
+        <div className="playlist-bar-empty" data-empty="playlist">Your playlist is empty. Tick the square on library cards to add them, and Play goes through them in turn.</div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={onDragCancel}>

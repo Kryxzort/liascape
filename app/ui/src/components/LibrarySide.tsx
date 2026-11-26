@@ -21,6 +21,7 @@ import { actionBlocked } from "./subscribeMode";
 import { revealCard } from "../hooks/gridKeys";
 import { SizePill } from "./sidePills";
 import { TypeBadge } from "./TypeBadge";
+import { Tip } from "./Tip";
 
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|avi)$/i;
 
@@ -394,6 +395,10 @@ export function LibrarySide({
               one muted line, no setting. Guard: probe-sidebar lib:fontStandIn */}
           {fontNote.value && <div className={`shint side-note side-fonts${fontNote.closing ? " leaving" : ""}`} data-scene-fonts>{fontNote.value}</div>}
         </SideSection>
+        {/* what this sidebar's settings are, said once under them: the wallpaper's own, the global ones elsewhere. Guard: --probe
+            probe-firstrun.js tip:itemSettings */}
+        <Tip id="itemSettings">{multi ? "These change each selected wallpaper's own. Settings has the ones for all of them."
+          : "These are this wallpaper's own. Settings has the ones for all of them."}</Tip>
         {/* a WE scene's own options (per item — not for a multi-selection: each scene has its own set) */}
         {sceneProps && <ScenePropsEditor key={p} path={p} preset={!!item.isPreset} onReady={() => setReady(true)} />}
         {/* a Workshop item's community, after everything about playing it: the Browse sidebar's own pieces

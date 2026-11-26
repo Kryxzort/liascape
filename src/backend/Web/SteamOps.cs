@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Liascape.Helpers;
@@ -31,6 +32,9 @@ public static class SteamOps
             usable = SteamAuthService.HasUsableSignIn(s),
             // "Use the Steam app" holds its Steam connection now (Helpers/SteamClientHold.cs): Steam shows Wallpaper Engine playing
             appConnected = SteamClientHold.Connected,
+            // API: the Library's welcome (components/Welcome.tsx) says whether Steam is on this PC: its own steamclient.so (what
+            // "Use the Steam app" loads) and the Wallpaper Engine Workshop folder the settings name. Files only, nothing loaded.
+            found = new { client = SteamClientUgc.Candidates(s).Count > 0, workshopFolder = Directory.Exists(s.WorkshopFolder) },
         };
     }
 

@@ -17,6 +17,7 @@ import { ContextMenu, type MenuAt } from "./ContextMenu";
 import { menuAt, oneOffMenuItem } from "./menuItems";
 import { FADE, useMotion } from "./motion";
 import { TypeBadge } from "./TypeBadge";
+import { Tip } from "./Tip";
 
 // how long an asked "Download without subscribing" route stays good when nothing it hangs on changed here (a settings change in
 // another window moves it)
@@ -67,6 +68,7 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
   const dlStatus = useStore((s) => s.downloadStatus[w.pageUrl]);
   const web = w.pageUrl.startsWith("http");
   const openOnSteam = useStore((s) => s.openOnSteam);
+  const navigate = useStore((s) => s.navigate);
   // auto-import on + the "subscribe" download mode: a subscription lands in the library anyway, so Download IS Subscribe —
   // the buttons say so, and the subscription card shows only once subscribed (SubToggle only="subscribed"). The other modes
   // ("Use the Steam app") keeps Download and the card. Guard: probe-steam steam:subMerge:*
@@ -173,6 +175,11 @@ export function BrowseSide({ w, source, libItem, progress, onDownload, onCancel,
             </>
           )}
         </div>
+        {/* the two Workshop download modes, said once under a Workshop item's buttons, with the way to the other one. Guard: --probe
+            probe-firstrun.js tip:downloadModes */}
+        <Tip id="downloadModes" when={isWorkshopItem(w)} action={{ label: "Settings", onClick: () => navigate("settings", "workshop") }}>
+          {mode === "subscribe" ? "Downloads use your Steam login. Settings can switch them to the Steam app."
+            : "Downloads use the Steam app. Settings can switch them to your Steam login."}</Tip>
         {/* outside the buttons' branch: a pick starts the download, and the menu still fades out once they're gone */}
         {oneOffable && <ContextMenu at={menu} onClose={closeMenu} returnTo={menuFrom} label="Download" note={missing}
           items={[oneOffMenuItem(menuApply, mode, () => onDownload(menuApply, true), missing)]} />}

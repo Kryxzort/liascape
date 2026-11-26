@@ -180,6 +180,8 @@ interface State {
   wsFavs: (FavoritesState & { ids: Set<string> }) | null; wsLibDetails: Record<string, Wallpaper>; localSort: LocalSort;
   // library
   libraryItems: LibraryItem[]; libQuery: string; libSort: number; undoDepth: number;
+  // a library read has answered: until then an empty `libraryItems` means "not read yet", never "empty" (the welcome waits)
+  libraryRead: boolean;
   // playlist
   playlist: string[]; playlistSettings: PlaylistSettings; playlistName: string | null; playlistNames: string[];
   // steam / workshop
@@ -229,6 +231,12 @@ interface State {
   libFocus: string | null; browseFocus: string | null;
   // bumped by pickLib: views/Library.tsx replaces its own selection (local state) with the picked card when it changes
   libPick: number;
+  // the Library's welcome (components/Welcome.tsx) asked for from Settings while the library has wallpapers: it shows in the
+  // grid's place until closed. An empty library shows it whatever this says. For the session only.
+  welcomeOpen: boolean;
+  // a tab asked for from outside App (the welcome's choices, a tip's link): App.tsx switches to `tab` when `n` changes, and
+  // Settings brings its section `at` (`data-section`) into view
+  nav: { tab: "browse" | "library" | "settings"; at?: string; n: number } | null;
   // the sidebar picture's preview switch (GIF / Video / YouTube / the still): the last pick per sidebar, for the session — the
   // next item opens on it when it has one (components/SidePanel.tsx SideMedia)
   previewPref: { library: PreviewKind | null; browse: PreviewKind | null };
@@ -288,6 +296,9 @@ interface State {
   savePlaylistAs(name: string): Promise<void>; loadNamedPlaylist(name: string): Promise<void>;
   // settings
   setSetting(key: string, value: unknown): void; mergeSettings(p: Record<string, unknown>): void;
+  // the one-time tips (components/Tip.tsx): `seeTip` remembers one as seen (settings `seenTips`), `showTipsAgain` forgets them all
+  seeTip(id: string): void; showTipsAgain(): void;
+  showWelcome(open: boolean): void; navigate(tab: "browse" | "library" | "settings", at?: string): void;
   clearLibrary(): Promise<void>; clearCache(ids: string[]): Promise<{ categories: CacheCleared[]; freedBytes: number; count: number } | null>;
   openImport(paths: string[], watch?: boolean): void; closeImport(): void;
   // an import from a link (components/ImportDialog.tsx): the dialog on that link; the import itself, its progress in
@@ -375,6 +386,13 @@ async function markPlayingAfterPlay(get: () => State, set: (p: Partial<State>) =
 }
 
 let browseGen = 0; // the Browse list's generation (reload / loadMore)
+// what a Browse request asks for (its source, search, filter and list): `browseFor` is the one the shown list answers, so a
+// view can tell an answer to what is asked now from one a failed or pending request left behind (views/Browse.tsx's empty note)
+export function browseRequestKey(s: State): string {
+  const filter = s.isWorkshop() ? wireFilter(s.browseFilter) : undefined;
+  const list = wireList(s);
+  return JSON.stringify([s.activeSource, list ? "" : s.query, filter ?? null, list ?? null]);
+}
 // a local set's list: nothing from /browse, and one key for every set (Browse keys its kept scroll on the set's own view)
 const NO_ITEMS: Wallpaper[] = [];
 const LOCAL_FOR = "local", HIDDEN_FOR = "hidden";
@@ -407,12 +425,12 @@ export const useStore = create<State>((set, get) => ({
   scenePropsFolded: LS.get<boolean>("scenePropsFolded", false) === true,
   // the docked filter panel closed; remembered
   filterColHidden: LS.get<boolean>("browseFilterHidden", false), libFilterColHidden: LS.get<boolean>("libFilterHidden", false), filterDrawer: null,
-  libraryItems: [], libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
+  libraryItems: [], libraryRead: false, libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
   subProgress: {}, wsStateTick: 0,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, scenesBlocked: null, vramHold: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
-  libFocus: null, libPick: 0, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
+  libFocus: null, libPick: 0, welcomeOpen: false, nav: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
 
   // The backend may be unreachable right now: restarting (`dotnet watch` on a source change — whose HMR update re-runs
   // this init into that very gap — or a relaunch). Retry until it answers; a read that failed never becomes what the
@@ -640,12 +658,13 @@ export const useStore = create<State>((set, get) => ({
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const list = wireList(get());
     const query = list ? "" : get().query; // a list has no search
+    const asked = browseRequestKey(get());
     const gen = ++browseGen;
     set({ loading: true, page: 1 });
     try {
       const got = await api.browse(activeSource, 1, query || undefined, filter, list);
       if (gen !== browseGen) return;
-      set({ wallpapers: got, browseFor: JSON.stringify([activeSource, query, filter ?? null, list ?? null]), wsListNote: null,
+      set({ wallpapers: got, browseFor: asked, wsListNote: null,
         hasMore: !!get().sources[activeSource]?.supportsPagination && got.length > 0 });
     } catch (e) {
       // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
@@ -764,7 +783,7 @@ export const useStore = create<State>((set, get) => ({
   // ---- library ----
   async loadLibrary() {
     const items = await api.library(), depth = (await api.undoDepth()).depth;
-    set({ libraryItems: keepSame(get().libraryItems, items), undoDepth: depth });
+    set({ libraryItems: keepSame(get().libraryItems, items), libraryRead: true, undoDepth: depth });
   },
   // optimistic per-item patch (volume/speed override etc.) so consumers — incl. the live WallpaperBg —
   // reflect a change instantly without waiting for a full library reload.
@@ -885,6 +904,15 @@ export const useStore = create<State>((set, get) => ({
       "globalSeparateSceneTiming", "globalSwitchScenesAfterSeconds"].includes(key))
       get().refreshPlayingStatus();
   },
+  seeTip(id) {
+    const seen = get().settings?.seenTips;
+    if (!get().settings || (Array.isArray(seen) && seen.includes(id))) return;
+    get().setSetting("seenTips", [...(Array.isArray(seen) ? seen : []), id]);
+  },
+  showTipsAgain() { get().setSetting("seenTips", []); },
+  // the welcome takes the grid's place: an open item sidebar closes with the grid
+  showWelcome(open) { set(open ? { welcomeOpen: true, libFocus: null } : { welcomeOpen: false }); },
+  navigate(tab, at) { set((s) => ({ nav: { tab, at, n: (s.nav?.n ?? 0) + 1 } })); },
   async clearLibrary() { await api.libraryClear(); await get().loadLibrary(); get().setStatus("Library cleared"); },
   async clearCache(ids) {
     try { const r = await api.clearCache(ids); get().setStatus(`Freed ${(r.freedBytes / (1 << 20)).toFixed(0)} MB of cache`); return r; }
@@ -1190,7 +1218,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
     if (theme) { applyThemeVars(theme); p.theme = theme; }
   }
   if (cur) { if (curQ.fresh()) p.playingPath = cur.v?.path ?? null; p.keepCurrent = !!cur.v?.keep; p.scenesBlocked = cur.v?.scenesBlocked ?? null; if (curQ.holdFresh()) p.vramHold = cur.v?.vramHold ?? null; }
-  if (lib) p.libraryItems = keepSame(st.libraryItems, lib.v);
+  if (lib) { p.libraryItems = keepSame(st.libraryItems, lib.v); p.libraryRead = true; }
   if (pstate && !playlistBarSavePending) {
     p.playlist = pstate.v?.videoPaths ?? []; p.playlistSettings = pstate.v?.settings ?? DEFAULT_PS; p.playlistName = pstate.v?.name ?? null;
   }

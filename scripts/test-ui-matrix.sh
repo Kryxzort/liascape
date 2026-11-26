@@ -344,13 +344,14 @@ clip() { ffmpeg -nostdin -loglevel error -y -f lavfi -i "$2=size=320x180:rate=30
            -t "$4" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$1"; }
 clip "$T/k1.mp4" testsrc2 330 30; clip "$T/k2.mp4" smptebars 440 30; clip "$T/k3.mp4" rgbtestsrc 550 30; clip "$T/k4.mp4" testsrc 660 10
 
-# Expert: every Settings row renders, so the cells that drive an Expert row (video cache, buffers) find it
+# Expert: every Settings row renders, so the cells that drive an Expert row (video cache, buffers) find it. The one-time tips
+# seen: no tip line moves what the other probes measure (probe-firstrun.js shows them itself)
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"NoAudio":false,"Volume":80,"Speed":1,"GlobalTransitionEnabled":true,
  "GlobalTransitionEffectIds":["fade"],"GlobalTransitionDurationMs":1200,"GlobalTransitionShuffle":false,
  "TransitionMethod":"full-live","GlobalSwitchWhenVideoEnds":false,"GlobalMaxPlaySeconds":0,
  "GlobalIntervalSeconds":600,"AutoMute":false,"SettingsLevel":"expert",
- "AutoAddWeWallpapersToLibrary":false}
+ "AutoAddWeWallpapersToLibrary":false,"SeenTips":["cardMenu","playlists","itemSettings","downloadModes"]}
 EOF
 
 # A private PulseAudio for the auto-mute cells: its own socket under $XDG_RUNTIME_DIR/pulse, ONE null sink (mx_null),

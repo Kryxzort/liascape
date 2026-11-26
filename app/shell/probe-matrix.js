@@ -263,7 +263,7 @@ const PAGE = `window.__mx = {
 // what the page shows, for a failure's print: its tab, the Library's cards against every `.card.lib` (Browse's too), the bar
 const PAGE_SEEN = `({ url: location.pathname, page: document.querySelector(".app")?.dataset.page ?? null, tab: document.querySelector(".tab.active")?.textContent.trim(),
   libCards: document.querySelectorAll(".lib-scroll .card.lib").length, cards: document.querySelectorAll(".card.lib").length,
-  libraryEmpty: [...document.querySelectorAll(".center-msg")].some((e) => e.textContent.startsWith("Library is empty")),
+  libraryEmpty: !!document.querySelector('[data-welcome="empty"]'),
   plItems: document.querySelectorAll(".pl-item").length, playing: document.querySelectorAll(".lib-scroll .card.lib.playing").length, mx: !!window.__mx,
   status: document.querySelector(".topbar > .status")?.textContent ?? null, ready: document.readyState, vis: document.visibilityState, focus: document.hasFocus() })`;
 // The page's first read applies the library, the playlist and the rest in one go (store/index.ts readBackend): until it
@@ -3749,7 +3749,7 @@ C["restore:scene"] = { states: ["scene"], noSwitch: true, async run(c) {
 
 // The backend restarted UNDER AN OPEN PAGE (e.g. `dotnet watch` restarts the dev backend on a source change while the
 // app stays open, and Vite's HMR of the same change re-runs the store's init into the outage — without a retry the
-// Library tab says "Library is empty" for good, the playing wallpaper's title in the header). The page must pick
+// Library tab shows the empty library's welcome for good, the playing wallpaper's title in the header). The page must pick
 // up everything it mirrors from the backend by itself — no reload: the library (cards), the playlist bar, the settings
 // (thumbnailAspect → --thumb-aspect), what plays — and never show [] for a read that failed.
 const CFG = path.dirname(E.LIASCAPE_USER_MUTE); // the stack's ~/.config/liascape (settings.json, playlist_state.json)
@@ -3763,7 +3763,7 @@ const keyIn = (o, name) => Object.keys(o).find((k) => k.toLowerCase() === name.t
 // what the page shows of the backend's data (read from the DOM, whichever tab — the cards are mounted on Library)
 // (only what shows: a page kept hidden while another tab shows is still in the document — App.tsx)
 const pageData = () => js(`({ cards: [...document.querySelectorAll(".card.lib:not([data-leaving])")].filter((c) => c.getClientRects().length).map((c) => c.querySelector(".lib-title")?.dataset.title).filter(Boolean).sort(),
-  empty: !!document.querySelector(".center-msg"), playlistBar: [...document.querySelectorAll(".pl-item:not([data-leaving])")].filter((e) => e.getClientRects().length).map((e) => e.dataset.title),
+  empty: !!document.querySelector('[data-welcome="empty"]'), playlistBar: [...document.querySelectorAll(".pl-item:not([data-leaving])")].filter((e) => e.getClientRects().length).map((e) => e.dataset.title),
   aspect: document.documentElement.style.getPropertyValue("--thumb-aspect") })`);
 const libTitles = async () => ((await http("GET", "/library")).json || []).map((i) => i.title).sort();
 // k5 (a copy of k4) leaves the library through the backend's own delete (the page's stale card is fine: the next cell reloads)
@@ -3810,7 +3810,7 @@ C["restart:backend"] = { states: ["idle", "playlist"], noSwitch: true, async run
     return v;
   } };
 // the page's first /library in flight when the backend dies (held at the request, the backend SIGKILLed, then let go):
-// the failed read must not become "Library is empty", and the page fills itself once the backend is back
+// the failed read must not become the empty library's welcome, and the page fills itself once the backend is back
 C["restart:midLibrary"] = { states: ["idle"], noSwitch: true, async run(c) {
     const wantTitles = await libTitles();
     let seen = false, release;

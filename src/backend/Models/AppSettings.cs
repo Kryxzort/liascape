@@ -211,6 +211,9 @@ public class AppSettings
     // UI: "Start with your desktop": Liascape's own XDG autostart entry running `liascape restore` (Helpers/Autostart.cs),
     // written or removed live by /settings
     public bool StartWithDesktop { get; set; } = false;
+    // UI: the one-time tips the user has dismissed (components/Tip.tsx ids); "Show tips again" in Settings empties it. Nothing
+    // here reads it.
+    public List<string> SeenTips { get; set; } = [];
     // "steamapp" (the default: the RUNNING Steam client subscribes, as Wallpaper Engine — Helpers/SteamClientUgc.cs: one
     // click, Steam's own progress) or "subscribe" (real Steam subscription via the community endpoint with the sign-in); what
     // the chosen one can't do falls back down WorkshopDownloader's order to the item's page in the Steam app. Any other stored

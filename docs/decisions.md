@@ -197,6 +197,10 @@ reverted). Unsubscribe and Hide are sidebar actions in both tabs. Hide only hide
 page URL and source), kept in `hidden.json`, undone by the removal's Undo; each grid's filter column gets a Hidden row
 (✓ shows only them, with Unhide in their sidebar), offered once something is hidden there. `scripts/test-hidden.sh`.
 
+### Teach in place, never with a step-by-step tour — 2026-11-26
+First-run help is a welcome in the empty Library's place, one dismissible tip per non-obvious thing where it is met, and
+empty views that say how to fill them; no guided tour walking through the app. Guard: `--probe probe-firstrun.js`.
+
 ### Let input pass through the window's opening, never end it — 2026-11-26
 The opening plays to its end while every click, key, wheel and drag reaches the page at once; no input skips it. Input
 already works through it at full speed (it never takes a pointer event, a card not shown yet can be clicked or focused),

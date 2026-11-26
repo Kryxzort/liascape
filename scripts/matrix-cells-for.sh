@@ -72,6 +72,9 @@ for f in $FILES; do
       echo "  $f → nothing in the matrix (bash scripts/test-item-actions.sh § files changed + --probe probe-sidebar.js --only lib:thumbFollows)" >&2 ;;
     app/ui/src/components/ImportDialog.tsx|app/ui/src/components/ImportButton.tsx|app/ui/src/components/importPick.ts)
       echo "  $f → nothing in the matrix (--probe probe-import.js; the top bar's widths: --probe probe-layout.js resize:)" >&2 ;;
+    # first-run help: the Library's welcome, the one-time tips, the empty states that teach — their own probe
+    app/ui/src/components/Welcome.tsx|app/ui/src/components/Tip.tsx|app/ui/src/components/tips.ts|app/shell/probe-firstrun.js)
+      echo "  $f → nothing in the matrix (--probe probe-firstrun.js)" >&2 ;;
     # an import from a link: its own script section, scraper-selftest's link cases and the probe's import:link: cells
     src/backend/Helpers/LinkImport.cs|src/backend/Web/LinkImportOps.cs)
       echo "  $f → nothing in the matrix (bash scripts/test-item-actions.sh § link; scraper-selftest; --probe probe-import.js --only import:link)" >&2 ;;

@@ -413,7 +413,9 @@ export const api = {
     jpost<{ message: string }>("/playlist/play", { paths, settings }),
   playFrom: (paths: string[], startIndex: number, settings: PlaylistSettings) =>
     jpost<{ message: string }>("/playlist/play-from", { paths, startIndex, settings }),
-  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean }>("/steam/status"),
+  // API: `found` = Steam's own files on this PC (its steamclient.so, the Workshop folder the settings name): the Library's welcome
+  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean;
+    found?: { client: boolean; workshopFolder: boolean } }>("/steam/status"),
   // API: the Workshop's Browse pages ride one anonymous Steam session the backend drops after a few idle minutes; this asks
   // it to connect ahead of a page the user is about to ask for (SteamAnonymous.Warm). Fire and forget: it never fails
   // visibly, and a hover sends it at most every 20 s. Guard: probe-steam browse:warm

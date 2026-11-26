@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { PRESET_TAG, filterOf, hiddenOnSource, presetsOn, useStore } from "../store";
+import { PRESET_TAG, browseRequestKey, filterOf, hiddenOnSource, presetsOn, useStore } from "../store";
 import { api } from "../api/client";
 import { ContextMenu, type MenuAt } from "../components/ContextMenu";
 import { cardMenuItems, menuAt } from "../components/menuItems";
@@ -323,6 +323,21 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     if (query) setQuery("");
   };
 
+  // Favourites ✓ with no favourite at all: how to star one, in place of "Nothing here matches"
+  const noFavs = modes.fav === "inc" && !!favs && !favs.loading && !favs.error && favs.ids.size === 0;
+  // a source that answered nothing for what is asked now (not a list or a set: they say so themselves; not an empty list a
+  // failed or pending request left from an earlier ask: browseFor names the request the list answers): what it holds and how it
+  // fills, or what was searched with the way back. Guard: --probe probe-firstrun.js empty:browse
+  const srcLabel = srcName ?? "This source";
+  const sourceEmpty = useStore((s) => !s.loading && !s.hasMore && s.browseFor !== "" && s.browseFor === browseRequestKey(s))
+    && !setOn && !wsList && !wallpapers.length;
+  const wsFiltered = ws && (browseFilter.include.length > 0 || browseFilter.exclude.length > 0);
+  const empty = !sourceEmpty ? null
+    : query ? { kind: "search", text: `Nothing on ${srcLabel} matches “${query}”.`, clear: "Clear search", onClear: () => setQuery("") }
+    : local ? { kind: "weLocal", text: "Your Wallpaper Engine folder has no wallpapers yet. Subscribe to some on the Workshop and they show up here.", clear: null, onClear: () => {} }
+    : wsFiltered ? { kind: "filters", text: "No Workshop wallpapers match these filters.", clear: "Clear filters", onClear: () => clearTags("workshop") }
+    : { kind: "source", text: `${srcLabel} has nothing to show right now. Try again in a while.`, clear: null, onClear: () => {} };
+
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
   // the filter panel: docked from WF_DOCK_QUERY up, a drawer below (its toggle is the top bar's split button, App.tsx)
   const col = useFilterPanel("browse", !!scope);
@@ -333,9 +348,10 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     <div className="scroll br-scroll" ref={smoothRef} onClick={onBgClick} onPointerDown={onMarquee}>
       {ws && <WsSetLoad />}
       {match && !sorted.length && wallpapers.length > 0 && <NoMatch onClear={() => clearTags("weLocal")} />}
-      {setEmpty && <NoMatch kind="set" text="Nothing here matches" clear={setClear} onClear={clearOthers} />}
+      {setEmpty && <NoMatch kind="set" text={noFavs ? "No favourites yet. Star a Workshop wallpaper in its sidebar and it shows here." : "Nothing here matches"} clear={setClear} onClear={clearOthers} />}
       {/* the Hidden row's ✓ with nothing (left) to show: say so, with the way back to the list. Guard: probe-hidden hide:filter */}
-      {hidOn && !sorted.length && scope && <NoMatch kind="hidden" text="Nothing hidden here" clear="Show the list" onClear={() => setTagState(HIDDEN_TAG, null, scope)} />}
+      {hidOn && !sorted.length && scope && <NoMatch kind="hidden" text="Nothing hidden here. A wallpaper you hide (right-click it) leaves the list and shows here." clear="Show the list" onClear={() => setTagState(HIDDEN_TAG, null, scope)} />}
+      {empty && !hidOn && <NoMatch kind={`browse-${empty.kind}`} text={empty.text} clear={empty.clear} onClear={empty.onClear} />}
       <WsListNote />
       <div className="grid" ref={gridRef}>
           {gridItems.map((w) => (

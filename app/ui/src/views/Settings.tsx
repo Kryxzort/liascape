@@ -29,6 +29,7 @@ import { useMotion, useFadeOff, FADE_EXIT_MS } from "../components/motion";
 import { glideFlip, snapFlip, type FlipSnap } from "../components/flipGlide";
 import { importFolder } from "../components/importPick";
 import { type Level, LEVEL_LABEL, LEVEL_OF_KEY, levelOf, rank } from "../settingsLevel";
+import { TIP_IDS } from "../components/tips";
 
 // Electron preload (app/shell/preload.js) exposes native dialogs; null in a browser → text entry only.
 const bridge = (window as unknown as { liascape?: { pickFolder?: () => Promise<string | null> } }).liascape;
@@ -360,13 +361,13 @@ function Row({ label, hint, disabled, liveChip, rk, wk, def, deviated, deviatedT
 // rows the level shows hides with them (index.css `.ssection[data-rows]`), so no heading ever stands alone. `bare` = a
 // section whose content isn't rows (the monitor list's add button): it always shows.
 // Guard: probe-settings levels:noEmptySection.
-function Section({ title, icon, lv, bare, boxRef, children }: {
-  title: string; icon?: React.ReactNode; lv?: Level; bare?: boolean; boxRef?: React.Ref<HTMLDivElement>; children: React.ReactNode;
+function Section({ title, icon, lv, bare, boxRef, id, children }: {
+  title: string; icon?: React.ReactNode; lv?: Level; bare?: boolean; boxRef?: React.Ref<HTMLDivElement>; id?: string; children: React.ReactNode;
 }) {
   const level = useStore((s) => levelOf(s.settings?.settingsLevel));
   if (lv && rank(lv) > rank(level)) return null;
   return (
-    <div ref={boxRef} className="ssection" data-rows={bare ? undefined : ""}>
+    <div ref={boxRef} className="ssection" data-rows={bare ? undefined : ""} data-section={id}>
       <h3>{icon && <span className="ssection-ico">{icon}</span>}{title}</h3>
       {children}
     </div>
@@ -554,6 +555,29 @@ function useGlobalPreview() {
   }, []);
 }
 
+// the last store `nav` Settings followed: a later visit doesn't scroll to an old ask again
+let navSeen = 0;
+
+// Getting started: the Library's welcome over a library with wallpapers (store showWelcome; it takes the grid's place until
+// "Back to your wallpapers"), and the one-time tips back (components/Tip.tsx). Guard: --probe probe-firstrun.js
+// welcome:settings, tip:again
+function GettingStarted() {
+  const seenN = useStore((s) => { const v = s.settings?.seenTips; return Array.isArray(v) ? TIP_IDS.filter((t) => v.includes(t)).length : 0; });
+  const showWelcome = useStore((s) => s.showWelcome);
+  const navigate = useStore((s) => s.navigate);
+  const showTipsAgain = useStore((s) => s.showTipsAgain);
+  return (
+    <Section title="Getting started" icon={<Sparkles size={15} />} id="start">
+      <Row label="Welcome page" hint="the ways to bring in wallpapers, as an empty library shows them">
+        <button type="button" className="btn ghost" data-show-welcome onClick={() => { showWelcome(true); navigate("library"); }}>Show</button>
+      </Row>
+      <Row label="Tips" hint={seenN ? `${seenN} of ${TIP_IDS.length} dismissed. Each shows again the next time you meet what it's about.` : "one line each, the first time you meet something new. None dismissed."}>
+        <button type="button" className="btn ghost" data-tips-again disabled={!seenN} onClick={showTipsAgain}>Show tips again</button>
+      </Row>
+    </Section>
+  );
+}
+
 export const Settings = memo(function Settings() {
   const { g, set } = useS();
   const previewGlobal = useGlobalPreview();
@@ -568,6 +592,18 @@ export const Settings = memo(function Settings() {
   const applyTheme = useStore((s) => s.applyTheme);
   const scrollRef = useRef<HTMLDivElement>(null);
   const smoothRef = useSmoothScroll(scrollRef);
+  // a section asked for from another tab (the Library welcome's "Steam settings": store navigate): brought into view once,
+  // on the frame after the page's first, when its layout is already done (nothing forced in the switch)
+  const nav = useStore((s) => s.nav);
+  const motionNow = useMotion();
+  useEffect(() => {
+    if (!nav?.at || nav.n === navSeen || nav.tab !== "settings") return;
+    const f = requestAnimationFrame(() => {
+      navSeen = nav.n;
+      scrollRef.current?.querySelector(`[data-section="${nav.at}"]`)?.scrollIntoView({ block: "start", behavior: motionNow ? "smooth" : "auto" });
+    });
+    return () => cancelAnimationFrame(f);
+  }, [nav]); // eslint-disable-line
   // the Look & feel rows that change how a library card looks: the card preview shows beside them while they're on screen
   const cardRowsRef = useRef<HTMLDivElement>(null);
   const [clearArm, setClearArm] = useState(-1); // -1 idle, >0 counting, 0 ready-to-confirm
@@ -821,7 +857,7 @@ export const Settings = memo(function Settings() {
       </Section>
       </CardPreview>
 
-      <Section title="Wallpaper Engine" icon={<Layers size={15} />}>
+      <Section title="Wallpaper Engine" icon={<Layers size={15} />} id="we">
         <Row label="Workshop folder" hint="where Steam keeps your Wallpaper Engine downloads">
           <input className="text" value={g("workshopFolder", "")} onChange={(e) => set("workshopFolder", e.target.value)} />
           <button className="btn ghost ico" onClick={() => pickInto("workshopFolder")}><FolderFlap size={14} /> Browse</button>
@@ -861,7 +897,7 @@ export const Settings = memo(function Settings() {
         </Section>
       )}
 
-      <Section title="Getting Workshop wallpapers" icon={<Download size={15} />}>
+      <Section title="Getting Workshop wallpapers" icon={<Download size={15} />} id="workshop">
         {/* two ways, one radio group; what the chosen one can't do falls back to the sign-in (under "Use the Steam app", when
             one is usable) and last to the wallpaper's Steam page (docs/decisions.md § "Offer two Workshop download modes, the
             Steam page the last resort"). Guard: probe-steam steam:row:steamApp */}
@@ -921,6 +957,8 @@ export const Settings = memo(function Settings() {
           </Row>
         ))}
       </Section>
+
+      <GettingStarted />
 
       <Section title="Housekeeping" icon={<LibraryIcon size={15} />}>
         <CachePicker />

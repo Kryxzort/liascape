@@ -26,7 +26,7 @@ export function LoadPlaylistModal({
               <h2>Load Playlist</h2>
               <div className="field-label">PLAYLIST</div>
               {names.length === 0
-                ? <p className="muted">No saved playlists</p>
+                ? <p className="muted" data-empty="saved-playlists">No saved playlists yet. Save keeps the bar's list under a name, to load here later.</p>
                 : (
                   <div className="pl-names">
                     {names.map((n) => (
