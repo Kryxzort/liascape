@@ -175,10 +175,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        backlog item against the code, delete what is done or obsolete (the legacy engine, mpvpaper, LWE-subprocess
        items), merge duplicates, and say for each kept item what is still missing. Report what was cut and why.
 
-24. [ ] (owner) Automate landing an agent's branch: scripts, a merge driver, hooks and one skill (no plugin: the repo's
+24. [ ] (owner) Automate landing an agent's branch: scripts, hooks and one skill (the TODO / decisions merge driver is built: `scripts/merge-docs.py`) (no plugin: the repo's
        `.claude/` already ships settings, skills and agents to a clone). In order:
-       - A git merge driver for `docs/TODO.md` and `docs/decisions.md` (`.gitattributes`): keeps both sides' new items /
-         entries, takes the target's numbering, drops what the branch deleted; a test with recorded conflicts.
        - A new script, `land-agent.sh <worktree>` in `scripts/`: rebase onto lp-player, builds + lint + `check-rules`, the local CodeRabbit
          review (findings saved for the lander to judge), `land.sh`, then the worktree and branch removed; refuses to land
          while the agent's report names an undone or follow-up part that `docs/TODO.md` doesn't carry.

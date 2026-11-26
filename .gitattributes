@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+docs/TODO.md merge=liascape-docs
+docs/decisions.md merge=liascape-docs
