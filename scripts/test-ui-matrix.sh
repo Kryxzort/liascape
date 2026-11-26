@@ -279,6 +279,9 @@ printf '{}' > "$LIASCAPE_WEB_SOURCES_FIXTURE"
 # and nothing else reaches a real server: the backend refuses any outbound connection but loopback with a
 # "test-network: REFUSED <call>" line (Helpers/TestNetwork.cs), and the run fails on one (the end of this script)
 export LIASCAPE_TEST_NO_NETWORK=1
+# an import from a link reaches only public addresses (Helpers/LinkImport.cs); probe-import's file server listens on loopback,
+# which this lets a link reach (never the LAN). Guard: --probe probe-import.js import:link:*
+export LIASCAPE_TEST_LINK_LOOPBACK=1
 # every curl here goes to the private backend: it carries the backend's API token (serve.token beside serve.port, read
 # per call — a restarted backend may have written it since; .claude/rules/backend/api.md § Security). /health needs none.
 curl() { command curl -H "X-Liascape-Token: $(cat "$XDG_CONFIG_HOME/liascape/serve.token" 2>/dev/null)" "$@"; }

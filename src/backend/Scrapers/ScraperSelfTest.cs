@@ -183,9 +183,119 @@ public static class ScraperSelfTest
             "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb")));
         await Case(got, dh, "desktophut detail without video", () => dhs.GetDetailAsync(Result("Broken", "https://www.desktophut.com/no-video")));
 
+        // an import from a link asks for a page's detail with no card behind it: the name comes from the page itself
+        await Case(got, mb, "motionbgs detail from a link", () => mbs.GetDetailAsync(Result("", "https://www.motionbgs.com/samurai-girl-rain-lantern")));
+        await Case(got, mw, "moewalls detail from a link", () => mws.GetDetailAsync(Result("",
+            "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/")));
+        await Case(got, dh, "desktophut detail from a link", () => dhs.GetDetailAsync(Result("", "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb")));
+        Links(got);
+
         await LocalFolder(Path.Combine(dir, "wallpaper-engine"), tmp, got);
         await Downloads(tmp, got);
         await ChildProcesses(tmp, got);
+    }
+
+    // What a link pasted into Import names (Helpers/LinkImport.cs, pure): every form of a Workshop item's page, each web
+    // source's wallpaper page in the address its Browse cards use, a file by its name, and what is refused (another scheme,
+    // a Steam page that isn't an item, a site's listing pages, credentials in the address); an unknown site is left to the
+    // answer's Content-Type. Then the stored extension per Content-Type, the names, and which addresses a link may reach.
+    private static void Links(JsonObject got)
+    {
+        JsonNode Mapped(string? text)
+        {
+            var t = LinkImport.Map(text);
+            return new JsonObject
+            {
+                ["kind"] = t.Kind.ToString(), ["url"] = t.Url.Length > 0 ? t.Url : null, ["workshopId"] = t.WorkshopId,
+                ["source"] = t.Source, ["media"] = t.Media, ["error"] = t.Error,
+            };
+        }
+        var map = new JsonObject();
+        foreach (var text in new[]
+        {
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=3042492564",
+            "https://steamcommunity.com/workshop/filedetails/?id=3042492564",
+            "  http://www.steamcommunity.com/sharedfiles/filedetails?id=3042492564&searchtext=rain#comments ",
+            "https://steamcommunity.com/sharedfiles/filedetails/?searchtext=&id=0123",
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=abc",
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=0",
+            "https://steamcommunity.com/sharedfiles/filedetails/?id=123456789012345678901",
+            "https://steamcommunity.com/sharedfiles/filedetails/",
+            "https://steamcommunity.com/id/someone/myworkshopfiles/",
+            "https://steamcommunity.com/app/431960/workshop/",
+            "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+            "https://www.moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper?utm=x",
+            "https://moewalls.com/",
+            "https://moewalls.com/anime/",
+            "https://moewalls.com/page/2/",
+            "https://moewalls.com/anime/page/3/",
+            "https://moewalls.com/wp-content/uploads/preview/2026/gojo-preview.webm",
+            "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb",
+            "http://desktophut.com/spider-man-rain-live-wallpaper-caeb/",
+            "https://www.desktophut.com/category/Animated-Wallpapers?page=2",
+            "https://www.desktophut.com/search/rain",
+            "https://www.motionbgs.com/samurai-girl-rain-lantern",
+            "https://motionbgs.com/samurai-girl-rain-lantern",
+            "https://www.motionbgs.com/tag:car/",
+            "https://www.motionbgs.com/search?q=rain",
+            "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
+            "https://cdn.example.com/walls/Neon%20Rain.WEBM?sig=abc",
+            "https://cdn.example.com/a/b/loop.mkv",
+            "https://cdn.example.com/a/loop.m4v",
+            "https://cdn.example.com/still.JPG",
+            "https://cdn.example.com/still.jpeg",
+            "https://cdn.example.com/still.png",
+            "https://cdn.example.com/still.webp",
+            "https://cdn.example.com/cat.gif",
+            "https://cdn.example.com/v/abc123",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://example.com/",
+            "https://cdn.example.com/drawing.svg",
+            "https://user:secret@cdn.example.com/a.mp4",
+            "file:///home/you/Videos/a.mp4",
+            "ftp://example.com/a.mp4",
+            "steam://url/CommunityFilePage/3042492564",
+            "javascript:alert(1)",
+            "/home/you/Videos/a.mp4",
+            "not a link",
+            "",
+            null,
+        })
+            map[text ?? "(null)"] = Mapped(text);
+        got["link: what each link names"] = map;
+
+        var ext = new JsonObject();
+        foreach (var (ct, url) in new (string?, string)[]
+        {
+            ("video/mp4", "https://x.test/a"), ("video/webm; charset=binary", "https://x.test/a.mp4"), ("video/x-matroska", "https://x.test/a"),
+            ("video/quicktime", "https://x.test/a"), ("video/x-msvideo", "https://x.test/a"), ("video/ogg", "https://x.test/a"),
+            ("video/ogg", "https://x.test/a.mkv"), ("image/gif", "https://x.test/a"), ("image/png", "https://x.test/a.jpg"),
+            ("image/jpeg", "https://x.test/a"), ("image/webp", "https://x.test/a"), ("image/svg+xml", "https://x.test/a.png"),
+            ("image/avif", "https://x.test/a"), ("text/html; charset=utf-8", "https://x.test/a.mp4"), ("application/json", "https://x.test/a.mp4"),
+            ("application/octet-stream", "https://x.test/a.webm"), ("application/octet-stream", "https://x.test/a"),
+            (null, "https://x.test/a%20b.GIF"), (null, "https://x.test/a"), ("", "https://x.test/a.exe"),
+        })
+            ext[$"{ct ?? "(none)"} {url}"] = LinkImport.ExtFor(ct, url);
+        got["link: the stored extension"] = ext;
+
+        got["link: names"] = new JsonObject
+        {
+            ["file"] = LinkImport.TitleFor("https://cdn.example.com/walls/Neon%20Rain.webm?x=1", null),
+            ["disposition"] = LinkImport.TitleFor("https://cdn.example.com/v/abc", "\"Sunset Loop.mp4\""),
+            ["no name"] = LinkImport.TitleFor("https://cdn.example.com/", null),
+            ["moewalls slug"] = LinkImport.SlugTitle("https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/"),
+            ["desktophut slug"] = LinkImport.SlugTitle("https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb"),
+            ["motionbgs slug"] = LinkImport.SlugTitle("https://www.motionbgs.com/samurai-girl-rain-lantern"),
+        };
+
+        var reach = new JsonObject();
+        foreach (var a in new[] { "93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946", "127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1",
+                     "10.0.0.5", "192.168.1.1", "172.16.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "fe80::1", "fd00::1", "224.0.0.1" })
+        {
+            var ip = System.Net.IPAddress.Parse(a);
+            reach[a] = $"{(LinkImport.AddressAllowed(ip, false) ? "public" : "refused")}, tests: {(LinkImport.AddressAllowed(ip, true) ? "allowed" : "refused")}";
+        }
+        got["link: the addresses a link may reach"] = reach;
     }
 
     // ChildProcess, which runs the ffmpeg of a GIF still (WallpaperEngineScraper) and of an import: what a tool printed and

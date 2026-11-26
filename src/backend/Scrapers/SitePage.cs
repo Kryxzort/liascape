@@ -58,6 +58,19 @@ internal static class SitePage
         return address.StartsWith('/') ? site + address : site + "/" + address;
     }
 
+    // A wallpaper's name from its own page, for a detail asked with no card behind it (an import from a link: the card's title
+    // is ""): the page's og:title, else its <title>, without a leading "Download", the " Live Wallpaper" the sites append and
+    // whatever follows it (" - MoeWalls", " – Free Animated …"). Throws, like Needed, when the page names nothing.
+    public static string PageName(HtmlDocument doc, string url)
+    {
+        string? full = Attr(doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']"), "content").Trim() is { Length: > 0 } og ? og
+            : Text(doc.DocumentNode.SelectSingleNode("//title"));
+        if (string.IsNullOrEmpty(full)) throw new InvalidDataException($"the wallpaper's name not found on {url}");
+        string name = System.Text.RegularExpressions.Regex.Replace(full, @"^Download\s+|\s+live wallpaper\b.*$", "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+        return name.Length > 0 ? name : full;
+    }
+
     // The one element a wallpaper's page must have (its video, its download link): a page without it is not a wallpaper's
     // page any more (the site changed its markup, or the link was wrong), so the detail fails rather than hand back an
     // address that leads nowhere.

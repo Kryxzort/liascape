@@ -34,6 +34,16 @@
       "title": "Spider-Man Rain"
     }
   },
+  "desktophut detail from a link": {
+    "asked": [
+      "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb"
+    ],
+    "result": {
+      "downloadUrl": "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
+      "previewUrl": "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
+      "title": "Spider-Man Rain"
+    }
+  },
   "desktophut detail without video": {
     "asked": [
       "https://www.desktophut.com/no-video"
@@ -636,6 +646,431 @@
     "files": 3,
     "item": "dir"
   },
+  "link: names": {
+    "desktophut slug": "Spider Man Rain",
+    "disposition": "Sunset Loop",
+    "file": "Neon Rain",
+    "moewalls slug": "Gojo And Black Cat Rainy Nights In Tokyo Jujutsu Kaisen",
+    "motionbgs slug": "Samurai Girl Rain Lantern",
+    "no name": "cdn.example.com"
+  },
+  "link: the addresses a link may reach": {
+    "0.0.0.0": "refused, tests: refused",
+    "10.0.0.5": "refused, tests: refused",
+    "100.64.0.1": "refused, tests: refused",
+    "127.0.0.1": "refused, tests: allowed",
+    "127.8.9.10": "refused, tests: allowed",
+    "169.254.169.254": "refused, tests: refused",
+    "172.16.0.1": "refused, tests: refused",
+    "192.168.1.1": "refused, tests: refused",
+    "224.0.0.1": "refused, tests: refused",
+    "2606:2800:220:1:248:1893:25c8:1946": "public, tests: allowed",
+    "93.184.216.34": "public, tests: allowed",
+    "::1": "refused, tests: allowed",
+    "::ffff:127.0.0.1": "refused, tests: allowed",
+    "fd00::1": "refused, tests: refused",
+    "fe80::1": "refused, tests: refused"
+  },
+  "link: the stored extension": {
+    " https://x.test/a.exe": null,
+    "(none) https://x.test/a": null,
+    "(none) https://x.test/a%20b.GIF": ".gif",
+    "application/json https://x.test/a.mp4": null,
+    "application/octet-stream https://x.test/a": null,
+    "application/octet-stream https://x.test/a.webm": ".webm",
+    "image/avif https://x.test/a": null,
+    "image/gif https://x.test/a": ".gif",
+    "image/jpeg https://x.test/a": ".jpg",
+    "image/png https://x.test/a.jpg": ".png",
+    "image/svg\u002Bxml https://x.test/a.png": null,
+    "image/webp https://x.test/a": ".webp",
+    "text/html; charset=utf-8 https://x.test/a.mp4": null,
+    "video/mp4 https://x.test/a": ".mp4",
+    "video/ogg https://x.test/a": ".mp4",
+    "video/ogg https://x.test/a.mkv": ".mkv",
+    "video/quicktime https://x.test/a": ".mov",
+    "video/webm; charset=binary https://x.test/a.mp4": ".webm",
+    "video/x-matroska https://x.test/a": ".mkv",
+    "video/x-msvideo https://x.test/a": ".avi"
+  },
+  "link: what each link names": {
+    "": {
+      "error": "Paste a link to a wallpaper.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "  http://www.steamcommunity.com/sharedfiles/filedetails?id=3042492564\u0026searchtext=rain#comments ": {
+      "error": null,
+      "kind": "Workshop",
+      "media": null,
+      "source": null,
+      "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3042492564",
+      "workshopId": "3042492564"
+    },
+    "(null)": {
+      "error": "Paste a link to a wallpaper.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "/home/you/Videos/a.mp4": {
+      "error": "Only web links (http or https) can be imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "file:///home/you/Videos/a.mp4": {
+      "error": "Only web links (http or https) can be imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "ftp://example.com/a.mp4": {
+      "error": "Only web links (http or https) can be imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "http://desktophut.com/spider-man-rain-live-wallpaper-caeb/": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "Desktophut",
+      "url": "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb",
+      "workshopId": null
+    },
+    "https://cdn.example.com/a/b/loop.mkv": {
+      "error": null,
+      "kind": "Direct",
+      "media": "video",
+      "source": null,
+      "url": "https://cdn.example.com/a/b/loop.mkv",
+      "workshopId": null
+    },
+    "https://cdn.example.com/a/loop.m4v": {
+      "error": null,
+      "kind": "Direct",
+      "media": "video",
+      "source": null,
+      "url": "https://cdn.example.com/a/loop.m4v",
+      "workshopId": null
+    },
+    "https://cdn.example.com/cat.gif": {
+      "error": null,
+      "kind": "Direct",
+      "media": "gif",
+      "source": null,
+      "url": "https://cdn.example.com/cat.gif",
+      "workshopId": null
+    },
+    "https://cdn.example.com/drawing.svg": {
+      "error": null,
+      "kind": "Unknown",
+      "media": null,
+      "source": null,
+      "url": "https://cdn.example.com/drawing.svg",
+      "workshopId": null
+    },
+    "https://cdn.example.com/still.JPG": {
+      "error": null,
+      "kind": "Direct",
+      "media": "image",
+      "source": null,
+      "url": "https://cdn.example.com/still.JPG",
+      "workshopId": null
+    },
+    "https://cdn.example.com/still.jpeg": {
+      "error": null,
+      "kind": "Direct",
+      "media": "image",
+      "source": null,
+      "url": "https://cdn.example.com/still.jpeg",
+      "workshopId": null
+    },
+    "https://cdn.example.com/still.png": {
+      "error": null,
+      "kind": "Direct",
+      "media": "image",
+      "source": null,
+      "url": "https://cdn.example.com/still.png",
+      "workshopId": null
+    },
+    "https://cdn.example.com/still.webp": {
+      "error": null,
+      "kind": "Direct",
+      "media": "image",
+      "source": null,
+      "url": "https://cdn.example.com/still.webp",
+      "workshopId": null
+    },
+    "https://cdn.example.com/v/abc123": {
+      "error": null,
+      "kind": "Unknown",
+      "media": null,
+      "source": null,
+      "url": "https://cdn.example.com/v/abc123",
+      "workshopId": null
+    },
+    "https://cdn.example.com/walls/Neon%20Rain.WEBM?sig=abc": {
+      "error": null,
+      "kind": "Direct",
+      "media": "video",
+      "source": null,
+      "url": "https://cdn.example.com/walls/Neon%20Rain.WEBM?sig=abc",
+      "workshopId": null
+    },
+    "https://example.com/": {
+      "error": null,
+      "kind": "Unknown",
+      "media": null,
+      "source": null,
+      "url": "https://example.com/",
+      "workshopId": null
+    },
+    "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4": {
+      "error": null,
+      "kind": "Direct",
+      "media": "video",
+      "source": null,
+      "url": "https://media.desktophut.com/previews/spider-man-rain-live-wallpaper-caeb-player.mp4",
+      "workshopId": null
+    },
+    "https://moewalls.com/": {
+      "error": "That MoeWalls page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://moewalls.com/anime/": {
+      "error": "That MoeWalls page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "Moewalls",
+      "url": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+      "workshopId": null
+    },
+    "https://moewalls.com/anime/page/3/": {
+      "error": "That MoeWalls page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://moewalls.com/page/2/": {
+      "error": "That MoeWalls page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://moewalls.com/wp-content/uploads/preview/2026/gojo-preview.webm": {
+      "error": null,
+      "kind": "Direct",
+      "media": "video",
+      "source": null,
+      "url": "https://moewalls.com/wp-content/uploads/preview/2026/gojo-preview.webm",
+      "workshopId": null
+    },
+    "https://motionbgs.com/samurai-girl-rain-lantern": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "MotionBgs",
+      "url": "https://www.motionbgs.com/samurai-girl-rain-lantern",
+      "workshopId": null
+    },
+    "https://steamcommunity.com/app/431960/workshop/": {
+      "error": "That Steam page isn\u0027t a Workshop item\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://steamcommunity.com/id/someone/myworkshopfiles/": {
+      "error": "That Steam page isn\u0027t a Workshop item\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://steamcommunity.com/sharedfiles/filedetails/": {
+      "error": "That Steam page isn\u0027t a Workshop item\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=0": {
+      "error": "That Steam page isn\u0027t a Workshop item\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=123456789012345678901": {
+      "error": "That Steam page isn\u0027t a Workshop item\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=3042492564": {
+      "error": null,
+      "kind": "Workshop",
+      "media": null,
+      "source": null,
+      "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3042492564",
+      "workshopId": "3042492564"
+    },
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=abc": {
+      "error": "That Steam page isn\u0027t a Workshop item\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://steamcommunity.com/sharedfiles/filedetails/?searchtext=\u0026id=0123": {
+      "error": null,
+      "kind": "Workshop",
+      "media": null,
+      "source": null,
+      "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=123",
+      "workshopId": "123"
+    },
+    "https://steamcommunity.com/workshop/filedetails/?id=3042492564": {
+      "error": null,
+      "kind": "Workshop",
+      "media": null,
+      "source": null,
+      "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3042492564",
+      "workshopId": "3042492564"
+    },
+    "https://user:secret@cdn.example.com/a.mp4": {
+      "error": "A link with a user name or password in it isn\u0027t imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://www.desktophut.com/category/Animated-Wallpapers?page=2": {
+      "error": "That DesktopHut page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://www.desktophut.com/search/rain": {
+      "error": "That DesktopHut page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "Desktophut",
+      "url": "https://www.desktophut.com/spider-man-rain-live-wallpaper-caeb",
+      "workshopId": null
+    },
+    "https://www.moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper?utm=x": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "Moewalls",
+      "url": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+      "workshopId": null
+    },
+    "https://www.motionbgs.com/samurai-girl-rain-lantern": {
+      "error": null,
+      "kind": "Site",
+      "media": null,
+      "source": "MotionBgs",
+      "url": "https://www.motionbgs.com/samurai-girl-rain-lantern",
+      "workshopId": null
+    },
+    "https://www.motionbgs.com/search?q=rain": {
+      "error": "That MotionBgs page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://www.motionbgs.com/tag:car/": {
+      "error": "That MotionBgs page isn\u0027t one wallpaper\u0027s page.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ": {
+      "error": null,
+      "kind": "Unknown",
+      "media": null,
+      "source": null,
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "workshopId": null
+    },
+    "javascript:alert(1)": {
+      "error": "Only web links (http or https) can be imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "not a link": {
+      "error": "Only web links (http or https) can be imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    },
+    "steam://url/CommunityFilePage/3042492564": {
+      "error": "Only web links (http or https) can be imported.",
+      "kind": "Refused",
+      "media": null,
+      "source": null,
+      "url": null,
+      "workshopId": null
+    }
+  },
   "local details": {
     "1001": {
       "downloadUrl": "$WS/1001/rain.mp4",
@@ -1066,6 +1501,17 @@
       "title": "Gojo And Black Cat"
     }
   },
+  "moewalls detail from a link": {
+    "asked": [
+      "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/"
+    ],
+    "result": {
+      "downloadUrl": "https://go.moewalls.com/download.php?video=0Lf1N4qBnRCsXaib5HAs%2FQ1GbxbFgReOio5PB929HFq4%2BRJLCv18I3Z0pziOVguRCMDXQT%2F9GwlLcEsQwCL7ADnruiDRklhrmt5E9CWS42kKlva%2FHWYfq6L4KtA%3D",
+      "previewUrl": "https://moewalls.com/wp-content/uploads/preview/2026/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-preview.webm",
+      "referrer": "https://moewalls.com/anime/gojo-and-black-cat-rainy-nights-in-tokyo-jujutsu-kaisen-live-wallpaper/",
+      "title": "Gojo And Black Cat Rainy Nights In Tokyo Jujutsu Kaisen"
+    }
+  },
   "moewalls detail without video": {
     "asked": [
       "https://moewalls.com/no-video/"
@@ -1169,6 +1615,16 @@
     ]
   },
   "motionbgs detail": {
+    "asked": [
+      "https://www.motionbgs.com/samurai-girl-rain-lantern"
+    ],
+    "result": {
+      "downloadUrl": "https://www.motionbgs.com/dl/4k/18",
+      "previewUrl": "https://www.motionbgs.com/media/18/samurai-girl-rain-lantern.960x540.mp4",
+      "title": "Samurai Girl With Lantern"
+    }
+  },
+  "motionbgs detail from a link": {
     "asked": [
       "https://www.motionbgs.com/samurai-girl-rain-lantern"
     ],

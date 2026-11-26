@@ -11,6 +11,8 @@ paths:
   - "src/backend/Helpers/FolderScanner.cs"
   - "src/backend/Web/FolderImportOps.cs"
   - "src/backend/Web/FolderWatch.cs"
+  - "src/backend/Web/LinkImportOps.cs"
+  - "src/backend/Helpers/LinkImport.cs"
   - "scripts/test-folder-import.sh"
   - "src/backend/Helpers/WorkshopUnsubQueue.cs"
   - "src/backend/Models/LibraryItem.cs"
@@ -123,6 +125,9 @@ Root `~/.local/share/liascape/library/<source>/<key>/` — every item is its own
 - Delete or trash through `LibraryService.TryDeleteDir`: a link is unlinked, never deleted through. Never write, move or delete a user's source. Guard: `scripts/test-folder-import.sh` § delete.
 - Watched folders (`AppSettings.WatchedFolders`, `Web/FolderWatch.cs`): inotify, debounced, plus a periodic pass; a file younger than the stable time waits. Every import runs through `FolderImportOps`' one gate. Items carry `LibMeta.WatchedFrom` + `SourceSig`; a deleted or trashed one joins the folder's `Skip`.
 - A source gone from its watched folder removes the item only when it is a link (`AppOps.Trash(…, undoable: false)`: the playlist follows); a copy stays, unmarked. Nothing leaves while the folder is missing, reads as empty, or the source sits under an unreadable folder. Why: `docs/decisions.md` § "Remove only the link when a watched folder's file goes". Guard: `scripts/test-folder-import.sh` § watch.
+
+## Import from a link (`Web/LinkImportOps.cs`, `Helpers/LinkImport.cs`)
+- Map the link purely (`LinkImport.Map`) to its source and item, then take that source's own download path, never a second downloader: a Workshop item and a web source's page through `ServerHost.DownloadResultAsync` (`/download`'s: the chosen download mode and its refusals, nothing else; a page's address in its Browse cards' exact form, the detail named from the page by `SitePage.PageName`), a file straight from a server through `DownloadHelper`'s link fetch into `imported/` by `ImportService` (`take`, the address as `sourceId`). An unknown site's answer decides: a video or picture is that file, a page is "That site isn't supported…". "Already in your library" = an item with that source id or Workshop id (nothing fetched). Fetch rules: `.claude/rules/backend/api.md` § Security. Guard: scraper-selftest "link: …", `scripts/test-item-actions.sh` § link, probe-import `import:link:*`.
 
 ## WE auto-import
 - `LibraryService.SyncWallpaperEngine` creates `local/<id>` links + index entries; it runs at `serve` start (then WS `library-synced`) and in `liascape restore` before playback. Steam's tags for what it adds: § Steam tags, trailers and frame sizes.

@@ -7,9 +7,12 @@ namespace Liascape.Helpers;
 
 // A write-only stream in front of another that reports how much of `total` bytes has gone through it, so a copy written
 // with Stream.CopyToAsync / HttpContent.CopyToAsync shows its progress without a copy loop of its own. Reports nothing
-// when the total isn't known (no Content-Length). Disposing it disposes the inner stream.
-public sealed class ProgressStream(Stream inner, long? total, IProgress<double>? progress) : Stream
+// when the total isn't known (no Content-Length). `max`: the most it lets through; one byte more throws TooLarge (an import
+// from a link: a server whose Content-Length lied, or that sent none). Disposing it disposes the inner stream.
+public sealed class ProgressStream(Stream inner, long? total, IProgress<double>? progress, long? max = null) : Stream
 {
+    public sealed class TooLarge(long max) : IOException($"bigger than {max} bytes");
+
     private long _written;
 
     public override bool CanRead => false;
@@ -22,6 +25,7 @@ public sealed class ProgressStream(Stream inner, long? total, IProgress<double>?
 
     public override void Write(ReadOnlySpan<byte> buffer)
     {
+        Allow(buffer.Length);
         inner.Write(buffer);
         Advance(buffer.Length);
     }
@@ -31,8 +35,14 @@ public sealed class ProgressStream(Stream inner, long? total, IProgress<double>?
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
     {
+        Allow(buffer.Length);
         await inner.WriteAsync(buffer, ct);
         Advance(buffer.Length);
+    }
+
+    private void Allow(int n)
+    {
+        if (max is { } m && _written + n > m) throw new TooLarge(m);
     }
 
     private void Advance(int n)

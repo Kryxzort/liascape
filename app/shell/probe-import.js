@@ -9,7 +9,7 @@
 //                       exactly the four ticked (links: "Copy files instead of linking" off by default) and the dialog leaves
 //   import:cancel       Cancel, Escape and a click outside each close it and land nothing
 //   import:files:<m>    the Import's chevron is in sight beside it (its height, in the top bar, aria-haspopup); a click opens
-//                       its menu ("Import a folder…", "Import files…") with the chevron turned over (motion on: through
+//                       its menu ("Import a folder…", "Import files…", "Import from a link…") with the chevron turned over (motion on: through
 //                       in-between angles while the menu grows in; off / reduced: it flips at once, the menu only fades);
 //                       Import files… opens the dialog on just the picked files
 //   import:files:keys   ↓ on the chevron opens the menu on its first entry, Escape gives the focus back to the chevron,
@@ -33,6 +33,20 @@
 //                       picture import-steam.png (also under no-glow and bg-live: the dialog keeps its fill)
 //   import:look         theme colours (the in-library pill in --success, the group chips in --accent), the drop frame's
 //                       glow (none under no-glow), bg-live: the dialog keeps its own fill; pictures import-*.png
+//   import:link:<m>     the Import menu's "Import from a link…" opens the dialog on an empty link field, focused, Import off
+//                       (motion on: it zooms in; off / reduced: it only fades); an unknown site's page says it isn't supported;
+//                       a file's link (this probe's own file server on loopback) shows what it is (motion on: the line rises
+//                       in through in-between frames; off: it only fades), Import downloads it with a Browse card's progress
+//                       bar (filling through in-between widths; "Importing…", Cancel turned "Close") that fades in, then the
+//                       dialog leaves, the item lands with its card and the status line says "Imported: …"
+//                       (pictures import-link-found-<m>.png, import-link-progress-<m>.png)
+//   import:link:paste   a web link pasted on the Library opens the dialog on it, resolved at once; plain text, a paste in the
+//                       search field and a paste on Browse open nothing; a link the library has shows "In your library", Import off
+//   import:link:drop    a web link dragged from a browser (text/uri-list http) opens the dialog on it
+//   import:link:close   Close while it imports: the dialog leaves at once, the import goes on and lands, the status says so
+//   import:link:error   a page served as video/mp4: the import's refusal shows in the dialog, which stays, Import off
+//   import:link:look    the error line in --danger, where it comes from in --subtext, the chip in --accent, the progress fill
+//                       in --accent with its glow (none under no-glow), bg-live keeps the dialog's fill; pictures
 // Exit 1 on any FAIL. LIASCAPE_ONLY = a regex over the cell names.
 const { app, BrowserWindow } = require("electron");
 const cp = require("child_process");
@@ -256,7 +270,7 @@ app.whenReady().then(async () => {
         }
         if (!/^matrix\(-1, /.test(turns.at(-1) ?? "")) v.push(`the open menu's chevron isn't turned over (${turns.at(-1)})`);
         if ((await js(`return document.querySelector("[data-import-more]").getAttribute("aria-expanded")`)) !== "true") v.push("aria-expanded isn't true while open");
-        if (J(await menuItems()) !== J(["Import a folder…", "Import files…"])) v.push(`menu ${J(await menuItems())}`);
+        if (J(await menuItems()) !== J(["Import a folder…", "Import files…", "Import from a link…"])) v.push(`menu ${J(await menuItems())}`);
         // it hangs under the pair, flush with one of its edges (never beside it)
         const at = await js(`const p = document.querySelector(".ctx-pop").getBoundingClientRect(), s = document.querySelector("[data-import-split]").getBoundingClientRect();
           return { below: p.top >= s.bottom, flush: Math.min(Math.abs(p.left - s.left), Math.abs(p.right - s.right)) < 1.5, p: [p.left, p.right], s: [s.left, s.right] }`);
@@ -311,7 +325,7 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: "mouseDown", x: Math.round(r.x), y: Math.round(r.y), button: "right", clickCount: 1 });
       win.webContents.sendInputEvent({ type: "mouseUp", x: Math.round(r.x), y: Math.round(r.y), button: "right", clickCount: 1 });
       if (!(await waitFor(menuOpen, 3000))) return ["no menu on the Import's right-click"];
-      if (J(await menuItems()) !== J(["Import a folder…", "Import files…"])) v.push(`menu ${J(await menuItems())}`);
+      if (J(await menuItems()) !== J(["Import a folder…", "Import files…", "Import from a link…"])) v.push(`menu ${J(await menuItems())}`);
       win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
       await waitFor(async () => !(await menuOpen()), 2000);
       await js(`document.querySelector("[data-import-btn]").click(); return true`);
@@ -525,6 +539,222 @@ app.whenReady().then(async () => {
       fs.rmSync(path.join(vdfDir, "libraryfolders.vdf"), { force: true });
       return v;
     });
+
+    // ---- an import from a link ----
+    // this probe's own file server on loopback (the stack's backend lets a link reach it: LIASCAPE_TEST_LINK_LOOPBACK): any
+    // /files/<name>.mp4 is one small video, /slow/<name>.mp4 the same sent in pieces over ~2.5 s (a progress bar to see),
+    // /page a web page, /fake.mp4 a page served as video/mp4
+    const srcVid = path.join(T, "served.mp4"); vid(srcVid, "purple");
+    const served = fs.readFileSync(srcVid);
+    const server = require("http").createServer((req, res) => {
+      const p = req.url.split("?")[0];
+      if (p.startsWith("/files/")) { res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": served.length }); res.end(served); }
+      else if (p.startsWith("/slow/")) {
+        res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": served.length });
+        const n = 12, step = Math.ceil(served.length / n);
+        let i = 0;
+        const t = setInterval(() => { res.write(served.subarray(i * step, (i + 1) * step)); if (++i >= n) { clearInterval(t); res.end(); } }, 210);
+        req.on("close", () => clearInterval(t));
+      } else if (p === "/page") { res.writeHead(200, { "Content-Type": "text/html" }); res.end("<!doctype html><title>a page</title>"); }
+      else if (p === "/fake.mp4") { res.writeHead(200, { "Content-Type": "video/mp4" }); res.end("<!doctype html><title>log in</title>" + " ".repeat(64)); }
+      else { res.writeHead(404); res.end(); }
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const S = `http://127.0.0.1:${server.address().port}`;
+    const linkState = () => js(`const d = document.querySelector("[data-import-dialog]"); if (!d) return null; const i = d.querySelector("[data-import-link]");
+      const l = d.querySelector("[data-import-link-line]");
+      return { state: d.dataset.importDialog, title: d.querySelector("h2")?.textContent, value: i?.value ?? null, focused: !!i && document.activeElement === i,
+        inputOff: !!i?.disabled, line: l?.dataset.importLinkLine ?? null, text: l?.textContent.trim() ?? null,
+        name: d.querySelector("[data-import-link-title]")?.textContent ?? null, where: d.querySelector("[data-import-link-where]")?.textContent ?? null,
+        have: !!d.querySelector(".imp-link-row .imp-have"), progress: !!d.querySelector("[data-import-link-progress]"),
+        go: d.querySelector("[data-import-go]")?.textContent.trim(), goOff: !!d.querySelector("[data-import-go]")?.disabled,
+        cancel: [...d.querySelectorAll(".imp-actions .btn.ghost")].map((b) => b.textContent.trim()).find((t) => t === "Cancel" || t === "Close") }`);
+    // typed as a user types: React's own value setter, then the input event
+    const setLink = (u) => `{ const i = document.querySelector("[data-import-link]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${J(u)});
+      i.dispatchEvent(new Event("input", { bubbles: true })); }`;
+    const lineIs = (want, ms = 6000) => waitFor(async () => (await linkState())?.line === want, ms);
+    const statusText = () => js(`return document.querySelector('.topbar [data-st="status"]')?.textContent ?? null`);
+    const closeDialog = async () => { await js(`[...document.querySelectorAll(".imp-actions .btn.ghost")].find((b) => /^(Cancel|Close)$/.test(b.textContent.trim()))?.click(); return true`); await gone(); };
+    const openLinkFromMenu = () => js(`document.querySelector("[data-import-more]").click(); await new Promise((r) => setTimeout(r, 350));
+      const e = [...document.querySelectorAll(".ctx-pop [data-ctx-item]")].find((b) => b.textContent.trim() === "Import from a link…"); if (!e) return false; e.click(); return true`);
+
+    for (const mode of ["on", "off", "reduced"]) {
+      await cell(`import:link:${mode} — Import from a link…: an unknown site isn't supported; a file's link shows what it is, imports with a progress bar, lands`, async () => {
+        const v = [];
+        await setSettings({ Morphs: mode !== "off" }); await reducedMotion(mode === "reduced"); await load();
+        const noMotion = () => js(`return document.documentElement.classList.contains("no-motion")`);
+        if (!(await waitFor(async () => (await noMotion()) === (mode !== "on"), 5000))) return [`:root.no-motion is ${await noMotion()} under motion ${mode} — proved nothing`];
+        await js(`document.querySelector("[data-import-more]").click(); return true`);
+        if (!(await waitFor(menuOpen, 3000))) return ["the Import menu didn't open"];
+        await sleep(350);
+        const fr = (await js(`const s = ${SAMPLE({ modal: ".imp-modal" }, 700)};
+          [...document.querySelectorAll(".ctx-pop [data-ctx-item]")].find((b) => b.textContent.trim() === "Import from a link…").click(); return await s`)).modal;
+        if (mode === "on") {
+          const sizes = fr.filter((f) => f[1] != null).map((f) => f[4]);
+          if (!(sizes.length > 2 && Math.min(...sizes) < Math.max(...sizes) - 2)) v.push(`motion on: the dialog didn't zoom in (widths ${J([...new Set(sizes)].slice(0, 8))})`);
+        } else v.push(...judge("the dialog", fr, { appear: true, size: false }));
+        const s0 = await linkState();
+        if (!s0 || s0.state !== "link" || s0.title !== "Import from a link") return [...v, `the dialog: ${J(s0)}, want "Import from a link"`];
+        if (!s0.focused || s0.value !== "" || !s0.goOff || s0.line != null || s0.cancel !== "Cancel") v.push(`opened: ${J(s0)}, want an empty focused field, no line, Import off`);
+        // an unknown site's page: it isn't supported, in plain words
+        await js(`${setLink(`${S}/page`)} return true`);
+        if (!(await lineIs("error"))) v.push(`an unknown site's page: no error line (${J(await linkState())})`);
+        else {
+          const s = await linkState();
+          if (!/^That site isn't supported\. Import takes a Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture\.$/.test(s.text)) v.push(`the error line says ${J(s.text)}`);
+          if (!s.goOff) v.push("Import is on for an unsupported site");
+        }
+        // a file's link: what it names, the line rising in (motion off: fading in place)
+        const url = `${S}/slow/lk${mode}.mp4`;
+        const lf = (await js(`const s = ${SAMPLE({ line: '[data-import-link-line="found"]' }, 1300)}; ${setLink(url)} return await s`)).line;
+        if (mode === "on") {
+          const mids = lf.filter((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95).length, ys = new Set(lf.filter((f) => f[1] != null).map((f) => f[3]));
+          if (!mids || ys.size < 2) v.push(`motion on: the found line didn't rise in (${brief(lf)})`);
+        } else v.push(...judge("the found line", lf, { appear: true }));
+        const s1 = await linkState();
+        if (s1.line !== "found" || s1.name !== `lk${mode}` || s1.where !== "Video from 127.0.0.1" || s1.goOff || s1.go !== "Import" || s1.have)
+          v.push(`a file's link: ${J(s1)}, want lk${mode}, "Video from 127.0.0.1", Import on`);
+        await shot(`link-found-${mode}`, ".imp-modal");
+        // Import: the progress fades in under it and fills as the file comes, then the dialog leaves
+        const before = await titles();
+        const pf = js(`const s = ${SAMPLE({ dl: "[data-import-link-progress]", fill: "[data-import-link-progress] .dl-fill" }, 1600)};
+          document.querySelector("[data-import-go]").click(); return await s`);
+        await sleep(700);
+        const mid = await linkState();
+        await shot(`link-progress-${mode}`, ".imp-modal");
+        const p = await pf;
+        if (!mid?.progress || mid.go !== "Importing…" || !mid.goOff || mid.cancel !== "Close" || !mid.inputOff)
+          v.push(`while importing: ${J(mid)}, want the progress bar, "Importing…" off, "Close", the field off`);
+        if (mode === "on") { if (!p.dl.some((f) => f[1] != null && f[1] > 0.02 && f[1] < 0.95)) v.push(`motion on: the progress popped in (${brief(p.dl)})`); }
+        else v.push(...judge("the progress", p.dl, { appear: true }));
+        const widths = [...new Set(p.fill.filter((f) => f[1] != null).map((f) => f[4]))];
+        if (widths.length < 3) v.push(`the fill didn't fill through in-between widths (${J(widths)})`);
+        if (!(await waitFor(async () => (await dialog()) == null, 10000))) v.push("the dialog stayed after the import");
+        if (!(await waitFor(async () => (await titles()).includes(`lk${mode}`), 10000))) v.push(`lk${mode} never landed`);
+        const added = (await titles()).filter((t) => !before.includes(t));
+        if (J(added) !== J([`lk${mode}`])) v.push(`landed ${J(added)}, want just lk${mode}`);
+        if (!(await waitFor(() => js(`return !!document.querySelector('[data-title="lk${mode}"]')`), 8000))) v.push("the imported item has no card");
+        if (!(await waitFor(async () => (await statusText()) === `Imported: lk${mode}`, 4000))) v.push(`the status line says ${J(await statusText())}`);
+        const it = (await library()).find((i) => i.title === `lk${mode}`);
+        if (it && it.sourceId !== url) v.push(`its source ${J(it.sourceId)}, want the link`);
+        await reducedMotion(false);
+        return v;
+      });
+    }
+
+    await cell("import:link:paste — a link pasted on the Library opens the dialog on it; other pastes open nothing", async () => {
+      const v = [];
+      await setSettings({ Morphs: true }); await load();
+      const paste = (text, on = "document.body") => js(`document.activeElement?.blur?.(); const dt = new DataTransfer(); dt.setData("text/plain", ${J(text)});
+        const t = ${on}; if (!t) return false; t.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); return true`);
+      const url = `${S}/files/pasted.mp4`;
+      await paste(url);
+      if (!(await waitFor(async () => (await linkState())?.state === "link", 3000))) return ["a pasted link didn't open the dialog"];
+      if (!(await lineIs("found", 3000))) v.push(`the pasted link wasn't resolved at once: ${J(await linkState())}`);
+      const s = await linkState();
+      if (s.value !== url || s.name !== "pasted") v.push(`the dialog on ${J(s.value)} naming ${J(s.name)}, want the pasted link`);
+      await closeDialog();
+      await paste("just some words"); await sleep(500);
+      if (await dialog()) { v.push("plain text opened the dialog"); await closeDialog(); }
+      // a paste in a text field is that field's
+      const inField = await paste(url, `document.querySelector(".topbar input")`);
+      await sleep(500);
+      if (!inField) v.push("no text field in the top bar to paste into — proved nothing for it");
+      else if (await dialog()) { v.push("a paste in the search field opened the dialog"); await closeDialog(); }
+      await js(`[...document.querySelectorAll(".tab")].find((t) => t.textContent.trim() === "Browse").click(); return true`); await sleep(600);
+      await paste(url); await sleep(500);
+      if (await dialog()) { v.push("a paste on Browse opened the dialog"); await closeDialog(); }
+      // a link the library has: said, and Import off
+      await load();
+      await paste(`${S}/slow/lkon.mp4`);
+      if (!(await lineIs("found", 3000))) v.push("the library's own link wasn't resolved");
+      else { const h = await linkState(); if (!h.have || !h.goOff) v.push(`the library's own link: ${J(h)}, want "In your library", Import off`); }
+      await shot("link-have", ".imp-modal");
+      await closeDialog();
+      return v;
+    });
+
+    await cell("import:link:drop — a web link dragged from a browser opens the dialog on it", async () => {
+      await load();
+      const url = `${S}/files/dropped.mp4`;
+      await js(`const dt = new DataTransfer(); dt.setData("text/uri-list", "# a comment\\n" + ${J(url)});
+        for (const t of ["dragenter", "dragover", "drop"]) document.body.dispatchEvent(new DragEvent(t, { dataTransfer: dt, bubbles: true, cancelable: true })); return true`);
+      if (!(await lineIs("found", 4000))) return [`a dropped link: ${J(await linkState())}`];
+      const s = await linkState();
+      const v = s.value === url && s.name === "dropped" ? [] : [`the dialog on ${J(s.value)} naming ${J(s.name)}, want the dropped link`];
+      await closeDialog();
+      return v;
+    });
+
+    await cell("import:link:close — Close while it imports: the dialog leaves, the import goes on and lands", async () => {
+      const v = [];
+      await load();
+      if (!(await openLinkFromMenu())) return ["no Import from a link… in the menu"];
+      await js(`${setLink(`${S}/slow/closed.mp4`)} return true`);
+      if (!(await lineIs("found"))) return [`the link: ${J(await linkState())}`];
+      await js(`document.querySelector("[data-import-go]").click(); return true`);
+      await sleep(400);
+      if ((await linkState())?.cancel !== "Close") v.push(`while importing the button says ${J((await linkState())?.cancel)}, want "Close"`);
+      await closeDialog();
+      if (await dialog()) v.push("Close didn't close the dialog");
+      if ((await titles()).includes("closed")) v.push("it landed before Close — proved nothing");
+      if (!(await waitFor(async () => (await titles()).includes("closed"), 10000))) v.push("the import didn't go on after Close");
+      if (!(await waitFor(async () => (await statusText()) === "Imported: closed", 4000))) v.push(`the status line says ${J(await statusText())}`);
+      return v;
+    });
+
+    await cell("import:link:error — the import's refusal shows in the dialog, which stays", async () => {
+      const v = [];
+      await load();
+      if (!(await openLinkFromMenu())) return ["no Import from a link… in the menu"];
+      await js(`${setLink(`${S}/fake.mp4`)} return true`);
+      if (!(await lineIs("found"))) return [`the link: ${J(await linkState())}`];
+      await js(`document.querySelector("[data-import-go]").click(); return true`);
+      if (!(await lineIs("error", 8000))) return [`no refusal shown: ${J(await linkState())}`];
+      await sleep(1200); // it stays: nothing asks about the link again and puts "found" back over it
+      const s = await linkState();
+      if (s.text !== "The link's file isn't a video." || !s.goOff || s.cancel !== "Cancel" || s.inputOff) v.push(`after the refusal: ${J(s)}`);
+      await shot("link-error", ".imp-modal");
+      await closeDialog();
+      if ((await titles()).includes("fake")) v.push("the page landed in the library");
+      return v;
+    });
+
+    await cell("import:link:look — theme colours, the progress fill's glow (none under no-glow), bg-live keeps the fill; pictures", async () => {
+      const v = [];
+      await load();
+      if (!(await openLinkFromMenu())) return ["no Import from a link… in the menu"];
+      const colours = (sel, prop = "color") => js(`const e = document.querySelector(${J(sel)}); if (!e) return null;
+        const probe = document.createElement("i"); document.body.append(probe);
+        const tv = (n) => { probe.style.color = "var(" + n + ")"; return getComputedStyle(probe).color; };
+        const out = { got: getComputedStyle(e)[${J(prop)}], danger: tv("--danger"), subtext: tv("--subtext"), accent: tv("--accent") }; probe.remove(); return out;`);
+      await js(`${setLink(`${S}/page`)} return true`);
+      if (await lineIs("error")) { const c = await colours("[data-import-link-error]"); if (c.got !== c.danger) v.push(`the error line ${c.got}, want --danger ${c.danger}`); }
+      else v.push("no error line");
+      await js(`${setLink(`${S}/slow/looked.mp4`)} return true`);
+      if (!(await lineIs("found"))) return [...v, "the link wasn't resolved"];
+      const w = await colours("[data-import-link-where]"); if (w.got !== w.subtext) v.push(`where it comes from ${w.got}, want --subtext ${w.subtext}`);
+      const g = await colours(".imp-link-row .imp-gico"); if (g.got !== g.accent) v.push(`the chip ${g.got}, want --accent ${g.accent}`);
+      await js(`document.querySelector("[data-import-go]").click(); return true`);
+      if (!(await waitFor(() => js(`return !!document.querySelector("[data-import-link-progress] .dl-fill")`), 3000))) return [...v, "no progress bar"];
+      await sleep(300);
+      const f = await colours("[data-import-link-progress] .dl-fill", "backgroundColor"); if (f.got !== f.accent) v.push(`the fill ${f.got}, want --accent ${f.accent}`);
+      const glow = () => js(`return getComputedStyle(document.querySelector("[data-import-link-progress] .dl-fill")).boxShadow`);
+      // lit: a shadow with a real colour and spread (no-glow turns --glow-sm into a clear zero shadow)
+      const lit = (sh) => !!sh && sh !== "none" && !/^(rgba\(0, 0, 0, 0\) 0px 0px 0px 0px(, )?)+$/.test(sh) && /px [1-9]/.test(sh);
+      const g1 = await glow();
+      if (!lit(g1)) v.push(`the fill doesn't glow (${g1})`);
+      await js(`document.documentElement.classList.add("no-glow", "bg-live"); return true`); await sleep(150);
+      const g2 = await glow();
+      if (lit(g2)) v.push(`no-glow: the fill still glows (${g2})`);
+      const fill = await js(`return getComputedStyle(document.querySelector(".imp-modal")).backgroundColor`);
+      if (/rgba\(0, 0, 0, 0\)|transparent/.test(fill)) v.push(`bg-live: the dialog lost its fill (${fill})`);
+      await shot("link-noglow-bglive", ".imp-modal");
+      await js(`document.documentElement.classList.remove("no-glow", "bg-live"); return true`);
+      await waitFor(async () => (await dialog()) == null, 10000);
+      return v;
+    });
+    server.close();
 
     await cell("import:look — theme colours, the drop frame's glow (none under no-glow), bg-live keeps the dialog's fill; pictures", async () => {
       const v = [];

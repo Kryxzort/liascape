@@ -30,7 +30,10 @@ its sidebar. Getting a preset gets its scene too.
 **Keeps a library.** Downloads land in your library, and so does anything new in your Wallpaper Engine Workshop folder
 (you can turn that off). Import a folder of your own videos, GIFs and pictures, or a backed-up Workshop folder, with the
 Library tab's Import button (its arrow picks single files) or by dropping it on the window: you see what it found before
-anything lands. A folder you keep watched (Settings, Watched folders) brings in new files by itself. Click a card to apply it. Right-click it to open its sidebar, where you can set that wallpaper's own volume and speed, and change a
+anything lands. A folder you keep watched (Settings, Watched folders) brings in new files by itself. To get a wallpaper
+from a link, pick "Import from a link…" under the Import button's arrow, paste the link on the Library or drop it on the
+window: a Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture (a
+Workshop item comes by your chosen download mode). Click a card to apply it. Right-click it to open its sidebar, where you can set that wallpaper's own volume and speed, and change a
 scene's own options.
 
 **Plays scenes.** Liascape draws Wallpaper Engine scenes itself, with no separate program. Turn them on in Settings →

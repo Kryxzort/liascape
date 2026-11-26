@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import {
   steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
-  type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState,
+  type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState, type LinkTarget,
 } from "../api/client";
 import {
   DEFAULT_LOCAL_SORT, FAVORITES_TAG, LIBRARY_TAG, isLocalSet, isLocalSort, setModesOf, type LocalSort, type SetModes,
@@ -192,8 +192,9 @@ interface State {
   // bar's slot lets a running library operation show over the first, never over the second (components/TopbarStatus.tsx)
   status: string; statusPlaying: boolean; error: string | null;
   // the import dialog (components/ImportDialog.tsx): what it scans (picked or dropped paths) and whether the folder is
-  // offered as watched from the start (Settings' "Add folder"); null = closed. A new object = a new scan.
-  importAt: { paths: string[]; watch: boolean } | null;
+  // offered as watched from the start (Settings' "Add folder"); `link` (a string, maybe "") = an import from a link instead,
+  // that text in its field; null = closed. A new object = a new scan.
+  importAt: { paths: string[]; watch: boolean; link?: string } | null;
   // the item sidebar (WE-style): the focused Library item's path / Browse
   // item's page URL, null = closed. In the store so the playlist bar (and Browse's "Show in Library") can focus an item and
   // a tab switch keeps it; the sidebars resolve the item from the live lists (a library-item-changed updates it in place).
@@ -260,6 +261,10 @@ interface State {
   setSetting(key: string, value: unknown): void; mergeSettings(p: Record<string, unknown>): void;
   clearLibrary(): Promise<void>; clearCache(ids: string[]): Promise<{ categories: CacheCleared[]; freedBytes: number; count: number } | null>;
   openImport(paths: string[], watch?: boolean): void; closeImport(): void;
+  // an import from a link (components/ImportDialog.tsx): the dialog on that link; the import itself, its progress in
+  // `downloads[target.id]` like a Browse card's. Its end: the status line; a failure, the dialog's own note while `req` is
+  // still the one it shows (the error back), else the error modal
+  openLink(url?: string): void; importLink(url: string, target: LinkTarget, req: State["importAt"]): Promise<string | null>;
   // steam / workshop
   loadSteam(): Promise<void>; startQr(): Promise<void>; cancelQr(): Promise<void>; signoutSteam(): Promise<void>;
   deleteFromSource(items: LibraryItem[]): Promise<void>;
@@ -766,6 +771,25 @@ export const useStore = create<State>((set, get) => ({
   },
   openImport(paths, watch = false) { set({ importAt: { paths, watch } }); },
   closeImport() { set({ importAt: null }); },
+  openLink(url = "") { set({ importAt: { paths: [], watch: false, link: url } }); },
+  async importLink(url, target, req) {
+    set({ downloads: { ...get().downloads, [target.id]: 0 } });
+    try {
+      const r = await api.importLink(url);
+      if (r.already) get().setStatus(`Already in your library: ${r.title}`);
+      else if (r.skipped) get().setStatus(`Skipped: ${target.title}`); // the Steam to-do's Skip / Stop
+      else { await get().loadLibrary(); get().setStatus(`Imported: ${r.title}`); }
+      return null;
+    } catch (e) {
+      const why = (e as Error).message || "The link couldn't be imported";
+      if (get().importAt !== req) get().setError(`Import failed: ${why}`);
+      return why;
+    } finally {
+      const d = { ...get().downloads }; delete d[target.id];
+      const st = { ...get().downloadStatus }; delete st[target.id];
+      set({ downloads: d, downloadStatus: st });
+    }
+  },
 
   // ---- steam / workshop ----
   async loadSteam() { set({ steam: await api.steamStatus() }); },

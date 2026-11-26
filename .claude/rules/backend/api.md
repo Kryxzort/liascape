@@ -10,6 +10,8 @@ paths:
   - "src/backend/Helpers/FeatureHealth.cs"
   - "src/backend/Helpers/Autostart.cs"
   - "src/backend/Program.cs"
+  - "src/backend/Web/LinkImportOps.cs"
+  - "src/backend/Helpers/LinkImport.cs"
 ---
 
 # Backend web API (`liascape-backend serve`)
@@ -26,6 +28,7 @@ paths:
 - The media listener (P + 1) is its own origin with its own 6 browser connections, so slow media never queues an API call: it answers only token-carrying GETs of `/media` `/clip` `/img` `/anim` `/still` (anything else 404, no `/health`, no UI files, no WebSocket, no preflight). An `Origin` there must be the API's or an allowed dev origin, echoed back (the transition preview's `<video crossorigin>`); the media origin is foreign to the API. The API keeps serving the media routes for clients without the media port. Why: `docs/decisions.md` § "Serve media from a second listener". Guard: matrix `browse:mediaPool`.
 - Local files (`/media`, `/clip`, `/anim`, `/still`, `/library/duration`, `/open` reveal, `/open/media`) only under the data dir, the caches and the `WorkshopFolder` (`ApiSecurity.MediaAllowed`); refuse `..`.
 - Remote fetches (`/img`, remote `/anim` `/still`): http(s) only, every resolved address public, checked again at connect (`PublicOnlyHttp`). No proxy.
+- An import from a link (`POST /library/link`, `/library/import-link`, `Web/LinkImportOps.cs`) fetches a file the user pasted only through `DownloadHelper.OpenLinkAsync` / `SaveLinkAsync`: http(s) only, no user info in the address, every address public (`LinkImport.AddressAllowed`; loopback only under `LIASCAPE_TEST_LINK_LOOPBACK=1`), checked up front and at every connect, each redirect followed by hand (http(s) only, at most 5), at most `LinkImport.MaxBytes` (4 GB; a Content-Length over it refused before the body, a longer body cut off), its first bytes its family's (`ApiSecurity.HeadIsMedia`) before it lands, nothing left behind on a refusal. Log the host only, never the address (a query can carry a token). Guard: `scripts/test-item-actions.sh` § link.
 - `POST /open`: http(s) URLs, or `{path, reveal: true}` under `MediaAllowed`. Never a bare path, `file:` or a custom scheme; `steam://` only via `POST /steam/open-page` with a digits-only id.
 - `POST /open/media {path}` (the sidebar preview in the user's own app) opens only what `ApiSecurity.OpenableMedia` passes: a video (`.mp4 .webm .mkv .mov .m4v .avi`) or a picture (`.png .jpg .jpeg .webp .gif`) by name, under `MediaAllowed`, its `realpath` re-checked against the roots' own realpaths and the watched folders' (`AppSettings.WatchedFolders`, read per call; nothing else widens) (the resolved name in the same family), a regular file (opened `O_NONBLOCK`) whose first bytes are that family's (a video container's; a PNG / JPEG / WebP / GIF header) with no `[Desktop` group in its first 4 KiB; `xdg-open` gets that resolved path as its one argument. Anything else 403 — xdg-open runs a file it takes for a `.desktop`. Guard: `scripts/test-item-actions.sh`.
 - Spawn processes with an argument list (`ArgumentList`), never by pasting values into an `sh -c` string or one command string.

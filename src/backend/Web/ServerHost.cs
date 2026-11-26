@@ -196,6 +196,53 @@ public static class ServerHost
         }
     }
 
+    // One Browse result into the library by its source's own download path: /download, and an import from a link once the
+    // link names its source and item (Web/LinkImportOps.cs), so neither has a download of its own.
+    internal static async Task<IResult> DownloadResultAsync(int source, WallpaperResult result, bool apply, bool oneOff, CancellationToken ct)
+    {
+        if (source < 0 || source >= Providers.Length) return Results.BadRequest("bad source");
+        // a Workshop item the download mode can't fetch now (WorkshopDownloader.Blocked; a one-off's route): 400 {error}
+        // before anything reaches Steam. A WE-local folder's item (a path, not a page) only imports from disk.
+        // Guard: test-steam-signin.sh § 2 (refused)
+        if (!string.IsNullOrEmpty(result.WorkshopId) && result.PageUrl.StartsWith("http", StringComparison.Ordinal)
+            && (oneOff ? WorkshopDownloader.OneOffRouteFor(SettingsService.Load()).Missing
+                : WorkshopDownloader.Blocked(SettingsService.Load(), WorkshopDownloader.WorkshopAction.Download)) is { } refused)
+            return Results.Json(new { error = refused }, statusCode: 400);
+        var detail = await Providers[source].GetDetailAsync(result);
+        LibraryItem item;
+        try { item = await AppOps.DownloadAsync(detail, result.ThumbnailUrl, result.PageUrl, ct, result.AnimatedThumbnailUrl, oneOff,
+            (Providers[source] as WebSource)?.Library); }
+        // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (.claude/rules/backend/sources-steam.md § Workshop downloads)
+        catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
+        if (apply)
+        {
+            // a preset plays once its base scene is here: wait for the base fetch its download started (the base's own
+            // mode and bounds; a cancelled request stops waiting, the fetch goes on). One that still can't play
+            // downloaded fine: the item and the reason it isn't applied, never a "Download failed".
+            // Guard: test-steam-signin.sh § 2 (presets) "download & apply"
+            if (PresetDownloads.Pending(item.VideoPath) is { } baseFetch)
+            {
+                EventBus.Broadcast("download-progress", new { id = result.PageUrl, value = 1.0, status = PresetDownloads.GettingBase });
+                await baseFetch.WaitAsync(ct);
+            }
+            IResult NotApplied(string why)
+            {
+                var o = JsonSerializer.SerializeToNode(item, new JsonSerializerOptions(JsonSerializerDefaults.Web))!.AsObject();
+                o["notApplied"] = why;
+                return Results.Json(o);
+            }
+            if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why) return NotApplied(why);
+            // the apply's own refusal (scenes off or unplayable here, no player binary): the same answer
+            try { PlayerHelper.Apply(item.VideoPath); }
+            catch (InvalidOperationException e) { return NotApplied(e.Message); }
+            SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } });
+        }
+        return Results.Json(item);
+    }
+
+    // the Browse source of this name (IBrowseSource.Name), -1 = none
+    internal static int SourceIndex(string name) => Array.FindIndex(Providers, (p) => p.Name == name);
+
     // Cache an animated gif, trimming a leading fade-from-black (frame 0 black → loop flashes black).
     // Detect the leading black segment with ffmpeg blackdetect, trim from its end, re-encode (palette).
     // Falls back to the raw bytes on any failure / no leading black. One-time per gif (then cached).
@@ -626,47 +673,11 @@ public static class ServerHost
             ? Results.Json(new { seconds = AppOps.GetDurationSeconds(path) }) : Results.Json(new { error = "not a library path" }, statusCode: 403));
 
         // ---- download (web sources) --------------------------------------------------------
-        app.MapPost("/download", async (DownloadReq r, HttpContext ctx) =>
-        {
-            if (r.Source < 0 || r.Source >= Providers.Length) return Results.BadRequest("bad source");
-            // a Workshop item the download mode can't fetch now (WorkshopDownloader.Blocked; a one-off's route): 400 {error}
-            // before anything reaches Steam. A WE-local folder's item (a path, not a page) only imports from disk.
-            // Guard: test-steam-signin.sh § 2 (refused)
-            if (!string.IsNullOrEmpty(r.Result.WorkshopId) && r.Result.PageUrl.StartsWith("http", StringComparison.Ordinal)
-                && (r.OneOff ? WorkshopDownloader.OneOffRouteFor(SettingsService.Load()).Missing
-                    : WorkshopDownloader.Blocked(SettingsService.Load(), WorkshopDownloader.WorkshopAction.Download)) is { } refused)
-                return Results.Json(new { error = refused }, statusCode: 400);
-            var detail = await Providers[r.Source].GetDetailAsync(r.Result);
-            LibraryItem item;
-            try { item = await AppOps.DownloadAsync(detail, r.Result.ThumbnailUrl, r.Result.PageUrl, ctx.RequestAborted, r.Result.AnimatedThumbnailUrl, r.OneOff,
-                (Providers[r.Source] as WebSource)?.Library); }
-            // Skip / Stop in the Steam to-do: not a failure — the card leaves its download with "Skipped" (.claude/rules/backend/sources-steam.md § Workshop downloads)
-            catch (WorkshopDownloader.SkippedException e) { return Results.Json(new { skipped = true, message = e.Message }); }
-            if (r.Apply)
-            {
-                // a preset plays once its base scene is here: wait for the base fetch its download started (the base's own
-                // mode and bounds; a cancelled request stops waiting, the fetch goes on). One that still can't play
-                // downloaded fine: the item and the reason it isn't applied, never a "Download failed".
-                // Guard: test-steam-signin.sh § 2 (presets) "download & apply"
-                if (PresetDownloads.Pending(item.VideoPath) is { } baseFetch)
-                {
-                    EventBus.Broadcast("download-progress", new { id = r.Result.PageUrl, value = 1.0, status = PresetDownloads.GettingBase });
-                    await baseFetch.WaitAsync(ctx.RequestAborted);
-                }
-                IResult NotApplied(string why)
-                {
-                    var o = JsonSerializer.SerializeToNode(item, new JsonSerializerOptions(JsonSerializerDefaults.Web))!.AsObject();
-                    o["notApplied"] = why;
-                    return Results.Json(o);
-                }
-                if (PlayerHelper.PresetUnplayableReason(item.VideoPath) is string why) return NotApplied(why);
-                // the apply's own refusal (scenes off or unplayable here, no player binary): the same answer
-                try { PlayerHelper.Apply(item.VideoPath); }
-                catch (InvalidOperationException e) { return NotApplied(e.Message); }
-                SettingsService.Update(x => x.LastSession = new LastSession { Paths = new List<string> { item.VideoPath } });
-            }
-            return Results.Json(item);
-        });
+        app.MapPost("/download", (DownloadReq r, HttpContext ctx) => DownloadResultAsync(r.Source, r.Result, r.Apply, r.OneOff, ctx.RequestAborted));
+        // an import from a link (Import → "Import from a link…", a link pasted on the Library): what it names, then that item
+        // downloaded by its own source's path (Web/LinkImportOps.cs). Guard: scripts/test-item-actions.sh § link
+        app.MapPost("/library/link", async (LinkReq r, HttpContext ctx) => await LinkImportOps.ResolveAsync(r.Url, ctx.RequestAborted));
+        app.MapPost("/library/import-link", async (LinkReq r, HttpContext ctx) => await LinkImportOps.ImportAsync(r.Url, ctx.RequestAborted));
 
         // ---- transitions ------------------------------------------------------------------
         // The effect catalog (id, name, category, defaultOn, uniforms) for the picker UI.
@@ -1114,6 +1125,7 @@ public static class ServerHost
     public record PlayReq(List<string> Paths, PlaylistSettings? Settings);
     public record PlayFromReq(List<string> Paths, int StartIndex, PlaylistSettings? Settings);
     public record ImportReq(string Path, string Title);
+    public record LinkReq(string? Url);
     public record SceneLoudnessReq(List<string>? Paths = null, bool? Force = null);
     public record ClipHoldBody(bool Hold);
     public record CacheClearReq(List<string>? Ids = null);

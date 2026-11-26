@@ -45,7 +45,7 @@ internal static partial class DesktophutScraper
     {
         var (doc, _) = await SitePage.GetAsync(card.PageUrl);
         string mp4 = SitePage.OnSite(Site, SitePage.Attr(SitePage.Needed(doc, "//source[@type='video/mp4']", "the video", card.PageUrl), "src"));
-        return new WallpaperDetail { Title = card.Title, PreviewUrl = mp4, DownloadUrl = mp4 };
+        return new WallpaperDetail { Title = card.Title.Length > 0 ? card.Title : SitePage.PageName(doc, card.PageUrl), PreviewUrl = mp4, DownloadUrl = mp4 };
     }
 
     // "Download Neon City Live Wallpaper — animated wallpaper" → "Neon City": the leading "Download" and everything from

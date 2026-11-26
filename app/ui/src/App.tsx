@@ -26,6 +26,7 @@ import { TopbarStatus } from "./components/TopbarStatus";
 import { TopbarSearch } from "./components/TopbarSearch";
 import { BrowseLocate, LocateButton } from "./components/LocateButton";
 import { ImportButton, ImportDrop } from "./components/ImportButton";
+import { webLink } from "./components/importPick";
 import { Intro as IntroView } from "./components/Intro";
 // PERF: code-split the bits not on the first paint (Settings is the 3rd tab; Steam/Error/Drain are
 // rarely-shown overlays; DebugHud only matters under LIASCAPE_DEBUG_IPC). Keeps the initial parse
@@ -226,6 +227,22 @@ export default function App() {
       if (a.pending && a instanceof CSSAnimation && a.effect?.getTiming().iterations !== Infinity
         && !(a.effect instanceof KeyframeEffect && a.effect.target?.closest(".intro"))) a.finish();
   }, [motion]);
+
+  // a web link pasted on the Library (Ctrl+V outside a text field, no dialog or menu open) opens the import from a link on it;
+  // any other paste is left alone. Guard: --probe probe-import.js import:link:paste
+  useEffect(() => {
+    if (tab !== "library") return;
+    const onPaste = (e: ClipboardEvent) => {
+      const at = e.target instanceof Element ? e.target : null;
+      if (at?.closest("input, textarea, [contenteditable]:not([contenteditable=false])") || document.querySelector(".modal-backdrop, .ctx-pop")) return;
+      const url = webLink(e.clipboardData?.getData("text/plain"));
+      if (!url) return;
+      e.preventDefault();
+      useStore.getState().openLink(url);
+    };
+    addEventListener("paste", onPaste);
+    return () => removeEventListener("paste", onPaste);
+  }, [tab]);
 
   const src = s.sources[s.activeSource];
   const bgAllTabs = !!(s.settings?.liveWallpaperBehindAllTabs);

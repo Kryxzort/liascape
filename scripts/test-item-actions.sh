@@ -16,6 +16,14 @@
 #         own animated preview and the videos without one, /media serves each as its own type, the gif and the mkv open in
 #         the user's app, a re-import is the same item, delete takes it away; a URL download's <key>.gif beside its video
 #         stays its preview, and never stands in for a broken video link. Helpers/ImportService.cs, LibraryService.ResolveItemMedia.
+#  link:  POST /library/link and /library/import-link (Web/LinkImportOps.cs) against a stand-in file server on loopback: a
+#         file's link resolves by its name and lands in imported/ with the link as its source, told by download-progress and
+#         the library-ops "link" operation; again → "already"; a picture → png; a same-server redirect followed; an unknown
+#         site's file named by its Content-Disposition, its page "isn't supported"; refused, landing nothing: a page served
+#         as video/mp4, redirects to cloud metadata / the LAN / file: / round a loop, a LAN address, a file over the cap
+#         (by its length, and one sending none), a 404; the link's query never logged. A Workshop link: Steam's details
+#         (LIASCAPE_STEAM_CM_FIXTURE), the download mode's refusal and nothing else (no Steam page); a web wallpaper and an
+#         unknown id refused. A MoeWalls page goes to MoeWalls (unreachable here).
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
@@ -107,6 +115,14 @@ mkdir -p "$LIB/imported/bad/dir.mp4"
 mkfifo "$LIB/imported/bad/fifo.mp4"
 cat > "$XDG_CONFIG_HOME/liascape/settings.json" <<EOF
 {"WorkshopFolder":"$WE","AutoAddWeWallpapersToLibrary":false,"AllowScenes":true,"NoAudio":true}
+EOF
+# § link: the stand-in file server listens on loopback, which only a test lets a link reach; a small cap; Steam's details
+# for the Workshop links from a file (a video, a web wallpaper, a scene), never Steam
+export LIASCAPE_TEST_LINK_LOOPBACK=1 LIASCAPE_LINK_MAX_BYTES=200000 LIASCAPE_STEAM_CM_FIXTURE=$T/steam-cm.json
+cat > "$LIASCAPE_STEAM_CM_FIXTURE" <<'EOF'
+{"930000001": {"title": "Link Workshop Video", "tags": ["Video", "Everyone", "1920 x 1080"]},
+ "930000002": {"title": "Link Web Wallpaper", "tags": ["Web", "Everyone"]},
+ "930000003": {"title": "Link Workshop Scene", "tags": ["Scene", "Everyone"]}}
 EOF
 
 LOG=$T/backend.log
@@ -281,6 +297,117 @@ check "a download's video stays its media, its gif the preview" "$(item dl1 | jq
   "[\"$LIB/imported/dl1/dl1.webm\",\"$LIB/imported/dl1/dl1.gif\"]"
 check "a download whose video link broke still names that link, never its preview gif" "$(item dl2 | jq -c '[.videoPath, .animatedThumbnailPath]')" \
   "[\"$LIB/imported/dl2/dl2.mp4\",\"$LIB/imported/dl2/dl2.gif\"]"
+
+echo "== link: an import from a pasted link (Web/LinkImportOps.cs)"
+# a stand-in file server on loopback: files by name, one without a name (its Content-Disposition names it), a page, a page
+# served as video/mp4, redirects (on to itself, to cloud metadata, the LAN, file:, round in a loop), files over the cap
+# (one saying so, one sending no length), a 404. Every request logged with its User-Agent.
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=yellow:s=64x36" -frames:v 1 "$SRC/lj.jpg"
+: > "$T/files.log"
+python3 -I - "$T/files.port" "$T/files.log" "$LIB/imported/v1/v1.mp4" "$SRC/lj.jpg" <<'PY' & FP=$!
+import http.server, sys
+port_file, log, video, jpg = sys.argv[1:5]
+V = open(video, "rb").read(); J = open(jpg, "rb").read()
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def send(self, code, body=b"", ctype=None, extra=()):
+        self.send_response(code)
+        if ctype: self.send_header("Content-Type", ctype)
+        for k, v in extra: self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def do_GET(self):
+        p = self.path.split("?")[0]
+        with open(log, "a") as f: f.write(f"{p} {self.headers.get('User-Agent', '')[:20]}\n")
+        go = lambda to: self.send(302, extra=[("Location", to)])
+        if p in ("/files/neon.mp4", "/files/redir-target.mp4", "/files/again.mp4"): self.send(200, V, "video/mp4")
+        elif p == "/files/still.jpg": self.send(200, J, "image/jpeg")
+        elif p == "/v/abc": self.send(200, V, "video/mp4", [("Content-Disposition", 'attachment; filename="Sunset Loop.mp4"')])
+        elif p in ("/page", "/v/page"): self.send(200, b"<!doctype html><title>a page</title>", "text/html; charset=utf-8")
+        elif p == "/files/fake.mp4": self.send(200, b"<!doctype html><title>log in</title>" + b" " * 64, "video/mp4")
+        elif p == "/r/ok": go("/files/redir-target.mp4")
+        elif p == "/r/meta.mp4": go("http://169.254.169.254/latest/meta-data/x.mp4")
+        elif p == "/r/lan.mp4": go("http://192.168.1.1/a.mp4")
+        elif p == "/r/file.mp4": go("file:///etc/passwd")
+        elif p == "/r/loop.mp4": go("/r/loop.mp4")
+        elif p == "/files/big.mp4": self.send(200, b"\0" * 300000, "video/mp4")
+        elif p == "/files/endless.mp4":
+            self.send_response(200); self.send_header("Content-Type", "video/mp4"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
+            try:
+                for _ in range(40):
+                    chunk = b"\0" * 10000
+                    self.wfile.write(b"%x\r\n" % len(chunk) + chunk + b"\r\n")
+                self.wfile.write(b"0\r\n\r\n")
+            except (BrokenPipeError, ConnectionResetError): pass
+        else: self.send(404, b"no", "text/plain")
+s = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+open(port_file, "w").write(str(s.server_address[1]))
+s.serve_forever()
+PY
+for _ in $(seq 1 50); do [ -s "$T/files.port" ] && break; sleep 0.1; done
+S=http://127.0.0.1:$(cat "$T/files.port")
+link() { postc "$1" "$(jq -nc --arg u "$2" '{url: $u}')"; }
+resolve() { echo "$(link /library/link "$1") $(jq -c "${2:-.}" "$T/body")"; }
+importl() { echo "$(link /library/import-link "$1") $(jq -c "${2:-.}" "$T/body")"; }
+trash_left() { find "$LIB/.trash" -mindepth 1 -maxdepth 1 -name 'link-*' 2>/dev/null | wc -l; }
+
+check "a file's link resolves to it, by its name" "$(resolve "$S/files/neon.mp4?token=SECRET-IN-QUERY")" \
+  "200 $(jq -nc --arg u "$S/files/neon.mp4?token=SECRET-IN-QUERY" '{kind: "direct", id: $u, title: "neon", source: "127.0.0.1", media: "video", inLibrary: false, blocked: null}')"
+check "…nothing fetched to say so (the name told)" "$(grep -c neon "$T/files.log" 2>/dev/null || true)" 0
+: > "$T/events.jsonl"
+check "importing it → imported/neon/neon.mp4" "$(importl "$S/files/neon.mp4?token=SECRET-IN-QUERY" .videoPath)" "200 \"$LIB/imported/neon/neon.mp4\""
+check "…its bytes the server's" "$(cmp -s "$LIB/imported/v1/v1.mp4" "$LIB/imported/neon/neon.mp4" && echo same || echo differ)" same
+check "…fetched once, with the Firefox User-Agent" "$(grep neon "$T/files.log")" "/files/neon.mp4 Mozilla/5.0 (X11; Li"
+check "…the item names the link as its source and page, with a thumbnail" "$(item neon | jq -c '[.sourceId, .pageUrl, (.thumbnailPath != null)]')" \
+  "$(jq -nc --arg u "$S/files/neon.mp4?token=SECRET-IN-QUERY" '[$u, $u, true]')"
+got=""; for _ in $(seq 1 30); do got=$(jq -c --arg u "$S/files/neon.mp4?token=SECRET-IN-QUERY" 'select(.type == "download-progress" and .payload.id == $u and .payload.done) | .payload.value' "$T/events.jsonl" 2>/dev/null | head -1); [ -n "$got" ] && break; sleep 0.1; done
+check "…its progress told like a Browse card's: download-progress {id: the link, done}" "$got" 1
+check "…the top bar's progress line had it: library-ops \"link\" started and ended" "$(grep -c 'library-ops: link \(started\|ended\)' "$LOG")" 2
+check "…the library's trash keeps nothing of it" "$(trash_left)" 0
+check "the same link again → already in the library, nothing fetched" "$(importl "$S/files/neon.mp4?token=SECRET-IN-QUERY") $(grep -c neon "$T/files.log")" \
+  '200 {"already":true,"title":"neon"} 1'
+check "…and its resolve says so" "$(resolve "$S/files/neon.mp4?token=SECRET-IN-QUERY" .inLibrary)" "200 true"
+check "a picture's link → stored as a png" "$(importl "$S/files/still.jpg" .videoPath) $(head -c 8 "$LIB/imported/still/still.png" 2>/dev/null | od -An -tx1 | tr -d ' \n')" \
+  "200 \"$LIB/imported/still/still.png\" 89504e470d0a1a0a"
+check "a redirect on the same server is followed" "$(importl "$S/r/ok" .videoPath)" "200 \"$LIB/imported/ok/ok.mp4\""
+check "an unknown site's address: its answer looked at, named by its Content-Disposition" "$(resolve "$S/v/abc" '[.kind, .title, .media]')" '200 ["direct","Sunset Loop","video"]'
+check "…and imported as that file" "$(importl "$S/v/abc" .videoPath)" "200 \"$LIB/imported/Sunset Loop/Sunset Loop.mp4\""
+unsupported='"That site isn'"'"'t supported. Import takes a Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture."'
+check "an unknown site's page → it isn't supported, in plain words (resolve)" "$(resolve "$S/page" .error)" "400 $unsupported"
+check "…and import, landing nothing" "$(importl "$S/v/page" .error) $(trash_left)" "400 $unsupported 0"
+n0=$(ls "$LIB/imported" | wc -l)
+check "a page served as video/mp4 → refused by its first bytes, nothing kept" "$(importl "$S/files/fake.mp4" .error) $(ls "$LIB/imported" | wc -l) $(trash_left)" \
+  "400 \"The link's file isn't a video.\" $n0 0"
+private_msg() { echo "\"The link leads to $1, which is this computer or your own network: only public addresses are fetched.\""; }
+check "a redirect to cloud metadata (169.254.169.254) → refused" "$(importl "$S/r/meta.mp4" .error)" "400 $(private_msg 169.254.169.254)"
+check "a redirect into the LAN (192.168.1.1) → refused" "$(importl "$S/r/lan.mp4" .error)" "400 $(private_msg 192.168.1.1)"
+check "a link straight into the LAN (10.0.0.5) → refused" "$(importl "http://10.0.0.5/a.mp4" .error)" "400 $(private_msg 10.0.0.5)"
+check "a redirect to file: → refused" "$(importl "$S/r/file.mp4" .error)" '400 "The link leads on to a file: address, which isn'"'"'t fetched."'
+check "a redirect loop → refused" "$(importl "$S/r/loop.mp4" .error)" '400 "The link redirects too many times."'
+check "a file: link itself → only web links" "$(importl "file:///etc/passwd" .error)" '400 "Only web links (http or https) can be imported."'
+toobig="\"It's bigger than 200000 bytes, the most an import from a link fetches.\""
+check "a file over the cap by its Content-Length → refused before its body" "$(importl "$S/files/big.mp4" .error) $(trash_left)" "400 $toobig 0"
+check "a file over the cap with no length → cut off at the cap, nothing kept" "$(importl "$S/files/endless.mp4" .error) $(ls "$LIB/imported" | wc -l) $(trash_left)" \
+  "400 $toobig $n0 0"
+check "a link the server doesn't have → its answer" "$(importl "$S/files/gone.mp4" .error)" '400 "The server answered 404 (Not Found)."'
+check "the link's query (a token in it) never reaches the log" "$(grep -c SECRET-IN-QUERY "$LOG" || true)" 0
+# a Workshop item's link goes through /download's path: the chosen mode ("subscribe", signed out here) refuses it with the
+# mode's own words before anything reaches Steam, and no other way (a Steam page) is tried
+: > "$OPENED"
+check "a Workshop link resolves to the item (Steam's details), the mode's refusal shown up front" \
+  "$(resolve "https://steamcommunity.com/workshop/filedetails/?id=930000001" '[.kind, .id, .title, .media, .blocked]')" \
+  '200 ["workshop","https://steamcommunity.com/sharedfiles/filedetails/?id=930000001","Link Workshop Video","video","Sign in to Steam to download"]'
+check "…its import refused with those words, no Steam page opened" "$(importl "https://steamcommunity.com/sharedfiles/filedetails/?id=930000001" .error) $(wc -l < "$OPENED")" \
+  '400 "Sign in to Steam to download" 0'
+check "a Workshop scene's link → a scene" "$(resolve "https://steamcommunity.com/sharedfiles/filedetails/?id=930000003" .media)" '200 "scene"'
+check "a Workshop web wallpaper's link → refused (it can't play)" "$(resolve "https://steamcommunity.com/sharedfiles/filedetails/?id=930000002" .error)" \
+  '400 "That Workshop item is a web or application wallpaper, which Liascape doesn'"'"'t play."'
+check "a Workshop id Steam has no item for → says so" "$(resolve "https://steamcommunity.com/sharedfiles/filedetails/?id=930000099" .error)" \
+  '400 "Steam has no public Workshop item with that id, or Steam couldn'"'"'t be reached."'
+# a web source's page goes to that site (no network here: it can't be reached), never anywhere else
+check "a MoeWalls page → fetched from MoeWalls (unreachable in this test)" \
+  "$(importl "https://moewalls.com/anime/neon-rain-live-wallpaper/" '.error | startswith("MoeWalls couldn'"'"'t be reached")')" "400 true"
+kill "$FP" 2>/dev/null
 stopbe
 
 echo "RESULT pass=$PASS fail=$FAIL"

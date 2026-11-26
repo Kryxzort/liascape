@@ -46,7 +46,7 @@ internal static class MoewallsScraper
         if (key.Length == 0) throw new System.IO.InvalidDataException($"the download button has no data-url on {card.PageUrl}");
         return new WallpaperDetail
         {
-            Title = card.Title,
+            Title = card.Title.Length > 0 ? card.Title : SitePage.PageName(doc, card.PageUrl),
             PreviewUrl = SitePage.OnSite(Site, SitePage.Attr(video, "src")),
             // data-url arrives already URL-encoded: it goes into the query as it is
             DownloadUrl = "https://go.moewalls.com/download.php?video=" + key,

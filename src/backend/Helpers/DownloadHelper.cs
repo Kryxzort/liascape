@@ -141,6 +141,89 @@ public static class DownloadHelper
         await answer.Content.CopyToAsync(file, ct);
     }
 
+    // ---- an import from a link (Web/LinkImportOps.cs) ---------------------------------------------------------------------
+    // Not BringAsync's client: a pasted address is anyone's, so it goes out like the image proxy's (.claude/rules/backend/api.md
+    // § Security): public addresses only, checked up front and again at every connect (DNS rebinding); every redirect
+    // followed here, http(s) only (never file: or another scheme), at most MaxRedirects; the file capped at
+    // LinkImport.MaxBytes. Guard: scripts/test-item-actions.sh § link
+    public sealed class LinkRefused(string why) : Exception(why);
+    private const int MaxRedirects = 5;
+    private static readonly TimeSpan LinkAnswerWait = TimeSpan.FromSeconds(30), LinkStall = TimeSpan.FromSeconds(60);
+    private static HttpClient? _linkHttp;
+    private static HttpClient LinkHttp => _linkHttp ??= Liascape.Web.ApiSecurity.PublicOnlyHttp(Timeout.InfiniteTimeSpan, redirects: false,
+        loopbackToo: LinkImport.LoopbackForTests);
+
+    // `url`'s answer once its redirects are followed: a 2xx with its headers read, the body still to read (SaveLinkAsync) or drop.
+    // A refusal, a server that doesn't answer and an error status throw LinkRefused with the words the dialog shows.
+    public static async Task<HttpResponseMessage> OpenLinkAsync(string url, CancellationToken ct)
+    {
+        var at = new Uri(url);
+        for (int hop = 0; ; hop++)
+        {
+            if (at.Scheme is not ("http" or "https")) throw new LinkRefused($"The link leads on to a {at.Scheme}: address, which isn't fetched.");
+            if (await Liascape.Web.ApiSecurity.CheckPublicUrl(at.AbsoluteUri, ct, LinkImport.LoopbackForTests) != null)
+                throw new LinkRefused($"The link leads to {at.Host}, which is this computer or your own network: only public addresses are fetched.");
+            var ask = new HttpRequestMessage(HttpMethod.Get, at);
+            ask.Headers.UserAgent.ParseAdd(HttpClientProvider.UserAgent);
+            HttpResponseMessage answer;
+            using (var wait = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                wait.CancelAfter(LinkAnswerWait);
+                try { answer = await LinkHttp.SendAsync(ask, HttpCompletionOption.ResponseHeadersRead, wait.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new LinkRefused($"{at.Host} didn't answer."); }
+                catch (HttpRequestException e) when (!ct.IsCancellationRequested) { throw new LinkRefused($"{at.Host} couldn't be reached ({e.Message})."); }
+            }
+            int code = (int)answer.StatusCode;
+            if (code is >= 300 and < 400 && answer.Headers.Location is { } to)
+            {
+                answer.Dispose();
+                if (hop >= MaxRedirects) throw new LinkRefused("The link redirects too many times.");
+                at = to.IsAbsoluteUri ? to : new Uri(at, to);
+                continue;
+            }
+            if (!answer.IsSuccessStatusCode)
+            {
+                string reason = answer.ReasonPhrase is { Length: > 0 } r ? $" ({r})" : "";
+                answer.Dispose();
+                throw new LinkRefused($"The server answered {code}{reason}.");
+            }
+            return answer;
+        }
+    }
+
+    // The answer's body → `to` (a new file), at most LinkImport.MaxBytes; a refusal or a failure leaves no file. A server that
+    // stops sending for LinkStall is given up on.
+    public static async Task SaveLinkAsync(HttpResponseMessage answer, string to, IProgress<double>? progress, CancellationToken ct)
+    {
+        long max = LinkImport.MaxBytes;
+        long? length = answer.Content.Headers.ContentLength;
+        string tooBig = $"It's bigger than {Size(max)}, the most an import from a link fetches.";
+        if (length > max) throw new LinkRefused(tooBig);
+        try
+        {
+            await using var body = await answer.Content.ReadAsStreamAsync(ct);
+            await using var file = new ProgressStream(new FileStream(to, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true),
+                length, progress, max);
+            var buf = new byte[1 << 16];
+            using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            while (true)
+            {
+                stall.CancelAfter(LinkStall);
+                int n;
+                try { n = await body.ReadAsync(buf, stall.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new LinkRefused("The server stopped sending the file."); }
+                if (n == 0) break;
+                await file.WriteAsync(buf.AsMemory(0, n), ct);
+            }
+        }
+        catch (ProgressStream.TooLarge) { TryDelete(to); throw new LinkRefused(tooBig); }
+        catch { TryDelete(to); throw; }
+    }
+
+    private static string Size(long bytes) => bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):0.#} GB" : bytes >= 1L << 20 ? $"{bytes / (double)(1L << 20):0.#} MB" : $"{bytes} bytes";
+
+    private static void TryDelete(string path) { try { File.Delete(path); } catch { } }
+
     // A picture beside the media as <key><its extension> (`fallbackExt` when the URL has none); null when there is none or it
     // couldn't be had (the card does without it)
     private static async Task<string?> AssetAsync(string? url, string folder, string key, string? fallbackExt, bool copy, CancellationToken ct)

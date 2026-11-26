@@ -2356,6 +2356,21 @@ button.side-pill.copy { overflow: hidden; }
 .imp-watched { margin: 8px 0 0; }
 .imp-note { color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
 .imp-ask-row { display: flex; gap: 8px; align-items: center; }
+/* an import from a link: the field, then one line under it (checking / what it names / why not) at the field's own edge,
+   the found item laid out as a scan list's group head (its kind's chip, its name, where from), the progress bar a Browse
+   card shows under it while it imports. Guard: --probe probe-import.js import:link:* */
+.imp-link > p { margin: 0 0 8px; }
+.imp-link-line { margin-top: 10px; min-height: 40px; }
+.imp-link-line > .imp-note, .imp-link-line > .imp-scanning { margin: 0; min-height: 40px; display: flex; align-items: center; gap: 8px; }
+.imp-link-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 6px; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface0) 55%, transparent); }
+.imp-link-what { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 1px; }
+.imp-link-what .imp-title { font-weight: 600; font-size: 14px; }
+.imp-link-what .imp-dir { flex: none; font-size: 12px; color: var(--subtext); }
+.imp-link-why { margin: 6px 0 0; padding: 0 6px; font-size: 12px; color: var(--warn); }
+.imp-link-dl { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 0 6px; }
+.imp-link-dl .dl-bar { flex: 1; width: auto; background: color-mix(in srgb, var(--surface1) 70%, transparent); }
+.imp-link-step { flex: none; font-size: 12px; color: var(--subtext); font-variant-numeric: tabular-nums; }
 .imp-actions { align-items: center; }
 /* a heading tick with some of its items ticked: the accent box with a dash */
 .ck input[type=checkbox]:indeterminate { background: color-mix(in srgb, var(--accent) 55%, transparent); border-color: var(--accent); }

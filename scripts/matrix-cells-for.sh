@@ -69,6 +69,9 @@ for f in $FILES; do
       echo "  $f → nothing in the matrix (bash scripts/test-folder-import.sh + --probe probe-import.js)" >&2 ;;
     app/ui/src/components/ImportDialog.tsx|app/ui/src/components/ImportButton.tsx|app/ui/src/components/importPick.ts)
       echo "  $f → nothing in the matrix (--probe probe-import.js; the top bar's widths: --probe probe-layout.js resize:)" >&2 ;;
+    # an import from a link: its own script section, scraper-selftest's link cases and the probe's import:link: cells
+    src/backend/Helpers/LinkImport.cs|src/backend/Web/LinkImportOps.cs)
+      echo "  $f → nothing in the matrix (bash scripts/test-item-actions.sh § link; scraper-selftest; --probe probe-import.js --only import:link)" >&2 ;;
     src/backend/Helpers/LibraryStore.cs|src/backend/Helpers/LibraryService.cs|src/backend/Helpers/Presets.cs) add "$LIB" "$f" ;;
     src/backend/Helpers/PlaylistService.cs|src/backend/Models/CustomPlaylist*.cs) add "$PL" "$f" ;;
     src/backend/Helpers/SettingsService.cs|src/backend/Models/AppSettings.cs) add "$SET|cover|plStart|parked|expert" "$f" ;;

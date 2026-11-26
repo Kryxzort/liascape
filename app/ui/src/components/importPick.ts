@@ -24,6 +24,17 @@ export async function importFiles() {
   if (ps?.length) useStore.getState().openImport(ps);
 }
 
+// A pasted or dropped text that is one web link (http or https, nothing else around it), else null: what the import from a
+// link opens on. The backend reads what it names (Helpers/LinkImport.cs); this only tells a link from other text.
+export function webLink(text: string | null | undefined): string | null {
+  const s = (text ?? "").trim();
+  if (!/^https?:\/\/\S+$/i.test(s)) return null;
+  try { new URL(s); return s; } catch { return null; }
+}
+// the first web link a drop carries (a link dragged from a browser: text/uri-list, `#` lines are comments)
+export const droppedLink = (dt: DataTransfer) =>
+  dt.getData("text/uri-list").split(/\r?\n/).filter((l) => l && !l.startsWith("#")).map(webLink).find(Boolean) ?? null;
+
 // What a drop carries from the file manager: the shell's path of each file or folder, else (no shell) its `file://` URIs.
 export const isFileDrag = (dt: DataTransfer | null) => !!dt && [...dt.types].some((t) => t === "Files" || t === "text/uri-list");
 export function droppedPaths(dt: DataTransfer): string[] {

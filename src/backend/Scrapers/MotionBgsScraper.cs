@@ -53,7 +53,7 @@ internal static class MotionBgsScraper
         var download = SitePage.Needed(doc, $"//div[{Class("download")}]//a[@href]", "the download link", card.PageUrl);
         return new WallpaperDetail
         {
-            Title = card.Title,
+            Title = card.Title.Length > 0 ? card.Title : SitePage.PageName(doc, card.PageUrl),
             PreviewUrl = SitePage.OnSite(Site, SitePage.Attr(video, "src")),
             DownloadUrl = SitePage.OnSite(Site, SitePage.Attr(download, "href")),
         };

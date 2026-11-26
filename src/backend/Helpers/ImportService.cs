@@ -33,7 +33,11 @@ public static class ImportService
     // stored as .mp4, which the player plays whatever the container. A picture is stored as a png (the library finds a still
     // as <key>.png): a png as it is, any other converted, even when `link` asks for a link. `meta` adds to the item's index
     // entry in the same write (a watched folder's mark). null when the file isn't there.
-    public static async Task<LibraryItem?> ImportAsync(string sourcePath, string title, bool link = false, Action<LibMeta>? meta = null)
+    // `sourceId`: what the index names as its source in place of "import:<path>" (an import from a link: its address, which
+    // its re-import finds). `take`: the file is the import's own (a link's download in the library's trash): moved in, never
+    // copied or linked.
+    public static async Task<LibraryItem?> ImportAsync(string sourcePath, string title, bool link = false, Action<LibMeta>? meta = null,
+        string? sourceId = null, bool take = false)
     {
         if (!File.Exists(sourcePath)) return null;
         string src = Path.GetFullPath(sourcePath);
@@ -45,10 +49,11 @@ public static class ImportService
             string media = Path.Combine(Directory.CreateDirectory(item).FullName, name + ext);
             if (media == src) return;
             if (picture && Ext(src) != ".png") await ConvertToPngAsync(src, media);
+            else if (take) await PlaceAsync(media, (part) => { File.Move(src, part); return Task.CompletedTask; });
             // a re-import keeps the item's form: a link stays a link, a copy is copied again
             else if (File.Exists(media) ? LibraryService.IsSymlink(media) : link) await PlaceAsync(media, (part) => { File.CreateSymbolicLink(part, src); return Task.CompletedTask; });
             else await PlaceAsync(media, (part) => Task.Run(() => File.Copy(src, part)));
-        }, (m, name) => { m.Title = name; meta?.Invoke(m); });
+        }, (m, name) => { m.Title = name; meta?.Invoke(m); }, sourceId);
 
         // outside the gate: a slow ffmpeg holds up no other import, and the item is listed (without its card picture) meanwhile
         string dir = Path.Combine(LibraryStore.SourceDir(LibraryStore.Imported), key);
@@ -86,9 +91,10 @@ public static class ImportService
     // given), then its index entry (SourceUrl, and what `describe` adds). The order is forced, not chosen: a key is only
     // known free while Gate is held, and the entry is written once its file is whole, so /library never lists an item with
     // nothing behind it and a placement that throws leaves the index as it was. The key back.
-    private static async Task<string> AdmitAsync(string src, string title, Func<string, string, Task> place, Action<LibMeta, string> describe)
+    private static async Task<string> AdmitAsync(string src, string title, Func<string, string, Task> place, Action<LibMeta, string> describe,
+        string? source = null)
     {
-        string sourceId = FolderScanner.ImportPrefix + src;
+        string sourceId = source ?? FolderScanner.ImportPrefix + src;
         await Gate.WaitAsync();
         try
         {

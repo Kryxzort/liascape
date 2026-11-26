@@ -321,6 +321,15 @@ public static class ApiSecurity
     private static IEnumerable<string> WatchedRoots() =>
         SettingsService.Load().WatchedFolders.Select(w => w.Path).Where(p => p.StartsWith('/'));
 
+    // A downloaded file's first bytes are its family's, as /open/media reads them (an import from a link: the server's
+    // Content-Type is only its word, and a page served as video/mp4 would land as a wallpaper that never plays).
+    // Guard: scripts/test-item-actions.sh § link "a page served as video/mp4"
+    public static bool HeadIsMedia(string path, bool picture)
+    {
+        var head = ReadHead(path, 4096);
+        return head != null && (picture ? IsImage(head) : IsVideoContainer(head)) && !Contains(head, "[Desktop") && !Contains(head, "[KDE Desktop");
+    }
+
     private static bool IsImage(byte[] b)
     {
         if (b.Length < 12) return false;
@@ -381,13 +390,16 @@ public static class ApiSecurity
     // addresses — never this machine or the LAN (a page could otherwise make the backend fetch the router's admin page, a
     // local service, cloud metadata). Checked twice: up front (a clear 403) and at every connect (DNS rebinding between the
     // two, a redirect to a private address). No proxy: a local proxy would be refused by the same rule.
-    public static HttpClient PublicOnlyHttp(TimeSpan timeout) => new(new SocketsHttpHandler
+    // `redirects: false` hands a redirect back to the caller (an import from a link follows them itself, checking each one);
+    // `loopbackToo`: this machine as well (Helpers/LinkImport.cs AddressAllowed, hermetic tests only)
+    public static HttpClient PublicOnlyHttp(TimeSpan timeout, bool redirects = true, bool loopbackToo = false) => new(new SocketsHttpHandler
     {
         UseProxy = false,
+        AllowAutoRedirect = redirects,
         ConnectCallback = async (ctx, ct) =>
         {
             Liascape.Helpers.TestNetwork.Check($"fetch {ctx.InitialRequestMessage.RequestUri}", ctx.DnsEndPoint.Host);
-            var addrs = await ResolvePublic(ctx.DnsEndPoint.Host, ct)
+            var addrs = await ResolvePublic(ctx.DnsEndPoint.Host, ct, loopbackToo)
                 ?? throw new HttpRequestException($"refused: {ctx.DnsEndPoint.Host} is not a public address");
             Exception? last = null;
             foreach (var a in addrs)
@@ -401,18 +413,18 @@ public static class ApiSecurity
     }) { Timeout = timeout };
 
     // null = refuse (not http(s), unresolvable, or ANY of its addresses is not public)
-    public static async Task<string?> CheckPublicUrl(string? url, CancellationToken ct = default)
+    public static async Task<string?> CheckPublicUrl(string? url, CancellationToken ct = default, bool loopbackToo = false)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https")) return "only http(s) URLs";
-        return await ResolvePublic(u.IdnHost, ct) == null ? $"{u.Host} is not a public address" : null;
+        return await ResolvePublic(u.IdnHost, ct, loopbackToo) == null ? $"{u.Host} is not a public address" : null;
     }
 
-    private static async Task<IPAddress[]?> ResolvePublic(string host, CancellationToken ct)
+    private static async Task<IPAddress[]?> ResolvePublic(string host, CancellationToken ct, bool loopbackToo = false)
     {
         IPAddress[] addrs;
         try { addrs = IPAddress.TryParse(host.Trim('[', ']'), out var ip) ? [ip] : await Dns.GetHostAddressesAsync(host, ct); }
         catch { return null; }
-        return addrs.Length > 0 && addrs.All(IsPublic) ? addrs : null;
+        return addrs.Length > 0 && addrs.All((a) => Liascape.Helpers.LinkImport.AddressAllowed(a, loopbackToo)) ? addrs : null;
     }
 
     public static bool IsPublic(IPAddress a)

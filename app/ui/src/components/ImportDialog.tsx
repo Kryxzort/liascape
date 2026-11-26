@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CloudCheck, Film, ImagePlay, Image as ImageIcon, Layers, LoaderCircle, Upload } from "lucide-react";
+import { CloudCheck, Film, ImagePlay, Image as ImageIcon, Layers, Link2, LoaderCircle, Upload } from "lucide-react";
 import { useStore } from "../store";
-import { api, type FoundItem, type ImportScan } from "../api/client";
+import { api, type FoundItem, type ImportScan, type LinkTarget } from "../api/client";
+import { shortDownloadStatus } from "./downloadStatus";
 import { useFadeOff, useMotion, FADE } from "./motion";
 import { magnetRef } from "./magnet";
 import { FolderFlap } from "./icons";
@@ -17,7 +18,12 @@ import { hasPicker, pickFolder } from "./importPick";
 // What sits in Steam's own Workshop folder is listed apart, "From your Steam subscriptions", unticked and disabled: Steam
 // deletes those files on an unsubscribe, so the WE auto-import is their one way in (Settings' "Import new Workshop
 // wallpapers"); the backend refuses them too.
-// Guard: --probe probe-import.js (import:*, import:steam)
+// An import from a link (the Import menu's "Import from a link…", a link pasted on the Library or dropped on the window) is
+// the same dialog with a link field: what the link names shows as soon as it is typed (POST /library/link: the item, its
+// kind and source, "In your library", the download mode's refusal, or why it can't be imported, in its own words), and
+// Import downloads it by that source's own path (Web/LinkImportOps.cs) with the progress bar a Browse card shows; Close
+// leaves it running (the top bar's words, then the status line or the error modal).
+// Guard: --probe probe-import.js (import:*, import:steam, import:link:*)
 const GROUPS: { kind: FoundItem["kind"]; label: string; one: string; many: string; icon: React.ReactNode }[] = [
   { kind: "video", label: "Videos", one: "video", many: "videos", icon: <Film size={14} /> },
   { kind: "gif", label: "GIFs", one: "GIF", many: "GIFs", icon: <ImagePlay size={14} /> },
@@ -55,14 +61,48 @@ export function ImportDialog() {
   const [watch, setWatch] = useState(false);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
+  // an import from a link: the field's text, what the backend said the trimmed text names (kept with that text: a newer text
+  // shows "Checking…" until its own answer), and the link importing now
+  const [linkText, setLinkText] = useState("");
+  const [resolved, setResolved] = useState<{ text: string; target: LinkTarget | null; error: string | null } | null>(null);
+  const [importing, setImporting] = useState<LinkTarget | null>(null);
   // each request starts clean (reset during render on the change: no frame shows the last one's list); `last` keeps a
-  // closing dialog's request, so its exit shows what it showed
-  const [shownReq, setShownReq] = useState(req);
+  // closing dialog's request, so its exit shows what it showed. Starts at none, not at `req`: the dialog is lazy-loaded, so its
+  // first mount already has the request that opened it (a pasted link's text) and must take it in like any later one
+  const [shownReq, setShownReq] = useState<typeof req>(null);
   const [last, setLast] = useState(req);
   if (req !== shownReq) {
     setShownReq(req);
-    if (req) { setLast(req); setScan(null); setFailed(null); setTicked(new Set()); setCopy(copyDefault); setWatch(req.watch); setTyped(""); setBusy(false); }
+    if (req) {
+      setLast(req); setScan(null); setFailed(null); setTicked(new Set()); setCopy(copyDefault); setWatch(req.watch); setTyped(""); setBusy(false);
+      setLinkText(req.link ?? ""); setResolved(null); setImporting(null);
+    }
   }
+  const isLink = req?.link !== undefined;
+  const linkTrim = linkText.trim();
+  const found = resolved && resolved.text === linkTrim ? resolved : null;
+  // what the link names, asked once typing pauses (at once for a link the dialog opened with: a paste, a drop); a newer text
+  // drops the older ask. Not tied to the import: its end (a refusal shown in this line) asks nothing again
+  useEffect(() => {
+    if (!isLink || !linkTrim) return;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      api.resolveLink(linkTrim, ctrl.signal).then((r) => setResolved({ text: linkTrim, target: r, error: null }),
+        (e) => { if (!ctrl.signal.aborted) setResolved({ text: linkTrim, target: null, error: (e as Error).message || "That link can't be imported." }); });
+    }, linkTrim === req?.link?.trim() ? 0 : 350);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [isLink, linkTrim, req]);
+  const linkReady = !!found?.target && !found.target.inLibrary && !found.target.blocked && !importing;
+  const goLink = async () => {
+    const t = found?.target;
+    if (!t || !linkReady) return;
+    setImporting(t);
+    const why = await useStore.getState().importLink(linkTrim, t, req);
+    // closed meanwhile: the status line or the error modal said how it ended
+    if (useStore.getState().importAt !== req) return;
+    if (why == null) close();
+    else { setImporting(null); setResolved({ text: linkTrim, target: null, error: why }); }
+  };
   useEffect(() => {
     if (!req?.paths.length) return;
     let alive = true;
@@ -105,8 +145,10 @@ export function ImportDialog() {
   });
   const look = () => { const p = typed.trim(); if (p) useStore.getState().openImport([p], last?.watch ?? false); };
   const browse = async () => { const p = await pickFolder(); if (p) useStore.getState().openImport([p], last?.watch ?? false); };
-  const label = picked.length ? `Import ${picked.length}` : watch && canWatch ? "Watch folder" : "Import";
-  const state = !last?.paths.length ? "ask" : failed ? "failed" : scan ? "found" : "scanning";
+  const state = last?.link !== undefined ? "link" : !last?.paths.length ? "ask" : failed ? "failed" : scan ? "found" : "scanning";
+  const label = state === "link" ? (importing ? "Importing…" : "Import")
+    : picked.length ? `Import ${picked.length}` : watch && canWatch ? "Watch folder" : "Import";
+  const goOff = state === "link" ? !linkReady : state !== "found" || busy || (!picked.length && !(watch && canWatch));
 
   return (
     <AnimatePresence>
@@ -118,7 +160,7 @@ export function ImportDialog() {
               exit: { scale: 0.96, opacity: 0 }, transition: { type: "spring", stiffness: 320, damping: 28, layout: { type: "spring", stiffness: 320, damping: 30 } } })}
             onClick={(e) => e.stopPropagation()}>
             <motion.div className="imp-inner" layout={motionOn ? "position" : false}>
-              <h2>{last?.watch ? "Watch a folder" : "Import"}</h2>
+              <h2>{state === "link" ? "Import from a link" : last?.watch ? "Watch a folder" : "Import"}</h2>
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div key={state} className="imp-state" {...(motionOn
                   ? { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.16 } }
@@ -135,6 +177,15 @@ export function ImportDialog() {
                   )}
                   {state === "scanning" && (
                     <p className="imp-scanning muted"><LoaderCircle size={14} className="side-sub-spin" /> Looking through {last!.paths.length === 1 ? last!.paths[0] : n(last!.paths.length, "item", "items")}…</p>
+                  )}
+                  {state === "link" && (
+                    <div className="imp-link">
+                      <p className="muted">A Steam Workshop item, a MoeWalls, DesktopHut or MotionBgs page, or a link straight to a video or picture:</p>
+                      <input className="text wide" autoFocus placeholder="https://…" value={linkText} data-import-link spellCheck={false}
+                        disabled={!!importing} aria-label="Link to import"
+                        onChange={(e) => setLinkText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void goLink(); }} />
+                      <LinkLine text={linkTrim} found={found} importing={importing} />
+                    </div>
                   )}
                   {state === "failed" && <p className="imp-note" data-import-failed>{failed}</p>}
                   {state === "found" && scan && (
@@ -162,14 +213,72 @@ export function ImportDialog() {
               <div className="modal-actions imp-actions">
                 {state === "ask" && <button className="btn ghost ico" onClick={browse} hidden={!hasPicker()}><FolderFlap size={14} /> Browse</button>}
                 <span className="spacer" />
-                <button className="btn ghost" onClick={close}>Cancel</button>
-                <button className="btn accent ico" ref={magnetRef} data-import-go disabled={state !== "found" || busy || (!picked.length && !(watch && canWatch))}
-                  onClick={doImport}><Upload size={15} /> {label}</button>
+                {/* an import from a link goes on once the dialog is closed: the button says so */}
+                <button className="btn ghost" onClick={close}>{importing ? "Close" : "Cancel"}</button>
+                <button className="btn accent ico" ref={magnetRef} data-import-go disabled={goOff}
+                  onClick={state === "link" ? goLink : doImport}>
+                  <Upload size={15} /> {label}</button>
               </div>
             </motion.div>
           </motion.div>
         </motion.div>
       )}
+    </AnimatePresence>
+  );
+}
+
+// The line under the link field: "Checking the link…" while the backend looks, then what it names (its kind's chip, its
+// title, where it comes from; "In your library"; the download mode's refusal) or why it can't be imported. A change of what
+// it says cross-fades (motion on: a short rise). Importing, the item's progress shows under it as a Browse card's does: its
+// download-progress fill (none known: the sweeping segment) and, for a Workshop item, the step it is at.
+const MEDIA: Record<string, { word: string; icon: React.ReactNode }> = {
+  video: { word: "Video", icon: <Film size={14} /> }, gif: { word: "GIF", icon: <ImagePlay size={14} /> },
+  image: { word: "Picture", icon: <ImageIcon size={14} /> }, scene: { word: "Scene", icon: <Layers size={14} /> },
+  preset: { word: "Preset", icon: <Layers size={14} /> },
+};
+function linkWhere(t: LinkTarget): string {
+  const what = (t.media && MEDIA[t.media]?.word) ?? "A file";
+  return t.kind === "workshop" ? `${what} on the Steam Workshop` : t.kind === "site" ? `${what} on ${t.source}` : `${what} from ${t.source}`;
+}
+function LinkLine({ text, found, importing }: {
+  text: string; found: { target: LinkTarget | null; error: string | null } | null; importing: LinkTarget | null;
+}) {
+  const motionOn = useMotion();
+  const fadeOff = useFadeOff();
+  const progress = useStore((s) => (importing ? s.downloads[importing.id] : undefined));
+  const step = useStore((s) => (importing ? s.downloadStatus[importing.id] : undefined));
+  const t = found?.target;
+  const key = !found ? "checking" : t ? `found:${t.id}` : `error:${found.error}`;
+  // always mounted, so the first line in (the field's first character) fades in like every later change
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      {text && <motion.div key={key} className="imp-link-line" data-import-link-line={!found ? "checking" : t ? "found" : "error"}
+        {...(motionOn ? { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.14 } } : FADE)}>
+        {!found && <p className="imp-scanning muted"><LoaderCircle size={14} className="side-sub-spin" /> Checking the link…</p>}
+        {found && !t && <p className="imp-note" data-import-link-error>{found.error}</p>}
+        {t && (
+          <>
+            <div className="imp-link-row">
+              <span className="imp-gico" aria-hidden>{(t.media && MEDIA[t.media]?.icon) ?? <Link2 size={14} />}</span>
+              <span className="imp-link-what">
+                <span className="imp-title" data-import-link-title>{t.title}</span>
+                <span className="imp-dir" data-import-link-where>{linkWhere(t)}</span>
+              </span>
+              {t.inLibrary && <span className="imp-have">In your library</span>}
+            </div>
+            {t.blocked && <p className="imp-link-why" data-import-link-blocked>{t.blocked}</p>}
+            <AnimatePresence initial={false}>
+              {importing && (
+                <motion.div key="dl" className="imp-link-dl" data-import-link-progress
+                  {...fadeOff({ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0 }, transition: { duration: 0.16 } })}>
+                  <span className="imp-link-step">{shortDownloadStatus(step)}</span>
+                  <div className={`dl-bar${progress! > 0 ? "" : " indet"}`}><div className="dl-fill" style={progress! > 0 ? { width: `${Math.round(progress! * 100)}%` } : undefined} /></div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+      </motion.div>}
     </AnimatePresence>
   );
 }

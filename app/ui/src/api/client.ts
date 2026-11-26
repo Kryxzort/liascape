@@ -259,6 +259,11 @@ export interface FoundItem { path: string; kind: "video" | "gif" | "image" | "sc
   subscription: boolean }
 export interface ImportScan { roots: string[]; folders: string[]; items: FoundItem[]; unreadable: string[]; unsupported: number; duplicates: number;
   truncated: boolean; scenesOff: boolean; autoImport: boolean; watched: string[]; copy: boolean }
+// API: POST /library/link (Web/LinkImportOps.cs Resolved): kind workshop | site | direct; id = the item's source id (also
+// the download-progress id); source = the Browse source's name (a direct file: its server's host); media = video | gif |
+// image | scene | preset (null: an unknown site's file not looked at); blocked = why the Workshop download mode can't now
+export interface LinkTarget { kind: "workshop" | "site" | "direct"; id: string; title: string; source: string;
+  media: "video" | "gif" | "image" | "scene" | "preset" | null; inLibrary: boolean; blocked: string | null }
 // AppSettings.WatchedFolders (backend-owned: POST /settings never changes it)
 export interface WatchedFolder { path: string; copy: boolean; skip: string[] }
 export interface SceneLoudnessStatus { running: boolean; done: number; total: number; current: string | null; failed: { path: string; error: string }[] }
@@ -318,6 +323,10 @@ export const api = {
   // ones imported in the background (`watch`: that folder from then on; `skip`: what was left unticked, which a watch never
   // imports and a preset never brings as its base; `roots`: the folders scanned, where a ticked preset's base is looked for)
   scanImport: (paths: string[]) => jpost<ImportScan>("/library/scan", { paths }),
+  // API: an import from a link (Web/LinkImportOps.cs): what it names (400 {error} = why it can't be imported), then the
+  // import — the item, {already} when the library has it, {skipped} from the Steam to-do, 400 {error} with why
+  resolveLink: (url: string, signal?: AbortSignal) => jpost<LinkTarget>("/library/link", { url }, signal),
+  importLink: (url: string) => jpost<LibraryItem & { already?: boolean; skipped?: boolean; message?: string }>("/library/import-link", { url }),
   importFound: (body: { paths: string[]; copy: boolean; watch?: string | null; skip?: string[]; roots?: string[] }) =>
     jpost<{ queued: number }>("/library/import-found", body),
   // API: a watched folder added, its link / copy choice changed, or no longer watched (settings-changed {watchedFolders})

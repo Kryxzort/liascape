@@ -17,6 +17,8 @@ export function opLabel(op: LibraryOp): string {
   if (op.id === "video-loudness") return "Measuring video loudness";
   // API: Web/FolderImportOps.cs, a folder import's or a watched folder's items landing
   if (op.id === "import") return "Importing";
+  // API: Web/LinkImportOps.cs, the imports from a link running (one: "Importing from a link…"; several: a count)
+  if (op.id === "link") return op.total > 1 ? "Importing from links" : "Importing from a link";
   // API: Web/SteamOps.cs StartDrain, the user's own unsubscribes reaching Steam after their Undo window
   if (op.id === "unsubscribe") return "Unsubscribing";
   return "Updating the library";
