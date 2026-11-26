@@ -52,19 +52,26 @@ export function WsSetLoad({ scope = "workshop" }: { scope?: FavScope }) {
     // shows as an error (one already read, the row then turned on) glides from there, whether or not the engine reports
     // a hidden box's first size (Chromium does, as 0). Reading it would force a layout in the mount. Guard: probe-steam
     // yours:errorFirst
-    let h0: number | null = d.firstElementChild ? null : 0, top0 = 0;
-    const onScroll = () => { top0 = sc.scrollTop; };
+    let h0: number | null = d.firstElementChild ? null : 0, top0 = 0, scrolled = false;
     const ro = new ResizeObserver(([e]) => {
       const h = e.borderBoxSize?.[0]?.blockSize ?? e.contentRect.height, top = sc.scrollTop;
       // only the dock's own change glides: a callback at the same height (the first one, after a kept scroll offset came
-      // back: top0 is still 0) is no move of the grid. Guard: probe-layout tabs:browse
-      const shift = h0 === null || h === h0 ? 0 : h - h0 - (top - top0);
+      // back: top0 is still 0; the one a scroll asked for, below) is no move of the grid. A scroll in the very frame the
+      // dock's height changed mixes the user's move into the offset's change: that one doesn't glide rather than glide
+      // by the wrong amount. Guard: probe-layout tabs:browse
+      const shift = h0 === null || h === h0 || scrolled ? 0 : h - h0 - (top - top0);
+      scrolled = false;
       if (glide.current && Math.abs(shift) >= 1)
         for (let el = d.nextElementSibling; el; el = el.nextElementSibling)
           if (el.matches(".grid, .wf-none")) el.animate([{ transform: `translateY(${-shift}px)` }, { transform: "none" }], { duration: GLIDE_MS, easing: "cubic-bezier(.25, .8, .25, 1)" });
       h0 = h; top0 = top;
     });
     ro.observe(d);
+    // PERF: the offset is read in the observer's callback only (after layout), never in the scroll event: a scroll's event
+    // can come with the layout dirty, and the read would force that layout (the sidebar's open scrolling a half-hidden card
+    // whole into view: gridKeys.ts keepCardInView). Observing the dock again asks for one callback after this frame's
+    // layout, which takes the new offset. Guard: probe-layout perf:sidebar
+    const onScroll = () => { scrolled = true; ro.unobserve(d); ro.observe(d); };
     sc.addEventListener("scroll", onScroll, { passive: true });
     return () => { ro.disconnect(); sc.removeEventListener("scroll", onScroll); };
   }, []);

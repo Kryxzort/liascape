@@ -54,11 +54,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Update `components/subscribeMode.ts` actionBlocked / downloadHint, the backend's WorkshopDownloader.Blocked
          (same words), `.claude/rules/backend/sources-steam.md`, the README's download-mode lines and probe-steam's
          mode cells.
-134. [ ] probe-layout `perf:sidebar` fails when run alone (`--only perf:sidebar`, 3/3, on lp-player's build too; it
-       passed inside the whole probe-layout run): "open: 1 layouts forced from script", the `scroll` listener
-       (`onScroll`) in `app/ui/src/components/WsSetLoad.tsx` reading `sc.scrollTop` while layout is dirty (a scroll
-       event the sidebar's open sends). Find what scrolls the grid on the open, or read the offset without forcing a
-       layout.
+136. [ ] probe-layout `perf:tabs` fails on the way to Settings: 1–3 layouts forced from script in `flipGlide.ts`'s
+       position snapshot (`va`, sometimes `xa`), alone and in the full probe-layout run, on lp-player's build too.
+       Take the snapshot's reads where layout is already clean (the frame before the change, or an observer).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
