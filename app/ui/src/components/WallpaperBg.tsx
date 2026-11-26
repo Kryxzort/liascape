@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import { useStore } from "../store";
 import { media, api } from "../api/client";
 
@@ -9,6 +9,9 @@ import { media, api } from "../api/client";
 // pause:appBg), and
 // re-synced the instant it refocuses. A wallpaper change SWAPS the src in place (no crossfade) — same
 // as the desktop, which swaps instantly (mpv `loadfile` in timed/advance modes, or a restart in others).
+// A video that left the library (trash, unsubscribe, delete) is never shown again, playing or last played, and one whose
+// file is gone (its <video> errors) is skipped at once: the next one takes over in place, a random library video, else
+// nothing (dark). Guard: probe-settings bg:removed, bg:fileGone
 export function WallpaperBg() {
   const playingPath = useStore((s) => s.playingPath);
   const libraryItems = useStore((s) => s.libraryItems);
@@ -17,19 +20,41 @@ export function WallpaperBg() {
   const videoScale = useStore((s) => (s.settings?.videoScale as string) ?? "fill");
   const globalSpeed = useStore((s) => (s.settings?.speed as number) ?? 1);
 
-  const playingVideo = playingPath && isVid(playingPath) ? playingPath : null;
+  const vids = useMemo(() => libraryItems.filter((i) => !i.isScene && isVid(i.videoPath)).map((i) => i.videoPath), [libraryItems]);
+  const fvOf = useMemo(() => new Map(libraryItems.map((i) => [i.videoPath, i.filesVersion])), [libraryItems]);
+  // the videos that were in the library and left it — adjusted during render, so no frame shows one. Only a departure
+  // counts: a video the library never listed (a one-off play, the library not loaded yet) still shows.
+  const [seen, setSeen] = useState<{ vids: string[]; gone: ReadonlySet<string> }>({ vids, gone: new Set() });
+  let gone = seen.gone;
+  if (seen.vids !== vids) {
+    const now = new Set(vids);
+    const g = new Set([...seen.gone].filter((p) => !now.has(p)));
+    for (const p of seen.vids) if (!now.has(p)) g.add(p);
+    gone = g;
+    setSeen({ vids, gone: g });
+  }
+  // the sources whose <video> errored (the file is gone), by URL: the same path with new files (a redownload) is tried again
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
+  const urlOf = (p: string) => media(p, fvOf.get(p));
+  const usable = (p: string | null): p is string => !!p && !gone.has(p) && !broken.has(urlOf(p));
+
+  const playingVideo = playingPath && isVid(playingPath) && usable(playingPath) ? playingPath : null;
   // the last video that played (kept while a scene plays) — adjusted during render, so no frame shows the old one
   const [lastPlayed, setLastPlayed] = useState<string | null>(playingVideo);
   if (playingVideo && playingVideo !== lastPlayed) setLastPlayed(playingVideo);
-  // nothing played yet → one random library video, kept while it's still in the library (a download or a delete
-  // elsewhere must not swap the background). The randomness is drawn once, at mount.
+  const lastOk = usable(lastPlayed) ? lastPlayed : null;
+  // nothing (left) to show → one random library video, kept while it's still in the library and plays (a download or a
+  // delete elsewhere must not swap the background). The randomness is drawn once, at mount.
   const [seed] = useState(randomSeed);
-  const vids = useMemo(() => libraryItems.filter((i) => !i.isScene && isVid(i.videoPath)).map((i) => i.videoPath), [libraryItems]);
+  const pool = vids.filter(usable);
   const [decor, setDecor] = useState<string | null>(null);
-  if (!lastPlayed && vids.length && (decor == null || !vids.includes(decor))) setDecor(vids[Math.floor(seed * vids.length)]);
-  const bgPath = playingVideo ?? lastPlayed ?? decor;
-  const bgFv = useMemo(() => (bgPath ? libraryItems.find((i) => i.videoPath === bgPath)?.filesVersion : null), [libraryItems, bgPath]);
-  const bgVideo = bgPath ? media(bgPath, bgFv) : null;
+  if (!lastOk && pool.length && (decor == null || !pool.includes(decor))) setDecor(pool[Math.floor(seed * pool.length)]);
+  const bgPath = playingVideo ?? lastOk ?? (decor != null && pool.includes(decor) ? decor : null);
+  const bgVideo = bgPath ? urlOf(bgPath) : null;
+  // only the source on screen now: an error from one already swapped away is old news
+  const onError = (e: SyntheticEvent<HTMLVideoElement>) => {
+    if (bgVideo && e.currentTarget.getAttribute("src") === bgVideo) setBroken((b) => new Set(b).add(bgVideo));
+  };
   const fit = videoScale === "fill" ? "cover" : "contain";
 
   const ref = useRef<HTMLVideoElement>(null);
@@ -88,7 +113,7 @@ export function WallpaperBg() {
   // above re-plays + re-syncs on the swap. No key/remount, no crossfade.
   if (!bgVideo) return null;
   return <video ref={ref} className="settings-bg" style={{ objectFit: fit }}
-    src={bgVideo} autoPlay={!paused} muted loop playsInline onLoadedMetadata={syncNow} />;
+    src={bgVideo} autoPlay={!paused} muted loop playsInline onLoadedMetadata={syncNow} onError={onError} />;
 }
 
 const isVid = (p: string) => /\.(mp4|webm|mov|mkv|avi)$/i.test(p);

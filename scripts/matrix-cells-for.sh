@@ -95,6 +95,8 @@ for f in $FILES; do
     src/player/src/sources/scene.rs|src/player/src/worker/*|src/player/src/scene/*|src/player/src/bin/liascape-scene-worker/*|\
     src/player/src/vram.rs|src/player/src/probe/workers.rs|src/player/src/probe/vram.rs) add "$SCENE" "$f" ;;
     app/ui/src/views/Settings.tsx) add "$SET|$SCENE|$NUM|cover|plStart|expert" "$f (+ --probe probe-cardpreview.js — the card preview; --probe probe-settings.js — its rows' own cells)" ;;
+    # the live background behind Settings (and every tab under bg-live)
+    app/ui/src/components/WallpaperBg.tsx) add "pause:appBg" "$f (+ --probe probe-settings.js — bg:)" ;;
     # the mute chip the item sidebar's preview volume and Settings → Sound's Volume row share
     app/ui/src/components/MuteButton.tsx) add "$SET|$MODAL|noAudio" "$f (+ --probe probe-settings.js — mute:; --probe probe-sidebar.js — preview:volume, preview:volumeLook)" ;;
     # copy feedback: Settings' Copy buttons and the Library sidebar's Workshop ID pill

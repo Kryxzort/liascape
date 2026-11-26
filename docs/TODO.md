@@ -108,13 +108,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Guard: probe cells reading the computed `text-shadow` of those elements with the setting on and off, and
        screenshots over a light and a dark `bg-live` wallpaper.
 
-14. [ ] (owner) The window's live background (`components/WallpaperBg.tsx`, "live wallpaper behind every tab") keeps
-       showing a wallpaper that was just removed: with nothing playing it falls back to `lastPlayed`, the last video it
-       showed, even when that item was trashed or unsubscribed (seen removing downloads from Browse one after another:
-       the desktop went blank each time, the window kept the removed one). Drop `lastPlayed` once its item leaves the
-       library (trash, unsubscribe, delete) and fall to the existing fallback (a library video), or dark when the library
-       has none. Guard: a probe cell that plays an item, removes it, and finds the background no longer showing it.
-
 15. [ ] (owner) A card shows its type as a small icon, not a pill badge (`components/TypeBadge.tsx`): a 14–16 px glyph
        in the card's corner with a soft shadow that reads on any picture: a cube for a scene, sliders for a preset
        (its current icon), nothing for a video (the default). Hover gives "Scene" / "Preset" as a tooltip; the sidebar
@@ -303,6 +296,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `restore_waits_for_ready_no_seam`).
 
 ## UI
+- [ ] An item trashed outside this page (`POST /library/trash` from another window or client) never reaches an open
+      page: `AppOps.Trash` broadcasts nothing (only `library-synced` for presets it greys out), so the Library keeps
+      the card and the live background (`components/WallpaperBg.tsx`) keeps a removed video until the next library
+      read. Broadcast `library-synced` on a trash and an undo. Guard: probe-settings `bg:removed` with the trash posted
+      by the probe instead of the Library's Delete.
 - [ ] A first `/library` read that fails leaves the Library blank until a later read (`libraryRead` stays false,
       `store/index.ts`; the welcome and empty states wait on it): show an error with Retry there instead.
 - [ ] probe-sidebar `lib:preset:needsBase` fails on lp-player's own UI: it expects a plain Workshop download disabled

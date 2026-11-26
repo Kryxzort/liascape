@@ -36,6 +36,11 @@
 //   copy:look         hover glow, no-glow, bg-live (a see-through fill), "Copied" in --success; pictures settings-copy-*.png
 //   bg:onePoll        the live background behind Settings (components/WallpaperBg.tsx) keeps one /current read open at a
 //                     time while every answer is held 7 s, and reads again once the slow one answered
+//   bg:removed        the background behind every tab, a played video deleted in the Library (Ctrl-click, Delete): the
+//                     background leaves it for another library video (on screen, a frame decoded), and with every video
+//                     deleted it goes dark (no video); Undo puts the library back
+//   bg:fileGone       the playing video's file deleted under it: a fresh load shows another library video, not the
+//                     vanished file's error
 //   vram:stopShows    "Stopped scene shows" (Expert) sits right under the video memory cap and only while the
 //                     cap is on: the shared Segmented switch, Last frame / Nothing, Last frame by default; a click on Nothing
 //                     saves sceneVramStopShows; at Advanced it hides and the value stays
@@ -1592,6 +1597,108 @@ app.whenReady().then(async () => {
         await js(`document.activeElement?.blur?.(); return true`).catch(() => {});
         await http("POST", "/library/watched", { path: dir, remove: true });
       }
+    });
+
+    // the live background behind Settings (components/WallpaperBg.tsx) after its video goes away. These run last: they
+    // play, trash and import items, and the library is put back as it was (Undo) when they end.
+    const BG = `const v = document.querySelector("video.settings-bg"); if (!v) return null;
+      let p = null; try { p = new URL(v.getAttribute("src") || "", location.href).searchParams.get("path"); } catch { /* no src */ }
+      const r = v.getBoundingClientRect(), cs = getComputedStyle(v);
+      return { path: p, ready: v.readyState, err: v.error?.code ?? null,
+        vis: r.width > 0 && r.height > 0 && cs.display !== "none" && cs.visibility === "visible" && +cs.opacity > 0 }`;
+    const bgNow = () => js(BG);
+    const libVids = async () => ((await http("GET", "/library")).json ?? []).filter((i) => !i.isScene && /\.(mp4|webm|mov|mkv|avi)$/i.test(i.videoPath));
+    const showing = (b, p) => !!b && b.path === p && b.vis && b.ready >= 2 && b.err == null; // on screen, a frame decoded, no error
+    // a copy of a library video imported under its own name, played, and the background on it after a fresh load; the
+    // import lands in `box.mine` at once, so the caller's cleanup finds it whatever throws after
+    async function playCopy(name, box) {
+      const vids = await libVids();
+      if (!vids.length) return { why: "no library video to copy — proved nothing" };
+      const src = path.join(OUT, `${name}.mp4`); fs.copyFileSync(vids[0].videoPath, src);
+      const mine = (await http("POST", "/library/import", { path: src, title: name })).json;
+      if (!mine?.videoPath) return { why: `couldn't import ${name} — proved nothing` };
+      box.mine = mine;
+      await http("POST", "/apply", { path: mine.videoPath });
+      if (!(await waitFor(async () => (await http("GET", "/current")).json?.path === mine.videoPath, SAVE_MS))) return { mine, why: `${name} never played — proved nothing` };
+      await load();
+      if (!(await waitFor(async () => showing(await bgNow(), mine.videoPath), 10000))) return { mine, why: `the background never showed the playing ${name} (${J(await bgNow())}) — proved nothing` };
+      return { mine };
+    }
+    async function dropCopy(mine) {
+      await http("POST", "/stop");
+      if (!mine) return;
+      const it = (await libVids()).find((i) => i.videoPath === mine.videoPath);
+      if (it) await http("POST", "/library/delete", it);
+    }
+
+    // the Library's Delete, as the user does it: Ctrl-click each card (select), then the Delete key — one trash batch
+    async function deleteInLibrary(titles) {
+      await js(`await window.__x.tab("Library"); return true`);
+      for (const t of titles) {
+        const at = await js(`const c = [...document.querySelectorAll(".lib-title")].find((x) => x.dataset.title === ${J(t)})?.closest(".card"); if (!c) return null;
+          c.scrollIntoView({ block: "center" }); await window.__x.sleep(400); const r = c.getBoundingClientRect();
+          return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 3) }`);
+        if (!at) return `no Library card "${t}"`;
+        send({ type: "mouseMove", ...at, modifiers: ["control"] }); await sleep(40);
+        send({ type: "mouseDown", ...at, button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(60);
+        send({ type: "mouseUp", ...at, button: "left", clickCount: 1, modifiers: ["control"] }); await sleep(300);
+      }
+      send({ type: "keyDown", keyCode: "Delete" }); send({ type: "keyUp", keyCode: "Delete" });
+      return null;
+    }
+
+    await cell("bg:removed — the played video trashed, the background moves to another library video; with no video left it goes dark", async () => {
+      const v = [];
+      // behind every tab, the way it was seen: the background stays mounted while the Library deletes
+      const box = {};
+      let undo = null; // the videos the empty case deleted, which its Undo must bring back
+      try {
+        await setSettings({ LiveWallpaperBehindAllTabs: true });
+        const { mine, why } = await playCopy("bg-removed", box);
+        if (why) return [why];
+        const miss = await deleteInLibrary(["bg-removed"]);
+        if (miss) return [`${miss} — proved nothing`];
+        const left = await waitFor(async () => !(await libVids()).some((i) => i.videoPath === mine.videoPath), SAVE_MS);
+        const others = (await libVids()).map((i) => i.videoPath);
+        if (!left || !others.length) return [`the Library's Delete left ${J(others)} — proved nothing`];
+        const moved = await waitFor(async () => { const b = await bgNow(); return others.includes(b?.path) && showing(b, b.path); }, 10000);
+        const b = await bgNow();
+        if (!moved) v.push(b?.path === mine.videoPath ? `the background still shows the trashed video (${J(b)})` : `the background isn't on another library video (${J(b)}, library ${J(others)})`);
+        // no video left in the library (its scenes stay): nothing to show, dark
+        await http("POST", "/stop");
+        const rest = await libVids();
+        undo = rest.map((i) => i.videoPath);
+        const miss2 = await deleteInLibrary(rest.map((i) => i.title));
+        if (miss2 || !(await waitFor(async () => !(await libVids()).length, SAVE_MS))) return [...v, `the library still lists videos after deleting them all (${miss2 ?? J((await libVids()).map((i) => i.title))}) — the empty case proved nothing`];
+        if (!(await waitFor(async () => (await bgNow()) == null, 10000))) v.push(`with no library video the background still shows ${J(await bgNow())}, want dark (no video)`);
+        return v;
+      } finally {
+        await setSettings({ LiveWallpaperBehindAllTabs: false });
+        await dropCopy(box.mine);
+        if (undo) {
+          const r = await http("POST", "/library/undo");
+          const back = await waitFor(async () => { const now = (await libVids()).map((i) => i.videoPath); return undo.every((p) => now.includes(p)); }, SAVE_MS);
+          // a library left without its videos breaks whatever runs after: an error, never a quiet PASS
+          if (r.status !== 200 || !back) throw new Error(`cleanup: Undo (${r.status}) didn't bring back every deleted video (${J(undo)})`);
+        }
+      }
+    });
+
+    await cell("bg:fileGone — the playing video's file vanished: the background shows another library video at once, never a blank error", async () => {
+      const box = {};
+      try {
+        const { mine, why } = await playCopy("bg-file-gone", box);
+        if (why) return [why];
+        fs.rmSync(mine.videoPath);
+        await load();
+        const others = (await libVids()).map((i) => i.videoPath).filter((p) => p !== mine.videoPath);
+        if (!others.length) return ["no other library video — proved nothing"];
+        if (!(await waitFor(async () => { const b = await bgNow(); return others.includes(b?.path) && showing(b, b.path); }, 10000))) {
+          const b = await bgNow();
+          return [b?.path === mine.videoPath ? `the background stays on the vanished file (${J(b)}: an error, nothing shown)` : `the background isn't on another library video (${J(b)})`];
+        }
+        return [];
+      } finally { await dropCopy(box.mine); }
     });
 
     await setSettings({ Morphs: true });
