@@ -35,6 +35,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        never goes through that check, it reads that one item's state. The Steam page is the Workshop downloads' last
        resort (`docs/decisions.md` § "Offer two Workshop download modes, the Steam page the last resort"), so this is
        that rule applied to the social controls.
+137. [ ] (owner) Hold the Steam app connection ("Playing Wallpaper Engine") while the Liascape window is open, not only
+       while Browse shows the Workshop: no flicker as the user moves between tabs, released when the window closes (the
+       page's heartbeat stops) plus the existing 60 s tail. Never for the backend's lifetime: that would block the real
+       Wallpaper Engine and pause Steam's other downloads all day. Rewrite `docs/decisions.md` § "Hold the Steam app
+       connection while the Workshop shows on Browse" in the same commit; guard in `scripts/test-steam-app-hold.sh`.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
