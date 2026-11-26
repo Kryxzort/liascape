@@ -41,6 +41,7 @@ public static class LiascapePlayerSelfTest
             StartArgsAssertions(fails);
             RendererLatchAssertions(fails);
             if (fails.Count == 0) QueueDepthAssertions(fails);
+            if (fails.Count == 0) VramCapRaceAssertions(fails);
             if (fails.Count == 0) RoundTrip(fails);
         }
         catch (Exception e) { fails.Add($"{e.GetType().Name}: {e.Message}"); }
@@ -1069,6 +1070,44 @@ public static class LiascapePlayerSelfTest
     // the single-worker FIFO deterministically (no timing race needed to "win" against the drain), so
     // a burst enqueued right behind it piles up — the cap must bound it, and enqueueing itself must
     // never block regardless of how clogged the chain is.
+    // The card's VRAM total learned while a settings edit lands: what the player's guard ends on is the newest saved
+    // settings bounded by the total, whatever order the two reach the queue in. The settings read here hands over the
+    // snapshot it read and saves a disable right after (the edit a learner holding that snapshot must not overwrite).
+    private static void VramCapRaceAssertions(List<string> fails)
+    {
+        // a set queued by a running one lands after Drain's mark: drain until nothing is left
+        static void DrainAll() { for (int i = 0; i < 10 && LiascapePlayerMedia.QueueDepth > 0; i++) try { LiascapePlayerMedia.Drain().Wait(5000); } catch { } }
+        var keep = PlayerStatus.VramTotalForTest;
+        var sent = new List<double>();
+        LiascapePlayerMedia.TestPlayerProp = (p, v) => { if (p == "scene_vram_limit_mib") lock (sent) sent.Add(Convert.ToDouble(v)); };
+        try
+        {
+            using var h = JsonDocument.Parse("""{"vram":{"ok":true,"reason":null,"probe":"fake","total_mib":8192}}""");
+            var on = new AppSettings { LimitVramPerScene = true, SceneVramLimitMib = 20000 };
+            var off = new AppSettings { LimitVramPerScene = false, SceneVramLimitMib = 20000 };
+            // a disable saved after the learner read the settings, before its set was queued
+            PlayerStatus.VramTotalForTest = null;
+            var saved = on; bool raced = false;
+            _ = LiascapePlayerMedia.Queue(() => { Thread.Sleep(200); return 0; }); // clog: both sets wait their turn
+            PlayerStatus.NoteVramTotal(h.RootElement, () =>
+            {
+                var read = saved;
+                if (!raced) { raced = true; saved = off; LiascapePlayerMedia.ApplyGpuSettings(on, off); }
+                return read;
+            });
+            DrainAll();
+            lock (sent)
+                if (sent.Count == 0 || sent[^1] != 0) fails.Add($"the VRAM total learned while the cap was turned off: the guard ended on {(sent.Count == 0 ? "nothing" : sent[^1])} ([{string.Join(", ", sent)}]), want 0 (off, the newer edit)");
+            // learned with the cap on and no edit: the guard gets the card's total
+            PlayerStatus.VramTotalForTest = null; lock (sent) sent.Clear();
+            PlayerStatus.NoteVramTotal(h.RootElement, () => on);
+            DrainAll();
+            lock (sent)
+                if (sent.Count == 0 || sent[^1] != 8192) fails.Add($"the VRAM total learned with a 20000 MiB cap on: the guard ended on {(sent.Count == 0 ? "nothing" : sent[^1])}, want 8192");
+        }
+        finally { LiascapePlayerMedia.TestPlayerProp = null; PlayerStatus.VramTotalForTest = keep; }
+    }
+
     private static void QueueDepthAssertions(List<string> fails)
     {
         _ = LiascapePlayerMedia.Queue(() => { Thread.Sleep(1500); return 0; });

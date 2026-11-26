@@ -69,6 +69,7 @@ public static class PlayerStatus
     private static volatile int _vramTotalRaw; // 0 = unknown
     private static int? _vramTotal => _vramTotalRaw > 0 ? _vramTotalRaw : null;
     public static int? VramTotalMib => _vramTotal;
+    internal static int? VramTotalForTest { get => _vramTotal; set => _vramTotalRaw = value ?? 0; }
     // the cap's bound while the card's total isn't known
     public const int VramCapUnknownMax = 65536;
     public static int VramCapMax => _vramTotal ?? VramCapUnknownMax;
@@ -80,14 +81,14 @@ public static class PlayerStatus
             ? (int)Math.Min(Math.Round(d), int.MaxValue) : null;
 
     // A health answer read anywhere: a total newly known (or changed) moves the playing wallpaper's guard at once, so a saved
-    // cap above the card holds at its total live, not from the next player start.
-    public static void NoteVramTotal(JsonElement? health)
+    // cap above the card holds at its total live, not from the next player start. The set reads the settings when it runs
+    // (`settings`, the saved file unless a test hands its own), never a snapshot taken here: an edit saved meanwhile wins.
+    // Guard: player-selftest VramCapRaceAssertions
+    public static void NoteVramTotal(JsonElement? health, Func<AppSettings>? settings = null)
     {
         if (VramTotalOf(health) is not int t || t == _vramTotal) return;
-        var s = SettingsService.Load();
-        var before = LiascapePlayerMedia.GpuProps(s, _vramTotal);
         _vramTotalRaw = t;
-        LiascapePlayerMedia.ApplyGpuProps(before, LiascapePlayerMedia.GpuProps(s, t));
+        LiascapePlayerMedia.ReassertVramCap(settings ?? SettingsService.Load);
     }
 
     public const string SceneSupportOff ="scene support is off (Settings → Wallpaper Engine → Play scenes)";

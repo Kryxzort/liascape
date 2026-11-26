@@ -323,13 +323,21 @@ public static class LiascapePlayerMedia
         ("scene_spare", s.SceneSpareWorker && s.AllowScenes),
     ];
 
-    public static void ApplyGpuSettings(AppSettings prev, AppSettings cur) => ApplyGpuProps(GpuProps(prev), GpuProps(cur));
-
-    public static void ApplyGpuProps(IReadOnlyList<(string prop, object value)> had, IReadOnlyList<(string prop, object value)> now)
+    // Each changed prop's value is worked out when its set runs, from `cur` and the VRAM total known then: a total learned
+    // after this edit was queued still bounds it.
+    public static void ApplyGpuSettings(AppSettings prev, AppSettings cur)
     {
-        foreach (var (prop, v) in now)
-            if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, v);
+        var had = GpuProps(prev);
+        foreach (var (prop, v) in GpuProps(cur))
+            if (!Equals(had.First(h => h.prop == prop).value, v)) QueuePlayerProp(prop, () => GpuProp(cur, prop));
     }
+
+    private static object GpuProp(AppSettings s, string prop) => GpuProps(s).First(p => p.prop == prop).value;
+
+    // The VRAM total just learned (PlayerStatus.NoteVramTotal): the guard again, from the settings as they are when it runs.
+    // Same key as a settings edit's set, so whichever is queued last runs, and both read the newest settings and total.
+    public static void ReassertVramCap(Func<AppSettings> settings) =>
+        QueuePlayerProp("scene_vram_limit_mib", () => GpuProp(settings(), "scene_vram_limit_mib"));
 
     // Pause when covered: `player.pause_when_covered` ← PauseWhenCovered, live (coalescible per prop); a new
     // player process gets it from AssertSceneFps (the prop's own default is off).
@@ -368,8 +376,14 @@ public static class LiascapePlayerMedia
     // The user unmutes an auto-mute (toggle-mute): audible now, and the player holds off until the foreign audio ended.
     public static void ReleaseAutoMute() => QueueEssential(() => { C.TryCall("automute.release", null, LiascapePlayerClient.QuickMs); });
 
-    private static void QueuePlayerProp(string prop, object v) =>
-        QueueSet("player:" + prop, () => SetPlayerProp(C, prop, v));
+    // the selftest's stand-in for the player: a queued player-level set hands it (prop, value) instead of sending it
+    internal static Action<string, object>? TestPlayerProp;
+
+    private static void QueuePlayerProp(string prop, object v) => QueuePlayerProp(prop, () => v);
+
+    // `value` is read when the set runs
+    private static void QueuePlayerProp(string prop, Func<object> value) =>
+        QueueSet("player:" + prop, () => { var v = value(); if (TestPlayerProp is { } t) t(prop, v); else SetPlayerProp(C, prop, v); });
 
     private static void SetPlayerProp(LiascapePlayerClient client, string prop, object v)
     {
