@@ -5,14 +5,6 @@ Delete an item in the commit that does it (the commit message is the record). Pr
 one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGHT-NOTES.md`. Design of the player: `docs/player/architecture.md`.
 
 ## Queued (in order — the next thing to pick up)
-0. [ ] (owner, 2026-11-22: "even with issues, it's better than the previous engine") **The switch-over, the rest** —
-       liascape-player is the only engine; the owner waived the rest of the bar (`docs/player/reports/switch-over.md`).
-       Left (a, the only engine, and b, the restored layer waiting for its source's `Ready`, are done):
-       c) The upstream code rewrite (`docs/superpowers/plans/2026-10-28-upstream-code-rewrite.md`), then
-       `LICENSE.upstream-MIT` and the README's fork line go.
-       Not blocking, run at night: the crash-isolation re-run (`scenes.sh crash`, `programs.sh crash`) and the 8 h soak
-       (`scenes.sh soak --minutes 480`); a regression they find is a bug to fix.
-       Frozen-onset micro-gaps (2–10 ms) don't count as failures unless the owner hears them.
 48. [ ] (owner) Scene wallpapers load faster — the rest (`src/player/tests/onmachine/scene_load.py`, private headless
        player). Done: the worker loads the project beside its EGL setup (`--preload`); the fork's texture upload context
        and the Container's remembered lookups (in the pin since `ff7cf61`); the spare worker (`player.scene_spare`, skips
@@ -132,7 +124,7 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       project moved to lively-community/lively, run by Sketches srl).
 - [ ] **More wallpaper sources** (owner: support all of them): first one source interface (search, page, details,
       download, filters/sort) that Browse, the sidebar and the download queue use, with MoeWalls / MotionBGs / DesktopHut
-      moved onto it (overlaps the upstream code rewrite); sources switch on/off in Settings. Then add Wallhaven (stills,
+      moved onto it; sources switch on/off in Settings. Then add Wallhaven (stills,
       keyless) and Pexels Videos (licensed ambient loops, key). Skipped as redundant: Pixabay (≈ Pexels; only if Pexels
       proves too small), Unsplash (≈ Wallhaven's photos), Wallpaper Waifu / MyLiveWallpapers (≈ MoeWalls), Alpha Coders
       (≈ Wallhaven), Coverr (≈ Pexels). Once the interface lands, compare MoeWalls / MotionBGs / DesktopHut's top 100 for
@@ -172,6 +164,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       before choosing the menu's depth.
 
 ## On a real desktop session (not hermetic)
+- [ ] The engine switch-over's night runs: the crash-isolation re-run (`scenes.sh crash`, `programs.sh crash`) and the
+      8 h soak (`scenes.sh soak --minutes 480`); a regression they find is a bug to fix. Frozen-onset micro-gaps
+      (2–10 ms) don't count as failures unless the owner hears them.
 - [ ] Compare `docs/player/reports/we-ref/compare/` side-by-sides against WE on Windows (a human's eyes are the final word).
 - [ ] Decide: UI-matrix randomized runs (optional).
 
@@ -183,6 +178,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       user-facing sentence>` trailer, or `Changelog: none` for internal work. The commit-msg hook requires it on commits
       Claude co-wrote; CLAUDE.md's commit rule and the PR template ("What this changes" repeats the commits' lines) say
       so. `CHANGELOG.md` (Keep a Changelog) is written from `git log <last tag>..HEAD --format='%(trailers:key=Changelog,valueonly)'`.
+- [ ] Delete `src/backend/Helpers/LegacyTakeover.cs` (it stops a session the old mpvpaper / LWE engine left running and
+      replays it on the player) and its rule line in `.claude/rules/backend/player-adapter.md` once every install that
+      ran the old engine has started a build with liascape-player as the only engine.
 
 ## Upstream PRs (once the project is done)
 - [ ] Draft PRs offering the LWE fork's patches upstream (Almamu/linux-wallpaperengine), several small focused ones.

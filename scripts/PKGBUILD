@@ -8,7 +8,7 @@ pkgrel=1
 pkgdesc="Live wallpaper manager for Wayland (video + Wallpaper Engine scenes)"
 arch=('x86_64')
 url="https://github.com/Kryxzort/liascape"
-license=('GPL-3.0-only' 'MIT')
+license=('GPL-3.0-only')
 # electron45: the app supports one Electron major (.claude/rules/build-and-packaging.md § Electron) and Arch's `electron`
 # is an older one. AUR electron45-bin provides electron45 until Arch ships its own; the launcher runs `electron45`
 # before `electron`.
@@ -88,5 +88,4 @@ build() {
 package() {
     cp -a "$srcdir/pkg-stage/." "$pkgdir/"
     install -Dm644 "$pkgname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-    install -Dm644 "$pkgname/LICENSE.upstream-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.upstream-MIT"
 }

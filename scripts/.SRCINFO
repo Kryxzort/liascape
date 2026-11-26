@@ -5,7 +5,6 @@ pkgbase = liascape-git
 	url = https://github.com/Kryxzort/liascape
 	arch = x86_64
 	license = GPL-3.0-only
-	license = MIT
 	makedepends = git
 	makedepends = dotnet-sdk
 	makedepends = aspnet-targeting-pack

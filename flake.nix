@@ -252,7 +252,7 @@
           Icon=liascape
           Type=Application
           Categories=Utility;
-          Keywords=wallpaper;live;wayland;video;
+          Keywords=wallpaper;live wallpaper;animated;video;scene;Wallpaper Engine;Wayland;
           StartupWMClass=liascape
           EOF
           install -Dm644 ${./app/ui/public/favicon.svg} $out/share/icons/hicolor/scalable/apps/liascape.svg

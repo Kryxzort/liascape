@@ -1,6 +1,5 @@
 src/backend/bin/
 src/backend/obj/
-publish/
 AppDir/
 node_modules
 app/ui/dist/

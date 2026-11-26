@@ -214,9 +214,7 @@ choices that might look odd.
 
 ## License and credits
 
-Liascape is licensed under the [GNU GPL v3.0](LICENSE). It started as a fork of
-[sunwoo101/livepaper](https://github.com/sunwoo101/livepaper); the parts that come from it keep their MIT notice in
-[`LICENSE.upstream-MIT`](LICENSE.upstream-MIT).
+Liascape is licensed under the [GNU GPL v3.0](LICENSE).
 
 Scenes are drawn by a fork of [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine)
 (GPL-3.0). Liascape's player reuses techniques from [mpvpaper](https://github.com/GhostNaN/mpvpaper) (GPL-3.0), and the
