@@ -236,6 +236,8 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       `restore_waits_for_ready_no_seam`).
 
 ## UI
+- [ ] A first `/library` read that fails leaves the Library blank until a later read (`libraryRead` stays false,
+      `store/index.ts`; the welcome and empty states wait on it): show an error with Retry there instead.
 - [ ] probe-sidebar `lib:preset:needsBase` fails on lp-player's own UI: it expects a plain Workshop download disabled
       under "subscribe" when signed out and sent as a one-off, but since the two download modes (`actionBlocked`)
       only the one-off is blocked and a signed-out subscribe opens the item's page. Update the cell to the modes' order.
