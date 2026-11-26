@@ -105,6 +105,16 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          "Delete and unsubscribe") and its mixed-selection wording, in both tabs.
        - Both tabs: a Play button, and a click on the sidebar's picture plays the preview (the Library has no Play
          button, Browse no click-to-play today).
+       - One order and one set of parts for the same item, from the owner's side-by-side (scene 2922240701 in each tab):
+         title, picture, one chip row in one order (type, resolution, age rating, subscribers, favourites, size, ID;
+         "In your library" / "Show in Library" only in Browse), Made by, Presets, the primary action (Apply /
+         Subscribe and apply), the subscription action, then About (description + tags) in both, the tiles (Open in
+         file manager when local, Open on Steam, Favourite) in one row in both, then Playback and Scene properties when
+         the item is in the library (in Browse too), then Comments. Today: tags sit loose in the Library but inside
+         About in Browse, the Library has no About, Favourite pairs with Open on Steam in Browse but sits alone under
+         Scene properties in the Library, the chips' order differs, Apply exists only in Browse.
+       - The Library's Unsubscribe tile reads washed out over a light live wallpaper (`bg-live`): every tile keeps
+         readable contrast on any wallpaper behind it (the probe checks contrast on a light and a dark background).
        Share one component (or one actions list) so the two can't drift again. Guard: probe cells that open the same item
        in both tabs and find the same actions, labels and behaviour; the design checklist for each control.
 
