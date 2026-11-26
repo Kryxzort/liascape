@@ -23,14 +23,17 @@ namespace Liascape.Helpers;
 // - A flip is against the state the cache keeps for that account when it has a whole list, else against the first read;
 //   another account signed in to Steam mid-watch starts over from its first read (its state was never this account's).
 // - Logs say what happened, never a Steam ID or a favourite's id.
-// Guard: scripts/test-steam-app-hold.sh k., l., m.
+// Guard: scripts/test-steam-app-hold.sh k., l., m., n.
 public static class SteamFavoriteWatch
 {
     static TimeSpan Ms(string env, int dflt) =>
         TimeSpan.FromMilliseconds(int.TryParse(Environment.GetEnvironmentVariable(env), out var v) && v > 0 ? v : dflt);
-    // the tests shorten both (LIASCAPE_FAV_WATCH_MS / LIASCAPE_FAV_WATCH_POLL_MS)
+    // the tests shorten all three (LIASCAPE_FAV_WATCH_MS / LIASCAPE_FAV_WATCH_POLL_MS / LIASCAPE_FAV_WATCH_READ_MS)
     public static TimeSpan Window { get; internal set; } = Ms("LIASCAPE_FAV_WATCH_MS", 180_000);
     public static TimeSpan Every { get; internal set; } = Ms("LIASCAPE_FAV_WATCH_POLL_MS", 3_000);
+    // one read's most: a Steam library that never answers is cut off (its child killed through the command's cancel), so the
+    // Steam client's turn comes free for the rest. Guard: scripts/test-steam-app-hold.sh p.
+    public static TimeSpan ReadBound { get; internal set; } = Ms("LIASCAPE_FAV_WATCH_READ_MS", 60_000);
 
     static readonly object Gate = new();
     static readonly Dictionary<string, long> Until = []; // watched id → its window's end (Environment.TickCount64)
@@ -52,6 +55,18 @@ public static class SteamFavoriteWatch
         return true;
     }
 
+    // A read's token: cancelled at the latest watched window's end (a read queued behind a long download for the Steam client's
+    // turn never starts once every window is over; a renewed window is picked up by the next loop) or after ReadBound.
+    // Guard: scripts/test-steam-app-hold.sh o., p.
+    static CancellationTokenSource ReadToken()
+    {
+        long latest;
+        lock (Gate) latest = Until.Count == 0 ? Now : Until.Values.Max();
+        var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(latest - Now, 1, (long)ReadBound.TotalMilliseconds)));
+        return cts;
+    }
+
     static async Task RunAsync()
     {
         var was = new Dictionary<string, bool>();
@@ -60,7 +75,12 @@ public static class SteamFavoriteWatch
         try
         {
             // the account first (one call, no Workshop query): Steam not running, offline or Wallpaper Engine not owned ends it here
-            var (sid, whyNot) = await SteamClientUgc.SteamIdAsync(SettingsService.Load(), CancellationToken.None).ConfigureAwait(false);
+            ulong sid; string? whyNot;
+            using (var first = ReadToken())
+            {
+                try { (sid, whyNot) = await SteamClientUgc.SteamIdAsync(SettingsService.Load(), first.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { (sid, whyNot) = (0, "Steam didn't answer in time"); }
+            }
             if (sid == 0)
             {
                 lock (Gate) { Until.Clear(); running = false; }
@@ -77,7 +97,21 @@ public static class SteamFavoriteWatch
                     if (Until.Count == 0) { running = false; Console.WriteLine("favourites watch: its window is over"); return; }
                     ids = Until.Keys.ToArray();
                 }
-                var (list, why) = await SteamClientUgc.FavoritesAsync(SettingsService.Load(), CancellationToken.None).ConfigureAwait(false);
+                // "Use the Steam app" turned off meanwhile: the user no longer wants Liascape on the Steam client
+                // Guard: scripts/test-steam-app-hold.sh n.
+                var s = SettingsService.Load();
+                if (s.WorkshopDownloadMode != "steamapp")
+                {
+                    lock (Gate) { Until.Clear(); running = false; }
+                    Console.WriteLine("favourites watch: stopped — not \"Use the Steam app\" any more");
+                    return;
+                }
+                SteamClientUgc.FavoriteList? list; string? why;
+                using (var read = ReadToken())
+                {
+                    try { (list, why) = await SteamClientUgc.FavoritesAsync(s, read.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { (list, why) = (null, "no answer before the window's end or within the read's bound"); }
+                }
                 if (list == null)
                 {
                     if (!anyRead)
@@ -96,6 +130,8 @@ public static class SteamFavoriteWatch
                     var on = list.Ids.ToHashSet();
                     foreach (var id in ids)
                     {
+                        // a window that ended while the read waited applies nothing
+                        lock (Gate) if (!Until.TryGetValue(id, out var end) || Now >= end) continue;
                         bool now = on.Contains(id);
                         if (!was.TryGetValue(id, out var before))
                         {

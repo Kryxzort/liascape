@@ -24,7 +24,9 @@
 //   favourited list, Wallpaper Engine as creator and consumer app, else an invalid handle), SendQueryUGCRequest 4,
 //   GetQueryUGCResult 5, ReleaseQueryUGCRequest 19, SetReturnOnlyIDs 23. The favourites: $FAKE_UGC_DIR/favorites, an id a
 //   line, 50 a page.
-//   $FAKE_UGC_DIR/offline exists → BLoggedOn false; $FAKE_UGC_DIR/query-fail exists → every query answers EResult 2
+//   $FAKE_UGC_DIR/offline exists → BLoggedOn false; $FAKE_UGC_DIR/query-fail exists → every query answers EResult 2;
+//   $FAKE_UGC_DIR/hang-query exists → the next CreateQueryUserUGCRequest removes it, writes a line to $FAKE_UGC_DIR/query-hung
+//   and never returns (a hung library mid-watch)
 //   $FAKE_UGC_DIR/queries ← a line "<pid> <page> <unix s>" per query sent; $FAKE_UGC_DIR/queries-released ← a line per handle released
 //   $FAKE_UGC_DIR/child.pid ← the caller's pid; $FAKE_UGC_DIR/released ← a line per pipe released
 //   $FAKE_UGC_DIR/sub-<id> = subscribed (a file: each helper run is a NEW process — an unsubscribe run must see what an
@@ -123,6 +125,7 @@ static void read_favs(void) {
 static uint32_t q_page; // the one query in flight (the helper sends one at a time)
 static uint64_t create_user_query(Obj *s, uint32_t account, int list, int matching, int sort, uint32_t creator, uint32_t consumer, uint32_t page) {
   (void)s; (void)matching; (void)sort;
+  if (exists("hang-query")) { char h[4096]; snprintf(h, sizeof h, "%s/hang-query", dir()); unlink(h); note("query-hung", "x\n"); for (;;) pause(); }
   if (account != (uint32_t)(steam_id() & 0xffffffffu) || list != 5 || creator != 431960 || consumer != 431960 || page == 0) return ~0ULL;
   q_page = page; read_favs();
   char line[96]; snprintf(line, sizeof line, "%d %u %.3f\n", getpid(), page, wall()); note("queries", line);

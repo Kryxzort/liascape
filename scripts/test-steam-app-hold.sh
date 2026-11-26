@@ -24,6 +24,11 @@
 #     stayed connected for the window, past the tail, then released Steam a tail after its last read
 #  m. no Steam app (fail-init): the page still opens, no watch: one helper tried, none held, nothing read; Steam offline
 #     (no account): the page opens, no favourites query sent
+#  n. "Use the Steam app" turned off mid-watch: the watch stops at its next read
+#  o. a download holds the Steam client's turn (hold-install) from a watch's first read until past its window: the read
+#     queued behind it never goes out, nothing is applied
+#  p. a hung Steam library mid-watch (hang-query): the read is cut off after its bound, its child killed, and the next
+#     download gets the turn and finishes
 #  g. SIGTERM with the child held: serve exits within 3 s and the child released Steam first
 # Never touches Steam, the network (LIASCAPE_TEST_NO_NETWORK) or ~/.config/liascape (temp HOME + every XDG dir); everything
 # it started is stopped on exit.
@@ -83,9 +88,9 @@ echo '{}' > "$T/cm.json"
 printf '{"WorkshopDownloadMode":"steamapp","WorkshopFolder":"%s","AutoAddWeWallpapersToLibrary":false,"NoAudio":true}\n' \
   "$T/ws/431960" > "$XDG_CONFIG_HOME/liascape/settings.json"
 BEAT=800 TAIL=2400 # the tail is three beats (SteamClientHold.TailBeats)
-WATCH=6000 WATCH_POLL=400
+WATCH=6000 WATCH_POLL=400 WATCH_READ=2000
 (cd /tmp && LIASCAPE_TEST_NO_NETWORK=1 LIASCAPE_STEAM_APP_BEAT_MS=$BEAT LIASCAPE_WORKSHOP_POLL_MS=300 \
-  LIASCAPE_FAV_WATCH_MS=$WATCH LIASCAPE_FAV_WATCH_POLL_MS=$WATCH_POLL \
+  LIASCAPE_FAV_WATCH_MS=$WATCH LIASCAPE_FAV_WATCH_POLL_MS=$WATCH_POLL LIASCAPE_FAV_WATCH_READ_MS=$WATCH_READ \
   LIASCAPE_STEAM_CM_FIXTURE=$T/cm.json LIASCAPE_STEAM_CLIENT_LIB=$T/steamclient.so FAKE_UGC_DIR=$T/steamlib FAKE_UGC_CLIP=$T/clip.mp4 \
   exec "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1) & BP=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
@@ -291,6 +296,56 @@ out(ro.status === 200 && ro.body?.ok === true && offNoWatch !== null && /no watc
   `open ${ro.status} ${JSON.stringify(ro.body)}, "no watch" logged ${offNoWatch !== null}, reads ${lines("queries").length - qO}`);
 fs.rmSync(`${T}/steamlib/offline`);
 
+// n. "Use the Steam app" turned off mid-watch: the reads stop at the next one, the window not yet over
+const setMode = (mode) => fetch(U + "/settings", { method: "POST", headers: H, body: JSON.stringify({ workshopDownloadMode: mode }) });
+const qN = lines("queries").length, tN = Date.now();
+const rn = await openPage({ workshopId: ITEM, watch: "favorite" });
+const readN = await until(() => lines("queries").length > qN, 5000);
+await setMode("subscribe");
+const stopN = await until(() => /favourites watch: stopped — not "Use the Steam app" any more/.test(log()), 3000);
+const qStop = lines("queries").length; await sleep(WATCH_POLL_GRACE);
+const lateN = lines("queries").length - qStop, inWindow = Date.now() - tN < WATCH;
+await setMode("steamapp");
+out(rn.body?.watching === true && readN !== null && stopN !== null && lateN === 0 && inWindow,
+  "n. \"Use the Steam app\" turned off mid-watch: the watch stopped, no more reads",
+  `open ${JSON.stringify(rn.body)}, first read ${readN} ms, stopped ${stopN} ms after the switch, reads after it ${lateN}, still inside the window ${inWindow}`);
+
+// o. a download takes the Steam client's turn right after a watch's first read and keeps it past the watch's window: the
+// read queued behind it never goes out once the window is over, and nothing is applied
+const ITEM_O = "720000300";
+const qO0 = lines("queries").length, tO = Date.now();
+const ro2 = await openPage({ workshopId: ITEM_O, watch: "favorite" });
+const readO = await until(() => lines("queries").length > qO0, 5000);
+fs.writeFileSync(`${T}/steamlib/hold-install`, "");
+const dlO = dl("720000013"); // held at 50 % (hold-install): the turn stays taken
+await until(() => lines("calls").includes("subscribe 720000013"), 5000);
+const qHeld = lines("queries").length;
+fs.writeFileSync(FAVF, `${ITEM_O}\n${OTHER}\n`); // a favourite Steam has, which only a late read could see
+await sleep(Math.max(0, tO + WATCH + 800 - Date.now()));
+fs.rmSync(`${T}/steamlib/hold-install`);
+const dO = await Promise.race([dlO, ceiling(30000)]);
+await sleep(WATCH_POLL_GRACE);
+const lateO = lines("queries").length - qHeld;
+out(ro2.body?.watching === true && readO !== null && dO?.status === 200 && lateO === 0 && !cacheIds().includes(ITEM_O),
+  "o. a download holding the Steam client's turn past a watch's window: the queued read never went out, nothing applied",
+  `first read ${readO} ms, download ${dO ? dO.status : "never answered"}, reads after the turn came free ${lateO}, cache ${JSON.stringify(cacheIds())}`);
+fs.writeFileSync(FAVF, `${OTHER}\n`);
+
+// p. a hung Steam library mid-watch: the read is cut off after its bound (the child killed), so the Steam client's turn comes
+// free and the next download finishes
+const WATCH_READ = +process.env.WATCH_READ, ITEM_P = "720000301";
+fs.writeFileSync(`${T}/steamlib/hang-query`, "");
+const rp = await openPage({ workshopId: ITEM_P, watch: "favorite" });
+const hung = await until(() => lines("query-hung").length > 0, 5000);
+const pidP = childPid(), tP = Date.now();
+const dP = await Promise.race([dl("720000014"), ceiling(WATCH_READ + 15000)]);
+const freedAfter = Date.now() - tP;
+out(rp.body?.watching === true && hung !== null && dP?.status === 200 && !alive(pidP) && freedAfter < WATCH_READ + 6000,
+  "p. a hung Steam library mid-watch: the read cut off after its bound, the hung child killed, the next download finished",
+  `hung ${hung !== null}, download ${dP ? dP.status : `never answered (${WATCH_READ + 15000} ms)`} after ${freedAfter} ms (bound ${WATCH_READ}), hung child alive ${alive(pidP)}`);
+// a backend that waited on it forever: the hung child goes, so g. still runs
+if (alive(pidP)) { try { process.kill(pidP, "SIGKILL"); } catch { /* gone meanwhile */ } await sleep(1000); }
+
 // g. below needs a held child: one more download while the UI beats
 beat(true); const rg = await download("720000012");
 if (rg !== 200) out(false, "a download for g.'s held child", `status ${rg}`);
@@ -298,7 +353,7 @@ fs.writeFileSync(`${T}/held.pid`, String(childPid()));
 fs.writeFileSync(`${T}/released.before`, String(lines("released").length));
 beat(false);
 EOF
-(cd "$T" && U=$U T=$T TAIL=$TAIL BEAT=$BEAT WATCH=$WATCH timeout 300 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
+(cd "$T" && U=$U T=$T TAIL=$TAIL BEAT=$BEAT WATCH=$WATCH WATCH_READ=$WATCH_READ timeout 300 node drive.mjs) > "$T/drive.log" 2>&1; rc=$?
 cat "$T/drive.log"
 PASS=$((PASS + $(grep -c '^PASS' "$T/drive.log"))); FAIL=$((FAIL + $(grep -c '^FAIL' "$T/drive.log")))
 [ $rc = 0 ] || bad "drive.mjs exited $rc"

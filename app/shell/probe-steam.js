@@ -318,6 +318,7 @@ const STUB = `(() => {
     if (p === "/steam/app-presence") (st.beats ??= []).push(performance.now());
     if (p === "/steam/app-presence" && localStorage.getItem("__probe_beat_ms")) {
       st.calls.push({ p, body: o.body ? JSON.parse(o.body) : null });
+      if (o.keepalive) (st.keepalive ??= []).push(p);
       return res({ connected: false, beatMs: +localStorage.getItem("__probe_beat_ms") });
     }
     if (p.startsWith("/steam/")) {
@@ -2889,7 +2890,7 @@ app.whenReady().then(async () => {
           await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
           // signed in: the box, no button
           await browseWs(); await W({ comments: COMMENTS.slice(0, 3), signedIn: true }); await openSide(0); await scrollSideTo(SEC);
-          await waitFor(() => js(`!!document.querySelector("${SEC} textarea")`), 3000);
+          if (!(await waitFor(() => js(`!!document.querySelector("${SEC} textarea")`), 3000))) v.push("signed in: the comment box never showed");
           if (await js(`!!document.querySelector(${J(BTN)})`)) v.push("signed in: \"Comment on Steam\" shows beside the box");
         }
         return v;
@@ -4560,9 +4561,13 @@ app.whenReady().then(async () => {
         const gap = Math.max(...bs.slice(1).map((t, i) => t - bs[i]));
         console.log(`        ${bs.length - 1} beats across four tab switches, the longest gap ${Math.round(gap)} ms`);
         if (bs.length < 6 || gap > EVERY * 2) v.push(`across tab switches: ${bs.length - 1} beats, the longest gap ${Math.round(gap)} ms (want ≤ ${EVERY * 2})`);
-        // the page going away says nothing more: the backend lets go a tail after the last beat
-        await js(`dispatchEvent(new Event("pagehide")); true`); await sleep(100);
+        // the page going away says nothing more (no keepalive request, no beat out of turn): the backend lets go a tail after
+        // the last beat
+        const h0 = (await beats()).at(-1);
+        await js(`dispatchEvent(new Event("pagehide")); true`); await sleep(60);
+        const h1 = await beats();
         if (await js(`(window.__st.keepalive || []).length`)) v.push("pagehide sent a request (keepalive)");
+        if (h1.filter((t) => t > h0).some((t) => t - h0 < EVERY * 0.8)) v.push("pagehide sent a beat out of turn");
         // another download mode (as the page hears it: its own save, or settings-changed): the beats stop at once, and a fresh
         // page sends none
         await setSettings({ workshopDownloadMode: "subscribe" }); await ev("settings-changed", { workshopDownloadMode: "subscribe" }); await sleep(EVERY * 2);
