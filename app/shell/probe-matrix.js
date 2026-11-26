@@ -2902,16 +2902,16 @@ C["autoMute:offWhileMuted"] = { states: ["single", "effect", "pending"], async r
     if (c.after.s.autoMute !== false) v.push("autoMute not saved off");
     return v;
   } };
-// streams that must never auto-mute: mpv's own (application.name mpv — the filter), one below the level threshold
-// (Min level −6 dB vs a −12 dBFS stream); then the threshold back to −70 while it plays → muted (the change is live)
+// a user's stream calling itself mpv (application.name mpv) is heard: both engines tell the player's own streams apart by
+// ownership, never by name (the player's own: the adapter IT § "auto-mute never hears our own switches")
 C["autoMute:mpvStream"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
     await ui(amEnable); c.ready = await amReady();
     tone(2500, "mpv"); const stop = sampler(c, 40); await waitFor(() => tones.size === 0, 5000, 50); await stop();
+    c.unmuted = await waitFor(() => muteNow(false), 5000, 50); // past the unmute delay: the oracle's end state is unmuted
   }, check(c) { const m = c.samples.filter(({ st }) => sourcesOf(st).some(([, n]) => amLevel(n) < -1));
-    // the one intended difference under the Signal (by design): a user's mpv is heard
-    if (AM_SIGNAL) return [...amReadyCheck(c), ...(m.length ? [] : ["an mpv stream never auto-muted under the Signal"])];
-    return [...amReadyCheck(c), ...(m.length ? [`an mpv stream auto-muted the wallpaper (${m.length}/${c.samples.length} samples)`] : [])]; } };
+    return [...amReadyCheck(c), ...(m.length ? [] : [`a stream named mpv never auto-muted (${AM_SIGNAL ? "the Signal" : "AudioMonitor"})`]),
+      ...(c.unmuted ? [] : ["the stream named mpv ended but the wallpaper stayed muted > 5 s"])]; } };
 C["seq:autoMute+threshold+tone+thresholdBack"] = { states: ["single"], async run(c) {
     if (amSkip(c)) return;
     await ui(settingsTab(`m.setCheck(m.input("Mute when other apps play audio"), true, "auto-mute"); await m.sleep(400); m.setValue(m.input("Ignore sounds below (dB)"), -6, "min level"); await m.sleep(400);`));

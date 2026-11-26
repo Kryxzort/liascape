@@ -129,6 +129,9 @@ If your distro has no .NET 10 package, Microsoft's `dotnet-install.sh` installs 
 <summary>Programs Liascape uses at run time</summary>
 
 - `ffmpeg` (with `ffprobe`): thumbnails, imports, video previews, video lengths and loudness measuring.
+- Only when `liascape-player` can't auto-mute by itself (its audio connection to PipeWire isn't up): `pactl` and
+  `parec` (from `libpulse` or `pipewire-pulse`) for auto-mute, and `playerctl` for "Only mute for media players". This
+  fallback works only while the app is open; Settings says when one of them is missing.
 - Optional: `secret-tool` (libsecret) keeps your Steam sign-in in the system keyring. Without it, the sign-in is kept
   in `~/.config/liascape/steam-auth.json`, readable only by you.
 

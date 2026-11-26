@@ -250,6 +250,12 @@ sup_pid()  { ctl hello 2>/dev/null | jq -r '.supervisor_pid // empty'; }
 acurl() { curl -H "X-Liascape-Token: $(cat "$API_TOKEN_FILE" 2>/dev/null)" "$@"; }
 post() { acurl -sf -m 15 -X POST -H 'Content-Type: application/json' -d "$2" "$API$1"; }
 get()  { acurl -sf -m 10 "$API$1"; }
+# /current names nothing (a /stop landed): at most 10 s
+wait_nothing_shown() {
+  local _
+  for _ in $(seq 1 100); do [ -z "$(get /current | jq -r '.path // empty')" ] && return 0; sleep 0.1; done
+  warn "/current still names $(get /current | jq -r '.path // empty') 10 s after /stop"; return 1
+}
 settings_get() { get /settings; }   # NEVER echo this directly anywhere -- it carries SteamRefreshToken
 
 # GET -> modify with a jq filter -> POST the FULL object back. Same pattern as
@@ -926,6 +932,9 @@ run_cell() {
         post /apply "$(jq -nc --arg p "$target" '{path:$p}')" >/dev/null
         corr=$(wait_for_new_corr "$prev" "$NEW_CORR_TIMEOUT")
         [ -n "$corr" ] && wait_for_terminal "$corr" "$term" >/dev/null   # priming switch, drained, not evaluated
+        # restore replays LastSession (the priming target) only onto a player that shows nothing
+        # (PlayerHelper.Restore): stopped first, or the cell can only watch a no-op restore
+        post /stop '{}' >/dev/null; wait_nothing_shown
         prev=$(last_corr)
         restore_cli_invoke
         observe_switch "$cell" "$i" "$prev" "$NEW_CORR_TIMEOUT" "$term" 0 || { cell_failed=1; break; }
@@ -952,11 +961,10 @@ run_cell() {
       # in flight, this script just stopped watching too early). An end-of-video switch waits for
       # the clip's end, so its real per-switch bound is the CLIP's own remaining play time, not
       # EFFECT_DURATION_MS -- use MAX_SHORT_VIDEO_MS (+ the player's 10s align_fallback / adapter's
-      # 15s backstop + margin) instead of term() for this mode only. advance-on-end's own interval
-      # always wins first (the program's maximum advances at the interval, well under `term`), so it
-      # keeps the plain term().
+      # 15s backstop + margin) for both end-aligned modes: advance-on-end has no maximum (0 = off), so
+      # its clip also plays to its end after the minimum and needs the same bound. timed-interval keeps term().
       local term_this="$term"
-      [ "$mode" = wait-for-end ] && term_this=$(python3 -c "print(int($MAX_SHORT_VIDEO_MS/1000) + 30)")
+      [ "$mode" != timed-interval ] && term_this=$(python3 -c "print(int($MAX_SHORT_VIDEO_MS/1000) + 30)")
       prev=$(last_corr)
       for ((i = 1; i <= SWITCHES; i++)); do
         observe_switch "$cell" "$i" "$prev" "$auto_timeout" "$term_this" 0 || { cell_failed=1; break; }

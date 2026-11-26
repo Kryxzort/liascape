@@ -2676,10 +2676,10 @@ EOF
   m0=$(amutes); foreign "$PW/long.wav"; sleep 1.5
   [ "$(amutes)" = "$m0" ] && eff_open && ok "Only if MPRIS player active, no player (no session bus): a stream doesn't mute" || bad "MPRIS-only with no player muted: $(am_gains)"
   foreign_stop; setting '.AutoMuteOnlyIfMprisActive = false'; sleep 0.3
-  # the one intended difference (criterion 2, by design): a stream calling itself mpv is heard by the Signal
+  # a stream calling itself mpv is a user's: both engines tell ours apart by ownership (§ "auto-mute never hears our
+  # own switches"), never by name
   m0=$(amutes); foreign "$PW/short.wav" mpv; waitfor 3000 eval '[ "$(amutes)" -gt "$m0" ]'; heard=$?; foreign_stop
-  if [ "$AM_SIGNAL" = 1 ]; then [ "$heard" = 0 ] && ok "a user's mpv is heard (the intended difference)" || bad "a stream named mpv never muted under the Signal"
-  else [ "$heard" != 0 ] && ok "a stream named mpv is filtered out (AudioMonitor's name filter)" || bad "AudioMonitor muted on a stream named mpv"; fi
+  [ "$heard" = 0 ] && ok "a user's stream named mpv is heard" || bad "a stream named mpv never auto-muted ($([ "$AM_SIGNAL" = 1 ] && echo the Signal || echo AudioMonitor))"
   waitfor 3000 eff_open || bad "still muted after the mpv stream: $(am_gains)"
 
   echo "  -- a B created while auto-muted comes up muted (criterion 7)"
