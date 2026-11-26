@@ -48,12 +48,12 @@ export function TransitionPicker({
   // pick a random pair of the user's wallpapers (video + a thumbnail poster) for the demo.
   const pickSources = (): [Source, Source] => {
     const poster = (i: LibraryItem, idx: number) =>
-      i.thumbnailPath ? media(i.thumbnailPath) : api.transitionPreviewUrl(idx ? "b" : "a");
+      i.thumbnailPath ? media(i.thumbnailPath, i.filesVersion) : api.transitionPreviewUrl(idx ? "b" : "a");
     const vids = libraryItems.filter((i) => !i.isScene && VIDEO_RE.test(i.videoPath));
     const pick = [...vids].sort(() => Math.random() - 0.5).slice(0, 2);
     if (pick.length === 2)
-      return [{ video: media(pick[0].videoPath), poster: poster(pick[0], 0) },
-              { video: media(pick[1].videoPath), poster: poster(pick[1], 1) }];
+      return [{ video: media(pick[0].videoPath, pick[0].filesVersion), poster: poster(pick[0], 0) },
+              { video: media(pick[1].videoPath, pick[1].filesVersion), poster: poster(pick[1], 1) }];
     return [{ poster: api.transitionPreviewUrl("a") }, { poster: api.transitionPreviewUrl("b") }];
   };
   const refreshSources = () => { const [x, y] = pickSources(); preview.setSources(x, y); };

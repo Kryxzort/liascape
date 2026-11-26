@@ -90,7 +90,8 @@ export function useClipMaking(paths: string[], q: ClipQuality): boolean {
 }
 
 // The clip URL a card plays now (null: none yet), and `retry` for a clip that failed to load (replaced and deleted since).
-export function useClipSrc(path: string | null, box: { w: number; h: number } | null): { src: string | null; retry: () => void } {
+// `fv`: the item's filesVersion — a file rewritten in place asks again (its clips are made anew: ClipStore keys them on the file)
+export function useClipSrc(path: string | null, box: { w: number; h: number } | null, fv?: string | null): { src: string | null; retry: () => void } {
   const q = useClipQuality();
   const exact = useContext(ClipExact);
   const [src, setSrc] = useState<string | null>(null);
@@ -109,7 +110,7 @@ export function useClipSrc(path: string | null, box: { w: number; h: number } | 
     const ask = async () => {
       const first = answers.get(path)?.q !== q;
       if (first) { asking.set(path, q); changed(); }
-      const r = await clipInfo(path, w, h, q, exact).catch(() => null);
+      const r = await clipInfo(path, w, h, q, exact, fv).catch(() => null);
       if (first && asking.get(path) === q) { asking.delete(path); changed(); }
       if (dead) return;
       if (r) remember(path, r);
@@ -123,6 +124,6 @@ export function useClipSrc(path: string | null, box: { w: number; h: number } | 
       const n = (shown.get(path) ?? 1) - 1;
       if (n > 0) shown.set(path, n); else shown.delete(path);
     };
-  }, [path, w, h, q, exact, attempt]);
+  }, [path, w, h, q, exact, attempt, fv]);
   return { src: path && w && h ? src : null, retry: () => setAttempt((a) => a + 1) };
 }

@@ -41,13 +41,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        fade / bg-live); fewer cards than tiles, an empty library or a non-Library start tab falls back to today's lift.
        A prototype first: a slowed recording (about 5 s) from the agent window for the owner before it lands. Guard:
        probe-intro cells for the hand-over, the fallbacks and motion off.
-7. [ ] (owner) A thumbnail follows its file when the file changes in place: Steam re-downloading an item (or a
-       Redownload) rewrites `preview.gif` at the same path, the backend's still / anim / clip caches are keyed by the
-       file's mtime, but the card's URL (`/still?u=<path>&w=`) never changes, so the window keeps the old (here empty)
-       picture until its HTTP cache is cleared. Version the media URLs by the file (mtime / size in the query, from the
-       library item), and have a Workshop folder that changes on disk broadcast `library-item-changed` (also clearing
-       `downloadIncomplete`). Guard: a probe cell that rewrites a fixture's preview in place and sees the card's
-       picture change without a reload.
 8. [ ] (owner) Scenes checked against real Wallpaper Engine, every feature, every scene, and as fast and lean as
        WE. Nothing about scenes counts as done until it matches WE's own frames
        (`docs/player/spikes/we-proton.md`: `scripts/dev/we-ref-capture.sh`, `scene_we_compare.sh`).

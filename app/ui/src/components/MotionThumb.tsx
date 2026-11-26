@@ -71,9 +71,10 @@ export function MotionThumb({ item, hover, hoverKind, idleKind, autoVideo = fals
   const gvOn = gvWant && gvSeen && (active || gvShown);
   if (!gvOn && gvShown) setGvShown(false);
   const box = useBoxSize(boxRef, (autoVideo && !!vid) || (gvWant && gvSeen));
-  const { src: clipSrc, retry: retryClip } = useClipSrc(autoVideo ? vid : null, box);
-  const { src: gvSrc, retry: retryGv } = useClipSrc(gvOn ? gifVid : null, box);
-  const realSrc = vid && hover && hoverKind === "video" ? media(vid) : null;
+  const fv = item.filesVersion;
+  const { src: clipSrc, retry: retryClip } = useClipSrc(autoVideo ? vid : null, box, fv);
+  const { src: gvSrc, retry: retryGv } = useClipSrc(gvOn ? gifVid : null, box, fv);
+  const realSrc = vid && hover && hoverKind === "video" ? media(vid, fv) : null;
   const videoSrc = realSrc ?? (vid && autoVideo && shown === "video" ? clipSrc : null);
   // a gif that plays unhovered stays shown under the hovered video: it never restarts, and nothing but the gif shows until
   // the video's first frame. It steps aside once its own video shows.
@@ -88,14 +89,14 @@ export function MotionThumb({ item, hover, hoverKind, idleKind, autoVideo = fals
   // animate while the gif shouldn't. Plain jpg/png pass straight through to /media. When there's no
   // static thumbnail at all (gif-only items / dangling we_thumbs links), extract the still from the gif.
   const stillSrc = item.thumbnailPath || item.animatedThumbnailPath;
-  const staticSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
+  const staticSrc = stillSrc ? still(stillSrc, CARD_STILL_W, fv) : "";
   return (
     <>
       <img ref={boxRef} className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
       {(showGif || held) && (
         // gif → /anim (leading-black trimmed); backgroundImage = the /still frame so the loop-gap
         // shows a real frame, not black (parity with the Browse Card).
-        <img className="thumb anim" src={animUrl(anim!)} decoding="async" alt=""
+        <img className="thumb anim" src={animUrl(anim!, fv)} decoding="async" alt=""
           style={{ backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center", visibility: showGif ? undefined : "hidden" }} />
       )}
       {gvOn && gvSrc && <PreviewPlayer src={gvSrc} real={false} gif paused={!active || !!realSrc} onError={retryGv}

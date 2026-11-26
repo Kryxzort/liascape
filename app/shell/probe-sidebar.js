@@ -102,6 +102,10 @@
 //                        "Redownload"; a click → POST /library/redownload
 //                        of its path (held), the button says it's downloading and the line under the words Steam's step; done →
 //                        the words fade out, the card and the notice come back; no-glow, bg-live. Shots side-incomplete-*.png
+//   lib:thumbFollows     a Workshop item's preview.png rewritten in place on disk (Steam downloading it again, another
+//                        picture of another shape at the same path): the card's picture becomes the new one without a page
+//                        reload (the backend's item-folder watcher → library-item-changed {filesVersion} → a new /still
+//                        URL). Shot side-thumbfollows.png
 //   lib:scenesBlocked    the scene renderer missing (page-only scenes-blocked): every scene and preset greyed with the reason
 //                        (the preset's status icon), no video; a click plays nothing, the status bar and notice say why;
 //                        cleared → back
@@ -2977,6 +2981,48 @@ app.whenReady().then(async () => {
       }
       return v;
     }, { workshopDownloadMode: "steamapp" }));
+
+    // lib:thumbFollows — tf, a Workshop scene in the library's own workshop/ folder (a copy of s2: a 320×180 blue preview.png),
+    // has its preview.png rewritten in place by another picture (200×200 yellow), as Steam downloading it again does. The open
+    // page is never reloaded; the card's picture must become the new one (its /still URL carries the item's filesVersion,
+    // which the backend's watcher sends as library-item-changed). Proved nothing when the card never showed the old picture.
+    await cell("lib:thumbFollows", async () => {
+      const v = [], J = JSON.stringify, id = "910000020", dir = path.join(WSDIR, id), prev = path.join(dir, "preview.png");
+      const idx = path.join(WSDIR, "index.json"), idx0 = fs.readFileSync(idx, "utf8");
+      const writeIdx = (t) => { fs.writeFileSync(idx + ".tf", t); fs.renameSync(idx + ".tf", idx); };
+      const s0 = await getSettings();
+      const pic = () => page(`const i = m.card("tf")?.querySelector("img.thumb"); return i ? { src: i.src, nw: i.naturalWidth, nh: i.naturalHeight, done: i.complete } : null;`);
+      try {
+        fs.cpSync(SC[1], dir, { recursive: true });
+        const pj = JSON.parse(fs.readFileSync(path.join(dir, "project.json"), "utf8"));
+        fs.writeFileSync(path.join(dir, "project.json"), JSON.stringify({ ...pj, title: "tf" }));
+        writeIdx(JSON.stringify({ ...JSON.parse(idx0), [id]: { title: "tf", isScene: true, workshopId: id } }));
+        await setSettings({ allowScenes: true });
+        await loadUi();
+        let a = null;
+        for (let i = 0; i < 80; i++) { await page(`m.card("tf")?.scrollIntoView({ block: "center" });`); a = await pic(); if (a?.done && a.nw > 0) break; await sleep(100); }
+        if (!(a?.done && a.nw === 320 && a.nh === 180)) return [`tf's card never showed its 320×180 picture (${J(a)}) — proved nothing`];
+        await js(`window.__noReload = 1`);
+        await sleep(1500); // the watcher's first look at the folder (its reference) is behind us
+        const tmp = path.join(OUT, "tf-new.png");
+        require("child_process").execFileSync("ffmpeg", ["-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=yellow:s=200x200", "-frames:v", "1", tmp]);
+        fs.copyFileSync(tmp, prev); // in place: the same path, the same file
+        fs.rmSync(tmp, { force: true });
+        let b = null;
+        for (let i = 0; i < 150; i++) { b = await pic(); if (b?.done && b.nw === 200 && b.nh === 200) break; await sleep(100); }
+        console.log(`        before ${J({ nw: a.nw, nh: a.nh })}, after ${J(b && { nw: b.nw, nh: b.nh, newUrl: b.src !== a.src })}`);
+        if (await js(`window.__noReload`) !== 1) v.push("the page reloaded (proved nothing)");
+        if (!(b?.done && b.nw === 200 && b.nh === 200)) v.push(`the card still shows the old picture after 15 s: ${J(b && { nw: b.nw, nh: b.nh, newUrl: b.src !== a.src })}, want 200×200`);
+        else if (b.src === a.src) v.push("the picture changed under the same URL");
+        await shot("thumbfollows");
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        writeIdx(idx0);
+        await setSettings({ allowScenes: s0.allowScenes ?? false });
+        await loadUi();
+      }
+      return v;
+    });
 
     // lib:baseDelete:<on|off> — deleting pb, which pp1 and pp2 play, asks first: the card's Delete button, the Delete key on
     // a selection and the sidebar's Delete all open the dialog (the modal shell: zooms in, motion off fades in place) naming

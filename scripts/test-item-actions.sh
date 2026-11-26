@@ -33,6 +33,11 @@
 #         page (409, its files left alone); then through a FAKE steamclient.so (scripts/test-fixtures/fake_steamclient.c, built
 #         here when a C compiler is there) its DownloadItem mends Steam's folder in place: whole in /library, every page told.
 #         LibraryService.DownloadIncomplete, PlayerHelper.UnplayableReason, Web/RedownloadOps.cs.
+#  files changed: Steam rewrites a linked Workshop item's folder in place (its play path unchanged). An empty one made whole
+#         lists as whole and every open page hears `library-item-changed {downloadIncomplete: false, filesVersion}` without a
+#         read of the library, and a preset of it its reason gone; a whole one's preview.gif rewritten → a new `filesVersion`
+#         alone. /still answers a URL carrying `fv` as it answers one without, the new picture.
+#         Web/ItemFilesWatch.cs, LibraryService.FilesVersionOf.
 # Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
@@ -113,14 +118,20 @@ mkdir -p "$WE/920000001"; vid "$WE/920000001/v.mp4"; ln -s "$WE/920000001" "$LIB
 # § incomplete: what an interrupted Steam download leaves — a scene's files all 0 bytes, a video's file 0 bytes (both Steam's
 # folders, linked), the library's own copy of an empty scene; Steam's client is the fake one, failing to start until the
 # Steam-client part (fail-init)
-for id in 940000001 940000002; do mkdir -p "$WE/$id"; ln -s "$WE/$id" "$LIB/local/$id"; done
+for id in 940000001 940000002 940000005 940000006; do mkdir -p "$WE/$id"; ln -s "$WE/$id" "$LIB/local/$id"; done
+# § files changed: an empty scene Steam will make whole in place, and a whole one whose preview it will rewrite
+: > "$WE/940000005/project.json"; : > "$WE/940000005/scene.pkg"; : > "$WE/940000005/preview.gif"
+printf '{"type":"scene","file":"scene.json","title":"whole scene"}' > "$WE/940000006/project.json"; head -c 16 /dev/zero > "$WE/940000006/scene.pkg"
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=red:s=32x32:rate=4:duration=1" "$WE/940000006/preview.gif"
+mkdir -p "$LIB/workshop/940000007"   # a preset of the scene Steam will make whole
+printf '{"dependency":"940000005","preset":{"rate":100},"preview":"preview.jpg","tags":["Unspecified"],"title":"preset of refetched","visibility":"public"}' > "$LIB/workshop/940000007/project.json"
 : > "$WE/940000001/project.json"; : > "$WE/940000001/scene.pkg"; : > "$WE/940000001/preview.gif"
 printf '{"type":"video","file":"v.mp4","title":"ev"}' > "$WE/940000002/project.json"; : > "$WE/940000002/v.mp4"
 mkdir -p "$LIB/workshop/940000003"; : > "$LIB/workshop/940000003/project.json"; : > "$LIB/workshop/940000003/scene.pkg"
 mkdir -p "$LIB/workshop/940000004"   # a preset of the empty scene (Wallpaper Engine's format): whole itself, its base not
 printf '{"dependency":"940000001","preset":{"rate":100},"preview":"preview.jpg","tags":["Unspecified"],"title":"preset of empty","visibility":"public"}' > "$LIB/workshop/940000004/project.json"
-printf '{"940000001":{"title":"empty scene","isScene":true,"workshopId":"940000001"},"940000002":{"title":"empty video","workshopId":"940000002"}}' > "$LIB/local/index.json"
-jq -c '. + {"940000003":{"title":"empty copy","isScene":true,"workshopId":"940000003"},"940000004":{"title":"preset of empty","workshopId":"940000004"}}' "$LIB/workshop/index.json" > "$T/wsidx" && mv "$T/wsidx" "$LIB/workshop/index.json"
+printf '{"940000001":{"title":"empty scene","isScene":true,"workshopId":"940000001"},"940000002":{"title":"empty video","workshopId":"940000002"},"940000005":{"title":"refetched scene","isScene":true,"workshopId":"940000005"},"940000006":{"title":"whole scene","isScene":true,"workshopId":"940000006"}}' > "$LIB/local/index.json"
+jq -c '. + {"940000003":{"title":"empty copy","isScene":true,"workshopId":"940000003"},"940000004":{"title":"preset of empty","workshopId":"940000004"},"940000007":{"title":"preset of refetched","workshopId":"940000007"}}' "$LIB/workshop/index.json" > "$T/wsidx" && mv "$T/wsidx" "$LIB/workshop/index.json"
 FAKECC=${CC:-$(command -v cc || command -v gcc || true)}
 if [ -n "$FAKECC" ] && "$FAKECC" -shared -fPIC -O1 -o "$T/steamclient.so" "$ROOT/scripts/test-fixtures/fake_steamclient.c"; then
   : > "$WE/fail-init"
@@ -152,6 +163,8 @@ EOF
 
 LOG=$T/backend.log
 rm -f "$XDG_CONFIG_HOME/liascape/serve.port"
+# the item folders' watcher (Web/FolderWatch.cs): a short debounce and stable time, so § files changed hears a change soon
+export LIASCAPE_WATCH_DEBOUNCE_MS=300 LIASCAPE_WATCH_STABLE_MS=600
 (cd /tmp && exec "$DOTNET" "$DLL" serve > "$LOG" 2>&1) & BP=$!
 for _ in $(seq 1 300); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; kill -0 $BP 2>/dev/null || break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { bad "backend didn't start"; tail -15 "$LOG"; exit 1; }
@@ -498,6 +511,35 @@ if [ -n "${LIASCAPE_STEAM_CLIENT_LIB:-}" ]; then
 else
   echo "SKIP  redownload through the Steam app — no C compiler for the fake steamclient.so"
 fi
+echo "== files changed: Steam rewrites a Workshop item's folder in place"
+RS=$(item "refetched scene" | jq -r .videoPath); WS=$(item "whole scene" | jq -r .videoPath)
+RV0=$(item "refetched scene" | jq -r .filesVersion); WV0=$(item "whole scene" | jq -r .filesVersion)
+check "the empty one lists as download incomplete, both with a files version" \
+  "$(item "refetched scene" | jq -c .downloadIncomplete) $([ ${#RV0} -ge 8 ] && [ ${#WV0} -ge 8 ] && echo yes)" "true yes"
+PR=$(item "preset of refetched" | jq -r .videoPath)
+check "…its preset greyed with its base's reason" "$(item "preset of refetched" | jq -c .presetReason)" '"Its base scene'"'"'s download is incomplete"'
+WGIF=$WE/940000006/preview.gif; WQ=$(jq -rn --arg u "$WGIF" '$u | @uri')
+api -o "$T/still0.jpg" "$U/still?u=$WQ&w=64"
+# Steam's download lands: the empty files whole, at the same paths
+printf '{"type":"scene","file":"scene.json","title":"refetched scene"}' > "$WE/940000005/project.json"
+head -c 16 /dev/zero > "$WE/940000005/scene.pkg"; cp "$WGIF" "$WE/940000005/preview.gif"
+# …and the whole one's preview another picture, at the same path
+ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=blue:s=48x48:rate=4:duration=1" "$WGIF"
+evt() { jq -c --arg p "$1" 'select(.type == "library-item-changed" and .payload.path == $p) | .payload' "$T/events.jsonl" 2>/dev/null | tail -1; }
+got=""; for _ in $(seq 1 100); do got=$(evt "$RS"); [ -n "$got" ] && [ -n "$(evt "$WS")" ] && [ -n "$(evt "$PR")" ] && break; sleep 0.1; done
+RV1=$(item "refetched scene" | jq -r .filesVersion); WV1=$(item "whole scene" | jq -r .filesVersion)
+check "the made-whole one: /library says whole, a new files version" "$(item "refetched scene" | jq -c .downloadIncomplete) $([ "$RV1" != "$RV0" ] && echo new)" "false new"
+check "…every page told without a library read: library-item-changed {downloadIncomplete:false, filesVersion}" \
+  "$(jq -c '[.downloadIncomplete, .filesVersion]' <<< "${got:-null}")" "[false,\"$RV1\"]"
+check "the rewritten preview: a new files version, every page told that alone" \
+  "$([ "$WV1" != "$WV0" ] && echo new) $(evt "$WS" | jq -c 'del(.path)')" "new {\"filesVersion\":\"$WV1\"}"
+check "the preset of the made-whole one: /library and every page say it plays" \
+  "$(item "preset of refetched" | jq -c .presetReason) $(evt "$PR" | jq -c 'del(.path)')" 'null {"presetReason":null}'
+api -o "$T/still1.jpg" -w '%{http_code}' "$U/still?u=$WQ&w=64&fv=$WV1" > "$T/code"
+api -o "$T/still2.jpg" "$U/still?u=$WQ&w=64"
+check "/still with fv: answered as without it, the new picture" \
+  "$(cat "$T/code") $(cmp -s "$T/still1.jpg" "$T/still2.jpg" && echo same) $(cmp -s "$T/still0.jpg" "$T/still1.jpg" || echo changed)" "200 same changed"
+
 kill "$FP" 2>/dev/null
 stopbe
 

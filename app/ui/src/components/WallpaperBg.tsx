@@ -28,7 +28,8 @@ export function WallpaperBg() {
   const [decor, setDecor] = useState<string | null>(null);
   if (!lastPlayed && vids.length && (decor == null || !vids.includes(decor))) setDecor(vids[Math.floor(seed * vids.length)]);
   const bgPath = playingVideo ?? lastPlayed ?? decor;
-  const bgVideo = bgPath ? media(bgPath) : null;
+  const bgFv = useMemo(() => (bgPath ? libraryItems.find((i) => i.videoPath === bgPath)?.filesVersion : null), [libraryItems, bgPath]);
+  const bgVideo = bgPath ? media(bgPath, bgFv) : null;
   const fit = videoScale === "fill" ? "cover" : "contain";
 
   const ref = useRef<HTMLVideoElement>(null);

@@ -30,7 +30,11 @@ export const withToken = (url: string) => (TOKEN ? `${url}${url.includes("?") ? 
 // route remote thumbs/gifs through the proxy (UA + Referer + CORS); local files via /media
 export const img = (u: string, referer?: string) =>
   withToken(`${MEDIA}/img?u=${encodeURIComponent(u)}${referer ? `&r=${encodeURIComponent(referer)}` : ""}`);
-export const media = (path: string) => withToken(`${MEDIA}/media?path=${encodeURIComponent(path)}`);
+// API: `fv` — a library item's filesVersion (LibraryService.FilesVersionOf: its files' size + write time). A file rewritten at
+// the same path (Steam downloading it again, a Redownload) gets a new URL, so the window's image cache never keeps the old
+// picture; the backend ignores it (its own caches key on the file's write time). Guard: --probe probe-sidebar.js lib:thumbFollows
+const fvq = (fv?: string | null) => (fv ? `&fv=${encodeURIComponent(fv)}` : "");
+export const media = (path: string, fv?: string | null) => withToken(`${MEDIA}/media?path=${encodeURIComponent(path)}${fvq(fv)}`);
 // API: the preview clips of a local video (/clip, the backend's Web/ClipStore.cs): what a card plays unhovered ("Not hovered")
 // (components/clipSource.ts). clipInfo names the clip to play now for a box of w × h device pixels at a quality (`v`, an
 // immutable file), the quality it was made at (`q`) and whether a better one is being made (`pending`: ask again); clipFile is
@@ -38,8 +42,8 @@ export const media = (path: string) => withToken(`${MEDIA}/media?path=${encodeUR
 export type ClipQuality = "low" | "mid" | "high";
 export type ClipInfo = { v: string | null; full: boolean; pending: boolean; q?: ClipQuality | null };
 // `exact`: a clip of exactly that quality, a short sample when the stored clip is another (Settings' card preview)
-export async function clipInfo(path: string, w: number, h: number, q: ClipQuality, exact = false): Promise<ClipInfo> {
-  const r = await fetch(withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&w=${w}&h=${h}&q=${q}&info=1${exact ? "&exact=1" : ""}`));
+export async function clipInfo(path: string, w: number, h: number, q: ClipQuality, exact = false, fv?: string | null): Promise<ClipInfo> {
+  const r = await fetch(withToken(`${MEDIA}/clip?path=${encodeURIComponent(path)}&w=${w}&h=${h}&q=${q}&info=1${exact ? "&exact=1" : ""}${fvq(fv)}`));
   if (!r.ok) throw new Error(`/clip → ${r.status}`);
   return r.json();
 }
@@ -71,8 +75,8 @@ export const clipSweepHold = (hold: boolean) =>
 // local /media) instead of the live /img proxy which flashes black at the gif loop seam.
 // gif (remote OR local) → /anim, which trims the leading fade-from-black + serves seekable so it loops
 // without a black seam. Other local formats (animated webp) loop fine raw → /media.
-export const anim = (u: string) =>
-  /^https?:/i.test(u) || /\.gif$/i.test(u) ? withToken(`${MEDIA}/anim?u=${encodeURIComponent(u)}`) : media(u);
+export const anim = (u: string, fv?: string | null) =>
+  /^https?:/i.test(u) || /\.gif$/i.test(u) ? withToken(`${MEDIA}/anim?u=${encodeURIComponent(u)}${fvq(fv)}`) : media(u, fv);
 // static thumbnail for an animated preview: a non-black/white extracted frame (so a gif not playing
 // doesn't show the gif's black frame-0, AND so a gif used as a static thumbnail doesn't self-animate).
 // Remote URLs and local gif/webp → /still (ffmpeg extract); plain local images → /media as-is.
@@ -80,9 +84,9 @@ export const anim = (u: string) =>
 // plain jpgs (WE previews are ~1024–1388px) decode down to the card's px → far less texture memory.
 // A NATIVE request (enlarged modal, no w) only needs /still for gif/webp/remote (frame extraction);
 // plain local images pass straight to /media uncropped + un-re-encoded (crisp, no quality loss).
-export const still = (u: string, w?: number) => {
-  if (w) return withToken(`${MEDIA}/still?u=${encodeURIComponent(u)}&w=${w}`);
-  return /^https?:/i.test(u) || /\.(gif|webp)$/i.test(u) ? withToken(`${MEDIA}/still?u=${encodeURIComponent(u)}`) : media(u);
+export const still = (u: string, w?: number, fv?: string | null) => {
+  if (w) return withToken(`${MEDIA}/still?u=${encodeURIComponent(u)}&w=${w}${fvq(fv)}`);
+  return /^https?:/i.test(u) || /\.(gif|webp)$/i.test(u) ? withToken(`${MEDIA}/still?u=${encodeURIComponent(u)}${fvq(fv)}`) : media(u, fv);
 };
 // card thumbnails decode to this width (never upscales — min(w,iw) caps at the source). Generous
 // enough for Large cards at hidpi; previews are usually ≤640px so most are served at native size.
@@ -247,6 +251,9 @@ export interface LibraryItem {
   // API: a Workshop item an interrupted Steam download left empty (LibraryService.DownloadIncomplete): it never plays, the card
   // says "Download incomplete", the sidebar offers Redownload (POST /library/redownload)
   downloadIncomplete?: boolean;
+  // API: the stamp of its picture and media files (LibraryService.FilesVersionOf): its media URLs carry it (`fv`), so a file
+  // rewritten in place shows its new picture; a library-item-changed brings the new one
+  filesVersion?: string | null;
 }
 // a long background operation of the library (Web/LibraryOps.cs): `clips` = the preview clips' queue: following "Video
 // preview quality" (phase low | mid | high) or the cards' own first clips (make), `facts` = Steam's tags (steam), trailer

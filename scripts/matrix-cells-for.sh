@@ -67,6 +67,9 @@ for f in $FILES; do
     # folder import and watched folders: their own script + probe (the matrix imports single files through /library/import)
     src/backend/Helpers/FolderScanner.cs|src/backend/Web/FolderImportOps.cs|src/backend/Web/FolderWatch.cs|src/backend/Models/WatchedFolder.cs|scripts/test-folder-import.sh)
       echo "  $f → nothing in the matrix (bash scripts/test-folder-import.sh + --probe probe-import.js)" >&2 ;;
+    # a Workshop item's files changed in place (its own watcher pass on FolderWatch's watchers)
+    src/backend/Web/ItemFilesWatch.cs)
+      echo "  $f → nothing in the matrix (bash scripts/test-item-actions.sh § files changed + --probe probe-sidebar.js --only lib:thumbFollows)" >&2 ;;
     app/ui/src/components/ImportDialog.tsx|app/ui/src/components/ImportButton.tsx|app/ui/src/components/importPick.ts)
       echo "  $f → nothing in the matrix (--probe probe-import.js; the top bar's widths: --probe probe-layout.js resize:)" >&2 ;;
     # an import from a link: its own script section, scraper-selftest's link cases and the probe's import:link: cells

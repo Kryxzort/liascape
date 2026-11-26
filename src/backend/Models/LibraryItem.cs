@@ -65,4 +65,7 @@ public class LibraryItem
     // A Workshop item Steam left unfinished (LibraryService.DownloadIncomplete: its project.json empty or unreadable, its main
     // file 0 bytes): it never plays, the card says "Download incomplete" and the sidebar offers Redownload (Web/RedownloadOps.cs).
     public bool DownloadIncomplete { get; init; }
+    // the stamp of its picture and media files (LibraryService.FilesVersionOf): its media URLs carry it, so a file rewritten in
+    // place loads again
+    public string? FilesVersion { get; init; }
 }

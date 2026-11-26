@@ -236,12 +236,13 @@ export function LibrarySide({
   }, [dangerKind, motion]);
 
   const stillSrc = item.thumbnailPath || item.animatedThumbnailPath;
-  const baseSrc = stillSrc ? still(stillSrc, CARD_STILL_W) : "";
-  const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath) : stillSrc ? still(stillSrc) : null;
+  const fv = item.filesVersion;
+  const baseSrc = stillSrc ? still(stillSrc, CARD_STILL_W, fv) : "";
+  const fullSrc = item.thumbnailPath && !/\.(gif|webp)$/i.test(item.thumbnailPath) ? media(item.thumbnailPath, fv) : stillSrc ? still(stillSrc, undefined, fv) : null;
   const anim = item.animatedThumbnailPath;
-  const gifSrc = anim && !VIDEO_RE.test(anim) ? animUrl(anim) : null;
+  const gifSrc = anim && !VIDEO_RE.test(anim) ? animUrl(anim, fv) : null;
   // the preview switch's "Video": the item's own video file (a scene has none); else a video preview the source shipped
-  const vidSrc = item.isScene ? null : VIDEO_RE.test(p) ? media(p) : anim && VIDEO_RE.test(anim) ? media(anim) : null;
+  const vidSrc = item.isScene ? null : VIDEO_RE.test(p) ? media(p, fv) : anim && VIDEO_RE.test(anim) ? media(anim, fv) : null;
   // the files behind those layers, for "open in your default app": the backend opens a video or a picture, checked by name
   // and content (.claude/rules/backend/api.md § Security); the Picture is the item's still (else its animated preview)
   const local = (f: string | null | undefined) => (f && f.startsWith("/") ? f : null);

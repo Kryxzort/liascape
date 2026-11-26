@@ -657,12 +657,15 @@ public static class LibraryService
         var age = m.AgeRating ?? WorkshopTags.AgeOf(steamTags);
         var proj = steamTags == null || age == null ? ProjectFactsOf(folder) : default;
         var (tags, resolution) = WithFrameSize(steamTags ?? proj.Tags, m);
+        var thumbPath = FindThumb(folder, key);
+        var animPath = FindAnimated(folder, key);
         return new LibraryItem
         {
             Title = m.Title ?? key,
             VideoPath = media,
-            ThumbnailPath = FindThumb(folder, key),
-            AnimatedThumbnailPath = FindAnimated(folder, key),
+            ThumbnailPath = thumbPath,
+            AnimatedThumbnailPath = animPath,
+            FilesVersion = FilesVersionOf(thumbPath, animPath, media),
             SourceId = m.SourceUrl ?? m.WorkshopId ?? workshopId,
             IsScene = isScene || m.IsScene,
             WorkshopId = m.WorkshopId ?? workshopId,
@@ -732,6 +735,23 @@ public static class LibraryService
         if (string.IsNullOrEmpty(sceneDir)) return null;
         var key = Path.GetFileName(sceneDir.TrimEnd('/'));
         return FindThumb(sceneDir, key) ?? FindAnimated(sceneDir, key);
+    }
+
+    // The stamp of the files an item's card and sidebar load (its pictures and its own file: size + write time, a scene's folder
+    // skipped), which the UI puts in their media URLs (`fv`): a file rewritten at the same path (Steam re-downloading it, a
+    // Redownload) gets a new URL, so the window's image cache never keeps showing the old picture. The backend's own caches
+    // key on the file's write time already (ServerHost.LocalHash, ClipStore); it ignores `fv`.
+    // Guard: --probe probe-sidebar.js lib:thumbFollows, scripts/test-item-actions.sh § files changed
+    public static string FilesVersionOf(params string?[] files)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var f in files)
+        {
+            if (string.IsNullOrEmpty(f)) { sb.Append('-'); continue; }
+            try { var fi = new FileInfo(f); sb.Append(fi.Exists ? $"{fi.LastWriteTimeUtc.Ticks}.{fi.Length}" : "x"); } catch { sb.Append('x'); }
+            sb.Append('|');
+        }
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString())))[..10].ToLowerInvariant();
     }
 
     // thumbnail in an item folder: <key>.jpg (web/imported) or preview.* (workshop/local Steam folder)
