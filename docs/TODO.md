@@ -74,10 +74,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 130. [ ] `scripts/test-backend-stop.sh`'s systemd-unit case leaves a `/tmp/liascape-stop-*` folder per run that its own
        cleanup can't delete (`inaccessible/*` permission denied); make the cleanup restore permissions first, and
        clear the ones already left.
-132. [ ] (owner) Speeding up very heavy videos lags (e.g. a 3840×2160 120 fps H.264 level 6.0 file at 110 Mbps: at 2×
-       it asks NVDEC for 240 4K frames/s). Find whether any of it is ours (the render worker, the clock, mpv options)
-       versus the decoder's limit; then drop frames evenly at high speeds instead of stuttering (mpv decoder-side
-       frame skipping), and measure before / after on a synthetic file of the same shape.
 133. [ ] (owner) Bring Electron with Liascape outside Nix, the way Discord / VS Code / Slack ship their own copy: when no
        `electron45` / `electron` is on PATH and `LIASCAPE_ELECTRON` is unset, `install.sh` installs the Electron 45 that
        npm already fetches for `app/shell` into Liascape's own folder and the launcher uses it. NixOS keeps the

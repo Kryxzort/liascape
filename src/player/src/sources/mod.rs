@@ -18,6 +18,7 @@
 //! `docs/player/modules/sources.md`.
 
 pub mod color;
+pub mod frame_skip;
 pub mod host;
 pub mod mpv;
 pub mod reaper;

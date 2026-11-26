@@ -226,6 +226,11 @@ pub enum ClipSpec {
     /// `ultrafast` CRF 23 instead of the near-lossless default: a 4K60 clip stays small and
     /// quick to make.
     TestSrc { w: u32, h: u32, fps: u32, secs: u32 },
+    /// [`ClipSpec::TestSrc`] in a fixed `P B b B` GOP pattern (x264, 3 B-frames, no adaptive
+    /// placement, B-pyramid: the middle B is a reference): every second frame is a
+    /// non-reference one, evenly spaced — the frames `vd-lavc-skipframe=nonref` skips
+    /// (`tests/api.rs::a_fast_speed_the_decoder_cant_sustain_skips_frames_evenly`).
+    BFrames { w: u32, h: u32, fps: u32, secs: u32 },
 }
 
 /// [`ClipSpec::Flash`]'s frame index for a decoded pixel, if it is one: grey (channels within
@@ -516,6 +521,36 @@ pub fn ensure_clip(name: &str, spec: ClipSpec) -> std::path::PathBuf {
                 &frames.to_string(),
             ]);
             push(&video_codec);
+        }
+        ClipSpec::BFrames { w, h, fps, secs } => {
+            push(&[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("testsrc2=s={w}x{h}:r={fps}:d={secs}"),
+                "-t",
+                &secs.to_string(),
+                "-vf",
+                TO_YUV,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-g",
+                &(2 * fps).to_string(),
+                "-x264-params",
+                "bframes=3:b-adapt=0:b-pyramid=normal:scenecut=0",
+                "-colorspace",
+                "bt709",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-color_range",
+                "tv",
+            ]);
         }
         ClipSpec::TestSrc { w, h, fps, secs } => {
             push(&[

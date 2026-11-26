@@ -92,6 +92,9 @@ const SLOW_JOB_MS: f64 = 100.0;
 /// - `panic` — panic at the first render (a bug or an allocation `expect` on `lia-render`): the
 ///   player must fail like a lost compositor, not freeze (`tests/api.rs::
 ///   render_worker_death_fails_the_player`);
+/// - `slow-render` — sleep [`SLOW_RENDER`] after every render, so no source renders faster than
+///   ~80 frames/s: mpv's VO falls behind a fast `speed` the way it does behind a saturated
+///   decoder (`tests/api.rs::a_fast_speed_the_decoder_cant_sustain_skips_frames_evenly`);
 /// - `slow-idle` — a 10 s idle backstop ([`SLOW_IDLE`]) in place of [`IDLE_POLL`], so a render that
 ///   only the backstop would start can't pass for a prompt one (`tests/api.rs::
 ///   a_switchs_b_readies_as_soon_as_mpv_has_its_first_frame`).
@@ -106,10 +109,14 @@ struct Faults {
     no_context: bool,
     panic: bool,
     slow_idle: bool,
+    slow_render: bool,
 }
 
 /// [`Faults`]' `slow-flush` / `publish-early` delay.
 const SLOW_FLUSH: Duration = Duration::from_millis(30);
+
+/// [`Faults`]' `slow-render` delay after each render.
+const SLOW_RENDER: Duration = Duration::from_millis(12);
 
 /// [`Faults`]' `slow-idle` backstop, in place of [`IDLE_POLL`].
 const SLOW_IDLE: Duration = Duration::from_secs(10);
@@ -126,8 +133,16 @@ fn faults() -> Faults {
             no_context: has("no-context"),
             panic: has("panic"),
             slow_idle: has("slow-idle"),
+            slow_render: has("slow-render"),
         };
-        if f.slow_flush || f.no_fence || f.publish_early || f.no_context || f.panic || f.slow_idle {
+        if f.slow_flush
+            || f.no_fence
+            || f.publish_early
+            || f.no_context
+            || f.panic
+            || f.slow_idle
+            || f.slow_render
+        {
             log::event(
                 "render",
                 Level::Warn,
@@ -135,7 +150,8 @@ fn faults() -> Faults {
                 None,
                 json!({ "slow_flush": f.slow_flush, "no_fence": f.no_fence,
                         "publish_early": f.publish_early, "no_context": f.no_context,
-                        "panic": f.panic, "slow_idle": f.slow_idle }),
+                        "panic": f.panic, "slow_idle": f.slow_idle,
+                        "slow_render": f.slow_render }),
             );
         }
         f
@@ -1167,6 +1183,9 @@ impl Slot {
         // FLIP_Y = 0 — image top at texture row 0, like the loop renderer.
         let res = unsafe { render.render(fbo, size.0, size.1, glow::RGBA8, false) };
         reset_gl(gl);
+        if faults().slow_render {
+            std::thread::sleep(SLOW_RENDER);
+        }
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         match res {
             Ok(()) if early => {

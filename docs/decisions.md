@@ -303,6 +303,12 @@ performance, so React won for framer-motion's ceiling.
 
 ## Player (`liascape-player`)
 
+### Skip only non-reference frames at a fast speed, only once mpv falls behind — 2026-11-26
+A video too heavy for its decoder at `speed` > 1 sets `vd-lavc-skipframe=nonref` (`sources/frame_skip.rs`). Measured
+on a 4K120 ~105 Mbps H.264 clip at 2×: `framedrop=decoder+vo` gave 42 uneven frames/s; `framedrop=no` 190 frames/s
+but at 1.58× and drifting from the audio; `bidir` skips referenced B-frames too, so a P-frame decoded from one
+breaks. Skipping by a speed or frame-rate threshold alone would halve fast clips the decoder handles.
+
 ### Make liascape-player the only engine, no fallback — 2026-11-22
 Owner: "even with issues, it's better than the previous engine". A missing player binary is an error with its reason
 (`/apply`, `/player-engine`, the health summary) and plays once it appears, never a fall back to legacy; a regression

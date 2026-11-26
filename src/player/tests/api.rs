@@ -6144,6 +6144,189 @@ fn bench_render_worker_ab() {
     }
 }
 
+/// A measurement (not a check — `LIASCAPE_BENCH_CLIP=<video> cargo test --release --test api --
+/// --ignored bench_heavy_video_speed --nocapture`; skipped without the clip): a video too heavy for
+/// the hardware decoder at high speeds (e.g. 3840×2160@120 H.264 at ~100 Mbps) on one
+/// `LIASCAPE_BENCH_OUTPUT` output (default 1920x1080@144), `--redraw-policy content`, at each
+/// speed of `LIASCAPE_BENCH_SPEEDS` (default 1,1.5,2,3, up then down). Per speed, after 2 s of
+/// settling, one `BENCH {json}` line over 4 s: the speed mpv really plays at (`time_pos` per wall
+/// second), frames the worker rendered per second, mpv's VO and decoder drops per second, and
+/// the `frames` probe's content presents (`fps`, `p95_ms`, `max_ms`, per 2 s window).
+#[test]
+#[ignore]
+fn bench_heavy_video_speed() {
+    let Ok(clip) = std::env::var("LIASCAPE_BENCH_CLIP") else {
+        println!("SKIP: set LIASCAPE_BENCH_CLIP=<video> to run");
+        return;
+    };
+    let output =
+        std::env::var("LIASCAPE_BENCH_OUTPUT").unwrap_or_else(|_| "1920x1080@144".to_string());
+    let speeds: Vec<f64> = std::env::var("LIASCAPE_BENCH_SPEEDS")
+        .unwrap_or_else(|_| "1,1.5,2,3,2,1.5,1".to_string())
+        .split(',')
+        .filter_map(|v| v.trim().parse().ok())
+        .collect();
+    let Some(srv) = real_serve(&["--outputs", &output, "--redraw-policy", "content"]) else {
+        return;
+    };
+    let mut c = srv.client();
+    let a = create_src(&mut c, json!({"path": clip, "loop": true, "hwdec": "auto"}));
+    show_all(&mut c, &a);
+    let t = Instant::now();
+    while f64_of(&mut c, &format!("{a}.time_pos")).unwrap_or(0.0) < 0.5 {
+        assert!(
+            t.elapsed() < Duration::from_secs(15),
+            "never played: {}",
+            c.ok("probe", json!({"name": "sources"}))
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let speed_path = format!("{a}.speed");
+    let sample = |c: &mut Client| {
+        let p = source_probe(c, &a);
+        let n = |v: &Value| v.as_f64().unwrap_or(0.0);
+        (
+            Instant::now(),
+            f64_of(c, &format!("{a}.time_pos")).unwrap_or(0.0),
+            n(&p["render"]["renders"]),
+            n(&p["mpv_frame_drops"]["vo"]),
+            n(&p["mpv_frame_drops"]["decoder"]),
+            p,
+        )
+    };
+    for speed in speeds {
+        c.ok("set", json!({"path": speed_path, "value": speed}));
+        std::thread::sleep(Duration::from_secs(2));
+        let _ = frames_all(&mut c);
+        let (t0, pos0, r0, vo0, dec0, _) = sample(&mut c);
+        let mut windows = Vec::new();
+        for _ in 0..2 {
+            std::thread::sleep(Duration::from_secs(2));
+            windows.push(frames_all(&mut c));
+        }
+        let (t1, pos1, r1, vo1, dec1, p) = sample(&mut c);
+        let secs = (t1 - t0).as_secs_f64();
+        // A loop wrap inside the window: count the clip's length back in.
+        let dur = f64_of(&mut c, &format!("{a}.duration")).unwrap_or(0.0);
+        let dpos = if pos1 < pos0 { pos1 + dur - pos0 } else { pos1 - pos0 };
+        println!(
+            "BENCH {}",
+            json!({"speed": speed, "played_speed": dpos / secs,
+                   "rendered_fps": (r1 - r0) / secs,
+                   "vo_drops_per_s": (vo1 - vo0) / secs,
+                   "decoder_drops_per_s": (dec1 - dec0) / secs,
+                   "estimated_vf_fps": p["mpv_frame_drops"]["estimated_vf_fps"],
+                   "skipframe": p["mpv_frame_drops"]["skipframe"],
+                   "frame_skip": p["frame_skip"],
+                   "hwdec_current": p["mpv_hwdec_current"],
+                   "fps": windows.iter().map(|w| w["fps"].clone()).collect::<Vec<_>>(),
+                   "p95_ms": windows.iter().map(|w| w["p95_ms"].clone()).collect::<Vec<_>>(),
+                   "max_ms": windows.iter().map(|w| w["max_ms"].clone()).collect::<Vec<_>>()})
+        );
+    }
+}
+
+/// `docs/player/modules/sources.md` § Fast speeds: a video whose `speed` asks for more frames
+/// than the source can take skips its non-reference frames in the decoder — evenly paced at the
+/// asked speed, mpv's VO no longer dropping — and plays every frame again when `speed` comes
+/// back down, live both ways. The limit is fault-injected (`slow-render`: ≤ ~80 frames/s through
+/// the render worker); the clip is 640×360@60 with every second frame a non-reference one
+/// (`ClipSpec::BFrames`), so 2× asks for 120 frames/s and skipping leaves 60. RED without the
+/// skipping (`MpvSource::frame_skip_tick` returning at once): mpv's VO drops ~40 frames/s at 2×.
+#[test]
+fn a_fast_speed_the_decoder_cant_sustain_skips_frames_evenly() {
+    let clip = s(&ensure_clip(
+        "bframes_360p60",
+        ClipSpec::BFrames {
+            w: 640,
+            h: 360,
+            fps: 60,
+            secs: 6,
+        },
+    ))
+    .to_string();
+    let Some(srv) = real_serve_env(
+        &[
+            "--render-worker",
+            "on",
+            "--outputs",
+            "640x360@240",
+            "--redraw-policy",
+            "content",
+        ],
+        &[("LIASCAPE_PLAYER_TEST_RENDER_WORKER_FAULT", Path::new("slow-render"))],
+    ) else {
+        return;
+    };
+    let mut c = srv.client();
+    let a = create_src(&mut c, json!({"path": clip, "loop": true, "hwdec": "no"}));
+    show_all(&mut c, &a);
+    wait_playing(&mut c, &a, 0.5);
+    let speed_path = format!("{a}.speed");
+    let skip_of = |c: &mut Client| {
+        let p = source_probe(c, &a);
+        (
+            p["frame_skip"]["on"] == json!(true),
+            p["mpv_frame_drops"]["skipframe"].as_str().unwrap_or("").to_string(),
+        )
+    };
+    // One measured window: (VO drops per second, the speed mpv really plays at, the frames
+    // probe's content presents).
+    let measure = |c: &mut Client| {
+        let drops = |c: &mut Client| source_probe(c, &a)["mpv_frame_drops"]["vo"].as_f64();
+        let pos = |c: &mut Client| f64_of(c, &format!("{a}.time_pos")).unwrap_or(0.0);
+        let _ = frames_all(c);
+        let (t0, d0, p0) = (Instant::now(), drops(c), pos(c));
+        std::thread::sleep(Duration::from_millis(1500));
+        let (d1, p1) = (drops(c), pos(c));
+        let secs = t0.elapsed().as_secs_f64();
+        let frames = frames_all(c);
+        let dur = f64_of(c, &format!("{a}.duration")).unwrap_or(0.0);
+        let dpos = if p1 < p0 { p1 + dur - p0 } else { p1 - p0 };
+        // A counter mpv restarted mid-window (a loop wrap) counts as no drops.
+        let dropped = match (d0, d1) {
+            (Some(d0), Some(d1)) if d1 >= d0 => d1 - d0,
+            _ => 0.0,
+        };
+        (dropped / secs, dpos / secs, frames)
+    };
+
+    // 1×: every frame, never skipping (normal speed is never touched).
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(skip_of(&mut c), (false, "default".to_string()), "1× skips");
+    for round in 0..2 {
+        // 2×: the source can't take 120 frames/s; within a few seconds it skips…
+        c.ok("set", json!({"path": speed_path, "value": 2.0}));
+        wait_for(Duration::from_secs(6), "skipping at 2×", || {
+            (skip_of(&mut c) == (true, "nonref".to_string())).then_some(())
+        });
+        std::thread::sleep(Duration::from_millis(1000));
+        // …and then plays at 2× with nothing dropped, evenly paced.
+        let (drops, played, frames) = measure(&mut c);
+        let (p50, p95) = (
+            frames["p50_ms"].as_f64().unwrap_or(f64::MAX),
+            frames["p95_ms"].as_f64().unwrap_or(f64::MAX),
+        );
+        assert!(
+            drops <= 3.0,
+            "round {round}: mpv still drops {drops:.1} frames/s at 2× while skipping"
+        );
+        assert!(
+            (1.8..=2.2).contains(&played),
+            "round {round}: plays at {played:.2}× instead of 2×"
+        );
+        assert!(
+            frames["fps"].as_f64().unwrap_or(0.0) >= 45.0 && p95 <= 1.6 * p50,
+            "round {round}: presents aren't even at 2× (≈ 60/s expected): {frames}"
+        );
+        // Back to 1×: every frame again, at once.
+        c.ok("set", json!({"path": speed_path, "value": 1.0}));
+        wait_for(Duration::from_secs(1), "no skipping at 1×", || {
+            (skip_of(&mut c) == (false, "default".to_string())).then_some(())
+        });
+    }
+}
+
 /// The render worker on a real compositor (opt-in like t20e — it draws on that compositor's outputs for
 /// ~10 s: `LIASCAPE_PLAYER_TEST_WAYLAND=<absolute wayland socket path>`; a nested headless sway is
 /// enough): with the render worker off and on, a video plays on every output (`render_mode`

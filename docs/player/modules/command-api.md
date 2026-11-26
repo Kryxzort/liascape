@@ -68,7 +68,8 @@ overrides to the item's own source id, layer settings (`fit`, `viewport`) to `la
 ## Probes worth knowing
 
 - `sources` — what each live source really runs (`mpv_volume_gain`, `mpv_pause`, `requests_in_flight`,
-  `mpv_hwdec`/`mpv_hwdec_current`, `mpv_audio_device`, step status, `effective_paused`), plus `dying`,
+  `mpv_hwdec`/`mpv_hwdec_current`, `mpv_audio_device`, `mpv_frame_drops`, `frame_skip`, step status,
+  `effective_paused`), plus `dying`,
   `reaper_pending`, `opening`, `open_pool`, `render_worker`. Its `mpv_*` fields are synchronous mpv reads, which is
   why they live only here.
 - `loop` — tick timing, `max_busy_ms`/`max_busy_at` (the longest synchronous stretch and what it was since

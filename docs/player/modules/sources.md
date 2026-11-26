@@ -1,7 +1,7 @@
 # Sources: mpv, SourceHost, render worker
 
 Covers `src/player/src/sources/` (`mod.rs`, `mpv.rs`, `host.rs`, `render_worker.rs`, `reaper.rs`, `color.rs`,
-`snapshot.rs`) and `src/player/src/mpv/`. Rules: `.claude/rules/player/sources-audio.md` (the Source contract,
+`snapshot.rs`, `frame_skip.rs`) and `src/player/src/mpv/`. Rules: `.claude/rules/player/sources-audio.md` (the Source contract,
 mpv options, async calls, hwdec, load fencing, onset, teardown, `SourceHost`, render worker). Scene sources:
 [scene-source.md](scene-source.md).
 
@@ -26,9 +26,8 @@ Why some fixed options are what they are:
 - Both trims are best-effort (`set_optional`) so an older libmpv still opens; skipped names log
   `mpv.options_skipped` once.
 
-**Async core calls.** `render.h` forbids the render thread from waiting on core functions: the core may be
-waiting for a frame to be rendered, so a synchronous `mpv_set_property` stalls until vo_libmpv's timeout
-(measured 4–72 ms per call). After open every apply is `mpv_set_property_async`/`mpv_command_async` (worst
+**Async core calls.** `render.h` forbids the render thread from waiting on core functions (the core may wait for
+a frame to be rendered): a synchronous `mpv_set_property` stalled 4–72 ms per call. After open every apply is `mpv_set_property_async`/`mpv_command_async` (worst
 measured 120–160 µs). Gains coalesce to one `volume-gain` request in flight, the latest sum sent on its reply —
 mpv's reply queue holds 1000 entries and a per-frame ramp would flood it.
 
@@ -67,12 +66,18 @@ Where the render context lives decides the mode:
 - **libcuda:** libmpv's nixpkgs RUNPATH lacks `/run/opengl-driver/lib`, so lane 0 dlopens `libcuda.so.1` by soname,
   else from that dir, before any interop — a loaded soname satisfies every later lookup.
 
-Measured (release, 1920×1080 headless, `hwdec: auto`, copy vs zero-copy): 4K60 process CPU 49 % → 7 % of a core,
-loop max busy steady 9.8 → 1.4 ms; 1080p30 7.8 → 3.2 %; first frame ~330 ms either way; the attach on its lane
-2 ms → 112 ms (91–155), which is why lanes exist. Each interop source costs ~60 MiB VRAM (its CUDA context). In
-copy mode, steady 1080p30 on two outputs: `no` 27.7 %, `nvdec-copy` 9.8 %, `vulkan-copy` 14.4 % of a core; first
-frame of a cold source `no` 319 ms, `nvdec-copy` 438, `vaapi-copy` 642, `vulkan-copy` 698 — hence `nvdec-copy` first.
-AMD/Intel `vaapi` zero-copy is unmeasured.
+Measured (release, headless, copy vs zero-copy): 4K60 CPU 49 % → 7 % of a core, loop max busy 9.8 → 1.4 ms;
+the attach on its lane 2 → 112 ms (why lanes exist); ~60 MiB VRAM per interop source (its CUDA context). Copy
+modes, 1080p30 on two outputs: `no` 27.7 %, `nvdec-copy` 9.8 %, `vulkan-copy` 14.4 % of a core; a cold first frame
+`no` 319 ms, `nvdec-copy` 438, `vaapi-copy` 642, `vulkan-copy` 698 — hence `nvdec-copy` first.
+AMD/Intel `vaapi` zero-copy: unmeasured.
+
+## Fast speeds
+
+A `speed` > 1 that outruns the decoder made mpv's VO drop nearly every frame as late: a 3840×2160@120 ~105 Mbps
+H.264 clip on NVDEC (~185 frames/s at most) showed 10–16 frames/s at 2× and 3×. `FrameSkip`
+(`sources/frame_skip.rs`, how it decides) then sets `vd-lavc-skipframe=nonref`: 121 even frames/s at 2×, 180 at
+3×. Why only `nonref`: `docs/decisions.md` § Skip only non-reference frames at a fast speed.
 
 ## Load fencing and events
 
@@ -80,16 +85,14 @@ Every `loadfile` is async; its reply carries the playlist entry id and START_FIL
 belong to, so events and observed props are attributed to a load and a superseded load's events are dropped.
 `Ready` needs the current load's PLAYBACK_RESTART and a frame rendered after its FILE_LOADED in either order:
 restart-first happens for paused clips and images, frame-first for most playing videos. `Position` comes from
-`time-pos`, rate-limited to 100 ms. mpv reports a `time-pos` only when it differs from the last one it sent, and
-the one sent between FILE_LOADED and the first PLAYBACK_RESTART is the start's seek target: when the frame the load
-lands on has that same time (a paused source at an exact frame, a clip restored on its last frame) no change
-follows, so that value is kept and adopted at the restart; otherwise `time_pos` stays unknown and reads as the
-graph's 0.0 (a snapshot then saves 0). On a looping file `time-pos` drops to 0 while the last frame is still shown;
+`time-pos`, rate-limited to 100 ms. mpv sends a `time-pos` only when it changed; the one sent between FILE_LOADED
+and the first PLAYBACK_RESTART is the start's seek target, and when the frame the load lands on has that time (a
+paused source at an exact frame, a clip restored on its last frame) none follows, so it is adopted at the restart. On a looping file `time-pos` drops to 0 while the last frame is still shown;
 frame 0 follows one frame later (33.9–34.3 ms at 30 fps) — the transition recipe anchors loop boundaries on it.
 
 **Dropped first frame.** vo_libmpv drops a frame the API user didn't render within 200 ms and stops reporting it.
-A playing source sends the next one; a paused source (a pending B), an image or a clip already at its end has no
-next frame, so if the loop was busy past 200 ms it never became Ready and the switch failed after 10 s.
+A paused source (a pending B), an image or a clip at its end has no next frame, so a loop busy past 200 ms left
+it never Ready.
 `refetch_lost_frame` seeks to the same position after `REFETCH_AFTER` (300 ms, backing off ×2 to 2.4 s) — a new
 PLAYBACK_RESTART, the same frame, no FILE_LOADED. Never for a playing source (it would restart a merely slow
 decode), never in stepped mode. `source.frame_refetched` logs it.

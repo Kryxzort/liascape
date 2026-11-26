@@ -83,6 +83,11 @@ Crate-wide rules (units, graph, composition, memory) are in `.claude/rules/playe
   copy/`no`); an attach that falls back to the loop sets `no` again. `vulkan`, `vdpau`, `amf` stay copy.
 - Lane 0 dlopens `libcuda.so.1` (soname, then `/run/opengl-driver/lib`) before any interop: libmpv's RUNPATH lacks
   that dir.
+- At `speed` > 1 skip only non-reference frames (`vd-lavc-skipframe=nonref`), and only once `FrameSkip`
+  (`src/player/src/sources/frame_skip.rs`) sees mpv's VO falling behind; never at ≤ 1×, never `bidir` or
+  `framedrop=decoder`; a new load judges afresh (`docs/decisions.md` § Skip only non-reference frames at a fast
+  speed, only once mpv falls behind). Guards unit tests in `frame_skip.rs`, `src/player/tests/api.rs`
+  `a_fast_speed_the_decoder_cant_sustain_skips_frames_evenly`.
 
 ## Load fencing and events
 - Only the current load counts: ignore a superseded load's FILE_LOADED, PLAYBACK_RESTART, END_FILE (errors

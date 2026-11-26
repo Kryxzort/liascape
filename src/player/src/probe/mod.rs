@@ -241,6 +241,19 @@ fn sources(rt: &mut Runtime, _: &Value) -> Result<Value, ApiError> {
             // the render context loaded a GL interop on the render worker: `hwdec_interop`).
             o.insert("mpv_hwdec".into(), json!(m.mpv_get_string("hwdec")));
             o.insert("hwdec_interop".into(), json!(m.hwdec_interop()));
+            // Frames mpv dropped (VO: decoded but never shown; decoder: never decoded) and the
+            // rate frames leave its filters — whether a fast `speed` outruns the decoder.
+            o.insert(
+                "mpv_frame_drops".into(),
+                json!({
+                    "vo": m.mpv_get_f64("frame-drop-count"),
+                    "decoder": m.mpv_get_f64("decoder-frame-drop-count"),
+                    "estimated_vf_fps": m.mpv_get_f64("estimated-vf-fps"),
+                    "skipframe": m.mpv_get_string("vd-lavc-skipframe"),
+                }),
+            );
+            // Decoder-side frame skipping at a fast speed (`sources::frame_skip`).
+            o.insert("frame_skip".into(), m.frame_skip_state());
             o.insert("requests_in_flight".into(), json!(m.requests_in_flight()));
             // The graph `af` mpv refused to build (it plays the fallback chain: no user filters).
             o.insert(

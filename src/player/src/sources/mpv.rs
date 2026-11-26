@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use glow::HasContext;
 use serde_json::{Map, Value};
 
+use super::frame_skip::{self, FrameSkip};
 use super::render_worker::{Attached, Frame, RenderWorker, SyncFence};
 use super::{Source, SourceEvent, bad_type, io_error, num, out_of_range, unsupported};
 use crate::gfx::{Fbo, Gfx, GlKeepAlive, Tex};
@@ -60,6 +61,10 @@ const OBS_AUDIO_PTS: u64 = 9;
 /// Does the *file* actually have an audio track mpv
 /// selected? See `MpvSource::has_audio`'s doc.
 const OBS_AUDIO_SELECTED: u64 = 10;
+/// mpv's VO drops (`frame-drop-count`) and the clip's frame rate (`container-fps`): what
+/// [`FrameSkip`] judges a fast `speed` by.
+const OBS_FRAME_DROPS: u64 = 11;
+const OBS_CONTAINER_FPS: u64 = 12;
 /// The longest a two-phase teardown waits for the core to go idle before freeing anyway.
 const TEARDOWN_MAX: Duration = Duration::from_millis(500);
 
@@ -372,6 +377,9 @@ enum ReqKind {
     Step,
     /// The teardown `stop` ([`Source::begin_teardown`]).
     Stop,
+    /// A `vd-lavc-skipframe` switch of our own ([`MpvSource::frame_skip_tick`]): no graph prop
+    /// to revert; a failure is logged.
+    Skip,
 }
 
 /// Where a stepped-mode frame request is ([`MpvSource::step_status`]).
@@ -701,6 +709,13 @@ pub struct MpvSource {
     /// flag. `fps_cap` maps to no `vf` on a still
     /// ([`MpvSource::want_vf`]).
     vf_still: bool,
+    /// Decoder-side frame skipping at a fast `speed` ([`FrameSkip`]), fed with mpv's
+    /// cumulative VO drops, the frames rendered (`loop_renders` here, the worker's count in
+    /// worker mode) and the clip's frame rate.
+    frame_skip: FrameSkip,
+    vo_drops: u64,
+    loop_renders: u64,
+    container_fps: Option<f64>,
     /// The `vf` last sent to mpv (`None` = none yet) — a push is skipped when unchanged.
     vf_sent: Option<String>,
 }
@@ -872,6 +887,8 @@ impl MpvSource {
             // confirmation is armed: it changes at the audio-buffer rate, and every
             // change wakes the loop.
             (OBS_AUDIO_SELECTED, "aid", Format::Str),
+            (OBS_FRAME_DROPS, "frame-drop-count", Format::I64),
+            (OBS_CONTAINER_FPS, "container-fps", Format::F64),
         ] {
             handle.observe(id, name, f).map_err(api_err)?;
         }
@@ -1054,6 +1071,10 @@ impl MpvSource {
             has_audio: None,
             vf_still: kind == "image",
             vf_sent: None,
+            frame_skip: FrameSkip::default(),
+            vo_drops: 0,
+            loop_renders: 0,
+            container_fps: None,
         };
         // The initial gain sum (0 dB unless opts say otherwise) is pushed explicitly so
         // mpv's volume-gain always mirrors `gains`, never its own default.
@@ -1391,6 +1412,11 @@ impl MpvSource {
         self.load_req = id;
         self.want_entry = None;
         self.path = path.to_string();
+        // The new file's decoder may keep up at this speed: judge it afresh.
+        self.container_fps = None;
+        if self.frame_skip.reset() {
+            self.send_skip(false);
+        }
         self.props
             .insert("path".into(), PropValue::Str(path.into()));
         self.file_loaded = false;
@@ -1415,6 +1441,73 @@ impl MpvSource {
             self.arm_audio_flowing();
         }
         Ok(())
+    }
+
+    /// Skip non-reference frames in the decoder while a fast `speed` asks for more frames than
+    /// it sustains ([`FrameSkip`], `docs/player/modules/sources.md` § Fast speeds). Real-clock
+    /// videos only: a stepped source never plays, a still has one frame. Guards unit tests in
+    /// `sources/frame_skip.rs`, `src/player/tests/api.rs`
+    /// `a_fast_speed_the_decoder_cant_sustain_skips_frames_evenly`.
+    fn frame_skip_tick(&mut self) {
+        if self.stepped || self.kind != "video" || self.teardown.is_some() || self.dead {
+            return;
+        }
+        let speed = self.props.get("speed").map_or(1.0, num);
+        let shown = self
+            .worker
+            .as_ref()
+            .map_or(self.loop_renders, |att| att.ex.lock().renders);
+        if let Some(on) = self.frame_skip.update(
+            Instant::now(),
+            speed,
+            self.vo_drops,
+            shown,
+            self.container_fps,
+        ) {
+            crate::log::event(
+                "mpv",
+                crate::log::Level::Info,
+                "source.frame_skip",
+                None,
+                serde_json::json!({ "on": on, "speed": speed,
+                                    "capacity_speed": self.frame_skip.capacity(),
+                                    "fps": self.container_fps, "path": self.path }),
+            );
+            self.send_skip(on);
+        }
+    }
+
+    fn send_skip(&mut self, on: bool) {
+        let v = if on {
+            frame_skip::SKIP
+        } else {
+            frame_skip::NO_SKIP
+        };
+        let id = self.req_id();
+        if self
+            .core()
+            .set_property_async(id, "vd-lavc-skipframe", v)
+            .is_ok()
+        {
+            self.inflight.insert(
+                id,
+                Request {
+                    what: format!("vd-lavc-skipframe={v}"),
+                    kind: ReqKind::Skip,
+                },
+            );
+        }
+    }
+
+    /// The `sources` probe's `frame_skip`: whether non-reference frames are skipped now and the
+    /// decoder's measured capacity (in `speed` units) that made it start.
+    pub fn frame_skip_state(&self) -> Value {
+        serde_json::json!({
+            "on": self.frame_skip.on(),
+            "capacity_speed": self.frame_skip.capacity(),
+            "container_fps": self.container_fps,
+            "vo_drops": self.vo_drops,
+        })
     }
 
     /// Stop waiting for `AudioFlowing` and stop observing `audio-pts`.
@@ -1643,6 +1736,14 @@ impl MpvSource {
                     }
                 }
             }
+            ReqKind::Skip if error < 0 => crate::log::event(
+                "mpv",
+                crate::log::Level::Warn,
+                "source.frame_skip_failed",
+                None,
+                serde_json::json!({ "what": req.what, "error": error_string(error) }),
+            ),
+            ReqKind::Skip => {}
             ReqKind::Prop { prop, prev } => {
                 let newest = self.prop_req.get(&prop) == Some(&id);
                 if newest {
@@ -1896,6 +1997,11 @@ impl MpvSource {
                     let _ = self.push_vf();
                 }
             }
+            (OBS_FRAME_DROPS, PropData::I64(n)) => self.vo_drops = n.max(0) as u64,
+            (OBS_CONTAINER_FPS, PropData::F64(f)) if self.is_current() => {
+                self.container_fps = Some(f)
+            }
+            (OBS_CONTAINER_FPS, PropData::None) if self.is_current() => self.container_fps = None,
             // `aid` (the *resolved* audio track selection — "manpage: the special
             // value `no` means no track is selected") always has a real textual value
             // ("auto" pre-resolution, then either a track number or `no`), unlike
@@ -2291,6 +2397,7 @@ impl Source for MpvSource {
         self.drain_wake();
         self.pump();
         self.refetch_lost_frame();
+        self.frame_skip_tick();
         // Rendering libmpv through any context but its own is UB (render.h): refuse.
         if !self.gl.is_for(gfx) {
             if !self.ctx_error_sent {
@@ -2343,6 +2450,7 @@ impl Source for MpvSource {
             // frame after the seek's reply is the target (`StepSeek::target_frame`).
             let new_frame =
                 self.step.as_ref().is_some_and(|st| st.replied) && !render.next_frame_is_redraw();
+            self.loop_renders += 1;
             if self.ready {
                 match render_into(gfx, render, &mut self.front, size) {
                     Ok(()) => {
