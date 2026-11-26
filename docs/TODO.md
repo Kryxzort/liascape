@@ -28,6 +28,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        play preset 2843309472 with its Volume up: its slot video should stay silent (the player plays a slot's video
        silent, assuming WE never plays a video texture's sound).
 
+143. [ ] The app icon shows square in Qt-drawn launchers (the owner's shell launcher): its rounding is a `<clipPath>`
+       (`app/ui/public/favicon.svg`, `app/icon/`), and Qt's SVG renderer (SVG Tiny 1.2) ignores clip paths, so the
+       rounded tile draws as a full square. Draw the tile's shape itself (a rounded `<rect>` / path, no clip needed
+       for the outline; the diagonal shadow clip likewise), and install hicolor PNGs (48–512) beside the SVG in the
+       flake, `scripts/install.sh`, the PKGBUILD and the AppImage. Guard: a check that renders the installed SVG with
+       Qt's renderer (or rsvg with clip paths ignored) and finds transparent corners.
+
 138. [ ] (owner) Right-click a card for Unsubscribe and Hide, and a "Hidden" filter. A Workshop card's right-click menu
        (Library and Browse; extend the menu cards already have, or add one in its look) offers Unsubscribe, through
        the download modes' order (signed out: the item's Steam page), and Hide; any card offers Hide. A hidden item
