@@ -1,4 +1,5 @@
 import { isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   X, RotateCcw, SlidersHorizontal, Repeat, VolumeX, Cpu, Palette, AlertTriangle,
   Layers, MonitorSmartphone, Download, Keyboard, Library as LibraryIcon, Wrench, Sparkles, Gauge, Volume2,
@@ -448,8 +449,16 @@ function StartupRows({ rootRef }: { rootRef: React.RefObject<HTMLDivElement | nu
   const snap = useRef<FlipSnap | null>(null);
   // where everything below stands just before a change that can add or take away the note (a user's tick, an answer)
   const before = useCallback(() => { snap.current = motion ? snapFlip(rootRef.current, AS_GLIDE) : null; }, [motion, rootRef]);
-  const read = useCallback(() => api.autostart().then((r) => { before(); setSt(r); }).catch(() => {}), [before]);
-  useEffect(() => { void read(); }, []); // eslint-disable-line
+  // PERF: an answer lands between frames, often while the page it arrived on is still being built (the first visit's
+  // read races the tab switch's commit), so its snapshot and the glide's measure would each force a layout from script.
+  // Both happen in the next frame instead: the snapshot reads the frame's own coming layout, and the commit and the
+  // glide's measure run in the same callback (flushSync), before that frame paints. Guard: probe-layout perf:tabs.
+  const answerFrame = useRef(0);
+  const read = useCallback(() => api.autostart().then((r) => {
+    cancelAnimationFrame(answerFrame.current);
+    answerFrame.current = requestAnimationFrame(() => { before(); flushSync(() => setSt(r)); });
+  }).catch(() => {}), [before]);
+  useEffect(() => { void read(); return () => cancelAnimationFrame(answerFrame.current); }, []); // eslint-disable-line
   // after a tick the backend has written or removed the entry (its save is debounced): read what it did
   const first = useRef(true);
   useEffect(() => {

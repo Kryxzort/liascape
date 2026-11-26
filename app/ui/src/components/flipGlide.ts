@@ -20,10 +20,15 @@ let tok: { e: string; ms: number } | null = null;
 function spring() {
   if (tok) return tok;
   const cs = getComputedStyle(document.documentElement);
-  const dur = cs.getPropertyValue("--spring-soft-dur").trim();
-  tok = { e: cs.getPropertyValue("--spring-soft").trim() || "ease-out", ms: (parseFloat(dur) || 0.5) * (dur.endsWith("ms") ? 1 : 1000) };
-  return tok;
+  const dur = cs.getPropertyValue("--spring-soft-dur").trim(), e = cs.getPropertyValue("--spring-soft").trim();
+  const t = { e: e || "ease-out", ms: (parseFloat(dur) || 0.5) * (dur.endsWith("ms") ? 1 : 1000) };
+  if (e) tok = t; // the stylesheet is in: the tokens are :root constants from here on
+  return t;
 }
+// PERF: the first read of the tokens is a computed-style read that lays out whatever is pending, so read them in the
+// app's first frame (where the frame lays out anyway), not in the first glide's render or effect (OrderList renders with
+// the spring while a page is being built: Settings' first visit forced a layout). Guard: probe-layout perf:tabs.
+if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => { spring(); });
 
 // the soft spring as a CSS timing (`--spring-soft`) and its length in ms: a glide that CSS runs (a sortable's transition)
 export const softSpringCss = () => spring();
