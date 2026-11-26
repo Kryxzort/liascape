@@ -1720,9 +1720,13 @@ app.whenReady().then(async () => {
         g = await sideGet(); const c2 = await cardBtn();
         if (J(g.off) !== J([false, false]) || g.why || c2?.off) v.push(`steamapp, signed out: ${J(g)}, card ${J(c2)}`);
         // live: a sign-out under an open sidebar — the page's words take the line's place, rising in (motion on) / only fading
-        const NOTE = `(() => { const n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return null;
-          return { hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e);
-            return [e.textContent, +(+cs.opacity).toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2)]; }) }; })()`;
+        // per hint: its words, its opacity as seen (the product up the tree), its translateY, and its box as drawn (motion-off.js's frame)
+        const NOTE = `(() => { const t = Math.round(performance.now()), n = document.querySelector("${SIDE} .side-cta-note"); if (!n) return { t, hs: [] };
+          return { t, hs: [...n.querySelectorAll("[data-side-get-hint]")].map((e) => { const cs = getComputedStyle(e), r = e.getBoundingClientRect();
+            let op = 1; for (let x = e; x && x.nodeType === 1; x = x.parentElement) op *= +getComputedStyle(x).opacity;
+            return [e.textContent, +op.toFixed(3), +new DOMMatrix(cs.transform).m42.toFixed(2), +r.x.toFixed(1), +r.y.toFixed(1), +r.width.toFixed(1), +r.height.toFixed(1)]; }) }; })()`;
+        // one hint's frames in motion-off.js's shape ([t, op, x, y, w, h], [t, null] while it isn't there)
+        const moFrames = (smp, words) => smp.filter((x) => x).map((x) => { const h = x.hs.find((y) => y[0] === words); return h ? [x.t, h[1], h[3], h[4], h[5], h[6]] : [x.t, null]; });
         for (const motion of [true, false]) {
           await setSettings({ workshopDownloadMode: "subscribe", morphs: motion });
           await browseWs(SIGNED_IN); await openSide(0); await sleep(300);
@@ -1730,12 +1734,15 @@ app.whenReady().then(async () => {
           const fr = frames("", NOTE, 700); await sleep(30);
           await ev("steam-status", SIGNED_OUT);
           if (motion) { await sleep(70); await shot("blocked-live"); }
-          const nw = (await fr).filter((x) => x).map((x) => x.hs.find((h) => h[0] === PAGE)).filter((x) => x);
+          const smp = await fr;
+          const nw = smp.filter((x) => x).map((x) => x.hs.find((h) => h[0] === PAGE)).filter((x) => x);
           const ops = nw.map((x) => x[1]), ys = nw.map((x) => x[2]);
           if (!nw.length) { v.push(`motion ${motion}: the page's words never showed after WS steam-status — proved nothing`); continue; }
-          if (!ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion ${motion}: the page's words popped in (opacity ${J(ops.slice(0, 10))})`);
+          if (motion && !ops.some((o) => o > 0.05 && o < 0.95)) v.push(`motion on: the page's words popped in (opacity ${J(ops.slice(0, 10))})`);
           if (motion && new Set(ys).size < 3) v.push(`motion on: the page's words didn't rise in (y ${J(ys.slice(0, 10))})`);
-          if (!motion && ys.some((y) => Math.abs(y) > 0.01)) v.push(`motion off: the page's words moved (y ${J(ys.slice(0, 10))})`);
+          // motion off: the shared judge — nothing moves or resizes, the new words fade in and the old ones out, briefly
+          if (!motion) v.push(...MO.judge("motion off: the page's words", moFrames(smp, PAGE), { appear: true }),
+            ...MO.judge("motion off: the sign-in's words", moFrames(smp, LOGIN), { leave: true }));
           g = await sideGet();
           if (J(g.off) !== J([false, false]) || g.why) v.push(`motion ${motion}: after WS steam-status (signed out) the buttons: ${J(g)}`);
         }
