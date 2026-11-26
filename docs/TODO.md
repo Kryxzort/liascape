@@ -113,10 +113,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          the item is in the library (in Browse too), then Comments. Today: tags sit loose in the Library but inside
          About in Browse, the Library has no About, Favourite pairs with Open on Steam in Browse but sits alone under
          Scene properties in the Library, the chips' order differs, Apply exists only in Browse.
-       - The Library's Unsubscribe tile reads washed out over a light live wallpaper (`bg-live`): every tile keeps
-         readable contrast on any wallpaper behind it (the probe checks contrast on a light and a dark background).
        Share one component (or one actions list) so the two can't drift again. Guard: probe cells that open the same item
        in both tabs and find the same actions, labels and behaviour; the design checklist for each control.
+
+13. [ ] (owner) "Text shadow" (Settings → Look & feel, `:root.text-shadow` in `index.css`) fits coloured text over a live
+       wallpaper too, and leaves the playlist bar's PLAYLIST label alone.
+       - Text in a state colour is excluded today (a black copy under it "reads as dirt"), so the red Unsubscribe tile
+         washes out over a light wallpaper. Give that text a shadow that suits it (a softer or tinted one, not the plain
+         black copy), at least for danger / warning text on tiles; judge it on a light and a dark wallpaper.
+       - `.playlist-bar-label` (`PlaylistBar.tsx`) joins the no-shadow list: its shadow looks wrong there.
+       Guard: probe cells reading the computed `text-shadow` of those elements with the setting on and off, and
+       screenshots over a light and a dark `bg-live` wallpaper.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
