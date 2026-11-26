@@ -133,6 +133,13 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        library (trash, unsubscribe, delete) and fall to the existing fallback (a library video), or dark when the library
        has none. Guard: a probe cell that plays an item, removes it, and finds the background no longer showing it.
 
+15. [ ] (owner) A card shows its type as a small icon, not a pill badge (`components/TypeBadge.tsx`): a 14–16 px glyph
+       in the card's corner with a soft shadow that reads on any picture: a cube for a scene, sliders for a preset
+       (its current icon), nothing for a video (the default). Hover gives "Scene" / "Preset" as a tooltip; the sidebar
+       still names the type in words. Every grid and card that shows the badge today (Library, Browse, the Settings
+       card preview). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
+       (icon present / absent, the tooltip, no pill), and screenshots over light and dark thumbnails.
+
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
       download in `prepare()` and an offline `build()`. It builds clean on Arch (`makechrootpkg -c`, `electron45-bin` and
