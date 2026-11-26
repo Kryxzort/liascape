@@ -27,6 +27,18 @@ the floor; a new element is designed to delight within the toggles and the frame
 - **Fit**: a new row or chip takes its container's spacing (never a `margin: 0` over the container's rhythm) and its siblings' fill and edge; the probe measures both with data that shows it (a tag row needs tags). Guard: probe-sidebar `look:sideRhythm`.
 - **Proof**: a probe cell covering motion on/off (per-frame samples that pass through in-between states), `no-glow` and `bg-live`, and mid-animation screenshots you LOOKED at. Procedure: the `ui-verify` skill.
 
+## Layout discipline (owner-approved, `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md`)
+- Decide visual details yourself, and write every visual decision beyond the brief as one report line ("added X, because Y").
+- One skeleton per concept: the Library's and Browse's item sidebars share one layout; a probe fails when their section
+  order differs (item 12's side-by-side cells).
+- Each area has one job: info pills = facts and tags, the action area = actions, rows = navigation.
+- Show a state on the control that changes it, never twice (no "Subscribed" card beside an Unsubscribe button).
+- Every addition names what it replaces (merges into or removes), or says in the report why it can't.
+- No hint text under buttons: a reason goes in the disabled control's tooltip or its right-click menu.
+- Icons only where they carry meaning; none on a row that is already fully clickable.
+- Filters live in the filter column, never as top-bar pills.
+- Every UI review compares Browse and Library screenshots side by side.
+
 ## Icon motion
 - Give every icon its role's motion, never a one-off: act (a verb plays its meaning once on hover — `app/ui/src/components/iconMotion.ts` RECIPES by lucide class), hold (trash lid / folder flap / X / crosshair open while hovered — index.css § icon motion), direction (one nudge; Play launches — out to the right, a fresh one springs in, one accent ring ripples off its button), disclosure (chevrons rotate), object (tilt while hovered — the default), status (glow only, never moves), progress (the only loops), toggle (the new state pops once on a user change, never on mount).
 - Start every one-shot from the icon's rest state (first keyframe = rest), even a "pop in": a first keyframe off rest jumps the moment the hover lands. Guard: probe-icons `icon:act:*` (starts at rest).

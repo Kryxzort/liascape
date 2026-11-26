@@ -41,12 +41,14 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          Puppet Warp, Video Texture), else a keyword search (an effect's or object's name); keep trying new items
          until one uses the feature. A feature with no scene is
          unverified, not done; each row marked pass / fail against WE with its evidence.
-       - The repo's own test scenes: about 10–15 small scenes, one per feature family (puppets + IK, particles, text
-         and clock, effects and blend modes, 3D models and lights, HDR, audio response, scripts, user properties,
-         video textures …), made in WE's own editor with our own images, saved with WE's captured frames as their
-         expected output; hermetic pixel tests against those frames. Made on Windows: the owner starts a session
-         there and a Claude session drives the editor. Write the per-family spec (what each scene must use, how
-         it is captured) before that session.
+       - The repo's own test scene (owner 2026-11-26: "we could make them toggles"): one big scene with a user-property
+         toggle per feature (puppets + IK, particles, text and clock, effects and blend modes, 3D models and lights, audio
+         response, scripts, video textures …), each feature in its own region; the harness captures each toggle alone,
+         all on, and the whole-frame features on / off. Small separate scenes only for what can't be toggled or affects
+         the whole frame (bloom / HDR, camera, colour grading, the clock). Made in WE's own editor with our own images,
+         saved with WE's captured frames as their expected output; hermetic pixel tests against those frames. Made on
+         Windows: the owner starts a session there and a Claude session drives the editor. Write the spec (each toggle,
+         its region, how it is captured) before that session.
        - Check LWE's logic per row against the decompiled WE; fix what differs, starting with puppets.
        - Sound a script starts: 2922240701 (every sound object `startsilent`, its radio started by a user property
          and by track clicks) against WE — the delay from the property to the first sample, track after track,
@@ -70,31 +72,31 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        requests to steamcommunity.com than now (`SteamGate`). Guard: the benchmark scenario's numbers before / after,
        and a probe cell per behaviour added.
 
-12. [ ] (owner) One sidebar for a Workshop item, the same in the Library and Browse — the owner-approved design in
-       `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` (its filter half is built; this is the sidebar half) (today they are separate
-       components that disagree: `LibrarySide.tsx` and `BrowseSide.tsx`).
-       - Not in the library: the actions are "Subscribe" and "Subscribe and apply" (in place of Download / Download and
-         apply), through the download modes' order; the one-off download stays in their right-click menu. The
-         subscription card below (`SubToggle`) goes: being offered Subscribe already says it isn't subscribed.
-       - In the library: the Library's red Unsubscribe tile with its right-click menu ("Unsubscribe without deleting",
-         "Delete and unsubscribe") and its mixed-selection wording, in both tabs.
-       - Both tabs: a Play button, and a click on the sidebar's picture plays the preview (the Library has no Play
-         button, Browse no click-to-play today).
-       - One order and one set of parts for the same item, from the owner's side-by-side (scene 2922240701 in each tab):
-         title, picture, one chip row in one order (type, resolution, age rating, subscribers, favourites, size, ID;
-         "In your library" / "Show in Library" only in Browse), Made by, Presets, the primary action (Apply /
-         Subscribe and apply), the subscription action, then About (description + tags) in both, the tiles (Open in
-         file manager when local, Open on Steam, Favourite) in one row in both, then Playback and Scene properties when
-         the item is in the library (in Browse too), then Comments. Today: tags sit loose in the Library but inside
-         About in Browse, the Library has no About, Favourite pairs with Open on Steam in Browse but sits alone under
-         Scene properties in the Library, the chips' order differs, Apply exists only in Browse.
-       - Undo the card right-click menu (e022227c): the owner meant "in the sidebar", which right-click opens; a menu at
-         the pointer collides with it. Remove the card `ContextMenu` / `cardMenuItems` wiring in Library and Browse and the
-         "light" menu mode it needed, and the probe cells for it; put Hide / Unhide in the shared sidebar (acting on the
-         selection, like Unsubscribe). Keep `hidden.json`, the Hidden filter row and their tests. `docs/decisions.md`
-         § "Hide and Unsubscribe live in the sidebar, never a card menu".
+12. [ ] (owner) One sidebar for a Workshop item, the same in the Library and Browse: the owner-approved design in
+       `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` § The sidebar (none of it built yet; its filter half is
+       item 17, its motion item 18, its UI rules are in `.claude/rules/ui/design.md`), with the owner's later calls on top.
+       Today `LibrarySide.tsx` and `BrowseSide.tsx` are separate and disagree (the owner's side-by-side of 2922240701).
+       - One skeleton in both tabs: picture → title → info pills (facts and tags only, one order) → one action area →
+         creator / presets rows → About (description; both tabs) → tiles → Playback / Scene properties when the item is in
+         the library (both tabs) → comments.
+       - Action area, not downloaded: "Subscribe" and "Subscribe and apply" (owner 2026-11-26, in place of the spec's
+         Download / Download & Apply), through the download modes' order; the one-off download stays in their right-click
+         menu. No `SubToggle` card, no hint line under the buttons (`side-cta-note`).
+       - Action area, downloaded (Browse, and the Library for Workshop items): one split button Play | Unsubscribe;
+         right-click on Unsubscribe = "Unsubscribe, keep the files". Library items not from the Workshop: Play | Delete.
+         A click on the sidebar's picture plays too, in both tabs.
+       - "Show in Library": an icon button under the close X (`SideHeadTools`, `SidePanel.tsx`); the "In your library" chip
+         goes.
+       - Favourite: the favourites-count pill is the toggle (star filled when favourited; signed out it explains
+         sign-in); the Favourite tile goes.
+       - Creator / presets rows: the whole row is the target, a hover lift and a sliding chevron, no trailing icons; the
+         presets row's look: 2–3 mock-ups for the owner to pick (the spec).
+       - Hide / Unhide in the sidebar, acting on the selection; remove the card right-click menu from e022227c (its
+         `ContextMenu` / `cardMenuItems` wiring, the "light" menu mode, its probe cells); keep `hidden.json`, the Hidden
+         filter row and their tests (`docs/decisions.md` § "Hide and Unsubscribe live in the sidebar, never a card menu").
        Share one component (or one actions list) so the two can't drift again. Guard: probe cells that open the same item
-       in both tabs and find the same actions, labels and behaviour; the design checklist for each control.
+       in both tabs and find the same sections in the same order, the same actions and labels, the Show in Library icon
+       under the X, the favourite pill, Hide / Unhide, and no card menu.
 
 13. [ ] (owner) "Text shadow" (Settings → Look & feel, `:root.text-shadow` in `index.css`) fits coloured text over a live
        wallpaper too, and leaves the playlist bar's PLAYLIST label alone.
@@ -129,6 +131,26 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        shown → logo → cover gone in the shipped and the dev build on the owner's machine before and after. Guard:
        probe-intro cells: the logo in the first painted frame, no blank frame, the cards path taken when the data
        comes within the cap.
+
+17. [ ] (owner) The filter half of `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` § Filters: the top-bar
+       creator / presets pills go (`components/SourcePills.tsx`); the filter column gets two editable fields, Author (a
+       Steam ID, a profile URL, or a name seen before) and Presets of (a scene's Workshop ID or URL); the sidebar's creator
+       / presets rows fill them; Author resolves to a Steam ID itself (a profile URL via the public profile page, a known
+       name from what the app has seen; an unknown plain name says to paste a profile link or ID). Guard: probe cells for
+       both fields, the rows filling them, clearing; a backend test for the resolution.
+
+18. [ ] (owner) The sidebar's open / close motion: variant E from the motion lab (worktree
+       `.claude/worktrees/agent-a841082c364487870`, `app/ui/motion-lab/`; the owner's pick 2026-11-21/22: "E … cards can
+       show underneath", start 30 %, travel 6×): a full slide, the cards glide nearest first and stay visible under a
+       backdrop that fades in, the content soft-cascades in late and from further back. Today: the old 44 px slide and
+       stagger (`index.css` ~1621-1647). Motion off: fade only. Guard: probe cells sampling the slide, the cards' glide and
+       the cascade per frame, and motion-off.
+
+19. [ ] (owner) The owner's README replaces the agent-written one: `docs/Meat bag's Readme.md` (untracked) and branch
+       `readme-preview` (8 commits: collapsible install steps per distro, shorter previews, a readable Settings image, a
+       required / optional "You'll need"; `docs/preview/` holds its images, untracked). Bring it up to date with today's
+       app (only liascape-player, the download modes, Start with your desktop, the welcome …), keep the owner's voice and
+       layout, make it `README.md`, delete the branch and the untracked copies.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
