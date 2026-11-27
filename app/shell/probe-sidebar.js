@@ -88,9 +88,10 @@
 //   lib:preset:uses      "Uses <base>" (WsListRow) from the preset's own file, no Steam ask; a click focuses the base's card
 //   lib:presets:scene    a Library scene with a Workshop id: "Presets" lists its presets on the Browse tab (the CM fixture's
 //                        two, marked In library); none on a preset; the Library's Preset filter keeps exactly the presets
-//   lib:preset:badge     a preset's card and its sidebar's chip say PRESET, its base's and a plain scene's SCENE: the same
-//                        badge in the same corner, the preset's told apart by at least two of fill / letters / ring / glyph,
-//                        two themes × glow on / off, its chip's own fill under bg-live. Shots side-preset-badge*.png
+//   lib:type:icon        a card's type as a small icon (TypeIcon.tsx): the presets' sliders on pp1, the cube on its base and a
+//                        plain scene, none on a video; one corner, the type's name as tooltip / label, no pill, still on hover,
+//                        ≥ 3:1 over a light and a dark picture (sampled); the sidebar chip the same icon + the word; two themes
+//                        × glow on / off, the chip's fill under bg-live. Shots side-type-icon-*.png
 //   lib:preset:needsBase[Off]  the base goes with the preset's sidebar open: the cards grey out (status icon fading in, the
 //                        reason as its tooltip), the notice (the crash notice's block, --warn) rises in (Off: fades); a click
 //                        plays nothing, the status bar says why; "Download it again" = /download of the base, a one-off only
@@ -158,6 +159,7 @@ const path = require("path");
 const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
+const TI = require("./type-icon"); // a card's type icon and the sidebar's type chip, read alike on both tabs
 const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
 const K = JSON.parse(E.LIASCAPE_CLIPS);
 const SC = JSON.parse(E.LIASCAPE_SCENES || "[]");
@@ -2886,68 +2888,67 @@ app.whenReady().then(async () => {
       return v;
     }));
 
-    // lib:preset:badge — side by side in the Library, a preset's card (pp1) says PRESET and its base (pb) and a plain scene
-    // (s1) SCENE: one `.badge` in the same corner and type (TypeBadge.tsx), the preset's look apart from the scenes' in at
-    // least two of fill, letters, ring and glyph, under two themes with glow on and off
-    await cell("lib:preset:badge", async () => {
-      const v = [], J = JSON.stringify, APART = ["bg", "fg", "ring", "svg"]; // what a glance tells a tag by
-      const s0 = await getSettings(), themes = (await http("GET", "/themes")).json ?? [];
-      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name, light = themes.find((t) => /latte/i.test(t.name) && t.name !== t0)?.name; // a light theme too: the hollow badge on a light fill
-      if (!t0 || !t1) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
-      const read = () => page(`return ["pp1", "pb", "s1"].map((t) => { const c = m.card(t), b = c?.querySelector(".thumb-wrap > .badge"); if (!b) return { t, text: null };
-        const s = getComputedStyle(b), w = c.querySelector(".thumb-wrap").getBoundingClientRect(), r = b.getBoundingClientRect();
-        return { t, text: b.textContent.trim(), cls: b.className, dx: Math.round(r.left - w.left), dy: Math.round(r.top - w.top), h: Math.round(r.height),
-          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | "),
-          bg: s.backgroundColor, fg: s.color, ring: /inset/.test(s.boxShadow), svg: !!b.querySelector("svg"), type: [s.fontSize, s.fontWeight, s.letterSpacing, s.borderRadius].join(" ") }; });`);
+    // lib:type:icon — side by side in the Library, a preset's card (pp1) shows the presets' sliders, its base (pb) and a plain
+    // scene (s1) the scene's cube, a video (k1) nothing: a small glyph in the same corner of every card, its type's name as its
+    // tooltip and label, no pill (TypeIcon.tsx); the sidebar's type chip leads with the same icon and names the type; the
+    // glyph's strokes stand ≥ 3:1 off their shadow over a light and a dark picture (sampled, type-icon.js); still on hover
+    // (a status icon never moves); under two themes with glow on and off, and the chip's fill under bg-live
+    await cell("lib:type:icon", async () => {
+      const v = [], J = JSON.stringify, s0 = await getSettings(), themes = (await http("GET", "/themes")).json ?? [];
+      const t0 = s0.theme ?? themes[0]?.name, light = themes.find((t) => /latte/i.test(t.name) && t.name !== t0)?.name ?? themes.find((t) => t.name !== t0)?.name;
+      if (!t0 || !light) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
+      const WANT = { pp1: "preset", pb: "scene", s1: "scene", k1: null };
       try {
-        for (const theme of [t0, t1, light].filter(Boolean)) for (const glows of [true, false]) await withPresets(async () => {
+        for (const theme of [t0, light]) for (const glows of [true, false]) await withPresets(async () => {
           const tag = `${theme}${glows ? "" : " no-glow"}`;
-          if (!(await page(`return !!m.card("pp1") && !!m.card("pb") && !!m.card("s1");`))) { v.push(`${tag}: pp1 / pb / s1 not all in the Library — proved nothing`); return; }
-          const [pre, base, plain] = await read();
-          console.log(`        ${tag}: ${J([pre.text, base.text, plain.text])}`);
-          if (pre.text !== "PRESET") v.push(`${tag}: pp1 (a preset) says ${J(pre.text)}, want PRESET`);
-          if (base.text !== "SCENE") v.push(`${tag}: pb (its base) says ${J(base.text)}, want SCENE`);
-          if (plain.text !== "SCENE") v.push(`${tag}: s1 (a plain scene) says ${J(plain.text)}, want SCENE`);
-          if (base.text) for (const k of ["cls", "dx", "dy", "h", "look"]) if (base[k] !== plain[k]) v.push(`${tag}: pb's badge ${k} ${J(base[k])} ≠ s1's ${J(plain[k])}`);
-          if (pre.text) {
-            for (const k of ["dx", "dy", "type"]) if (pre[k] !== plain[k]) v.push(`${tag}: pp1's badge ${k} ${J(pre[k])} ≠ s1's ${J(plain[k])}`);
-            const d = APART.filter((k) => pre[k] !== plain[k]);
-            if (d.length < 2) v.push(`${tag}: pp1's badge differs from a scene's only in ${J(d)} — want two of ${J(APART)} (${pre.look} vs ${plain.look})`);
+          if (!(await page(`return Object.keys(${J(WANT)}).every((t) => !!m.card(t));`))) { v.push(`${tag}: pp1 / pb / s1 / k1 not all in the Library — proved nothing`); return; }
+          const got = {};
+          for (const t of Object.keys(WANT)) { got[t] = await page(TI.readCard(`m.card(${J(t)})`)); v.push(...TI.judgeCard(tag, t, WANT[t], got[t])); }
+          console.log(`        ${tag}: ${J(Object.fromEntries(Object.entries(got).map(([t, g]) => [t, g?.kind ?? null])))}`);
+          const ref = got.s1;
+          if (ref?.kind) for (const t of ["pp1", "pb"]) if (got[t]?.kind) for (const k of ["dx", "dy", "w", "h", "color", "filter"])
+            if (got[t][k] !== ref[k]) v.push(`${tag}: ${t}'s icon ${k} ${J(got[t][k])} ≠ s1's ${J(ref[k])} — one spot and one look on every card`);
+          // glow on: an accent glow outside the dark shadow; no-glow: the shadow alone (it's legibility, not a glow)
+          const layers = ref?.filter?.match(/drop-shadow\([^)]*\)[^)]*\)/g) ?? [], dark = layers.filter((l) => /rgba?\(0, 0, 0\b|color\(srgb 0 0 0\b/.test(l)).length;
+          if (ref?.kind && (dark < 1 || (glows ? layers.length - dark < 1 : layers.length !== dark)))
+            v.push(`${tag}: the icon's filter ${J(ref.filter)} — want the dark shadow ${glows ? "and an accent glow" : "alone"}`);
+          // still on hover (the real pointer on it): no tilt, no one-shot
+          const ir = await page(`const e = m.card("s1")?.querySelector(".type-ico"); if (!e) return null; e.scrollIntoView({ block: "nearest" }); await m.sleep(100);
+            const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
+          if (ir) await mv(ir.x, ir.y, 300);
+          const still = ir && await page(`const e = m.card("s1")?.querySelector(".type-ico"); if (!e) return null; const s = getComputedStyle(e.querySelector("svg"));
+            return { hover: e.matches(":hover"), anims: e.getAnimations({ subtree: true }).length, t: s.transform, rot: s.rotate, sc: s.scale };`);
+          if (ir) await mv(5, 880);
+          if (still && !still.hover) v.push(`${tag}: the pointer on s1's icon didn't hover it ${J(still)} — proved nothing`);
+          else if (still && (still.anims || (still.t !== "none" && still.t !== "matrix(1, 0, 0, 1, 0, 0)") || (still.rot !== "none") || (still.sc !== "none")))
+            v.push(`${tag}: the icon moves on hover ${J(still)} — a status icon stays still`);
+          // legible on any picture
+          for (const t of ["s1", "pp1"]) for (const [bgName, bg] of [["light", "#f2f2ee"], ["dark", "#0d0d12"]]) {
+            const c = await TI.contrast(win, `window.__sb.card(${J(t)})`, bg);
+            console.log(`        ${tag}: ${t} over a ${bgName} picture ${J(c)}`);
+            if (c.error) v.push(`${tag}: ${t} over a ${bgName} picture: ${c.error}`);
+            else if (c.ratio < TI.MIN_CONTRAST) v.push(`${tag}: ${t}'s icon over a ${bgName} picture: strokes ${c.stroke} vs shadow ${c.ring} = ${c.ratio}:1, want ≥ ${TI.MIN_CONTRAST}:1`);
           }
-          const sh = plain.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
-          if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${plain.look})`);
-          // the sidebar's hero chip says the same as the card (ItemSide.tsx)
-          const chips = [];
-          for (const t of ["pp1", "pb", "s1"]) chips.push(await page(`await m.closeAll(); await m.openSide(${J(t)});
-            const c = m.side().querySelector(".side-hero > .side-chip.accent:not([data-side-looping])"); if (!c) return { t: ${J(t)}, text: null };
-            const s = getComputedStyle(c); return { t: ${J(t)}, text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | "),
-              bg: s.backgroundColor, fg: s.color, ring: s.boxShadow, svg: !!c.querySelector("svg"), type: s.fontSize };`));
-          await page(`await m.closeAll();`);
-          console.log(`        ${tag} sidebar: ${J(chips.map((c) => c.text))}`);
-          const want = { pp1: "PRESET", pb: "SCENE", s1: "SCENE" };
-          for (const c of chips) if (c.text !== want[c.t]) v.push(`${tag}: ${c.t}'s sidebar chip says ${J(c.text)}, want ${want[c.t]}`);
-          const [cp, cb, cs] = chips;
-          if (cb.text) for (const k of ["cls", "look"]) if (cb[k] !== cs[k]) v.push(`${tag}: pb's sidebar chip ${k} ${J(cb[k])} ≠ s1's ${J(cs[k])}`);
-          if (cp.text) {
-            if (cp.type !== cs.type) v.push(`${tag}: pp1's sidebar chip size ${J(cp.type)} ≠ s1's ${J(cs.type)}`);
-            const d = APART.filter((k) => cp[k] !== cs[k]);
-            if (d.length < 2) v.push(`${tag}: pp1's sidebar chip differs from a scene's only in ${J(d)} — want two of ${J(APART)} (${cp.look} vs ${cs.look})`);
+          const slug = `${theme.replace(/\W+/g, "-").toLowerCase()}${glows ? "" : "-noglow"}`;
+          await shot(`type-icon-grid-${slug}`);
+          // the sidebar's chip: the same icon, and the word
+          for (const t of Object.keys(WANT)) {
+            const c = await page(`await m.closeAll(); await m.openSide(${J(t)}); await m.sleep(250); ${TI.readChip("m.side()")}`);
+            v.push(...TI.judgeChip(tag, t, WANT[t], c));
+            if (t === "pp1") await shot(`type-icon-side-${slug}`);
           }
-          // pp1's sidebar open beside its card and pb's, one shot per theme and glow
-          await page(`await m.openSide("pp1"); await m.sleep(400);`);
-          await shot(`preset-badge-${theme.replace(/\W+/g, "-").toLowerCase()}${glows ? "" : "-noglow"}`);
-          if (theme === t1 && glows) await shot("preset-badge");
           await page(`await m.closeAll();`);
         }, { theme, glows });
-        // bg-live: the docked sidebar has no fill of its own, so the hollow chip's own dark fill must carry it
+        // bg-live: the docked sidebar has no fill of its own, so the chip's own fill must carry it
         await withPresets(async () => {
           const c = await page(`await m.closeAll(); await m.openSide("pp1"); document.documentElement.classList.add("bg-live"); await m.sleep(400);
-            const c = m.side().querySelector(".side-hero > .side-chip.accent.preset"); if (!c) return null;
-            const s = getComputedStyle(c); return { bg: s.backgroundColor, svg: !!c.querySelector("svg"), live: document.documentElement.classList.contains("bg-live") };`);
+            const c = m.side().querySelector(".side-hero > [data-side-type]"); if (!c) return null;
+            const s = getComputedStyle(c), r = c.getBoundingClientRect(); return { bg: s.backgroundColor, svg: !!c.querySelector("svg"),
+              shown: s.display !== "none" && s.visibility === "visible" && +s.opacity > 0 && r.width > 0, live: document.documentElement.classList.contains("bg-live") };`);
           console.log(`        bg-live sidebar: ${J(c)}`);
           if (!c?.live) v.push(`bg-live: :root.bg-live not set — proved nothing`);
-          else if (!c.svg || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(c.bg)) v.push(`bg-live: pp1's chip ${J(c)} — want its glyph and a fill of its own`);
-          await shot("preset-badge-bglive");
+          else if (!c.shown || !c.svg || /^rgba\(0, 0, 0, 0\)$|^transparent$/.test(c.bg)) v.push(`bg-live: pp1's type chip ${J(c)} — want its icon and a fill of its own`);
+          await shot("type-icon-bglive");
           await page(`document.documentElement.classList.remove("bg-live"); await m.closeAll();`);
         });
       } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); }

@@ -6,10 +6,10 @@ import { MotionThumb } from "./MotionThumb";
 import { usePreviewKinds } from "./mediaAssets";
 import { useAutoplayVideo } from "./autoplay";
 import { useSeenCard } from "./previewQueue";
-import { TypeBadge } from "./TypeBadge";
+import { TypeIcon } from "./TypeIcon";
 
 // USER-RULED FORK: compact library card — the card *is* the thumbnail with a 2-line centered
-// title overlay (#66000000 bar), SCENE badge TL, ring/check playlist-toggle TR, trash BR (hover).
+// title overlay (#66000000 bar), type icon TL, ring/check playlist-toggle TR, trash BR (hover).
 // PERF: memo'd; content-visibility (CSS) + per-card props; lift+glow hover (design choice).
 // A click applies it; its settings and actions live in the item sidebar (a right-click focuses the card) — components/ItemSide.tsx.
 // COOL: animated preview (MotionThumb): what it shows hovered and not follows Settings → "On hover" / "Not hovered".
@@ -50,9 +50,8 @@ export const LibraryCard = memo(function LibraryCard({
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
        >
         <MotionThumb item={item} hover={hover} hoverKind={hoverKind} idleKind={idleKind} autoVideo={autoVideo} />
-        {/* a preset is a scene for everything else (greying, "Play scenes" off); only its badge names it. Guard: probe-sidebar
-            lib:preset:badge */}
-        {item.isScene && <TypeBadge preset={item.isPreset} />}
+        {/* its type's icon, top-left. Guard: probe-sidebar lib:type:icon */}
+        <TypeIcon scene={item.isScene} preset={item.isPreset} />
         {/* Guard: probe-sidebar lib:preset:needsBase, lib:scenesBlocked (a scene's too) */}
         {(item.isPreset || item.isScene) && <span className={`warn preset${reason && !incomplete ? " on" : ""}`} data-card-reason={incomplete ? "" : reason ?? ""}
           title={reason && !incomplete ? reason : undefined} aria-hidden={reason && !incomplete ? undefined : true}><Unplug size={15} /></span>}

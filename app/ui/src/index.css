@@ -10,6 +10,9 @@
   /* the item sidebar's own background: in live-wallpaper mode fully see-through, like the Settings page — its section cards,
      stage and tiles carry the darkness */
   --tr-side: 100%;
+  /* marks drawn straight on a wallpaper's picture (a card's type icon): the picture, not the theme, is under them, so they are
+     light on a dark shadow in every theme */
+  --on-pic: #fff; --on-pic-shade: #000;
   /* COOL: reusable accent glow (static box-shadow, toggled by state — never animate blur) */
   --glow-sm: 0 0 12px -2px var(--accent);
   --glow: 0 0 22px -3px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
@@ -309,22 +312,22 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
    Guard: probe-steam look:dlCentre. */
 .dl-glyph { color: var(--accent); width: 22px; height: 22px; fill: currentColor; stroke: none; transform-origin: center;
   transition: color .15s; }
-.badge {
-  position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 800; letter-spacing: .5px;
-  padding: 3px 7px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 85%, black);
-  color: var(--accent-fg); box-shadow: var(--glow-sm);
-}
-/* Browse: already in the library — the success colour, not the accent (it isn't a state of the card, it's a fact) */
-.badge.inlib { left: auto; right: 8px; gap: 3px; align-items: center;
-  background: color-mix(in srgb, var(--success) 82%, black); color: #fff; box-shadow: none; }
-/* a preset (TypeBadge.tsx): SCENE's tag turned hollow — the theme's darkest fill (dense enough to read on any picture),
-   the accent as its ring and letters, the presets' glyph in front — so fill, edge and shape all differ from SCENE's solid
-   accent chip, at small size and out of the corner of the eye. The glyph scales with the letters (the compact grid's 8px).
-   Guard: probe-sidebar lib:preset:badge, probe-filters filter:preset:badge */
-.badge.preset { display: flex; align-items: center; gap: 3px; padding-left: 5px;
-  background: color-mix(in srgb, var(--bg-crust) 90%, transparent); color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); }
-.badge.preset > svg { flex: none; width: 1.1em; height: 1.1em; }
+/* Browse: already in the library — a tag in the top-right, the type icon's opposite corner; the success colour, not the
+   accent (it isn't a state of the card, it's a fact) */
+.badge.inlib { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 800; letter-spacing: .5px;
+  padding: 3px 7px; border-radius: 6px; gap: 3px; align-items: center;
+  background: color-mix(in srgb, var(--success) 82%, black); color: #fff; }
+/* a card's type (TypeIcon.tsx): a bare glyph in the picture's top-left corner, no pill. Light strokes ringed by a dark
+   outline (two tight shadows stacked: one alone left ≈ 1.7:1 over white), then a soft one, so it reads on a white picture and a black one alike: it stands on the picture, not on the theme,
+   so it takes the picture's own light-on-dark tokens (--on-pic, --on-pic-shade) in every theme. Glow adds the accent's
+   halo outside the shadow; no-glow keeps the shadow (it's legibility, not a glow), as text-shadow does. A status icon: it
+   never moves (no hover tilt: it isn't a button). Guard: probe-sidebar lib:type:icon, probe-filters filter:type:icon */
+.type-ico { position: absolute; top: 8px; left: 8px; width: 16px; height: 16px; display: grid; place-items: center; color: var(--on-pic);
+  --ti-shadow: drop-shadow(0 0 1px color-mix(in srgb, var(--on-pic-shade) 95%, transparent))
+    drop-shadow(0 0 1px color-mix(in srgb, var(--on-pic-shade) 95%, transparent))
+    drop-shadow(0 0 2.5px color-mix(in srgb, var(--on-pic-shade) 75%, transparent));
+  filter: var(--ti-shadow) drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 65%, transparent)); }
+.type-ico > svg { display: block; width: 100%; height: 100%; }
 .res {
   position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 700;
   padding: 3px 6px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff;
@@ -543,8 +546,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   .card.lib .card-incomplete > svg { width: 10px; height: 10px; }
   .lib-title { height: 26px; padding: 2px 4px; }
   .lib-title span { font-size: 9px; line-height: 1.2; }
-  .badge { font-size: 8px; padding: 2px 5px; top: 5px; left: 5px; }
-  .badge.inlib { left: auto; right: 5px; }
+  .badge.inlib { font-size: 8px; padding: 2px 5px; top: 5px; right: 5px; }
+  .type-ico { top: 5px; left: 5px; width: 14px; height: 14px; }
   .res { font-size: 8px; padding: 2px 5px; top: 5px; right: 5px; }
 }
 .card.crashed { outline: 2px solid var(--danger); }
@@ -560,8 +563,8 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   transition: opacity .22s ease, scale .3s var(--spring-soft, ease); }
 .warn.preset.on { opacity: 1; scale: 1; pointer-events: auto; }
 :root.no-motion .warn.preset { scale: 1; transition: opacity var(--fade-dur) linear; }
-/* a Workshop download Steam left empty (LibraryCard): the words over its greyed picture, in the hollow tag's look (.badge.preset)
-   with --warn for ring, letters and glow; centred on the picture above the title bar; faded in and out by its state class, as
+/* a Workshop download Steam left empty (LibraryCard): the words over its greyed picture on the theme's darkest fill, --warn
+   for ring, letters and glow; centred on the picture above the title bar; faded in and out by its state class, as
    the status icon is. Guard: probe-sidebar lib:incomplete */
 .card-incomplete { position: absolute; left: 50%; top: calc(50% - 22px); translate: -50% -50%; display: flex; align-items: center;
   gap: 5px; padding: 4px 9px 4px 7px; border-radius: 7px; font-size: 11px; font-weight: 800; letter-spacing: .3px; line-height: 1.2;
@@ -572,7 +575,7 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
 .card-incomplete.on { opacity: 1; scale: 1; }
 .card-incomplete > svg { flex: none; }
 :root.no-motion .card-incomplete { scale: 1; transition: opacity var(--fade-dur) linear; }
-/* crashed warn — bottom-left, above the title bar (avoids the toggle/SCENE corners) */
+/* crashed warn — bottom-left, above the title bar (avoids the toggle / type-icon corners) */
 .warn { position: absolute; left: 6px; bottom: 50px; color: var(--danger); display: grid; place-items: center;
   filter: drop-shadow(0 0 4px var(--danger)); }
 /* bottom title bar (#66000000), 2-line clamp, centered white: the Library's and Browse's cards (Card.tsx) alike; inside the
@@ -1464,7 +1467,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-tile.danger:is(:disabled, [aria-disabled="true"]) .side-tile-ico { box-shadow: none; }
 :root.no-glow .side-tile.danger:hover, :root.no-glow .side-close:hover { box-shadow: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
-:root.no-glow .side-chip.accent.preset { box-shadow: inset 0 0 0 1px var(--accent); }
+:root.no-glow .type-ico { filter: var(--ti-shadow); }
 :root.no-glow .side-open:hover { box-shadow: none; }
 :root.no-glow :is(.ws-creator:hover:not(:disabled), .ws-post textarea:focus) { box-shadow: none; }
 :root.no-glow .wf-field-box :is(.text, .text:hover, .text:focus, .wf-field-x:hover) { box-shadow: none; }
@@ -1781,11 +1784,6 @@ input[type=range]:focus-visible { outline: none; }
   border-radius: 999px; background: var(--surface0); color: var(--subtext); }
 .side-chip.accent { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 10px -4px var(--accent); }
-/* a preset's chip: the card badge's hollow look (.badge.preset) in the hero line — no accent tint, a full-accent ring,
-   the presets' glyph */
-.side-chip.accent.preset { padding-left: 7px; background: color-mix(in srgb, var(--bg-crust) 60%, transparent);
-  box-shadow: inset 0 0 0 1px var(--accent), 0 0 10px -4px var(--accent); }
-.side-chip.preset > svg { flex: none; width: 12px; height: 12px; }
 .side-chip.danger { background: var(--danger-bg); color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
 /* a crashed scene's notice (ItemSide.tsx): a block of the body in the section cards' material (.side-sec: fill, edge,
    radius) with a danger stripe where they have the accent one, the warning glyph, the words and the sidebar's small button

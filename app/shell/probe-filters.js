@@ -83,8 +83,9 @@
 //   filter:preset:on  ticking Preset POSTs include ["Preset"] and lists exactly the two presets
 //   filter:preset:cleared  Preset ticked, then Settings → Play scenes off: the row and the saved tag go, the list is asked
 //                     again without it and holds no preset. Screenshots wf-preset-*.png
-//   filter:preset:badge  the presets' cards and sidebar chips say PRESET, the base scene's SCENE: the same badge in the same
-//                     corner, the preset's told apart by at least two of fill / letters / ring / glyph, two themes × glow on / off
+//   filter:type:icon  a card's type as a small icon (TypeIcon.tsx, read by type-icon.js): the presets' sliders, the base
+//                     scene's cube, none on a video; one corner, tooltip / label, no pill, ≥ 3:1 over a light and a dark
+//                     picture; the sidebar chip the same icon + the word; two themes × glow on / off. Shots wf-type-icon-*.png
 // The local filters — the Library's and the local Wallpaper Engine folder's, filtered in the page from each item's tags (the stack's
 // scenes s1-s3 get project.json tags / age ratings; a fake WE folder of four videos):
 //   lib:column        the Library's column docks at 1400 px right of its grid, above the playlist bar (full width); it offers only
@@ -134,6 +135,7 @@ const E = process.env;
 const U = E.LIASCAPE_URL;
 const { withToken, authHeaders } = require("./api-auth"); // the backend's API token (.claude/rules/backend/api.md § Security)
 const MO = require("./motion-off"); // motion off: only opacity changes, nothing moves, appear / leave fade
+const TI = require("./type-icon"); // a card's type icon and the sidebar's type chip, read alike on both tabs
 const PXC = require("./pixel-centre"); // a chip's glyph centred as drawn, in pixels
 const NF = "await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));"; // in-page: two frames pass
 const OUT = E.LIASCAPE_OUT;
@@ -1794,77 +1796,64 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // filter:preset:badge — a preset's card says PRESET, its base and every other scene SCENE, in the same corner and the same
-    // type (one `.badge`, TypeBadge.tsx), the preset's look apart from the scene's in at least two of fill, letters, ring and
-    // glyph (and both presets alike), under two themes with glow on and off: the default list's base (Fixture Workshop Three)
-    // against the Preset list's two presets
-    await cell("filter:preset:badge", async () => {
-      const v = [], APART = ["bg", "fg", "ring", "svg"]; // what a glance tells a tag by
+    // filter:type:icon — on Browse, the presets' cards show the presets' sliders, the base scene's the scene's cube, a video's
+    // nothing: the Library's icon (TypeIcon.tsx, read by type-icon.js) in the same corner, its name as tooltip and label, no pill;
+    // the Browse sidebar's type chip the same icon and the word; ≥ 3:1 over a light and a dark picture; two themes × glow on / off
+    await cell("filter:type:icon", async () => {
+      const v = [];
       const s0 = (await http("GET", "/settings")).json ?? {}, themes = (await http("GET", "/themes")).json ?? [];
-      const t0 = s0.theme ?? themes[0]?.name, t1 = themes.find((t) => t.name !== t0)?.name, light = themes.find((t) => /latte/i.test(t.name) && t.name !== t0)?.name; // a light theme too: the hollow badge on a light fill
-      if (!t0 || !t1) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
-      const read = (titles) => page(`return ${J(titles)}.map((t) => { const c = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === t);
-        const b = c?.querySelector(".thumb-wrap > .badge:not(.inlib)"); if (!b) return { t, text: null };
-        const s = getComputedStyle(b), w = c.querySelector(".thumb-wrap").getBoundingClientRect(), r = b.getBoundingClientRect();
-        return { t, text: b.textContent.trim(), cls: b.className, dx: Math.round(r.left - w.left), dy: Math.round(r.top - w.top), h: Math.round(r.height),
-          look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.fontWeight, s.letterSpacing, s.padding, s.borderRadius].join(" | "),
-          bg: s.backgroundColor, fg: s.color, ring: /inset/.test(s.boxShadow), svg: !!b.querySelector("svg"), type: [s.fontSize, s.fontWeight, s.letterSpacing, s.borderRadius].join(" ") }; });`);
+      const t0 = s0.theme ?? themes[0]?.name, light = themes.find((t) => /latte/i.test(t.name) && t.name !== t0)?.name ?? themes.find((t) => t.name !== t0)?.name;
+      if (!t0 || !light) return [`themes ${J(themes.map((t) => t.name))} — two needed, proved nothing`];
+      const CARD = (t) => `[...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === ${J(t)})`;
+      const chip = async (t) => {
+        const r = await page(`const w = ${CARD(t)}?.querySelector(".thumb-wrap"); if (!w) return null; w.scrollIntoView({ block: "nearest" }); await m.sleep(150);
+          const b = w.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };`);
+        if (!r) return null;
+        await rightAt(r.x + r.w / 2, r.y + r.h / 2);
+        for (let i = 0; i < 40 && !(await page(`return !!document.querySelector(".side-panel:not(.closing) .side-hero");`)); i++) await sleep(50);
+        await sleep(250);
+        const c = await page(TI.readChip(`document.querySelector(".side-panel:not(.closing)")`));
+        return c;
+      };
+      const closeSide = () => page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await m.sleep(300);`);
       try {
-        for (const theme of [t0, t1, light].filter(Boolean)) for (const glows of [true, false]) {
-          const tag = `${theme}${glows ? "" : " no-glow"}`;
+        for (const theme of [t0, light]) for (const glows of [true, false]) {
+          const tag = `${theme}${glows ? "" : " no-glow"}`, slug = `${theme.replace(/\W+/g, "-").toLowerCase()}${glows ? "" : "-noglow"}`;
           await setSettings({ theme, glows });
           await realWs(true);
           const d = await waitTitles((x) => J(x) === J(DEFAULT_SCENES));
           if (J(d) !== J(DEFAULT_SCENES)) return [...v, `${tag}: the default list ${J(d)} — proved nothing`];
-          const [base, vid] = await read(["Fixture Workshop Three", "Fixture Workshop One"]);
-          await page(`m.seg("Preset", "inc")?.click();`);
+          await sleep(300);
+          const base = await page(TI.readCard(CARD("Fixture Workshop Three"))), vid = await page(TI.readCard(CARD("Fixture Workshop One")));
+          v.push(...TI.judgeCard(tag, "the base scene", "scene", base), ...TI.judgeCard(tag, "a video", null, vid));
+          for (const [bgName, bg] of [["light", "#f2f2ee"], ["dark", "#0d0d12"]]) {
+            const c = await TI.contrast(win, CARD("Fixture Workshop Three"), bg);
+            console.log(`        ${tag}: the base scene over a ${bgName} picture ${J(c)}`);
+            if (c.error) v.push(`${tag}: the base scene over a ${bgName} picture: ${c.error}`);
+            else if (c.ratio < TI.MIN_CONTRAST) v.push(`${tag}: the scene icon over a ${bgName} picture: ${c.ratio}:1, want ≥ ${TI.MIN_CONTRAST}:1`);
+          }
+          await shot(`type-icon-grid-${slug}`);
+          v.push(...TI.judgeChip(tag, "the base scene", "scene", await chip("Fixture Workshop Three")));
+          await shot(`type-icon-side-${slug}`);
+          await closeSide();
+          v.push(...TI.judgeChip(tag, "a video", null, await chip("Fixture Workshop One")));
+          await closeSide();
+          await page(`await m.ensure(); m.seg("Preset", "inc")?.click();`);
           const p = await waitTitles((x) => J(x) === J(PRESETS));
           if (J(p) !== J(PRESETS)) return [...v, `${tag}: Preset ticked lists ${J(p)} — proved nothing`];
           await sleep(300);
-          const pres = await read(PRESETS);
-          await shot(`preset-cards-${theme.replace(/\W+/g, "-").toLowerCase()}${glows ? "" : "-noglow"}`);
-          console.log(`        ${tag}: base ${J(base)} / presets ${J(pres.map((x) => x.text))}`);
-          if (base.text !== "SCENE") v.push(`${tag}: the base scene's card says ${J(base.text)}, want SCENE`);
-          if (vid.text != null) v.push(`${tag}: a video's card has a badge ${J(vid.text)}`);
-          for (const x of pres) {
-            if (x.text !== "PRESET") v.push(`${tag}: ${x.t} says ${J(x.text)}, want PRESET`);
-            else {
-              for (const k of ["dx", "dy", "type"]) if (x[k] !== base[k]) v.push(`${tag}: ${x.t}'s badge ${k} ${J(x[k])} ≠ the scene's ${J(base[k])}`);
-              const d = APART.filter((k) => x[k] !== base[k]);
-              if (d.length < 2) v.push(`${tag}: ${x.t}'s badge differs from the scene's only in ${J(d)} — want two of ${J(APART)} (${x.look} vs ${base.look})`);
-              if (x.look !== pres[0].look || x.svg !== pres[0].svg) v.push(`${tag}: the presets' badges differ: ${x.look} vs ${pres[0].look}`);
-            }
+          for (const t of PRESETS) {
+            const g = await page(TI.readCard(CARD(t)));
+            v.push(...TI.judgeCard(tag, t, "preset", g));
+            if (g?.kind && base?.kind) for (const k of ["dx", "dy", "w", "h", "color", "filter"]) if (g[k] !== base[k]) v.push(`${tag}: ${t}'s icon ${k} ${J(g[k])} ≠ the scene's ${J(base[k])}`);
           }
-          const sh = base.look?.split(" | ")[2] ?? "none", lit = sh !== "none" && !/^rgba\(0, 0, 0, 0\)/.test(sh); // no-glow: a transparent shadow
-          if (lit !== glows) v.push(`${tag}: the badge ${lit ? "glows" : "doesn't glow"} (${base.look})`);
-          // the Browse sidebar's hero chip says the same as the card (ItemSide.tsx): a right-click on the card opens it
-          const chip = async (t) => {
-            const r = await page(`const c = [...document.querySelectorAll(".scroll:not(.lib-scroll) .card.lib")].find((c) => c.querySelector("[data-title]")?.dataset.title === ${J(t)});
-              const w = c?.querySelector(".thumb-wrap"); if (!w) return null; w.scrollIntoView({ block: "nearest" }); await m.sleep(150); const b = w.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };`);
-            if (!r) return { t, text: null };
-            await rightAt(r.x + r.w / 2, r.y + r.h / 2);
-            for (let i = 0; i < 40 && !(await page(`return !!document.querySelector(".side-panel:not(.closing) .side-hero");`)); i++) await sleep(50);
-            await sleep(250);
-            const c = await page(`const c = document.querySelector(".side-panel:not(.closing) .side-hero > .side-chip.accent"); if (!c) return null;
-              const s = getComputedStyle(c); return { text: c.textContent.trim(), cls: c.className, look: [s.backgroundColor, s.color, s.boxShadow, s.fontSize, s.padding].join(" | "),
-                bg: s.backgroundColor, fg: s.color, ring: s.boxShadow, svg: !!c.querySelector("svg"), type: s.fontSize };`);
-            await page(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await m.sleep(300);`);
-            return { t, text: null, ...c };
-          };
-          const cp = await chip(PRESETS[0]);
-          if (cp.text !== "PRESET") v.push(`${tag}: ${cp.t}'s sidebar chip says ${J(cp.text)}, want PRESET`);
-          if (theme === t1 && glows) await shot("preset-badge");
+          const c = await TI.contrast(win, CARD(PRESETS[0]), "#f2f2ee");
+          if (c.error || c.ratio < TI.MIN_CONTRAST) v.push(`${tag}: the preset icon over a light picture ${J(c)}`);
+          v.push(...TI.judgeChip(tag, PRESETS[0], "preset", await chip(PRESETS[0])));
+          console.log(`        ${tag}: base ${J(base?.kind)} video ${J(vid?.kind)} preset contrast ${J(c)}`);
+          await closeSide();
           await page(`await m.ensure(); m.seg("Preset", "off")?.click();`);
-          const d2 = await waitTitles((x) => J(x) === J(DEFAULT_SCENES)); await sleep(300);
-          if (J(d2) !== J(DEFAULT_SCENES)) return [...v, `${tag}: Preset off lists ${J(d2)} — proved nothing`];
-          const cb = await chip("Fixture Workshop Three");
-          console.log(`        ${tag} sidebar: ${J([cp.text, cb.text])}`);
-          if (cb.text !== "SCENE") v.push(`${tag}: the base scene's sidebar chip says ${J(cb.text)}, want SCENE`);
-          else if (cp.text) {
-            if (cp.type !== cb.type) v.push(`${tag}: the preset's sidebar chip size ${J(cp.type)} ≠ the scene's ${J(cb.type)}`);
-            const d = APART.filter((k) => cp[k] !== cb[k]);
-            if (d.length < 2) v.push(`${tag}: the preset's sidebar chip differs from the scene's only in ${J(d)} — want two of ${J(APART)} (${cp.look} vs ${cb.look})`);
-          }
+          await waitTitles((x) => J(x) === J(DEFAULT_SCENES));
           await realDone();
         }
       } finally { await setSettings({ theme: t0, glows: s0.glows ?? true }); await realDone(); }

@@ -4,7 +4,7 @@ import { thumb, anim, still, CARD_STILL_W, type Wallpaper } from "../api/client"
 import { useStore } from "../store";
 import { shortDownloadStatus } from "./downloadStatus";
 import { actionBlocked, isWorkshopItem, subscribeIsDownload } from "./subscribeMode";
-import { TypeBadge } from "./TypeBadge";
+import { TypeIcon } from "./TypeIcon";
 
 // USER-RULED: Browse card mirrors the Library card — the card IS the thumbnail with a 2-line centered
 // title overlay. Interactions (docs/decisions.md § "Left click does the tab's main action, right click opens the item
@@ -72,10 +72,9 @@ export const Card = memo(function Card({
           <img className="thumb anim" src={gifSrc} decoding="async" alt=""
             style={{ opacity: active ? 1 : 0, backgroundImage: `url("${staticSrc}")`, backgroundSize: "cover", backgroundPosition: "center" }} />
         )}
-        {/* a Workshop preset is a scene for everything else (greying, "Play scenes" off); only its badge names it. Guard:
-            probe-filters filter:preset:badge */}
-        {w.isScene && <TypeBadge preset={w.isPreset} />}
-        {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the SCENE badge's opposite corner */}
+        {/* its type's icon, top-left, as on the Library's card. Guard: probe-filters filter:type:icon */}
+        <TypeIcon scene={w.isScene} preset={w.isPreset} />
+        {/* already downloaded (the library holds it — Browse.tsx libraryKeys); top-right, the type icon's opposite corner */}
         {inLibrary && <span className="badge inlib ico" data-in-library><Check size={11} strokeWidth={3} />In library</span>}
         {/* hover download button (bottom-right, the Library card's trash spot): a solid accent arrow on a dark round chip (index.css
             `.dl-btn` — a hollow outline gets lost on bright thumbnails). A click on the card opens the sidebar. */}

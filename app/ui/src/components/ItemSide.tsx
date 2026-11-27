@@ -20,7 +20,7 @@ import { BaseRow, CommentsSection, CreatorRow, FavoritePill, PresetsRow, Worksho
 import { actionBlocked, isWorkshopItem } from "./subscribeMode";
 import { revealCard } from "../hooks/gridKeys";
 import { SizePill, StatPills } from "./sidePills";
-import { TypeBadge } from "./TypeBadge";
+import { TypeIcon } from "./TypeIcon";
 import { Tip } from "./Tip";
 import { magnetRef } from "./magnet";
 import { useRemoval } from "./itemRemoval";
@@ -491,8 +491,8 @@ export function ItemSide({ tab, w, lib, libTargets, hide, clearSel, onRemoved, o
       <div ref={bodyRef} className={`side-body${ready ? "" : " wait"}`}>
         {/* the info pills: facts only, in one order on both tabs (tags live in About). Guard: probe-hidden same:parts */}
         <div className="side-hero">
-          {/* says what its card's badge says (LibraryCard.tsx, Card.tsx). Guard: probe-sidebar lib:preset:badge */}
-          {isScene && <TypeBadge chip preset={isPreset} />}
+          {/* its card's type icon, with the type in words (TypeIcon.tsx). Guard: probe-sidebar lib:type:icon */}
+          <TypeIcon chip scene={isScene} preset={isPreset} />
           {/* "keep playing this one" is on — the only thing the old "Playing now" pill said that nothing else does */}
           {playing && keepCurrent && <span className="side-chip accent" data-side-looping><Repeat size={12} /> Looping this one</span>}
           {/* reserved before the duration loads: the rows below don't move when it lands */}

@@ -82,13 +82,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Guard: probe cells reading the computed `text-shadow` of those elements with the setting on and off, and
        screenshots over a light and a dark `bg-live` wallpaper.
 
-15. [ ] (owner) A card shows its type as a small icon, not a pill badge (`components/TypeBadge.tsx`): a 14–16 px glyph
-       in the card's corner with a soft shadow that reads on any picture: a cube for a scene, sliders for a preset
-       (its current icon), nothing for a video (the default). Hover gives "Scene" / "Preset" as a tooltip; the sidebar
-       still names the type in words. Every grid and card that shows the badge today (Library, Browse, the Settings
-       card preview), and the item sidebar's type chip too (owner 2026-11-27: "scene type also icon"). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
-       (icon present / absent, the tooltip, no pill), and screenshots over light and dark thumbnails.
-
 19. [ ] (owner) The owner's README replaces the agent-written one: `docs/Meat bag's Readme.md` (untracked) and branch
        `readme-preview` (8 commits: collapsible install steps per distro, shorter previews, a readable Settings image, a
        required / optional "You'll need"; `docs/preview/` holds its images, untracked). Bring it up to date with today's

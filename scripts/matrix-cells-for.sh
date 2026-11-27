@@ -127,9 +127,10 @@ for f in $FILES; do
     app/ui/src/components/Playlist*|app/ui/src/components/PlaylistToggle.tsx) add "$PL|plStart|plTr|travel:|global:sceneTiming|playlist:sceneTiming" "$f" ;;
     # the health warning icon (Settings rows + the playlist modal's Transitions field): drawn only — the modal cells must still open
     app/ui/src/components/FeatureWarn.tsx) add "plTr|plStart|$NUM" "$f" ;;
-    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:|appear|clip:" "$f (+ --probe probe-presence.js lib:; probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs; probe-sidebar.js lib:preset:badge; probe-steam.js — lib:yours:)" ;;
+    app/ui/src/components/LibraryCard.tsx|app/ui/src/views/Library.tsx|app/ui/src/components/MotionThumb.tsx|app/ui/src/hooks/useResetOnLeave.ts) add "$CARD|$KEYS|travel:|appear|clip:" "$f (+ --probe probe-presence.js lib:; probe-select.js — box selection; probe-layout.js tabs:keep, perf:tabs; probe-sidebar.js lib:type:icon; probe-steam.js — lib:yours:)" ;;
     # the SCENE / PRESET tag on both tabs' cards and sidebars
-    app/ui/src/components/TypeBadge.tsx) add "$CARD|browse:" "$f (+ --probe probe-sidebar.js lib:preset:badge; --probe probe-filters.js filter:preset:badge)" ;;
+    app/ui/src/components/TypeIcon.tsx) add "$CARD|browse:" "$f (+ --probe probe-sidebar.js lib:type:icon; --probe probe-filters.js filter:type:icon; --probe probe-icons.js)" ;;
+    app/shell/type-icon.js) echo "  $f → nothing in the matrix (--probe probe-sidebar.js --only lib:type:icon, probe-filters.js --only filter:type:icon)" >&2 ;;
     # a scene that presets play: the question before it goes (the Library's and the Browse sidebar's deletes / unsubscribes)
     app/ui/src/components/baseConfirm.ts|app/ui/src/components/BaseSceneConfirm.tsx) add "$CARD|$KEYS" "$f (+ --probe probe-sidebar.js — lib:baseDelete*, lib:preset:*)" ;;
     # what a card shows hovered and not ("On hover" / "Not hovered"), the list control that orders them, the on-screen gating
@@ -168,7 +169,7 @@ for f in $FILES; do
     app/ui/src/components/iconMotion.ts|app/ui/src/components/magnet.ts|app/ui/src/components/icons.ts)
       add "$CARD|$PL|$MODAL|appear" "$f (+ --probe probe-icons.js — every role; probe-layout.js perf:idle)" ;;
     app/ui/src/components/Card.tsx|app/ui/src/views/Browse.tsx|app/ui/src/components/WsSetLoad.tsx|app/ui/src/views/localSet.ts|app/ui/src/components/facets.ts|app/ui/src/hooks/useKeptScroll.ts|app/ui/src/hooks/useBrowseFocusShown.ts)
-      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-presence.js browse:filter; --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:, yours:; --probe probe-filters.js — the Workshop filter column, filter:preset:badge; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
+      add "browse:" "$f (+ scripts/test-ui-matrix.sh --probe probe-presence.js browse:filter; --probe probe-sidebar.js — the sidebar probe; --probe probe-steam.js — side:oneOff:, steam:subMerge:, yours:; --probe probe-filters.js — the Workshop filter column, filter:type:icon; --probe probe-select.js — box selection; --probe probe-layout.js — tabs:browse, perf:tabs)" ;;
     # the filter panel and the top bar's split button: not in the matrix (Browse needs the network) — its own probe stubs
     # /browse (hooks/filterMorph.ts: gone, listed so its deletion maps here)
     app/ui/src/components/WorkshopFilterColumn.tsx|app/ui/src/components/workshopFilter.ts|app/ui/src/components/SortFilterButton.tsx|app/ui/src/hooks/filterMorph.ts)
