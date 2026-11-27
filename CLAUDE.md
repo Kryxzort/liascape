@@ -84,6 +84,6 @@ Path-scoped rules load when you read or edit matching files; open one directly w
 | Electron shell, probes, UI matrix | `.claude/rules/ui/shell-and-probes.md` |
 
 ## Reference docs (read on demand)
-- `docs/player/architecture.md` (the player's design), `docs/player/invariants.md`, `docs/player/debugging.md`, `docs/player/modules/` (how each player module works now: one file per module, `scene-*.md` for the scene worker, `persistence.md` for snapshot/outbox/supervisor), `docs/player/adapter.md` (the C# adapter's walkthrough).
+- `docs/player/architecture.md` (the player's design), `docs/player/invariants.md`, `docs/player/debugging.md`, `docs/player/modules/` (how each player module works now: one file per module, `scene-*.md` for the scene worker, `persistence.md` for snapshot/outbox/supervisor), `docs/player/adapter.md` (the C# adapter's walkthrough), `docs/backend/steam-workshop.md` (how the backend talks to Steam).
 - `docs/decisions.md` — why things are the way they are: the choices that ruled out a tempting alternative (read before "fixing" one back).
 - Status and to-do: `docs/TODO.md` (a done item is deleted in the commit that does it). Work agreed but not started goes in its "Queued" section, in order, the moment it's agreed; the next task comes from the top of it.

@@ -2,7 +2,7 @@
 # Checks the agent-facing rules against .claude/rules/writing-rules.md:
 #  - every .claude/rules/**/*.md starts with YAML frontmatter whose only key is `paths:` = a list of quoted globs
 #    (invalid YAML would make Claude Code load the rule on every task), each glob matching a tracked file;
-#  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; reference docs (docs/player/*.md, modules) ≤ 15,000 chars, docs/decisions.md ≤ 30,000; every SKILL.md and .claude/agents/*.md has name + description;
+#  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; reference docs (docs/player/*.md, modules, docs/backend/*.md) ≤ 15,000 chars, docs/decisions.md ≤ 30,000; every SKILL.md and .claude/agents/*.md has name + description;
 #  - .claude/settings.json parses and every hook script it runs exists;
 #  - every backticked repo path in CLAUDE.md, the rules and the skills exists (exact, a tracked directory, a glob, or
 #    a suffix of a tracked path such as `hooks/useLinger.ts`; runtime and build-output paths are skipped);
@@ -119,7 +119,7 @@ if text.count("\n") > 100: bad("CLAUDE.md", f"{text.count(chr(10))} lines > 100"
 check_paths("CLAUDE.md", text)
 print(f"CLAUDE.md: {text.count(chr(10))} lines, {len(text)} chars")
 
-for f in ["docs/decisions.md"] + sorted(glob.glob("docs/player/*.md") + glob.glob("docs/player/modules/*.md")):
+for f in ["docs/decisions.md"] + sorted(glob.glob("docs/player/*.md") + glob.glob("docs/player/modules/*.md") + glob.glob("docs/backend/*.md")):
     if os.path.exists(f): personal(f, open(f, encoding="utf-8").read())
 
 # Doc budgets (writing-rules.md § Files): reference docs ≤ 15,000 chars, the decision log ≤ 30,000. Reports and spikes
@@ -127,7 +127,7 @@ for f in ["docs/decisions.md"] + sorted(glob.glob("docs/player/*.md") + glob.glo
 if os.path.exists("docs/decisions.md"):
     n = len(open("docs/decisions.md", encoding="utf-8").read())
     if n > 30000: bad("docs/decisions.md", f"{n} chars > 30,000")
-for f in sorted(glob.glob("docs/player/*.md") + glob.glob("docs/player/modules/*.md")):
+for f in sorted(glob.glob("docs/player/*.md") + glob.glob("docs/player/modules/*.md") + glob.glob("docs/backend/*.md")):
     n = len(open(f, encoding="utf-8").read())
     if n > 15000: bad(f, f"{n} chars > 15,000 (reference doc)")
 

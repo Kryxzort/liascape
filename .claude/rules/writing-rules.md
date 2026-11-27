@@ -59,7 +59,7 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - A reversed decision: edit its entry to the new choice (say what it replaced in one clause); never keep both.
 - Rules link to an entry (`docs/decisions.md` § heading); entries never restate the rule's text.
 
-## Reference material (`docs/player/*.md`, `docs/player/modules/*.md`, other `docs/` walkthroughs)
+## Reference material (`docs/player/*.md`, `docs/player/modules/*.md`, `docs/backend/*.md`)
 - Describes the code as it is now: present tense, no dates, no incident stories, no Task/Phase/R-numbers.
 - Open with one line naming the code it covers (`src/player/src/sources/`); keep each file to one module or topic.
 - Keep only what one read of the code won't give: the contract between parts, invariants, non-obvious why, pitfalls,
