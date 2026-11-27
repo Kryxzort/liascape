@@ -1496,25 +1496,36 @@ input[type=range]:focus-visible { outline: none; }
    one, whose letters are dark: a black shadow under them only smudges, a white one parts them from the wallpaper the same way */
 :root.text-shadow { --ts-c: oklch(from var(--bg-crust) round(l) 0 0); }
 :root.text-shadow body { text-shadow: var(--ts-c) 2px 1.9px 2px; }
-:root.text-shadow :is(button, input, textarea, select) { text-shadow: inherit; }
+/* :where: no more specific than the coloured-text rule below, which the buttons among it (an outlined danger button) take */
+:root.text-shadow :where(button, input, textarea, select) { text-shadow: inherit; }
 /* text on a fill of its own (the accent, danger, a badge) is legible on it already; a black halo around --accent-fg's dark
    letters only smudges them */
 :root.text-shadow :is(.tab.active, .pill.active, .seg-ghost, .dl, .badge, .check, .btn.accent, .btn.danger.solid, .mini.on, .play-btn,
   .ss-filter.on, .ss-n, .sel-opt.on, .pl-name.sel, .tr-toggle.on, .tr-refresh:hover, .tr-chip.on, .side-tool.accent, .side-mute.on,
   .wf-n, .wf-seg[aria-checked="true"], .wf-fm-seg[aria-checked="true"]) { text-shadow: none; }
-/* the shadow is for plain text: text in the accent or a state colour (a heading, a warning, a lit control, a hovered glow)
-   is lit already, and a black copy under it reads as dirt, or glows along with it under a drop-shadow glow. Every selector
-   that colours text so or glows it (index.css) keeps its own look */
-:root.text-shadow :is(.badge, .btn.accent, .btn.danger, .card-pv-cap[data-making] > span, .card-pv-h, .check, .dbg-hud b.bad, .del:hover, .dl,
-  .dl-btn:hover, .dl-glyph, .err-modal h2, .go-playing:hover:not(:disabled), .health-sum-head, .hms span.s-warn-text, .mini.on,
-  .ns-btn:not(:disabled):hover, .ord-n, .pill.active, .pl-name.sel, .pl-remove:hover, .pl-toggle, .play-btn, .pw-err, .pw-wait, .s-expert,
-  .s-reset:hover, .s-warn, .s-warn-text, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
-  .side-crash-ico, .side-mute.on, .side-sec-ico, .side-sec-title,
-  .side-tile-ico, .side-tile.danger, .side-tool.accent, .side-val, .side-vol-val.follow, .sp-group,
-  .ss-filter.on, .ss-n, .ssection h3, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-hold-ico, .st-hold-text, .st-msg, .st-name, .st-use,
-  .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-sec-label, .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
-  .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-row.exc .wf-name, .wf-seg.e:hover,
-  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], .wf-title, button.side-pill.copy.done, .ws-c-op) { text-shadow: none; }
+/* text that glows (a drop-shadow glow on it or its icon) or sits on a solid fill of its own keeps its own look: a shadow
+   under it would glow along with it. Coloured text without either takes the tinted halo below */
+:root.text-shadow :is(.badge, .btn.accent, .btn.danger.solid, .card-pv-cap[data-making] > span, .check, .dbg-hud b.bad, .del:hover, .dl,
+  .dl-btn:hover, .dl-glyph, .err-modal h2, .go-playing:hover:not(:disabled), .mini.on,
+  .ns-btn:not(:disabled):hover, .pill.active, .pl-name.sel, .pl-remove:hover, .pl-toggle, .play-btn, .s-expert,
+  .s-reset:hover, .s-warn, .seg-hl-in > .seg-ghost, .sel-opt.on, .side-chip.accent, .side-chip.danger, .side-close:hover,
+  .side-crash-ico, .side-mute.on, .side-sec-ico,
+  .side-tile-ico, .side-tile.danger, .side-tool.accent,
+  .ss-filter.on, .ss-n, .ssection-ico, .st-btns .st-stop:hover:not(:disabled), .st-hold-ico, .st-use:hover:not(:disabled),
+  .tab.active, .tr-chip.on, .tr-refresh:hover:not(:disabled), .tr-toggle.on, .tsearch:not([data-folded]):focus-within .ts-btn,
+  .tsearch[data-lit] .ts-btn, .warn, .wf-fm-seg[aria-checked="true"], .wf-gico, .wf-n, .wf-seg.e:hover,
+  .wf-seg.e[aria-checked="true"], .wf-seg.i:hover, .wf-seg.i[aria-checked="true"], button.side-pill.copy.done, .ws-c-op) { text-shadow: none; }
+/* coloured text (a heading or value in the accent, a warning, an outlined danger button, the playlist bar's label) over a
+   live wallpaper: a halo in its own colour, darkened toward the shadow's black (lightened toward white under a light theme),
+   hugging the letters instead of the offset copy: a grey copy under a coloured letter reads as dirt, and on small bold
+   caps as a second, doubled letter. Its colour mixes in each element's own currentColor (resolved per element), so one
+   rule fits every colour. Mixed in oklab, not oklch: --ts-c's hue is 0, and an oklch mix would swing a blue halo round
+   toward pink. :where keeps it below the exclusions above and the bg-live rule below (text already under a
+   drop-shadow filter). Guard: probe-layout look:textShadowTint */
+:root.text-shadow { --ts-tint: color-mix(in oklab, currentColor 15%, var(--ts-c)); }
+:root.text-shadow :where(.btn.danger, .card-pv-h, .health-sum-head, .hms span.s-warn-text, .ord-n, .playlist-bar-label, .pw-err,
+  .pw-wait, .s-warn-text, .side-sec-title, .side-val, .side-vol-val.follow, .sp-group, .ssection h3, .st-hold-text, .st-msg,
+  .st-name, .st-use, .tr-sec-label, .wf-row.exc .wf-name, .wf-title) { text-shadow: var(--ts-tint) 0 0 1px, var(--ts-tint) 0 0 2px; }
 /* the sidebar title's two-line clamp (overflow: hidden) would cut a text-shadow off at its box: the unclipped wrapper draws
    the same shadow as a filter instead, as bg-live does */
 :root.text-shadow .side-head-text { filter: drop-shadow(2px 1.9px 1px var(--ts-c)); text-shadow: none; }

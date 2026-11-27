@@ -72,16 +72,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        Never more requests to steamcommunity.com than now (`SteamGate`). Guard: the bench's numbers before / after, a probe
        cell per behaviour added.
 
-5. [ ] (owner) "Text shadow" (Settings → Look & feel, `:root.text-shadow` in `index.css`) fits coloured text over a live
-       wallpaper too, and leaves the playlist bar's PLAYLIST label alone.
-       - Text in a state colour is excluded today (a black copy under it "reads as dirt"), so the red Unsubscribe tile
-         washes out over a light wallpaper. Give that text a shadow that suits it (a softer or tinted one, not the plain
-         black copy), at least for danger / warning text on tiles; judge it on a light and a dark wallpaper.
-       - The playlist bar's PLAYLIST label (`.playlist-bar-label`, `PlaylistBar.tsx`), coloured text whose plain black
-         shadow looks wrong, gets the same suited shadow instead of none.
-       Guard: probe cells reading the computed `text-shadow` of those elements with the setting on and off, and
-       screenshots over a light and a dark `bg-live` wallpaper.
-
 7. [ ] (owner) The owner's README replaces the agent-written one: `docs/Meat bag's Readme.md` (untracked) and branch
        `readme-preview` (8 commits: collapsible install steps per distro, shorter previews, a readable Settings image, a
        required / optional "You'll need"; `docs/preview/` holds its images, untracked). Bring it up to date with today's

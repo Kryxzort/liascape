@@ -59,6 +59,12 @@
 //                         inside bg-live's drop-shadow filters, the sidebar title's pixels the same on and off); the clamped
 //                         sidebar title draws it through its clamp; a light theme's crust turns it white; off: gone.
 //                         Screenshots look-textShadow-*.png
+//   look:textShadowTint   "Text shadow" on coloured text (the playlist bar's PLAYLIST label, the accent headings, the outlined
+//                         danger button) over a light and a dark live backdrop: a halo in its own colour hugging the letters,
+//                         never the grey offset copy; where the backdrop washes the letters out (contrast < 3) it lifts them
+//                         to ≥ 3, always within 80 % of a plain black / white halo, and the pixels round them darken; a light
+//                         theme too, the same under no-glow and motion off; off: none. Screenshots
+//                         look-textShadowTint-*.png
 //   look:vramHold[:off]   the low-VRAM hold's notice leads the now-playing line in the notice look (the --warn edge and glyph,
 //                         their glow, none under no-glow, a translucent fill under bg-live, Latte's own --warn): "Low VRAM",
 //                         never cut, the glyph alone in a slot too narrow for it (the top bar's height kept), the whole
@@ -876,12 +882,13 @@ app.whenReady().then(async () => {
         return { cls: root.classList.contains("text-shadow"), body: ts(document.body), label: ts(document.querySelector(".srow .slabel")),
           tab: ts(document.querySelector(".tab:not(.active)")), nFilled: filled.length,
           filledShadowed: filled.filter((e) => ts(e) !== "none").map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)),
-          ...(() => { // text in the accent or a state colour is lit already: no shadow on it, nor from a shadowing filter above it
+          ...(() => { // text in the accent or a state colour never takes the plain offset copy (on it, or from a shadowing filter
+            // above it): a grey copy under a coloured letter reads as dirt; it takes the tinted halo or none (look:textShadowTint)
             const col = (v) => { const s = document.createElement("span"); s.style.color = v; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; };
             const lit = new Set(["var(--accent)", "var(--accent-hover)", "var(--danger)", "var(--success)", "var(--warn)"].map(col));
             const filtered = (e) => { for (let a = e; a; a = a.parentElement) if (/2px 1\.9px/.test(getComputedStyle(a).filter)) return true; return false; };
             const els = [...document.querySelectorAll("body *")].filter((e) => own(e) && e.getClientRects().length && lit.has(getComputedStyle(e).color));
-            return { nLit: els.length, litShadowed: els.filter((e) => ts(e) !== "none" || filtered(e)).map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)) }; })() };`;
+            return { nLit: els.length, litShadowed: els.filter((e) => /2px 1\.9px/.test(ts(e)) || filtered(e)).map((e) => e.className + ":" + e.textContent.trim().slice(0, 16)) }; })() };`;
       // (Settings is a lazy chunk: a first visit can take seconds to mount)
       // text whose own overflow clip cuts its text-shadow off (a hard-edged dark box on a bright backdrop): an element showing its
       // own text with a shadow, overflow not visible, no fill of its own (a fill's edge shows anyway: the clip adds none) and
@@ -933,7 +940,7 @@ app.whenReady().then(async () => {
         if (!on.nFilled) v.push("on: no text on an accent fill on Settings to check — proved nothing");
         if (on.filledShadowed.length) v.push(`on: text on an accent fill is shadowed: ${on.filledShadowed.join(", ")}`);
         if (!on.nLit) v.push("on: no accent / state-coloured text on Settings to check — proved nothing");
-        if (on.litShadowed.length) v.push(`on: coloured text (accent / state colour, lit already) is shadowed: ${on.litShadowed.join(", ")}`);
+        if (on.litShadowed.length) v.push(`on: coloured text (accent / state colour) carries the plain offset copy: ${on.litShadowed.join(", ")}`);
         if (!(await saved(true))) v.push("turning Text shadow on wasn't saved (textShadow !== true)");
         // a light theme (its crust light, its letters dark) turns the shadow white; the theme's own crust comes back after
         const lt = await page(`const r = document.documentElement, was = r.style.getPropertyValue("--bg-crust");
@@ -1013,6 +1020,159 @@ app.whenReady().then(async () => {
         if (!(await saved(false))) v.push("turning Text shadow off wasn't saved");
       } finally {
         await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true, ...(level0 ? { settingsLevel: level0 } : {}) });
+        await win.loadURL(withToken(U + "/")); await js(PAGE); await sleep(400);
+      }
+      return v;
+    });
+    // look:textShadowTint — "Text shadow" on coloured text (index.css --ts-tint): the playlist bar's PLAYLIST label (--muted),
+    // the accent headings (a Settings section's, the sidebar's) and the sidebar's outlined Delete (--danger) take a halo in their
+    // own colour mixed toward the shadow's black (white under a light theme), never the grey offset copy. Measured per element
+    // as the eye compares it: the letter's colour against its halo's, and against the bare backdrop with the setting off,
+    // over a white and a dark live backdrop (bg-live). Where the backdrop of the halo's other lightness (white under a dark
+    // theme's black halo, dark under a light theme's white one) washes the letters out (off: contrast < 3) the halo lifts
+    // them to ≥ 3, and it is always within 80 % of the plain black / white halo's contrast. Rendered: over that backdrop
+    // the pixels round the letters darken (lighten) with the setting on, under no-glow and motion off too. A coloured letter's
+    // halo carries its hue (within 20°). A light theme (its crust,
+    // accent and muted from Latte) too; no-glow and motion off keep it; off: none. LIASCAPE_TS_SHOTS=<dir> copies the
+    // screenshots there too. Screenshots look-textShadowTint-*.png
+    await cell("look:textShadowTint", async () => {
+      const v = [], J = JSON.stringify, OUT_DIR = E.LIASCAPE_TS_SHOTS || "";
+      const LIGHT = [255, 255, 255], DARK = [0x15, 0x15, 0x1f], HALO_SHARE = 0.24;
+      const BACK = (c) => `(() => { document.querySelector(".ts-probe-bg")?.remove(); document.querySelectorAll(".settings-bg").forEach((e) => e.style.visibility = "hidden");
+        const d = document.createElement("div"); d.className = "ts-probe-bg"; d.style.cssText = "position:fixed;inset:0;z-index:0;pointer-events:none;background:rgb(${c.join(",")})";
+        document.querySelector(".app").prepend(d); return true; })()`;
+      // per selector: the letter colour, the first shadow layer's colour, both as sRGB through a canvas (any CSS colour form)
+      const READ = (sels) => `const cv = document.createElement("canvas"); cv.width = cv.height = 1; const cx = cv.getContext("2d", { willReadFrequently: true });
+        const rgba = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = "rgb(1, 2, 3)"; cx.fillStyle = c; if (cx.fillStyle === "#010203") return null;
+          cx.fillRect(0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
+        const first = (s) => s === "none" ? null : (s.match(/^([a-z-]+\\((?:[^()]|\\([^()]*\\))*\\)|#[0-9a-f]+|[a-z]+)/i) || [])[1] || null;
+        const probe = document.createElement("span"); probe.style.color = "var(--ts-c, transparent)"; document.body.append(probe); const plain = rgba(getComputedStyle(probe).color); probe.remove();
+        const out = {}; for (const sel of ${J(sels)}) { const e = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length && x.textContent.trim());
+          if (!e) { out[sel] = null; continue; } const cs = getComputedStyle(e);
+          const lch = (c) => { if (!c) return null; const s = document.createElement("span"); s.style.color = "oklch(from " + c + " l c h)"; document.body.append(s);
+            const m = getComputedStyle(s).color.match(/oklch\\(([\\d.]+) ([\\d.]+) ([\\d.]+|none)/); s.remove(); return m ? [+m[1], +m[2], m[3] === "none" ? 0 : +m[3]] : null; };
+          out[sel] = { text: rgba(cs.color), shadow: cs.textShadow, halo: first(cs.textShadow) && rgba(first(cs.textShadow)), plain, words: e.textContent.trim().slice(0, 16),
+            textLch: lch(cs.color), haloLch: lch(first(cs.textShadow)) }; }
+        return out;`;
+      const lin = (x) => { x /= 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+      const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+      const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+      const over = (c, b) => [0, 1, 2].map((i) => c[3] * c[i] + (1 - c[3]) * b[i]); // a colour with alpha over the backdrop
+      const rows = [];
+      // judge one sample read with the setting on against the same read with it off
+      const judge = (where, sel, on, off) => {
+        if (!on || !off) { v.push(`${where}: no ${sel} on screen — proved nothing`); return; }
+        if (!on.halo || !on.text) { v.push(`${where}: ${sel} "${on.words}" has no shadow with Text shadow on (${on.shadow})`); return; }
+        if (/2px 1\.9px/.test(on.shadow)) v.push(`${where}: ${sel} carries the grey offset copy, not a halo (${on.shadow})`);
+        if (on.plain && on.halo.slice(0, 3).every((x, i) => Math.abs(x - on.plain[i]) <= 1)) v.push(`${where}: ${sel}'s halo is the plain shadow colour, not its own (${on.shadow})`);
+        if (off.shadow !== "none") v.push(`${where}: ${sel} keeps a shadow with Text shadow off (${off.shadow})`);
+        // a coloured letter's halo carries its hue (a neutral near-black would differ from the plain shadow and still be grey);
+        // a near-grey letter (--muted) has no hue to carry
+        if (!on.textLch || !on.haloLch) v.push(`${where}: ${sel}: couldn't read the hues (${on.shadow}) — proved nothing`);
+        else if (on.textLch[1] >= 0.05) {
+          const dh = Math.abs(((on.haloLch[2] - on.textLch[2]) % 360 + 540) % 360 - 180);
+          rows.push(`${where} ${sel} hue: letter ${on.textLch[2].toFixed(0)}° (chroma ${on.textLch[1].toFixed(3)}), halo ${on.haloLch[2].toFixed(0)}° (chroma ${on.haloLch[1].toFixed(3)})`);
+          if (!(on.haloLch[1] > 0.005 && dh < 20)) v.push(`${where}: ${sel}'s halo doesn't carry its colour: letter ${on.textLch[2].toFixed(0)}°, halo ${on.haloLch[2].toFixed(0)}° chroma ${on.haloLch[1].toFixed(3)}`);
+        }
+        const plainCr = cr(on.text, on.plain);
+        for (const [bn, b] of [["light", LIGHT], ["dark", DARK]]) {
+          const cOff = cr(on.text, b), cOn = cr(on.text, over(on.halo, b));
+          rows.push(`${where} ${sel} over ${bn}: off ${cOff.toFixed(2)}, on ${cOn.toFixed(2)} (plain halo ${plainCr.toFixed(2)})`);
+          // the halo parts letters from a backdrop of the other lightness (a black halo from a light picture, a white one from a dark)
+          const judged = (lum(on.plain) < 0.5) === (b === LIGHT);
+          if (judged && cOff < 3 && !(cOn >= 3 && cOn > cOff)) v.push(`${where}: ${sel} over the ${bn} backdrop stays washed out: contrast off ${cOff.toFixed(2)}, on ${cOn.toFixed(2)}`);
+          if (cOn < 0.8 * plainCr) v.push(`${where}: ${sel}'s halo over the ${bn} backdrop is weaker than the plain one: ${cOn.toFixed(2)} vs ${plainCr.toFixed(2)}`);
+        }
+      };
+      const both = async (sels) => {
+        const on = await page(READ(sels));
+        await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(120);
+        const off = await page(READ(sels));
+        await page(`document.documentElement.classList.add("text-shadow");`); await sleep(120);
+        return { on, off };
+      };
+      // what the eye sees: round the letters (their text's box, 3 px out) over the backdrop the halo parts them from, setting
+      // on vs off, the share of pixels the halo darkens (lightens under a light theme) by more than 10 levels: a halo rings
+      // every letter, whatever its declared colour; a zero-blur copy hidden under the letters changes only their antialiased
+      // edges, a transparent one nothing (measured: a halo 28–35 %, the zero-blur copy 14–19 %)
+      const grab = async (r) => (await win.webContents.capturePage({ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.w), height: Math.round(r.h) })).toBitmap();
+      const ringed = (a, b, sign) => { let n = 0; const k = Math.min(a.length, b.length);
+        for (let i = 0; i < k; i += 4) if (sign * ((b[i] + b[i + 1] + b[i + 2]) - (a[i] + a[i + 1] + a[i + 2])) / 3 > 10) n++; return n / (k / 4); };
+      const rendered = async (where, sels, b) => {
+        await js(BACK(b)); await sleep(250);
+        const rects = await page(`return ${J(sels)}.map((sel) => { const e = [...document.querySelectorAll(sel)].find((x) => x.getClientRects().length && x.textContent.trim()); if (!e) return null;
+          const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT, { acceptNode: (n) => n.textContent.trim() ? 1 : 3 }), ts = []; for (let n; (n = w.nextNode());) ts.push(n);
+          const rg = document.createRange(); rg.setStart(ts[0], 0); rg.setEnd(ts[ts.length - 1], ts[ts.length - 1].length); const r = rg.getBoundingClientRect();
+          return { x: r.x - 3, y: r.y - 3, w: r.width + 6, h: r.height + 6 }; });`);
+        const on = [];
+        for (const r of rects) on.push(r && await grab(r));
+        await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(150);
+        for (let i = 0; i < sels.length; i++) {
+          if (!rects[i]) { v.push(`${where}: no ${sels[i]} to measure — proved nothing`); continue; }
+          const share = ringed(on[i], await grab(rects[i]), b === LIGHT ? 1 : -1);
+          rows.push(`${where} ${sels[i]} rendered over ${b === LIGHT ? "light" : "dark"}: ${(100 * share).toFixed(1)} % of the pixels round the letters changed by the halo`);
+          if (!(share > HALO_SHARE)) v.push(`${where}: ${sels[i]}'s halo doesn't show over the ${b === LIGHT ? "light" : "dark"} backdrop (${(100 * share).toFixed(1)} % of the pixels round the letters changed)`);
+        }
+        await page(`document.documentElement.classList.add("text-shadow");`); await sleep(150);
+      };
+      const shots = async (name) => {
+        for (const [bn, b] of [["light", LIGHT], ["dark", DARK]]) {
+          await js(BACK(b)); await sleep(200);
+          const f1 = await shot(`look-textShadowTint-${name}-${bn}-on`);
+          await page(`document.documentElement.classList.remove("text-shadow");`); await sleep(150);
+          const f2 = await shot(`look-textShadowTint-${name}-${bn}-off`);
+          await page(`document.documentElement.classList.add("text-shadow");`); await sleep(150);
+          if (OUT_DIR) for (const f of [f1, f2]) { fs.mkdirSync(OUT_DIR, { recursive: true }); fs.copyFileSync(f, path.join(OUT_DIR, path.basename(f))); }
+        }
+      };
+      try {
+        await setSettings({ textShadow: true, liveWallpaperBehindAllTabs: true, glows: true });
+        await win.loadURL(withToken(U + "/")); await js(PAGE); await tab("Library"); await sleep(600);
+        // Library: the playlist bar's label
+        const LIB = [".playlist-bar-label"];
+        let r = await both(LIB); for (const s of LIB) judge("Library", s, r.on[s], r.off[s]);
+        await rendered("Library", LIB, LIGHT);
+        await shots("library");
+        // the item sidebar: its section titles (accent) and the outlined Delete (danger)
+        await page(`const c = document.querySelector(".card.lib .thumb-wrap"); const b = c.getBoundingClientRect();
+          c.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: b.x + 10, clientY: b.y + 10 }));`);
+        await sleep(900);
+        const SIDE = [".side-panel:not(.closing) .side-sec-title", ".side-panel:not(.closing) .btn.danger[data-delete]"];
+        r = await both(SIDE); for (const s of SIDE) judge("sidebar", s, r.on[s], r.off[s]);
+        await rendered("sidebar", SIDE, LIGHT);
+        await shots("side");
+        // Settings: a section heading (accent); no-glow and motion off keep the halo
+        await page(`document.querySelector(".side-panel:not(.closing) .side-close")?.click();`); await sleep(400);
+        await tab("Settings"); await sleep(800);
+        const SET = [".ssection h3"];
+        r = await both(SET); for (const s of SET) judge("Settings", s, r.on[s], r.off[s]);
+        await rendered("Settings", SET, LIGHT);
+        const base = r.on[SET[0]]?.shadow;
+        for (const cls of ["no-glow", "no-motion"]) {
+          const x = await page(`document.documentElement.classList.add(${J(cls)}); await m.sleep(80); const r = (() => { ${READ(SET)} })();
+            document.documentElement.classList.remove(${J(cls)}); return r;`);
+          if (x[SET[0]]?.shadow !== base) v.push(`${cls}: the Settings heading's halo changed (${x[SET[0]]?.shadow} vs ${base})`);
+          // and still drawn while the class is on (an ancestor's filter or opacity would hide it with the value unchanged)
+          await page(`document.documentElement.classList.add(${J(cls)});`); await sleep(120);
+          await rendered(`Settings, ${cls}`, SET, LIGHT);
+          await page(`document.documentElement.classList.remove(${J(cls)});`); await sleep(120);
+        }
+        await shots("settings");
+        // a light theme: Latte's crust (the shadow turns white), accent and muted; over a dark backdrop its dark letters wash out
+        await tab("Library"); await sleep(500);
+        await page(`const r = document.documentElement.style; window.__tsWas = Object.fromEntries(["--bg-crust", "--accent", "--muted"].map((k) => [k, r.getPropertyValue(k)]));
+          r.setProperty("--bg-crust", "#dce0e8"); r.setProperty("--accent", "#8839ef"); r.setProperty("--muted", "#9ca0b0");`);
+        await sleep(150);
+        r = await both(LIB); for (const s of LIB) judge("Library, light theme", s, r.on[s], r.off[s]);
+        await rendered("Library, light theme", LIB, DARK);
+        await tab("Settings"); await sleep(500);
+        r = await both(SET); for (const s of SET) judge("Settings, light theme", s, r.on[s], r.off[s]);
+        await rendered("Settings, light theme", SET, DARK);
+        await shots("settings-latte");
+        await page(`const r = document.documentElement.style; for (const [k, was] of Object.entries(window.__tsWas || {})) if (was) r.setProperty(k, was); else r.removeProperty(k);`);
+        for (const x of rows) console.log(`        ${x}`);
+      } finally {
+        await setSettings({ textShadow: false, liveWallpaperBehindAllTabs: false, glows: true });
         await win.loadURL(withToken(U + "/")); await js(PAGE); await sleep(400);
       }
       return v;
