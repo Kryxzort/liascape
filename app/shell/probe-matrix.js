@@ -202,7 +202,11 @@ function oracle(snap, exp) {
 
 // ---------------------------------------------------------------- the page
 let win;
-const httpLog = [];
+// every response the page got (url, method, status, when), for the whole run: the load:* cells time the page's reads by it,
+// afterControl lists a cell's HTTP errors from it. Electron keeps ONE listener per webRequest event, so a cell that set its
+// own onCompleted replaced this log, and its cleanup (null) emptied it for every later cell of the shard; a cell that wants
+// completions adds a function to httpDone instead (the whenReady block makes onCompleted itself throw).
+const httpLog = [], httpDone = new Set();
 const js = (code) => win.webContents.executeJavaScript(code);
 const PAGE = `window.__mx = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -337,6 +341,7 @@ async function playFast(c, paths, settings) {
   await post("/playlist/state", { videoPaths: paths, settings, name: null }); // the real durations, live (a 600 s timer: no switch)
 }
 async function reset(pl) {
+  previewHold(false);
   const st = await ctl.call("state");
   for (const [name, w, h] of [["VIRTUAL-1", 640, 360], ["VIRTUAL-2", 320, 180]])
     if (!st.outputs.some((o) => o.name === name)) await ctl.call("headless.add_output", { name, width: w, height: h, hz: 60 }).catch(() => {});
@@ -951,7 +956,8 @@ C["browse:gifAfterStill"] = { states: ["idle"], noSwitch: true, async run(c) {
       if (n && /\/anim\?/.test(q.url)) { anims.add(n); if (!stillIn.has(n)) early.push(n); }
       cb({});
     });
-    wr.onCompleted(filter, (q) => { const n = cardOf(q.url); if (n && /\/still\?/.test(q.url)) stillIn.add(n); });
+    const done = (q) => { const n = cardOf(q.url); if (n && /\/still\?/.test(q.url)) stillIn.add(n); };
+    httpDone.add(done);
     wr.onErrorOccurred(filter, (q) => { const n = cardOf(q.url); if (n && /\/still\?/.test(q.url)) stillIn.add(n); });
     wr.onHeadersReceived(filter, (q, cb) => {
       if (!(cardOf(q.url) && /\/still\?/.test(q.url))) return cb({});
@@ -983,7 +989,7 @@ C["browse:gifAfterStill"] = { states: ["idle"], noSwitch: true, async run(c) {
       c.asked = stillAsked.size; c.anims = anims.size; c.early = [...new Set(early)];
       console.log(`        gifAfterStill: ${c.held} stills held, ${c.earlyHeld} gifs asked meanwhile; ${c.asked} stills asked, ${c.anims} gifs after`);
     } finally {
-      wr.onBeforeRequest(filter, null); wr.onCompleted(filter, null); wr.onErrorOccurred(filter, null); wr.onHeadersReceived(filter, null);
+      wr.onBeforeRequest(filter, null); httpDone.delete(done); wr.onErrorOccurred(filter, null); wr.onHeadersReceived(filter, null);
       for (const go of [...held]) go();
       await js(`(() => { if (window.__gaFetch) { window.fetch = window.__gaFetch; delete window.__gaFetch; } })(); true`).catch(() => {});
       await ui(`m.tab("Settings"); await m.sleep(400); await m.select("Card previews", "Animate on hover"); await m.sleep(300);`).catch(() => {});
@@ -2425,6 +2431,13 @@ function clipSwap(sm, from, to) {
 const swapOk = (r) => r.swapped && Math.abs(r.jump) <= 0.1 && r.ran != null && Math.abs(r.ran) <= 0.15 && r.blank === 0;
 // the Settings page is built on each visit: wait for a row before using it
 const ROW = (label) => `for (let i = 0; i < 50 && !m.row(${JSON.stringify(label)}); i++) await m.sleep(100); const row = m.row(${JSON.stringify(label)});`;
+// the preview backfill's hold while the file exists (test-ui-matrix.sh: LIASCAPE_PREVIEW_HOLD_FILE); its worker looks before each item
+function previewHold(on) {
+  const f = E.LIASCAPE_PREVIEW_HOLD_FILE;
+  if (!f) return;
+  if (on) fs.writeFileSync(f, "matrix cell");
+  else fs.rmSync(f, { force: true });
+}
 const isClip = (k) => !!k && k !== "real", isShort = (k) => !!k && k.endsWith("_short"), isFull = (k) => !!k && k.endsWith("_full");
 
 // /clip checks every parameter (Web/ClipStore.cs Handle): a path outside the library 403, a box or quality that isn't one
@@ -2543,9 +2556,12 @@ C["clip:size"] = { states: ["single"], noSwitch: true,
 
 // The 10 s stand-in plays first and the full clip takes over mid-play the moment it's ready: from the moment the stand-in
 // is at, never from frame 0, no frame without a playing video.
+// The preview backfill is held from before the import to the end: once any earlier page reported its card box, the backfill
+// makes the fixture's full clip ahead of its card (0.3 s here), the card never needs a stand-in, and the cell proves nothing.
 C["clip:shortToFull"] = { states: ["single"], noSwitch: true,
   // imported before the page loads (it reads the library at start)
   async pre(c) {
+    previewHold(true);
     c.p = await clipFixture("clipSF", 30);
     if (!c.p) return;
     await post("/playlist/state", { videoPaths: [K[0], c.p], settings: PS(), name: null });
@@ -2556,7 +2572,7 @@ C["clip:shortToFull"] = { states: ["single"], noSwitch: true,
     try {
       c.sm = await js(CLIP_SAMPLE("clipSF", 14000));
       fs.writeFileSync(path.join(OUT, "clip-shortToFull.json"), JSON.stringify(clipSwap(c.sm, isShort, isFull)));
-    } finally { await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS(), name: null }); await dropFixture(c.p); await sleep(300); }
+    } finally { previewHold(false); await post("/playlist/state", { videoPaths: [K[0], K[1], K[2]], settings: PS(), name: null }); await dropFixture(c.p); await sleep(300); }
   }, check(c) {
     if (!c.p) return ["couldn't import the 1280×720 fixture"];
     const r = clipSwap(c.sm, isShort, isFull), J = JSON.stringify;
@@ -5138,7 +5154,9 @@ async function fuzzMain() {
 }
 
 app.whenReady().then(async () => {
-  session.defaultSession.webRequest.onCompleted({ urls: ["<all_urls>"] }, (d) => httpLog.push({ url: d.url, method: d.method, status: d.statusCode, t: Date.now() }));
+  const wr0 = session.defaultSession.webRequest;
+  wr0.onCompleted({ urls: ["<all_urls>"] }, (d) => { httpLog.push({ url: d.url, method: d.method, status: d.statusCode, t: Date.now() }); for (const f of httpDone) f(d); });
+  wr0.onCompleted = () => { throw new Error("webRequest.onCompleted would replace the run's httpLog: add a function to httpDone instead"); };
   // SHOWN (on the private Xvfb — nothing reaches the session's display) and focused, like the real app: a
   // hidden window renders no frames — requestAnimationFrame never fires, so framer-motion/WAAPI animations
   // never finish (an exiting modal stayed in the DOM), dnd-kit's drop never lands (pointermoves are
