@@ -992,7 +992,7 @@ app.whenReady().then(async () => {
         if (cut.size) v.push(`the shadow is cut off at the box of text that clips itself: ${[...cut].join(", ")}`);
         if (so.title !== "none" && !/drop-shadow/.test(so.filter)) v.push(`the sidebar title's shadow is a text-shadow inside its clamp (${so.title}): clipped`);
         if (so.wrapClips) v.push("the sidebar title's wrapper clips its overflow: the filter's shadow is cut off");
-        await page(`const s = document.createElement("style"); s.id = "ts-white"; s.textContent = ".side-panel { background: #fff !important; }"; document.head.append(s);`);
+        await page(`const s = document.createElement("style"); s.id = "ts-white"; s.textContent = ".side-panel::before { background: #fff !important; }"; document.head.append(s);`); // the panel's fill is its ::before (index.css)
         await sleep(200);
         // the title's own area on the white panel (its letters are light): the shadow darkens it. Whether the clamp cuts it is
         // the structure above (the filter on an unclipped wrapper) and CLIPS: an offset shadow off a one-line title stays inside

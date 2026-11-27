@@ -117,6 +117,20 @@
 //   browse:inLibrary     an item the library has: no chip, a Show in Library icon under the close button → the Library tab, that
 //                        item focused
 //   browse:dblclick      a double-click downloads & applies
+//   side:open:slide      (Large cards, per frame) the panel slides in the whole way from the window's edge without fading,
+//                        its fill (::before) fading in over the slide; the same under no-glow (no edge glow) and bg-live (no
+//                        fill). Shots side-open-mid.png, side-open-end.png, side-open-mid-bglive.png
+//   side:open:glide[:keys]  the cards that change columns glide there (≥ 3 in-between frames, a right-click and an arrow
+//                        key), nearest the panel first; the ones starting under the panel aren't clipped by the grid's edge
+//                        and show through the thin fill; afterwards the dock's margin is back, nothing moved and the columns
+//                        are the docked grid's own (a re-fit at rest keeps them). Shot side-glide-mid.png
+//   side:open:cascade    the head, the picture and the body's first / last blocks come in late (≥ 90 ms after the panel)
+//                        and from far off (≥ 120 px), head → picture → body, landing in place. Shot side-cascade-mid.png
+//   side:close           the panel slides out the whole way, its fill thinning, gone within 500 ms; the cards glide back.
+//                        Shot side-close-mid.png
+//   side:open:resize     the window resized while the panel opens: the columns a fresh open at that size gives, docked
+//   side:motionOff       motion off: the panel fades in / out in place, its content doesn't move in it, the cards take
+//                        their new columns at once, the fill doesn't fade on its own
 //   motion:on|off|reduced the open slides/fades (transform + opacity only); animations off / reduced motion → only opacity
 //                        animates and nothing moves: the panel fades in, a switch cross-fades the old content into the new, the
 //                        close fades out (per frame: in-between opacity frames, the boxes still)
@@ -192,7 +206,13 @@ const PAGE = `window.__sb = {
   async closeAll() { for (let i = 0; i < 3; i++) { if (!document.querySelector(".side-panel, .ctx-menu")) return; this.key("Escape"); await this.sleep(300); } },
   accent() { const d = document.createElement("div"); d.style.color = "var(--accent)"; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; },
   op(el) { let o = 1; for (let e = el; e && e !== document.body; e = e.parentElement) o *= +getComputedStyle(e).opacity; return o; },
-  async waitSide(kind, ms = 2000) { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (this.side(kind)) return true; await this.sleep(30); } return false; },
+  // the sidebar shown and its open's slide and cascade over (components/sideMotion.ts, ~0.9 s): a cell measures it at rest
+  async waitSide(kind, ms = 2000) { const t0 = performance.now(); while (performance.now() - t0 < ms) { const s = this.side(kind); if (s) { await this.settled(s);
+      // a body that waited for its parts cascades in when they arrive (at most 450 ms)
+      for (let i = 0; i < 20 && s.querySelector(".side-body.wait"); i++) await this.sleep(30);
+      await this.settled(s); return true; } await this.sleep(30); } return false; },
+  async settled(el, cap = 1500) { const fin = el.getAnimations({ subtree: true }).filter((a) => !(a instanceof CSSTransition) && Number.isFinite(a.effect?.getComputedTiming().endTime));
+    await Promise.race([Promise.all(fin.map((a) => a.finished.catch(() => {}))), this.sleep(cap)]); },
 }; true`;
 const page = (code) => js(`(async () => { const m = window.__sb; ${code} })()`);
 async function loadUi() {
@@ -1988,6 +2008,215 @@ app.whenReady().then(async () => {
       });
     }
 
+    // ---- the open / close motion (components/sideMotion.ts), sampled per frame on Large cards (the grid's rows reach under
+    // the docked panel, so its columns change and some cards start under it). `trigger` runs right before the first frame.
+    // Per frame, read right after it (a task after the frame: a read inside requestAnimationFrame would lay out the frame's
+    // commit before the grid's column re-fit, a layout no frame paints): the panel's x / width / own opacity / its fill's
+    // (::before) opacity, four content blocks' x relative to the panel and seen opacity, the grid's scroll box right edge,
+    // every card's box.
+    const SIDE_SAMPLE = (trigger, ms) => `const P = '.side-panel[data-side="library"]', sc = document.querySelector(".lib-scroll");
+      const cards = [...document.querySelectorAll(".lib-scroll .card.lib")], box = (c) => { const b = c.getBoundingClientRect(); return [+b.x.toFixed(1), +b.y.toFixed(1), +b.right.toFixed(1)]; };
+      const out = { before: cards.map(box), titles: cards.map((c) => c.querySelector(".lib-title")?.dataset.title), f: [], W: innerWidth };
+      const t0 = performance.now(); ${trigger}
+      await new Promise((res) => { const f = () => { const t = performance.now() - t0, p = document.querySelector(P), fr = { t: Math.round(t) };
+        if (p) { const r = p.getBoundingClientRect(), c = p.querySelector(".side-content:not(.side-exit)");
+          const blk = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return [+(b.x - r.x).toFixed(1), +m.op(el).toFixed(3)]; };
+          Object.assign(fr, { px: +r.x.toFixed(1), pw: r.width, pop: +getComputedStyle(p).opacity, fill: +getComputedStyle(p, "::before").opacity, closing: p.classList.contains("closing"),
+            head: blk(p.querySelector(".side-head-text")), stage: blk(c?.querySelector(":scope > .side-stage")), b0: blk(c?.querySelector(":scope > .side-body > :first-child")),
+            bN: blk(c?.querySelector(":scope > .side-body > :last-child")) }); }
+        fr.sr = +sc.getBoundingClientRect().right.toFixed(1); fr.cards = cards.map(box); fr.dock = !!p?.hasAttribute("data-docking");
+        fr.ol = cards.map((c) => c.offsetLeft + "," + c.offsetTop).join(" "); out.f.push(fr);
+        if (t < ${ms}) requestAnimationFrame(g); else res(); }; const g = () => setTimeout(f, 0); requestAnimationFrame(g); });
+      return out;`;
+    // each card that changed place: its frames strictly between where it was and where it lands, and when it started
+    const glidesOf = (o) => {
+      const last = o.f[o.f.length - 1];
+      return o.before.map((b, i) => {
+        const e = last.cards[i], d = (a, c) => Math.max(Math.abs(a[0] - c[0]), Math.abs(a[1] - c[1]));
+        if (d(b, e) < 2) return null;
+        const start = o.f.find((x) => d(x.cards[i], b) > 0.5);
+        return { title: o.titles[i], from: b, to: e, mid: o.f.filter((x) => d(x.cards[i], b) > 0.5 && d(x.cards[i], e) > 0.5).length, start: start ? start.t : null,
+          gap: last.sr - e[2] }; // how far it lands from the grid's right edge (the panel's)
+      }).filter(Boolean);
+    };
+    const withLargeCards = async (fn) => {
+      const s0 = await getSettings();
+      await setSettings({ cardSize: "Large" }); await loadUi(); await sleep(600);
+      try { return await fn(); } finally { await page(`await m.closeAll();`); await setSettings({ cardSize: s0.cardSize }); await loadUi(); }
+    };
+    // the panel slides in the whole way from the window's edge (no fade of its own), its fill fades in over the slide;
+    // the same with Glow effects off (its edge without the glow) and with the wallpaper behind (no fill: the edge only)
+    await cell("side:open:slide", async () => withLargeCards(async () => {
+      const v = [], J = JSON.stringify, live0 = !!(await getSettings()).liveWallpaperBehindAllTabs;
+      try { for (const look of ["glow", "no-glow", "bg-live"]) {
+        if (look === "bg-live") await setBgLive(true);
+        await page(`document.documentElement.classList.toggle("no-glow", ${look === "no-glow"}); await m.closeAll(); await m.sleep(400);`);
+        const o = await page(SIDE_SAMPLE(`m.ctx(m.thumb("k2"));`, 900));
+        const fr = o.f.filter((x) => x.px != null), end = fr[fr.length - 1];
+        if (!end) { v.push(`${look}: no sidebar`); continue; }
+        const off = fr.map((x) => x.px - end.px);
+        console.log(`        ${look}: offsets ${off.slice(0, 12).map((d) => d.toFixed(0)).join(" ")} … | fill ${fr.slice(0, 12).map((x) => x.fill.toFixed(2)).join(" ")} …`);
+        if (!(off[0] >= 0.8 * end.pw)) v.push(`${look}: the panel's first frame is ${off[0].toFixed(0)} px off its place (want a full slide from the edge, ≥ ${(0.8 * end.pw).toFixed(0)})`);
+        const mid = off.filter((d) => d > 0.05 * end.pw && d < 0.95 * end.pw).length;
+        if (mid < 3) v.push(`${look}: ${mid} frames between the edge and its place (want ≥ 3: a slide, not a jump)`);
+        if (Math.abs(off[off.length - 1]) > 0.5) v.push(`${look}: the panel didn't land (${off[off.length - 1]} px off)`);
+        if (fr.some((x) => x.pop < 0.99)) v.push(`${look}: the panel itself fades (opacity ${Math.min(...fr.map((x) => x.pop))}); only its fill does`);
+        if (!(fr[0].fill < 0.25)) v.push(`${look}: the fill starts at ${fr[0].fill} (want it thin while the cards glide out from under it)`);
+        if (fr.filter((x) => x.fill > 0.05 && x.fill < 0.95).length < 3) v.push(`${look}: the fill doesn't fade in (${J(fr.slice(0, 8).map((x) => x.fill))})`);
+        if (end.fill < 0.99) v.push(`${look}: the fill ends at ${end.fill}`);
+        const fill = await page(`const p = document.querySelector('.side-panel[data-side="library"]'), cs = getComputedStyle(p, "::before"), own = getComputedStyle(p);
+          return { bg: cs.backgroundColor, img: cs.backgroundImage, shadow: cs.boxShadow, edge: cs.borderLeftColor, ownBg: own.backgroundColor, ownImg: own.backgroundImage, acc: m.accent() };`);
+        const alpha = (c) => { const x = c.match(/[0-9.]+/g)?.map(Number) ?? []; return c.includes("/") || c.startsWith("rgba") ? x[x.length - 1] : 1; };
+        if (look === "bg-live") { if (alpha(fill.bg) > 0.01 || fill.img !== "none") v.push(`bg-live: the panel's fill shows (${fill.bg}, ${fill.img.slice(0, 50)})`); }
+        else if (alpha(fill.bg) < 0.99) v.push(`${look}: the panel's fill is see-through at rest (${fill.bg})`);
+        if (alpha(fill.ownBg) > 0.01 || fill.ownImg !== "none") v.push(`${look}: the panel has a fill of its own besides its ::before (${fill.ownBg})`);
+        const glows = fill.shadow.includes(fill.acc);
+        if (look === "no-glow" ? glows : !glows) v.push(`${look}: the panel's edge glow is ${glows ? "on" : "off"} (${fill.shadow})`);
+        if (look === "glow") { await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2")); await m.sleep(120);`); await shot("open-mid"); await sleep(900); await shot("open-end"); }
+        if (look === "bg-live") { await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2")); await m.sleep(120);`); await shot("open-mid-bglive"); }
+      } } finally {
+        await page(`document.documentElement.classList.remove("no-glow");`);
+        if (!!(await getSettings()).liveWallpaperBehindAllTabs !== live0) await setBgLive(live0);
+      }
+      return v;
+    }));
+    // the grid's cards glide to their new columns on the slide's spring, nearest the panel first, and the ones that start
+    // under the panel aren't clipped (the scroll box reaches under it while they glide) — by a right-click and by an arrow key
+    for (const how of ["pointer", "keyboard"]) await cell(`side:open:glide${how === "keyboard" ? ":keys" : ""}`, async () => withLargeCards(async () => {
+      const v = [], J = JSON.stringify;
+      await page(`await m.closeAll(); await m.sleep(400);`);
+      const o = await page(SIDE_SAMPLE(how === "pointer" ? `m.ctx(m.thumb("k2"));` : `m.key("ArrowRight");`, 1000));
+      const g = glidesOf(o), end = o.f[o.f.length - 1];
+      console.log(`        ${how}: ${g.map((x) => `${x.title} start ${x.start} ms, ${x.mid} frames between, lands ${x.gap.toFixed(0)} px from the edge`).join(" | ")}`);
+      if (!end.px) return ["no sidebar"];
+      if (g.length < 2) return [`${g.length} cards changed place — proved nothing (the grid kept its columns?)`];
+      for (const x of g) if (x.mid < 3) v.push(`${x.title} jumped to its new place (${x.mid} in-between frames; want a glide)`);
+      if (how === "pointer") {
+      // (not the right-clicked card: it rises at once with the focus lift, whatever its glide does)
+      const by = g.filter((x) => x.title !== "k2").sort((a, b) => a.gap - b.gap), near = by[0], farC = by[by.length - 1];
+      if (near.start == null || farC.start == null) v.push("a card never started moving");
+      else {
+        if (!(farC.start >= near.start + 15)) v.push(`the farthest card (${farC.title}, ${farC.gap.toFixed(0)} px) started at ${farC.start} ms, the nearest (${near.title}) at ${near.start} ms — want nearest first`);
+        const span = farC.gap - near.gap;
+        for (const a of by) for (const b of by) if (b.gap - a.gap > span / 3 && a.start > b.start + 17) v.push(`${a.title} (nearer the panel) started after ${b.title} (${a.start} vs ${b.start} ms)`);
+      }
+      // the cards that start where the panel lands: in the scroll box (not clipped) and seen through the thin fill
+      const under = g.filter((x) => x.from[2] > end.px + 4);
+      if (!under.length) v.push("no card starts under the panel — proved nothing for the cards showing through");
+      for (const x of under) {
+        const i = o.titles.indexOf(x.title), early = o.f.filter((f) => f.px != null && f.t < 150);
+        const cut = early.filter((f) => f.cards[i][2] > f.sr + 1);
+        if (cut.length) v.push(`${x.title} is clipped by the grid's edge while it glides out from under the panel (right ${cut[0].cards[i][2]} > the box's ${cut[0].sr} at ${cut[0].t} ms)`);
+        if (early.length && !(early[0].fill < 0.6)) v.push(`the fill hides ${x.title} at once (${early[0].fill})`);
+      }
+      }
+      // the dock's room goes back to a margin once the glide is over (nothing moves at the switch)
+      const rest = await page(`await m.sleep(300); const sc = document.querySelector(".lib-scroll"), p = document.querySelector('.side-panel[data-side="library"]');
+        return { docking: p?.hasAttribute("data-docking"), mr: parseFloat(getComputedStyle(sc).marginRight), pw: p?.getBoundingClientRect().width, cards: [...sc.querySelectorAll(".card.lib")].map((c) => +c.getBoundingClientRect().x.toFixed(1)) };`);
+      if (rest.docking) v.push("the panel still says it docks a second after the open");
+      if (Math.abs(rest.mr - rest.pw) > 1) v.push(`at rest the grid's margin is ${rest.mr} px, not the panel's ${rest.pw}`);
+      // the cards' layout places (offsetLeft / Top, no glide in them) on the last frame with the dock's padding and the first after
+      const di = o.f.findIndex((f, i) => i > 0 && o.f[i - 1].dock && !f.dock);
+      if (di < 0) v.push("the dock's padding never went back to the margin within the sample");
+      else if (o.f[di - 1].ol !== o.f[di].ol) v.push(`cards moved when the dock went back to its margin (${o.f[di - 1].ol.slice(0, 80)} → ${o.f[di].ol.slice(0, 80)})`);
+      // the columns the glide landed on are the docked grid's own: a re-fit at rest (the window 1 px taller) keeps them
+      const colsNow = () => js(`document.querySelector(".lib-scroll").style.getPropertyValue("--cols")`);
+      const c0 = await colsNow(); win.setContentSize(1400, 901); await sleep(400); const c1 = await colsNow(); win.setContentSize(1400, 900); await sleep(300);
+      if (c0 !== c1) v.push(`the grid landed on ${c0} columns; re-fitted at rest beside the panel it has ${c1}`);
+      if (how === "pointer") { await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2")); await m.sleep(90);`); await shot("glide-mid"); }
+      return v;
+    }));
+    // the content comes in late (from 30 % of the slide) and from far off (6× the old offsets), the head first, then the
+    // picture, then the body's blocks, landing in place
+    await cell("side:open:cascade", async () => withLargeCards(async () => {
+      const v = [];
+      await page(`await m.closeAll(); await m.sleep(400);`);
+      const o = await page(SIDE_SAMPLE(`m.ctx(m.thumb("k2"));`, 1300));
+      const fr = o.f.filter((x) => x.px != null), t0 = fr[0]?.t ?? 0, end = fr[fr.length - 1];
+      if (!end) return ["no sidebar"];
+      const seen = {};
+      for (const k of ["head", "stage", "b0", "bN"]) {
+        const at = fr.filter((x) => x[k]), fin = end[k];
+        if (!fin) { v.push(`${k}: not in the sidebar`); continue; }
+        const first = at.find((x) => x[k][1] > 0.05);
+        if (!first) { v.push(`${k}: never seen`); continue; }
+        const d0 = first[k][0] - fin[0];
+        seen[k] = first.t - t0;
+        console.log(`        ${k}: first seen ${first.t - t0} ms after the panel, ${d0.toFixed(0)} px from its place; ${at.filter((x) => Math.abs(x[k][0] - fin[0]) > 0.5).length} frames off it`);
+        if (k !== "bN" && first.t - t0 < 90) v.push(`${k}: shows ${first.t - t0} ms after the panel appears (want it late: from ~30 % of the slide)`);
+        if (k !== "bN" && !(d0 >= 120)) v.push(`${k}: first seen ${d0.toFixed(0)} px from its place (want it from far off, ≥ 120 px)`);
+        const mid = at.filter((x) => x[k][1] > 0.05 && Math.abs(x[k][0] - fin[0]) > 1 && Math.abs(x[k][0] - d0 - fin[0]) > 1).length;
+        if (mid < 3) v.push(`${k}: ${mid} frames on its way in (want ≥ 3)`);
+        if (Math.abs(end[k][0] - fin[0]) > 0.5 || end[k][1] < 0.99) v.push(`${k}: didn't land (${end[k]})`);
+      }
+      if (seen.head != null && seen.stage != null && seen.head > seen.stage) v.push(`the picture (${seen.stage} ms) came before the head (${seen.head} ms)`);
+      if (seen.stage != null && seen.b0 != null && seen.stage > seen.b0) v.push(`the body (${seen.b0} ms) came before the picture (${seen.stage} ms)`);
+      await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2")); await m.sleep(260);`); await shot("cascade-mid");
+      return v;
+    }));
+    // closing slides it back out with the fill thinning first, the cards glide back, and it is gone soon after
+    await cell("side:close", async () => withLargeCards(async () => {
+      const v = [];
+      await page(`await m.closeAll(); await m.sleep(400); await m.openSide("k2"); await m.sleep(1200);`);
+      const o = await page(SIDE_SAMPLE(`m.key("Escape");`, 800));
+      const fr = o.f.filter((x) => x.px != null), gone = o.f.find((x) => x.px == null);
+      if (!fr.length) return ["the panel was gone at once (popped out)"];
+      const W = fr[0].pw, off = fr.map((x) => x.px - fr[0].px);
+      console.log(`        offsets ${off.map((d) => d.toFixed(0)).join(" ")} | fill ${fr.map((x) => x.fill.toFixed(2)).join(" ")} | gone at ${gone?.t} ms`);
+      if (off.filter((d) => d > 0.05 * W && d < 0.95 * W).length < 3) v.push("the panel doesn't slide out (fewer than 3 frames on its way)");
+      if (!(Math.max(...off) >= 0.8 * W)) v.push(`the panel left from ${Math.max(...off).toFixed(0)} px off its place (want it to slide out the whole way)`);
+      if (fr.filter((x) => x.fill > 0.05 && x.fill < 0.95).length < 2) v.push("the fill doesn't thin out");
+      if (!gone || gone.t > 500) v.push(`the closed panel was still mounted at ${gone?.t ?? "> 800"} ms`);
+      const g = glidesOf(o);
+      if (!g.length) v.push("no card changed place — proved nothing for the glide back");
+      for (const x of g) if (x.mid < 3) v.push(`${x.title} jumped back (${x.mid} in-between frames)`);
+      await page(`await m.closeAll(); await m.sleep(300); await m.openSide("k2"); await m.sleep(1200); m.key("Escape"); await m.sleep(90);`); await shot("close-mid");
+      return v;
+    }));
+    // a window resize while the panel opens: the grid ends with the columns a fresh open at that size gives, docked
+    await cell("side:open:resize", async () => withLargeCards(async () => {
+      const v = [];
+      const cols = () => page(`await m.sleep(1200); const sc = document.querySelector(".lib-scroll"), p = document.querySelector('.side-panel[data-side="library"]');
+        return { cols: sc.style.getPropertyValue("--cols"), mr: parseFloat(getComputedStyle(sc).marginRight), pw: p?.getBoundingClientRect().width, px: p?.getBoundingClientRect().right, W: innerWidth, docking: p?.hasAttribute("data-docking") };`);
+      try {
+        await page(`await m.closeAll(); await m.sleep(400); m.ctx(m.thumb("k2")); await m.sleep(60);`);
+        win.setContentSize(1150, 900);
+        const a = await cols();
+        await page(`await m.closeAll(); await m.sleep(500); await m.openSide("k2");`);
+        const b = await cols();
+        console.log(`        resized while opening: ${JSON.stringify(a)}; opened at that size: ${JSON.stringify(b)}`);
+        if (a.cols !== b.cols) v.push(`resized while opening, the grid has ${a.cols} columns; opened at that size it has ${b.cols}`);
+        if (a.docking || Math.abs(a.mr - a.pw) > 1) v.push(`not docked after the resize (margin ${a.mr}, panel ${a.pw}, docking ${a.docking})`);
+        if (Math.abs(a.px - a.W) > 1) v.push(`the panel isn't at the window's edge (right ${a.px} of ${a.W})`);
+      } finally { win.setContentSize(1400, 900); await sleep(300); }
+      return v;
+    }));
+    // motion off: the panel fades in and out in place, its content doesn't move inside it, the cards take their new
+    // columns at once (MO.judge for the panel; per frame for the rest)
+    await cell("side:motionOff", async () => withLargeCards(async () => {
+      const v = [];
+      await setMotion(false);
+      try {
+        for (const what of ["open", "close"]) {
+          await page(`await m.closeAll(); await m.sleep(400); ${what === "close" ? `await m.openSide("k2"); await m.sleep(800);` : ""}`);
+          const o = await page(SIDE_SAMPLE(what === "open" ? `m.ctx(m.thumb("k2"));` : `m.key("Escape");`, 600));
+          const fr = o.f.filter((x) => x.px != null);
+          const panel = o.f.map((x) => (x.px == null ? [x.t, null] : [x.t, x.pop, x.px, 0, x.pw, 0]));
+          console.log(`        ${what}: panel ${MO.brief(panel)}`);
+          v.push(...MO.judge(`${what}: the panel`, panel, what === "open" ? { appear: true } : { leave: true }));
+          for (const k of ["head", "stage", "b0"]) {
+            const xs = fr.filter((x) => x[k]).map((x) => x[k][0]);
+            if (xs.length && Math.max(...xs) - Math.min(...xs) > 0.75) v.push(`${what}: ${k} moves inside the panel (${Math.min(...xs)}–${Math.max(...xs)} px)`);
+          }
+          const g = glidesOf(o);
+          if (!g.length) v.push(`${what}: no card changed place — proved nothing`);
+          for (const x of g) if (x.mid) v.push(`${what}: ${x.title} glides (${x.mid} in-between frames; motion off = its new place at once)`);
+          if (fr.some((x) => Math.abs(x.fill - 1) > 0.01)) v.push(`${what}: the fill fades on its own (motion off: the panel fades as one)`);
+        }
+      } finally { await setMotion(true); }
+      return v;
+    }));
+
     for (const mode of ["on", "off", "reduced"]) {
       await cell(`motion:${mode}`, async () => {
         await setMotion(mode !== "off"); await reducedMotion(mode === "reduced"); await sleep(300);
@@ -2002,8 +2231,8 @@ app.whenReady().then(async () => {
         if (!r.open) return ["no sidebar"];
         if (mode === "on") {
           if (!r.n) v.push("the sidebar didn't animate in");
-          const bad = r.props.filter((p) => !["transform", "opacity", "translate"].includes(p));
-          if (bad.length) v.push(`it animates ${bad.join(", ")} (transform / opacity only)`);
+          const bad = r.props.filter((p) => !["transform", "opacity", "translate", "scale"].includes(p));
+          if (bad.length) v.push(`it animates ${bad.join(", ")} (transform / translate / scale / opacity only)`);
         } else {
           // only opacity, nothing moves: the open fades in, a switch cross-fades, the close fades out (MO.judge)
           const nf = "await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));";
@@ -2120,11 +2349,12 @@ app.whenReady().then(async () => {
 
     await cell("look:liveBg", async () => {
       const v = [];
+      // the panel's fill is its ::before (it fades in behind the content as the panel opens: components/sideMotion.ts)
       const read = () => page(`await m.closeAll(); await m.openSide("k2"); await m.sleep(500); const p = m.side();
         const alpha = (c) => { const x = c.match(/[0-9.]+/g)?.map(Number) ?? []; return c.includes("/") || c.startsWith("rgba") ? x[x.length - 1] : 1; };
         const title = document.querySelector(".lib-title");
         const sec = p.querySelector(".side-sec");
-        return { sec: sec ? alpha(getComputedStyle(sec).backgroundColor) : null, bgImg: getComputedStyle(p).backgroundImage, panel: alpha(getComputedStyle(p).backgroundColor), head: alpha(getComputedStyle(p.querySelector(".side-head")).backgroundColor),
+        return { sec: sec ? alpha(getComputedStyle(sec).backgroundColor) : null, bgImg: getComputedStyle(p, "::before").backgroundImage, panel: alpha(getComputedStyle(p, "::before").backgroundColor), head: alpha(getComputedStyle(p.querySelector(".side-head")).backgroundColor),
           name: title ? alpha(getComputedStyle(title).backgroundColor) : null, scroller: getComputedStyle(p).overflowY,
           inner: getComputedStyle(p.querySelector(".side-scroll")).overflowY, live: document.documentElement.classList.contains("bg-live"),
           // the title's shadow: drawn by the unclipped wrapper, never a text-shadow inside the clamped (overflow: hidden) h2
@@ -2159,7 +2389,8 @@ app.whenReady().then(async () => {
         }
         await mv(5, 5, 100);
       }
-      if (on.scroller !== "hidden" || on.inner !== "auto") v.push(`the content must scroll below the head (panel ${on.scroller}, inner ${on.inner})`);
+      // the panel itself never scrolls (it doesn't clip either: its shadow on ::before reaches past it); its scroll area does
+      if (["auto", "scroll"].includes(on.scroller) || on.inner !== "auto") v.push(`the content must scroll below the head (panel ${on.scroller}, inner ${on.inner})`);
       await page(`await m.closeAll();`); await setBgLive(false);
       return v;
     });

@@ -63,8 +63,11 @@ function bind(el: HTMLElement, key: string, aspect: number, n: number): () => vo
     // grid: neither the bar's height nor the Library's own bottom padding changes the column count
     const padTop = parseFloat(cs.paddingTop) || 0;
     const gap = parseFloat(cs.getPropertyValue("--gap")) || 14;
-    // the docked panels' room (the grid has no side margins of its own); computed style is clean in this callback
-    const panels = (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
+    // the docked panels' room (the grid has no side margins of its own), and the opening sidebar's while its cards glide
+    // out from under it (index.css `[data-docking]`: right padding past the left one in place of the margin); computed
+    // style is clean in this callback
+    const pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
+    const panels = (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0) + Math.max(0, pr - pl);
     const w = el.clientWidth - padX;
     const h = el.clientHeight + (parseFloat(cs.marginBottom) || 0) - padTop * 2;
     if (w <= 0 || h <= 0) return;

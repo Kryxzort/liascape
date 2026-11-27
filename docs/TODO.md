@@ -96,13 +96,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        name from what the app has seen; an unknown plain name says to paste a profile link or ID). Guard: probe cells for
        both fields, the rows filling them, clearing; a backend test for the resolution.
 
-18. [ ] (owner) The sidebar's open / close motion: variant E from the motion lab (worktree
-       `.claude/worktrees/agent-a841082c364487870`, `app/ui/motion-lab/`; the owner's pick 2026-11-21/22: "E … cards can
-       show underneath", start 30 %, travel 6×): a full slide, the cards glide nearest first and stay visible under a
-       backdrop that fades in, the content soft-cascades in late and from further back. Today: the old 44 px slide and
-       stagger (`index.css` ~1621-1647). Motion off: fade only. Guard: probe cells sampling the slide, the cards' glide and
-       the cascade per frame, and motion-off.
-
 19. [ ] (owner) The owner's README replaces the agent-written one: `docs/Meat bag's Readme.md` (untracked) and branch
        `readme-preview` (8 commits: collapsible install steps per distro, shorter previews, a readable Settings image, a
        required / optional "You'll need"; `docs/preview/` holds its images, untracked). Bring it up to date with today's
@@ -174,6 +167,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        version (a 10 s clip) had one at 10.16 s and 20.16 s and nowhere else; plain mpv 0.41 (`--loop-file=inf
        --keep-open=yes`) does the same (65 samples per wrap, 3 s and 4 s 240 fps clips). Judge it on real content
        (an audible click on a tone; music likely hides it) and close it if mpv offers a gapless wrap.
+
+28. [ ] probe-sidebar `lib:reflow` fails when run alone (`--only '^lib:reflow$'`), on lp-player as well as with the new
+       sidebar motion, and passes inside the whole probe: at 1000×560 with Large cards and 24 extra items the right-click
+       opens the sidebar but the grid keeps 5 columns ("the cell proves nothing"), so the card-stays-in-view check never
+       runs. Find what the earlier cells set up that it relies on (the card size, the window) and make it stand alone.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every
@@ -308,6 +306,17 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] probe-sidebar `lib:preset:needsBase` fails on lp-player's own UI: it expects a plain Workshop download disabled
       under "subscribe" when signed out and sent as a one-off, but since the two download modes (`actionBlocked`)
       only the one-off is blocked and a signed-out subscribe opens the item's page. Update the cell to the modes' order.
+- [ ] probe-filters `search:keep` fails inside the whole probe (on lp-player too) and passes alone: "840 px, room: after
+      a blur holding "k1" it is folded reading "k1" (want open)". An earlier cell leaves something that takes the status
+      slot's room (a wallpaper playing, the bar's width); make the cell set up its own state.
+- [ ] The item sidebar's open / close glide costs main-thread frames: `node scripts/bench-live-ui.mjs sidebar` (agent
+      window, Vite dev, ~147 Hz, the owner's library copy, 53 preview videos playing) went from overBudget 84 / 86 and
+      over2Frames 42 / 53 before the full slide to overBudget 145 / 139 / 155 / 93 and over2Frames 62 / 49 / 86 / 68 with
+      it; the `--profile typical` runs stayed within noise (58 / 67 → 75 / 67). The trace's long tasks are main frames
+      while ~40 cards glide on `translate` / `scale` (`components/sideMotion.ts` playGrid): paint lifecycle + layerize
+      ≈ 7 ms each and IntersectionObserver work for the moving cards (their preview visibility and `content-visibility`).
+      Find what schedules a main frame per animation frame (a composited glide shouldn't need one) and cut it; measure
+      before / after on the same bench, several runs each (the spread is ±30).
 - [ ] Text that changes in place pops, against design.md's "content changes slide or cross-fade … numbers and bars
       ease" (only the sidebar title, `components/SideTitle.tsx`, does it). Add two shared primitives in `components/`:
       a `SwapText` (keyed on the value: the old line leaves and the new one arrives with a short slide or cross-fade,
@@ -1040,3 +1049,4 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
     `restore` / `session_start` (`Programs::restore_rng`), so the sequence goes on across processes; a
     snapshot from before it repeats once. `tests/program.rs::session_start_start_over_shuffles_anew_each_boot`
     (RED: three boots, one order).
+

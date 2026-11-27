@@ -7,6 +7,7 @@ import { facetsOf } from "../components/facets";
 import { WF_GROUPS, knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
+import { useSideMotion } from "../hooks/useSideMotion";
 import { ItemSide } from "../components/ItemSide";
 import { WsListNote } from "../components/WorkshopSocial";
 import { WsSetLoad } from "../components/WsSetLoad";
@@ -314,6 +315,7 @@ export const Browse = memo(function Browse({ onShowInLibrary }: { onShowInLibrar
     : { kind: "source", text: `${srcLabel} has nothing to show right now. Try again in a while.`, clear: null, onClear: () => {} };
 
   const shown = useLinger(focusedW ? focusedW.pageUrl : null, SIDE_CLOSE_MS, motion);
+  useSideMotion("browse", shown, scrollRef, gridRef, motion); // the open / close slide and the grid's glide
   // the filter panel: docked from WF_DOCK_QUERY up, a drawer below (its toggle is the top bar's split button, App.tsx)
   const col = useFilterPanel("browse", !!scope);
   const sideW = shown.value && kept?.pageUrl === shown.value ? kept : null;

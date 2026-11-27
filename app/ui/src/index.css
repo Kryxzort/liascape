@@ -13,6 +13,13 @@
   /* COOL: reusable accent glow (static box-shadow, toggled by state — never animate blur) */
   --glow-sm: 0 0 12px -2px var(--accent);
   --glow: 0 0 22px -3px var(--accent), 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  /* the item sidebar's slide in (and the filter panel's): a spring of 460 ms visual duration and 14 % bounce (framer's
+     spring, which settles in 528 ms with no visible overshoot), sampled evenly into linear(). components/sideMotion.ts
+     reads it; .claude/rules/ui/design.md § Item sidebar */
+  --side-slide: linear(0, .009, .032, .066, .109, .158, .21, .265, .32, .375, .429, .481, .531, .578, .622, .664, .702, .737,
+    .769, .798, .825, .849, .87, .889, .906, .921, .934, .946, .956, .964, .972, .978, .983, .988, .992, .995, .997, .999, 1.001,
+    1.002, 1.003, 1.004, 1.004, 1.005, 1);
+  --side-slide-dur: 528ms;
   --ease-icon-out: cubic-bezier(.2, .9, .3, 1);
   --press-dur: 70ms;
   /* motion off: the one fade every appear / leave / content swap gets (= components/motion.ts FADE_MS) */
@@ -1607,22 +1614,24 @@ input[type=range]:focus-visible { outline: none; }
    own; the head (title + tools + close) stays. Look:
    the Settings page's language — an accent pool in its corner, the picture in a framed stage with a soft accent glow,
    action tiles with glowing icon chips, section cards (`.side-sec`, like `.ssection`), accent-filled sliders.
-   COOL motion (transform + opacity only): a slightly springy slide in (an overshooting curve), the content following in a
-   quick stagger (picture → hero → actions → rows, ~30 ms apart, a small rise + fade, the picture scaling in), a faster
-   re-stagger on an item switch, a quicker slide out (SIDE_CLOSE_MS = 170 in hooks/useLinger.ts). Done in ≤ 0.4 s. */
+   COOL motion: the open / close slide, the grid's glide and the content's cascade are components/sideMotion.ts (script
+   animations on translate / scale / opacity); here only an item switch's carousel and re-stagger. */
 .app { --side-w: clamp(300px, 26vw, 400px); --side-media-h: min(38vh, 320px); }
 .side-panel { position: absolute; top: anchor(--topbar bottom, 56px); right: 0; bottom: 0; width: var(--side-w); z-index: 40;
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; }
+/* the panel's fill, edge and shadow live on its ::before, so they fade in behind the content while the panel slides in and
+   the cards gliding out from under it stay in view (components/sideMotion.ts). The panel doesn't clip (the shadow reaches
+   past its box); its scroll area clips its own content */
+.side-panel::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background:
     radial-gradient(440px 300px at 100% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 70%),
     radial-gradient(380px 300px at 0% 100%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
     color-mix(in srgb, var(--bg-mantle) var(--tr-side), transparent);
   border-left: 1px solid color-mix(in srgb, var(--accent) 28%, var(--surface1));
-  box-shadow: -14px 0 34px rgba(0,0,0,.42), var(--glow-sm);
-  animation: side-in .32s cubic-bezier(.2, 1.22, .36, 1); }
+  box-shadow: -14px 0 34px rgba(0,0,0,.42), var(--glow-sm); }
 /* live wallpaper behind: no panel fill and no accent wash — the wallpaper shows, the cards hold the darkness; the loose text
    (the title, the head's sub-line) gets a shadow to stay legible on a bright wallpaper */
-:root.bg-live .side-panel { background: transparent; }
+:root.bg-live .side-panel::before { background: transparent; }
 /* the loose small controls on a bright wallpaper: the head's tools and the "global" tags get the cards' dark fill */
 :root.bg-live .side-head .side-tool:not(.on):not(.accent):not(:hover), :root.bg-live .side-global { background: color-mix(in srgb, var(--bg-crust) 60%, transparent); }
 /* like Netflix's subtitles: a soft black shadow hugging the letters, no offset — Netflix's look is
@@ -1632,9 +1641,10 @@ input[type=range]:focus-visible { outline: none; }
    standard deviation (text-shadow's is 2σ), so 3.5px here = text-shadow's 7px — measured identical, pixel for pixel, in
    Electron 42 */
 :root.bg-live .side-head-text { filter: drop-shadow(0 0 3.5px #000); }
-.side-panel.closing { animation: side-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
-@keyframes side-in { from { transform: translateX(44px); opacity: 0; } }
-@keyframes side-out { to { transform: translateX(36px); opacity: 0; } }
+.side-panel.closing { pointer-events: none; }
+/* the sidebar's slide in and out (components/sideMotion.ts), for the filter panel that takes it (`.wf-col`) */
+@keyframes side-in { from { translate: 100% 0; } }
+@keyframes side-out { to { translate: 100% 0; } }
 
 /* the head: the title, close and, under it, its tools */
 /* the scrollbar's room is kept whether it shows or not: a body that grows past the panel (a section unfolding) or shrinks under
@@ -2055,21 +2065,14 @@ button.side-pill.fav-pill[data-ws-fav=loading] svg { opacity: .55; }
 .side-panel input[type=range]:hover::-webkit-slider-thumb, .side-panel input[type=range]:active::-webkit-slider-thumb {
   transform: scale(1.18); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg-crust) 85%, transparent), 0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 16px var(--accent); }
 
-/* the stagger (open) and the quicker re-stagger (an item switch) — transform + opacity, backwards fill only: nothing is left
-   transformed once it landed. The body's children start when its `.wait` (no pop-in) lifts. */
-.side-content.opening > .side-stage { animation: side-pop .32s cubic-bezier(.2, 1.15, .35, 1) .04s backwards; }
-.side-content.opening > .side-body:not(.wait) > * { animation: side-rise .24s cubic-bezier(.2, .9, .3, 1.05) backwards; }
-.side-content.opening > .side-body:not(.wait) > :nth-child(1) { animation-delay: .07s; }
-.side-content.opening > .side-body:not(.wait) > :nth-child(2) { animation-delay: .1s; }
-.side-content.opening > .side-body:not(.wait) > :nth-child(3) { animation-delay: .13s; }
-.side-content.opening > .side-body:not(.wait) > :nth-child(n+4) { animation-delay: .16s; }
+/* the quicker re-stagger of an item switch with no direction — transform + opacity, backwards fill only: nothing is left
+   transformed once it landed. The body's children start when its `.wait` (no pop-in) lifts. (The open's cascade:
+   components/sideMotion.ts.) */
 .side-content.swapping > .side-stage { animation: side-swap-in .2s ease-out backwards; }
 .side-content.swapping > .side-body:not(.wait) > * { animation: side-rise-sm .18s ease-out backwards; }
 .side-content.swapping > .side-body:not(.wait) > :nth-child(2) { animation-delay: .025s; }
 .side-content.swapping > .side-body:not(.wait) > :nth-child(3) { animation-delay: .05s; }
 .side-content.swapping > .side-body:not(.wait) > :nth-child(n+4) { animation-delay: .075s; }
-@keyframes side-pop { from { opacity: 0; transform: translateY(10px) scale(.94); } }
-@keyframes side-rise { from { opacity: 0; transform: translateY(12px); } }
 @keyframes side-swap-in { from { opacity: 0; transform: scale(.98); } }
 /* a switch slides like a carousel by where the new card sits vs the old: the same row, right of it → the old content out to
    the left, the new in from the right (left of it: mirrored); a row below / above → vertical (below). The exit layer lies over the track's top-left (the panel scrolls back to the top on a switch) */
@@ -2099,6 +2102,16 @@ button.side-pill.fav-pill[data-ws-fav=loading] svg { opacity: .55; }
   .app[data-page="browse"]:has(> .side-panel[data-side="browse"]:not(.closing)) > .scroll,
   .app[data-page="library"]:has(> .side-panel[data-side="library"]:not(.closing)) > .scroll { margin-right: var(--side-w); }
   .app[data-page="library"]:has(> .side-panel[data-side="library"]:not(.closing)) > .playlist-bar { right: var(--side-w); }
+  /* While the cards glide out from under the opening panel (hooks/useSideMotion.ts sets [data-docking] until they landed),
+     the grid's scroll box reaches under it and pads by its width instead of ending at its edge, so it doesn't clip them
+     and they show through the panel's fading fill; the playlist bar stays whole under it too. The content box is the same
+     either way (useGridFit counts the padding past the left one as the panel's room), so the switch back to the margin
+     moves no card.
+     Guard: probe-sidebar side:open:glide */
+  .app[data-page="browse"]:has(> .side-panel[data-side="browse"][data-docking]:not(.closing)) > .scroll,
+  .app[data-page="library"]:has(> .side-panel[data-side="library"][data-docking]:not(.closing)) > .scroll {
+    margin-right: 0; padding-right: calc(var(--gap) + var(--side-w)); }
+  .app[data-page="library"]:has(> .side-panel[data-side="library"][data-docking]:not(.closing)) > .playlist-bar { right: 0; }
 }
 @media (max-width: 899.98px) {
   .app { --side-w: min(360px, 100vw); }
@@ -2126,13 +2139,13 @@ button.side-pill.fav-pill[data-ws-fav=loading] svg { opacity: .55; }
 /* the Library's docked panel ends where its grid does, above the playlist bar (index.css .lib-scroll); the bar keeps its
    full width, so opening or closing the panel never resizes it */
 .wf-col[data-wf-page="library"][data-mode="dock"] { bottom: var(--playlist-bar-h, 60px); }
-/* COOL: the item sidebar's motion, exactly (its keyframes, durations and curves — `.side-panel`): opened, it slides in from
-   the right with the springy overshoot, closed it slides back out to the right, quicker (WF_CLOSE_MS = SIDE_CLOSE_MS);
-   transform + opacity only. A page that starts with it docked just shows it (workshopFilter.ts `entering`). Swapped with the
+/* COOL: the item sidebar's slide, exactly (its keyframes, durations and curves — components/sideMotion.ts): opened, it
+   slides in the whole way from the right on --side-slide, closed it slides back out to the right, quicker (WF_CLOSE_MS =
+   SIDE_CLOSE_MS). A page that starts with it docked just shows it (workshopFilter.ts `entering`). Swapped with the
    sidebar, each plays its own over the same margin: the sidebar (z 40) slides over or off the panel (z 30). Guard:
    probe-filters motion:match, panel:right, swap:* */
-.wf-col.entering, .wf-col[data-mode="drawer"] { animation: side-in .32s cubic-bezier(.2, 1.22, .36, 1); }
-.wf-col.closing { animation: side-out .17s cubic-bezier(.55, 0, .8, .2) forwards; pointer-events: none; }
+.wf-col.entering, .wf-col[data-mode="drawer"] { animation: side-in var(--side-slide-dur) var(--side-slide); }
+.wf-col.closing { animation: side-out .26s cubic-bezier(.5, 0, .75, 0) forwards; pointer-events: none; }
 .wf-col[data-mode="drawer"] { z-index: 46; outline: none;
   border-left-color: color-mix(in srgb, var(--accent) 28%, var(--surface1));
   box-shadow: -14px 0 34px rgba(0,0,0,.42), var(--glow-sm); }

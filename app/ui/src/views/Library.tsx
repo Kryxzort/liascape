@@ -7,6 +7,7 @@ import { facetsOf } from "../components/facets";
 import { knownTags, localMatcher, useFilterPanel } from "../components/workshopFilter";
 import { SidePanel, SelectionNote } from "../components/SidePanel";
 import { SIDE_CLOSE_MS, useLinger } from "../hooks/useLinger";
+import { useSideMotion } from "../hooks/useSideMotion";
 import { ItemSide } from "../components/ItemSide";
 import { useRemoval } from "../components/itemRemoval";
 import { useMotion } from "../components/motion";
@@ -302,6 +303,7 @@ export const Library = memo(function Library({ onShowInBrowse }: { onShowInBrows
 
   // the sidebar: the focused item (kept for its exit slide after the focus clears)
   const shown = useLinger(libFocus, SIDE_CLOSE_MS, motion);
+  useSideMotion("library", shown, scrollRef, gridRef, motion); // the open / close slide and the grid's glide
   const sideItem = shown.value ? byPath[shown.value] ?? null : null;
 
   // nothing read yet: an empty page, never the welcome for a library that is only on its way

@@ -15,9 +15,9 @@ import { type usePreview, usePreviewSound, previewLevel, setPreviewVolume, setPr
 // item sidebar"; .claude/rules/ui/design.md § Item sidebar). One shell for the Library and
 // the Browse sidebar: an <aside> beside the page (a sibling of `.scroll` inside `.app`), docked at ≥ 900 px — the grid
 // and the playlist bar end at its left edge (index.css `.app:has(> .side-panel…)`) — and floating over the page with a
-// scrim below that. It slides in on a slightly springy curve and its content follows in a quick stagger (picture → hero →
-// actions → rows), a switch re-staggers the new item's content faster, it slides out on close (transform + opacity only;
-// `:root.no-motion` → it fades in and out, and a switch cross-fades). `id` is the item's IDENTITY (its path / page URL): a
+// scrim below that. Its open and close (the slide, the grid's glide, the content's late cascade) are the page's
+// (hooks/useSideMotion.ts, components/sideMotion.ts); here an item switch: the carousel below, or a quicker re-stagger
+// (`:root.no-motion` → it fades in and out, and a switch cross-fades). `id` is the item's IDENTITY (its path / page URL): a
 // new copy of the same item (`library-item-changed`) is no new open — nothing replays.
 // Look: the Settings page's language — accent-tinted
 // section cards with glowing icon chips (`.side-sec`), the picture in a framed stage with a soft accent glow, action tiles.
@@ -63,7 +63,8 @@ export function SidePanel({ kind, id, order = -1, card, closing, title, sub, onC
   const ref = useRef<HTMLElement>(null);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const motion = useMotion();
-  // the first item this panel opened on staggers in with the slide; a later one slides (or re-staggers faster)
+  // the first item this panel opened on cascades in with the slide (`opening`: no CSS entrance; sideMotion.ts openSide);
+  // a later one slides (or re-staggers faster)
   // (cleared on the first switch: coming back to that item later is a switch too, not the opening)
   const [first, setFirst] = useState<string | null>(id);
   // follow the shown item during render (no effect round-trip, like useLinger): the last children per item, so a switch

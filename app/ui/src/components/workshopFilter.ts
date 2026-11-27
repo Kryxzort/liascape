@@ -71,7 +71,7 @@ export const wsSortValue = (f: WorkshopFilter) => (f.sort === "trend" ? `trend:$
 export const wsSortPatch = (v: string): Partial<WorkshopFilter> => (v.startsWith("trend:") ? { sort: "trend", trendDays: +v.slice(6) } : { sort: v });
 
 export { WF_DOCK_QUERY };
-export const WF_CLOSE_MS = SIDE_CLOSE_MS; // the panel's exit slide: the item sidebar's (index.css `side-out`)
+export const WF_CLOSE_MS = SIDE_CLOSE_MS; // the panel's exit slide: the item sidebar's (index.css `side-out`, components/sideMotion.ts)
 const subscribeDock = (cb: () => void) => { const q = matchMedia(WF_DOCK_QUERY); q.addEventListener("change", cb); return () => q.removeEventListener("change", cb); };
 export const useFilterDocked = () => useSyncExternalStore(subscribeDock, () => matchMedia(WF_DOCK_QUERY).matches);
 

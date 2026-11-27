@@ -2086,16 +2086,22 @@ C["appear:glows"] = { states: ["single"], noSwitch: true, async run(c) {
     return v;
   } };
 
-// "Smooth window animations": the item sidebar's motion (components/SidePanel.tsx),
-// opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides / fades
-// in (transform + opacity animations only, nothing else animated), and closes (its close button, or Escape) by sliding out.
+// "Smooth window animations": the item sidebar's motion (components/sideMotion.ts, SidePanel.tsx),
+// opened from a library card (its menu's Settings) and from a playlist-bar item ("Settings"). On: it slides in, its content
+// cascading after it (transform / translate / scale + opacity animations only, nothing else animated), all of it over
+// within the slide plus the content's spring (--side-slide-dur + --spring-soft-dur) of opening and nothing left running
+// past that; it closes (its close button, or Escape) by sliding out.
 // Off: nothing moves — it fades in and out in place (opacity only; per frame: in-between frames, its box still; gone after
 // the ~120 ms fade, not at once) — also after a page reload; back on: it slides.
 const SIDE_SAMPLE = String.raw`(() => { const p = document.querySelector(".side-panel"); if (!p) return null;
   const run = p.getAnimations({ subtree: true }).filter((a) => a.playState === "running" && !a.effect?.target?.matches?.("img, video"));
   const props = [...new Set(run.flatMap((a) => (a.effect.getKeyframes?.() ?? []).flatMap((k) => Object.keys(k).filter((x) => !["offset", "easing", "composite", "computedOffset"].includes(x)))))];
-  const b = p.getBoundingClientRect(), cs = getComputedStyle(p);
-  return { anims: run.length, props, opacity: +cs.opacity, rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
+  const b = p.getBoundingClientRect(), cs = getComputedStyle(p), root = getComputedStyle(document.documentElement);
+  const ms = (k) => { const x = root.getPropertyValue(k).trim(); return x ? parseFloat(x) * (x.endsWith("ms") ? 1 : 1000) : 0; };
+  // how long the open has run (its longest running animation) and how long until its last one ends
+  const t = run.map((a) => [+a.currentTime || 0, (a.effect?.getComputedTiming().endTime ?? 0) - (+a.currentTime || 0)]);
+  return { anims: run.length, props, opacity: +cs.opacity, since: Math.round(Math.max(0, ...t.map((x) => x[0]))), left: Math.round(Math.max(0, ...t.map((x) => x[1]))),
+    budget: Math.round(ms("--side-slide-dur") + ms("--spring-soft-dur")), rect: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }; })()`;
 async function sideOpen(c, via, { full = false, esc = false } = {}) {
   const t = TITLE(via === "bar" ? c.barItem : c.cardItem);
   const open = via === "bar" ? `m.ctx(m.playlistBar(${JSON.stringify(t)}), "playlistBar");`
@@ -2135,12 +2141,14 @@ C["appear:morphs"] = { states: ["single"], noSwitch: true, async run(c) {
     const v = [], J = JSON.stringify;
     const on = (n, r) => {
       if (!r.early?.anims) v.push(`animations on, ${n}: the sidebar didn't slide in (+60 ms ${J(r.early)})`);
-      const bad = (r.early?.props ?? []).filter((x) => !["transform", "opacity", "translate"].includes(x));
+      const bad = (r.early?.props ?? []).filter((x) => !["transform", "opacity", "translate", "scale"].includes(x));
       if (bad.length) v.push(`animations on, ${n}: it animates ${bad.join(", ")} (transform / opacity only)`);
       if (r.closeMs < 0 || r.after.panels || r.after.focused) v.push(`animations on, ${n}: it didn't close cleanly ${J([r.closeMs, r.after])}`);
     };
     on("card", c.onCard); on("playlist-bar item", c.onBar); on("card, Escape", c.onEsc); on("back on", c.back);
-    if (c.onCard.mid?.anims) v.push(`animations on: still animating at +460 ms ${J(c.onCard.mid)}`);
+    const m = c.onCard.mid;
+    if (m?.anims && m.since + m.left > m.budget) v.push(`animations on: the open runs ${m.since + m.left} ms (want it over within the slide + the content's spring, ${m.budget} ms) ${J(m)}`);
+    if (c.onCard.late?.anims) v.push(`animations on: still animating at +1210 ms ${J(c.onCard.late)}`);
     if (!c.savedOff) v.push("turning Smooth window animations off wasn't saved (morphs !== false)");
     const off = (n, r) => {
       for (const k of ["early", "mid", "late"]) { const x = r[k]; if (x?.props?.some((p) => p !== "opacity")) v.push(`animations off, ${n}: it moves at ${k} ${J(x)}`); }

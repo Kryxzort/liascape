@@ -181,7 +181,10 @@ const PAGE = `window.__wf = {
   tog() { return this.q("[data-sortsplit] [data-wf-toggle]"); },
   isOpen() { return this.tog()?.getAttribute("aria-expanded") === "true"; },
   // the panel open (want) or closed through the toggle; false = no toggle
-  async open(want = true) { const t = this.tog(); if (!t) return false; if (this.isOpen() !== want) { t.click(); await this.sleep(450); } return true; },
+  // the toggle, then its slide over (the item sidebar's: 528 ms in, 260 ms out — index.css side-in / side-out)
+  async open(want = true) { const t = this.tog(); if (!t) return false; if (this.isOpen() !== want) { t.click(); await this.sleep(450); await this.settled(); } return true; },
+  async settled(cap = 1500) { const els = [...document.querySelectorAll(".wf-col, .side-panel")], an = els.flatMap((e) => e.getAnimations()).filter((a) => !(a instanceof CSSTransition));
+    await Promise.race([Promise.all(an.map((a) => a.finished.catch(() => {}))), this.sleep(cap)]); },
   // docked widths: the panel open (a cell before may have closed it — an item sidebar does)
   async ensure() { if (innerWidth >= 900) await this.open(true); },
   accent() { const e = document.createElement("i"); e.style.background = "var(--accent)"; document.body.append(e); const c = getComputedStyle(e).backgroundColor; e.remove(); return c; },
@@ -304,7 +307,9 @@ app.whenReady().then(async () => {
         if (await page(`return !!m.q(".wf-col, [data-sortsplit]");`)) v.push(`the filter column / split button shows for ${n}`);
       }
       await source(wsName);
+      // (measured once its slide in is over: 528 ms, index.css --side-slide-dur)
       const r = await page(`const c = m.col(); if (!c) return null; const sc = m.q(".scroll");
+        await Promise.race([Promise.all(c.getAnimations().map((a) => a.finished.catch(() => {}))), m.sleep(1500)]);
         const cards = [...sc.querySelectorAll(".card")].slice(0, 30).map((x) => x.getBoundingClientRect()).filter((b) => b.width);
         return { mode: c.dataset.mode, c: m.rect(c), s: m.rect(sc), W: innerWidth, under: cards.filter((b) => b.right > m.rect(c).x + 1).length,
           groups: [...c.querySelectorAll("[data-wf-group]")].map((g) => g.dataset.wfGroup),
@@ -744,12 +749,13 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // per-frame samples of the shown page's panel (transform x, opacity, closing) for `ms` after `act` (a toggle click)
+    // per-frame samples of the shown page's panel (its x off its place at the window's right edge — translate or transform —,
+    // its width, opacity, closing) for `ms` after `act` (a toggle click)
     const framesOf = (pg, act, ms = 650) => page(`window.__fr = []; const t0 = performance.now();
       const sc = m.q(${J(pg === "library" ? ".lib-scroll" : ".scroll:not(.lib-scroll)")}); window.__gr = [];
       const f = () => { const c = document.querySelector('.wf-col[data-wf-page="${pg}"]'); window.__gr.push(sc.getBoundingClientRect().right);
-        if (c) { const t = getComputedStyle(c).transform; const mm = new DOMMatrixReadOnly(t === "none" ? undefined : t);
-          window.__fr.push({ tx: mm.m41, op: +getComputedStyle(c).opacity, cl: c.classList.contains("closing"), an: c.getAnimations().length,
+        if (c) { const b = c.getBoundingClientRect();
+          window.__fr.push({ tx: b.right - innerWidth, w: b.width, op: +getComputedStyle(c).opacity, cl: c.classList.contains("closing"), an: c.getAnimations().length,
             props: [...new Set(c.getAnimations().flatMap((a) => a.effect.getKeyframes().flatMap((k) => Object.keys(k))))].filter((k) => !["offset", "easing", "composite", "computedOffset"].includes(k)) }); }
         else window.__fr.push(null);
         if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); };
@@ -766,36 +772,36 @@ app.whenReady().then(async () => {
     await cell("panel:right", async () => {
       const v = [];
       await toWorkshop();
-      const geo = await page(`const c = m.col(), tb = document.querySelector(".topbar"), t = m.tog(); if (!c || !t) return null;
+      const geo = await page(`await m.settled(); const c = m.col(), tb = document.querySelector(".topbar"), t = m.tog(); if (!c || !t) return null;
         return { c: m.rect(c), tb: m.rect(tb), t: m.rect(t), W: innerWidth, mode: c.dataset.mode, mr: parseFloat(getComputedStyle(m.q(".scroll")).marginRight) };`);
       if (!geo) return ["no docked panel / toggle at 1400 px"];
       if (geo.mode !== "dock" || Math.abs(geo.c.r - geo.W) > 0.5) v.push(`the panel (${geo.mode}) spans ${geo.c.x}–${geo.c.r}, not at the right edge of ${geo.W}`);
       if (Math.abs(geo.c.y - geo.tb.b) > 1) v.push(`the panel starts at ${geo.c.y}, the top bar ends at ${geo.tb.b}`);
       if (!(geo.t.r > geo.c.x && geo.t.x < geo.c.r)) v.push(`the toggle (${geo.t.x}–${geo.t.r}) isn't above the panel (${geo.c.x}–${geo.c.r})`);
       if (Math.abs(geo.mr - geo.c.w) > 1) v.push(`the grid's margin-right ${geo.mr} (want the panel's ${geo.c.w})`);
-      // closing: slides out to the right, fading, then gone
+      // closing: slides out to the right the whole way (the item sidebar's slide: components/sideMotion.ts), then gone
       let fr = await framesOf("browse", `m.tog().click();`);
       const out = fr.filter(Boolean);
       const props = [...new Set(out.flatMap((x) => x.props))];
       if (!out.length || !out.every((x) => x.cl)) v.push(`closing: ${out.length} frames of the panel, closing on ${out.filter((x) => x.cl).length}`);
-      if (!out.some((x) => x.tx > 2 && x.tx < 30 && x.op > 0.02 && x.op < 0.98)) v.push(`closing: no in-between frame (tx / opacity ${J(out.map((x) => [Math.round(x.tx), +x.op.toFixed(2)]))})`);
+      if (!out.some((x) => x.tx > 2 && x.tx < 0.95 * x.w)) v.push(`closing: no in-between frame (tx / opacity ${J(out.map((x) => [Math.round(x.tx), +x.op.toFixed(2)]))})`);
       if (out.some((x, i) => i && x.tx < out[i - 1].tx - 0.5)) v.push("closing: it moves back left on the way out");
       if (fr[fr.length - 1] !== null) v.push("closing: the panel is still there after the slide");
-      if (props.some((p) => !["transform", "opacity"].includes(p))) v.push(`closing animates ${J(props)}`);
+      if (props.some((p) => !["transform", "translate", "opacity"].includes(p))) v.push(`closing animates ${J(props)}`);
       oneStep(v, "closing", await gridEdge(), 1);
       const mr = await page(`return parseFloat(getComputedStyle(m.q(".scroll")).marginRight);`);
       if (mr > 1) v.push(`closed: the grid keeps a ${mr} px margin-right`);
-      // opening: from the right, through in-between offsets, landing on 0
+      // opening: from beyond the right edge, through in-between offsets, landing on 0
       fr = await framesOf("browse", `m.tog().click();`);
       const inn = fr.filter(Boolean), first = inn[0], last = inn[inn.length - 1];
       const props2 = [...new Set(inn.flatMap((x) => x.props))];
-      if (!first || !(first.tx > 2) || !(first.op < 0.9)) v.push(`opening: the first frame sits at ${first ? `${first.tx.toFixed(1)} px, opacity ${first.op.toFixed(2)}` : "nothing"} (want off to the right, faded)`);
-      if (!inn.some((x) => x.tx > 1 && x.tx < 38)) v.push(`opening: no in-between offset ${J(inn.map((x) => Math.round(x.tx)))}`);
+      if (!first || !(first.tx > 0.8 * first.w)) v.push(`opening: the first frame sits at ${first ? `${first.tx.toFixed(1)} px, opacity ${first.op.toFixed(2)}` : "nothing"} (want off the right edge, the whole way)`);
+      if (!inn.some((x) => x.tx > 1 && x.tx < 0.95 * x.w)) v.push(`opening: no in-between offset ${J(inn.map((x) => Math.round(x.tx)))}`);
       if (inn.some((x) => x.tx < -6)) v.push(`opening: it overshoots ${Math.min(...inn.map((x) => x.tx)).toFixed(1)} px to the left`);
       if (!last || Math.abs(last.tx) > 0.5 || last.op < 0.99 || last.cl) v.push(`opening: it lands at ${last ? `${last.tx.toFixed(1)} px, opacity ${last.op}` : "nothing"}`);
-      if (props2.some((p) => !["transform", "opacity"].includes(p))) v.push(`opening animates ${J(props2)}`);
+      if (props2.some((p) => !["transform", "translate", "opacity"].includes(p))) v.push(`opening animates ${J(props2)}`);
       oneStep(v, "opening", await gridEdge(), -1);
-      // the same per-frame path closing as opening, reversed: out to the right and faded, from where it rests
+      // the same per-frame path closing as opening, reversed: out to the right, from where it rests
       if (out.length && inn.length && (out[0].tx > 0.5 || out[0].op < 0.99)) v.push(`closing starts at ${out[0].tx.toFixed(1)} px / ${out[0].op} (want from rest)`);
       // remembered over a reload, both ways; a tab visit shows it without the slide
       await page(`await m.open(false);`); await loadUi(); await toWorkshop(false);
@@ -807,13 +813,16 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the panel's open / close is the item sidebar's, exactly: its duration, curve and keyframes, both ways; motion off → the
-    // same fade for both (opacity only, ~120 ms), never a pop
+    // the panel's open / close is the item sidebar's, exactly: its duration, curve and translate keyframes, both ways (the
+    // sidebar's is a script animation, components/sideMotion.ts, the panel's CSS: compared by value); motion off → the same
+    // fade for both (opacity only, ~120 ms), never a pop
     await cell("motion:match", async () => {
       const v = [];
-      const SIG = `const sig = (el) => { const a = el?.getAnimations().find((x) => x.effect?.target === el); if (!a) return null;
+      const SIG = `const nt = (x) => { x = String(x ?? "").trim(); return !x || x === "none" || /^0(px)?( 0(px)?)?$/.test(x) ? "rest" : x.replace(/\\b0px\\b/g, "0").replace(/\\s+/g, " "); };
+        const num = (e) => (String(e).match(/^[a-z-]+/)?.[0] ?? "") + ":" + (String(e).match(/-?[0-9]*\\.?[0-9]+/g) ?? []).map((x) => +(+x).toFixed(3)).join(",");
+        const sig = (el) => { const a = el?.getAnimations().find((x) => x.effect?.target === el && !x.effect.pseudoElement); if (!a) return null;
         const k = a.effect.getKeyframes(), t = a.effect.getTiming(), f = k[0], l = k[k.length - 1];
-        return { dur: t.duration, ease: getComputedStyle(el).animationTimingFunction, from: [f.transform ?? "", f.opacity ?? ""], to: [l.transform ?? "", l.opacity ?? ""] }; };`;
+        return { dur: Math.round(t.duration), ease: num(t.easing !== "linear" ? t.easing : f.easing), from: [nt(f.translate), f.opacity ?? ""], to: [nt(l.translate), l.opacity ?? ""] }; };`;
       const run = async () => {
         await toWorkshop();
         const c = await page(`const t = m.q(".scroll:not(.lib-scroll) .card .thumb-wrap"); return t ? m.rect(t) : null;`);
@@ -842,7 +851,7 @@ app.whenReady().then(async () => {
       same("motion off, opening", off.panelIn, off.sideIn);
       same("motion off, closing", off.panelOut, off.sideOut);
       for (const [k, s] of Object.entries({ panelIn: off.panelIn, sideIn: off.sideIn, panelOut: off.panelOut, sideOut: off.sideOut }))
-        if (s && (s.from[0] || s.to[0] || s.dur > MO.FADE_MS + 30)) v.push(`motion off: ${k} isn't a short fade in place (${J(s)})`);
+        if (s && (s.from[0] !== "rest" || s.to[0] !== "rest" || s.dur > MO.FADE_MS + 30)) v.push(`motion off: ${k} isn't a short fade in place (${J(s)})`);
       // the closed one fades out (gone ~170 ms after, polled from ~30 ms in), never popped
       if (off.lingerA < 60 || off.lingerB < 60) v.push(`motion off: the closed one popped out (panel ${off.lingerA} ms, sidebar ${off.lingerB} ms)`);
       await setMotion(true);
@@ -1341,7 +1350,7 @@ app.whenReady().then(async () => {
       if (r.col) v.push("at 860 px the column is still on screen (docked)");
       if (!r.btn) return [...v, "no filter toggle in the top bar at 860 px"];
       // open, set two tags inside it
-      await page(`m.tog().click(); await m.sleep(450);`);
+      await page(`m.tog().click(); await m.sleep(450); await m.settled();`);
       r = await page(`const c = m.col(); if (!c) return null; const s = m.q(".wf-scrim");
         return { mode: c.dataset.mode, c: m.rect(c), scrim: !!s, z: +getComputedStyle(c).zIndex, W: innerWidth, H: innerHeight };`);
       if (!r) return [...v, "the filter toggle didn't open the drawer"];
@@ -1359,7 +1368,7 @@ app.whenReady().then(async () => {
       // with the item sidebar open the toggle swaps it for the drawer (one right-hand panel); the scrim closes the drawer
       await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(600);`);
       const side0 = await page(`return !!m.q(".side-panel:not(.closing)");`);
-      await page(`m.tog().click(); await m.sleep(450);`);
+      await page(`m.tog().click(); await m.sleep(450); await m.settled();`);
       r = await page(`const c = m.col(); if (!c) return null; const b = m.rect(c); const hit = document.elementFromPoint(b.x + b.w / 2, b.y + 60);
         return { side: !!m.q(".side-panel"), top: !!hit?.closest(".wf-col") };`);
       if (!side0) v.push("(the item sidebar didn't open for the check)");
@@ -1394,7 +1403,7 @@ app.whenReady().then(async () => {
         if (docked && g.col && g.s.r > g.col.r.x + 1) v.push("the grid runs under the column");
         await shot(`size-${w}x${h}`);
         // the item sidebar opened: it takes the panel's place
-        await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(650);`);
+        await page(`m.q(".scroll:not(.lib-scroll) .card .thumb-wrap")?.click(); await m.sleep(650); await m.settled();`);
         g = await geo();
         const side = await page(`const p = m.q(".side-panel:not(.closing)"); return p ? m.rect(p) : null;`);
         if (g.col) v.push(`the filter panel (${g.col.mode}) stayed open beside the item sidebar`);
@@ -1407,7 +1416,7 @@ app.whenReady().then(async () => {
         await page(`m.q(".side-panel [data-side-close]")?.click(); await m.sleep(400);`);
         if (docked) await page(`await m.open(true);`);
         if (!docked) {
-          await page(`m.tog()?.click(); await m.sleep(450);`);
+          await page(`m.tog()?.click(); await m.sleep(450); await m.settled();`);
           const d = await page(`const c = m.col(); if (!c) return null; const b = m.rect(c); const close = c.querySelector(".wf-close"); const cb = close ? m.rect(close) : null;
             return { b, cb, W: innerWidth, H: innerHeight, sh: c.querySelector(".wf-scroll").scrollHeight > c.querySelector(".wf-scroll").clientHeight };`);
           if (!d) v.push("the filter toggle didn't open the drawer");
@@ -1490,7 +1499,7 @@ app.whenReady().then(async () => {
       if (alpha(r.grp) < 0.3) v.push(`its groups don't carry the darkness (${r.grp})`);
       await shot("liveBg-wide");
       await resize(860, 700);
-      await page(`m.tog().click(); await m.sleep(450);`);
+      await page(`m.tog().click(); await m.sleep(450); await m.settled();`);
       const d = await page(`return getComputedStyle(m.col()).backgroundColor;`);
       if (alpha(d) < 0.6) v.push(`the drawer over the grid has no fill (${d})`);
       await shot("liveBg-drawer");

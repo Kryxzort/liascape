@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { FADE_EXIT_MS } from "../components/motion";
 
-// the item sidebar's exit slide (index.css `side-out`, .17 s)
-export const SIDE_CLOSE_MS = 170;
+// how long the item sidebar stays mounted after it closes: its 260 ms slide out (components/sideMotion.ts SLIDE_OUT_MS; the
+// filter panel's index.css `side-out`) and a few frames for the slide to start, so it never vanishes before it is out.
+// Guard: probe-sidebar side:close
+export const SIDE_CLOSE_MS = 320;
 
 // the last non-null value for `ms` after it went null (a panel's exit animation), `closing` meanwhile; motion off → for
 // FADE_EXIT_MS (the exit is a fade then: components/motion.ts), never gone at once
