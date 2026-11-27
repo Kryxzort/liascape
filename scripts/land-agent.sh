@@ -219,7 +219,8 @@ checks() {
 }
 
 # ---- 4. the UI matrix ----------------------------------------------------------------------------------------------------
-matrix_cmd=${LAND_AGENT_MATRIX_CMD:-"bash scripts/test-ui-matrix.sh"}
+# The matrix takes the test lock itself but needs the dev shell for dotnet, ffmpeg and the player's native deps.
+matrix_cmd=${LAND_AGENT_MATRIX_CMD:-"$devsh bash scripts/test-ui-matrix.sh"}
 passing() { grep -E '^MATRIX ' "$1" | tail -n 1 | grep -qE ' fail=0 error=0 .*setup=0'; }
 escape_re() { printf '%s' "$1" | sed 's/[][\\.*+?^${}()|/]/\\&/g'; }
 run_matrix() {  # <label> <args…>: runs it, reruns failed cells alone; 0 = passed (maybe with flakes)
