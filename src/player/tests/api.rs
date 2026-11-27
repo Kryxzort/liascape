@@ -9519,6 +9519,203 @@ fn bus_producers_link_asynchronously() {
     );
 }
 
+/// The on-machine crash step's tone detector (`scenes_steps.sh` `meter_drops`): the bus meter's
+/// 1 ms samples over `[from, to)` in 10 ms bins (power mean), the first and last bin left out, the
+/// median bin the level; a drop is a bin 15 dB or more under it. → (level dB, drop bin starts ms, bins)
+fn meter_drops(c: &mut Client, from: f64, to: f64) -> (f64, Vec<f64>, usize) {
+    let mut bins: std::collections::BTreeMap<i64, Vec<f64>> = std::collections::BTreeMap::new();
+    for (t, db) in meter_samples(c, from, to) {
+        bins.entry((t / 10.0).floor() as i64)
+            .or_default()
+            .push(10f64.powf(db / 10.0));
+    }
+    let vals: Vec<(f64, f64)> = bins
+        .iter()
+        .map(|(k, v)| {
+            let p = v.iter().sum::<f64>() / v.len() as f64;
+            (*k as f64 * 10.0, if p > 0.0 { 10.0 * p.log10() } else { -96.0 })
+        })
+        .collect();
+    let vals = if vals.len() > 2 { vals[1..vals.len() - 1].to_vec() } else { Vec::new() };
+    let mut sorted: Vec<f64> = vals.iter().map(|v| v.1).collect();
+    sorted.sort_by(f64::total_cmp);
+    let level = sorted.get(sorted.len() / 2).copied().unwrap_or(f64::NAN);
+    let drops = vals.iter().filter(|v| v.1 < level - 15.0).map(|v| v.0).collect();
+    (level, drops, vals.len())
+}
+
+/// `n` threads spinning until dropped (a panic included: `cargo test` runs on in the same process).
+struct Burners {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl Burners {
+    fn start(n: usize) -> Burners {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let threads = (0..n)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let mut x = 0u64;
+                    while !stop.load(Ordering::Relaxed) {
+                        x = std::hint::black_box(x.wrapping_mul(6364136223846793005).wrapping_add(1));
+                    }
+                })
+            })
+            .collect();
+        Burners { stop, threads }
+    }
+}
+
+impl Drop for Burners {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        for t in self.threads.drain(..) {
+            let _ = t.join();
+        }
+    }
+}
+
+/// A scene worker killed (SIGKILL) or hung (SIGSTOP; the host's heartbeat kills it) on one output
+/// never touches the sound another output plays. VIRTUAL-1 plays a looping tone clip, VIRTUAL-2 a
+/// synthetic scene: soundless (as the on-machine crash step's), then with a quiet tone of its own
+/// (its stream on the bus dies abruptly with a kill, or freezes in the graph with a hang). Per event,
+/// the on-machine detector over the bus meter (no 10 ms bin 15 dB under the level, `meter_drops`)
+/// from the signal to 2.4 s after it; and the private sink, recorded throughout, has no run of exact
+/// silence (a lost bus cycle) from any signal to 200 ms after its scene resumed. The same windows
+/// with no event first: a drop there is the machine's, not a worker's. `LIASCAPE_TEST_CRASH_LOAD=<n>`
+/// adds n busy threads, to tell load from a coupling.
+#[test]
+fn a_scene_workers_crash_never_drops_another_outputs_tone() {
+    let Some((serial, root, pw)) = private_pw() else {
+        return;
+    };
+    let srv = scene_audio_serve(&pw, root.clone(), serial);
+    let mut c = srv.client();
+    require_rt_graph(&pw, &mut c);
+    let load: usize = std::env::var("LIASCAPE_TEST_CRASH_LOAD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let burners = Burners::start(load);
+    // Recording from before the video's first sound: `recording_anchor` maps it onto the player's clock.
+    let wav = root.join("sink.wav");
+    let rec = record_sink(&pw, &wav);
+    // Longer than the test: mpv's loop wrap costs the bus one quantum of exact silence (its own
+    // matter, not a worker's), which would read as a lost cycle inside an event window.
+    const RED_60S: ClipSpec = ClipSpec::Solid {
+        rgb: [255, 0, 0],
+        secs: 60.0,
+        tone_hz: 440.0,
+        tone_dbfs: -20.0,
+    };
+    let clip = s(&ensure_clip("crash_iso_red_60s", RED_60S)).to_string();
+    let v = create_src(&mut c, json!({"path": clip, "loop": true}));
+    c.ok("set", json!({"path": "lay:VIRTUAL-1:main.content", "value": v}));
+    wait_for(Duration::from_secs(5), "the video's tone on the bus", || {
+        (bus_db(&mut c, 200.0) > -26.0).then_some(())
+    });
+    const WINDOW: (f64, f64) = (-100.0, 2400.0);
+    let mut quiet = Vec::new();
+    for _ in 0..4 {
+        let t = bus_now(&mut c);
+        std::thread::sleep(Duration::from_millis(2600));
+        let (_, d, n) = meter_drops(&mut c, t + WINDOW.0, t + WINDOW.1);
+        quiet.push((d.len(), n));
+    }
+    println!("quiet windows (no event): VIRTUAL-1 tone (drops, bins) {quiet:?}");
+    let quiet_scene = SyntheticSpec { tone_dbfs: -40.0, ..tone_scene(660.0) };
+    let mut events: Vec<(String, f64, f64, usize, usize)> = Vec::new();
+    for (round, spec) in [("soundless", SyntheticSpec::default()), ("with sound", quiet_scene)] {
+        let dir = common::synthetic_scene(&format!("api-crash-iso-{}", spec.has_audio), &spec);
+        let sc = create_src(&mut c, json!({"kind": "scene", "path": s(&dir)}));
+        c.ok("set", json!({"path": "lay:VIRTUAL-2:main.content", "value": sc}));
+        wait_for(Duration::from_secs(20), "the scene playing", || {
+            let flowing = !spec.has_audio
+                || has_event(&mut c, "source.audio_flowing", |e| e["id"] == json!(sc));
+            let ready = get(&mut c, &format!("{sc}.ready"))["result"]["value"] == json!(true);
+            (flowing && ready).then_some(())
+        });
+        std::thread::sleep(Duration::from_millis(500));
+        // Three events per source: its restart budget (3 in 60 s) is never spent.
+        for ev in ["kill", "hang", "kill"] {
+            let pid = wait_for(Duration::from_secs(10), "a live worker", || {
+                let w = c.ok("probe", json!({"name": "workers"}));
+                w["workers"].as_array()?.iter().find(|w| w["id"] == json!(sc))?["pid"].as_u64()
+            });
+            c.ok("probe", json!({"name": "frames", "args": {"reset": true}}));
+            c.ok("probe", json!({"name": "loop", "args": {"reset": true}}));
+            let t0 = bus_now(&mut c);
+            let sig = if ev == "kill" { libc::SIGKILL } else { libc::SIGSTOP };
+            unsafe { libc::kill(pid as i32, sig) };
+            std::thread::sleep(Duration::from_millis(2500));
+            let f = c.ok("probe", json!({"name": "frames"}));
+            let paced = f["outputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|o| o["name"] == "VIRTUAL-1")
+                .unwrap()["paced"]
+                .clone();
+            let busy = c.ok("probe", json!({"name": "loop"}))["max_busy_ms"]
+                .as_f64()
+                .unwrap_or(f64::NAN);
+            let resumed = wait_for(Duration::from_secs(10), "scene.resumed", || {
+                logs_of(&mut c, "scene.resumed")
+                    .iter()
+                    .filter(|e| e["id"] == json!(sc))
+                    .filter_map(|e| e["t_mono_ms"].as_f64())
+                    .find(|t| *t > t0)
+            });
+            let (lvl, d, n) = meter_drops(&mut c, t0 + WINDOW.0, t0 + WINDOW.1);
+            println!(
+                "{round} {ev} (pid {pid}): resumed {:.0} ms after the signal; tone level {lvl:.2} dB, \
+                 drops {} at {:?} ms (bins {n}); VIRTUAL-1 paced {paced}; loop max_busy {busy:.2} ms",
+                resumed - t0,
+                d.len(),
+                d.iter().map(|x| x - t0).collect::<Vec<_>>()
+            );
+            events.push((format!("{round} {ev}"), t0, resumed, d.len(), n));
+            std::thread::sleep(Duration::from_millis(1000));
+        }
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let (left, runs) = stop_sink_recording(rec, &wav);
+    drop(burners);
+    let log = c.ok("logs", json!({"min_level": "debug", "limit": 100_000}))["events"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let anchor = recording_anchor(&mut c, &log, &left)
+        .expect("the recording anchored on the player's clock");
+    let at_events: Vec<_> = runs
+        .iter()
+        .map(|r| (r, anchor + r.0 * 1000.0))
+        .filter(|(_, t)| events.iter().any(|e| *t >= e.1 - 20.0 && *t <= e.2 + 200.0))
+        .collect();
+    println!(
+        "sink: {:.1} s recorded, exact-silence runs {runs:?}; inside an event: {at_events:?}",
+        left.len() as f64 / 48_000.0
+    );
+    assert!(
+        quiet.iter().all(|(_, n)| *n > 200),
+        "a quiet window the meter didn't cover ((drops, bins) {quiet:?})"
+    );
+    assert!(
+        quiet.iter().all(|(d, _)| *d == 0),
+        "the tone dropped with no event at all ((drops, bins) {quiet:?}): the machine, not a worker"
+    );
+    for (name, _, _, drops, bins) in &events {
+        assert!(*bins > 200, "{name}: the meter covered {bins} 10 ms bins of 250");
+        assert_eq!(
+            *drops, 0,
+            "{name}: VIRTUAL-1's tone dropped {drops} 10 ms bins as VIRTUAL-2's worker went"
+        );
+    }
+    assert!(at_events.is_empty(), "bus cycles lost while a worker died or hung: {at_events:?}");
+}
+
 /// A full-live `align: end` effect
 /// must hand off to B exactly when A's last frame has had its time — never cutting that frame
 /// short (B drawn over a frame the clip still owns), never holding it past its due. The

@@ -152,18 +152,28 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
          (the test lock in `nix develop`, never the main checkout's node_modules, CodeRabbit, the one attribution line,
          delete the TODO item by its text, queue what's left, no push), so a brief states only the task.
 
-25. [ ] A scene worker's crash on one output disturbs the other output: the real-session crash run
-       (`src/player/tests/onmachine/scenes.sh crash`, 2026-11-27, DP-1 video + DP-2 scene) failed 43/52. DP-1's tone
-       dropped while DP-2's worker was killed or hung (synthetic kill 50 drops, hang 19, a real scene's kill 14; bound
-       0), DP-1's pacing slipped in 5 windows (p95 up to 27.9 ms vs a quiet 7.8 ms), and DP-2 didn't hold its frame
-       exactly after a kill (grim diff 0.0009). Hermetic agent runs overlapped it, so rerun on a quiet machine first; what
-       still fails is a bug in the isolation (`.claude/rules/player/core.md`, the audio bus and the worker supervisor):
-       find where a dying worker blocks the shared audio graph or the compositor loop, fix it, and pin it with a
-       hermetic test (a killed / hung worker under a private PipeWire, the other source's tone without a drop).
+25. [ ] (owner's night of choice, real session) Rerun `src/player/tests/onmachine/scenes.sh crash` on a quiet
+       machine. The 2026-11-27 run (43/52) overlapped agents' hermetic suites; it now takes the test lock, so none can.
+       It must show: DP-1's tone with 0 drops in every event AND in every quiet window (the new "quiet windows (no
+       event)" check — drops there are the machine's, not a worker's); DP-1's pacing within its quiet windows; DP-2
+       holding its frame (the first grim now waits for a killed worker's reap: the failing pair was the dying worker's
+       own last frame, markers 2013 → 2014, latching after the first grim). Hermetically nothing couples:
+       `tests/api.rs` `a_scene_workers_crash_never_drops_another_outputs_tone` (private PipeWire, a video's tone on one
+       output, a soundless and a sounding synthetic scene killed and hung on the other) saw 0 drops and no lost bus
+       cycle in 36 events over six runs, idle and under 24 / 48 busy threads, pacing never missed, loop busy ≤ 6.2 ms;
+       in the real run two of the three failing events were a soundless scene (no worker stream on the bus) with the
+       loop ≤ 2.6 ms busy. A drop or slip that still shows on a quiet machine with clean quiet windows is a real coupling outside
+       these (the GPU: a worker's EGL context going and coming on the real outputs): chase it then.
 
 26. [ ] (owner) Pick the sidebar's presets row look: A (built: the creator row's look, "Made for this scene", a
        sliding chevron), B (three fanned preset thumbnails leading, "2 presets made for this scene") or C (an accent
        left edge, a tinted glyph and a count pill). Mock-up screenshots: the night notes of 2026-11-27.
+
+27. [ ] A looping video's sound loses one graph quantum (64 samples of exact silence, 1.3 ms at 48 kHz) at every
+       loop wrap: the private sink's recording in `a_scene_workers_crash_never_drops_another_outputs_tone`'s first
+       version (a 10 s clip) had one at 10.16 s and 20.16 s and nowhere else; plain mpv 0.41 (`--loop-file=inf
+       --keep-open=yes`) does the same (65 samples per wrap, 3 s and 4 s 240 fps clips). Judge it on real content
+       (an audible click on a tone; music likely hides it) and close it if mpv offers a gapless wrap.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

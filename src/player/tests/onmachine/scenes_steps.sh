@@ -468,32 +468,48 @@ hold_check() { # <check name> <img_diff_held json> <pair prefix> <keep prefix> [
 # sample (often 0) + 1 then failed events by chance. So the bound is the worst quiet window of the run + 1, the
 # quiet windows interleaved with the events (the desktop's rate drifts over minutes), and the p95 bound is the
 # quiet windows' median p95 × 1.10.
-quiet_window() { # → "<DP-1 missed> <DP-1 paced p95 ms>" over the window an event gets, with no event
+# The tone gets the same control: its drops in a quiet window are the machine's (a loaded desktop), not a worker's —
+# an event's drops count only in a run whose quiet windows have none, each covered by the meter.
+quiet_window() { # → "<DP-1 missed> <DP-1 paced p95 ms> <DP-1 tone drops | uncovered>" over an event's window, with no event
+    local fr t
     reset_frames
+    t=$(now_ms)
     grim_pair $OUT_B "$SCRATCH/quiet-g1.png" "$SCRATCH/quiet-g2.png"
     sleep 2.2
-    local fr
     fr=$(frames)
-    echo "$(fstat "$fr" $OUT_A .paced.missed) $(fstat "$fr" $OUT_A .paced.p95_ms)"
+    echo "$(fstat "$fr" $OUT_A .paced.missed) $(fstat "$fr" $OUT_A .paced.p95_ms)" \
+        "$(meter_drops "$(python3 -c "print($t - 100)")" "$(python3 -c "print($t + 2400)")" |
+            jq -r 'if .bins > 100 then .drops else "uncovered" end')"
 }
 CRASH_QUIET_MISS=()
 CRASH_QUIET_P95=()
 crash_events() { # <scene label> <scene id> <bound recover s> [must-see box: the only part a frame of it changes]
-    local label=$1 id=$2 bound=$3 must=${4:-} ev w t0 g1 g2 resumed rec fr p95 miss md lb n=0 qm qp
-    local ev_p95=() ev_miss=() ev_busy=() ev_name=()
+    local label=$1 id=$2 bound=$3 must=${4:-} ev w t0 g1 g2 resumed rec fr p95 miss md lb n=0 qm qp qd
+    local ev_p95=() ev_miss=() ev_busy=() ev_name=() quiet_drops=()
     for _ in 1 2 3; do
-        read -r qm qp <<<"$(quiet_window)"
-        CRASH_QUIET_MISS+=("$qm"); CRASH_QUIET_P95+=("$qp")
+        read -r qm qp qd <<<"$(quiet_window)"
+        CRASH_QUIET_MISS+=("$qm"); CRASH_QUIET_P95+=("$qp"); quiet_drops+=("$qd")
     done
     for ev in kill kill hang kill hang kill kill; do
         n=$((n + 1))
-        read -r qm qp <<<"$(quiet_window)"
-        CRASH_QUIET_MISS+=("$qm"); CRASH_QUIET_P95+=("$qp")
+        read -r qm qp qd <<<"$(quiet_window)"
+        CRASH_QUIET_MISS+=("$qm"); CRASH_QUIET_P95+=("$qp"); quiet_drops+=("$qd")
         w=$(worker_pid_checked "$id") || { check "$label $ev: worker found" none "a worker" 0; continue; }
         ctl probe '{"name":"loop","args":{"reset":true}}' >/dev/null
         reset_frames
         t0=$(now_ms)
         if [[ $ev == kill ]]; then kill -KILL "$w"; else kill -STOP "$w"; fi
+        # The held frame is the worker's last: one it sent just before the signal still latches once its fence
+        # signals, until the host reaps a killed worker (`Latch::forget_worker`). A first grim before that caught
+        # frame n and the second n + 1 of the same worker (diff 0.0009, no resume yet). So: the reap for a kill,
+        # a few output frames for a hang.
+        if [[ $ev == kill ]]; then
+            for _ in $(seq 20); do
+                [[ $(events_since "$t0" "worker.exited" | jq length) -gt 0 ]] && break
+                sleep 0.05
+            done
+        fi
+        sleep 0.05
         grim_pair $OUT_B "$RESULTS/crash-$label-g1.png" "$RESULTS/crash-$label-g2.png"
         local tg=$(now_ms)
         sleep 2.2
@@ -532,6 +548,8 @@ crash_events() { # <scene label> <scene id> <bound recover s> [must-see box: the
     done
     crash_quiet_bounds
     note "$label quiet windows so far: $OUT_A missed ${CRASH_QUIET_MISS[*]}; p95 median $(fnum "$QUIET_P95" 2) ms"
+    check "$label quiet windows (no event): $OUT_A tone drops" "${quiet_drops[*]}" "0 in every window" \
+        "$(python3 -c "import sys; print(1 if all(x == '0' for x in sys.argv[1:]) else 0)" "${quiet_drops[@]}")"
     local i
     for i in "${!ev_name[@]}"; do
         check "$label ${ev_name[$i]} #$((i + 1)): $OUT_A paced p95 / missed" \

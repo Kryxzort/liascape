@@ -8,7 +8,9 @@ Covers the crash paths of `src/player/src/sources/scene.rs` (`hold_for_restart`,
 A worker crash or hang keeps the source's last frame (or its preview if none arrived), restarts up to 3 times in a
 sliding 60 s resuming at the held position, then the source is broken. Other outputs, videos and audio are never
 touched: with a scene on one output killed four times, a video on another kept its frame pacing, its position and
-its gains, and the loop's busy stayed within a few ms.
+its gains, and the loop's busy stayed within a few ms. On a private PipeWire, a video's tone on one output kept
+every 10 ms bin and the bus lost no cycle while a scene's worker on the other (soundless, or with its own stream on
+the bus) was killed or hung, idle and under 48 busy threads.
 
 ## Resume exactly at the held frame
 

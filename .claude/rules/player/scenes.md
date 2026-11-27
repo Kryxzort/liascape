@@ -231,7 +231,7 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   gives a crash-looping scene a fresh budget. Guards: `broken_scene_is_saved_and_recreated_broken`,
   `tests/supervise.rs::broken_scene_restores_as_preview`.
 - `loading` is true only while a live worker is inside its load. Guard: `tests/scene.rs::scene_loading_spans_the_load_only`.
-- A crash never touches other outputs. Guard: `tests/api.rs::crash_never_touches_other_outputs`.
+- A crash never touches other outputs, their picture or their sound. Guards: `tests/api.rs::crash_never_touches_other_outputs`, `a_scene_workers_crash_never_drops_another_outputs_tone`.
 - Hang timeout knob: `LIASCAPE_SCENE_WORKER_HANG_MS`. Guard: `tests/api.rs::hang_is_killed_and_restarted`.
 
 ## Transitions with scenes

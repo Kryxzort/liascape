@@ -72,6 +72,9 @@ while (($#)); do
     shift
 done
 ((${#STEPS[@]})) || { echo "name a step (outputs|dropout|crash|budget|workers|pause|soak|all)" >&2; exit 2; }
+# One heavy run at a time: pacing and tone drops measured while a hermetic suite saturates the machine prove nothing
+# about the player. Waits for the machine's test lock, then holds it until this script exits.
+. "$REPO/scripts/test-lock.sh"
 BIN=$BINDIR/liascape-player
 WBIN=$BINDIR/liascape-scene-worker
 [[ -x $BIN && -x $WBIN ]] || { echo "no liascape-player/liascape-scene-worker in $BINDIR (build release first)" >&2; exit 2; }
