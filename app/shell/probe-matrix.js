@@ -931,6 +931,74 @@ C["browse:mediaPool"] = { states: ["idle"], noSwitch: true, async run(c) {
     if (!c.shown) return [`the search's list never replaced ${c.src}'s stubbed one within 12 s (${c.pending} thumbnail loads were in flight)`];
     return c.ms > 2500 ? [`the search's list showed ${c.ms} ms after typing (≤ 2500): its /browse waited for ${c.pending} thumbnail loads on ${c.hosts.join(", ")}`] : [];
   } };
+// a Browse card asks for its gif (/anim) only once its still (/still) is in: the still's request already downloads the gif
+// both are made from, and the gifs of every card, mounted at once, queued ahead of the stills on screen for the media
+// origin's 6 connections. Staged: Card previews → Always animate ("Not hovered": the gif); Wallpaper Engine (Local)'s list
+// is a stubbed page of 24 cards with remote animated previews, every /still response held 4 s once its headers arrive (a
+// slow download behind it). RED when a card's /anim is asked while its /still is still held (the gifs asked at mount).
+C["browse:gifAfterStill"] = { states: ["idle"], noSwitch: true, async run(c) {
+    const ws = path.join(path.dirname(path.dirname(path.dirname(path.dirname(K[0])))), "we-gifs"), d = path.join(ws, "9103");
+    fs.mkdirSync(d, { recursive: true });
+    fs.copyFileSync(K[0], path.join(d, "v.mp4"));
+    fs.writeFileSync(path.join(d, "project.json"), JSON.stringify({ title: "weGifs", type: "video", file: "v.mp4" }));
+    const s0 = await getSettings();
+    const wr = session.defaultSession.webRequest, filter = { urls: ["<all_urls>"] };
+    const cardOf = (u) => { const m = /[?&]u=([^&]+)/.exec(u); return m ? /ga-(\d+)\.gif/.exec(decodeURIComponent(m[1]))?.[1] ?? null : null; };
+    const held = new Set(), stillAsked = new Set(), stillIn = new Set(), early = [], anims = new Set();
+    wr.onBeforeRequest(filter, (q, cb) => {
+      const n = cardOf(q.url);
+      if (n && /\/still\?/.test(q.url)) stillAsked.add(n);
+      if (n && /\/anim\?/.test(q.url)) { anims.add(n); if (!stillIn.has(n)) early.push(n); }
+      cb({});
+    });
+    wr.onCompleted(filter, (q) => { const n = cardOf(q.url); if (n && /\/still\?/.test(q.url)) stillIn.add(n); });
+    wr.onErrorOccurred(filter, (q) => { const n = cardOf(q.url); if (n && /\/still\?/.test(q.url)) stillIn.add(n); });
+    wr.onHeadersReceived(filter, (q, cb) => {
+      if (!(cardOf(q.url) && /\/still\?/.test(q.url))) return cb({});
+      const go = () => { held.delete(go); clearTimeout(t); cb({}); }, t = setTimeout(go, 4000); held.add(go);
+    });
+    try {
+      await post("/settings", { ...s0, workshopFolder: ws, autoAddWeWallpapersToLibrary: false });
+      // through the page (a POST /settings reaches no open page): "Not hovered" plays the gif
+      await ui(`m.tab("Settings"); await m.sleep(400); await m.select("Card previews", "Always animate"); await m.sleep(300);`);
+      c.gifIdle = await waitFor(async () => (await getSettings()).previewNotHovered?.[0] === "gif", 4000, 100);
+      const srcs = (await http("GET", "/sources")).json || [];
+      c.src = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
+      const items = Array.from({ length: 24 }, (_, i) => ({ title: `ga-${i + 1}`, thumbnailUrl: `https://gif.invalid/ga-${i + 1}.gif`,
+        animatedThumbnailUrl: `https://gif.invalid/ga-${i + 1}.gif`, pageUrl: `https://gif.invalid/page/${i + 1}`, isScene: false, workshopId: null, addedAt: null }));
+      await js(`(() => { const items = ${JSON.stringify(items)}, f = window.fetch; window.fetch = (u, o) => {
+        if (String(u).split("?")[0].endsWith("/browse") && o?.method === "POST") { const b = JSON.parse(o.body);
+          if (b.source === 3 && !b.query) return Promise.resolve(new Response(JSON.stringify(b.page > 1 ? [] : items), { status: 200, headers: { "Content-Type": "application/json" } })); }
+        return f(u, o); }; })(); true`);
+      await ui(`m.tab("Browse"); await m.sleep(300); m.click(m.byText(".pill", ${JSON.stringify(c.src)}), "source pill");`);
+      c.listed = await waitFor(() => ui(`return !!m.browseCard("ga-1");`), 8000, 100);
+      await waitFor(() => held.size >= 6, 6000, 50);
+      await sleep(1000); // the gifs a card mounts at once would be asked by now
+      c.held = held.size; c.earlyHeld = early.length;
+      for (const go of [...held]) go();
+      // the held stills answer (the backend refuses gif.invalid: an error is "in" too), then their cards' gifs are asked
+      await waitFor(() => anims.size >= 6 && [...stillAsked].every((n) => stillIn.has(n)), 8000, 100);
+      await sleep(800);
+      c.asked = stillAsked.size; c.anims = anims.size; c.early = [...new Set(early)];
+      console.log(`        gifAfterStill: ${c.held} stills held, ${c.earlyHeld} gifs asked meanwhile; ${c.asked} stills asked, ${c.anims} gifs after`);
+    } finally {
+      wr.onBeforeRequest(filter, null); wr.onCompleted(filter, null); wr.onErrorOccurred(filter, null); wr.onHeadersReceived(filter, null);
+      for (const go of [...held]) go();
+      await ui(`m.tab("Settings"); await m.sleep(400); await m.select("Card previews", "Animate on hover"); await m.sleep(300);`).catch(() => {});
+      await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary,
+        previewOnHover: s0.previewOnHover, previewNotHovered: s0.previewNotHovered });
+      await ui(`m.tab("Library"); await m.sleep(400);`);
+    }
+  }, check(c) {
+    if (!c.gifIdle) return ["choosing Card previews → Always animate wasn't saved (\"Not hovered\" starts with the gif) — the cell proved nothing"];
+    if (!c.listed) return [`${c.src}'s stubbed list never showed within 8 s`];
+    if (!(c.held >= 6)) return [`only ${c.held} /still loads held (want ≥ 6, the browser's connections per host) — the cell proved nothing`];
+    if (!(c.anims >= 6)) return [`only ${c.anims} cards asked for their gif after their still was in (want ≥ 6 of ${c.asked} stills asked) — the cell proved nothing`];
+    const v = [];
+    if (c.early.length) v.push(`${c.early.length} cards asked for their gif before their still was in (cards ${c.early.slice(0, 8).join(", ")}…): a card's still and gif hold two of the 6 connections for one download`);
+    if (c.anims > c.asked) v.push(`${c.anims} gifs asked for ${c.asked} stills: cards whose still was never asked (off screen) asked for their gif`);
+    return v;
+  } };
 // a right click on a card or bar item whose hover preview plays (a right-click opens the item's sidebar — no menu):
 // the same <video> keeps playing while the pointer stays on the item, nothing applies; off the item it stops. The card's case
 // right-clicks with the sidebar already open (no grid re-fit under the pointer — opening it from closed re-fits the columns and

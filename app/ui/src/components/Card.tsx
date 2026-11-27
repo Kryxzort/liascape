@@ -27,9 +27,18 @@ export const Card = memo(function Card({
   // a string per card, the same for every card of a list
   const getOff = useStore((s) => isWorkshopItem(w) ? actionBlocked(s.settings, s.steam, "download") : null);
   const active = !!w.animatedThumbnailUrl && (hover ? gifOnHover : gifIdle);
+  // PERF: the gif asks for its file only once the still is in (loaded or failed). Both come from the backend's media
+  // origin, whose 6 browser connections every picture of the page waits in line for, and the still's request already
+  // downloads the gif the backend makes both from (ServerHost RemotePreview): asked together, a card's two requests hold two
+  // connections for one download, and every card's gif (mounted at once, not lazily like the still) queued ahead of the
+  // stills on screen. The gif is the still's overlay anyway: nothing shows sooner without it. Guard: matrix
+  // browse:gifAfterStill, scripts/test-card-pictures.sh
+  const [stillIn, setStillIn] = useState(false);
+  const stillRef = useRef<HTMLImageElement>(null);
+  useEffect(() => { if (stillRef.current?.complete) setStillIn(true); }, []);
   // keep the gif mounted once activated → re-hover never restarts it (just unhides the live frame)
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { if (active) setMounted(true); }, [active]);
+  useEffect(() => { if (active && stillIn) setMounted(true); }, [active, stillIn]);
   // A remote workshop preview's STATIC thumbnail is the
   // gif's frame-0, which is often pure black (fade-in loops). So a gif not playing / the gif's loop-gap
   // showed black. For remote animated items use /still (first non-black/white frame); local items
@@ -56,7 +65,8 @@ export const Card = memo(function Card({
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }} // stop middle-click autoscroll
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onMiddle(w); } }}
        >
-        <img className="thumb" src={staticSrc} loading="lazy" decoding="async" alt="" />
+        <img ref={stillRef} className="thumb" src={staticSrc} loading="lazy" decoding="async" alt=""
+          onLoad={() => setStillIn(true)} onError={() => setStillIn(true)} />
         {gifSrc && mounted && (
           // backgroundImage = the static frame → the gif's loop-gap shows the thumbnail, not black flicker
           <img className="thumb anim" src={gifSrc} decoding="async" alt=""

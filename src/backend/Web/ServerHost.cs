@@ -42,7 +42,7 @@ public static class ServerHost
     internal static SteamWorkshopService Workshop => (SteamWorkshopService)Providers[^1];
 
     // remote thumbnails / gifs the page names (/img, /anim, /still): public addresses only (ApiSecurity.PublicOnlyHttp)
-    private static readonly HttpClient Http = ApiSecurity.PublicOnlyHttp(TimeSpan.FromSeconds(30));
+    private static readonly HttpClient Http = ApiSecurity.PublicOnlyHttp(TimeSpan.FromSeconds(30), loopbackToo: ApiSecurity.MediaLoopbackForTests);
     // the provider's table lacks Matroska: an .mkv (an import keeps its own extension, Helpers/ImportService.cs) would go out
     // as application/octet-stream. Guard: scripts/test-item-actions.sh "/media serves each as its own type"
     private static readonly FileExtensionContentTypeProvider Mime = new() { Mappings = { [".mkv"] = "video/x-matroska" } };
@@ -343,8 +343,98 @@ public static class ServerHost
     internal static string PreviewCacheDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".cache", "liascape", "workshop_previews");
     // an extraction in flight owns `file`: its output, or a temporary named after it (`<out>.tmp.jpg`, `<out>.src.gif`, a
-    // remote /anim's `<hash>.<ext>` under the key `<hash>`), so a cache clear leaves it to finish
-    internal static bool Extracting(string file) => _extracting.Keys.Any(k => file.StartsWith(k, StringComparison.Ordinal));
+    // remote preview's `<hash>.<ext>` and `<hash>.<id>.part<ext>` under the key `<hash>`), so a cache clear leaves it to finish
+    internal static bool Extracting(string file)
+    {
+        if (_extracting.Keys.Any(k => file.StartsWith(k, StringComparison.Ordinal))) return true;
+        lock (_remote) return _remote.Keys.Any(k => file.StartsWith(k, StringComparison.Ordinal));
+    }
+
+    // ---- a remote preview (a Workshop card's gif on Steam's image CDN): ONE download, shared by its still and its gif ----
+    // PERF: the page holds one of the media origin's 6 browser connections for every /still and /anim until its answer, and
+    // the rest wait in line for one: the download from the CDN is what each one waits on. So a card's still and gif share a
+    // single download (the still is made from the gif /anim keeps), and a download nobody waits for any longer (the page
+    // dropped its list: Card.tsx aborts its loads) stops at once instead of taking the link from the next list's.
+    // Guard: scripts/test-card-pictures.sh.
+    private sealed class RemoteFetch
+    {
+        public readonly CancellationTokenSource Cts = new();
+        public Task<string> Task = null!;
+        public int Waiters;
+    }
+    private static readonly Dictionary<string, RemoteFetch> _remote = new();
+    private static readonly string[] _previewExts = [".gif", ".webp", ".png", ".jpg"];
+    private static string UrlHash(string u) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(u)))[..24];
+
+    // the remote preview `u`'s cached file, or null. A cached one needs no address check: nothing is fetched (and it still
+    // shows offline)
+    private static string? RemoteCached(string u)
+    {
+        var key = Path.Combine(PreviewCacheDir, UrlHash(u));
+        return _previewExts.Select(e => key + e).FirstOrDefault(File.Exists);
+    }
+
+    // The remote preview `u` as a cached file: a gif trimmed of its fade from black, any other picture as it came. Downloads it
+    // unless cached; a request already downloading it is joined. Throws when it can't be had, or when `aborted` fires.
+    private static async Task<string> RemotePreview(string u, CancellationToken aborted)
+    {
+        var dir = PreviewCacheDir;
+        Directory.CreateDirectory(dir);
+        var key = Path.Combine(dir, UrlHash(u));
+        if (RemoteCached(u) is { } cached) return cached;
+        RemoteFetch f;
+        lock (_remote)
+        {
+            if (!_remote.TryGetValue(key, out f!))
+            {
+                var mine = f = new RemoteFetch();
+                _remote[key] = f;
+                f.Task = Task.Run(async () =>
+                {
+                    try { return await DownloadPreview(u, key, mine.Cts.Token); }
+                    finally { lock (_remote) if (_remote.TryGetValue(key, out var cur) && cur == mine) _remote.Remove(key); }
+                });
+            }
+            f.Waiters++;
+        }
+        try { return await f.Task.WaitAsync(aborted); }
+        finally
+        {
+            lock (_remote)
+            {
+                // the last one waiting left before it was done: stop it, and let the next ask start afresh
+                if (--f.Waiters == 0 && !f.Task.IsCompleted)
+                {
+                    if (_remote.TryGetValue(key, out var cur) && cur == f) _remote.Remove(key);
+                    f.Cts.Cancel();
+                }
+            }
+        }
+    }
+
+    // a download made under its own temporary name, moved into place once whole: a stopped one leaves no file to serve, and
+    // two of the same preview (one stopped, its follower) never write the same file at once
+    private static async Task<string> DownloadPreview(string u, string key, CancellationToken ct)
+    {
+        using var msg = new HttpRequestMessage(HttpMethod.Get, u);
+        msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
+        using var resp = await Http.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, ct);
+        resp.EnsureSuccessStatusCode();
+        var mt = resp.Content.Headers.ContentType?.MediaType ?? "image/gif";
+        var ext = mt.Contains("webp") ? ".webp" : mt.Contains("png") ? ".png" : mt.Contains("jpeg") ? ".jpg" : ".gif";
+        var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+        var part = $"{key}.{Guid.NewGuid():N}.part{ext}";
+        try
+        {
+            if (ext == ".gif") await CacheGifTrimmed(bytes, part); // strip leading fade-from-black
+            else await File.WriteAllBytesAsync(part, bytes, ct);
+            File.Move(part, key + ext, true);
+        }
+        finally { try { File.Delete(part); } catch { } }
+        PruneAnimCache(Path.GetDirectoryName(key)!, PREVIEW_CACHE_CAP); // ~1 GB LRU cap (an updated preview = a new immutable URL → new file)
+        return key + ext;
+    }
 
     // how many /still and /anim requests wait for their file now: a card on screen. The preview backfill starts nothing
     // while one does (ClipStore's worker), so the cards scrolled into view go first.
@@ -936,7 +1026,7 @@ public static class ServerHost
         app.MapGet("/img", async (string u, string? r, HttpContext ctx) =>
         {
             // a proxy for remote previews only: http(s) to a public address (never this machine / the LAN — SSRF)
-            if (await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted) is string refused)
+            if (await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted, ApiSecurity.MediaLoopbackForTests) is string refused)
             {
                 ctx.Response.StatusCode = 403;
                 await ctx.Response.WriteAsJsonAsync(new { error = refused });
@@ -994,7 +1084,7 @@ public static class ServerHost
         // Animated preview (workshop gifs): like library, serve from a LOCAL CACHED FILE with range/length
         // instead of the live /img proxy (chunked, no length) — the live stream can't loop cleanly, so the
         // gif flashed black at the loop seam. Cache once, then serve the stable file → loops smoothly.
-        app.MapGet("/anim", async (string u) =>
+        app.MapGet("/anim", async (string u, HttpContext ctx) =>
         {
             try
             {
@@ -1017,30 +1107,12 @@ public static class ServerHost
                     return Results.Stream(File.OpenRead(trimmed), "image/gif", enableRangeProcessing: true);
                 }
 
-                if (await ApiSecurity.CheckPublicUrl(u) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
-                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(u)))[..24];
-                var existing = Directory.GetFiles(dir, hash + ".*").FirstOrDefault();
+                var existing = RemoteCached(u);
                 if (existing == null)
                 {
-                    // dedup keyed on the hash (ext unknown until fetched) → concurrent hits share one download+trim
-                    await ExtractOnce(Path.Combine(dir, hash), async () =>
-                    {
-                        if (Directory.GetFiles(dir, hash + ".*").Any()) return;
-                        using var msg = new HttpRequestMessage(HttpMethod.Get, u);
-                        msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
-                        using var resp = await Http.SendAsync(msg);
-                        resp.EnsureSuccessStatusCode();
-                        var mt = resp.Content.Headers.ContentType?.MediaType ?? "image/gif";
-                        var ext = mt.Contains("webp") ? ".webp" : mt.Contains("png") ? ".png" : mt.Contains("jpeg") ? ".jpg" : ".gif";
-                        var outp = Path.Combine(dir, hash + ext);
-                        var bytes = await resp.Content.ReadAsByteArrayAsync();
-                        if (ext == ".gif") await CacheGifTrimmed(bytes, outp); // strip leading fade-from-black
-                        else await File.WriteAllBytesAsync(outp, bytes);
-                        PruneAnimCache(dir, PREVIEW_CACHE_CAP); // ~1 GB LRU cap (an updated preview = a new immutable URL → new file)
-                    });
-                    existing = Directory.GetFiles(dir, hash + ".*").FirstOrDefault();
+                    if (await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted, ApiSecurity.MediaLoopbackForTests) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
+                    existing = await RemotePreview(u, ctx.RequestAborted);
                 }
-                if (existing == null) return Results.StatusCode(502);
                 try { File.SetLastAccessTimeUtc(existing, DateTime.UtcNow); } catch { } // touch for LRU
                 var ctOut = Mime.TryGetContentType(existing, out var t) ? t : "image/gif";
                 return Results.Stream(File.OpenRead(existing), ctOut, enableRangeProcessing: true);
@@ -1052,7 +1124,7 @@ public static class ServerHost
         // the loop-gap shows a real frame, not the gif's black frame-0 — and so a gif used as a *static*
         // thumbnail (library items whose only
         // sibling image is the preview gif) doesn't animate on its own. `u` = remote URL OR local path.
-        app.MapGet("/still", async (string u, int? w) =>
+        app.MapGet("/still", async (string u, int? w, HttpContext ctx) =>
         {
             try
             {
@@ -1073,23 +1145,21 @@ public static class ServerHost
                     return Results.Stream(File.OpenRead(ljpg), "image/jpeg", enableRangeProcessing: true);
                 }
                 // remote URLs are immutable: keyed on the URL alone
-                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(u)))[..24];
-                var jpg = Path.Combine(dir, hash + (width > 0 ? $"_still{width}.jpg" : "_still.jpg"));
-                if (await ApiSecurity.CheckPublicUrl(u) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
+                var jpg = Path.Combine(dir, UrlHash(u) + (width > 0 ? $"_still{width}.jpg" : "_still.jpg"));
                 if (!File.Exists(jpg))
-                    await ExtractOnce(jpg, async () =>
+                {
+                    if (await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted, ApiSecurity.MediaLoopbackForTests) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
+                    // made from the file /anim serves (one download for the card's still and gif): its trim only cut black
+                    // frames, which the still skips anyway
+                    var src = await RemotePreview(u, ctx.RequestAborted);
+                    await ExtractOnce(jpg, () =>
                     {
-                        if (File.Exists(jpg)) return; // won the race already
-                        using var msg = new HttpRequestMessage(HttpMethod.Get, u);
-                        msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
-                        using var resp = await Http.SendAsync(msg);
-                        resp.EnsureSuccessStatusCode();
-                        var srcGif = jpg + ".src.gif";
-                        await File.WriteAllBytesAsync(srcGif, await resp.Content.ReadAsByteArrayAsync());
-                        ExtractStill(srcGif, jpg, width);
-                        try { File.Delete(srcGif); } catch { }
+                        if (File.Exists(jpg)) return Task.CompletedTask; // won the race already
+                        ExtractStill(src, jpg, width);
                         PruneAnimCache(dir, PREVIEW_CACHE_CAP);
+                        return Task.CompletedTask;
                     });
+                }
                 if (!File.Exists(jpg)) return Results.StatusCode(502);
                 try { File.SetLastAccessTimeUtc(jpg, DateTime.UtcNow); } catch { }
                 return Results.Stream(File.OpenRead(jpg), "image/jpeg", enableRangeProcessing: true);

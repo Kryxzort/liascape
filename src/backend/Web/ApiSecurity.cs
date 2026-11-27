@@ -412,6 +412,10 @@ public static class ApiSecurity
         },
     }) { Timeout = timeout };
 
+    // hermetic tests only (LIASCAPE_TEST_MEDIA_LOOPBACK=1): /img and the remote /anim and /still may reach this machine's
+    // loopback too, where a test's fake image server listens (scripts/test-card-pictures.sh); never the LAN
+    public static bool MediaLoopbackForTests => Environment.GetEnvironmentVariable("LIASCAPE_TEST_MEDIA_LOOPBACK") == "1";
+
     // null = refuse (not http(s), unresolvable, or ANY of its addresses is not public)
     public static async Task<string?> CheckPublicUrl(string? url, CancellationToken ct = default, bool loopbackToo = false)
     {
@@ -422,9 +426,30 @@ public static class ApiSecurity
     private static async Task<IPAddress[]?> ResolvePublic(string host, CancellationToken ct, bool loopbackToo = false)
     {
         IPAddress[] addrs;
-        try { addrs = IPAddress.TryParse(host.Trim('[', ']'), out var ip) ? [ip] : await Dns.GetHostAddressesAsync(host, ct); }
+        try { addrs = IPAddress.TryParse(host.Trim('[', ']'), out var ip) ? [ip] : await Lookup(host, ct); }
         catch { return null; }
         return addrs.Length > 0 && addrs.All((a) => Liascape.Helpers.LinkImport.AddressAllowed(a, loopbackToo)) ? addrs : null;
+    }
+
+    // PERF: a host's addresses, looked up at most once a minute and shared by every request asking meanwhile. Every card
+    // picture names the same CDN host, and a lookup per request (the up-front check, then each connect) put each picture
+    // behind the system resolver, whose lost answer costs its 5 s timeout: the media origin's 6 browser connections then sat
+    // those seconds out together while the page's other pictures waited in line (slow /still and /anim answers at 5, 10, 15 s
+    // exactly). The addresses checked are the ones connected to (the connect reads the same entry), so keeping them never
+    // lets a rebinding answer in between. A failed lookup isn't kept. Guard: scripts/test-card-pictures.sh "lookups".
+    private const long DnsKeepMs = 60_000;
+    private static readonly Dictionary<string, (Task<IPAddress[]> Lookup, long At)> _dns = new(StringComparer.OrdinalIgnoreCase);
+    private static Task<IPAddress[]> Lookup(string host, CancellationToken ct)
+    {
+        Task<IPAddress[]> t;
+        lock (_dns)
+        {
+            var now = Environment.TickCount64;
+            if (!_dns.TryGetValue(host, out var e) || e.Lookup.IsFaulted || e.Lookup.IsCanceled || now - e.At > DnsKeepMs)
+                _dns[host] = e = (Dns.GetHostAddressesAsync(host), now); // shared: one asker leaving never cancels it for the rest
+            t = e.Lookup;
+        }
+        return t.WaitAsync(ct);
     }
 
     public static bool IsPublic(IPAddress a)

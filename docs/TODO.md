@@ -58,19 +58,19 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        - Performance against WE as well, in the same harness: per scene, apply → first frame, steady RAM and VRAM, CPU
          and GPU time per frame, ours beside WE's; a gap is a row to fix like a wrong picture (read how WE loads,
          caches and shares textures and shaders where it beats us). Folds in item 1's remaining load work.
-11. [ ] (owner) Browse feels slow: measure, then fix the biggest part. Measured on the owner's window over 170 min of real use
-       (2026-11-26/27, CDP network log): the card pictures dominate — `/still` (a still frame made from a gif/webp
-       preview) median 7.9 s, p90 26 s, and `/anim` median 10.8 s, p90 19 s, ~310 requests each, together ~110 min of
-       waiting; Steam's own calls are small beside them (`/browse` median 2.1 s; sidebar comments / creator / favourite
-       medians 0–340 ms, p90 ~1.1–1.4 s); 410 main-thread stalls ≥ 50 ms (48 s, worst 463 ms). Start with why a still
-       or a gif takes seconds (ffmpeg per card under `CardWait`, a queue behind the clip sweep, decode of large gifs?). Time a Workshop browse end to end in the agent
-       window (`node scripts/bench-live-ui.mjs`, a new scenario): the session connect, each `QueryFiles` page, the
-       thumbnails / previews to first paint, the gate's spacing, React's render; first visit, next page, a filter
-       change, going back. Then fix the largest share first. Candidates: the next page fetched while the current one
-       shows, recent queries cached (back / re-filter instant), thumbnails on screen first and at the card's size, and
-       in "Use the Steam app" mode the queries through the already-held Steam app connection (no connect). Never more
-       requests to steamcommunity.com than now (`SteamGate`). Guard: the benchmark scenario's numbers before / after,
-       and a probe cell per behaviour added.
+11. [ ] (owner) Browse feels slow: the rest, now that the card pictures wait on neither the resolver nor each other
+       (`scripts/test-card-pictures.sh`, matrix `browse:gifAfterStill`).
+       - Measure the owner's window again with the CDP recorder: how long a `/still` or `/anim` now waits in the browser's
+         queue for a media connection (it was ~97 % of each one's time) and whether any answer still lands at 5 s.
+       - Browse end to end in the agent window (`node scripts/bench-live-ui.mjs browse`: first page, next page, a search,
+         back): one run to the next varies several-fold with the network (the 35 on-screen cards' pictures in 0.4–8 s),
+         so repeat each side at least three times before judging a change. Candidates: the next page fetched while the
+         current one shows, recent queries kept (back / a re-search instant: back asks Steam again today, 0.8–1.8 s to its
+         list), "Use the Steam app" mode's queries over the already-held Steam app connection.
+       - The main thread: 410 stalls ≥ 50 ms (48 s, worst 463 ms) in the owner's 170 min; the bench's Browse run has
+         275–500 tasks over one frame.
+       Never more requests to steamcommunity.com than now (`SteamGate`). Guard: the bench's numbers before / after, a probe
+       cell per behaviour added.
 
 13. [ ] (owner) "Text shadow" (Settings → Look & feel, `:root.text-shadow` in `index.css`) fits coloured text over a live
        wallpaper too, and leaves the playlist bar's PLAYLIST label alone.
@@ -167,6 +167,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        version (a 10 s clip) had one at 10.16 s and 20.16 s and nowhere else; plain mpv 0.41 (`--loop-file=inf
        --keep-open=yes`) does the same (65 samples per wrap, 3 s and 4 s 240 fps clips). Judge it on real content
        (an audible click on a tone; music likely hides it) and close it if mpv offers a gapless wrap.
+
+29. [ ] The hermetic suites that run in `unshare -rn` resolve names through the host's nscd (glibc asks
+       `/run/nscd/socket` before its own resolver, and nscd answers from outside the namespace), so a name looked up
+       inside one reaches the real DNS. Hide nscd's socket in each (as `scripts/test-card-pictures.sh` does: its own mount
+       namespace, an empty dir over `/run/nscd`) or show that none looks a name up.
 
 28. [ ] probe-sidebar `lib:reflow` fails when run alone (`--only '^lib:reflow$'`), on lp-player as well as with the new
        sidebar motion, and passes inside the whole probe: at 1000×560 with Large cards and 24 extra items the right-click

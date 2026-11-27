@@ -4,9 +4,9 @@
 // The repeatable half of the performance standard: the UI matrix gates refresh-independent COUNTS (layers, forced
 // layouts, renders); this measures real TIME on real hardware, judged in frames of the display's measured refresh rate.
 // Harmless input only: pointer moves, wheel scrolls, tab clicks, right-click (opens the item sidebar without applying) +
-// Escape. Never a left-click on a card (applies it), Enter (plays) or any button. Restores the tab (and the Library's
-// scroll position) it started on.
-// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|libscroll|tabs|sidebar> [out-label] [--profile high|typical] [--owner]
+// Escape, a source pill and typing in the search box (Browse). Never a left-click on a card (applies it), Enter (plays)
+// or any other button. Restores the tab (and the Library's scroll position) it started on.
+// Usage: node scripts/bench-live-ui.mjs <idle|plhover|plhover-slow|libscroll|tabs|sidebar|browse> [out-label] [--profile high|typical] [--owner]
 //   prints one JSON line (hz, budgetMs, overBudget = main-thread tasks longer than one frame, over2Frames, main-thread ms by
 //   phase, worst tasks, layouts, the preview <video>s' decode: how many play, frames decoded / dropped, and the renderer +
 //   GPU processes' CPU time as % of one core) + the top JS self-time; writes <label>.trace.json + <label>.cpuprofile in the cwd.
@@ -102,8 +102,57 @@ async function run() {
     await key("Escape", "Escape", 27); await sleep(900);                                               // close
     return;
   }
+  if (scen === "browse") { await browseRun(); return; }
   throw new Error("unknown scenario " + scen);
 }
+
+// "browse": the Workshop's first page, the next page (wheeled to the end of the grid), a search, and back to the unsearched
+// list, each timed from the input to its list and to every picture of the cards on screen (the still, and the gif where "Not
+// hovered" shows it; an error counts as in). The card pictures' requests (/still /anim /img: their time in the browser's
+// queue for a media connection vs the backend's answer) from the Network domain. Typing in the search box is harmless input.
+const net = new Map(), pics = [];
+async function browseRun() {
+  await call("Network.enable");
+  ws.addEventListener("message", (e) => {
+    const m = JSON.parse(e.data), p = m.params;
+    if (m.method === "Network.requestWillBeSent" && /\/(still|anim|img|clip|media)\?/.test(p.request.url)) net.set(p.requestId, { kind: /\/(still|anim|img|clip|media)\?/.exec(p.request.url)[1], t: p.timestamp, type: p.type,
+      u: /[?&]u=([^&]+)/.exec(p.request.url)?.[1]?.slice(-40), prio: p.request.initialPriority });
+    else if (m.method === "Network.responseReceived" && net.has(p.requestId)) { const t = p.response.timing; const r = net.get(p.requestId); r.queue = t ? (t.requestTime - r.t) * 1000 + t.sendStart : null; }
+    else if ((m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") && net.has(p.requestId)) {
+      const r = net.get(p.requestId); net.delete(p.requestId);
+      pics.push({ kind: r.kind, type: r.type, u: r.u, prio: r.prio, t: r.t, ms: (p.timestamp - r.t) * 1000, queue: r.queue, ok: m.method === "Network.loadingFinished" });
+    }
+  });
+  const cards = `document.querySelectorAll(".br-scroll .card").length`;
+  // every card on screen has its pictures in: its still (the first .thumb) complete, and its gif's where one is mounted
+  const shown = `(() => { const sc = document.querySelector(".br-scroll"); if (!sc) return null; const b = sc.getBoundingClientRect();
+    const on = [...sc.querySelectorAll(".card")].filter((c) => { const r = c.getBoundingClientRect(); return r.bottom > b.top && r.top < b.bottom; });
+    if (!on.length) return null; return on.every((c) => [...c.querySelectorAll("img.thumb")].every((i) => i.complete)) ? on.length : null; })()`;
+  const until = async (expr, ms = 60000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await ev(expr); if (v) return { v, ms: Date.now() - t0 }; await sleep(50); } return { v: null, ms: null }; };
+  const step = async (act, listExpr) => { const t0 = Date.now(); await act(); const l = await until(listExpr); const s = await until(shown); return { listMs: l.ms, picturesMs: s.ms == null ? null : Date.now() - t0, onScreen: s.v }; };
+  const search = (q) => ev(`(() => { const i = document.querySelector("input.search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(q)}); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  const out = {};
+  out.first = await step(async () => {
+    await leftClickTab("Browse"); await sleep(300);
+    await ev(`(() => { const p = [...document.querySelectorAll(".pill")].find((e) => /workshop/i.test(e.textContent)); p?.click(); })()`);
+  }, `${cards} > 0`);
+  const n0 = await ev(cards);
+  out.next = await step(async () => {
+    const g = await ev(`(() => { const b = document.querySelector(".br-scroll").getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+    for (let i = 0; i < 400 && (await ev(cards)) <= n0; i++) { await call("Input.dispatchMouseEvent", { type: "mouseWheel", x: Math.round(g.x), y: Math.round(g.y), deltaX: 0, deltaY: 400 }); await sleep(40); }
+  }, `${cards} > ${n0}`);
+  const first = await ev(`document.querySelector(".br-scroll .card")?.dataset.key`);
+  out.search = await step(() => search("anime"), `document.querySelector(".br-scroll .card")?.dataset.key !== ${JSON.stringify(first)}`);
+  const searched = await ev(`document.querySelector(".br-scroll .card")?.dataset.key`);
+  out.back = await step(() => search(""), `document.querySelector(".br-scroll .card")?.dataset.key !== ${JSON.stringify(searched)}`);
+  await call("Network.disable");
+  const med = (a, p = 0.5) => { const s = a.filter((x) => x != null).sort((x, y) => x - y); return s.length ? Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) : null; };
+  out.requests = Object.fromEntries(["still", "anim", "img", "clip", "media"].map((k) => { const r = pics.filter((x) => x.kind === k && x.ok);
+    return [k, { n: r.length, medMs: med(r.map((x) => x.ms)), p90Ms: med(r.map((x) => x.ms), 0.9), queueMedMs: med(r.map((x) => x.queue)) }]; }));
+  browseOut = out;
+  fs.writeFileSync(`${label}.requests.json`, JSON.stringify({ steps: out, pics }));
+}
+let browseOut;
 
 await call("Profiler.enable"); await call("Profiler.setSamplingInterval", { interval: 200 });
 await call("Tracing.start", { categories: "devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,cc,benchmark", transferMode: "ReportEvents" });
@@ -118,7 +167,10 @@ const prof = (await call("Profiler.stop")).result.profile;
 if (profile === "typical") await call("Emulation.setCPUThrottlingRate", { rate: 1 }); // never leave the owner's window slowed
 await call("Tracing.end"); await finished;
 if (curTab && scen !== "idle") { const now = await ev(`document.querySelector("button.tab.active")?.textContent.trim()`); if (now !== curTab) await leftClickTab(curTab); }
-fs.writeFileSync(`${label}.trace.json`, JSON.stringify({ traceEvents: events })); fs.writeFileSync(`${label}.cpuprofile`, JSON.stringify(prof));
+// the trace in slices: a busy run's events (Browse's pictures and gifs) pass the longest string JSON.stringify can make
+const tfd = fs.openSync(`${label}.trace.json`, "w"); fs.writeSync(tfd, '{"traceEvents":[');
+for (let i = 0; i < events.length; i += 20000) fs.writeSync(tfd, (i ? "," : "") + events.slice(i, i + 20000).map((e) => JSON.stringify(e)).join(","));
+fs.writeSync(tfd, "]}"); fs.closeSync(tfd); fs.writeFileSync(`${label}.cpuprofile`, JSON.stringify(prof));
 
 const pr = events.filter((e) => e.name === "PipelineReporter" && e.ph === "b" && e.args?.chrome_frame_reporter);
 const states = {}; for (const e of pr) { const s = (e.args.chrome_frame_reporter.state || "?").replace("STATE_", ""); states[s] = (states[s] || 0) + 1; }
@@ -134,7 +186,7 @@ const self = new Map(); const dts = prof.timeDeltas || []; const byNode = new Ma
 (prof.samples || []).forEach((s, i) => cnt.set(s, (cnt.get(s) || 0) + (dts[i] || 0)));
 for (const [nid, us] of cnt) { const f = byNode.get(nid).callFrame; if (["(idle)", "(program)", "(root)", "(garbage collector)"].includes(f.functionName)) continue;
   const k = `${f.functionName || "(anon)"} ${(f.url || "").split("/").slice(-2).join("/").split("?")[0]}:${f.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + us / 1000); }
-console.log(JSON.stringify({ scen, err, wallS: +wall.toFixed(1), frames: states, mainThreadMs: ms, tasks: tasks.length, profile, displayHz: hz, budgetHz, budgetMs: +budget.toFixed(2), overBudget: tasks.filter((d) => d > budget).length, over2Frames: tasks.filter((d) => d > 2 * budget).length, over16ms: tasks.filter((d) => d > 16).length,
+console.log(JSON.stringify({ scen, err, ...(browseOut ? { browse: browseOut } : {}), wallS: +wall.toFixed(1), frames: states, mainThreadMs: ms, tasks: tasks.length, profile, displayHz: hz, budgetHz, budgetMs: +budget.toFixed(2), overBudget: tasks.filter((d) => d > budget).length, over2Frames: tasks.filter((d) => d > 2 * budget).length, over16ms: tasks.filter((d) => d > 16).length,
   over50ms: tasks.filter((d) => d > 50).length, worstMs: tasks.slice(0, 5).map((d) => +d.toFixed(1)), layouts: lay.length,
   layoutAvgMs: lay.length ? +(lay.reduce((a, e) => a + e.dur, 0) / lay.length / 1000).toFixed(2) : 0,
   videos: { ...vid, decPerS: Math.round(vid.dec / wall) }, cpuPct }));
