@@ -61,6 +61,16 @@
 # capability): a private PulseAudio, the player at `--ao null` (no bus). Without pipewire / wireplumber / pipewire-pulse the
 # default falls back to audiomonitor (printed).
 # LIASCAPE_MATRIX_SCREEN=<w>x<h> (default 1400x900): the private Xvfb's screen size (a probe that measures at the owner's 1080p).
+# A cell that never ends must not hold the machine's test lock (a wedged probe Electron can ignore
+# SIGTERM). LIASCAPE_MATRIX_CELL_LIMIT=<s> (default 240: the slowest cell seen took 62 s, a passing one 28 s): a probe-matrix
+# cell still running then is recorded as an ERROR naming it and its last log lines, its Electron and everything under it
+# get TERM (KILL 5 s later), the player / backend are started again if they no longer answer, and a new Electron goes on
+# with the next cell. After LIASCAPE_MATRIX_MAX_HANGS (default 3) such cells, or when the stack can't be brought back
+# (Xvfb gone, a player or backend that won't start), the stack ends with an error instead. LIASCAPE_MATRIX_RUN_LIMIT=<s>
+# (0 = none): the whole run's ceiling, counted from the stacks' start; by default 900 s for the start-up + 20 s for each
+# cell of the largest shard + room for the hung cells (fuzz: per step; another probe: 5400 s, the lock wrapper's cap).
+# Every exit lets the lock go, a kill -9 of the run too: the lock's helper watches the run's pid, the shards stop when
+# their parent is gone, and a single stack's reaper stops what the killed run had started.
 # LIASCAPE_MATRIX_NICE=1: run at the lowest CPU + I/O priority (nice 19, ionice idle — everything it starts
 # inherits it); off by default — a starved stack makes the timing-sensitive cells flaky.
 # Needs: dotnet (DOTNET=…), ffmpeg, jq, curl, node, an Electron (ELECTRON=…, default: $LIASCAPE_ELECTRON — the
@@ -108,6 +118,46 @@ if [ -n "$CHANGED" ] && [ -z "$SHARD" ]; then
 fi
 case "$JOBS" in ''|*[!0-9]*|0) echo "--jobs wants a positive number"; exit 2 ;; esac
 [ -n "$PROBE" ] && [ "$PROBE" != probe-matrix.js ] && JOBS=1
+CELL_LIMIT=${LIASCAPE_MATRIX_CELL_LIMIT:-240}; MAX_HANGS=${LIASCAPE_MATRIX_MAX_HANGS:-3}
+num "$CELL_LIMIT" && [ "$CELL_LIMIT" -gt 0 ] || { echo "LIASCAPE_MATRIX_CELL_LIMIT wants a positive number of seconds"; exit 2; }
+num "$MAX_HANGS" || { echo "LIASCAPE_MATRIX_MAX_HANGS wants a number"; exit 2; }
+[ -z "${LIASCAPE_MATRIX_RUN_LIMIT:-}" ] || num "$LIASCAPE_MATRIX_RUN_LIMIT" || { echo "LIASCAPE_MATRIX_RUN_LIMIT wants seconds (0 = none)"; exit 2; }
+# The whole run's ceiling in seconds since the stacks started (0 = none); $1 = the largest shard's cell count, empty while
+# a probe-matrix shard hasn't said yet (cells.total) — the start-up allowance alone until then. A backstop: a hung cell
+# is the per-cell limit's, so this only ends a run whose every cell crawls, or a stack wedged outside a cell.
+run_limit() {
+  local startup=900 per=20 hung=$(( MAX_HANGS * (CELL_LIMIT + 60) ))
+  if [ -n "${LIASCAPE_MATRIX_RUN_LIMIT:-}" ]; then echo "$LIASCAPE_MATRIX_RUN_LIMIT"
+  elif [ -n "$FUZZ" ]; then echo $(( startup + (FRUNS + JOBS - 1) / JOBS * (FUZZ * per + 60) ))
+  elif [ -n "$FREPLAY" ]; then echo $(( startup + ($(printf '%s' "$FREPLAY" | tr -cd , | wc -c) + 1) * per + 60 ))
+  elif [ -n "$PROBE" ] && [ "$PROBE" != probe-matrix.js ]; then echo 5400
+  elif [ -z "${1:-}" ]; then echo "$startup"
+  else echo $(( startup + $1 * per + hung )); fi
+}
+# $1 and every process under it (listed before any is killed: the children of a dead process are re-parented)
+descendants() {
+  ps -e -o pid=,ppid= | awk -v root="$1" '{ kids[$2] = kids[$2] " " $1 }
+    END { out = root; q = root; while (q != "") { n = split(q, a, " "); q = ""; for (i = 1; i <= n; i++) { m = split(kids[a[i]], b, " ")
+      for (j = 1; j <= m; j++) { out = out " " b[j]; q = q " " b[j] } } } print out }'
+}
+# running (a zombie — our own child not yet waited for — isn't)
+alive() { local s; s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; s=${s##*) }; [ "${s%% *}" != Z ]; }
+# TERM to $1, KILL after $2 seconds (CONT too: a SIGSTOPped process takes no TERM); then whatever is left under it gets TERM,
+# KILL 2 s later. The root goes first: Electron (and the player's supervisor) stop their own children, and an Electron
+# whose zygote / GPU process is TERMed under it aborts with a core dump. Returns 1 when the root needed the KILL.
+kill_tree() {
+  local pids p left r=0; pids=$(descendants "$1")
+  kill -CONT $pids 2>/dev/null; kill -TERM "$1" 2>/dev/null
+  for _ in $(seq 1 $(( ${2:-5} * 10 ))); do alive "$1" || break; sleep 0.1; done
+  alive "$1" && { kill -KILL "$1" 2>/dev/null; r=1; }
+  left=""; for p in $pids; do alive "$p" && left="$left $p"; done
+  [ -n "$left" ] && kill -TERM $left 2>/dev/null
+  for _ in $(seq 1 20); do
+    left=""; for p in $pids; do alive "$p" && left="$left $p"; done
+    [ -z "$left" ] && return $r; sleep 0.1
+  done
+  kill -KILL $left 2>/dev/null; return $r
+}
 SELF=$ROOT/scripts/$(basename "${BASH_SOURCE[0]}")
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
@@ -187,7 +237,7 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
   [ "$JOBS" -gt "$fit" ] && { echo "== only $(memavail) MiB available: $fit shard(s), not $JOBS"; JOBS=$fit; }
   if [ $MODE = FUZZ ]; then echo "== fuzz: $FRUNS runs × $FUZZ steps, seed $FSEED, $JOBS shards"; else echo "== matrix: $JOBS shards"; fi
   for i in $(seq 0 $((JOBS - 1))); do
-    LIASCAPE_MATRIX_OUT=$OUTROOT/shard-$i setsid "$SELF" --no-build --ui-dir "$UIDIR" --shard "$i/$JOBS" ${ONLY:+--only "$ONLY"} "${FARGS[@]}" \
+    LIASCAPE_MATRIX_OUT=$OUTROOT/shard-$i LIASCAPE_MATRIX_PARENT=$$ setsid "$SELF" --no-build --ui-dir "$UIDIR" --shard "$i/$JOBS" ${ONLY:+--only "$ONLY"} "${FARGS[@]}" \
       </dev/null >"$OUTROOT/shard-$i.log" 2>&1 &
     PIDS+=($!)
     sleep 2 # stagger the start-up spikes (ffmpeg clips, the backend's JIT, Electron)
@@ -201,10 +251,24 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
       SEEN[$i]=$n
     done
   }
+  # the largest shard's cell count once every shard still running has said (cells.total), else empty
+  slice_max() {
+    local i m=0 c
+    for i in $(seq 0 $((JOBS - 1))); do
+      if c=$(cat "$OUTROOT/shard-$i/cells.total" 2>/dev/null) && num "$c"; then [ "$c" -gt "$m" ] && m=$c
+      elif kill -0 "${PIDS[$i]}" 2>/dev/null; then return 0; fi
+    done
+    echo "$m"
+  }
   while :; do
     alive=0; for pid in "${PIDS[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
     if [ "$(memavail)" -lt "$MINFREE" ]; then echo "ABORT: only $(memavail) MiB available (floor $MINFREE) — stopping every shard"; exit 3; fi
-    flush; [ $alive = 0 ] && break; sleep 3
+    flush; [ $alive = 0 ] && break
+    lim=$(run_limit "$(slice_max)")
+    if [ "$lim" -gt 0 ] && [ $(( $(date +%s) - T0 )) -ge "$lim" ]; then
+      echo "ERROR: the run passed its ceiling of $lim s (LIASCAPE_MATRIX_RUN_LIMIT overrides it) — stopping every shard"; exit 4
+    fi
+    sleep 3
   done
   rcs=""; for i in $(seq 0 $((JOBS - 1))); do wait "${PIDS[$i]}"; rcs="$rcs $?"; done
   if [ $MODE = FUZZ ]; then
@@ -244,6 +308,7 @@ if [ -z "$SHARD" ] && [ "$JOBS" -gt 1 ]; then
 fi
 
 T=$(mktemp -d /tmp/liascape-mx-XXXXXX)   # short: a unix socket path must be < 108 bytes
+RUN_T0=$(date +%s)   # the whole-run ceiling counts from here (a single stack; --jobs: the parent's T0)
 if [ -z "${LIASCAPE_MATRIX_SNAPPED:-}" ]; then
   DLL=$(snapshot_backend "$T/backend") || { echo "ABORT: no complete backend build to snapshot"; exit 2; }
 fi
@@ -306,10 +371,13 @@ export LIASCAPE_LAUNCHER=/opt/liascape-matrix/bin/liascape
 # audio: every pulse client of the stack (the backend's pactl/parec, the probe's paplay) resolves the PRIVATE server
 # started below ($XDG_RUNTIME_DIR/pulse/native) — never the session's
 unset PULSE_SERVER PULSE_SINK PULSE_SOURCE PULSE_COOKIE PULSE_CLIENTCONFIG PULSE_RUNTIME_PATH
-SP=""; BP=""; XP=""; PA=""
+SP=""; BP=""; XP=""; PA=""; EP=""; REAPER=""
 cleanup() {
   rc=$?
   trap - EXIT INT TERM HUP
+  [ -n "$REAPER" ] && kill "$REAPER" 2>/dev/null
+  # the probe's Electron (a run stopped mid-cell): it may ignore TERM
+  [ -n "$EP" ] && alive "$EP" && kill_tree "$EP" 5
   [ -n "$XP" ] && kill "$XP" 2>/dev/null
   [ -n "$PA" ] && kill $PA 2>/dev/null
   [ -n "$BP" ] && { kill "$BP" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$BP" 2>/dev/null || break; sleep 0.1; done; kill -9 "$BP" 2>/dev/null; }
@@ -338,7 +406,29 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM HUP
+trap '[ -e "$T/ceiling" ] && exit 4; exit 130' INT TERM HUP
+# A single stack's watcher, beside the run from here to its end (start-up, cells, a restart after a hung cell):
+# - the whole run's ceiling (run_limit, from RUN_T0): past it, it says so and TERMs the run, whose cleanup stops the stack
+#   (exit 4). A shard's ceiling is its parent's.
+# - a run killed outright (kill -9: no trap runs) lets the test lock go by itself (its helper watches this pid), but what it
+#   started would play on: the watcher then stops every process started with the stack's HOME and removes the temp dir.
+#   A shard needs none: its parent's cleanup ends the shard's whole session, and a shard whose parent is gone stops itself.
+if [ -z "$SHARD" ]; then
+  ( trap '' INT HUP
+    while kill -0 $$ 2>/dev/null; do
+      lim=$(run_limit "$(cat "$OUT/cells.total" 2>/dev/null)")
+      if [ ! -e "$T/ceiling" ] && [ "$lim" -gt 0 ] && [ $(( $(date +%s) - RUN_T0 )) -ge "$lim" ]; then
+        echo "ERROR: the run passed its ceiling of $lim s (LIASCAPE_MATRIX_RUN_LIMIT overrides it)"; : > "$T/ceiling"; kill -TERM $$
+      fi
+      sleep 1
+    done
+    exec >/dev/null 2>&1
+    pids=$(grep -lzx "HOME=$T/home" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3)
+    if [ -n "$pids" ]; then kill -TERM $pids; kill -CONT $pids; sleep 3; kill -KILL $pids; fi
+    [ -n "${LIASCAPE_KEEP_TMP:-}" ] || rm -rf -- "$T"
+  ) </dev/null &
+  REAPER=$!
+fi
 
 clip() { ffmpeg -nostdin -loglevel error -y -f lavfi -i "$2=size=320x180:rate=30" -f lavfi -i "sine=frequency=$3:sample_rate=48000" \
            -t "$4" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$1"; }
@@ -435,17 +525,37 @@ SCENES_JSON=$(printf '%s\n' "${SCENES[@]}" | jq -R . | jq -sc .)
 
 # `--ao null` means no bus (so no `automute` capability): under the Signal it plays on the private PipeWire
 AO=(--ao null); [ "$AMX" = signal ] && AO=()
-(cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real "${AO[@]}" > "$T/serve.log" 2>&1) & SP=$!
-for _ in $(seq 1 50); do "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1 && break; sleep 0.1; done
+player_up() { "$B" ctl --timeout-ms 500 hello >/dev/null 2>&1; }
+start_player() {
+  (cd /tmp && exec "$B" serve --headless --outputs 640x360@60,320x180@60 --clock real "${AO[@]}" >> "$T/serve.log" 2>&1) & SP=$!
+  for _ in $(seq 1 50); do player_up && return 0; sleep 0.1; done
+  return 1
+}
+start_player
 "$DOTNET" "$DLL" serve > "$T/backend.log" 2>&1 & BP=$!
 for _ in $(seq 1 150); do [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] && break; sleep 0.1; done
 [ -s "$XDG_CONFIG_HOME/liascape/serve.port" ] || { echo "ABORT: backend didn't start"; tail -5 "$T/backend.log"; exit 1; }
 U=http://127.0.0.1:$(cat "$XDG_CONFIG_HOME/liascape/serve.port")
 for _ in $(seq 1 50); do curl -sf -m 2 "$U/health" >/dev/null && break; sleep 0.1; done
+# after a hung cell: a backend on the same port again (the probe's own restarts do the same), up once it answers /health
+start_backend() {
+  LIASCAPE_PORT=${U##*:} "$DOTNET" "$DLL" serve >> "$T/backend.log" 2>&1 & BP=$!
+  local end=$((SECONDS + 40))
+  while [ $SECONDS -lt $end ]; do curl -sf -m 2 "$U/health" >/dev/null && return 0; alive "$BP" || return 1; sleep 0.1; done
+  return 1
+}
 [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .available)" = true ] || { echo "ABORT: the backend's liascape-player isn't available"; exit 1; }
 post() { curl -sf -m 10 -X POST -H 'Content-Type: application/json' -d "$2" "$U$1"; }
-CLIPS=$(for k in k1 k2 k3 k4; do post /library/import "{\"path\":\"$T/$k.mp4\",\"title\":\"$k\"}" | jq -c .videoPath; done | jq -sc .)
+# each import tried three times: one lost to a busy start-up left the stack with three clips, and every cell then failed
+# its entry as SETUP
+import_clip() {
+  local r
+  for _ in 1 2 3; do r=$(post /library/import "{\"path\":\"$T/$1.mp4\",\"title\":\"$1\"}" | jq -ce '.videoPath | strings') && { echo "$r"; return 0; }; sleep 1; done
+  return 1
+}
+CLIPS=$(for k in k1 k2 k3 k4; do import_clip "$k" || echo "ABORT: importing $k failed" >&2; done | jq -sc .)
 echo "library: $CLIPS"
+[ "$(echo "$CLIPS" | jq length)" = 4 ] || { echo "ABORT: the library has $(echo "$CLIPS" | jq length) of its 4 clips"; tail -5 "$T/backend.log"; exit 1; }
 # k1 looks like a Wallpaper Engine item: a SQUARE preview image + an animated gif next to its video (the
 # card crops it to 16:9, the settings modal shows it at its own aspect — the morph probe needs both)
 K1DIR=$(dirname "$(echo "$CLIPS" | jq -r '.[0]')")
@@ -475,14 +585,87 @@ done
 case "$(cat "$T/xdisplay")" in 0|1|2|3|4|5|6|7|8|9) echo "ABORT: Xvfb on a low display :$(cat "$T/xdisplay")"; exit 1 ;; esac
 echo "== Xvfb on :$(cat "$T/xdisplay")"
 if [ $MODE = FUZZ ]; then echo "== fuzz${FREPLAY:+ (replay)}"; else echo "== matrix"; fi
-(cd "$ROOT/app/shell" && env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LIASCAPE_URL="$U" LIASCAPE_PLAYER_SOCKET="$XDG_RUNTIME_DIR/liascape/liascape-player.sock" \
-  LIASCAPE_CLIPS="$CLIPS" LIASCAPE_OUT="$OUT" LIASCAPE_DOTNET="$DOTNET" LIASCAPE_DLL="$DLL" LIASCAPE_ONLY="$ONLY" LIASCAPE_SHARD="$SHARD" \
-  LIASCAPE_FUZZ_STEPS="$FUZZ" LIASCAPE_FUZZ_SEED="$FSEED" LIASCAPE_FUZZ_RUNS="$FRUNS" LIASCAPE_FUZZ_REPLAY="$FREPLAY" \
-  LIASCAPE_ADAPTER_LOG="$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" LIASCAPE_BACKEND_LOG="$T/backend.log" \
-  LIASCAPE_USER_MUTE="$XDG_CONFIG_HOME/liascape/user_mute.state" LIASCAPE_PULSE="$LIASCAPE_PULSE" \
-  LIASCAPE_SCENES="$SCENES_JSON" LIASCAPE_VRAM_FAKE="$T/vram.json" LIASCAPE_BACKEND_PID="$BP" LIASCAPE_BACKEND_PID_FILE="$T/backend2.pid" \
-  "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>"$OUT/electron.stderr")
-rc=$?
+CELLF=$T/cell.now   # probe-matrix.js: "<start ms>\t<last phase finished>\t<cell>" while a cell runs
+# In the background, waited on below: a foreground Electron would hold off this script's TERM trap for as long as it
+# lives, and the per-cell watchdog has to run meanwhile.
+start_probe() {   # $1 = the cell to go on after (a hung one), empty = from the start
+  rm -f "$CELLF"
+  (cd "$ROOT/app/shell" && exec env -u LD_LIBRARY_PATH DISPLAY=":$(cat "$T/xdisplay")" LIASCAPE_URL="$U" LIASCAPE_PLAYER_SOCKET="$XDG_RUNTIME_DIR/liascape/liascape-player.sock" \
+    LIASCAPE_CLIPS="$CLIPS" LIASCAPE_OUT="$OUT" LIASCAPE_DOTNET="$DOTNET" LIASCAPE_DLL="$DLL" LIASCAPE_ONLY="$ONLY" LIASCAPE_SHARD="$SHARD" \
+    LIASCAPE_FUZZ_STEPS="$FUZZ" LIASCAPE_FUZZ_SEED="$FSEED" LIASCAPE_FUZZ_RUNS="$FRUNS" LIASCAPE_FUZZ_REPLAY="$FREPLAY" \
+    LIASCAPE_ADAPTER_LOG="$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" LIASCAPE_BACKEND_LOG="$T/backend.log" \
+    LIASCAPE_USER_MUTE="$XDG_CONFIG_HOME/liascape/user_mute.state" LIASCAPE_PULSE="$LIASCAPE_PULSE" \
+    LIASCAPE_SCENES="$SCENES_JSON" LIASCAPE_VRAM_FAKE="$T/vram.json" LIASCAPE_BACKEND_PID="$BP" LIASCAPE_BACKEND_PID_FILE="$T/backend2.pid" \
+    LIASCAPE_MATRIX_CELL_FILE="$CELLF" LIASCAPE_MATRIX_BASE_SETTINGS="$T/base-settings.json" LIASCAPE_MATRIX_RESUME_AFTER="$1" \
+    "$ELECTRON" --ozone-platform=x11 --disable-gpu "${PROBE:-probe-matrix.js}" 2>>"$OUT/electron.stderr") & EP=$!
+}
+# the backend that should be serving now: the probe's own restart (backend2.pid, only one with this stack's HOME) or ours
+backend_pids() {
+  local b2; b2=$(cat "$T/backend2.pid" 2>/dev/null)
+  [ -n "$b2" ] && tr '\0' '\n' 2>/dev/null < "/proc/$b2/environ" | grep -qx "HOME=$T/home" && alive "$b2" && echo "$b2"
+  alive "$BP" && echo "$BP"
+}
+# After a hung cell's Electron is gone, bring back what no longer answers and go on: one hung cell shouldn't cost the
+# rest of a shard. Xvfb and the audio server stay (no cell stops them); a player that doesn't answer `hello` within 5 s
+# goes with its whole tree and starts again, the same for a backend without /health (the probe's own restart of it ran
+# under the killed Electron). Non-zero = not possible: the stack ends with an error instead.
+restart_stack() {
+  alive "$XP" || { echo "        (the stack's Xvfb is gone)"; return 1; }
+  local ok=0 p
+  for _ in $(seq 1 10); do player_up && { ok=1; break; }; sleep 0.5; done
+  if [ $ok = 0 ]; then
+    echo "        the player doesn't answer: starting it again"
+    kill_tree "$SP" 5; wait "$SP" 2>/dev/null
+    start_player || { echo "        (the player didn't start again)"; return 1; }
+  fi
+  ok=0; for _ in $(seq 1 10); do curl -sf -m 2 "$U/health" >/dev/null && { ok=1; break; }; sleep 0.5; done
+  if [ $ok = 0 ]; then
+    echo "        the backend doesn't answer: starting it again"
+    for p in $(backend_pids); do kill_tree "$p" 5; done; rm -f "$T/backend2.pid"
+    start_backend || { echo "        (the backend didn't start again)"; tail -n 5 "$T/backend.log" | sed 's/^/          /'; return 1; }
+  fi
+  for _ in $(seq 1 50); do [ "$(curl -sf -m 5 "$U/player-engine" | jq -r .available 2>/dev/null)" = true ] && return 0; sleep 0.2; done
+  echo "        (the backend doesn't reach the player)"; return 1
+}
+# what a hung cell is reported with (no Steam token line: a failed run's logs are kept)
+last_logs() {
+  { tail -n 8 "$OUT/electron.stderr" 2>/dev/null | sed 's/^/electron: /'
+    tail -n 8 "$T/backend.log" 2>/dev/null | sed 's/^/backend: /'
+    tail -n 4 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/adapter: /'
+  } | grep -v SteamRefreshToken
+}
+RESUME=""; hangs=0; rc=""
+while [ -z "$rc" ]; do
+  start_probe "$RESUME"; RESUME=""
+  while alive "$EP"; do
+    # a shard whose parent is gone (killed outright: its cleanup never ran) stops, or it would play on with no one waiting
+    if [ -n "${LIASCAPE_MATRIX_PARENT:-}" ] && ! kill -0 "$LIASCAPE_MATRIX_PARENT" 2>/dev/null; then echo "ERROR: the run that started this shard is gone"; exit 1; fi
+    if [ -s "$CELLF" ] && IFS=$'\t' read -r c0 cph cname 2>/dev/null < "$CELLF" && num "$c0" \
+       && [ $(( $(date +%s%3N) - c0 )) -ge $(( CELL_LIMIT * 1000 )) ]; then
+      RESUME=$cname; break
+    fi
+    sleep 1
+  done
+  if [ -z "$RESUME" ]; then wait "$EP"; rc=$?; EP=""; break; fi
+  # a cell past the limit. Guard: scripts/test-matrix-watchdog.sh
+  hangs=$((hangs + 1))
+  logs=$(last_logs)
+  echo "ERROR $RESUME"
+  echo "        - no result within $CELL_LIMIT s (LIASCAPE_MATRIX_CELL_LIMIT; last phase finished: $cph): its Electron is stopped (TERM, KILL after 5 s)"
+  echo "        last log lines:"; printf '%s\n' "$logs" | sed 's/^/          /'
+  if kill_tree "$EP" 5; then echo "        its Electron ended on TERM"; else echo "        its Electron ignored TERM: KILLed after 5 s"; fi
+  wait "$EP" 2>/dev/null; EP=""; rm -f "$CELLF"
+  # this record stands for the cell: an Electron that quit on the TERM may have recorded it failing on its way out
+  jq -c --arg cell "$RESUME" 'select("\(.state) × \(.control)" != $cell)' "$OUT/cells.jsonl" > "$OUT/cells.jsonl.mx" 2>/dev/null \
+    && mv -f "$OUT/cells.jsonl.mx" "$OUT/cells.jsonl"
+  jq -nc --arg cell "$RESUME" --arg ph "$cph" --argjson lim "$CELL_LIMIT" --arg logs "$logs" \
+    '($cell | split(" × ")) as $sc | { state: $sc[0], control: ($sc[1:] | join(" × ")), result: "ERROR", ms: ($lim * 1000),
+      violations: ["no result within \($lim) s (last phase finished: \($ph)): the cell hung, its Electron was killed"],
+      logs: ($logs | split("\n") | map(select(length > 0))) }' >> "$OUT/cells.jsonl"
+  if [ "$hangs" -ge "$MAX_HANGS" ]; then echo "ERROR: $hangs cells hung (LIASCAPE_MATRIX_MAX_HANGS $MAX_HANGS): this stack ends here"; rc=1
+  elif ! restart_stack; then echo "ERROR: the stack couldn't be brought back after $RESUME: it ends here"; rc=1
+  else echo "        the stack answers again: on with the cells after it"; fi
+done
 echo "== adapter log (tail)"; tail -n 6 "$XDG_CACHE_HOME/liascape/liascape-player-adapter.log" 2>/dev/null | sed 's/^/     /'
 # a call to a real server (LIASCAPE_TEST_NO_NETWORK above refused it): the run fails, naming each — the probe that made it
 # needs a stub or a fixture

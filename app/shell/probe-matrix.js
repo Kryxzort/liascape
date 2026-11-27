@@ -4654,10 +4654,31 @@ C["cli:loopCurrent"] = { states: ["playlist"], switch: true, async run(c) {
     return v;
   } };
 
+// The runner's per-cell watchdog (test-ui-matrix.sh LIASCAPE_MATRIX_CELL_LIMIT) proven on a cell that never answers and
+// whose Electron ignores SIGTERM, as a wedged one can: the run names it as an ERROR within
+// the limit and goes on with the cells after it. Present only with LIASCAPE_MATRIX_TEST_HANG=1.
+// Guard: scripts/test-matrix-watchdog.sh
+if (E.LIASCAPE_MATRIX_TEST_HANG === "1") {
+  C["mx:hang"] = { states: ["idle"], noSwitch: true, async run() {
+      process.on("SIGTERM", () => {}); fs.writeFileSync(path.join(OUT, "mx-hang.started"), ""); await new Promise(() => {}); } };
+  C["mx:passA"] = { states: ["idle"], noSwitch: true, async run() {} };
+  C["mx:passB"] = { states: ["idle"], noSwitch: true, async run() {} };
+}
+
 // Cells whose expectation waits on an owner decision: reported as KNOWN (with the reason), not FAIL.
 const KNOWN = [];
 
 // ---------------------------------------------------------------- run
+// test-ui-matrix.sh's per-cell watchdog reads LIASCAPE_MATRIX_CELL_FILE while a cell runs: "<start ms>\t<last phase
+// finished>\t<cell>" (gone between cells). A cell past the limit is killed with its Electron and named from this.
+const CELL_FILE = E.LIASCAPE_MATRIX_CELL_FILE;
+let cellT0 = 0;
+function heartbeat(name, phase) {
+  if (!CELL_FILE) return;
+  if (phase === "start") cellT0 = Date.now();
+  fs.writeFileSync(CELL_FILE + ".tmp", `${cellT0}\t${phase}\t${name}\n`); fs.renameSync(CELL_FILE + ".tmp", CELL_FILE);
+}
+const cellDone = () => { if (CELL_FILE) fs.rmSync(CELL_FILE, { force: true }); };
 // a state's entry that didn't get there: what it saw (a SETUP is usually load: the run's timing, not a product bug)
 async function notReached(stateName, logAt) {
   const st = await ctl.call("state").catch(() => null);
@@ -4669,7 +4690,7 @@ async function runCell(stateName, ctlName) {
   const S = STATES[stateName], K_ = C[ctlName];
   const c = { state: stateName, control: ctlName, exp: { ...S.exp } };
   // where each cell's time goes (cells.jsonl `phases`, ms) — what the matrix's speed work measures against
-  let tp = Date.now(); const ph = (c.phases = {}); const lap = (k) => { const n = Date.now(); ph[k] = (ph[k] ?? 0) + n - tp; tp = n; };
+  let tp = Date.now(); const ph = (c.phases = {}); const lap = (k) => { const n = Date.now(); ph[k] = (ph[k] ?? 0) + n - tp; tp = n; heartbeat(`${stateName} × ${ctlName}`, k); };
   [c.shown, c.other] = S.roles();
   await reset(S.playlist?.()); lap("reset");
   if (S.pre) await S.pre(c);
@@ -5047,23 +5068,44 @@ app.whenReady().then(async () => {
   win = new BrowserWindow({ show: !E.LIASCAPE_MATRIX_HIDDEN, x: 0, y: 0, width: 1400, height: 900, useContentSize: true, webPreferences: { backgroundThrottling: false } });
   win.focus();
   subscribe();
-  BASE_SETTINGS = await getSettings();
+  // the baseline every cell's reset() restores: read once per run and kept beside the stack, so an Electron the runner
+  // started again after a hung cell restores the run's baseline, not whatever the hung cell left set
+  const baseFile = E.LIASCAPE_MATRIX_BASE_SETTINGS;
+  try { BASE_SETTINGS = baseFile && JSON.parse(fs.readFileSync(baseFile, "utf8")); } catch { /* the run's first Electron */ }
+  if (!BASE_SETTINGS) { BASE_SETTINGS = await getSettings(); if (baseFile) fs.writeFileSync(baseFile, JSON.stringify(BASE_SETTINGS)); }
   if (E.LIASCAPE_FUZZ_STEPS || E.LIASCAPE_FUZZ_REPLAY) return fuzzMain();
-  const out = fs.createWriteStream(path.join(OUT, "cells.jsonl"));
-  const results = [];
+  const list = [];
   let idx = -1;
   for (const st of Object.keys(STATES)) for (const k of Object.keys(C)) {
-    const name = `${st} × ${k}`;
-    if (ONLY && !ONLY.test(name)) continue;
+    if (ONLY && !ONLY.test(`${st} × ${k}`)) continue;
     if (C[k].states ? !C[k].states.includes(st) : STATES[st].optIn) continue;
     if (SHARD && ++idx % SHARD[1] !== SHARD[0]) continue;
+    list.push([st, k]);
+  }
+  // this instance's slice: the runner sizes the whole run's ceiling from it
+  fs.writeFileSync(path.join(OUT, "cells.total"), `${list.length}\n`);
+  // LIASCAPE_MATRIX_RESUME_AFTER=<cell>: the runner killed an earlier Electron on that hung cell (and recorded it): go on
+  // after it, the summary counting what the earlier instances recorded
+  const cellsFile = path.join(OUT, "cells.jsonl");
+  const after = E.LIASCAPE_MATRIX_RESUME_AFTER;
+  const results = [];
+  let from = 0;
+  if (after) {
+    from = list.findIndex(([st, k]) => `${st} × ${k}` === after) + 1;
+    if (!from) { console.log(`ERROR resume: no cell ${JSON.stringify(after)} in this slice`); app.exit(1); return; }
+    try { for (const l of fs.readFileSync(cellsFile, "utf8").split("\n")) if (l.trim()) results.push(JSON.parse(l)); } catch { /* none yet */ }
+  } else fs.writeFileSync(cellsFile, "");
+  for (const [st, k] of list.slice(from)) {
+    const name = `${st} × ${k}`;
     let r; const t0 = Date.now();
+    heartbeat(name, "start");
     try { r = await runCell(st, k); } catch (e) { r = { state: st, control: k, result: "ERROR", violations: [String(e && e.stack || e)] }; }
     r.ms = Date.now() - t0;
-    results.push(r); out.write(JSON.stringify(r) + "\n");
+    // written at once: a later cell's hang ends this Electron with a KILL
+    results.push(r); fs.appendFileSync(cellsFile, JSON.stringify(r) + "\n");
+    cellDone();
     console.log(`${r.result.padEnd(5)} ${name}${r.violations?.length ? "\n        - " + r.violations.join("\n        - ") : ""}${r.warnings?.length ? "\n        ! " + r.warnings.join("\n        ! ") : ""}`);
   }
-  out.end();
   const n = (x) => results.filter((r) => r.result === x).length;
   console.log(`MATRIX pass=${n("PASS")} fail=${n("FAIL")} error=${n("ERROR")} skip=${n("SKIP")} setup=${n("SETUP")} known=${n("KNOWN")}`);
   await reset().catch(() => {});
