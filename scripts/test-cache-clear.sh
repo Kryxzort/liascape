@@ -11,7 +11,7 @@
 #  logs:   the logs category empties a current `*.log` in place (a writer appending to it carries on at the new end) and
 #          deletes a rotated `*.log.<n>`; nothing else in the cache root is touched
 #  link:   a category folder that is itself a symlink is never followed: size 0, nothing deleted behind it
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays).
 # Never touches ~/.cache/liascape, ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
@@ -40,7 +40,7 @@ if [ -z "${LIASCAPE_CACHE_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_CACHE_T=$T
-  timeout -k 10 240 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 240 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

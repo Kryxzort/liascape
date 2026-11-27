@@ -19,7 +19,7 @@
 #          away) → an /apply tries it and no real `liascape-player serve` ever runs.
 # The player is the repo's debug build behind a wrapProgram-style wrapper that adds `--headless --outputs 640x360@60
 # --clock real --ao null` to the `serve` the backend starts (no Wayland, no audio server). Runs in its own user, network,
-# mount and PID namespaces (`unshare -rnpf --mount-proc`): every process scan sees only this run, and everything dies
+# mount and PID namespaces (`unshare -rnpf --mount-proc` + `scripts/test-netns.sh`): every process scan sees only this run, and everything dies
 # with the namespace. Temp HOME + XDG dirs, its own player socket; never touches ~/.config/liascape, the session's
 # player or its wallpaper. Never prints settings.json or a token.
 #
@@ -57,7 +57,7 @@ if [ -z "${LIASCAPE_PB_T:-}" ]; then
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_PB_T=$T LIASCAPE_PB_BIN=$B
   # PID 1 of the new namespace is this script: when it exits, the kernel kills every process left in it
-  timeout -k 10 300 unshare -rnpf --mount-proc bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 300 unshare -rnpf --mount-proc bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

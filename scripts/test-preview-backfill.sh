@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test of the previews made ahead of their cards (Web/PreviewBackfill.cs on ClipStore's worker): a temp HOME + XDG
-# dirs, no network (`unshare -rn`), a private backend and nine library items (a video, a 1280×720 still and a gif each; x's
+# dirs, no network (`unshare -rnm` + `scripts/test-netns.sh`), a private backend and nine library items (a video, a 1280×720 still and a gif each; x's
 # still is broken). The hold's signals are stood in for by a file (LIASCAPE_PREVIEW_HOLD_FILE: its words while it exists).
 #  1. held: started with the hold on, nothing is made, GET /previews/status names why, no operation is listed.
 #  2. released: every card's still is made (only the still: "Never animate"), the card on screen first, then the Library's
@@ -39,7 +39,7 @@ if [ -z "${LIASCAPE_BACKFILL_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_BACKFILL_T=$T
-  timeout -k 10 600 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 600 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

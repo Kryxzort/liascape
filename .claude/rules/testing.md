@@ -50,6 +50,12 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   text (`tests/api.rs` hints, probe labels, `test-*.sh` output). Never trust "no test reads this" without the grep.
 - A refactor must keep what an effect did on mount (an initial value, a first fetch); a test that only covers updates misses it.
 
+## No network: a namespace and no name lookups
+- A suite that isolates its network enters the namespace through `scripts/test-netns.sh` (`unshare -rnm bash
+  "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"`), never a bare `unshare -rn`: glibc asks nscd's socket
+  before its own resolver, and nscd answers from the host's network. Guards: `scripts/test-hermetic-dns.sh`; check-rules
+  fails a script that skips it.
+
 ## Temp folders: a test leaves nothing in /tmp
 - A test's temp root is removed when the run ends, pass, fail or interrupt: shell tests source `scripts/test-tmp.sh` and
   call `lp_tmp_done "$T" <the mktemp prefix> "$rc"` from the EXIT trap (`rc=$?` first); Rust suites get a per-process root

@@ -32,7 +32,7 @@
 #          leaves when its folder goes; a legacy settings file changes none of it; nothing in the tree or the fixtures changes.
 #  open:   POST /open/media opens a watched folder's linked file (a stub xdg-open), never a library link to a file outside
 #          every root nor a watched folder's file by its own path, and no longer once the folder is unwatched.
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing ever plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
@@ -61,7 +61,7 @@ if [ -z "${LIASCAPE_FOLDERS_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_FOLDERS_T=$T
-  timeout -k 10 400 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 400 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

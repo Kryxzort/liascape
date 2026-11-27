@@ -38,7 +38,7 @@
 #         read of the library, and a preset of it its reason gone; a whole one's preview.gif rewritten → a new `filesVersion`
 #         alone. /still answers a URL carrying `fv` as it answers one without, the new picture.
 #         Web/ItemFilesWatch.cs, LibraryService.FilesVersionOf.
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays).
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
 #
@@ -67,7 +67,7 @@ if [ -z "${LIASCAPE_ACTIONS_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_ACTIONS_T=$T
-  timeout -k 10 300 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 300 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

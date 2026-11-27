@@ -4,7 +4,7 @@
 # and the signed-in account's favourites cache (Helpers/WorkshopDetailsCache.cs, WorkshopFavorites.cs): a private backend
 # whose steamcommunity.com and api.steampowered.com are a fake server (scripts/test-fixtures/fake-steam-community.mjs;
 # LIASCAPE_STEAM_COMMUNITY / LIASCAPE_STEAM_API) and whose Steam client-protocol answers are a fixture file
-# (LIASCAPE_STEAM_CM_FIXTURE), all in its own network namespace (`unshare -rn`: loopback only — nothing can reach Steam;
+# (LIASCAPE_STEAM_CM_FIXTURE), all in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`: loopback only — nothing can reach Steam;
 # no real favourite, no real comment).
 #  1. signed out: the creator's name + avatar (profile XML, markup stripped, read once per run; the creator of an item
 #     without one asked of the client protocol); the favourite state "signed out" with no request; favourite and post → 403
@@ -79,7 +79,7 @@ if [ -z "${LIASCAPE_SOCIAL_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_SOCIAL_T=$T
-  timeout -k 10 300 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 300 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

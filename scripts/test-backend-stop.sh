@@ -11,7 +11,7 @@
 #  stand-in that never answers; SteamKit2's disconnect waits for that lookup) · the backend in a systemd
 #  unit (KillMode=control-group) that spawned the player itself: `systemctl stop` of that unit leaves the player playing,
 #  and a second backend adopts it rather than starting another (Helpers/UserScope.cs).
-# Runs in its own user, network, cgroup and mount namespaces (`unshare -rnCm`), a temp HOME + XDG dirs, its own backend,
+# Runs in its own user, network, cgroup and mount namespaces (`unshare -rnCm` + `scripts/test-netns.sh`), a temp HOME + XDG dirs, its own backend,
 # player socket and no audio server. The unit case runs a PRIVATE user manager (`systemd --user` on this run's
 # XDG_RUNTIME_DIR, in a cgroup subtree of its own, only this test's units on its unit path); the session's user manager
 # is never asked to start or stop anything. Without a cgroup of its own (the caller's cgroup isn't the user's to divide)
@@ -65,10 +65,10 @@ if [ -z "${LIASCAPE_STOP_T:-}" ]; then
   export DOTNET LIASCAPE_STOP_T=$T LIASCAPE_STOP_CG=${CG:+1}
   if [ -n "$CG" ]; then
     # moved into the subtree first, so the cgroup namespace's root is it
-    bash -c 'echo $$ > "$1/cgroup.procs" && exec timeout -k 10 420 unshare -rnCm --propagation private bash -c \
-      "ip link set lo up && mount -t cgroup2 none /sys/fs/cgroup && exec bash \"\$0\"" "$0"' "${BASH_SOURCE[0]}" "$CG"
+    bash -c 'echo $$ > "$1/cgroup.procs" && exec timeout -k 10 420 unshare -rnCm --propagation private bash "$2" "$3" \
+      bash -c "mount -t cgroup2 none /sys/fs/cgroup && exec bash \"\$0\"" "$0"' "${BASH_SOURCE[0]}" "$CG" "$ROOT/scripts/test-netns.sh" "$T"
   else
-    timeout -k 10 420 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+    timeout -k 10 420 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   fi
   exit $?
 fi

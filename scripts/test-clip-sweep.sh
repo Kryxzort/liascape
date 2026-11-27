@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test of the preview clips following "Video preview quality" (Web/ClipStore.cs § the library follows "Video
-# preview quality", Web/LibraryOps.cs): a temp HOME + XDG dirs, no network (`unshare -rn`), a private backend with short
+# preview quality", Web/LibraryOps.cs): a temp HOME + XDG dirs, no network (`unshare -rnm` + `scripts/test-netns.sh`), a private backend with short
 # waits (LIASCAPE_CLIP_SETTLE_MS, LIASCAPE_CLIP_GRACE_MS) and five 1080p library videos.
 #  1. debounce: Low → Mid → High within a second, back where it started: nothing is re-made, no file changes.
 #  2. down + priority: Mid then Low (the last one wins: the sweep follows Low, never Mid); the item a "card" keeps asking
@@ -45,7 +45,7 @@ if [ -z "${LIASCAPE_SWEEP_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_SWEEP_T=$T
-  timeout -k 10 900 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 900 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

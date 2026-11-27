@@ -2,7 +2,7 @@
 # Hermetic test of what the library learns in the background (Web/LibraryFactsOps.cs): Steam's Workshop tags for the items
 # auto-imported from Wallpaper Engine's folder, asked once, and every other item's frame size, bucketed into the Workshop's
 # resolution tags (WorkshopTags.ResolutionTagOf) — the Library filter column's data.
-# Runs in its own network namespace (`unshare -rn`: loopback only, nothing can reach Steam), a temp HOME + XDG dirs and a
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`: loopback only, nothing can reach Steam), a temp HOME + XDG dirs and a
 # private backend whose Steam servers are a fixture file (LIASCAPE_STEAM_CM_FIXTURE, Helpers/SteamWorkshopDetails.cs:
 # every GetDetails request is logged with its ids).
 #  1. tags: the first start asks Steam ONCE for every Workshop item without tags (one GetDetails of exactly those ids;
@@ -48,7 +48,7 @@ if [ -z "${LIASCAPE_FACTS_T:-}" ]; then
   trap 'exit 130' INT TERM HUP
   # the test itself runs with no network at all (loopback only): nothing in it can reach Steam
   export DOTNET LIASCAPE_FACTS_T=$T
-  timeout -k 10 600 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 600 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

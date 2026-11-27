@@ -168,15 +168,16 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        --keep-open=yes`) does the same (65 samples per wrap, 3 s and 4 s 240 fps clips). Judge it on real content
        (an audible click on a tone; music likely hides it) and close it if mpv offers a gapless wrap.
 
-29. [ ] The hermetic suites that run in `unshare -rn` resolve names through the host's nscd (glibc asks
-       `/run/nscd/socket` before its own resolver, and nscd answers from outside the namespace), so a name looked up
-       inside one reaches the real DNS. Hide nscd's socket in each (as `scripts/test-card-pictures.sh` does: its own mount
-       namespace, an empty dir over `/run/nscd`) or show that none looks a name up.
-
 28. [ ] probe-sidebar `lib:reflow` fails when run alone (`--only '^lib:reflow$'`), on lp-player as well as with the new
        sidebar motion, and passes inside the whole probe: at 1000×560 with Large cards and 24 extra items the right-click
        opens the sidebar but the grid keeps 5 columns ("the cell proves nothing"), so the card-stays-in-view check never
        runs. Find what the earlier cells set up that it relies on (the card size, the window) and make it stand alone.
+
+30. [ ] The suites without a network namespace (the UI matrix, the adapter IT, the settings suites,
+       `test-steam-signin.sh`, `test-steam-app-hold.sh`) guard only the backend's own connections
+       (`LIASCAPE_TEST_NO_NETWORK`); Electron, ffmpeg and the player in them can still reach the real network and its
+       DNS. Run them inside `scripts/test-netns.sh` too (the matrix's private Xvfb, audio server and CDP ports all live
+       on loopback), or show that nothing but the guarded backend could look a name up.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds the current app through `scripts/install.sh`, with every

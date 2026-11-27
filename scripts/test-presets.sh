@@ -19,7 +19,7 @@
 #     of 2843309472); a path out of it, a link out, not an image or a video, or a missing file sends nothing.
 #  3. the base trashed: its presets read "Needs its base scene" and the WebSocket says `library-synced`; Undo makes them
 #     playable again (playing them: the adapter IT § presets).
-# Runs in its own network namespace (`unshare -rn`) with a temp HOME + XDG dirs and a private backend whose Steam servers
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`) with a temp HOME + XDG dirs and a private backend whose Steam servers
 # are an empty fixture (LIASCAPE_STEAM_CM_FIXTURE) and which refuses every real server (LIASCAPE_TEST_NO_NETWORK=1). The
 # player is a stub binary that never plays (nothing is played here); the base scene is synthetic.
 # Never touches ~/.config/liascape or the real library; everything it started is stopped on exit.
@@ -48,7 +48,7 @@ if [ -z "${LIASCAPE_PRESETS_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_PRESETS_T=$T LIASCAPE_PRESETS_FIXTURES=$ROOT/scripts/test-fixtures/presets
-  timeout -k 10 300 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 300 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

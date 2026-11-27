@@ -14,7 +14,7 @@
 #  restart:  the backend stopped and started again reads every key back
 #  torn:     a file that doesn't parse is never written over: a POST fails, the bytes stay; GET reads nothing hidden
 #  files:    nothing under the library changes (Hide only hides)
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs and a private backend whose player is an
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`), a temp HOME + XDG dirs and a private backend whose player is an
 # `exit 1` stub (nothing plays). Never touches ~/.local/share/liascape or ~/.config/liascape; everything it started is
 # stopped on exit.
 #
@@ -43,7 +43,7 @@ if [ -z "${LIASCAPE_HIDDEN_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_HIDDEN_T=$T
-  timeout -k 10 300 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 300 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

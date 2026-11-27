@@ -10,6 +10,7 @@
 #  - guards resolve: every `Guard: probe-<area> <cell>` names a cell in that probe, every `Guard: scripts/….sh` exists.
 #  - no dead citations: every `.claude/rules/….md` or `docs/….md` path named in any tracked or new text file (code
 #    comments included) exists — one problem per missing path, with its count and the files citing it.
+#  - every scripts/*.sh that runs in `unshare -…n…` enters it through scripts/test-netns.sh (no name lookup leaves it).
 # Uses PyYAML when installed; otherwise a strict parser for the one allowed shape (any file it accepts is valid YAML).
 # Usage: bash scripts/check-rules.sh    Exit 0 = clean; prints every problem.
 set -uo pipefail
@@ -221,6 +222,20 @@ for f in sorted(set(listed)):
     if f not in todo_text and os.path.basename(f) not in todo_text:
         bad(f, 'an open spec or plan that docs/TODO.md does not name: add the item for what of it is left, or delete it if done')
 print(f'open specs and plans: {nspec} checked against docs/TODO.md')
+
+# A hermetic suite's network namespace starts with scripts/test-netns.sh: `unshare -rn` alone leaves name lookups going
+# through the host's nscd socket (and nss daemons), which answer from the real network. Guard: scripts/test-hermetic-dns.sh.
+nns = 0
+for f in sorted(set(listed)):
+    if not re.match(r'scripts/[^/]+\.sh$', f) or f == 'scripts/test-netns.sh' or not os.path.isfile(f): continue
+    with open(f, encoding='utf-8', errors='replace') as fh: code = [l for l in fh if not l.lstrip().startswith('#')]
+    # each invocation on its own: the helper on its line or the continuation line after it
+    for i, l in enumerate(code):
+        if not re.search(r'\bunshare\s+-[A-Za-z]*n', l): continue
+        nns += 1
+        if not any('scripts/test-netns.sh' in x for x in code[i:i + 2]):
+            bad(f, f'`{l.strip()[:80]}` runs in `unshare -…n…` without scripts/test-netns.sh: a name looked up inside reaches the host\'s nscd and the real DNS')
+print(f'network namespaces: {nns} unshare calls checked for scripts/test-netns.sh')
 
 if not yaml: print("(PyYAML not installed: frontmatter checked with the strict built-in parser)")
 for p in problems: print("PROBLEM " + p)

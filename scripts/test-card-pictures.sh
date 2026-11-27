@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic timing test of Browse's card pictures: a Workshop card's still (/still, a frame made from its gif preview) and
 # its gif (/anim, the preview trimmed of a fade from black), both made from a gif on Steam's image CDN. A temp HOME + XDG
-# dirs, no network (`unshare -rnm`: loopback only, its own mounts), a private backend, a fake CDN on loopback
+# dirs, no network (`unshare -rnm` + `scripts/test-netns.sh`: loopback only, no nscd), a private backend, a fake CDN on loopback
 # (scripts/test-fixtures/fake-image-cdn.mjs: ~1.1 MB gifs, 224×224, 56 frames, as Workshop previews are; one shared 8 MB/s
 # link, 150 ms to the first byte) named cdn.test, and a slow DNS server for that name (scripts/test-fixtures/fake-dns.mjs,
 # 500 ms an answer; the namespace's /etc/resolv.conf names only it). The page is
@@ -39,11 +39,8 @@ if [ -z "${LIASCAPE_CARDPIX_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_CARDPIX_T=$T
-  # the namespace's resolver: only the fake DNS server, asked by glibc itself (nscd's socket hidden: nscd would ask the
-  # host's resolver, outside the namespace)
-  printf 'nameserver 127.0.0.1\noptions timeout:5 attempts:2\n' > "$T/resolv.conf"; mkdir -p "$T/no-nscd"
-  timeout -k 10 300 unshare -rnm bash -c 'ip link set lo up && mount --bind "$1" /etc/resolv.conf &&
-    { [ ! -d /run/nscd ] || mount --bind "$2" /run/nscd; } && exec bash "$0"' "${BASH_SOURCE[0]}" "$T/resolv.conf" "$T/no-nscd"
+  # the namespace's resolver names only 127.0.0.1, where the fake DNS server listens, asked by glibc itself
+  timeout -k 10 300 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

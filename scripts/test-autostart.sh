@@ -13,7 +13,7 @@
 #           a liascape.desktop the user wrote is left alone either way; a compositor line added later takes the entry away
 #           (GET /autostart) and its removal brings it back; `serve` puts a missing entry back at start; /health/features
 #           reports the detection (ok, and a plain Hyprland's line as its reason).
-# Runs in its own network namespace (`unshare -rn`), a temp HOME + XDG dirs, a stub `systemctl` (never the session's user
+# Runs in its own network namespace (`unshare -rnm` + `scripts/test-netns.sh`), a temp HOME + XDG dirs, a stub `systemctl` (never the session's user
 # manager) and a backend whose player is an `exit 1` stub. Never touches the real autostart folder or compositor config.
 #
 # Usage: scripts/test-autostart.sh [--no-build]   LIASCAPE_BACKEND_DLL=<dll>: another backend build (a RED run).
@@ -41,7 +41,7 @@ if [ -z "${LIASCAPE_AUTOSTART_T:-}" ]; then
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
   export DOTNET LIASCAPE_AUTOSTART_T=$T
-  timeout -k 10 300 unshare -rn bash -c 'ip link set lo up && exec bash "$0"' "${BASH_SOURCE[0]}"
+  timeout -k 10 300 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
   exit $?
 fi
 

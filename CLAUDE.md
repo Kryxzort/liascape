@@ -34,6 +34,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - Liascape's own Electron where the system has none (install.sh's decision, the bundled copy, the launcher's order): `bash scripts/test-electron-bundle.sh`
 - "Start with your desktop" (which sessions run autostart entries, the entry written / removed, nothing else touched): `bash scripts/test-autostart.sh`
 - The app icon as Qt launchers draw it (no clip paths; transparent corners) and its hicolor PNGs installed: `bash scripts/test-app-icon.sh`
+- No name lookup leaves a hermetic suite's namespace (nscd's socket hidden; getent and .NET's resolver): `bash scripts/test-hermetic-dns.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - The TODO / decisions merge driver (block-level, no conflict when branches touch different items): `bash scripts/test-merge-docs.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`
