@@ -15,9 +15,16 @@
 #  - /etc/nsswitch.conf resolves hosts by `files dns` only (/etc/hosts keeps `localhost` for the fake servers);
 #  - /etc/resolv.conf names only 127.0.0.1, where nothing listens unless a suite runs a fake DNS server there
 #    (test-card-pictures.sh's answers in 500 ms, inside the 5 s timeout): with none, a lookup is refused at once.
-# Guard: scripts/test-hermetic-dns.sh; scripts/check-rules.sh fails a scripts/*.sh `unshare -…n…` that skips this file.
+# --own-uid: the suite runs as the user who started it, not as root. `unshare -r` maps that user to root, and Chromium
+# won't start as root with its sandbox on (Electron aborts: "Running as root without --no-sandbox is not supported").
+# A nested user namespace maps the uid and gid back, so Electron keeps its own sandbox and file modes bind as they do
+# outside (root reads past them). Everything is exec'd in place: the suite keeps the pid it was started with, which the
+# test lock's helper and a matrix shard's parent check watch.
+# Guard: scripts/test-hermetic-dns.sh; scripts/check-rules.sh fails a scripts/*.sh `unshare -…n…` that skips this file,
+# and a scripts/test-*.sh that starts a backend or an Electron without it.
 set -eu
-[ $# -ge 2 ] || { echo "usage: unshare -rnm … bash scripts/test-netns.sh DIR COMMAND [ARG…]" >&2; exit 2; }
+OWN=0; [ "${1:-}" = --own-uid ] && { OWN=1; shift; }
+[ $# -ge 2 ] || { echo "usage: unshare -rnm … bash scripts/test-netns.sh [--own-uid] DIR COMMAND [ARG…]" >&2; exit 2; }
 D=$1/netns; shift
 mkdir -p "$D/no-nscd"
 printf 'nameserver 127.0.0.1\noptions timeout:5 attempts:2\n' > "$D/resolv.conf"
@@ -33,4 +40,9 @@ fail() { echo "test-netns: can't $1 (run under unshare -rnm …)" >&2; exit 2; }
 [ ! -e /etc/resolv.conf ] || mount --bind "$D/resolv.conf" /etc/resolv.conf || fail "replace /etc/resolv.conf"
 [ ! -e /etc/nsswitch.conf ] || mount --bind "$D/nsswitch.conf" /etc/nsswitch.conf || fail "replace /etc/nsswitch.conf"
 [ ! -d /run/nscd ] || mount --bind "$D/no-nscd" /run/nscd || fail "hide /run/nscd"
+if [ $OWN = 1 ]; then
+  # the outside ids `unshare -r` mapped to 0 (its maps read "0 <outside id> 1")
+  read -r _ uid _ < /proc/self/uid_map; read -r _ gid _ < /proc/self/gid_map
+  exec unshare -U --map-user="$uid" --map-group="$gid" "$@"
+fi
 exec "$@"

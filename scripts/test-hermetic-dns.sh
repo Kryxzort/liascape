@@ -7,6 +7,7 @@
 #  dotnet:  System.Net.Dns.GetHostAddresses("example.com") (the backend's own resolver path)
 #  local:   `localhost` still resolves (/etc/hosts: the suites' fake servers listen on it)
 #  hidden:  nscd's socket, up on the host, isn't there inside (a host without nscd: SKIP, proved nothing; the lookups still count)
+#  own-uid: all of the above again under `test-netns.sh --own-uid`, which runs as the user who started it, not root
 #
 # Usage: scripts/test-hermetic-dns.sh   LIASCAPE_KEEP_TMP=1 keeps the temp folder.
 # Needs: dotnet (or DOTNET=…), unshare + ip (iproute2), getent, timeout. Last line `RESULT pass=N fail=M skip=K`, exit 0 = pass.
@@ -33,8 +34,11 @@ CS
   DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 "$DOTNET" build "$T/dns/dns.cs" -o "$T/dns/out" -nologo -v q > "$T/dns/build.log" 2>&1 \
     || { cat "$T/dns/build.log"; echo "ABORT: can't build the .NET lookup"; exit 2; }
   NSCD=0; [ -S /run/nscd/socket ] && NSCD=1
-  export DOTNET LIASCAPE_HDNS_T=$T LIASCAPE_HDNS_NSCD=$NSCD
-  timeout -k 10 120 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"
+  export DOTNET LIASCAPE_HDNS_T=$T LIASCAPE_HDNS_NSCD=$NSCD LIASCAPE_HDNS_UID=$(id -u) LIASCAPE_HDNS_GID=$(id -g)
+  timeout -k 10 120 unshare -rnm bash "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"; r1=$?
+  echo "== --own-uid (the suites that run Electron)"
+  LIASCAPE_HDNS_OWN=1 timeout -k 10 120 unshare -rnm bash "$ROOT/scripts/test-netns.sh" --own-uid "$T" bash "${BASH_SOURCE[0]}"; r2=$?
+  [ $r1 = 0 ] && [ $r2 = 0 ]
   exit $?
 fi
 
@@ -62,6 +66,11 @@ case "$out" in
              || bad ".NET Dns.GetHostAddresses($NAME): failed, but only after ${dt} ms" ;;
   *) bad ".NET Dns.GetHostAddresses($NAME): rc $rc in ${dt} ms: ${out:-nothing}" ;;
 esac
+
+if [ -n "${LIASCAPE_HDNS_OWN:-}" ]; then
+  [ "$(id -u):$(id -g)" = "$LIASCAPE_HDNS_UID:$LIASCAPE_HDNS_GID" ] && ok "--own-uid: runs as the user who started it ($(id -u):$(id -g)), not root" \
+    || bad "--own-uid: runs as $(id -u):$(id -g), not the user's $LIASCAPE_HDNS_UID:$LIASCAPE_HDNS_GID"
+fi
 
 out=$(timeout 10 getent hosts localhost 2>&1)
 [ -n "$out" ] && ok "localhost still resolves (${out%%$'\n'*})" || bad "localhost doesn't resolve inside the namespace"

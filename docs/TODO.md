@@ -228,6 +228,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
       AI assistance disclosed. Drafts only: opening them publishes under the owner's name, so the owner approves each.
 
 ## UI
+- [ ] A full 6-shard UI matrix fails three cells in shard 3, the same way with or without the network namespace:
+      `idle × load:afterApply:wsLate` and `single × load:duringRestart` (the page's held `/current` never comes back:
+      "proved nothing") and `single × clip:shortToFull` (the stand-in never played). All three pass alone
+      (`--only`). Find what shard 3's earlier cells leave behind that these depend on, and make them stand alone.
 - [ ] A matrix cell that hangs: twice a shard's probe sat in one cell (`scene × sceneProp:restart` for 30 min; 90 min
       after `single × pause:appBg`, next in order `single × load:duringRestart`, ignoring SIGTERM), neither reproduced
       alone. The runner now names a hung cell as an ERROR with its last phase and log lines: read that the next time it

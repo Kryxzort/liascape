@@ -80,9 +80,12 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)  # physical path: a symlinked alias (/home → /mnt/…) makes MSBuild delete its own outputs
 . "$ROOT/scripts/test-tmp.sh"   # lp_tmp_done: the temp folder goes on exit; LIASCAPE_KEEP_TMP=1 keeps it
+. "$ROOT/scripts/test-no-network.sh"   # lp_no_lookup: a name that resolves inside fails the run
 if [ "${LIASCAPE_MATRIX_NICE:-0}" = 1 ]; then renice -n 19 -p $$ >/dev/null 2>&1; ionice -c3 -p $$ >/dev/null 2>&1; fi
 BUILD=1; ONLY=""; UIDIR=""; JOBS=${LIASCAPE_MATRIX_JOBS:-6}; SHARD=""; PROBE=""; CHANGED=""
 FUZZ=""; FSEED=""; FRUNS=""; FREPLAY=""; JOBS_SET=""
+ARGS=("$@")   # the same run again, inside the network namespace (below)
+say() { [ -n "${LIASCAPE_NETNS:-}" ] || echo "$@"; }   # said once, outside it
 while [ $# -gt 0 ]; do
   case "$1" in --no-build) BUILD=0 ;; --only) ONLY=$2; shift ;; --ui-dir) UIDIR=$(cd "$2" && pwd); shift ;; --probe) PROBE=$2; shift ;;
     --jobs) JOBS=$2; JOBS_SET=1; shift ;; --shard) SHARD=$2; shift ;;
@@ -90,6 +93,7 @@ while [ $# -gt 0 ]; do
     --fuzz) FUZZ=$2; shift ;; --seed) FSEED=$2; shift ;; --fuzz-runs) FRUNS=$2; shift ;; --fuzz-replay) FREPLAY=$2; shift ;;
     *) echo "unknown arg $1"; exit 2 ;; esac; shift
 done
+[ -n "${LIASCAPE_NETNS:-}" ] && BUILD=0   # built outside, before the namespace
 num() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
 if [ -n "$FUZZ$FREPLAY" ]; then
   [ -n "$ONLY$CHANGED$PROBE" ] && { echo "--fuzz / --fuzz-replay don't combine with --only / --changed / --probe"; exit 2; }
@@ -108,12 +112,12 @@ MODE=MATRIX; [ -n "$FUZZ$FREPLAY" ] && MODE=FUZZ
 # or everything since <rev>); FULL when it touches something central, nothing when the matrix covers none of it
 if [ -n "$CHANGED" ] && [ -z "$SHARD" ]; then
   [ -n "$ONLY" ] && { echo "--changed and --only don't combine"; exit 2; }
-  echo "== cells for the change (${CHANGED/HEAD/uncommitted}):"
+  say "== cells for the change (${CHANGED/HEAD/uncommitted}):"
   sel=$(bash "$ROOT/scripts/matrix-cells-for.sh" $([ "$CHANGED" = HEAD ] || echo "$CHANGED")) || exit 2
   case "$sel" in
     NONE) echo "== the matrix covers nothing in this change — skipped"; exit 0 ;;
-    FULL) echo "== → the full matrix" ;;
-    *) ONLY=$sel; echo "== → --only '$ONLY'" ;;
+    FULL) say "== → the full matrix" ;;
+    *) ONLY=$sel; say "== → --only '$ONLY'" ;;
   esac
 fi
 case "$JOBS" in ''|*[!0-9]*|0) echo "--jobs wants a positive number"; exit 2 ;; esac
@@ -163,7 +167,7 @@ DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 ELECTRON=${ELECTRON:-${LIASCAPE_ELECTRON:-$(command -v electron || true)}}
 [ -x "$ELECTRON" ] || { echo "no electron — set ELECTRON=/path/to/electron (or run in the devShell)"; exit 2; }
-[ -n "$SHARD" ] || echo "== electron $("$ELECTRON" --version 2>/dev/null) ($ELECTRON)"
+[ -n "$SHARD" ] || say "== electron $("$ELECTRON" --version 2>/dev/null) ($ELECTRON)"
 for t in ffmpeg jq curl node; do command -v $t >/dev/null || { echo "missing: $t"; exit 2; }; done
 # Electron renders on a private Xvfb (its headless ozone platform crashes on this build; no display of
 # the session is ever used)
@@ -181,6 +185,18 @@ if [ $BUILD = 1 ]; then
 fi
 [ -x "$B" ] && [ -f "$DLL" ] || { echo "not built: $B / $DLL (drop --no-build)"; exit 2; }
 [ -x "${B%/*}/liascape-scene-worker" ] || { echo "not built: ${B%/*}/liascape-scene-worker (drop --no-build)"; exit 2; }
+# Everything from here on runs in its own network namespace (scripts/test-netns.sh, as this user: Chromium won't run as
+# root with its sandbox on): what the stack starts (the backend, the player, mpv, ffmpeg, Electron, Xvfb, the audio
+# server) reaches no real network and looks no name up, under the backend's own LIASCAPE_TEST_NO_NETWORK guard. Every
+# stack and shard shares this one namespace: they meet only over loopback, unix sockets and signals. exec'd in place:
+# this pid keeps the test lock and stays the parent its shards watch (LIASCAPE_MATRIX_PARENT). Guard: the lp_no_lookup
+# line below.
+if [ -z "${LIASCAPE_NETNS:-}" ]; then
+  NSD=$(mktemp -d /tmp/liascape-ns-XXXXXX)
+  LIASCAPE_NETNS=$NSD exec unshare -rnm bash "$ROOT/scripts/test-netns.sh" --own-uid "$NSD" bash "$SELF" "${ARGS[@]}"
+fi
+lp_netns_entered
+[ -n "$SHARD" ] || lp_no_lookup "MATRIX pass=0 fail=1 error=0 skip=0 setup=0 known=0" || exit 1
 
 # Run the backend from a private copy of its build: the owner's `dotnet watch` rebuilds the same
 # bin/Debug whenever a build here touches obj/, and mid-rebuild liascape-backend.runtimeconfig.json is briefly
@@ -570,7 +586,9 @@ timeout 60 ffmpeg -nostdin -loglevel error -y -f lavfi -i "color=c=black:size=24
 # picks the first FREE-LOOKING display, and the session's Xwayland (:1, started with -listenfd) leaves a lock file
 # naming a pid that is long dead — Xvfb took that for stale, took :1 and replaced the session's /tmp/.X11-unix/X1
 # (unlinked again when the shard ended). -displayfd stays as the "ready" signal. Shards racing for one number: the
-# loser exits on the lock, the next number is tried.
+# loser exits on the lock, the next number is tried. Abstract sockets belong to a network namespace: /proc/net/unix
+# lists only this run's (its other shards'), and the session's X servers are seen by their files in /tmp. Xvfb listens
+# on no TCP port (-nolisten tcp): the namespace has only loopback, and nothing here needs one.
 x_taken() { [ -e "/tmp/.X11-unix/X$1" ] || [ -e "/tmp/.X$1-lock" ] || grep -q "@/tmp/.X11-unix/X$1\$" /proc/net/unix; }
 XP=""
 for n in $(seq 90 189); do

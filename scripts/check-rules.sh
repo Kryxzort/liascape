@@ -261,6 +261,21 @@ for f in sorted(set(listed)):
             bad(f, f'`{l.strip()[:80]}` runs in `unshare -…n…` without scripts/test-netns.sh: a name looked up inside reaches the host\'s nscd and the real DNS')
 print(f'network namespaces: {nns} unshare calls checked for scripts/test-netns.sh')
 
+# Every hermetic suite that starts a backend (the dll, or its CLI: `liascape-backend`) or an Electron (`$ELECTRON`, the
+# one name the suites start it by) runs in that namespace: the backend's own LIASCAPE_TEST_NO_NETWORK guard covers only
+# its own connections, not Electron, ffmpeg, mpv or the player beside it. Text, not tracing: a suite that started one
+# under another name would pass unseen, so a new way to start either one belongs in these two patterns.
+starts = re.compile(r'\bliascape-backend\b|\$\{?ELECTRON\b')
+nsuite = 0
+for f in sorted(set(listed)):
+    if not re.match(r'scripts/test-[^/]+\.sh$', f) or not os.path.isfile(f): continue
+    with open(f, encoding='utf-8', errors='replace') as fh: code = [l for l in fh if not l.lstrip().startswith('#')]
+    if not any(starts.search(l) for l in code): continue
+    nsuite += 1
+    if not any(re.search(r'\bunshare\s+-[A-Za-z]*n', l) for l in code):
+        bad(f, 'starts a backend or an Electron outside a network namespace: enter it through scripts/test-netns.sh (.claude/rules/testing.md § No network)')
+print(f'network namespaces: {nsuite} suites that start a backend or an Electron checked for one')
+
 if not yaml: print("(PyYAML not installed: frontmatter checked with the strict built-in parser)")
 for p in problems: print("PROBLEM " + p)
 print(f"RESULT problems={len(problems)}")

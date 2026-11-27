@@ -15,6 +15,9 @@
 # npm ci runs in a temp copy of app/shell's package.json + lockfile, with the user's npm and Electron download caches
 # (a cached zip: no download). On NixOS the npm prebuilt can't find its libs, so the test alone runs it through nix-ld
 # with nixpkgs' libs; a NixOS install never takes this path (the flake brings its own Electron).
+# No network namespace (scripts/test-netns.sh), on purpose: npm ci and Electron's postinstall download whatever the
+# user's caches lack, as install.sh's own step does; with the caches full nothing goes out. It starts no backend and no
+# Electron window (the bundled copy runs only as node, ELECTRON_RUN_AS_NODE).
 #
 # Usage: scripts/test-electron-bundle.sh    LIASCAPE_KEEP_TMP=1 keeps the temp folder.
 # Needs: node, npm (and nix on NixOS). Last line `RESULT pass=N fail=M`, exit 0 = pass.

@@ -40,7 +40,9 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/test-lock.sh" # one heavy test run at a time on this machine
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 . "$ROOT/scripts/test-tmp.sh"
+. "$ROOT/scripts/test-no-network.sh"   # lp_no_lookup: a name that resolves inside fails the run
 BUILD=1; [ "${1:-}" = "--no-build" ] && BUILD=0
+[ -n "${LIASCAPE_NETNS:-}" ] && BUILD=0   # built outside, before the namespace
 DOTNET=${DOTNET:-$(command -v dotnet || true)}
 [ -n "$DOTNET" ] || { echo "dotnet not found — set DOTNET=/path/to/dotnet"; exit 2; }
 CC=${CC:-$(command -v cc || command -v gcc || true)}
@@ -53,6 +55,15 @@ if [ $BUILD = 1 ] && [ -z "${LIASCAPE_BACKEND_DLL:-}" ]; then
 fi
 [ -f "$DLL" ] || { echo "not built: $DLL (drop --no-build)"; exit 2; }
 
+# Everything from here on runs in its own network namespace (scripts/test-netns.sh, as this user): what the suite starts
+# (the backend, the player, mpv, ffmpeg, the fake Steam servers on loopback) reaches no real network and looks no name up, under the backend's own
+# LIASCAPE_TEST_NO_NETWORK guard. exec'd in place: this pid keeps the test lock.
+if [ -z "${LIASCAPE_NETNS:-}" ]; then
+  NSD=$(mktemp -d /tmp/liascape-ns-XXXXXX)
+  LIASCAPE_NETNS=$NSD exec unshare -rnm bash "$ROOT/scripts/test-netns.sh" --own-uid "$NSD" bash "${BASH_SOURCE[0]}" "$@"
+fi
+lp_netns_entered
+lp_no_lookup "RESULT pass=0 fail=1" || exit 1
 T=$(mktemp -d /tmp/liascape-hold-XXXXXX)
 BP=""
 stopbe() { [ -n "$1" ] && { kill "$1" 2>/dev/null; for _ in $(seq 1 30); do kill -0 "$1" 2>/dev/null || break; sleep 0.1; done; kill -9 "$1" 2>/dev/null; }; }

@@ -55,6 +55,12 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   "$ROOT/scripts/test-netns.sh" "$T" bash "${BASH_SOURCE[0]}"`), never a bare `unshare -rn`: glibc asks nscd's socket
   before its own resolver, and nscd answers from the host's network. Guards: `scripts/test-hermetic-dns.sh`; check-rules
   fails a script that skips it.
+- Every suite that starts a backend or an Electron runs in it (check-rules fails one that doesn't): the backend's
+  `LIASCAPE_TEST_NO_NETWORK` guard covers only its own connections, not Electron, ffmpeg, mpv or the player. A suite with
+  Electron, or one whose processes must outlive a parent check, enters with `exec unshare -rnm bash …/test-netns.sh
+  --own-uid …` after its build (the UI matrix's pattern): its own uid (Chromium won't run as root with its sandbox) and
+  its own pid (the test lock's helper and the shards watch it); then `lp_netns_entered` and `lp_no_lookup`
+  (`scripts/test-no-network.sh`) as its first check.
 
 ## Temp folders: a test leaves nothing in /tmp
 - A test's temp root is removed when the run ends, pass, fail or interrupt: shell tests source `scripts/test-tmp.sh` and
