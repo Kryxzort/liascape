@@ -23,7 +23,7 @@ reviews:
   path_instructions:
     - path: "src/player/**"
       instructions: |
-        Check against .claude/rules/player/ (core.md, scenes.md, sources-audio.md, runtime-api.md, gfx-wayland.md)
+        Check against .claude/rules/player/ (core.md and the area files whose paths match)
         and docs/player/invariants.md: never hand an audible or visible stream from one owner to another, never block
         the runtime loop, never wait on a fence on the loop, a new behaviour names its guard test.
     - path: "src/backend/**"

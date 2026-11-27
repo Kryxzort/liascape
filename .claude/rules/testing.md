@@ -84,6 +84,8 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
   under the lock before reporting it.
 
 ## liascape-player tests (`src/player/tests/`)
+- Set `RLIMIT_CORE` 1 on every process a test spawns (0 still runs systemd-coredump and pops crash dialogs), and put
+  its sockets under `std::env::temp_dir()`, never `target/` (a Unix socket path must be < 108 bytes).
 - One transition harness at a time (a process-wide lock): parallel 1080p decoders starve each other. Unit-test pure
   state-machine rules graph-only in `recipes/transition.rs`.
 - Bound a harness wait with `tick_until` / `Harness::within`, never an `h.now() < …` assert or a fixed 100 ms gap:

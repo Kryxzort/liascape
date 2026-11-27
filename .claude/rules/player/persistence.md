@@ -73,8 +73,7 @@ restart: `.claude/rules/backend/player-adapter.md`.
   exits at once (`sleep_unless_stopped`). Guard `sigterm_during_compositor_backoff_exits_at_once`.
 - `make_sent_faults_fatal` (first thing in `serve`) re-raises a sent SIGSEGV/SIGBUS; Rust's handler alone survives a
   `kill -SEGV`.
-- Tests set `RLIMIT_CORE` 1 on every spawned process (0 still runs systemd-coredump and pops crash dialogs);
-  `src/player/tests/api.rs` runs `--no-supervise`. Knobs: `LIASCAPE_PLAYER_TEST_CRASH=startup`,
+- `src/player/tests/api.rs` runs `--no-supervise`. Knobs: `LIASCAPE_PLAYER_TEST_CRASH=startup`,
   `LIASCAPE_PLAYER_TEST_COMPOSITOR_WAIT_MS`.
 
 ## Memory (`src/player/src/mem.rs`)

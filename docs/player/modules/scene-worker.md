@@ -35,20 +35,17 @@ restarts; `waitpid` runs every poll only once the worker is ending, else every `
   On reap the output is drained to EOF (so the crash's last stderr lines make the record), then the budget (3 per
   sliding 60 s) admits a respawn with the last `Start` at the resume position, or the source breaks
   ([scene-crash-policy.md](scene-crash-policy.md)).
-- **Folding.** `Start`, `Paused`, `Resize`, `Route`, `SetProperty`, `Gain`, `NoAudio`, `Speed` and `LoudnessMeter`
-  are recorded even while connected and folded into the restart's `Start`, so a restart never resumes with a stale
-  pause, size, route, property, level or meter. Other messages while not connected are `NotConnected`; the caller
-  re-sends gains and the pointer after the new worker's `Ready`. `WouldBlock` = the worker isn't reading.
-- **Fatal errors are not crashes.** `error {fatal: true}` (no GPU, load or build failed; the host makes one of a
-  `Hello` with another `protocol`) leaves the worker idle until `quit`: no restart, no crash record.
+- **Folding.** The live-change messages are recorded even while connected and folded into the restart's `Start`
+  (the list: the rule). Other messages while not connected are `NotConnected`; the caller re-sends gains and the
+  pointer after the new worker's `Ready`. `WouldBlock` = the worker isn't reading. A fatal `error` (no GPU, load or
+  build failed, another `protocol`) leaves the worker idle until `quit`.
 - **`stop()`/`Drop`** send `quit` and hand the pid to the `lia-worker-reap` thread (started on demand), which
   SIGKILLs at `STOP_GRACE` (500 ms). `stop` drains the pipe first so a fatal error's own stderr line stays in the
   tail, then closes it. The reaper keeps each ending (`reap::ended`); a death by a signal it didn't send is a crash
   in the worker's teardown (`worker.exit_crash`; else only the kernel log has it). `kill_for_restart(why)`
   SIGKILLs a live worker as a crash with `why` leading the record's reason.
 - **Log tail:** the last `LOG_TAIL` (50) lines of output and `log` messages across restarts, with a marker line
-  between processes; `ctl probe '{"name":"workers","args":{"log_tail":true}}'` shows it (LWE's warnings, also for a
-  scene that renders wrong).
+  between processes (the `workers` probe's `log_tail`).
 - **Crash record** `<state>/crashes/<scene-id>-<unix_ms>.json` (temp + rename): source id, path, reason,
   signal/code, restarts, uptime, log tail; the oldest beyond `MAX_CRASH_RECORDS` (20) are removed.
 

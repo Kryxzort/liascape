@@ -5,6 +5,7 @@ paths:
   - "src/player/src/redraw.rs"
   - "src/player/src/probe/vram.rs"
   - "src/player/src/bin/liascape-scene-worker/gputimer.rs"
+  - "src/player/src/sources/scene.rs"
 ---
 
 # liascape-player: scene GPU budget, VRAM limit and the low-VRAM hold

@@ -88,23 +88,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        full UI matrix green before and after, the same cell list), and trim comments that only restate the code
        (`.claude/rules/writing-rules.md` § Code comments).
 
-10. [ ] (owner) Trim the rules to well under their caps without losing a rule an agent needs. Today `player/scenes.md` is at
-       250 / 250 lines, `backend/sources-steam.md` ~28k / 30k chars, `ui/design.md` and `backend/library.md` ~21k; the
-       reference docs and `docs/decisions.md` sit at their caps. Method (community guidance on CLAUDE.md / rules: a
-       buried rule is a dropped rule; spend the instruction budget only on what an agent can't infer or a check can't
-       enforce):
-       - Per bullet: keep it if an agent would otherwise get it wrong; cut it if the code makes it obvious; when a test,
-         hook or `check-rules.sh` enforces it, keep one line + the guard's name only where a "fix" would undo it.
-       - Move "how it works" prose to the reference docs (`docs/player/modules/`, linked); rules keep musts / nevers.
-       - Narrow the globs and split a file that serves two areas (scenes.md: core vs audio vs presets) so a task loads
-         fewer bullets; merge overlapping bullets across files (one fact, one place).
-       - Fold old `docs/decisions.md` entries the code no longer needs defending (Electron + React, "a work of art", focus
-         rings only while tabbing, …; cut an entry that restates a rule to its why plus a link; ~18–20k chars); keep each
-         reference doc ≤ ~12k.
-       - A recall check after: an agent opened on a file in each area recites that area's rules for a set task; a
-         critical rule it misses moves higher, gets clearer, or becomes a hook / check.
-       Target: every rule file ≤ 80 % of its line and char caps. `check-rules.sh` green; no guard citation lost.
-
 11. [ ] (owner's night of choice, real session) Rerun `src/player/tests/onmachine/scenes.sh crash` on a quiet
        machine. The 2026-11-27 run (43/52) overlapped agents' hermetic suites; it now takes the test lock, so none can.
        It must show: DP-1's tone with 0 drops in every event AND in every quiet window (the new "quiet windows (no

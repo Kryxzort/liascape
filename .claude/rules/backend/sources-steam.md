@@ -127,7 +127,8 @@ works (sessions, the one-off and preset-base routes, the favourites cache, the t
 - "Download without subscribing" (`WorkshopDownloader.AcquireOneOffAsync`) makes the library's own `workshop/<id>` copy
   by the download mode's own route (`OneOffRouteOf`, `GET /workshop/one-off`; none = the entries disabled with the
   reason, `/download` 400) — never a Steam page, a to-do entry or an `Unblock`; a subscription the user already had is
-  copied and left alone. The routes: `docs/backend/steam-workshop.md` § "Download without subscribing". Guard:
+  copied and left alone; block Steam's folder of an item that isn't a subscription (`WorkshopUnsubQueue.Block`), and
+  give the one-off's own unsubscribe no Undo window and no `unsub-progress` (`AddPending(…, quiet: true)`). The routes: `docs/backend/steam-workshop.md` § "Download without subscribing". Guard:
   `test-steam-signin.sh` § 2 (one-off), § 3 j., steam-selftest "one-off route", "reconcile", probe-steam `side:oneOff:*`.
 - A preset brings its base scene by the route its download took (`WorkshopDownloader.Took`) and its action, never
   another (`Web/PresetDownloads.cs`): reuse a base already in the library, never fetch one whose Steam kind isn't

@@ -1,7 +1,7 @@
 # Audio bus and meter
 
-Covers `src/player/src/audio/` (`bus.rs`, `meter.rs`, `mod.rs`). Rules: `.claude/rules/player/audio-bus.md`
-§ Audio bus, § Async streams and latency, § Meter, § Never fork the serve process. Auto-mute and `sysmon`:
+Covers `src/player/src/audio/` (`bus.rs`, `meter.rs`, `mod.rs`). Rules: `.claude/rules/player/audio-bus.md`;
+never fork the serve process: `.claude/rules/player/core.md` § Build and test. Auto-mute and `sysmon`:
 [signals.md](signals.md).
 
 Every wallpaper's audio goes to one in-process PipeWire loopback sink owned by the player, forwarded at 0 dB to

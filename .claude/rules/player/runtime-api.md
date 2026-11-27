@@ -62,7 +62,6 @@ programs in [recipes.md](recipes.md); snapshot and supervisor in [persistence.md
   unlinks an existing path only if it is a socket. Guard: `tests/api.rs::concurrent_starts_one_serves`.
 - chmod the socket dir only if we created it or it is the default `…/liascape`; never chmod a directory
   named by `--socket`/`LIASCAPE_PLAYER_SOCKET`.
-- Unix socket paths must be < 108 bytes: tests put sockets under `std::env::temp_dir()`, not `target/`.
 
 ## Stepped clock and headless
 - `step` must not block the loop: defer it (`PendingStep`), bounded by `STEP_TIMEOUT`, and read nothing more

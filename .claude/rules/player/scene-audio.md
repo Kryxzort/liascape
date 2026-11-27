@@ -5,6 +5,7 @@ paths:
   - "src/player/src/audio/loudness.rs"
   - "src/player/src/scene/loudness_estimate.rs"
   - "src/player/src/scene/pkg.rs"
+  - "src/player/src/sources/scene.rs"
   - "src/player/tests/scene_loudness.rs"
 ---
 

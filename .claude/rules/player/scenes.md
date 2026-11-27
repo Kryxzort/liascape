@@ -1,9 +1,6 @@
 ---
 paths:
-  - "src/player/src/bin/liascape-scene-worker/main.rs"
-  - "src/player/src/bin/liascape-scene-worker/ring.rs"
-  - "src/player/src/bin/liascape-scene-worker/synthetic.rs"
-  - "src/player/src/bin/liascape-scene-worker/media.rs"
+  - "src/player/src/bin/liascape-scene-worker/**"
   - "src/player/src/scene/mod.rs"
   - "src/player/src/scene/assets.rs"
   - "src/player/src/scene/pointer.rs"
