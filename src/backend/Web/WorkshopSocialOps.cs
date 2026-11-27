@@ -55,7 +55,7 @@ public static class WorkshopSocialOps
     {
         SteamCommunity.SignInRequiredException => Results.Json(new { error = e.Message, signIn = true }, statusCode: 403),
         ArgumentException => Results.Json(new { error = e.Message }, statusCode: 400),
-        SteamCooldownException => Results.Json(new { error = e.Message }, statusCode: 429),
+        SteamCooldownException cd => Results.Json(cd.Body, statusCode: 429),
         HttpRequestException or TaskCanceledException => Results.Json(new { error = "Couldn't reach Steam" }, statusCode: 502),
         _ => Results.Json(new { error = e.Message }, statusCode: 502),
     };

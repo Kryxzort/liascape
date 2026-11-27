@@ -31,6 +31,9 @@ and § Settings & state.
 - The UI never guesses which item plays: the mark comes from `wallpaper-changed` (and `/current` for a Play that switches nothing; drop it if an event landed meanwhile). Guard: matrix `playlistMark:shufflePlay`.
 - Ask `/current` only through `askCurrent()`: an answer applies while it is the newest asked and no `wallpaper-changed` landed since. The page asks once more when its first socket opens (`rereadPlaying`): the store's first reads race it. Guards: matrix `load:afterApply:*`.
 - A Browse list reply belongs to its generation (`browseGen`): drop replies from an older `reload()`.
+- Steam's cooldown: the store's end (`steamCoolUntil`) comes only from the backend's `cooldownMs` (`/steam/status` reads,
+  older than its last change dropped; WS `steam-cooldown`; a 429 through `noteSteamRefusal`); a refused read shows `app/ui/src/components/SteamCooldown.tsx`'s notice once per surface
+  instead of its own error, and asks again at the end (`browseCooled`, `app/ui/src/hooks/useAfterCooldown.ts`). Guard: probe-steam `cool:*`.
 - An item that can't play (`unplayableReasonOf`: a preset's `presetReason`, and every scene and preset while
   `scenesBlocked`) is greyed with the reason, and `applyItem` plays nothing and says why. Guard: probe-sidebar
   `lib:preset:needsBase`, `lib:scenesBlocked`.

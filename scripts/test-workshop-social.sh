@@ -31,6 +31,10 @@
 #     community page + the items' details (current counts again);
 #     the cookie's token in no log line and not in settings.json; every request with the Firefox User-Agent.
 #  4. Steam's 429: the comments answer 429 "try again in N min", the cooldown file is written and the next read sends nothing.
+#     The cooldown's state and events (Helpers/SteamGate.cs Changed): a short one (Steam's Retry-After 2 s) sends
+#     `steam-cooldown` with its `cooldownMs` as it starts (its own event: never a whole `steam-status`, whose sign-in could
+#     be older than a sign-out sent meanwhile), the 429 and /steam/status carry how long is left, and its end sends
+#     `steam-cooldown` {cooldownMs: 0} by itself.
 #  5. a scene's presets (/browse `list` kind "presets", QueryFiles' child lookup; the player is a
 #     stub binary that never runs): exactly the presets naming it (a web-based one left out), paged 100 at a time, sorted
 #     as asked; the whole Workshop's default list holds none, Preset ticked holds only presets; a preset's base
@@ -881,9 +885,27 @@ const bl = fs.readFileSync(`${T}/backend.log`, "utf8"), st = fs.readFileSync(`${
 out(!bl.includes(TOKEN) && !st.includes(TOKEN), "the cookie's token is in no log line and not in settings.json");
 
 // ---- 4. Steam's 429 ----
+// the cooldown's state and events: the one end the UI counts down to (app/ui/src/store/index.ts setSteam)
+const sevs = [];
+const ws4 = new WebSocket(U.replace("http", "ws") + "/events?token=" + encodeURIComponent(TOKEN_API));
+await new Promise((res) => { ws4.onopen = res; ws4.onerror = res; setTimeout(res, 3000); });
+const stEvs = [];
+ws4.onmessage = (m) => { try { const e = JSON.parse(m.data); if (e.type === "steam-cooldown") sevs.push(e.payload.cooldownMs); if (e.type === "steam-status") stEvs.push(e.payload); } catch { } };
+await fetch(`${FAKE}/__ratelimit?after=2`);
+r = await get(`/workshop/comments?id=${ITEM}&owner=${OWNER}&start=0&count=10`);
+const st1 = await get("/steam/status");
+const began = await waitFor(() => sevs.some((ms) => ms > 0 && ms <= 2000), 3000);
+const ended = await waitFor(() => sevs.at(-1) === 0, 6000);
+const st2 = await get("/steam/status");
+out(r.status === 429 && r.json?.cooldownMs > 0 && r.json.cooldownMs <= 2000 && st1.json?.cooldownMs > 0 && st1.json.cooldownMs <= 2000
+  && began && ended && st2.json?.cooldownMs === 0 && stEvs.length === 0,
+  "the cooldown's state and events: a 2 s one → steam-cooldown {cooldownMs} as it starts (no steam-status), the 429 and /steam/status say how long is left, its end → steam-cooldown {cooldownMs: 0}",
+  J({ r, st1: st1.json?.cooldownMs, sevs, st2: st2.json?.cooldownMs, stEvs: stEvs.length }));
+ws4.close();
 await fetch(`${FAKE}/__ratelimit`);
 r = await get(`/workshop/comments?id=${ITEM}&owner=${OWNER}&start=0&count=10`);
-out(r.status === 429 && /try again in/.test(r.json?.error ?? ""), "Steam's 429: the comments answer 429 'try again in N min'", J(r));
+out(r.status === 429 && /try again in/.test(r.json?.error ?? "") && r.json?.cooldownMs > 110_000 && r.json.cooldownMs <= 120_000,
+  "Steam's 429: the comments answer 429 'try again in N min' and how long is left (Retry-After 120 s)", J(r));
 out(fs.existsSync(`${process.env.XDG_CACHE_HOME}/liascape/steam-cooldown.json`), "Steam's 429: the cooldown is saved (steam-cooldown.json)");
 n0 = (await fakeLog()).length;
 r = await get(`/workshop/comments?id=${ITEM}&owner=${OWNER}&start=10&count=10`);

@@ -108,12 +108,17 @@ async function jget<T>(path: string): Promise<T> {
 // API: a refused request's {error} words, its status, and `signIn` — the action needs the Steam sign-in (the UI's "Sign in to …")
 export class ApiError extends Error {
   readonly status: number; readonly signIn: boolean;
-  constructor(message: string, status: number, signIn = false) { super(message); this.status = status; this.signIn = signIn; }
+  // API: a 429 Steam's cooldown answered (Helpers/SteamGate.cs SteamCooldownException.Body): how long it has left, in ms
+  readonly cooldownMs: number | null;
+  constructor(message: string, status: number, signIn = false, cooldownMs: number | null = null) {
+    super(message); this.status = status; this.signIn = signIn; this.cooldownMs = cooldownMs;
+  }
 }
 async function apiError(path: string, r: Response): Promise<ApiError> {
-  let body: { error?: string; signIn?: boolean } | null = null;
+  let body: { error?: string; signIn?: boolean; cooldownMs?: number } | null = null;
   if (r.headers.get("content-type")?.includes("json")) { try { body = await r.json(); } catch { /* not JSON after all */ } }
-  return new ApiError(body?.error ?? `${path} → ${r.status}`, r.status, body?.signIn === true);
+  return new ApiError(body?.error ?? `${path} → ${r.status}`, r.status, body?.signIn === true,
+    r.status === 429 && typeof body?.cooldownMs === "number" ? body.cooldownMs : null);
 }
 // WS steam-todo / GET /steam-todo (Web/SteamTodo.cs): the current entry + the count, or `finished` (idle). `delivered` = Steam
 // already has the current one (its download finished) — still the user's Next; `message` = the Steam app couldn't be opened /
@@ -414,8 +419,14 @@ export const api = {
   playFrom: (paths: string[], startIndex: number, settings: PlaylistSettings) =>
     jpost<{ message: string }>("/playlist/play-from", { paths, startIndex, settings }),
   // API: `found` = Steam's own files on this PC (its steamclient.so, the Workshop folder the settings name): the Library's welcome
-  steamStatus: () => jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean;
-    found?: { client: boolean; workshopFolder: boolean } }>("/steam/status"),
+  // API: `cooldownMs` = how long Steam's cooldown has left (0 = none; Helpers/SteamGate.cs), stamped with when it was asked and
+  // answered: the store counts from the answer and drops a read older than its last change (store coolFromRead)
+  steamStatus: async () => {
+    const cooldownAsked = Date.now();
+    const r = await jget<{ signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean;
+      cooldownMs?: number; found?: { client: boolean; workshopFolder: boolean } }>("/steam/status");
+    return { ...r, cooldownAsked, cooldownAt: Date.now() };
+  },
   // API: the Workshop's Browse pages ride one anonymous Steam session the backend drops after a few idle minutes; this asks
   // it to connect ahead of a page the user is about to ask for (SteamAnonymous.Warm). Fire and forget: it never fails
   // visibly, and a hover sends it at most every 20 s. Guard: probe-steam browse:warm

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { favoritesRowOn, useStore, type FavScope } from "../store";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
+import { CooldownWords } from "./SteamCooldown";
 
 // The favourites' load line at the top of Browse's grid (and of the Library's, which shows its whole list meanwhile: Library.tsx),
 // while a Favourites row is ✓ / ✕ there and the list isn't all in: "Loading your favourites…" before anything has come, "Loading your favourites — 120 so far" while Steam hasn't said how
@@ -12,15 +13,18 @@ import { useMotion } from "./motion";
 // words and Retry (the load again, sync=open) take their own room above the grid and the cards glide down under them, so
 // nothing covers a card while the error stays; what loaded stays in the grid.
 // Guard: probe-steam yours:loadLine, yours:loadLineOff, yours:loadError, lib:yours:load, lib:yours:error
+// Browse's list refused for Steam's cooldown takes the same line, before the favourites' (the store's browseCooled): the
+// cooldown's words counting down (SteamCooldown.tsx), no Retry (the list asks again by itself at its end), in the error's
+// own room. Guard: probe-steam cool:browse, cool:browseOff, cool:end
 
 // the leave: the bar fills out to its end, then the line fades (index.css .ws-set-load.closing)
 const LEAVE_MS = 450;
 // the grid's glide when the error's room comes or goes (the sidebar's open: 220 ms ease-out)
 const GLIDE_MS = 240;
 
-type Line = { kind: "load"; done: number; total: number | null } | { kind: "error"; text: string };
+type Line = { kind: "load"; done: number; total: number | null } | { kind: "error"; text: string } | { kind: "cooldown" };
 
-const words = (l: Line) => (l.kind === "error" ? l.text
+const words = (l: Line) => (l.kind === "cooldown" ? <CooldownWords /> : l.kind === "error" ? l.text
   : !l.done ? "Loading your favourites…"
   : l.total != null ? `Loading your favourites — ${l.done} of ${l.total}` : `Loading your favourites — ${l.done} so far`);
 
@@ -28,6 +32,7 @@ export function WsSetLoad({ scope = "workshop" }: { scope?: FavScope }) {
   const used = useStore((s) => favoritesRowOn(s, scope));
   // a string, not an object: useLinger follows identity, and every read of the favourites is a new object
   const key = useStore((s) => {
+    if (scope === "workshop" && s.browseCooled && s.steamCoolUntil > 0) return JSON.stringify({ kind: "cooldown" });
     if (!favoritesRowOn(s, scope)) return null;
     const f = s.wsFavs;
     const l: Line | null = !f ? { kind: "load", done: 0, total: null } : !f.signedIn ? null : f.error ? { kind: "error", text: f.error }
@@ -86,12 +91,12 @@ export function WsSetLoad({ scope = "workshop" }: { scope?: FavScope }) {
   // while the total isn't known); at the end the bar runs out to the edge, then the line fades and lifts away. Motion off:
   // it fades in and out in place and the bar steps (index.css § the favourites' load line)
   return (
-    <div className={`ws-set-load-dock${l.kind === "error" ? " flow" : ""}`} ref={dock}>
+    <div className={`ws-set-load-dock${l.kind !== "load" ? " flow" : ""}`} ref={dock}>
       <div className={`ws-set-load${closing ? " closing" : ""}${away ? " away" : ""}${active ? "" : " idle"}`} data-ws-set-load={l.kind}
         role={l.kind === "error" ? "alert" : "status"}>
         {/* keyed by kind: the words of a load and of an error cross-fade, a count steps in place */}
         <span key={l.kind} className="wsl-text">{words(l)}</span>
-        {l.kind === "error"
+        {l.kind === "cooldown" ? null : l.kind === "error"
           ? <button type="button" className="btn ghost wsl-retry" data-wsl-retry disabled={closing} onClick={() => loadFavorites("open")}>Retry</button>
           : (
             <span className="wsl-track" aria-hidden>

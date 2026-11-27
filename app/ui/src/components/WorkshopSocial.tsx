@@ -7,6 +7,7 @@ import { fmtCount } from "./sideFormat";
 import { useMotion } from "./motion";
 import { glideFlip, snapFlip, type FlipSnap } from "./flipGlide";
 import { revealCard } from "../hooks/gridKeys";
+import { useAfterCooldown } from "../hooks/useAfterCooldown";
 
 // The item sidebars' Workshop community pieces (ItemSide.tsx, on both tabs): the creator, the
 // favourite toggle, the comment thread and (Library) the item's counts (the backend: Web/WorkshopSocialOps.cs). Reading works signed out; favouriting and posting need the Steam sign-in: without it
@@ -15,7 +16,8 @@ import { revealCard } from "../hooks/gridKeys";
 // community site per IP (every call is spaced and stops during its cooldown — Helpers/SteamGate.cs), so the sidebar asks
 // only for what the user looks at: the creator and the favourite once the sidebar has stayed on an item for SETTLE_MS (a
 // run of arrow keys asks for nothing), the comments once their section scrolls into view, and each answer is kept for the
-// session.
+// session. A read Steam's cooldown refused waits for its end without a line of its own (the sidebar's cooldown notice says it
+// once: SteamCooldown.tsx), then asks again by itself. Guard: probe-steam cool:side
 
 const SETTLE_MS = 350;
 const PAGE = 10;
@@ -95,13 +97,17 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCreator | null>(() => creators.get(workshopId) ?? null);
   const [failed, setFailed] = useState(false);
+  // refused for Steam's cooldown: still "…" (no "Steam creator" stand-in), asked again at its end
+  const [cooled, setCooled] = useState(false);
+  const [tries, setTries] = useState(0);
+  useAfterCooldown(cooled, () => { setCooled(false); setTries((n) => n + 1); });
   useEffect(() => {
     if (!settled || creators.has(workshopId)) return;
     let alive = true;
     api.workshopCreator(workshopId, authorId).then((r) => { creators.set(workshopId, r); if (alive) setC(r); })
-      .catch(() => { if (alive) setFailed(true); });
+      .catch((e) => { if (!alive) return; if (useStore.getState().noteSteamRefusal(e)) setCooled(true); else setFailed(true); });
     return () => { alive = false; };
-  }, [settled, workshopId, authorId]);
+  }, [settled, workshopId, authorId, tries]);
   const id = c?.steamId ?? authorId ?? null;
   // nothing to say who made it (the creator unknown and unreadable): no row
   if (failed && !id) return null;
@@ -195,15 +201,19 @@ export function FavoritePill({ workshopId, count }: { workshopId: string; count:
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pops, setPops] = useState(0); // user changes: the star's key, so each one pops once
+  // its state refused for Steam's cooldown: still loading (a click does nothing) until its end, then asked again
+  const [cooled, setCooled] = useState(false);
+  const [tries, setTries] = useState(0);
+  useAfterCooldown(cooled, () => { setCooled(false); setTries((n) => n + 1); });
   useEffect(() => {
     if (!settled || favorites.has(workshopId)) return;
     let alive = true;
     api.workshopFavorite(workshopId).then((r) => {
       if (r.signedIn && r.favorited != null) { favorites.set(workshopId, r.favorited); favoritesCounted.set(workshopId, r.favorited); }
       if (alive) { setSt(r); setCounted(r.favorited ?? null); }
-    }).catch(() => { if (alive) setSt({ signedIn: true, favorited: null }); });
+    }).catch((e) => { if (!alive) return; if (useStore.getState().noteSteamRefusal(e)) setCooled(true); else setSt({ signedIn: true, favorited: null }); });
     return () => { alive = false; };
-  }, [settled, workshopId]);
+  }, [settled, workshopId, tries]);
   const on = st?.favorited === true;
   const signedOut = st?.signedIn === false;
   const openOnSteam = useStore((s) => s.openOnSteam);
@@ -217,6 +227,7 @@ export function FavoritePill({ workshopId, count }: { workshopId: string; count:
     setSt({ signedIn: true, favorited: want }); setPops((n) => n + 1);
     try { const r = await api.workshopSetFavorite(workshopId, want); favorites.set(workshopId, r.favorited); }
     catch (e) {
+      useStore.getState().noteSteamRefusal(e); // a cooldown it ran into: the sidebar's notice counts it down
       setSt({ signedIn: !(e instanceof ApiError && e.signIn), favorited: !want }); setPops((n) => n + 1);
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
@@ -300,7 +311,8 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
   const [total, setTotal] = useState<number | null>(null);
   const [owner, setOwner] = useState<string | null>(authorId ?? null);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  // "cooled": refused for Steam's cooldown (the sidebar's notice says it; no line here), read again at its end
+  const [state, setState] = useState<"idle" | "loading" | "error" | "cooled">("idle");
   const [err, setErr] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
@@ -314,10 +326,14 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
       setOwner(r.owner); setSignedIn(r.signedIn); setTotal(r.total);
       setList((l) => (start === 0 ? r.comments : [...l, ...r.comments.filter((c) => !l.some((x) => x.id === c.id))]));
       setState("idle");
-    } catch (e) { setState("error"); setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) {
+      if (useStore.getState().noteSteamRefusal(e)) { setState("cooled"); return; }
+      setState("error"); setErr(e instanceof Error ? e.message : String(e));
+    }
   };
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; });
+  useAfterCooldown(state === "cooled", () => void loadRef.current(list.length));
   // in view (the sidebar's own scroller) → read; the observer goes once it has fired
   useEffect(() => {
     const el = ref.current;
@@ -336,6 +352,7 @@ export function CommentsSection({ workshopId, authorId }: { workshopId: string; 
       const r = await api.workshopPostComment(workshopId, owner, t, PAGE);
       setText(""); setList(r.comments); setTotal(r.total); setFresh(r.comments[0]?.id ?? null);
     } catch (e2) {
+      useStore.getState().noteSteamRefusal(e2);
       if (e2 instanceof ApiError && e2.signIn) setSignedIn(false);
       setPostErr(e2 instanceof Error ? e2.message : String(e2));
     } finally { setPosting(false); }
@@ -395,10 +412,12 @@ export function WsListNote() {
   // a local set (a Yours row ✓) isn't the list's pages: neither the list's error nor its emptiness is the set's.
   // Guard: probe-steam yours:inList
   const local = useStore((s) => s.localSetOn());
+  // a list Steam's cooldown refused: Browse's cooldown notice says so, once (WsSetLoad.tsx)
+  const cooled = useStore((s) => !!s.browseCooled && s.steamCoolUntil > 0);
   const note = useStore((s) => s.wsListNote);
   const empty = useStore((s) => !!s.wsList && !s.loading && !s.hasMore && s.wallpapers.length === 0 && s.browseFor !== "");
   const kind = useStore((s) => s.wsList?.kind);
-  if (local || (!note && !empty)) return null;
+  if (local || cooled || (!note && !empty)) return null;
   const text = note ? note.text
     : kind === "presets" ? "This scene has no presets yet — or none that match these filters." : "No wallpapers here match these filters.";
   return <div className="wf-none ws-list-note" data-ws-list-note={note ? "error" : "empty"}><span>{text}</span></div>;

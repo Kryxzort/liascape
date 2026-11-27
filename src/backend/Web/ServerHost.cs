@@ -91,11 +91,14 @@ public static class ServerHost
                 Console.WriteLine($"error: {ctx.Request.Method} {ctx.Request.Path}: {e.GetType().Name}: {e.Message}");
                 if (ctx.Response.HasStarted) return;
                 ctx.Response.StatusCode = e is SteamCooldownException ? 429 : 500;
-                await ctx.Response.WriteAsJsonAsync(new { error = e.Message });
+                await ctx.Response.WriteAsJsonAsync(e is SteamCooldownException cd ? cd.Body : new { error = e.Message });
             }
         });
         app.UseWebSockets();
         EventBus.WirePlayer();
+        // Steam's cooldown started, grew or ended: every page's notice counts down to the backend's end (or leaves), and what
+        // it skipped reloads. Guard: scripts/test-workshop-social.sh § 4 "the cooldown's state and events"
+        SteamGate.Changed += SteamOps.CooldownChanged;
 
         // Serve the built React UI same-origin (so the client uses relative paths, no CORS).
         // LIASCAPE_UI_DIR points at app/ui/dist (dev) or the bundled wwwroot (packaged).
@@ -541,7 +544,7 @@ public static class ServerHost
                 return Results.Json(list);
             }
             // Steam asked us to slow down (SteamGate): say when to retry — nothing more was sent
-            catch (SteamCooldownException e) { return Results.Json(new { error = e.Message }, statusCode: 429); }
+            catch (SteamCooldownException e) { return Results.Json(e.Body, statusCode: 429); }
         });
 
         app.MapPost("/detail", async (DetailReq r) =>

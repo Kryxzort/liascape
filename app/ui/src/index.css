@@ -423,8 +423,13 @@ button { font: inherit; cursor: pointer; border: 0; background: none; color: inh
   transition: opacity .2s ease-in .25s, transform .2s ease-in .25s; }
 .ws-set-load.closing.away { transition-delay: 0s; }
 .wsl-text { animation: nm-in .2s ease-out; }
-.ws-set-load[data-ws-set-load="error"] { grid-auto-flow: column; align-items: center; gap: 12px; padding-bottom: 9px; }
-.ws-set-load[data-ws-set-load="error"] .wsl-text { color: var(--warn); }
+/* Steam's cooldown over Browse's grid (WsSetLoad.tsx, SteamCooldown.tsx) takes the error's look and room, without Retry */
+.ws-set-load:is([data-ws-set-load="error"], [data-ws-set-load="cooldown"]) { grid-auto-flow: column; align-items: center; gap: 12px; padding-bottom: 9px; }
+.ws-set-load:is([data-ws-set-load="error"], [data-ws-set-load="cooldown"]) .wsl-text { color: var(--warn); }
+/* the cooldown's count (SteamCooldown.tsx CooldownWords): each new number cross-fades in, in figures of one width so the
+   words beside it never shift (motion off: the same fade, linear). Guard: probe-steam cool:browse, cool:browseOff */
+.cool-n { display: inline-block; font-variant-numeric: tabular-nums; animation: nm-in .24s ease-out; }
+:root.no-motion .cool-n { animation: nm-in var(--fade-dur) linear; }
 .ws-set-load-dock.flow > .ws-set-load { top: 0; }
 /* the line takes no click; only Retry does */
 .wsl-retry { padding: 4px 12px; font-size: 12px; pointer-events: auto; }

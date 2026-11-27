@@ -15,7 +15,8 @@
 //   GET  /profiles/S/myworkshopfiles/?…myfavorites  S's favourites page (filedetails links + Steam's "Showing a-b of N entries"), 30 a
 //                                                   page, to S's own sign-in cookie only (any account's "<S>||<token>")
 //   POST /ISteamRemoteStorage/GetPublishedFileDetails/v1/  the keyless details, current AND lifetime counts
-//   GET  /__log  the requests so far     POST /__ratelimit  the next request answers 429     /__fav?id=N  favourited on "Steam"
+//   GET  /__log  the requests so far     POST /__ratelimit[?after=S]  the next request answers 429 (Retry-After S, default 120)
+//   /__fav?id=N  favourited on "Steam"
 //   POST /__myfavs {ids: string[], steamid?, hold?}  an account's favourites page list, in its order (default: the signed-in
 //        account's, three ids); hold = a page number whose next request waits for POST /__release (a test acts in between)
 //        Guard: the default list, test-workshop-social.sh "favourites of a private profile: the community page …"; a set
@@ -34,7 +35,7 @@ const OWNER = "76561198000000007";        // the creator of the items with comme
 const ITEM = "3000000001";
 const log = [];
 const favs = new Set();                   // `${steamid}:${id}`
-let rateLimitNext = false;
+let rateLimitNext = false, retryAfter = "120";
 const favLists = { [ME]: ["3100000001", "3100000002", "3100000003"] };
 let holdPage = 0, release = () => { };
 const oddPages = {};                      // page number → "login" | "blank", served once
@@ -106,7 +107,7 @@ const server = http.createServer(async (req, res) => {
   if (!u.pathname.startsWith("/__")) log.push(entry);
   const send = (status, b, type = "application/json") => { res.writeHead(status, { "Content-Type": type }); res.end(typeof b === "string" ? b : JSON.stringify(b)); };
   if (u.pathname === "/__log") return send(200, log);
-  if (u.pathname === "/__ratelimit") { rateLimitNext = true; return send(200, {}); }
+  if (u.pathname === "/__ratelimit") { rateLimitNext = true; retryAfter = u.searchParams.get("after") || "120"; return send(200, {}); }
   if (u.pathname === "/__fav") { favs.add(`${ME}:${u.searchParams.get("id")}`); return send(200, {}); }
   if (u.pathname === "/__myfavs" && req.method === "POST") {
     try { const b = JSON.parse(raw); favLists[b.steamid ?? ME] = (b.ids ?? []).map(String); holdPage = +b.hold || 0; }
@@ -115,7 +116,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (u.pathname === "/__release") { release(); return send(200, {}); }
   if (u.pathname === "/__oddpage") { oddPages[+u.searchParams.get("p") || 1] = u.searchParams.get("kind") || "blank"; return send(200, {}); }
-  if (rateLimitNext) { rateLimitNext = false; res.writeHead(429, { "Content-Type": "text/html", "Retry-After": "120" }); return res.end("Too Many Requests"); }
+  if (rateLimitNext) { rateLimitNext = false; res.writeHead(429, { "Content-Type": "text/html", "Retry-After": retryAfter }); return res.end("Too Many Requests"); }
 
   let m;
   if (req.method === "GET" && u.pathname === "/sharedfiles/filedetails/") {

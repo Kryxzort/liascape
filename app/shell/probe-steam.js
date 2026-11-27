@@ -152,6 +152,22 @@
 //   ws:favoriteSteam[Off] no usable sign-in: the pill is "Favourite on Steam" (its name, the reason as its tooltip) once the state
 //                         lands, keeping its box; a click opens the item's page in the Steam app (POST /steam/open-page
 //                         {watch: "favorite"}), sends no favourite; no-glow + bg-live
+//   cool:browse[Off]      Steam's cooldown refusing Browse's Workshop list: one notice over the grid ("Steam is limiting requests
+//                         from this connection — back in 2 min", the warn colour, no Retry, no status line or list note), rising
+//                         in (Off: a fade); the count going on (90 s, 89 s…); nothing asked meanwhile; the backend's end → it
+//                         leaves (Off: a fade) and the list is asked again. Shots steam-cool-browse*.png
+//   cool:end              the countdown running out by itself: Browse's notice leaves and its list, the sidebar's comments are asked
+//                         again once, at the end; a 1 s cooldown still shows its notice and asks again
+//   cool:more             the next page refused: the notice, the shown cards kept, page 2 asked again only at the end
+//   cool:side[Off]        the item sidebar's notice (the body's notice block, before the action area) rising in as a cooldown starts
+//                         (the action area gliding; Off: a fade); an item opened during it: comments and creator refused with no
+//                         line of their own; the end → it leaves, both asked again. Shots steam-cool-side*.png
+//   cool:author           the Author field's lookup refused: its error state in the cooldown's short words; asked again at the end.
+//                         Shot steam-cool-author.png
+//   cool:authorStale      a newer list lookup on its way when the cooldown ends: the refused Author lookup doesn't go over it
+//   cool:stale            a status read asked before a cooldown and answered after it saying none: the notice stays; one asked
+//                         during a cooldown the page never knew of, answered after its end: no notice
+//   cool:local            Browse's list refused, then the In my library ✓: the notice goes with the list, the end asks nothing
 //   ws:comments[Off]      the comments: read only once in view, 10 of 23 newest first, the creator's marked, the text plain (markup
 //                         as typed, nothing injected), they rise in (Off: fade), Show older reads start 10; signed out no box;
 //                         a failed read a quiet line, Retry; bg-live
@@ -315,6 +331,8 @@ const STUB = `(() => {
     st.bodies.push({ p, m, body: typeof o.body === "string" ? o.body : null });
     const res = (b, status = 200) => Promise.resolve(new Response(b == null ? "" : JSON.stringify(b), { status, headers: b == null ? {} : { "Content-Type": "application/json" } }));
     // __probe_steam_status_fail: the status can't be read (Steam's state stays unknown: yours:steamUnknown)
+    // window.__stHold = []: a status read waits until a cell calls each held resolver (cool:stale)
+    if (p === "/steam/status" && window.__stHold) return new Promise((r) => window.__stHold.push(() => r(res(st.status))));
     if (p === "/steam/status") return localStorage.getItem("__probe_steam_status_fail") === "1" ? res({ error: "the backend's status read failed" }, 500) : res(st.status);
     if (p === "/workshop/my-favorites") {
       (st.favAsks ??= []).push(new URL(String(u), location.href).searchParams.get("sync"));
@@ -360,13 +378,20 @@ const STUB = `(() => {
     }
     // the Browse sidebar's Workshop community pieces (ws:*): the state a cell puts in window.__ws, every call recorded
     const W = (window.__ws ??= {});
-    if (p === "/workshop/creator") { st.calls.push({ p, q: String(u) }); return res(W.creator ?? { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null }); }
+    // Steam's cooldown (cool:*): a read W names answers the backend's 429 with how long is left (SteamGate's
+    // SteamCooldownException.Body): W.creatorCool, W.favCool, W.comCool, W.authorCool, W.browseCool (a Workshop page read),
+    // W.moreCool (its later pages only) = the ms left
+    const cool = (ms) => res({ error: "Steam is limiting requests from this connection — try again in 2 min", cooldownMs: ms }, 429);
+    // W.detailsDelay: Steam's details of an item held that many ms, then the stack's backend answers (cool:authorStale)
+    if (p === "/workshop/details" && m === "POST" && W.detailsDelay) return new Promise((r) => setTimeout(() => r(f(u, o)), W.detailsDelay));
+    if (p === "/workshop/creator") { st.calls.push({ p, q: String(u) }); if (W.creatorCool) return cool(W.creatorCool); return res(W.creator ?? { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null }); }
     // the filter column's Author field (list:*): W.authors (by what was typed, trimmed, lower case), else the creator by their ID,
     // their profile link (its ID shown: no name) or their name, else the backend's words for a name it never saw; held
     // W.authorDelay ms. With __probe_author_real the stack's backend answers it (list:author:real)
     if (p === "/workshop/author") {
       const q = new URL(String(u), location.href).searchParams.get("q") ?? "";
       st.calls.push({ p, q });
+      if (W.authorCool) return cool(W.authorCool);
       if (localStorage.getItem("__probe_author_real") === "1") return f(u, o);
       const me = { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null };
       const A = { "76561190000000007": me, "https://steamcommunity.com/id/probecreator": { ...me, name: null }, "probe creator": me, ...(W.authors ?? {}) };
@@ -377,7 +402,7 @@ const STUB = `(() => {
     // a preset's base (ws:presetBase): W.base, else Steam's "not a preset"
     if (p === "/workshop/base") { st.calls.push({ p, q: String(u) }); return W.base ? res(W.base) : res({ error: "Steam lists no base for this item: it isn't a preset" }, 404); }
     // W.favDelay: the state's answer held that many ms (ws:favoriteSteam: the words' swap as it lands)
-    if (p === "/workshop/favorite" && m === "GET") { st.calls.push({ p, m }); const out = res(W.fav ?? { signedIn: false, favorited: null });
+    if (p === "/workshop/favorite" && m === "GET") { st.calls.push({ p, m }); if (W.favCool) return cool(W.favCool); const out = res(W.fav ?? { signedIn: false, favorited: null });
       return W.favDelay ? new Promise((r) => setTimeout(() => r(out), W.favDelay)) : out; }
     if (p === "/workshop/favorite" && m === "POST") {
       const b = JSON.parse(o.body); st.calls.push({ p, m, body: b });
@@ -386,7 +411,8 @@ const STUB = `(() => {
     }
     if (p === "/workshop/comments") {
       const q = new URL(String(u), location.href).searchParams, s0 = +q.get("start"), n = +q.get("count");
-      st.calls.push({ p, start: s0, count: n });
+      st.calls.push({ p, start: s0, count: n, t: performance.now() });
+      if (W.comCool) return cool(W.comCool);
       if (W.comFail) return res({ error: "Couldn't reach Steam" }, 502);
       const all = W.comments ?? [];
       return res({ signedIn: !!W.signedIn, owner: "76561190000000007", total: all.length, start: s0, comments: all.slice(s0, s0 + n) });
@@ -433,7 +459,8 @@ const STUB = `(() => {
     }
     if (p === "/browse" && m === "POST") {
       const b = JSON.parse(o.body);
-      (st.browses ??= []).push(b); // every list read (ws:*), apart from the cells' own calls
+      (st.browses ??= []).push({ ...b, t: performance.now() }); // every list read (ws:*), apart from the cells' own calls
+      if (b.filter && (W.browseCool || (W.moreCool && b.page > 1))) return cool(W.browseCool || W.moreCool);
       const y = Y();
       // y.endless: every later Workshop page holds six more (the list never ends: its placeholders stay)
       if (y?.endless && !b.list && b.page > 1) return res(Array.from({ length: 6 }, (_, i) => ({ ...y.page[0], title: "ws-p" + b.page + "-" + i,
@@ -2967,6 +2994,417 @@ app.whenReady().then(async () => {
         return v;
       });
     }
+
+    // ---- Steam's cooldown (components/SteamCooldown.tsx): one notice per surface, counting down to the backend's end ----
+    // The reads are this page's stub: each answers the backend's 429 with how long is left (W.*Cool); its end is a
+    // `steam-status` {cooldownMs: 0} (the backend's Changed) or the countdown running out on its own (cool:end).
+    const COOL_WORDS = /^Steam is limiting requests from this connection — back in (\d+) (min|s)$/;
+    const COOL_NOTE = `.br-scroll [data-ws-set-load="cooldown"]`;
+    const SIDE_COOL = `${SIDE} [data-cool-side]`;
+    const opY = (sel) => `(() => { const e = document.querySelector(${J(sel)}); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m42]; })()`;
+    const pillClick = (n) => `[...document.querySelectorAll(".pill")].find((e) => e.textContent.trim() === ${J(n)})?.click();`;
+    const srcNames = async () => { const s = (await http("GET", "/sources")).json; return { ws: s.find((x) => x.supportsTagFilter)?.name, other: s.find((x) => !x.supportsTagFilter && x.available)?.name }; };
+    const wsBrowses = async () => (await browses()).filter((b) => b.filter);
+    const coolEnd = () => ev("steam-cooldown", { cooldownMs: 0 });
+
+    // cool:browse[Off] — Browse's Workshop list refused for the cooldown (a source switch back to the Workshop): the notice over
+    // the grid in the favourites line's look (the warn colour, no Retry), its words "… — back in 2 min", the only notice on the
+    // page (no status line, no list note), rising in (Off: fading in place); the count goes on by itself (95 s: "2 min", then
+    // "90 s", "89 s"); nothing more asked while it lasts; the backend's end → it leaves (Off: a fade) and the list is asked
+    // again, its cards back. On: no-glow + bg-live keep its fill. Shots steam-cool-browse*.png
+    for (const motion of [true, false]) {
+      await cell(`cool:browse${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        if (!motion && !(await js(`document.documentElement.classList.contains("no-motion")`))) return ["motion off: the page isn't in no-motion — proved nothing"];
+        const { ws, other } = await srcNames();
+        if (!other) return ["no other source to switch to — proved nothing"];
+        await page(pillClick(other)); await sleep(600);
+        await W({ browseCool: 95_000 });
+        const nb = (await wsBrowses()).length;
+        const smp = motion ? null : js(MO.SAMPLE({ n: COOL_NOTE }, 700));
+        if (!motion) await sleep(40);
+        const fr = frames(pillClick(ws), opY(COOL_NOTE), 700);
+        if (motion) { await sleep(130); await shot("cool-browse-in"); }
+        const f = await fr;
+        await sleep(300);
+        const r = await page(`const e = document.querySelector(${J(COOL_NOTE)}); if (!e) return null; const t = e.querySelector(".wsl-text");
+          return { text: t.textContent, notices: document.querySelectorAll("[data-ws-set-load], [data-ws-list-note], [data-cool-side]").length,
+            status: document.querySelector(".status")?.textContent ?? "", retry: !!e.querySelector("button"), color: getComputedStyle(t).color,
+            role: e.getAttribute("role") };`);
+        const warn = await js(`(() => { const d = document.createElement("i"); d.style.color = "var(--warn)"; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; })()`);
+        console.log(`        ${J(r)}`);
+        if (!r) return ["no cooldown notice over Browse's grid"];
+        if (!/^Steam is limiting requests from this connection — back in 2 min$/.test(r.text)) v.push(`the words: ${J(r.text)} (want "… — back in 2 min")`);
+        if (r.notices !== 1) v.push(`${r.notices} notices on the page (want the one)`);
+        if (/limiting/.test(r.status)) v.push(`the status line says it too: ${J(r.status)}`);
+        if (r.retry) v.push("the notice has a button (the list asks again by itself)");
+        if (r.color !== warn) v.push(`its words are ${r.color} (want the warn colour ${warn})`);
+        if (r.role !== "status") v.push(`role ${r.role} (want status)`);
+        if (motion) {
+          const ops = f.filter((x) => x).map((x) => x[0]), ys = f.filter((x) => x).map((x) => x[1]);
+          console.log(`        in: opacity ${J(ops.slice(0, 10).map((o) => +o.toFixed(2)))} y ${J(ys.slice(0, 10).map((o) => +o.toFixed(1)))}`);
+          if (between(ops, 0.05) < 2) v.push("the notice popped in (no in-between opacity frames)");
+          if (between(ys, 0.3) < 1) v.push("the notice didn't rise in");
+        } else {
+          const s1 = await smp; console.log(`        motion off: in ${MO.brief(s1.n)}`);
+          v.push(...MO.judge("motion off: the notice appearing", s1.n, { appear: true, size: false }));
+        }
+        // the count, live: "2 min" until 90 s are left, then the seconds, one a second
+        const words = () => js(`document.querySelector(${J(COOL_NOTE)} + " .wsl-text")?.textContent ?? null`);
+        const secs = await waitFor(async () => { const w = await words(); const m = COOL_WORDS.exec(w ?? ""); return m && m[2] === "s" ? +m[1] : null; }, 8000);
+        await sleep(1100);
+        const m2 = COOL_WORDS.exec((await words()) ?? "");
+        console.log(`        the count: ${secs} s, then ${m2?.[1]} ${m2?.[2]}`);
+        if (!secs || secs > 90 || secs < 85) v.push(`the count never turned to seconds at 90 s (${secs})`);
+        else if (!m2 || m2[2] !== "s" || +m2[1] >= secs || +m2[1] < secs - 2) v.push(`the count didn't go on: ${secs} s, then ${J(m2?.[0])}`);
+        const during = (await wsBrowses()).slice(nb);
+        if (during.length !== 1) v.push(`${during.length} Workshop reads during the cooldown (want the one refused)`);
+        if (motion) await shot("cool-browse");
+        // the end: the notice leaves, the list is asked again and shows
+        await W({ browseCool: 0 });
+        const n1 = (await wsBrowses()).length;
+        // a scroller's scrollbar, as thick as the page draws it
+        const bar = await js(`(() => { const d = document.createElement("div"); d.className = "scroll"; d.style.cssText = "position:absolute;left:-999px;width:100px;height:50px;overflow-y:scroll";
+          document.body.append(d); const w = d.offsetWidth - d.clientWidth; d.remove(); return w; })()`);
+        const smp2 = motion ? null : js(MO.SAMPLE({ n: COOL_NOTE }, 700));
+        if (!motion) await sleep(40);
+        const fo = frames(`window.__fakeWs("steam-cooldown", { cooldownMs: 0 });`, opY(COOL_NOTE), 700);
+        const g = await fo;
+        await sleep(500);
+        const after = await page(`return { note: !!document.querySelector(${J(COOL_NOTE)}), cards: document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length };`);
+        const again = (await wsBrowses()).slice(n1);
+        console.log(`        after the end: ${J(after)}, asked ${J(again.map((b) => b.page))}`);
+        if (after.note) v.push("the notice stayed after the cooldown ended");
+        if (again.filter((b) => b.page === 1).length !== 1 || again[0]?.page !== 1) v.push(`after the end the list was asked ${J(again.map((b) => b.page))} (want page 1 once, first)`);
+        if (!after.cards) v.push("no cards after the end");
+        if (motion) {
+          const ops = g.filter((x) => x).map((x) => x[0]);
+          if (between(ops, 0.05) < 2) v.push(`the notice vanished (no in-between frames: ${J(ops.slice(0, 10))})`);
+        } else {
+          const s2 = await smp2; console.log(`        motion off: out ${MO.brief(s2.n)}`);
+          // the list coming back (its cards, then a moment of placeholders until the next page answers) can bring the
+          // scroller's scrollbar, which re-centres the line at once by half its thickness (a layout change, not a motion):
+          // anything else that moves or resizes fails
+          const dx = bar / 2 + 0.75;
+          const shown = s2.n.filter((x) => x[1] != null), f0 = shown[0];
+          const moved = shown.find((x) => Math.abs(x[3] - f0[3]) > 0.75 || Math.abs(x[4] - f0[4]) > 0.75 || Math.abs(x[5] - f0[5]) > 0.75 || Math.abs(x[2] - f0[2]) > dx);
+          if (moved) v.push(`motion off: the notice moved while leaving (${J(f0)} → ${J(moved)}; a scrollbar is ${bar} px)`);
+          v.push(...MO.judge("motion off: the notice leaving", s2.n, { leave: true, size: false, still: false }));
+        }
+        if (motion) {
+          // no-glow + bg-live (a fresh page: the toggles apply on load): the notice keeps its fill
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await page(pillClick(other)); await sleep(600);
+          await W({ browseCool: 95_000 }); await page(pillClick(ws));
+          await waitFor(() => js(`!!document.querySelector(${J(COOL_NOTE)})`), 3000); await sleep(500);
+          const lk = await looks(COOL_NOTE);
+          if (!/no-glow/.test(lk?.html ?? "") || !/bg-live/.test(lk?.html ?? "")) v.push(`the toggles didn't apply: ${lk?.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk?.bg ?? "")) v.push(`bg-live: the notice has no fill (${lk?.bg})`);
+          await shot("cool-browse-live");
+          await W({ browseCool: 0 }); await coolEnd();
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+        }
+        return v;
+      });
+    }
+
+    // cool:end — the countdown running out on its own (no event): Browse's notice ("3 s") leaves at 0 and the list is asked
+    // again once; the sidebar's comments refused at its open read again by themselves once it is over, not before
+    await cell("cool:end", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      const { ws, other } = await srcNames();
+      if (!other) return ["no other source to switch to — proved nothing"];
+      await page(pillClick(other)); await sleep(600);
+      await W({ browseCool: 3000 });
+      const nb = (await wsBrowses()).length;
+      await page(pillClick(ws));
+      if (!(await waitFor(() => js(`!!document.querySelector(${J(COOL_NOTE)})`), 2000))) return ["no notice for a 3 s cooldown"];
+      await W({ browseCool: 0 }); // the stub would answer now: nothing may ask before the end
+      const t0 = await js(`performance.now()`);
+      await sleep(1200);
+      if ((await wsBrowses()).length !== nb + 1) v.push("the list was asked again before the cooldown ended");
+      const gone = await waitFor(() => js(`!document.querySelector(${J(COOL_NOTE)})`), 4000);
+      await sleep(400);
+      const again = (await wsBrowses()).slice(nb + 1).filter((b) => b.page === 1);
+      if (!gone) v.push("the notice stayed after its countdown ran out");
+      if (again.length !== 1 || again[0].t - t0 < 1500) v.push(`after the countdown the list was asked ${again.length} time(s) (${J(again.map((b) => Math.round(b.t - t0)))} ms in; want once, at the end)`);
+      // the sidebar: the comments refused while it opened, read again by themselves when the countdown ends
+      await W({ comments: COMMENTS, signedIn: false, comCool: 3000 });
+      await openSide(0);
+      const SEC = `${SIDE} [data-ws-comments]`;
+      await scrollSideTo(SEC);
+      if (!(await waitFor(() => js(`document.querySelector(${J(SEC)})?.dataset.wsComments === "cooled"`), 3000))) return [...v, "the comments weren't refused — proved nothing"];
+      await W({ comCool: 0 });
+      const c0 = await wsCalls("/workshop/comments");
+      if (!(await waitFor(() => js(`document.querySelectorAll("${SEC} .ws-c").length === 10`), 5000))) v.push("the comments didn't come once the countdown ran out");
+      const c1 = await wsCalls("/workshop/comments");
+      const dt = c1.length === c0.length + 1 ? c1.at(-1).t - c0.at(-1).t : null;
+      console.log(`        comments asked ${c0.length} → ${c1.length}, again after ${Math.round(dt)} ms`);
+      if (c1.length !== c0.length + 1 || dt < 2500) v.push(`the comments were asked again ${c1.length - c0.length} time(s), ${Math.round(dt)} ms after the refusal (want once, at the end)`);
+      if (!(await waitFor(() => js(`!document.querySelector(${J(SIDE_COOL)})`), 1500))) v.push("the sidebar's notice stayed after the end");
+      // a cooldown of a second (Steam's Retry-After: 1): still the notice, and the list asked again once it is over
+      await page(`document.querySelector("${SIDE} .side-close")?.click(); return true;`); await sleep(400);
+      await page(pillClick(other)); await sleep(600);
+      await W({ browseCool: 1000 });
+      const nc = (await wsBrowses()).length;
+      await page(pillClick(ws)); await sleep(150);
+      await W({ browseCool: 0 });
+      const short = await js(`document.querySelector(${J(COOL_NOTE)} + " .wsl-text")?.textContent ?? null`);
+      await sleep(2000);
+      const asked = (await wsBrowses()).slice(nc).filter((b) => b.page === 1).length;
+      const st2 = await js(`document.querySelector(".status")?.textContent ?? ""`);
+      console.log(`        a 1 s cooldown: ${J(short)}, page 1 asked ${asked} time(s), status ${J(st2)}`);
+      if (!/back in 1 s$/.test(short ?? "")) v.push(`a 1 s cooldown showed ${J(short)} (want "… — back in 1 s")`);
+      if (asked !== 2) v.push(`a 1 s cooldown: page 1 asked ${asked} time(s) (want the refused one and once more at its end)`);
+      if (/limiting/.test(st2)) v.push(`a 1 s cooldown went to the status line: ${J(st2)}`);
+      return v;
+    });
+
+    // cool:stale — a Steam status read asked before a cooldown began (held while the page reconnects) and answered after it,
+    // saying none: older news than the cooldown, so the notice stays and the list isn't asked early
+    await cell("cool:stale", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      const { ws, other } = await srcNames();
+      if (!other) return ["no other source to switch to — proved nothing"];
+      await page(pillClick(other)); await sleep(600);
+      await js(`window.__st.status = { ...window.__st.status, cooldownMs: 0 }; window.__stHold = []; window.__wsDrop()`);
+      if (!(await waitFor(() => js(`window.__stHold.length > 0`), 5000))) return ["the reconnect asked no status — proved nothing"];
+      await W({ browseCool: 95_000 });
+      const nb = (await wsBrowses()).length;
+      await page(pillClick(ws));
+      if (!(await waitFor(() => js(`!!document.querySelector(${J(COOL_NOTE)})`), 3000))) return ["no notice for the refused list — proved nothing"];
+      await js(`{ const h = window.__stHold; window.__stHold = null; h.forEach((r) => r()); } true`);
+      await sleep(800);
+      const still = await js(`!!document.querySelector(${J(COOL_NOTE)})`), asked = (await wsBrowses()).slice(nb).length;
+      console.log(`        after the stale status: notice ${still}, Workshop reads ${asked}`);
+      if (!still) v.push("a status read asked before the cooldown ended it");
+      if (asked !== 1) v.push(`the list was asked ${asked} times (want the refused one only)`);
+      await W({ browseCool: 0 }); await coolEnd(); await sleep(400);
+      // and the other way: a read held while a cooldown was on says so after the backend said it was over (the page never
+      // knew of it): older news again, no notice (the sidebar's would show it: Browse's list wasn't refused)
+      await openSide(0);
+      await js(`window.__st.status = { ...window.__st.status, cooldownMs: 95000 }; window.__stHold = []; window.__wsDrop()`);
+      if (!(await waitFor(() => js(`window.__stHold.length > 0`), 5000))) return [...v, "the second reconnect asked no status — proved nothing"];
+      await coolEnd(); await sleep(200);
+      await js(`{ const h = window.__stHold; window.__stHold = null; h.forEach((r) => r()); } true`);
+      await sleep(800);
+      const back = await js(`!!document.querySelector(${J(COOL_NOTE)}) || !!document.querySelector("[data-cool-side]")`);
+      if (back) v.push("a status read asked before the backend said the cooldown was over brought a notice back");
+      await js(`window.__st.status = { ...window.__st.status, cooldownMs: 0 }; true`);
+      return v;
+    });
+
+    // cool:local — Browse's list refused, then a view of the page's own (the In my library ✓): the notice is the refused list's,
+    // so it goes with it, and the view stays as it is when the cooldown ends (no Workshop read)
+    await cell("cool:local", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      const { ws, other } = await srcNames();
+      if (!other) return ["no other source to switch to — proved nothing"];
+      await page(pillClick(other)); await sleep(600);
+      await W({ browseCool: 95_000 });
+      await page(pillClick(ws));
+      if (!(await waitFor(() => js(`!!document.querySelector(${J(COOL_NOTE)})`), 3000))) return ["no notice for the refused list — proved nothing"];
+      const row = (s) => page(`const t = document.querySelector("[data-sortsplit] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") { t?.click(); await new Promise((r) => setTimeout(r, 450)); }
+        const b = document.querySelector('.wf-col:not(.closing) .wf-row[data-wf-tag="@library"] [data-seg=' + ${J(J(s))} + ']'); if (!b) return false; b.click(); return true;`);
+      if (!(await row("inc"))) return ["no In my library row — proved nothing"];
+      await sleep(900);
+      const nb = (await wsBrowses()).length;
+      const gone = await js(`!document.querySelector(${J(COOL_NOTE)})`);
+      if (!gone) v.push("the refused list's notice stayed over the local set");
+      await coolEnd(); await sleep(600);
+      if ((await wsBrowses()).length !== nb) v.push("the cooldown's end asked the Workshop under the local set");
+      await W({ browseCool: 0 });
+      await row("off"); await sleep(600);
+      return v;
+    });
+
+    // cool:more — the next page refused for the cooldown: its notice, the cards already shown kept, no more page asked while it
+    // lasts (the placeholders ask nothing); at the end that page is asked once by itself
+    await cell("cool:more", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      await W({ moreCool: 95_000 });
+      const nb = (await wsBrowses()).length;
+      await page(`const sc = document.querySelector(".br-scroll"); sc.scrollTop = sc.scrollHeight; return true;`);
+      if (!(await waitFor(() => js(`!!document.querySelector(${J(COOL_NOTE)})`), 4000))) return ["no notice when the next page was refused"];
+      await sleep(1500);
+      const p2 = (await wsBrowses()).slice(nb).filter((b) => b.page === 2);
+      const cards = await js(`document.querySelectorAll(".scroll:not(.lib-scroll) .card:not(.skel-card):not([data-leaving])").length`);
+      if (p2.length !== 1) v.push(`page 2 asked ${p2.length} times during the cooldown (want the one refused)`);
+      if (cards < 6) v.push(`${cards} cards (want the first page's 6 kept)`);
+      await W({ moreCool: 0 });
+      await coolEnd(); await sleep(800);
+      const p2b = (await wsBrowses()).slice(nb).filter((b) => b.page === 2);
+      if (p2b.length !== 2) v.push(`page 2 asked ${p2b.length} times in all (want once more at the end)`);
+      if (await js(`!!document.querySelector(${J(COOL_NOTE)})`)) v.push("the notice stayed after the end");
+      return v;
+    });
+
+    // cool:side[Off] — the item sidebar: a cooldown starting while it shows (steam-status) → its notice among the body's notices
+    // (the preset notice's block: the warn stripe, before the action area), rising in while the action area glides down (Off:
+    // fading in place); an item opened during it: the comments and the creator refused, no error line, the creator row still
+    // waiting ("…"); the end → the notice leaves (Off: a fade), the comments and the creator asked again by themselves.
+    // On: no-glow + bg-live. Shots steam-cool-side*.png
+    for (const motion of [true, false]) {
+      await cell(`cool:side${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs();
+        await W({ comments: COMMENTS, signedIn: false });
+        await openSide(0); await sleep(700);
+        if (await js(`!!document.querySelector(${J(SIDE_COOL)})`)) return ["a cooldown notice with no cooldown"];
+        const CTA = `${SIDE} [data-side-part="cta"]`;
+        const smp = motion ? null : js(MO.SAMPLE({ n: SIDE_COOL }, 700));
+        if (!motion) await sleep(40);
+        const fr = frames(`window.__fakeWs("steam-cooldown", { cooldownMs: 95000 });`,
+          `(() => { const e = document.querySelector(${J(SIDE_COOL)}), c = document.querySelector(${J(CTA)}); return [e ? +getComputedStyle(e).opacity : null, c ? +c.getBoundingClientRect().top.toFixed(1) : null]; })()`, 700);
+        if (motion) { await sleep(110); await shot("cool-side-in"); }
+        const f = await fr;
+        await sleep(300);
+        const r = await page(`const n = document.querySelector(${J(SIDE_COOL)}); if (!n) return null; const cta = document.querySelector(${J(CTA)}), hero = document.querySelector("${SIDE} .side-hero");
+          return { text: n.querySelector("[data-cool-words]").textContent, beforeCta: !!(n.compareDocumentPosition(cta) & 4), afterHero: !!(hero.compareDocumentPosition(n) & 4),
+            body: n.parentElement.classList.contains("side-body"), block: n.classList.contains("side-crash") && n.classList.contains("side-preset"), role: n.getAttribute("role"),
+            n: document.querySelectorAll("[data-cool-side], [data-ws-set-load='cooldown']").length };`);
+        console.log(`        ${J(r)}`);
+        if (!r) return ["no notice in the sidebar after the cooldown started"];
+        if (!/^Steam is limiting requests from this connection — back in 2 min$/.test(r.text)) v.push(`the words: ${J(r.text)}`);
+        if (!r.body || !r.beforeCta || !r.afterHero || !r.block) v.push(`placement / look: ${J(r)} (want the body's notice block, after the pills, before the action area)`);
+        if (r.n !== 1) v.push(`${r.n} cooldown notices on the page (want the sidebar's one: Browse's list wasn't refused)`);
+        if (motion) {
+          const ops = f.filter((x) => x && x[0] != null).map((x) => x[0]), ctas = f.filter((x) => x).map((x) => x[1]);
+          console.log(`        in: opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} cta ${J(ctas.slice(0, 8))}`);
+          if (between(ops, 0.05) < 2) v.push("the notice popped in");
+          if (between(ctas, 1) < 2) v.push("the action area jumped down (no glide)");
+        } else {
+          const s1 = await smp; console.log(`        motion off: in ${MO.brief(s1.n)}`);
+          v.push(...MO.judge("motion off: the notice appearing", s1.n, { appear: true, size: false }));
+        }
+        if (motion) await shot("cool-side");
+        // another item opened during the cooldown: its reads refused, nothing says so twice
+        await W({ comCool: 95_000, creatorCool: 95_000 });
+        await openSide(1); await sleep(600);
+        const SEC = `${SIDE} [data-ws-comments]`;
+        await scrollSideTo(SEC);
+        await waitFor(() => js(`document.querySelector(${J(SEC)})?.dataset.wsComments === "cooled"`), 3000);
+        const d = await page(`const s = document.querySelector(${J(SEC)}), c = document.querySelector("${SIDE} [data-ws-creator]");
+          return { com: s?.dataset.wsComments, error: !!s?.querySelector("[data-ws-error]"), loading: !!s?.querySelector("[data-ws-loading]"), shown: s?.querySelectorAll(".ws-c").length,
+            creator: c?.dataset.wsCreator, name: c?.querySelector("[data-ws-row-name]")?.textContent, note: !!document.querySelector(${J(SIDE_COOL)}),
+            arrive: document.querySelector(${J(SIDE_COOL)})?.classList.contains("arrive") };`);
+        console.log(`        during: ${J(d)}`);
+        if (d.com !== "cooled" || d.error || d.loading || d.shown) v.push(`the comments during the cooldown: ${J(d)} (want refused, no line of their own)`);
+        if (d.creator !== "loading" || d.name !== "…") v.push(`the creator row during the cooldown: ${J(d)} (want still "…")`);
+        if (!d.note || d.arrive) v.push(`the opened item's notice: ${J(d)} (want there from the open, coming in with the body)`);
+        const c0 = (await wsCalls("/workshop/comments")).length, cr0 = (await wsCalls("/workshop/creator")).length;
+        if (!c0 || !cr0) v.push(`nothing was refused (comments ${c0}, creator ${cr0}) — proved nothing`);
+        // the end
+        await W({ comCool: 0, creatorCool: 0 });
+        const smp2 = motion ? null : js(MO.SAMPLE({ n: SIDE_COOL }, 700));
+        if (!motion) await sleep(40);
+        const fo = frames(`window.__fakeWs("steam-cooldown", { cooldownMs: 0 });`, `(() => { const e = document.querySelector(${J(SIDE_COOL)}); return e ? +getComputedStyle(e).opacity : null; })()`, 600);
+        const g = await fo;
+        await waitFor(() => js(`document.querySelectorAll("${SEC} .ws-c").length === 10`), 3000); await sleep(300);
+        const e = await page(`const c = document.querySelector("${SIDE} [data-ws-creator]");
+          return { note: !!document.querySelector(${J(SIDE_COOL)}), shown: document.querySelectorAll("${SEC} .ws-c").length, name: c?.querySelector("[data-ws-row-name]")?.textContent };`);
+        const c1 = (await wsCalls("/workshop/comments")).length, cr1 = (await wsCalls("/workshop/creator")).length;
+        console.log(`        after the end: ${J(e)}, comments asked ${c0} → ${c1}, creator ${cr0} → ${cr1}`);
+        if (e.note) v.push("the notice stayed after the end");
+        if (e.shown !== 10 || c1 !== c0 + 1) v.push(`the comments after the end: ${e.shown} shown, asked ${c1 - c0} more (want 10, once)`);
+        if (e.name !== "Probe Creator" || cr1 !== cr0 + 1) v.push(`the creator after the end: ${J(e.name)}, asked ${cr1 - cr0} more (want "Probe Creator", once)`);
+        if (motion) {
+          const ops = g.filter((x) => x != null);
+          if (between(ops, 0.05) < 2) v.push(`the notice vanished (no in-between frames: ${J(ops.slice(0, 10))})`);
+        } else {
+          const s2 = await smp2; console.log(`        motion off: out ${MO.brief(s2.n)}`);
+          v.push(...MO.judge("motion off: the notice leaving", s2.n, { leave: true, size: false }));
+        }
+        if (motion) {
+          // no-glow + bg-live (a fresh page: the toggles apply on load): its own fill, the stripe without its glow
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await browseWs(); await W({ comments: COMMENTS, signedIn: false }); await openSide(0); await sleep(500);
+          await ev("steam-cooldown", { cooldownMs: 95_000 });
+          await waitFor(() => js(`!!document.querySelector(${J(SIDE_COOL)})`), 3000); await sleep(500);
+          const lk = await looks(SIDE_COOL);
+          if (!/no-glow/.test(lk?.html ?? "") || !/bg-live/.test(lk?.html ?? "")) v.push(`the toggles didn't apply: ${lk?.html}`);
+          if (/rgba\(0, 0, 0, 0\)|transparent/.test(lk?.bg ?? "")) v.push(`bg-live: the notice has no fill (${lk?.bg})`);
+          const stripe = await js(`getComputedStyle(document.querySelector(${J(SIDE_COOL)}), "::before").boxShadow`);
+          if (stripe && stripe !== "none") v.push(`no-glow: the stripe still glows (${stripe})`);
+          await shot("cool-side-live");
+          await coolEnd();
+          await setSettings({ glows: true, liveWallpaperBehindAllTabs: false });
+        }
+        return v;
+      });
+    }
+
+    // cool:author — a custom profile name looked up during the cooldown: the Author field's own error state with the cooldown's
+    // short words, counting; the typed text kept; at the end the field asks again by itself and opens that creator's list
+    await cell("cool:author", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      if (!(await openCol())) return ["no Author field in Browse's filter column"];
+      const LINK = "https://steamcommunity.com/id/someone-new";
+      await W({ authorCool: 95_000, authors: { [LINK]: { steamId: "76561190000000099", name: "Someone New", avatar: null } } });
+      const n0 = (await wsCalls("/workshop/author")).length;
+      await typeIn("creator", LINK);
+      await waitFor(async () => (await field("creator"))?.state === "error", 3000); await sleep(300);
+      const f = await field("creator");
+      console.log(`        during: ${J(f)}`);
+      if (f?.state !== "error" || !/^Steam is limiting requests — back in 2 min$/.test(f?.err ?? "")) v.push(`the field during the cooldown: ${J(f)} (want its error state, "Steam is limiting requests — back in 2 min")`);
+      if (f?.value !== LINK) v.push(`the typed text wasn't kept (${J(f?.value)})`);
+      const fits = await js(`(() => { const e = document.querySelector(${J(LFIELD("creator") + " [data-wf-field-err]")}); return e ? e.scrollWidth <= e.clientWidth + 1 : null; })()`);
+      if (fits === false) v.push("the field's cooldown words are cut off");
+      await shot("cool-author");
+      await W({ authorCool: 0 });
+      await coolEnd();
+      await waitFor(async () => (await field("creator"))?.state === "on", 3000); await sleep(300);
+      const g = await field("creator"), asks = (await wsCalls("/workshop/author")).slice(n0), l = await lastList();
+      console.log(`        after the end: ${J(g)}; asked ${J(asks.map((a) => a.q))}; list ${J(l)}`);
+      if (g?.state !== "on" || g.value !== "Someone New" || g.err) v.push(`the field after the end: ${J(g)} (want "Someone New", on)`);
+      if (asks.length !== 2) v.push(`/workshop/author asked ${asks.length} times (want the refused one and once more at the end)`);
+      if (l?.kind !== "creator" || l.id !== "76561190000000099") v.push(`the list asked: ${J(l)}`);
+      await clearField("creator"); await sleep(400);
+      return v;
+    });
+
+    // cool:authorStale — a newer lookup (the Presets of field, its answer still on its way) when the cooldown ends: the
+    // refused Author lookup doesn't go again over it, and the newer one's list opens
+    await cell("cool:authorStale", async () => {
+      const v = [];
+      await setSettings({ allowScenes: true, morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      try {
+        await browseWs();
+        if (!(await openCol())) return ["no Author field in Browse's filter column"];
+        if (!(await js(`!!document.querySelector(${J(LFIELD("presets"))})`))) return ["no Presets of field — proved nothing"];
+        // a 2.5 s cooldown that runs out by itself (no event: the same end on any build of the page)
+        await W({ authorCool: 2500 });
+        const n0 = (await wsCalls("/workshop/author")).length;
+        await typeIn("creator", "https://steamcommunity.com/id/someone-new");
+        if (!(await waitFor(async () => (await field("creator"))?.state === "error", 3000))) return ["the Author lookup wasn't refused — proved nothing"];
+        // the Presets of field: the Author field's blur commits it again (refused again, the cooldown still on), then the
+        // presets lookup, held past the cooldown's end, is the newest list operation when it ends
+        await W({ detailsDelay: 5000 });
+        await typeIn("presets", "910000003");
+        await sleep(100);
+        const n1 = (await wsCalls("/workshop/author")).length;
+        await waitFor(async () => (await lastList())?.kind === "presets", 8000); await sleep(600);
+        const l = await lastList(), asks = (await wsCalls("/workshop/author")).slice(n1).length;
+        console.log(`        list ${J(l)}; Author asked ${asks} time(s) after the end (${n1 - n0} before)`);
+        if (l?.kind !== "presets" || l.id !== "910000003") v.push(`the list opened: ${J(l)} (want the scene's presets, the newer lookup)`);
+        if (asks !== 0) v.push(`the Author lookup went again ${asks} time(s) at the end, over the newer lookup (want none)`);
+        await W({ detailsDelay: 0, authorCool: 0 }); await clearField("presets"); await sleep(400);
+      } finally { await setSettings({ allowScenes: false }); }
+      return v;
+    });
 
     // ws:commentSelect — a comment's text and its commenter's name are selectable text (a real drag selects each); a comment's
     // date says its own year (never 1970), and one Steam gave no time for shows none. Shot steam-ws-commentselect.png

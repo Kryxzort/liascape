@@ -35,7 +35,22 @@ public static class SteamOps
             // API: the Library's welcome (components/Welcome.tsx) says whether Steam is on this PC: its own steamclient.so (what
             // "Use the Steam app" loads) and the Wallpaper Engine Workshop folder the settings name. Files only, nothing loaded.
             found = new { client = SteamClientUgc.Candidates(s).Count > 0, workshopFolder = Directory.Exists(s.WorkshopFolder) },
+            // API: how long Steam's cooldown has left (Helpers/SteamGate.cs; 0 = none): the one end every page counts down to
+            // (app/ui/src/store/index.ts coolFromRead); `steam-cooldown` says it again when it starts, grows or ends
+            cooldownMs = CooldownMs(),
         };
+    }
+
+    static long CooldownMs() => (long)Math.Ceiling(SteamGate.CooldownRemaining.TotalMilliseconds);
+    static readonly object _cooldownEvents = new();
+
+    // Steam's cooldown started, grew or ended (SteamGate.Changed): its own event, never a whole `steam-status` (one read
+    // before a sign-out and sent after that sign-out's own would bring the old sign-in back to every page). Read and sent
+    // under one lock, so the pages get them in the order they were read and the last one says how things are now.
+    // Guard: scripts/test-workshop-social.sh § 4 "the cooldown's state and events"
+    public static void CooldownChanged()
+    {
+        lock (_cooldownEvents) EventBus.Broadcast("steam-cooldown", new { cooldownMs = CooldownMs() });
     }
 
     public static void StartQr()

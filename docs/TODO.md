@@ -88,11 +88,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        app (only liascape-player, the download modes, Start with your desktop, the welcome …), keep the owner's voice and
        layout, make it `README.md`, delete the branch and the untracked copies.
 
-8. [ ] (owner) One shared notice when Steam is limiting requests: wherever Steam data is missing because of the cooldown
-       (`Helpers/SteamGate.cs`: Browse, the sidebar's comments / favourite / creator, downloads), say "Steam is limiting
-       requests from this connection — back in N min" in the app's notice look, instead of the sidebar's parts going
-       quiet. One source of truth for the cooldown's end (the backend's), live countdown, gone when it ends. Guard: probe
-       cells with the stack's cooldown fixture for each place, and motion-off.
+8. [ ] (owner) A Workshop download Steam's cooldown refuses still fails as "Download failed: Steam rate-limited the
+       request." (`Helpers/WorkshopDownloader.cs` `SteamRateLimitException`, the error modal): give it the shared cooldown
+       notice's words and countdown (`app/ui/src/components/SteamCooldown.tsx`, a 429 carrying `cooldownMs`) and start the
+       download again by itself when the cooldown ends, as the sidebar's comments do. Guard: a probe-steam `cool:` cell.
 
 9. [ ] (owner) Split the biggest files so agents can work in them: `src/player/src/runtime.rs`, `app/ui/src/index.css`
        and `app/shell/probe-matrix.js` into modules / partials by area, no behaviour change (the full player suite and the

@@ -17,6 +17,7 @@ import { useLinger } from "../hooks/useLinger";
 import { WorkshopIdPill } from "./WorkshopIdPill";
 import { snapFlip, glideFlip, glideY } from "./flipGlide";
 import { BaseRow, CommentsSection, CreatorRow, FavoritePill, PresetsRow, WorkshopStats } from "./WorkshopSocial";
+import { SideCooldownNotice } from "./SteamCooldown";
 import { actionBlocked, isWorkshopItem } from "./subscribeMode";
 import { revealCard } from "../hooks/gridKeys";
 import { SizePill, StatPills } from "./sidePills";
@@ -522,6 +523,8 @@ export function ItemSide({ tab, w, lib, libTargets, hide, clearSel, onRemoved, o
         {lib && presetNote.value && !multi && (
           <PresetNotice item={lib} reason={presetNote.value} closing={presetNote.closing} arrive={!noteAtOpen} />
         )}
+        {/* Steam's cooldown: why the creator, the favourite and the comments wait (they ask again at its end) */}
+        <SideCooldownNotice on={!!social} body={bodyRef} />
         {/* the action area, one on both tabs. The library's copy: one split button, Play | Unsubscribe (a Workshop item Steam
             keeps subscribed, with auto-import on: components/itemRemoval.ts; its right-click "Unsubscribe without deleting") or
             Play | Delete (its right-click, a Workshop item with auto-import off: "Delete and unsubscribe"); a mixed selection

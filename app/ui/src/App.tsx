@@ -126,6 +126,8 @@ export default function App() {
     else if (e.type === "steam-signed-in") s.onSignedIn(e.payload);
     // API: the sign-in ended (here or by Steam): the Unsubscribe controls follow (SteamOps.SignInLost)
     else if (e.type === "steam-status") useStore.setState({ steam: e.payload });
+    // API: Steam's cooldown started, grew or ended (SteamOps.CooldownChanged): every notice counts down to it, or leaves
+    else if (e.type === "steam-cooldown") useStore.getState().steamCooldown(e.payload.cooldownMs);
     else if (e.type === "steam-qr-error") s.setStatus("Couldn't sign in to Steam: " + e.payload.message);
     // the password sign-in's steps (SteamPasswordModal)
     else if (e.type === "steam-login-code") s.onPwCode(e.payload);

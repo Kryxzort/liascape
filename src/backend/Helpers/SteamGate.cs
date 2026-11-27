@@ -20,6 +20,10 @@ namespace Liascape.Helpers;
 //     $XDG_CACHE_HOME/liascape/steam-cooldown.json, so a restart keeps honouring it.
 //   - During a cooldown nothing is sent: SendAsync throws SteamCooldownException at once — a background job waits it out
 //     (CooldownRemaining), something the user clicked fails fast with "try again in N min" instead of adding requests.
+//   - Changed fires when a cooldown starts or grows and when it ends (a timer at its end, also for one read back from the
+//     file): `serve` sends the pages `steam-cooldown` (Web/SteamOps.cs CooldownChanged), whose `cooldownMs` is the one end
+//     the UI counts down to.
+//     Guard: scripts/test-workshop-social.sh § 4 "the cooldown's state and events"
 // Not here: Steam sign-in (once, user-driven), api.steampowered.com (a separate host and limit).
 public static class SteamGate
 {
@@ -35,6 +39,10 @@ public static class SteamGate
     private static DateTimeOffset _until = DateTimeOffset.MinValue;
     private static int _strikes;
     private static bool _loaded;
+    private static Timer? _endTimer;
+
+    // a cooldown started, grew or ended; raised on the thread pool, never under the lock
+    public static event Action? Changed;
 
     private static string StateFile => Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } x ? x
@@ -49,6 +57,33 @@ public static class SteamGate
         _loaded = true;
         try { if (JsonSerializer.Deserialize<State>(File.ReadAllText(StateFile)) is { } s) { _until = s.Until; _strikes = s.Strikes; } }
         catch { /* none yet / unreadable → no cooldown */ }
+        ArmEnd(); // a cooldown from before a restart still ends with an event
+    }
+
+    // under _lock: the end's timer follows _until (a cooldown that grew moves it; none left, none armed)
+    private static void ArmEnd()
+    {
+        _endTimer?.Dispose(); _endTimer = null;
+        var left = _until - DateTimeOffset.UtcNow;
+        if (left <= TimeSpan.Zero) return;
+        _endTimer = new Timer(_ => Ended(), null, left + TimeSpan.FromMilliseconds(20), Timeout.InfiniteTimeSpan);
+    }
+
+    private static void Ended()
+    {
+        lock (_lock)
+        {
+            // a timer that fired a little early (or a cooldown that grew meanwhile) waits for the real end
+            if (_until > DateTimeOffset.UtcNow) { ArmEnd(); return; }
+            _endTimer?.Dispose(); _endTimer = null;
+        }
+        Raise();
+    }
+
+    private static void Raise()
+    {
+        if (Changed is not { } h) return;
+        ThreadPool.QueueUserWorkItem(_ => { try { h(); } catch (Exception e) { Console.WriteLine($"steam: cooldown event: {e.Message}"); } });
     }
 
     private static void Save()
@@ -71,6 +106,7 @@ public static class SteamGate
     // Steam said "too many": stop every steamcommunity request for its Retry-After, else 10 min doubling (cap 60).
     public static void Trip(TimeSpan? retryAfter = null)
     {
+        bool grew = false;
         lock (_lock)
         {
             Load();
@@ -78,16 +114,18 @@ public static class SteamGate
             var minutes = Math.Min(MaxCooldownMin, BaseCooldownMin * (1 << Math.Min(_strikes - 1, 6)));
             var wait = retryAfter is { } ra && ra > TimeSpan.Zero ? ra : TimeSpan.FromMinutes(minutes);
             var until = DateTimeOffset.UtcNow + wait;
-            if (until > _until) _until = until;
+            if (until > _until) { _until = until; grew = true; ArmEnd(); }
             Save();
             Console.WriteLine($"steam: rate-limited — pausing every Steam Community request for {Math.Ceiling(wait.TotalMinutes)} min (strike {_strikes})");
         }
+        if (grew) Raise();
     }
 
     // steam-selftest only (a private HOME): end a cooldown it tripped, so its later checks reach the fake answers again
     internal static void ResetForSelfTest()
     {
-        lock (_lock) { Load(); _until = DateTimeOffset.MinValue; _strikes = 0; Save(); }
+        lock (_lock) { Load(); _until = DateTimeOffset.MinValue; _strikes = 0; Save(); ArmEnd(); }
+        Raise();
     }
 
     private static void Succeeded()
@@ -125,4 +163,7 @@ public sealed class SteamCooldownException(TimeSpan remaining)
     : Exception($"Steam is limiting requests from this connection — try again in {Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes))} min")
 {
     public TimeSpan Remaining { get; } = remaining;
+    // API: every 429 an endpoint answers for the cooldown (app/ui/src/api/client.ts apiError): the words and how long is left,
+    // so a page that hears of it from a refusal before the steam-status event counts down to the backend's end, not a guess
+    public object Body => new { error = Message, cooldownMs = (long)Math.Ceiling(Math.Max(0, Remaining.TotalMilliseconds)) };
 }

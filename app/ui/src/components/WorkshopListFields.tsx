@@ -5,6 +5,8 @@ import { listGenNow, nextListGen, presetsOn, useStore } from "../store";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
 import { Avatar } from "./WorkshopSocial";
+import { CooldownWords } from "./SteamCooldown";
+import { useAfterCooldown } from "../hooks/useAfterCooldown";
 
 // COOL: the Workshop filter column's two list fields (components/WorkshopFilterColumn.tsx, the Workshop's scope only), at its
 // top: Author (a Steam ID, a profile link, or a name the app has seen: the backend resolves it, GET /workshop/author,
@@ -15,6 +17,8 @@ import { Avatar } from "./WorkshopSocial";
 // field's own error state, never as a line under it: its box turns the danger colour and its heading line names what to
 // paste instead; the typed text stays to fix. docs/decisions.md § "Pick a creator's or a scene's list in the filter column".
 // Guard: probe-steam list:*
+// Steam's cooldown refusing a lookup (a custom profile name's page) is that error state too, its words the cooldown's own
+// counting down (SteamCooldown.tsx), and the field asks again by itself at its end. Guard: probe-steam cool:author
 
 // a scene's Workshop id from what was pasted: the id itself, or its Workshop page's link (`…/filedetails/?id=<id>`)
 function workshopIdOf(text: string): string | null {
@@ -60,6 +64,10 @@ function ListField({ kind, label, placeholder, lead, resolve }: {
   const [draft, setDraft] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // the error is Steam's cooldown (its live words in the error's place; committed again at its end, unless a newer list
+  // operation came since: the generation the refused commit took)
+  const [cooled, setCooled] = useState(false);
+  const coolGen = useRef(0);
   // the commit the field waits on: an older one's answer is dropped (the user typed on or cleared it: `seq`; a newer commit
   // in either field, a source switch, a row's fill or Clear all: the store's list generation; a list opened from elsewhere:
   // the store's list changed under it)
@@ -75,7 +83,7 @@ function ListField({ kind, label, placeholder, lead, resolve }: {
   useEffect(() => { rung[kind] = key; }, [kind, key]);
   if (seenAny !== anyKey) {
     setSeenAny(anyKey);
-    if (draft !== null || err) { setDraft(null); setErr(null); setBusy(false); }
+    if (draft !== null || err) { setDraft(null); setErr(null); setBusy(false); setCooled(false); }
   }
   if (seen !== key) {
     setSeen(key);
@@ -90,6 +98,7 @@ function ListField({ kind, label, placeholder, lead, resolve }: {
     const t = draft.trim();
     if (busy && asking.current === t) return;
     const n = ++seq.current;
+    setCooled(false);
     if (!t || (list && t === shown)) { setDraft(null); setErr(null); setBusy(false); if (!t && list) setWsList(null); return; }
     asking.current = t;
     setBusy(true);
@@ -106,12 +115,22 @@ function ListField({ kind, label, placeholder, lead, resolve }: {
     } catch (e) {
       if (stale()) { drop(); return; }
       setBusy(false);
+      coolGen.current = gen;
+      setCooled(useStore.getState().noteSteamRefusal(e));
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
+  const commitRef = useRef(commit);
+  useEffect(() => { commitRef.current = commit; });
+  // still waiting on the cooldown with the same text: it goes again once Steam lets requests through
+  // Guard: probe-steam cool:author, cool:authorStale
+  useAfterCooldown(cooled && !!err && draft !== null, () => {
+    if (listGenNow() !== coolGen.current) { setCooled(false); return; }
+    asking.current = null; void commitRef.current();
+  });
   const clear = () => {
     seq.current++;
-    setDraft(null); setErr(null); setBusy(false);
+    setDraft(null); setErr(null); setBusy(false); setCooled(false);
     if (list) setWsList(null);
   };
 
@@ -121,7 +140,7 @@ function ListField({ kind, label, placeholder, lead, resolve }: {
         <label className="wf-field-name" htmlFor={id}>{label}</label>
         {shownErr.value && (
           <span id={`${id}-err`} className={`wf-field-err${shownErr.closing ? " closing" : ""}`} role="alert" data-wf-field-err
-            title={shownErr.value}>{shownErr.value}</span>
+            title={shownErr.value} data-wf-field-cool={cooled || undefined}>{cooled && !shownErr.closing ? <CooldownWords short /> : shownErr.value}</span>
         )}
       </div>
       <div className="wf-field-box">
@@ -130,12 +149,12 @@ function ListField({ kind, label, placeholder, lead, resolve }: {
         <input id={id} className="text" value={value} placeholder={placeholder} spellCheck={false} autoComplete="off"
           aria-invalid={err ? true : undefined} aria-describedby={err ? `${id}-err` : undefined} aria-busy={busy || undefined}
           data-wf-dirty={draft !== null || err ? "" : undefined}
-          onChange={(e) => { setDraft(e.target.value); if (err) setErr(null); if (busy) { seq.current++; setBusy(false); } }}
+          onChange={(e) => { setDraft(e.target.value); if (err) { setErr(null); setCooled(false); } if (busy) { seq.current++; setBusy(false); } }}
           onBlur={() => void commit()}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); void commit(); }
             // Escape takes back what was typed (the drawer's Escape closes it only when there's nothing to take back)
-            else if (e.key === "Escape" && (draft !== null || err)) { e.preventDefault(); e.stopPropagation(); seq.current++; setDraft(null); setErr(null); setBusy(false); }
+            else if (e.key === "Escape" && (draft !== null || err)) { e.preventDefault(); e.stopPropagation(); seq.current++; setDraft(null); setErr(null); setBusy(false); setCooled(false); }
           }} />
         {busy ? <span className="wf-field-x" aria-hidden="true"><LoaderCircle size={14} className="side-sub-spin" /></span>
           : value && <button type="button" className="wf-field-x" data-wf-field-clear aria-label={`Clear ${label}`}

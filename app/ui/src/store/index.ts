@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import {
-  steamPageUrl, api, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
+  steamPageUrl, api, ApiError, type Source, type Wallpaper, type Theme, type LibraryItem, type PlaylistSettings, type WorkshopFilter, type SteamTodo,
   type LibraryOp, type CacheCleared, type WsList, type WsListSort, type FavoritesState, type LinkTarget,
   type HiddenState, type HiddenEntry, type HiddenScope, type HideEntry,
 } from "../api/client";
@@ -181,7 +181,21 @@ interface State {
   playlist: string[]; playlistSettings: PlaylistSettings; playlistName: string | null; playlistNames: string[];
   // steam / workshop
   // usable: what the Workshop controls follow (components/subscribeMode.ts actionBlocked)
-  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean } | null;
+  steam: { signedIn: boolean; rejected?: boolean; accountName: string; daysLeft: number | null; mode: string; usable?: boolean; cooldownMs?: number } | null;
+  // Steam's cooldown (Helpers/SteamGate.cs: Steam is limiting this connection's community requests): when it ends on this
+  // page's clock (0 = none), from the backend's own `cooldownMs` (a `steam-status` read or event, a 429's body), never
+  // guessed; `steamCoolEnds` counts the ends, so what the cooldown skipped asks again (components/SteamCooldown.tsx)
+  steamCoolUntil: number; steamCoolEnds: number;
+  // what is left in words ("12 min", "45 s"), live: one ticker for every notice; the last words stay after the end (a notice
+  // fading out keeps them)
+  steamCoolLeft: string;
+  // a refusal the cooldown answered taught the store its end: true when a cooldown is now known (its notice speaks for it)
+  noteSteamRefusal(e: unknown): boolean;
+  // WS steam-cooldown: the backend's cooldown started, grew or ended (Helpers/SteamGate.cs Changed)
+  steamCooldown(ms: number): void;
+  // Browse's list read the cooldown refused (its notice shows over the grid; at its end the read goes again): the first page
+  // ("reload") or the next one ("more")
+  browseCooled: "reload" | "more" | null;
   qrOpen: boolean; qrPng: string | null;
   // the password sign-in modal (SteamPasswordModal): which step Steam is at (WS steam-login-code), busy while a request /
   // Steam's answer is pending, the inline error. The password itself is never in the store — the modal's own field only.
@@ -429,6 +443,12 @@ export const useStore = create<State>((set, get) => ({
   libraryItems: [], libraryRead: false, libQuery: "", libSort: LS.get("libSort", 5), undoDepth: 0,
   playlist: [], playlistSettings: DEFAULT_PS, playlistName: null, playlistNames: [],
   steam: null, qrOpen: false, qrPng: null, pwLogin: null, steamTodo: null, libraryOps: [],
+  steamCoolUntil: 0, steamCoolEnds: 0, steamCoolLeft: "", browseCooled: null,
+  noteSteamRefusal(e) {
+    if (!(e instanceof ApiError) || e.status !== 429) return false;
+    if (e.cooldownMs != null) applyCooldown(e.cooldownMs, "refusal");
+    return get().steamCoolUntil > 0;
+  },
   subProgress: {}, wsStateTick: 0,
   themes: [], theme: null, settings: null, playingPath: null, keepCurrent: false, scenesBlocked: null, vramHold: null, wallpaperPaused: false, status: "", statusPlaying: true, error: null, importAt: null,
   libFocus: null, libPick: 0, welcomeOpen: false, nav: null, browseFocus: null, previewPref: { library: null, browse: null }, appActive: true,
@@ -648,12 +668,13 @@ export const useStore = create<State>((set, get) => ({
     // the Hidden row's ✓ the same: Browse shows the source's hidden cards from the store (Browse.tsx). Guard: probe-hidden hide:filter
     if (get().hiddenViewOn()) {
       ++browseGen;
-      set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseFor: HIDDEN_FOR });
+      // (a view of the page's own: a refused list's cooldown notice and its read at the end go. Guard: probe-steam cool:local)
+      set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseCooled: null, browseFor: HIDDEN_FOR });
       return;
     }
     if (get().localSetOn()) {
       ++browseGen; // a Workshop page still on its way belongs to the list before
-      set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseFor: LOCAL_FOR });
+      set({ loading: false, page: 1, hasMore: false, wallpapers: NO_ITEMS, wsListNote: null, browseCooled: null, browseFor: LOCAL_FOR });
       const m = get().setModes();
       if (m.fav && !get().wsFavs) get().loadFavorites("open");
       if (m.lib === "inc") get().loadLibDetails();
@@ -669,16 +690,19 @@ export const useStore = create<State>((set, get) => ({
     try {
       const got = await api.browse(activeSource, 1, query || undefined, filter, list);
       if (gen !== browseGen) return;
-      set({ wallpapers: got, browseFor: asked, wsListNote: null,
+      set({ wallpapers: got, browseFor: asked, wsListNote: null, browseCooled: null,
         hasMore: !!get().sources[activeSource]?.supportsPagination && got.length > 0 });
     } catch (e) {
-      // e.g. Steam's cooldown (SteamGate): "Steam is limiting requests from this connection — try again in N min"
       if (gen === browseGen) {
         const text = e instanceof Error ? e.message : String(e);
+        // Steam's cooldown (SteamGate): its notice over the grid says so and counts down, once (no status line, no list note),
+        // and the read goes again when it ends. Guard: probe-steam cool:browse, cool:end
+        const cooled = get().noteSteamRefusal(e);
+        if (cooled) set({ browseCooled: "reload" });
         // a list says why in the grid, in its own words; the rest in the status
         if (list) set({ wallpapers: [], hasMore: false, browseFor: JSON.stringify([activeSource, query, filter ?? null, list]),
-          wsListNote: { text } });
-        else get().setStatus(text, true);
+          wsListNote: cooled ? null : { text } });
+        else if (!cooled) get().setStatus(text, true);
         if (!get().wallpapers.length) set({ hasMore: false }); // a switched-to source that failed: no placeholders asking for page 2
       }
     } finally { if (gen === browseGen) set({ loading: false }); }
@@ -686,6 +710,8 @@ export const useStore = create<State>((set, get) => ({
   async loadMore() {
     const { activeSource, page, loading, hasMore, wallpapers } = get();
     if (loading || !hasMore || get().localSetOn() || get().hiddenViewOn()) return;
+    // the next page the cooldown refused waits for its end (asked then by itself): its placeholders ask nothing meanwhile
+    if (get().browseCooled && get().steamCoolUntil) return;
     const filter = get().isWorkshop() ? wireFilter(get().browseFilter) : undefined;
     const wl = wireList(get());
     const query = wl ? "" : get().query;
@@ -703,7 +729,10 @@ export const useStore = create<State>((set, get) => ({
       if (fresh.length === 0) { set({ page: next, hasMore: false }); return; }
       set({ wallpapers: [...wallpapers, ...fresh], page: next, hasMore: list.length > 0 });
     } catch (e) {
-      if (gen === browseGen) get().setStatus(e instanceof Error ? e.message : String(e), true); // e.g. Steam's cooldown
+      if (gen !== browseGen) return;
+      // Steam's cooldown: its notice, and this page asked again at its end. Guard: probe-steam cool:more
+      if (get().noteSteamRefusal(e)) set({ browseCooled: get().browseCooled ?? "more" });
+      else get().setStatus(e instanceof Error ? e.message : String(e), true);
     } finally { if (gen === browseGen) set({ loading: false }); }
   },
   async download(source, w, apply, oneOff = false) {
@@ -946,7 +975,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   // ---- steam / workshop ----
-  async loadSteam() { set({ steam: await api.steamStatus() }); },
+  async loadSteam() { const r = await api.steamStatus(); set({ steam: r }); coolFromRead(r); },
+  steamCooldown(ms) { applyCooldown(ms, "event"); },
   async startQr() { set({ qrOpen: true, qrPng: null }); await api.qrStart(); },
   async cancelQr() { await api.qrCancel(); set({ qrOpen: false, qrPng: null }); },
   async signoutSteam() { await api.signout(); await get().loadSteam(); },
@@ -1132,6 +1162,60 @@ useStore.subscribe((s) => {
   if (favoritesWanted(useStore.getState())) useStore.getState().loadFavorites("open");
 });
 
+// Steam's cooldown on this page's clock, from the backend's `cooldownMs` only: its `steam-cooldown` event (sent in order as
+// the cooldown starts, grows or ends), a `/steam/status` read (readBackend, loadSteam: coolFromRead) and a 429's body
+// (noteSteamRefusal). The end is set from it, a timer ends it, and its end asks again what it skipped: Browse's list here,
+// the sidebar's and the Author field's reads in their own components (steamCoolEnds). A read asked before the last change is
+// older news and changes nothing (a status read held while the page reconnected must not end a cooldown that began
+// meanwhile); what it says is counted from when it was answered, not when the store took it. A refusal only ever moves the
+// end later. Guard: probe-steam cool:*, cool:stale, cool:end
+let coolTimer: ReturnType<typeof setTimeout> | undefined, coolTick: ReturnType<typeof setTimeout> | undefined;
+let coolChangedAt = 0;
+function applyCooldown(ms: number, kind: "event" | "read" | "refusal", asked = Date.now()) {
+  if (kind === "read" && asked < coolChangedAt) return;
+  // the backend's event is the newest word even when it changes nothing here (an end the page never saw begin): a read
+  // asked before it is older news
+  if (kind === "event") coolChangedAt = Date.now();
+  const was = useStore.getState().steamCoolUntil;
+  if (ms <= 0) { if (was && kind !== "refusal") endCooldown(); return; }
+  const until = Date.now() + ms;
+  if (was && (kind === "refusal" ? until <= was + 1000 : Math.abs(until - was) < 1000)) return; // the same end: nothing re-renders
+  coolChangedAt = Date.now();
+  useStore.setState({ steamCoolUntil: until });
+  clearTimeout(coolTimer);
+  coolTimer = setTimeout(endCooldown, ms);
+  tickCooldown();
+}
+// a `/steam/status` read (api.steamStatus stamps when it was asked and answered)
+function coolFromRead(r: { cooldownMs?: number; cooldownAsked?: number; cooldownAt?: number } | null | undefined) {
+  if (typeof r?.cooldownMs !== "number") return;
+  const at = r.cooldownAt ?? Date.now();
+  applyCooldown(r.cooldownMs - (Date.now() - at), "read", r.cooldownAsked ?? at);
+}
+// whole minutes from 90 s up (rounded, the way "back in 2 min" is said), seconds under that
+const coolWords = (left: number) => (left > 90_000 ? `${Math.round(left / 60_000)} min` : `${Math.max(1, Math.ceil(left / 1000))} s`);
+// the words now, and a timer for the moment they change next: a minute count turns at its half minute (down to 90 s), a
+// second count each second
+function tickCooldown() {
+  clearTimeout(coolTick);
+  const until = useStore.getState().steamCoolUntil, left = until - Date.now();
+  if (!until || left <= 0) return;
+  const w = coolWords(left);
+  if (w !== useStore.getState().steamCoolLeft) useStore.setState({ steamCoolLeft: w });
+  const at = left > 90_000 ? Math.max(90_000, (Math.round(left / 60_000) - 0.5) * 60_000) : (Math.ceil(left / 1000) - 1) * 1000;
+  coolTick = setTimeout(tickCooldown, Math.max(20, left - at + 5));
+}
+function endCooldown() {
+  clearTimeout(coolTimer); clearTimeout(coolTick);
+  const st = useStore.getState();
+  if (!st.steamCoolUntil) return;
+  coolChangedAt = Date.now();
+  const redo = st.browseCooled;
+  useStore.setState({ steamCoolUntil: 0, steamCoolEnds: st.steamCoolEnds + 1, browseCooled: null });
+  if (redo === "reload") void st.reload();
+  else if (redo === "more") void st.loadMore();
+}
+
 // Format an interval (e.g. "1h 30m", "45s").
 function fmtInterval(total: number): string {
   const p: string[] = []; const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
@@ -1234,6 +1318,7 @@ async function readBackend(set: Setter, get: () => State): Promise<boolean> {
   if (ops) p.libraryOps = ops.v;
   if (hidden && hGen === hiddenGen) p.hidden = { library: hidden.v.library ?? {}, browse: hidden.v.browse ?? {} }; // none changed meanwhile
   set(p);
+  if (steam) coolFromRead(steam.v);
   if (playingLine) get().refreshPlayingStatus(); // the now-playing line follows (a transient notice reverts to it itself)
   return !unreachable;
 }

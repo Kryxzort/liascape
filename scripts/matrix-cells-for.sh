@@ -109,6 +109,9 @@ for f in $FILES; do
     # Workshop ID pill
     app/ui/src/components/WorkshopSocial.tsx|app/ui/src/components/WorkshopIdPill.tsx|app/ui/src/components/SourcePills.tsx|app/ui/src/components/sidePills.tsx|app/ui/src/components/sideFormat.ts)
       add "browse:" "$f (+ --probe probe-steam.js — ws:, lib:ws:, side:copyIdPill, side:idPill:still; probe-settings.js copy:sidebarPill; probe-filters.js split:noWrap)" ;;
+    # Steam's cooldown notice (Browse's grid, the item sidebar, the Author field) and the reads that wait for its end
+    app/ui/src/components/SteamCooldown.tsx|app/ui/src/hooks/useAfterCooldown.ts)
+      add "browse:" "$f (+ --probe probe-steam.js — cool:, ws:, list:)" ;;
     app/ui/src/hooks/rangeDrag.ts) add "$KEYS|$MODAL" "$f" ;;
     # the rotation's h/m/s fields (the maximum's floor at the minimum, drafts) and their hints
     app/ui/src/components/PlayTimeInput.tsx|app/ui/src/components/rotHint.ts)

@@ -41,7 +41,8 @@ choices here: `docs/decisions.md` § Steam & sources.
 
 ## Steam Community rate limits (`Helpers/SteamGate.cs`)
 - Send EVERY steamcommunity.com request through `SteamGate.SendAsync(req, kind)`; never call it around the gate. Steam blocks the user's IP for 30+ min once tripped.
-- A 429 (or the subscribe 403 "too many", via `Trip`) starts an app-wide cooldown, persisted in `$XDG_CACHE_HOME/liascape/steam-cooldown.json`. During it nothing is sent: `SteamCooldownException` → `/browse` 429 `{error}`.
+- A 429 (or the subscribe 403 "too many", via `Trip`) starts an app-wide cooldown, persisted in `$XDG_CACHE_HOME/liascape/steam-cooldown.json`. During it nothing is sent: `SteamCooldownException` → 429 `{error, cooldownMs}` (`.Body`).
+- The cooldown's end is the backend's alone: `/steam/status` `cooldownMs`, and its own `steam-cooldown` event when it starts, grows or ends (`SteamGate.Changed` → `SteamOps.CooldownChanged`, a timer at its end); never a whole `steam-status`, whose sign-in could be older than a sign-out sent meanwhile. Guard: `test-workshop-social.sh` § 4.
 - Prefer no request: Browse, details and trailers ask Steam's CM servers first. Not gated: the sign-in itself and api.steampowered.com.
 
 ## Workshop Browse over Steam's client protocol (`Services/SteamWorkshopService.cs`)
