@@ -1,35 +1,31 @@
 ---
 paths:
-  - "src/player/src/bin/liascape-scene-worker/**"
-  - "src/player/src/scene/**"
+  - "src/player/src/bin/liascape-scene-worker/main.rs"
+  - "src/player/src/bin/liascape-scene-worker/ring.rs"
+  - "src/player/src/bin/liascape-scene-worker/synthetic.rs"
+  - "src/player/src/bin/liascape-scene-worker/media.rs"
+  - "src/player/src/scene/mod.rs"
+  - "src/player/src/scene/assets.rs"
+  - "src/player/src/scene/pointer.rs"
+  - "src/player/src/scene/synthetic.rs"
   - "src/player/src/worker/**"
   - "src/player/src/sources/scene.rs"
   - "src/player/src/gfx/dmabuf.rs"
-  - "src/player/src/vram.rs"
-  - "src/player/src/redraw.rs"
-  - "src/player/src/audio/loudness.rs"
   - "src/player/src/signal/cursor.rs"
   - "src/player/src/probe/workers.rs"
-  - "src/player/src/probe/vram.rs"
-  - "src/player/build.rs"
   - "src/player/tests/scene.rs"
   - "src/player/tests/worker.rs"
-  - "src/player/tests/lwe_build.rs"
-  - "src/player/tests/scene_loudness.rs"
   - "src/player/tests/onmachine/scene*"
-  - "patches/lwe/**"
-  - "third_party/lwe/**"
-  - "scripts/lwe.sh"
 ---
 
-# liascape-player: WE scenes (`liascape-scene-worker`)
+# liascape-player: WE scenes — the worker and the `scene` source
 
 One worker process per scene source, shared by every output showing it; the compositor drives it over a
-socket and samples its dmabuf frames. Crate-wide rules: [core.md](core.md); transitions/runtime:
-[runtime-api.md](runtime-api.md); backend side: [player-adapter.md](../backend/player-adapter.md).
-Walkthroughs: `docs/player/modules/scene-worker.md` and its siblings (`docs/player/modules/scene-frame-transport.md`,
-`docs/player/modules/scene-lwe-core.md`, `docs/player/modules/scene-crash-policy.md`, …).
-Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, `docs/player/reports/phase2.md`.
+socket and samples its dmabuf frames. Crate-wide rules: [core.md](core.md); the LWE core, its build, fonts and
+shader cache: [scene-lwe.md](scene-lwe.md); scene sound and loudness: [scene-audio.md](scene-audio.md); GPU budget and
+VRAM: [scene-gpu.md](scene-gpu.md); backend side: [player-adapter.md](../backend/player-adapter.md).
+Walkthroughs: `docs/player/modules/scene-worker.md`, `docs/player/modules/scene-source.md`,
+`docs/player/modules/scene-frame-transport.md`, `docs/player/modules/scene-crash-policy.md`.
 
 ## Protocol (`worker/proto.rs`)
 - Bump `PROTOCOL` on any message shape change; the host turns a `Hello` with another protocol into a fatal error.
@@ -47,8 +43,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
 - Child fds: socket at fd 3, parent copies `CLOEXEC` and renumbered ≥ 10 before `dup2`; empty signal mask
   and default dispositions (the compositor blocks SIGINT/SIGTERM). The worker keeps its socket `CLOEXEC`:
   EOF is the crash signal.
-- `wake_fd()` is an epoll fd over the current socket + pipe, stable across restarts; register a dup.
-- `poll(now)` never blocks; call it on every wake and every tick (time must pass for a hang to show).
+- `wake_fd()` is stable across restarts; register a dup. `poll(now)` never blocks; call it on every wake and every
+  tick (time must pass for a hang to show).
 - Count as hung only when the worker is the reason no frame comes: don't age ticks while it is starved
   of slots (ping it instead, bounded at `STARVE_LIMIT_FACTOR` × hang timeout), and give everything a fresh
   timeout after a host stall (gap > `hang_timeout / 2`). Guards: `tests/worker.rs::starved_worker_is_not_hung`,
@@ -62,50 +58,21 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `stuck_start_is_hung`, `endless_start_is_hung_at_the_cap`.
 - Fold `Start`/`Paused`/`Resize`/`Route`/`SetProperty`/`Gain`/`NoAudio`/`Speed`/`LoudnessMeter` into the
   restart's `Start` so a restart never resumes stale. Guard: `restart_start_folds_live_changes`.
-- A fatal `error` (can't play) is not a crash: no restart, no crash record; the caller stops the worker. Nor is an exit 127 (`worker::LOADER_FAILED`) before `Hello`: the loader couldn't open LWE's core, so the host sends a fatal `RENDERER_MISSING` error and marks the renderer missing (`worker::renderer`: outbox fact `scene.renderer_missing`, no `scene` capability, `hello.scene_renderer_missing`) until a worker's `Hello` or the probe's start clears it (`scene.renderer_found`); the backend greys every scene and marks nothing. Guards: `tests/api.rs::worker_without_its_core_fails_without_crash_record`, `missing_renderer_is_found_again_by_the_probe`.
+- A fatal `error` (can't play) is not a crash: no restart, no crash record; the caller stops the worker. Nor is an
+  exit 127 (`worker::LOADER_FAILED`) before `Hello`: the host sends a fatal `RENDERER_MISSING` and marks the renderer
+  missing (`worker::renderer`) until a worker's `Hello` or the probe's start clears it (the facts and what the backend
+  does: `docs/player/modules/scene-crash-policy.md`). Guards:
+  `tests/api.rs::worker_without_its_core_fails_without_crash_record`, `missing_renderer_is_found_again_by_the_probe`.
 - `stop()`/`Drop` never block: send `quit`, hand the pid to `worker::reap`; drain the pipe first (a fatal error's
   stderr line stays in the tail). Guards: `tests/worker.rs::stop_never_blocks`, `tests/api.rs::missing_scene_folder_fails_without_crash_record`.
 - End the worker with `_exit` once a scene may be live (`exit` runs driver exit handlers under LWE's video threads), log
   with `elog!`, never `eprintln!`, keep `exit_on_panic`. Guard: `tests/scene.rs::real_worker_with_video_textures_ends_cleanly`.
 - Test gotcha: a sibling's `posix_spawn` briefly holds every fd (CLOEXEC too): `poll` for the hang-up before EOF.
-- Keep ≤ 1 spare worker (`worker::spare`, scene-worker.md § The spare worker); its death is never a crash; adopt it only when launched
-  like the scene (`sources::scene::launch_for`), reap it at once when a setting changes that; drop an adopted one whose load stalls for a fresh
-  worker, never as a crash (`WorkerHost::watch_adopted_load`). Read "a scene is coming" from `Programs::rotation_scenes`, never a backend prop. Guards: `tests/worker.rs`, `tests/api.rs`, `tests/supervise.rs` `spare_*`.
-
-## Build (`build.rs`, LWE core)
-- Only `liascape-scene-worker` links LWE (`cargo::rustc-link-arg-bin`); the compositor binary never does.
-  Guard: `tests/lwe_build.rs::worker_links_the_core`.
-- Feature `lwe` is default; without `LIASCAPE_LWE_CORE_DIR` the build fails by design (`--no-default-features`: stub + synthetic). A RUNPATH into the Nix store is rooted by the build (`.claude/rules/build-and-packaging.md` § LWE core).
-- The pin lives in `third_party/lwe/PIN`; `UPSTREAM.md` § linux-wallpaperengine owns the patch series and
-  resync recipe. Guards: `tests/lwe_build.rs::core_is_the_pinned_one`, `pin_matches_flake`.
-- Patch work: `LWE_DEV_SRC=<fork> bash scripts/lwe.sh build test`. Inside the devShell override
-  `LIASCAPE_LWE_CORE_DIR` to a writable dir — the devShell's points at the read-only store.
-- The LWE headers are C++-only: declare the C calls by hand in `bin/liascape-scene-worker/lwe.rs`; keep
-  `patches/lwe/tests/host_api_test.cpp` C++.
-- Never copy WE's JS classes (`<assets>/scripts/jsclasses`, `<assets>/scripts/jsmodules`) into the repo or fork: LWE reads them
-  from the assets dir at run time.
-- Bump `SOUND_SEMANTICS` (`scene/loudness_estimate.rs`) whenever the player's sound-object semantics change, so no
-  fingerprint continues a measurement of the old sound. Guard: `fingerprint_carries_the_sound_semantics`.
-- Stop pulling audio before `wp_context_destroy`.
-- Load a real scene's project (`render::load_project`: no GL) on `lia-scene-preload` beside the EGL setup, from
-  the host's `--preload` argv (`worker::preload_args`); the `Start` stays the authority (a mismatch loads again).
-  Create no GL object or QuickJS runtime there. Guard: `tests/scene.rs::real_scene_project_loads_beside_the_egl_setup`.
-- Hand LWE the texture upload context as a `gfx::ShareRecipe` (`lwe::Scene::set_upload_context`, looked up with
-  `dlsym`): its `wp-tex-upload` thread makes the context, never the render thread (`docs/player/modules/scene-lwe-core.md`
-  § Texture uploads).
-- Give the core the compositor's interop and `hwdec` (`wp_context_set_video_hwdec`, mpv's names: its FFmpeg decoder opens only the devices the list leads to) and
-  load libcuda first for `cuda`. A scene's videos share one CUDA device on the primary context and play on the scene clock (`docs/decisions.md` § Decode scene video textures with FFmpeg, not mpv). Guards: `tests/scene.rs::real_scene_worker_loads_libcuda_for_video_textures`, host_api_test `video_players_load_only_the_hosts_interop`, `video_players_share_one_cuda_context`, `video_texture_plays_on_the_scene_clock`.
-- Give LWE the shader text cache dir `gfx::shader_cache::lwe_dir` (`wp_config_set_shader_cache_dir`,
-  `docs/player/modules/scene-lwe-core.md` § Shader cache); keep it out of the user's cache in tests (`tests/common`
-  sets `LIASCAPE_SCENE_SHADER_CACHE_DIR`) and on-machine scripts (their private dir). Guards:
-  `tests/scene.rs::real_workers_keep_the_shader_cache_in_the_tests_dir`, `host_api_test` `shader_cache_reuses_text_work`.
-- Resolve a scene's fonts through fontconfig like any app (`docs/decisions.md` § "Scene fonts come from fontconfig, not a
-  Windows install"): the worker adds `scene::fonts::ALIASES` (`<accept>` only, never `<prefer>`: an installed original
-  wins) and `LIASCAPE_SCENE_FONT_DIRS` to its own fontconfig before the build (`render::scene_fonts`); never read a
-  Windows partition, never ship or copy a Microsoft font. Keep `scene::fonts`' `systemfont_*` table equal to the core's
-  `TextFonts::systemFont`. Report stand-ins in `Ready.fonts` → `scene.fonts`; tests see only their fixture fonts
-  (`tests/common` drops `LIASCAPE_SCENE_FONT_DIRS`). Guards: `tests/scene.rs::scene_text_reports_the_family_fontconfig_matched`,
-  `tests/api.rs::scene_font_stand_ins_reach_the_event_and_probe`, probe-sidebar `lib:fontStandIn:*`.
+- Keep ≤ 1 spare worker (`worker::spare`, scene-worker.md § The spare worker); its death is never a crash; adopt it
+  only when launched like the scene (`sources::scene::launch_for`), reap it at once when a setting changes that; drop
+  an adopted one whose load stalls for a fresh worker, never as a crash (`WorkerHost::watch_adopted_load`). Read "a
+  scene is coming" from `Programs::rotation_scenes`, never a backend prop. Guards: `tests/worker.rs`, `tests/api.rs`,
+  `tests/supervise.rs` `spare_*`.
 
 ## Frame transport (`gfx/dmabuf.rs`, `worker/dmabuf.rs`, `sources/scene.rs`)
 - Latch only the newest frame whose acquire fence already polls readable; release older queued frames
@@ -129,7 +96,6 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   loop. Guard: `tests/api.rs::stepped_scene_is_deterministic`.
 - Ask for a low-priority context only in the worker; compositor contexts keep the driver default.
   Guard (load-sensitive, rerun on a quiet machine): `tests/scene.rs::worker_context_is_low_priority`.
-- Field is `generation`, not `gen` (reserved in edition 2024).
 
 ## The `scene` source kind
 - Compute scene demand only when `Graph::demand_rev` moves; never move `demand_rev` on animated values or
@@ -158,66 +124,14 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   (`wp_project_pointer_jump`). Guard: `tests/api.rs::pointer_enter_is_a_jump_and_rate_is_the_demand`.
 - Desktop pointer (`signal/cursor.rs`) polls Hyprland only while an unpaused scene wants it; fall back to the
   surface pointer. Guard: `tests/api.rs::desktop_pointer_from_a_fake_hyprland`.
-- `scene_props` apply after load and live via `SetProperty`; a removed key keeps its value until reopened. A `scenetexture` set to an image file's absolute path (png, jpg, jpeg, bmp, tga, gif: its first frame; a preset's own image) is that image in its slot, bound at the build (send it at open); one that doesn't load, or is over 64 MiB, 16384 px a side or 64 Mpx, keeps the slot's texture. One set to a video file's (mp4, m4v, webm, mkv, mov) plays that video there, streamed from the file (no byte cap), looped, silent and on the scene clock like a video texture; it opens only as MP4 / QuickTime or Matroska / WebM through the `file` protocol (`GLPlayer::kFileFormats`: FFmpeg picks a demuxer by the bytes); one that doesn't open so or whose header says over 8192 px a side or 7680 × 4320 px keeps the slot's texture, and a frame over those caps as displayed (a stream that grows, a stretching sample aspect) is not shown. A video in any pass slot plays while its pass lives.
+- `scene_props` apply after load and live via `SetProperty`; a removed key keeps its value until reopened. A
+  `scenetexture` set to an image or video file's absolute path shows that file in its slot (send it at open); one
+  that doesn't load, or is over the caps, keeps the slot's texture — never widen the formats or caps without the
+  core's (`docs/player/modules/scene-source.md` § Assets, properties, inputs).
   Guards: `tests/api.rs::scene_props_apply_at_open_and_live`, host_api_test `usertexture_loads_an_image_file`, `usertexture_caps_an_image_file`, `usertexture_plays_a_video_file`.
 - Run the visualiser capture only while a ready scene `wants_audio_input`; never capture `node.virtual`
   streams or the microphone. Guard: `tests/api.rs::visualiser_input_reaches_only_scenes_that_want_it`.
 - Never let a create/destroy stall the loop. Guard: `tests/api.rs::scene_create_and_destroy_never_stall_the_loop`.
-
-## Scene audio (`bin/liascape-scene-worker/audio.rs`, `stretch.rs`)
-- Start the audio thread only once a sound is installed (at the load, or a `startsilent` one's first play: `HasAudio`, install on the compositor's `Gain`, `Renderer::watch_sound`); a soundless scene has none.
-  Guards: `tests/scene.rs::audio_thread_only_for_a_scene_with_sound`, `tests/api.rs::a_scene_whose_sounds_all_start_silent_plays_what_its_script_starts`, `a_radio_turned_on_right_after_the_scene_is_applied_is_heard_at_once`.
-- Run the process callback with `RT_PROCESS`; the callback owns the `Dsp` and the main loop never locks it
-  while streaming (`try_lock` only). Guard: `tests/api.rs::scene_gain_ramp_reaches_the_bus`.
-- Make the stream an async node (`node.async`) and leave the graph cleanly before exit (deactivate,
-  settle, disconnect, all within `STOP_GRACE`). Guards: `tests/api.rs::scene_worker_exit_never_skips_bus_cycles`,
-  `bus_producers_link_asynchronously`.
-- Signal path: pull → stretch → gate → envelope → gain → clip at ±1 after the gain (WE's device clip).
-  The gate jumps when the stream is silent anyway (no decode drift). Guards: `output_clips_at_full_scale_after_the_gain`,
-  `gate_declicks_only_an_audible_stream`.
-- The stretch is a bit-exact passthrough at exactly 1×. Guard: `time_stretch_is_bit_exact_at_1x`.
-- Send `AudioFlowing` once per arming, only from a buffer that pulled real sound into a real stream. Guard:
-  `tests/api.rs::scene_audio_flowing_gates_every_onset`.
-- Measure audio CPU with a release worker: a debug WSOLA misses 64-frame cycles.
-
-## Scene loudness (`audio/loudness.rs`)
-- Meter after the stretch, before gate and gain; count only buffers that play into a real stream (never
-  paused, `no_audio`, fallback timer, stepped). Guard: `loudness_segments_count_only_played_sound`.
-- Keep a histogram, not results (BS.1770's relative gate needs all blocks). Guard:
-  `histogram_merge_across_sessions_equals_one_long_integration`.
-- One measurement per (canonical folder, `loudness_key`) in the `Book`: one live source measures (the
-  head); a seed is adopted only if it covers more audible play, never merged — no block counted twice.
-  Guards: `book_reopen_continues_the_last_source_never_twice`,
-  `tests/api.rs::scene_path_changes_and_folder_spellings_share_one_measurement`,
-  `scene_loudness_key_change_never_shares_a_histogram`.
-- On a live `loudness_key` change report the old key's rest under the old key, join the new key without
-  `Book::forget_idle`, and drop segments for `KEY_CHANGE_SETTLE` (the stream still carries the old mix). Guard:
-  `tests/api.rs::scene_loudness_key_change_never_shares_a_histogram`.
-- Stop metering at the cap (`LoudnessMeter {on: false}`). Guards: `cap_stops_measuring`,
-  `tests/api.rs::scene_loudness_stops_at_the_cap`.
-- A report never moves the playing source's `gain.normalize` (the backend applies it once per play). Guard:
-  `tests/api.rs::scene_loudness_is_learned_once_after_its_window`.
-
-## GPU budget and VRAM (`scene/budget.rs`, `vram.rs`, `redraw.rs`)
-- Gate each output's scene presents on its own `scene_fps` grid, deferring early frames, never dropping.
-  A scene at the refresh on a frame-callback output is ungated and presents every callback. Guards:
-  `scene_frames_wake_each_output_at_its_scene_fps`, `scene_at_the_refresh_is_paced_by_frame_callbacks_not_the_gate`,
-  `tests/api.rs::per_output_scene_fps_gates_presents`.
-- Throttle only when misses exceed `THROTTLE_MISSED_PCT` and the worker uses ≥ `GPU_LOAD_MS_PER_S`; read
-  misses from the worst output, not only the scene's. Guards: `budget_ignores_misses_a_light_worker_cannot_cause`,
-  `budget_miss_rate_is_the_worst_output_not_only_the_scenes`, `tests/scene.rs::scene_budget_throttles_live_and_recovers`.
-- Never wait on a `GL_TIME_ELAPSED` query; read it once available.
-- Run VRAM probes on `lia-vram`, never the loop; dlopen NVML, never link it.
-- A scene over `scene_vram_limit_mib` is stopped, not crashed (no restart, no record), keeping only its shown
-  slot. Guards: `tests/api.rs::scene_over_vram_limit_is_stopped_not_crashed`,
-  `tests/scene.rs::vram_stopped_scene_keeps_only_its_shown_slot`.
-- Under `player.scene_vram_stop_shows` `nothing` a VRAM-stopped scene hides that slot (`SceneSource::shows_nothing`,
-  never dropped, so the choice is live both ways) and the seam probe skips it; a layer waiting for a picture takes
-  that blank as one (`SceneSource::hides_a_picture`). Guards: `tests/api.rs::scene_over_vram_limit_can_show_nothing`,
-  `output_added_while_a_vram_stop_shows_nothing_keeps_the_scene`.
-- The low-VRAM hold composes into the effective pause (never `player.paused`); `stop` mode suspends every media source and resumes each at its position; the reserve keeps freed memory from reading as free. Guards: `low_vram_never_flaps_under_light_load`, `low_vram_releases_when_the_probe_dies`, `tests/api.rs::low_vram_stop_frees_and_resumes_every_source`, `low_vram_pause_mode_pauses_without_freeing`.
-- Count only this player's own pids in the reserve (compositor, scene workers, spare) and keep it to the held sources that can still come back: one replaced by a transition, retired or destroyed drops its share at once (`Runtime::vram_gone`, `LowVram::set_reserve`) and never reopens; `stop` clears the hold. Resume at low + `RESUME_MARGIN_MIB` (256); anti-flap's doubling hold is the loop guard, never a wider bar. Guards: `low_vram_high_usage_resumes_at_the_resume_bar`, `low_vram_reserve_follows_the_held_sources`, `tests/api.rs::low_vram_apply_while_held_plays_once_memory_allows`, `low_vram_stop_clears_the_hold`, `low_vram_replaced_source_drops_its_reserve`.
-- Say what the hold keeps and why: `hello.vram_hold` / `state.vram_hold`, `vram.held {sources, reason, free_mib, needed_mib}` / `vram.released {reason}` → the backend's WS `vram-hold` → the now-playing line. Guards: the low_vram tests above, adapter IT § "the low-VRAM hold is visible", probe-matrix `vram:held`.
 
 ## Crash policy
 - A crash or hang holds the last frame (else the preview), restarts ≤ 3 in 60 s at the held frame's `t`
@@ -239,8 +153,8 @@ Measurements: `docs/player/spikes/dmabuf.md`, `docs/player/spikes/lwe-core.md`, 
   `scene_lead_a_align_end_starts_now`, `tests/transition.rs::scene_a_align_end_starts_at_once`.
 - A scene B crashing mid-effect still hands off; a B broken mid-effect snaps back. Guards:
   `tests/transition.rs::scene_b_worker_crash_mid_effect_still_hands_off`, `scene_b_broken_mid_effect_snaps_back`.
-- Write interrupt-chain tests with gaps by condition, not fixed 100 ms (a worker's first frame takes longer).
-  Guard: `tests/api.rs::scene_switch_storm_reaps_workers`.
+- Interrupt-chain tests wait by condition (`.claude/rules/testing.md` § liascape-player tests). Guard:
+  `tests/api.rs::scene_switch_storm_reaps_workers`.
 
 ## Corpus and health tooling
 - Run `src/player/tests/onmachine/scene_corpus.sh` / `scene_health.sh` on a private headless player; they

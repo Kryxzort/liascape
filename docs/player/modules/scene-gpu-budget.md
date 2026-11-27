@@ -2,7 +2,7 @@
 
 Covers `src/player/src/scene/budget.rs`, `src/player/src/vram.rs`, the scene present gate in `redraw.rs`, the
 worker's `gputimer.rs`, and the runtime's `feed_scene_budgets` / `vram_tick` with `SourceHost::suspend_media` /
-`resume_media`. Rules: `.claude/rules/player/scenes.md` § GPU budget and VRAM.
+`resume_media`. Rules: `.claude/rules/player/scene-gpu.md`.
 
 ## Per-output present gate
 

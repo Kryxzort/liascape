@@ -1,7 +1,7 @@
 # Scene audio
 
 Covers `src/player/src/bin/liascape-scene-worker/audio.rs` (stream, `Dsp`) and `stretch.rs` (WSOLA), and the audio
-half of `src/player/src/sources/scene.rs`. Rules: `.claude/rules/player/scenes.md` § Scene audio; invariants #8 and
+half of `src/player/src/sources/scene.rs`. Rules: `.claude/rules/player/scene-audio.md` § Scene audio; invariants #8 and
 #11 in `docs/player/invariants.md`.
 
 A scene's sound is a PipeWire stream of its own worker on the player bus, driven by the compositor's dB gains

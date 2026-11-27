@@ -85,11 +85,17 @@ caused it; the backend's event connection completes its waits from them ([adapte
 
 | area | rule | walkthrough | tests |
 |---|---|---|---|
-| dB math, clocks, animation, graph, event log, snapshot, outbox, supervisor, memory | `.claude/rules/player/core.md` | [graph-properties](modules/graph-properties.md), [persistence](modules/persistence.md), [runtime](modules/runtime.md) | unit tests, `src/player/tests/supervise.rs` |
+| dB math, clocks, animation, graph, event log | `.claude/rules/player/core.md` | [graph-properties](modules/graph-properties.md) | unit tests |
+| snapshot, outbox, supervisor, memory | `.claude/rules/player/persistence.md` | [persistence](modules/persistence.md), [runtime](modules/runtime.md) | `src/player/tests/supervise.rs` |
 | EGL, composition, effects, Wayland, frame pacing, capture | `.claude/rules/player/gfx-wayland.md` | [gfx-egl](modules/gfx-egl.md), [composition](modules/composition.md), [wayland](modules/wayland.md) | `src/player/tests/{gfx_basic,compose,effects_all}.rs`, `src/player/tests/onmachine/outputs.sh` |
-| mpv sources, hwdec, render worker, audio bus, meter | `.claude/rules/player/sources-audio.md` | [sources](modules/sources.md), [audio-bus](modules/audio-bus.md) | `src/player/tests/sources.rs`, `src/player/tests/onmachine/bus.sh` |
-| loop, transitions, programs, signals, command API, probes | `.claude/rules/player/runtime-api.md` | [runtime](modules/runtime.md), [transitions](modules/transitions.md), [programs](modules/programs.md), [signals](modules/signals.md), [command-api](modules/command-api.md) | `src/player/tests/{api,transition,program,automute}.rs` |
-| scenes: worker, transport, LWE, audio, loudness, GPU/VRAM, crashes | `.claude/rules/player/scenes.md` | `modules/scene-*.md` | `src/player/tests/{worker,scene,lwe_build,scene_loudness}.rs` |
+| mpv sources, hwdec, render worker, onset | `.claude/rules/player/sources.md` | [sources](modules/sources.md) | `src/player/tests/sources.rs` |
+| audio bus, RT threads, meter | `.claude/rules/player/audio-bus.md` | [audio-bus](modules/audio-bus.md) | `src/player/tests/onmachine/bus.sh` |
+| loop, outputs, signals, command API, probes | `.claude/rules/player/runtime-api.md` | [runtime](modules/runtime.md), [signals](modules/signals.md), [command-api](modules/command-api.md) | `src/player/tests/{api,automute}.rs` |
+| transition recipe, programs | `.claude/rules/player/recipes.md` | [transitions](modules/transitions.md), [programs](modules/programs.md) | `src/player/tests/{transition,program}.rs` |
+| scenes: worker, transport, scene source, crashes | `.claude/rules/player/scenes.md` | `modules/scene-*.md` | `src/player/tests/{worker,scene}.rs` |
+| scenes: the LWE core, its build, fonts, shader cache | `.claude/rules/player/scene-lwe.md` | [scene-lwe-core](modules/scene-lwe-core.md) | `src/player/tests/lwe_build.rs` |
+| scenes: sound and loudness | `.claude/rules/player/scene-audio.md` | [scene-audio](modules/scene-audio.md), [scene-loudness](modules/scene-loudness.md) | `src/player/tests/scene_loudness.rs` |
+| scenes: GPU budget, VRAM | `.claude/rules/player/scene-gpu.md` | [scene-gpu-budget](modules/scene-gpu-budget.md) | `src/player/tests/scene.rs` |
 | the C# side of a setting, rotation semantics | `.claude/rules/backend/player-adapter.md` | [adapter](adapter.md) | `scripts/test-liascape-player-adapter.sh`, `player-selftest` |
 | audio symptoms, dropout detection | — | [debugging](debugging.md) | `src/player/tests/dropout.rs`, `src/player/tests/onmachine/dropout.sh` |
 

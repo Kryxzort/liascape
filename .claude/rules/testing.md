@@ -83,6 +83,15 @@ Hermetic setup (own HOME, backend, player, audio): `CLAUDE.md` § Hard rules.
 - A perf or count failure seen while the machine was loaded (`uptime`'s load above the core count) proves nothing: rerun it
   under the lock before reporting it.
 
+## liascape-player tests (`src/player/tests/`)
+- One transition harness at a time (a process-wide lock): parallel 1080p decoders starve each other. Unit-test pure
+  state-machine rules graph-only in `recipes/transition.rs`.
+- Bound a harness wait with `tick_until` / `Harness::within`, never an `h.now() < …` assert or a fixed 100 ms gap:
+  neither counts the time a source is still coming up (`any_coming_up`), seconds per cold worker start on a busy box.
+- Bound a spawned process's come-up (a `serve`, a supervisor's restarted child) with `src/player/tests/common/come_up.rs`
+  `ComeUp::waiting`, never a fixed wall-clock wait: a cold debug start pages ~140 libraries in before `serve` runs.
+  Guard: `src/player/tests/supervise.rs::come_up_waits_for_progress_not_for_a_stuck_start`.
+
 ## A red result
 - Re-run only the failed cells, alone, on this tree AND on the previous build before deciding anything: fails on both =
   older than your change; fails only on yours = yours; passes alone = load flake (the matrix runs 6 shards).

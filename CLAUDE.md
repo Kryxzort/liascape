@@ -72,11 +72,13 @@ Path-scoped rules load when you read or edit matching files; open one directly w
 | library, index, loudness, scene properties, trash | `.claude/rules/backend/library.md` |
 | scrapers, Workshop, Steam sign-in, secrets, downloads | `.claude/rules/backend/sources-steam.md` |
 | C# side of liascape-player; rotation semantics | `.claude/rules/backend/player-adapter.md` |
-| Rust player: core invariants, graph, clocks, snapshot, supervisor | `.claude/rules/player/core.md` |
-| Rust player: EGL, Wayland, composition | `.claude/rules/player/gfx-wayland.md` |
-| Rust player: sources, mpv, audio bus | `.claude/rules/player/sources-audio.md` |
-| Rust player: transitions, programs, signals, runtime, command API | `.claude/rules/player/runtime-api.md` |
-| Rust player: scenes, scene worker, LWE core | `.claude/rules/player/scenes.md` |
+| Rust player: core invariants, graph, clocks, event log (every player file) | `.claude/rules/player/core.md` |
+| Rust player: snapshot, outbox, supervisor, memory | `.claude/rules/player/persistence.md` |
+| Rust player: EGL, effects, composition, Wayland | `.claude/rules/player/gfx-wayland.md` |
+| Rust player: sources, mpv, render worker; the audio bus | `.claude/rules/player/sources.md`, `.claude/rules/player/audio-bus.md` |
+| Rust player: runtime loop, outputs, signals, command API | `.claude/rules/player/runtime-api.md` |
+| Rust player: transition recipe, programs | `.claude/rules/player/recipes.md` |
+| Rust player: scene worker and source; the LWE core; scene sound; GPU / VRAM | `.claude/rules/player/scenes.md`, `scene-lwe.md`, `scene-audio.md`, `scene-gpu.md` |
 | UI look, motion, controls, performance | `.claude/rules/ui/design.md` |
 | UI store and backend API use | `.claude/rules/ui/state-and-api.md` |
 | Electron shell, probes, UI matrix | `.claude/rules/ui/shell-and-probes.md` |

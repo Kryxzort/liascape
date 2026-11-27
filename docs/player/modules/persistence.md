@@ -1,7 +1,7 @@
 # Persistence and restart: snapshot, outbox, supervisor
 
 Covers `src/player/src/snapshot.rs`, `outbox.rs`, `supervise.rs` and their wiring in `runtime.rs`/`main.rs`.
-Rules: `.claude/rules/player/core.md` § Snapshot, § Outbox, § Supervisor. The backend's side of a restart:
+Rules: `.claude/rules/player/persistence.md`. The backend's side of a restart:
 `.claude/rules/backend/player-adapter.md`.
 
 ## Snapshot (`<state>/snapshot.json`)

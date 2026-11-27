@@ -3,7 +3,7 @@
 Covers `src/player/src/audio/loudness.rs` (`SegmentMeter`, `Learner`, `Book`), the worker's metering in
 `bin/liascape-scene-worker/audio.rs`, the learner wiring in `sources/scene.rs`, and the offline estimate in
 `scene/loudness_estimate.rs` + `scene/pkg.rs` (`liascape-player scene-loudness`). Rules:
-`.claude/rules/player/scenes.md` § Scene loudness. The backend stores and applies it:
+`.claude/rules/player/scene-audio.md` § Scene loudness. The backend stores and applies it:
 `.claude/rules/backend/library.md` § Loudness and `.claude/rules/backend/player-adapter.md` § Scenes and loudness;
 why it is applied once per play: `docs/decisions.md` § Set scene normalization once per play.
 

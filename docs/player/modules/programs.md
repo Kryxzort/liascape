@@ -1,7 +1,7 @@
 # Programs (player-side rotation)
 
 Covers `src/player/src/recipes/program/` (`mod.rs` engine, `rule.rs`, `order.rs`, `pick.rs`, `store.rs`,
-`resume.rs`). Rules: `.claude/rules/player/runtime-api.md` § Programs. The contract it runs is the rotation in
+`resume.rs`). Rules: `.claude/rules/player/recipes.md` § Programs. The contract it runs is the rotation in
 `.claude/rules/backend/player-adapter.md` § Rotation (`pick` = the backend's `PickEffect` + `PickDuration`).
 
 A program is a graph node `prog:<name>` whose settings are live props; the recipe turns them into `transition`

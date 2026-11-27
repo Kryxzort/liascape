@@ -1,6 +1,6 @@
 # Audio bus and meter
 
-Covers `src/player/src/audio/` (`bus.rs`, `meter.rs`, `mod.rs`). Rules: `.claude/rules/player/sources-audio.md`
+Covers `src/player/src/audio/` (`bus.rs`, `meter.rs`, `mod.rs`). Rules: `.claude/rules/player/audio-bus.md`
 § Audio bus, § Async streams and latency, § Meter, § Never fork the serve process. Auto-mute and `sysmon`:
 [signals.md](signals.md).
 

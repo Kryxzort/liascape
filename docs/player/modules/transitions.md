@@ -1,7 +1,7 @@
 # Transition recipe
 
 Covers `src/player/src/recipes/transition.rs` and `src/player/src/onset.rs`. Rules:
-`.claude/rules/player/runtime-api.md` § Transition recipe; invariants #1, #4–#8 in `docs/player/invariants.md`.
+`.claude/rules/player/recipes.md` § Transition recipe; invariants #1, #4–#8 in `docs/player/invariants.md`.
 
 `Transitions::start`/`cancel`/`tick` only issue graph `create`/`set`/`destroy` and Animator calls. A
 `TransitionReq` is `{outputs (alias), to (B's create props), effect_id (None = cut), params, duration_ms, method:

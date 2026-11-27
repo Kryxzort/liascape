@@ -2,7 +2,7 @@
 
 Covers `src/player/src/worker/` (`proto.rs`, `mod.rs`, `reap`) and the process side of
 `src/player/src/bin/liascape-scene-worker/` (`main.rs`). Rules: `.claude/rules/player/scenes.md` § Protocol,
-§ Worker host lifecycle, § Build. Siblings: [scene-frame-transport.md](scene-frame-transport.md),
+§ Worker host lifecycle; `.claude/rules/player/scene-lwe.md`. Siblings: [scene-frame-transport.md](scene-frame-transport.md),
 [scene-source.md](scene-source.md), [scene-crash-policy.md](scene-crash-policy.md),
 [scene-lwe-core.md](scene-lwe-core.md), [scene-audio.md](scene-audio.md), [scene-loudness.md](scene-loudness.md),
 [scene-gpu-budget.md](scene-gpu-budget.md). Measurements: `docs/player/spikes/dmabuf.md`.
@@ -17,9 +17,7 @@ One JSON object per `SOCK_SEQPACKET` datagram (≤ `MAX_MSG`, 64 KiB), fds on th
 (≤ `MAX_FDS`, 8), internally tagged by `msg`. `Hello {protocol, pid, features, sync}` comes first; the host answers
 with `Start`. Scene time `t` in `Tick`/`Frame` is the compositor's scene clock. `Tick.input` carries the visualiser's
 system audio since the last tick (stereo s16, base64). `AudioRoute` is `"null" | "default" | {"device": …}`; a dmabuf
-`modifier` is an exact u64. `send` refuses oversize, uses `MSG_NOSIGNAL` (a gone peer is `EPIPE`, never SIGPIPE);
-`recv` never blocks and consumes a bad datagram (closing its fds) so the next one parses. Received fds are
-`CLOEXEC`.
+`modifier` is an exact u64. `send` refuses oversize; a gone peer is `EPIPE`, never SIGPIPE. Received fds are `CLOEXEC`.
 
 ## `WorkerHost` (`worker/mod.rs`)
 
@@ -28,13 +26,11 @@ States: `Starting` (no `Hello`) → `Running` → on a crash `Restarting {attemp
 restarts; `waitpid` runs every poll only once the worker is ending, else every `REAP_CHECK` (100 ms).
 
 - **Spawn** is `posix_spawn` (glibc's `CLONE_VM|CLONE_VFORK`: no page-table copy of the compositor, 0.2–0.7 ms of
-  loop time). It runs on the loop because `PR_SET_PDEATHSIG` fires when the spawning thread exits and pool threads
-  exit when idle (a spawn thread would make the pid late for every kill/reap path). The child gets the socket at
-  fd 3, stdout+stderr on one pipe (the log tail), stdin `/dev/null`; the parent's copies are renumbered ≥ 10 first so no `dup2` clobbers another and fd 3 never equals its
-  source (an `adddup2(3, 3)` would keep `CLOEXEC`). Signal mask empty and dispositions default (the compositor blocks
-  SIGINT/SIGTERM for its signalfd).
-- **`wake_fd()`** is an epoll fd over the current socket and pipe, stable across restarts: a dup of the old socket
-  would read EOF forever after a restart.
+  loop time), on the loop (pool threads exit when idle, firing `PR_SET_PDEATHSIG`). The child gets the socket at
+  fd 3, stdout+stderr on one pipe (the log tail), stdin `/dev/null`; the parent's copies are renumbered ≥ 10 first so
+  no `dup2` clobbers another and fd 3 never equals its source (an `adddup2(3, 3)` would keep `CLOEXEC`).
+- **`wake_fd()`** is an epoll fd over the current socket and pipe: a dup of the old socket would read EOF forever
+  after a restart.
 - **Crash** = socket EOF or the process gone; a process that closed its socket but lives on is SIGKILLed after 1 s.
   On reap the output is drained to EOF (so the crash's last stderr lines make the record), then the budget (3 per
   sliding 60 s) admits a respawn with the last `Start` at the resume position, or the source breaks
@@ -64,38 +60,30 @@ scene's spec, the `Start` sent at once, the `Hello` replayed to the source, the 
 instead of paying exec + link + EGL. The pool lives in `SourceHost` and runs each `sync` (at most every 20 ms):
 
 - **When.** Only while scenes are in use: while a rotation can still play a scene item (`Programs::rotation_scenes`:
-  an item's `kind` prop, else the program's `defaults`, is `scene`, and it isn't skipped or marked broken), so the
-  rotation's first scene takes a spare too; or from the first scene worker of the player's run (a restore's included)
-  until `stop`, or until no scene source was hosted for 30 min. A rotation that holds no scene ends it at once once no
-  scene shows (an edit removing the last scene, a video-only playlist started): it knows none comes, so waiting out
-  the 30 min would only charge a video-only user. With no rotation (a single wallpaper) the next apply is anyone's
-  guess and the 30 min stand, counted from the last scene shown or in a rotation. A player that only plays videos
-  never starts one. Off, no worker binary or WE assets, or the low-VRAM `stop` hold → reaped at once. At most one.
+  an item's `kind` prop, else the program's `defaults`, is `scene`, not skipped or broken); or from the first scene
+  worker of the run until `stop`, or until no scene source was hosted for 30 min. A rotation that holds no scene ends
+  it as soon as no scene shows (it knows none comes); with no rotation the 30 min stand. A player that only plays
+  videos never starts one. Off, no worker binary or WE assets, or the low-VRAM `stop` hold → reaped at once.
 - **Refill.** A spare starts (after a take: is replaced) once nothing competes with its start: 2 s after a take, no
   scene loading, no async open, no video before its first frame, no transition in flight (the spare's EGL setup is
   CPU and driver time the picture being waited for would share). At player start that is once the restore shows.
 - **Launch.** A spare serves only a scene launched the same way (binary, args, environment: `sources::scene::launch_for`, the
-  same helpers `SceneSource::open` uses). A change of it (another worker binary, the synthetic test scenes switched)
-  reaps the spare at once, so no scene ever starts in a stale one; the next one starts by the refill rule. The scene
-  fonts are no launch input: their rules come with the binary, their folders with the compositor's environment.
+  same helpers `SceneSource::open` uses). A change of it reaps the spare at once, so no scene ever starts in a stale
+  one. The scene fonts are no launch input (they come with the binary and the compositor's environment).
 - **Failure.** A spare that dies, hangs (its heartbeat runs as for any worker) or reports a fatal error is no crash:
   `Exited` only, no restart, no budget, no record, no scene touched; the next starts after 5 s, doubling to 5 min
   while failures continue. Once adopted it is the scene's own worker: its crash restarts through that scene's budget.
   Crash restarts spawn their own process. Until its `Ready` an adopted spare's load is watched: a process with no CPU
   time, page fault or IO wait for one hang timeout (a load works the whole time) is SIGKILLed for a fresh worker that
   loads from scratch, no crash (no budget, record, `Exited` or preview), once per adoption (`worker.spare_dropped`
-  with why and the main thread's wchan; the source's `spares_dropped`). It dies with its player (`PR_SET_PDEATHSIG`, spawned on the loop); a
-  supervisor restart keeps `player.scene_spare` (snapshot) and starts a new spare once the restored scene's worker
-  started, or once the restore shows when the restored rotation holds a scene.
+  with why and the main thread's wchan). A supervisor restart keeps `player.scene_spare` (snapshot) and starts a new
+  spare once the restore shows.
 - **Seen in** the `workers` probe's `spare` (state `spare` | `none` with `why`), the source's `spares_taken`, and the
   `worker.spare_*` / `worker.adopted` events. Test timing: `LIASCAPE_PLAYER_SPARE_TIMING=<refill>,<idle>,<retry>,<retry_max>` (ms).
 
-Measured (`scene_load.py --spare`, release, 3 scenes, medians): an apply 65–135 ms sooner warm, 70–215 cold (no exec or link from a cold disk), 71–108 after a reboot; the waiting spare holds ~168 MiB RSS, ~61 MiB PSS, ~35 MiB private dirty, 3 MiB VRAM.
-A fresh player's first scene with that scene in its rotation (`--first`, 5 rounds): 380–445 → 320–360 ms (59–114 sooner)
-with the files cached, 415–465 → 370–415 ms (49–78 sooner) with them dropped (`first_boot`).
-Against real Wallpaper Engine under Proton (request to B's first frame on screen): warm about even without the spare,
-110–180 ms sooner with it; after a boot or cold 135–265 ms sooner, and WE shows black while it loads.
-See [scene-load-we.md](../reports/scene-load-we.md) (`src/player/tests/onmachine/scene_load_we.py`).
+Measured (`scene_load.py --spare`, release, medians): an apply 65–135 ms sooner warm, 70–215 cold, 71–108 after a
+reboot; the waiting spare holds ~61 MiB PSS and 3 MiB VRAM. Against real Wallpaper Engine under Proton: 110–180 ms
+sooner warm, 135–265 ms cold ([scene-load-we.md](../reports/scene-load-we.md)).
 
 ## The heartbeat
 
@@ -108,8 +96,7 @@ the last third of the bound it is late for: before `Hello` its CPU time or major
 wait (`D`); after it only paging in counts (major faults, `D`), since CPU work then is a load the worker's protocol
 thread covers itself (`LoadGate`, its own cap) and a renderer spinning without answering is hung. All of it up to
 `HELLO_TIMEOUT_MAX_FACTOR` (10) × `HELLO_TIMEOUT` from its spawn (50 s, as long as the transition recipe waits for a
-loading B). A cold start on a saturated disk (binary and GL driver evicted) sat in D state for over 20 s at 2–3 major
-faults a second; killed, it would only start over, and three restarts mark the scene broken.
+loading B): a cold start on a saturated disk sat in D state for over 20 s, and killing it would only start it over.
 
 "Hung" means the worker is the reason no frame comes, so two waits don't count:
 
@@ -125,10 +112,9 @@ faults a second; killed, it would only start over, and three restarts mark the s
 
 ## The worker binary
 
-`liascape-scene-worker --fd N --parent-pid P [--stub]`. It sets `PR_SET_PDEATHSIG(SIGKILL)` first, exits 3 if
-`getppid()` ≠ `--parent-pid` (the parent died before the prctl), then sets its soft `RLIMIT_CORE` to 1 so an LWE
-crash never reaches systemd-coredump or a desktop crash dialog (`LIASCAPE_SCENE_WORKER_COREDUMP=1` keeps the
-inherited limit). It keeps its socket `CLOEXEC`: nothing it starts may hold it, since EOF is the crash signal.
+`liascape-scene-worker --fd N --parent-pid P [--stub]`. The PDEATHSIG / `getppid` / `RLIMIT_CORE` start and the
+`CLOEXEC` socket are the rule's (`.claude/rules/player/scenes.md` § Worker host lifecycle): the parent may die before
+the prctl, an LWE crash must never reach systemd-coredump or a crash dialog, and EOF is the crash signal.
 
 - **Threads.** The renderer (main thread: GL, ring, LWE), `lia-scene-proto` (reads the socket, hands messages over a
   channel), `lia-scene-audio` (only for a scene with sound, [scene-audio.md](scene-audio.md)), `lia-scene-media`
@@ -136,8 +122,8 @@ inherited limit). It keeps its socket `CLOEXEC`: nothing it starts may hold it, 
   took up to 2.8 s, a heavy scene's ~5 s of CPU) the protocol thread answers pings itself, bounded by
   `LIASCAPE_SCENE_LOAD_TIMEOUT_MS` (30 s). Past the bound a load that still makes progress — the renderer thread's
   CPU time (`/proc/self/task/<tid>/schedstat`) advanced within the last third of the bound — stays covered, up to
-  `LOAD_TIMEOUT_MAX_FACTOR` (4) × the bound. LWE's build is one thread on the CPU and a saturated machine queues it
-  (6.3 s quiet, 21–28 s at 3–5 runnable threads per CPU); a deadlocked load sleeps, so its CPU time stops. A `Quit`
+  `LOAD_TIMEOUT_MAX_FACTOR` (4) × the bound (a saturated machine queues LWE's one-thread build: 6.3 s quiet, 21–28 s
+  at 3–5 runnable threads per CPU; a deadlocked load sleeps, so its CPU time stops). A `Quit`
   or EOF during a load `_exit(0)`s at once; `Resize`/`Pointer`/`SetProperty` queue and apply after it.
 - **Preload.** For a real scene the host adds `--preload <scene> --preload-assets <dir> [--preload-steam <dir>]`
   (`worker::preload_args`, from the `Start` it will send) and the worker loads the project (folder check, LWE
@@ -146,15 +132,15 @@ inherited limit). It keeps its socket `CLOEXEC`: nothing it starts may hold it, 
   drops it and loads again; a preload's error is the load's error. While the renderer waits for it the `LoadGate`
   watches the preload thread's CPU time. Nothing thread-bound exists before the build: LWE's thread-locals live
   inside one parser call, and the QuickJS runtime and every GL object come with `first_render` on the renderer.
-- **Ending.** With a scene possibly live every exit is `_exit` (`Quit`, EOF, lost context, any panic via
-  `exit_on_panic`): `exit` runs NVIDIA's EGL and libcuda exit handlers under LWE's still-decoding video threads,
-  which segfault. Log with `elog!`: `eprintln!` panics once `stop` closed the pipe.
+- **Ending.** With a scene possibly live every exit is `_exit` (`Quit`, EOF, lost context, any panic): `exit` runs
+  NVIDIA's EGL and libcuda exit handlers under LWE's still-decoding video threads, which segfault. `eprintln!` panics
+  once `stop` closed the pipe, hence `elog!`.
 - **`--stub`** (tests, no GPU) answers pings and ticks with fd-less frames and is scripted by
   `LIASCAPE_SCENE_WORKER_TEST` (`crash_after_ms`, `hang_after_ms`, `ring:N` for slot starvation, `freeze_after_ms`
   + `freeze_ms`, `exit_code`, `ignore_quit`, `spam_stderr`). Without `--stub`, a folder holding
   `liascape-synthetic.json` plays the synthetic renderer when `LIASCAPE_PLAYER_ALLOW_SYNTHETIC_SCENES=1`
   (`scene::synthetic::SyntheticSpec`: patterns, `gpu_work`, tones, `load_ms`, `fail`, `gpu_stall`,
   `context_lost_after_ms`); `tests/common::synthetic_scene` writes such a folder.
-- **Build.** Only this binary links LWE's core (`cargo::rustc-link-arg-bin`); the compositor never does. Without
-  feature `lwe` (`--no-default-features`, `install.sh --no-scenes`) it runs the stub and the synthetic renderer only.
-  `paths::scene_worker_bin()` = `$LIASCAPE_SCENE_WORKER_BIN` (if it names a file) → next to `/proc/self/exe` → `PATH`.
+- **Build.** Without feature `lwe` (`--no-default-features`, `install.sh --no-scenes`) it runs the stub and the
+  synthetic renderer only. `paths::scene_worker_bin()` = `$LIASCAPE_SCENE_WORKER_BIN` (if it names a file) → next to
+  `/proc/self/exe` → `PATH`.

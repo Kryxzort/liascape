@@ -1,7 +1,7 @@
 # Composition and effects
 
 Covers `src/player/src/gfx/compose.rs` (the per-output frame builder) and `src/player/src/gfx/effects.rs` (the
-transition-effect catalogue). Rules: `.claude/rules/player/core.md` § Effects, § Composition.
+transition-effect catalogue). Rules: `.claude/rules/player/gfx-wayland.md` § Effects, § Composition.
 
 ## Effect catalogue
 

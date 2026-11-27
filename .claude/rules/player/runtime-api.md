@@ -7,24 +7,19 @@ paths:
   - "src/player/src/ctl.rs"
   - "src/player/src/api/**"
   - "src/player/src/probe/**"
-  - "src/player/src/recipes/**"
   - "src/player/src/signal/**"
   - "src/player/src/audio/foreign.rs"
   - "src/player/src/audio/sysmon.rs"
   - "src/player/tests/api.rs"
-  - "src/player/tests/transition.rs"
-  - "src/player/tests/program.rs"
   - "src/player/tests/automute.rs"
-  - "transitions/**"
 ---
 
-# liascape-player: runtime, transitions, programs, signals, command API
+# liascape-player: runtime loop, outputs, signals, command API
 
-Crate-wide rules (core invariant, event log, snapshot, supervisor, units) live in [core.md](core.md); scene
-specifics in [scenes.md](scenes.md); the backend's rotation contract in
-[player-adapter.md](../backend/player-adapter.md). Walkthroughs: `docs/player/modules/runtime.md`,
-`docs/player/modules/transitions.md`, `docs/player/modules/programs.md`, `docs/player/modules/signals.md`,
-`docs/player/modules/command-api.md`. Audio symptom → probe recipes: `docs/player/debugging.md`.
+Crate-wide rules (core invariant, event log, units, graph) live in [core.md](core.md); the transition recipe and
+programs in [recipes.md](recipes.md); snapshot and supervisor in [persistence.md](persistence.md); scene specifics in
+[scenes.md](scenes.md). Walkthroughs: `docs/player/modules/runtime.md`, `docs/player/modules/signals.md`,
+`docs/player/modules/command-api.md`. Debugging a running player: the `player-debug` skill.
 
 ## Runtime loop (`runtime.rs`)
 - Run time-driven work (animator, recipes, programs, compose) only on the timer tick. A wake (mpv eventfd,
@@ -78,8 +73,7 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   children get `PR_SET_PDEATHSIG(SIGKILL)` (`die_with_parent`). Test servers run
   `LIASCAPE_PLAYER_VRAM_PROBE=none` unless they set a fake.
 - In `state.graph` a source node's `kind` is its Source kind (`video`/`scene`/…): recognise sources by
-  `gain_effective_db`. A log `fields` key named like a fixed key (`kind`, `corr`) overwrites it — use
-  `source_kind`.
+  `gain_effective_db`.
 
 ## Outputs, hotplug, parking
 - On output add: re-apply its remembered `out:` props first, then a parked wallpaper parked for that
@@ -96,81 +90,6 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
   `align: end` request waits for an output unless the parked A `never_ends` (still or scene) — then it hands
   off at once. Guards: `tests/api.rs::i4_transitions_while_no_output_replace_the_parked_wallpaper`,
   `parked_scene_align_end_hands_off_at_once`.
-
-## Transition recipe (`recipes/transition.rs`)
-- Keep the recipe kind-agnostic: it issues only graph `create`/`set`/`destroy` and `Animator` calls — no
-  rendering, no source access, no per-kind branches beyond `is_still`/`never_ends`/`b_has_audio`.
-- `start` creates B first (a bad request changes nothing), then resolves overlapping transitions:
-  pre-Running → abort (A's loop restored without a rewind); Running → commit; Handoff → left to settle.
-  Only then capture A.
-- With no A on any requested output, run the request as a cut (`effect_id: null`); an A on any one output
-  keeps the effect. Guards: `effect_from_nothing_is_a_cut`, `effect_stays_with_any_a_and_superseding_from_nothing_stays_a_cut`.
-- A cut ramps out (and swaps at t0 + 30 ms) only an A that `onset::audible` says can be heard; an ended, paused,
-  soundless or −96 dB A gets its anticlick set and B shows at t0 (`a_audible`). An A whose audio isn't
-  known yet counts as audible. Guards: `cut_from_a_soundless_a_swaps_at_once` (unit and `tests/transition.rs`).
-- Never run a gain animation shorter than 30 ms, whatever `duration_ms`. Guard: `tests/transition.rs::zero_duration_gains_still_ramp_30ms`.
-- Hold B's onset ramp until its `AudioFlowing` (≤ `ONSET_TIMEOUT`), started at the confirmation instant,
-  never backdated; route every call site through `schedule_onset`. `b_has_audio` skips the wait for
-  color/image/snapshot or a muted B, and a user pause too (the pause gate holds B silent). A cut's B is never held.
-- Write `settle_until` with `.max()` downstream of a scheduled onset, never plain assignment, so a later
-  recompute can't shorten a still-ramping onset (`commit_unseen` drops a pending onset instead).
-- `begin_running` force-starts another transition's pending onset on its A's, never `start` (a committed frozen B
-  is the new A before its audio flows). Guard: `frozen_commit_holds_b_silent_until_audio_flows`.
-- Pause a held A at `t0 + ANTICLICK + AUDIO_SETTLE_TAIL`, not `t0 + ANTICLICK`: mpv's gain lags the graph.
-- Record gains for restore with `Animator::live_target_of`, never `target_of` (a finished ramp's stale
-  target would undo a later `set`). Guard: `restore_uses_live_target_not_a_stale_finished_one`.
-- Ignore B's `Rejected` events; only `Error` fails B. Ignore A's errors (its texture holds its last frame).
-- `align: end`: aim at the raw end minimum (no half-frame centring); rescale it on a speed change rather than
-  restart from a stale `time_pos`; `follow_a_end` compresses the remaining effect when A's end moves earlier
-  (≥ `COMPRESS_FLOOR` left, never stretched). A lead A that `never_ends` → start now. An A that never reaches
-  its end falls back after its remaining time + `ALIGN_SLACK`. Guards:
-  `tests/api.rs::align_end_hands_off_as_a_last_frame_ends`, `align_end_speed_up_mid_effect_hands_off_at_a_end`,
-  `align_end_tracks_a_speed_dragged_continuously`, `align_end_compression_keeps_the_hold_and_never_stretches`,
-  `anim::compress_to_keeps_value_and_shape`.
-- reveal/frozen snapshot only an A whose picture can still change: a still (by kind) or an ended A is held
-  as itself. A video is never a still, even with no known duration.
-- Never pause, ramp, loop-change or destroy an A shown by a layer outside the request (shared A).
-- Process the graveyard at the top of `tick` so a source's final −96 dB reaches it before its node goes; a
-  transition can't enter Running while a grave on its outputs is pending (≤ 2 streams per output).
-- A B with observed `loading` true waits up to `LOADING_READY_TIMEOUT` instead of `READY_TIMEOUT`; keep it
-  under the backend's own 60 s switch wait. Guard: `loading_b_is_waited_for_past_the_ready_timeout`.
-- Stamp transition events with the pause-excised player clock (`Runtime::now`), not `t_mono_ms`.
-- Tests: one harness at a time (process-wide lock) — parallel 1080p decoders starve each other.
-  Pure state-machine rules are unit-tested graph-only in `recipes/transition.rs`.
-- Bound a harness wait with `tick_until` / `Harness::within`, not an `h.now() < …` assert: neither counts the
-  time a source is still coming up (`any_coming_up`), seconds per cold worker start on a busy box.
-- Bound a spawned process's come-up (a `serve`, a supervisor's restarted child) with `src/player/tests/common/come_up.rs`
-  `ComeUp::waiting`, never a fixed wall-clock wait: a cold debug start pages ~140 libraries in before `serve` runs
-  (5 s in the loader alone under fsync writers). Guard: `src/player/tests/supervise.rs::come_up_waits_for_progress_not_for_a_stuck_start`.
-
-## Transition catalogue (`transitions/`, shared with the UI's previews)
-- `glsl/<id>.glsl` bodies + `manifest.json`, generated by `scripts/generate_transitions.py`; credit new effects in `UPSTREAM.md`.
-
-## Programs (`recipes/program/`)
-- A program is a graph node `prog:<name>` that only issues `transition` requests through
-  `Transitions::start` (or `transition_parked`); never add a second switch path, never render, never touch
-  a source. Rotation semantics follow the contract in [player-adapter.md](../backend/player-adapter.md) § Rotation.
-- Program create/destroy never moves `picture_rev`/`demand_rev`.
-- Stash the transition outbox (`Runtime::stash_tr_events`) in the `transition`/`cancel` verbs and output
-  removal instead of dropping it: programs read those events on the next tick.
-- Commit a step at its `transition.started` (a `handoff` commits one whose `started` was missed); plan a
-  step, never pre-fetch.
-- Drive play time and countdown from `Runtime::rotation_now` (every pause excised, a still-frame effect's
-  too; play time wall-rate, countdown scaled by the current source's `speed`); no rule starts a switch
-  under a hold (user pause, VRAM, cover).
-  Guards: `tests/program.rs::cover_hold_freezes_a_program`, `live_max_edit_while_paused_waits_for_the_resume`.
-- Arm an `on_end` switch only after the current effect's handoff and never while parked: a request during a
-  Running effect would commit it early.
-- Failures never spin: back off on `BACKOFF_MS`, mark the path failed, move on; when every item failed,
-  retry at the ladder's pace.
-- Parked under `while_parked: rotate`, switch no sooner than `PARKED_MIN_PLAY_MS` after the last commit.
-- `keep` stops every rotation rule and keeps a video looping; user verbs still switch; lifting it resets
-  play time and countdown. Guards: `tests/program.rs::keep_holds_the_current_item_and_loops_it`,
-  `keep_stops_the_timer_and_resets_it_when_lifted`.
-- A live edit never resets play time; an edit to only items' `props`/`skip` never reorders.
-- Write `program.json` only when a definition changed (`def_dirty`), never on the 2 s snapshot refresh.
-  A crash restart restores exactly; only `--session-start` applies `start_mode`.
-  Guard: `tests/program.rs::resume_retimes_a_countdown_saved_under_other_settings`.
 
 ## Signals (`signal/`)
 - "Covered" means visible, never focused: never read wlr-ft `activated`, Hyprland client `visible`, or
@@ -192,14 +111,12 @@ specifics in [scenes.md](scenes.md); the backend's rotation contract in
 ## Command API (`src/player/src/api/`, `src/player/src/ctl.rs`)
 - Every error reply carries a `hint` saying what to do next.
 - Flush the event tap before every reply: events a command causes arrive before its reply.
-- Global settings go to `srcs:*` (core.md § Graph); a `set`/`animate` on a broadcast alias matching nothing is
-  still type-checked and succeeds with `targets: []` — only an unknown connector or concrete id is `no_such_node`.
+- A `set`/`animate` on a broadcast alias (`srcs:*`) matching nothing is still type-checked and succeeds with `targets: []` — only an unknown connector or concrete id is `no_such_node`.
 - Keep client isolation: per-wake read/request caps, oversized lines → `bad_request` + close, slow
   subscribers dropped. Guard: `tests/api.rs::bad_client_isolated`.
 - A new probe = a file in `src/player/src/probe/` + one `PROBES` entry. Keep `mpv_*` synchronous reads
   probe-only.
 - Spawn dropout ffmpeg decodes without `pre_exec` (it forks the whole compositor and costs bus cycles):
   `setpriv --pdeathsig KILL -- ffmpeg`. Guard: `tests/api.rs::dropout_analysis_never_skips_bus_cycles`.
-- Debug order: `ctl state` → `ctl logs '{"corr":…}'` → `ctl probe` (`sources`, `loop`) → `ctl capture` →
-  replay on `serve --headless --clock stepped --ao null`. `LIASCAPE_PLAYER_MPV_LOG=v` prints each mpv core's
-  log (timestamps are when the loop pumped it).
+- `LIASCAPE_PLAYER_MPV_LOG=v` prints each mpv core's log (timestamps are when the loop pumped it); replay a bug on
+  `serve --headless --clock stepped --ao null`.

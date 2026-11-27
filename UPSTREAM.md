@@ -18,7 +18,7 @@ Do not hand-edit `CREDITS.md`; edit this file (or a patch header) and run
 - **Relationship**: **absorbed, not vendored.** mpvpaper is small (~2k lines of C); its value to
   this project is proven techniques, not code to pull in wholesale. No mpvpaper source file is
   copied into this repo — each row below is reimplemented in Rust against its own measured
-  constraints, documented in full in `.claude/rules/player/core.md`.
+  constraints, documented in full in the player rules (`.claude/rules/player/`).
 - **Last reviewed**: commit `fc5ed28` (2026-08-28). A periodic look at mpvpaper's changelog
   replaces a code sync — there is nothing to merge, only techniques to notice.
 

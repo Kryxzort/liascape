@@ -82,6 +82,14 @@ gaps only ever supersedes; choose gaps by condition.
   frame) and live as `SetProperty` per changed entry, typed by JSON shape (bool, number, `[r,g,b(,a)]` 0–1,
   string). A removed key keeps its value until the scene reopens — LWE has no reset, so the backend sends defaults
   explicitly.
+- **A file in a `scenetexture` slot** (a preset's own image, the fork's `GLPlayer::kFileFormats`): an image file's
+  absolute path (png, jpg, jpeg, bmp, tga, gif: its first frame) is bound at the build, so it goes at open; one that
+  doesn't load, or is over 64 MiB, 16384 px a side or 64 Mpx, keeps the slot's texture. A video file's (mp4, m4v,
+  webm, mkv, mov) plays there, streamed from the file (no byte cap), looped, silent and on the scene clock like a
+  video texture; it opens only as MP4 / QuickTime or Matroska / WebM through the `file` protocol (FFmpeg picks a
+  demuxer by the bytes). One that doesn't open so, or whose header says over 8192 px a side or 7680 × 4320 px, keeps
+  the slot's texture, and a frame over those caps as displayed (a stream that grows, a stretching sample aspect) is
+  not shown. A video in any pass slot plays while its pass lives.
 - **`scene_dir` vs `path`.** A preset has no scene of its own: its source's `path` is the preset's folder and
   `scene_dir` the base scene's (`SceneOpts::load_path`; `""` = `path`). Only the worker's `Start` and
   `--preload`, the synthetic check and the Steam library come from `scene_dir`; everything that names the source —

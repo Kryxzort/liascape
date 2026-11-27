@@ -13,10 +13,10 @@ paths:
   - "src/player/tests/onmachine/outputs.sh"
 ---
 
-# liascape-player: EGL, GL and the Wayland backend
+# liascape-player: EGL, GL, effects, composition and the Wayland backend
 
-Crate-wide rules (effects, composition, the graph) are in `.claude/rules/player/core.md`. Walkthroughs and
-measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`.
+Crate-wide rules (the graph, units, clocks) are in `.claude/rules/player/core.md`. Walkthroughs and
+measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/composition.md`, `docs/player/modules/wayland.md`.
 
 ## EGL ownership (`src/player/src/gfx/egl.rs`)
 - Share EGL teardown through `Rc<Shared>`: `Gfx`, every `WindowTarget` and every `GlKeepAlive` hold a clone, and
@@ -36,14 +36,39 @@ measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`
   NVIDIA's process-wide lock at its first `eglMakeCurrent`; the render worker pays that once at startup only.
 
 ## GL helpers (`src/player/src/gfx/gl.rs`)
-- `Gfx::tex` is RGBA8, LINEAR, CLAMP_TO_EDGE with no per-call knobs; `Gfx::fbo` panics on an incomplete attachment
-  (a programming error).
 - Reuse `Gfx::empty_vao` for fullscreen-triangle draws (core profile needs a bound VAO).
 - `tests/common::read_rgba` is GL bottom-left origin and never flipped; `Gfx::write_png` flips to top-down PNG
   order; `write_png_source` writes a raw source texture (already image-top at row 0) without a flip. Never re-flip
   what the other already flipped.
 - Encode PNGs with fdeflate `Compression::Fast`. Guard `src/player/tests/gfx_basic.rs`
   `write_png_is_fast_enough_for_the_loop`.
+
+## Effects (`src/player/src/gfx/effects.rs`)
+- Never edit anything under `transitions/` for this crate: the assets are shared with the UI. Adapt at load time
+  (`rewrite_header`, the `//<<BODY>>` splice in `Catalogue::program`); a driver needing a GLSL prelude gets it there.
+- `rewrite_header` must fail loud when `#version 300 es` is missing from either wrapper or the precision line is
+  missing from `wrap.frag.template` — the asset changed shape. An unknown uniform `type` in the manifest fails at
+  `Catalogue::load`, not at draw time.
+- A failed effect compile is cached (`Catalogue::failed`), logged once, and drawn as a cut at progress 0.5 — never
+  re-compiled per frame, never a transparent frame. Guard `src/player/tests/compose.rs`
+  `uncompilable_effect_draws_a_cut_not_black`.
+- `EffectProgram::draw` draws into whatever FBO/viewport is bound and restores no state; the caller owns the target.
+- When no catalogue resolves (the `nix build` sandbox has no `transitions/`), tests skip through
+  `tests/common::catalogue_dir`; the runtime still serves cuts (`Catalogue::empty`).
+
+## Composition (`src/player/src/gfx/compose.rs`)
+- Keep `compose_output` stateless with respect to frames: a missing texture draws transparent. Holding the last
+  good frame is the source's job.
+- Flip exactly once: `flip_v = true` only on the plain-`Source` → target blit; `false` for `render_side`'s inputs
+  (the effect wrapper flips them) and for the effect result → target. A second flip turns every transition upside
+  down. Guard `src/player/tests/compose.rs` `effect_progress_endpoints_match_plain_source` (a Y-uniform test can't
+  catch it). Placement coordinates are GL bottom-left; never flip placement.
+- Draw premultiplied (`rgb * opacity`, `a * opacity`) with `GL_ONE, GL_ONE_MINUS_SRC_ALPHA` onto transparent black.
+  Apply layer opacity in the separate result → target pass; the effect shader has no opacity input.
+- Keep `fit_rect` exact `f64`; round to whole pixels only at the `gl.viewport` call.
+- `Composer::last_missing` reports holes in a visible layer (the seam probe); a recipe must never show a source
+  before it is `Ready`. Guards `src/player/tests/compose.rs` `last_missing_names_every_hole_in_a_visible_layer`,
+  `src/player/tests/api.rs` `switches_never_compose_a_hole`.
 
 ## Capture (`src/player/src/api/capture.rs`)
 - Never read back synchronously on the loop for `capture`: `Gfx::start_read_back` (PBO + fence + flush), poll with
@@ -77,8 +102,9 @@ measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`
 
 ## Present
 - In `present`: make the window current, disable scissor, full viewport, `glDrawBuffer(GL_BACK)` every time, blit
-  the FBO, clear alpha only to 1, request the frame callback, then `eglSwapBuffers`. Surfaceless-first contexts
-  start with draw buffer `GL_NONE`, so skipping `glDrawBuffer` silently drops every write.
+  the FBO, clear alpha only to 1 (the EGL config is ARGB: the compositor must never blend what's behind), request the
+  frame callback, then `eglSwapBuffers`. Surfaceless-first contexts start with draw buffer `GL_NONE`, so skipping
+  `glDrawBuffer` silently drops every write.
 - Request the frame callback before the swap (it rides on the swap's commit). A failed swap leaves it armed
   (`frame_armed`): never request a second; set `frame_pending` only after a successful swap.
 - Back off failed presents (`present_backoff`) and log `output.present_failed` rate-limited.
@@ -86,8 +112,6 @@ measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`
 - Use swap interval 0 on every window — interval 1 blocks the single loop thread and drags other outputs down.
 - Terminate `eglCreatePlatformWindowSurface`'s attrib list with `ATTRIB_NONE`; an empty slice is
   `EGL_BAD_PARAMETER`.
-- Alpha is forced to 1 at present (the EGL config is ARGB) so the compositor never blends what's behind.
-- Every present is full damage; there is no buffer-age path.
 
 ## NVIDIA explicit sync and the default queue
 - `wl::apply_driver_env` (first thing in `serve`, Wayland only, before any thread) sets
@@ -121,8 +145,8 @@ measurements: `docs/player/modules/gfx-egl.md`, `docs/player/modules/wayland.md`
   re-derive from the graph per wake.
 - Headless composes every tick unless `--redraw-policy content`. Guard `src/player/tests/api.rs`
   `mixed_content_static_output_stays_idle`.
-- Keep the animator tick timer running when idle (decided): stopping it would need every start/phase/step/stop
-  path to re-arm it.
+- Keep the animator tick timer running when idle (`docs/decisions.md` § "Keep the animator tick timer running while
+  every output is idle").
 
 ## Hotplug and pointer
 - A removed output's GPU side goes to a dead list, freed in `process` with the context current surfaceless
