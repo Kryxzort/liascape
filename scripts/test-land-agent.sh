@@ -33,6 +33,8 @@ cat > "$T/bin/matrix" <<'S'
 #!/usr/bin/env bash
 # a full run fails $MX_CELL; alone (--only) it passes unless MX_ALONE=fail
 echo "matrix $*" >> "$STUB_LOG"
+# the real matrix script rejects an empty argument ("unknown arg ")
+for a in "$@"; do [ -n "$a" ] || { echo "    unknown arg $a"; exit 2; }; done
 case " $* " in
   *" --only "*) [ "${MX_ALONE:-pass}" = fail ] && { echo "FAIL $MX_CELL"; echo "MATRIX pass=0 fail=1 error=0 skip=0 setup=0 known=0"; exit 1; }
                 echo "MATRIX pass=1 fail=0 error=0 skip=0 setup=0 known=0"; exit 0 ;;

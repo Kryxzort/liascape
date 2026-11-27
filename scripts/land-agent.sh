@@ -227,7 +227,9 @@ run_matrix() {  # <label> <args…>: runs it, reruns failed cells alone; 0 = pas
   local head log; head=$(git -C "$wt" rev-parse HEAD); log="$state/matrix-$head.log"
   if [ "$dry" = 1 ]; then say "would run the $label UI matrix: $matrix_cmd $*"; return 0; fi
   say "the $label UI matrix (output: $log) …"
-  local rc=0; (cd "$wt" && bash -c "$matrix_cmd $(printf '%q ' "$@")") >"$log" 2>&1 || rc=$?
+  # printf '%q ' with no arguments prints '' (an empty argument the matrix script rejects): quote only real ones.
+  local args=""; [ "$#" -eq 0 ] || args=$(printf '%q ' "$@")
+  local rc=0; (cd "$wt" && bash -c "$matrix_cmd $args") >"$log" 2>&1 || rc=$?
   if [ "$rc" = 0 ] && passing "$log"; then say "matrix: $(grep -E '^MATRIX ' "$log" | tail -n 1)"; : > "$state/matrix-$head.$label.ok"; return 0; fi
   grep -q '^FAIL real network' "$log" && die "the matrix reached a real server (see $log)"
   local cells; cells=$(grep -E '^(FAIL|ERROR|SETUP) .+ × .+' "$log" | sed -E 's/^(FAIL|ERROR|SETUP) //' | sort -u || true)
