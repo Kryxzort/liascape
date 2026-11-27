@@ -37,6 +37,7 @@ machine-wide lock (`scripts/test-lock.sh`, `.claude/rules/testing.md` § One hea
 - No name lookup leaves a hermetic suite's namespace (nscd's socket hidden; getent and .NET's resolver): `bash scripts/test-hermetic-dns.sh`
 - Rules and docs: `bash scripts/check-rules.sh`
 - The TODO / decisions merge driver (block-level, no conflict when branches touch different items): `bash scripts/test-merge-docs.sh`
+- Landing an agent's branch (`scripts/land-agent.sh`, skill `land-agent`: dry run, leftovers refused, flakes, findings, a conflict) and the hooks in `.claude/hooks/`: `bash scripts/test-land-agent.sh`
 - Dev stack (NOT hermetic — the owner's session): `bash scripts/dev.sh` / `bash scripts/dev-stop.sh`
 - Agent window (NOT hermetic — its own headless compositor, sandboxed backend, Vite and CDP port; it never writes to the session's Hyprland; CDP scripts and benches drive it, never the owner's window): `bash scripts/agent-window.sh up|status|down`
 - Live UI benchmark (NOT hermetic — drives the agent window; `--owner` the owner's): `node scripts/bench-live-ui.mjs <scenario>` — real frame times at the window's measured refresh rate

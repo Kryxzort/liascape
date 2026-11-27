@@ -132,19 +132,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        backlog item against the code, delete what is done or obsolete (the legacy engine, mpvpaper, LWE-subprocess
        items), merge duplicates, and say for each kept item what is still missing. Report what was cut and why.
 
-24. [ ] (owner) Automate landing an agent's branch: scripts, hooks and one skill (the TODO / decisions merge driver is built: `scripts/merge-docs.py`) (no plugin: the repo's
-       `.claude/` already ships settings, skills and agents to a clone). In order:
-       - A new script, `land-agent.sh <worktree>` in `scripts/`: rebase onto lp-player, builds + lint + `check-rules`, the local CodeRabbit
-         review (findings saved for the lander to judge), `land.sh`, then the worktree and branch removed; refuses to land
-         while the agent's report names an undone or follow-up part that `docs/TODO.md` doesn't carry.
-       - Claude Code hooks in `.claude/settings.json`: `check-rules.sh` after an edit under `docs/` or `.claude/`, the
-         checks on a finished agent's worktree, the Queued list at session start.
-       - A `land-agent` skill: run the script, then the judgement steps (each finding real or not, code conflicts,
-         leftovers queued).
-       - The implementer agent's definition moves into the repo (`.claude/agents/`) carrying the standard brief tail
-         (the test lock in `nix develop`, never the main checkout's node_modules, CodeRabbit, the one attribution line,
-         delete the TODO item by its text, queue what's left, no push), so a brief states only the task.
-
 25. [ ] (owner's night of choice, real session) Rerun `src/player/tests/onmachine/scenes.sh crash` on a quiet
        machine. The 2026-11-27 run (43/52) overlapped agents' hermetic suites; it now takes the test lock, so none can.
        It must show: DP-1's tone with 0 drops in every event AND in every quiet window (the new "quiet windows (no

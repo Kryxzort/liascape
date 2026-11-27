@@ -2,7 +2,8 @@
 # Checks the agent-facing rules against .claude/rules/writing-rules.md:
 #  - every .claude/rules/**/*.md starts with YAML frontmatter whose only key is `paths:` = a list of quoted globs
 #    (invalid YAML would make Claude Code load the rule on every task), each glob matching a tracked file;
-#  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; reference docs (docs/player/*.md, modules) ≤ 15,000 chars, docs/decisions.md ≤ 30,000; every SKILL.md has name + description;
+#  - every rule file is ≤ 250 lines and ≤ 30,000 chars; CLAUDE.md ≤ 100 lines; reference docs (docs/player/*.md, modules) ≤ 15,000 chars, docs/decisions.md ≤ 30,000; every SKILL.md and .claude/agents/*.md has name + description;
+#  - .claude/settings.json parses and every hook script it runs exists;
 #  - every backticked repo path in CLAUDE.md, the rules and the skills exists (exact, a tracked directory, a glob, or
 #    a suffix of a tracked path such as `hooks/useLinger.ts`; runtime and build-output paths are skipped);
 #  - no "see memory X" pointers (auto memory is invisible to subagents); no emails / real IPs in rules and docs (public repo);
@@ -137,6 +138,29 @@ for f in sorted(glob.glob(".claude/skills/*/SKILL.md")):
         bad(f, "skill frontmatter needs `name:` and `description:`")
     check_paths(f, t)
     print(f"{f}: {t.count(chr(10))} lines")
+
+# Agent definitions (.claude/agents/*.md) load like a skill: `name:` and `description:`, and the paths they name exist.
+for f in sorted(glob.glob(".claude/agents/*.md")):
+    t = open(f, encoding="utf-8").read()
+    m = re.match(r"---\n(.*?)\n---\n", t, re.S)
+    if not m or not re.search(r"^name: \S", m.group(1), re.M) or not re.search(r"^description: \S", m.group(1), re.M):
+        bad(f, "agent frontmatter needs `name:` and `description:`")
+    check_paths(f, t)
+    personal(f, t)
+    print(f"{f}: {t.count(chr(10))} lines")
+
+# The repo's Claude Code settings parse (a broken file drops every hook silently) and each hook's script exists.
+if os.path.exists(".claude/settings.json"):
+    import json
+    try:
+        st = json.load(open(".claude/settings.json", encoding="utf-8"))
+        cmds = [h.get("command", "") for groups in (st.get("hooks") or {}).values() for g in groups for h in g.get("hooks", [])]
+        for c in cmds:
+            for sp in re.findall(r"\$\{?CLAUDE_PROJECT_DIR\}?/([\w./-]+)", c):
+                if not os.path.isfile(sp): bad(".claude/settings.json", f"a hook runs a missing script: {sp}")
+        print(f".claude/settings.json: {len(cmds)} hook(s)")
+    except (ValueError, AttributeError, TypeError) as e:
+        bad(".claude/settings.json", f"not valid settings JSON: {e}")
 
 # Dead citations: every `.claude/rules/….md` / `docs/….md` path named in a tracked (or new, not ignored) text file —
 # code comments, docs, rules — must exist, unless git ignores the path. One problem per missing path, with its count and where it is cited.

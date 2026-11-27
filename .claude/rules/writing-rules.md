@@ -23,6 +23,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
 - A must/never for one area → that area's rule in `.claude/rules/` (the table in `CLAUDE.md` says which).
 - Needed on every task → `CLAUDE.md` (keep it ≤100 lines).
 - A multi-step procedure → a skill, `.claude/skills/<name>/SKILL.md`.
+- The standing brief of a delegated role (what every task of it needs, true on any clone) → `.claude/agents/<name>.md`;
+  one person's additions go in their `CLAUDE.local.md` (a same-named user-level agent file is shadowed by the repo's).
 - How a part works now, when one read of the code won't tell you → reference material in `docs/` (see below), linked from its rule.
 - A choice that ruled out a tempting alternative → one entry in `docs/decisions.md` (see below).
 - What happened (incidents, who said what, dates, Task/Phase/R-numbers, measurements of a bug now fixed) → the commit message only. `git log -S` finds it.
@@ -34,7 +36,8 @@ Follows Anthropic's guidance: https://code.claude.com/docs/en/memory and https:/
   facts to their homes above (git history keeps the file).
 - Every owner request or agreed decision about the app → a `docs/TODO.md` item in the same turn it is agreed, before any
   work or delegation; a chat message, a spec or an agent's brief is never its only record.
-- A zero-exception ban → a hook or a permission rule, not prose.
+- A zero-exception ban → a hook or a permission rule, not prose: hooks in `.claude/settings.json`, their scripts in
+  `.claude/hooks/`, quick (well under 2 s) and silent when all is well (`check-rules.sh` checks each named script exists).
 - What a user needs to install, start and use the app → `README.md` (see below); never internals or a change log.
 - One person's own workflow on their machine (where their notes go, their habits) → `CLAUDE.local.md` (gitignored,
   loaded like `CLAUDE.md` for that checkout only); a tracked file never points at anything that exists only locally.

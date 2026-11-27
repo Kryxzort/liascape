@@ -43,7 +43,7 @@ add() { parts+=("$1"); echo "  $2 → $1" >&2; }
 for f in $FILES; do
   case "$f" in
     docs/*|.claude/*|*.md|LICENSE*|.gitignore) echo "  $f → nothing (docs)" >&2 ;;
-    scripts/matrix-cells-for.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
+    scripts/matrix-cells-for.sh|scripts/check-rules.sh|scripts/land-agent.sh|scripts/test-land-agent.sh|scripts/test-settings-*.sh|scripts/measure-*|scripts/gen-credits.py) echo "  $f → nothing (a test/tool script)" >&2 ;;
     scripts/test-workshop-social.sh|scripts/test-fixtures/fake-steam-community.mjs|scripts/test-library-facts.sh|scripts/test-clip-sweep.sh|scripts/test-preview-backfill.sh|scripts/test-item-actions.sh|scripts/test-cache-clear.sh|scripts/test-backend-stop.sh|scripts/test-presets.sh|\
     scripts/test-steam-signin.sh|scripts/test-fixtures/drive-steam-client.mjs|scripts/test-fixtures/fake_steamclient.c|src/backend/Web/SteamSelfTest.cs|scripts/test-steam-app-hold.sh) echo "  $f → nothing (its own script — run it)" >&2 ;;
     # "Start with your desktop": the entry and the detection have their own script, the Settings row its probe cells
