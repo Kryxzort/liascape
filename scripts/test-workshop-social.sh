@@ -14,6 +14,13 @@
 #  1b. an item's counts (/workshop/counts, the Library sidebar's stat pills): Steam's CURRENT subscriber / favourite counts
 #     from the client protocol (not the lifetime ones); one GetDetails per item however many asks (the counts and the creator
 #     at once, again later); no such item → 404, a bad id → 400, Steam unreachable → 502 and asked again once it answers.
+#  1c. the filter column's Author field (/workshop/author, Helpers/SteamAuthors.cs): a Steam ID and a profile link naming one
+#     → that account with no request; a profile link's custom name → its public XML once (any case, kept for the run), one no
+#     profile has → 404 (kept), an answer that isn't a profile → 502 (not kept); a name seen on a profile, in a comment thread
+#     or saved with a library item (its creator from the details cache) → that account, a name two accounts go by or one
+#     never seen → 400 with what to paste (digits that aren't an ID count as a name), another site's link → 400, none of
+#     those asking Steam anything; a custom name asked twice at once → one read; § 4's cooldown:
+#     a new custom name → 429 with nothing sent.
 #  2. a creator's items (/browse `list`): the client protocol's user files, the CURRENT subscriber / favourite counts (not the
 #     lifetime ones), web / application items left out, paged 100 at a time to the end, top rated → Steam's "score" order,
 #     the filter's tags matched.
@@ -117,6 +124,9 @@ const item = (i, extra = {}) => ({ publishedfileid: String(3200000000 + i), titl
 const counts = { subscriptions: 692, lifetime_subscriptions: 876, favorited: 34, lifetime_favorited: 35 };
 const fx = { "3000000001": { tags: ["Video"], creator: OWNER, ...counts }, "3000000002": { tags: ["Video"], creator: OWNER },
   "3000000003": { tags: ["Video"], creator: OWNER, ...counts }, "3000000004": { tags: ["Video"], creator: OWNER, ...counts },
+  // the library items § 1c names by their saved creator name (the details cache holds their creators)
+  "3000000005": { tags: ["Video"], title: "lib-made-5", creator: "76561198000000055" }, "3000000006": { tags: ["Video"], title: "lib-made-6", creator: "76561198000000066" },
+  "3000000007": { tags: ["Video"], title: "lib-made-7", creator: "76561198000000077" },
   "@userfiles": { [`${OWNER}:myfiles`]: Array.from({ length: 130 }, (_, i) => item(i)),
                   [`${ME}:myfavorites`]: [item(500, { title: "fav-a" }), item(501, { title: "fav-b" })] },
   // the whole Workshop (QueryFiles): a video, a scene, its two presets (Steam tags a preset Preset + the type of its base), a
@@ -724,6 +734,60 @@ n0 = (await fakeLog()).length;
 r = await get("/workshop/my-favorites?sync=open");
 out(r.status === 200 && r.json?.signedIn === false && !("items" in r.json) && (await since(n0)).length === 0, "my-favorites signed out: {signedIn:false}, nothing sent", J(r));
 
+// ---- 1c. the filter column's Author field (GET /workshop/author, Helpers/SteamAuthors.cs) ----
+{
+  const author = (q) => get(`/workshop/author?q=${encodeURIComponent(q)}`);
+  const vanityReads = async (k0) => (await since(k0)).filter((x) => x.path.startsWith("/id/")).map((x) => x.path);
+  // the library's two Workshop items with a saved creator name, their creators in the details cache (no profile read)
+  const LIB = `${process.env.XDG_DATA_HOME}/liascape/library/workshop`;
+  fs.mkdirSync(LIB, { recursive: true });
+  fs.writeFileSync(`${LIB}/index.json`, J({ "3000000005": { workshopId: "3000000005", authorName: "Library Maker" }, "3000000006": { workshopId: "3000000006", authorName: "fan 5" },
+    "3000000007": { workshopId: "3000000007", authorName: "1234" } }));
+  await post("/workshop/details", { ids: ["3000000005", "3000000006", "3000000007"] });
+  let k0 = (await fakeLog()).length;
+  r = await author(OWNER);
+  out(r.status === 200 && r.json?.steamId === OWNER && r.json.name === `Creator Bold ${OWNER.slice(-2)}` && r.json.avatar === `https://avatars.example.invalid/${OWNER}_medium.jpg`,
+    "author: a Steam ID → that account, with the name and avatar this run read", J(r));
+  const r2 = await author(`https://steamcommunity.com/profiles/${OWNER}/myworkshopfiles/?appid=431960`);
+  const r3 = await author(" steamcommunity.com/profiles/76561198000000077 ");
+  out(r2.status === 200 && r2.json?.steamId === OWNER && r3.status === 200 && r3.json?.steamId === "76561198000000077" && r3.json.name === null,
+    "author: a profile link naming its ID (with or without https://, a path after it) → that account", J([r2, r3]));
+  out((await since(k0)).length === 0, "author: an ID or an ID's link asks Steam nothing", J(await since(k0)));
+  k0 = (await fakeLog()).length;
+  r = await author("https://steamcommunity.com/id/ProbeCreator/");
+  const again = await author("steamcommunity.com/id/probecreator/myworkshopfiles");
+  out(r.status === 200 && r.json?.steamId === OWNER && r.json.name === `Creator Bold ${OWNER.slice(-2)}` && again.status === 200 && again.json?.steamId === OWNER
+    && J(await vanityReads(k0)) === J(["/id/probecreator/"]) && (await since(k0)).length === 1,
+    "author: a profile link's custom name, read once (its public XML through the gate; any case, kept for the run)", J({ r, again, reqs: await since(k0) }));
+  k0 = (await fakeLog()).length;
+  r = await author("https://steamcommunity.com/id/nobody-here");
+  const none2 = await author("https://steamcommunity.com/id/Nobody-Here/");
+  out(r.status === 404 && /No Steam profile/.test(r.json?.error ?? "") && none2.status === 404 && (await vanityReads(k0)).length === 1,
+    "author: a custom name no profile has → 404, remembered for the run (asked once)", J({ r, none2, reqs: await vanityReads(k0) }));
+  k0 = (await fakeLog()).length;
+  const both = await Promise.all([author("https://steamcommunity.com/id/twice-at-once"), author("steamcommunity.com/id/Twice-At-Once")]);
+  out(both.every((x) => x.status === 404) && (await vanityReads(k0)).length === 1, "author: the same custom name asked twice at once → one read", J({ both, reqs: await vanityReads(k0) }));
+  k0 = (await fakeLog()).length;
+  r = await author("https://steamcommunity.com/id/garbled");
+  const g2 = await author("https://steamcommunity.com/id/garbled");
+  out(r.status === 502 && g2.status === 502 && (await vanityReads(k0)).length === 2, "author: an answer that isn't a profile → 502, not kept (asked again)", J({ r, g2, reqs: await vanityReads(k0) }));
+  k0 = (await fakeLog()).length;
+  const byProfile = await author("  creator   BOLD 07 "), byComment = await author("Fan 3"), byLib = await author("library maker"), byDigits = await author("1234");
+  out(byProfile.status === 200 && byProfile.json?.steamId === OWNER, "author: a name this run read on a profile (any case, spaces squeezed) → that account", J(byProfile));
+  out(byComment.status === 200 && byComment.json?.steamId === "76561198000000103", "author: a commenter's name from a thread this run read → their account", J(byComment));
+  out(byLib.status === 200 && byLib.json?.steamId === "76561198000000055" && byLib.json.name === "library maker",
+    "author: a library item's saved creator name → the creator the details cache holds for it", J(byLib));
+  out(byDigits.status === 200 && byDigits.json?.steamId === "76561198000000077", "author: a saved creator name of digits alone (not a Steam ID) → that creator", J(byDigits));
+  const shared = await author("fan 5"), unknown = await author("Someone Else"), bad = await author("https://example.com/id/probecreator"), empty = await author("  ");
+  out(shared.status === 400 && shared.json?.reason === "shared" && /paste a profile link or ID/.test(shared.json?.error ?? ""),
+    "author: a name two accounts go by (a commenter, a library item's creator) → 400 shared, paste a link or ID", J(shared));
+  out(unknown.status === 400 && unknown.json?.reason === "unknown" && unknown.json?.error === "Unknown name: paste a profile link or ID",
+    "author: a name never seen → 400 unknown, paste a link or ID", J(unknown));
+  out(bad.status === 400 && bad.json?.reason === "bad" && empty.status === 400 && empty.json?.reason === "bad", "author: another site's link or nothing → 400 bad", J([bad, empty]));
+  out((await since(k0)).length === 0, "author: names (known, shared, unknown) and bad links ask Steam nothing", J(await since(k0)));
+  fs.rmSync(`${LIB}/index.json`);
+}
+
 // ---- 2. a creator's items ----
 r = await browse({ kind: "creator", id: OWNER });
 const p1 = r.json ?? [];
@@ -825,6 +889,11 @@ n0 = (await fakeLog()).length;
 r = await get(`/workshop/comments?id=${ITEM}&owner=${OWNER}&start=10&count=10`);
 const r3 = await post("/workshop/favorite", { workshopId: ITEM, favorite: true });
 out(r.status === 429 && r3.status === 429 && (await since(n0)).length === 0, "during the cooldown: 429 and nothing sent", J([r.status, r3.status]));
+n0 = (await fakeLog()).length;
+const ra = await get(`/workshop/author?q=${encodeURIComponent("https://steamcommunity.com/id/someone-new")}`);
+const rk = await get(`/workshop/author?q=${encodeURIComponent("https://steamcommunity.com/id/probecreator")}`);
+out(ra.status === 429 && /try again in/.test(ra.json?.error ?? "") && rk.status === 200 && rk.json?.steamId === OWNER && (await since(n0)).length === 0,
+  "author during the cooldown: a new custom name → 429 'try again in N min', nothing sent; one read before still answers", J([ra, rk]));
 
 // ---- 5. a scene's presets (list kind "presets": QueryFiles' child lookup) and a preset's base ----
 r = await browse({ kind: "presets", id: "1003" });

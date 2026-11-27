@@ -920,6 +920,7 @@ public static class ServerHost
         // "Unsubscribe without deleting": its own route, so nothing that deletes is on its path (WorkshopSubOps.UnsubscribeKeepAsync)
         // the Browse sidebar's creator, favourite and comments (Web/WorkshopSocialOps.cs over Helpers/SteamCommunity.cs)
         app.MapGet("/workshop/creator", (string? id, string? owner, HttpContext ctx) => WorkshopSocialOps.CreatorAsync(id, owner, ctx.RequestAborted));
+        app.MapGet("/workshop/author", (string? q, HttpContext ctx) => WorkshopSocialOps.AuthorAsync(q, ctx.RequestAborted));
         app.MapGet("/workshop/favorite", (string? id, HttpContext ctx) => WorkshopSocialOps.FavoriteStateAsync(id, ctx.RequestAborted));
         app.MapPost("/workshop/favorite", (FavoriteReq r, HttpContext ctx) => WorkshopSocialOps.SetFavoriteAsync(r.WorkshopId, r.Favorite, ctx.RequestAborted));
         app.MapGet("/workshop/comments", (string? id, string? owner, int? start, int? count, HttpContext ctx) =>

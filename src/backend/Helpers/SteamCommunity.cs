@@ -40,6 +40,13 @@ public static class SteamCommunity
     // a profile's name and avatar for this run of the backend (a name changes rarely; a restart reads it again)
     static readonly ConcurrentDictionary<string, Profile> _profiles = new();
     static readonly ConcurrentDictionary<string, Task<Profile?>> _profileReads = new();
+    // the names this run saw beside an account's id in a comment thread (the Author field's known names: SteamAuthors)
+    static readonly ConcurrentDictionary<string, string> _commentNames = new();
+    // a profile link's custom name (steamcommunity.com/id/<name>, lower case) → its account, null = Steam has no such
+    // profile; for this run, like the profiles
+    static readonly ConcurrentDictionary<string, string?> _vanity = new();
+    // Lazy: GetOrAdd may run two racing factories (keeping one result); only the stored entry's read is ever started
+    static readonly ConcurrentDictionary<string, Lazy<Task<Profile?>>> _vanityReads = new();
     // the favourite state per (signed-in account, item), set by a read or by this app's own toggle
     static readonly ConcurrentDictionary<string, bool> _favorites = new();
 
@@ -231,7 +238,10 @@ public static class SteamCommunity
             int total = r.TryGetProperty("total_count", out var tc) && tc.TryGetInt32(out var t) ? t : 0;
             int st = r.TryGetProperty("start", out var s) && s.TryGetInt32(out var si) ? si : start;
             var html = r.TryGetProperty("comments_html", out var h) && h.ValueKind == JsonValueKind.String ? h.GetString() ?? "" : "";
-            return new CommentPage(total, st, ParseComments(html));
+            var list = ParseComments(html);
+            foreach (var c in list)
+                if (c.AuthorId != null && c.Author != "Steam user") _commentNames[c.AuthorId] = c.Author;
+            return new CommentPage(total, st, list);
         }
         catch (JsonException) { return null; }
     }
@@ -331,6 +341,51 @@ public static class SteamCommunity
     /// trip the community site's per-IP limit).
     // Guard: scripts/test-workshop-social.sh § 7 "authorName: a creator this run read by name, another null, no profile read for it"
     public static string? KnownName(string steamId) => _profiles.TryGetValue(steamId, out var p) ? p.Name : null;
+
+    /// A profile this run already read (its name and avatar), never a request.
+    public static Profile? Known(string steamId) => _profiles.TryGetValue(steamId, out var p) ? p : null;
+
+    /// Every account this run saw a name for (the profiles read, the comment threads' authors) as (id, name).
+    public static IEnumerable<(string Id, string Name)> SeenNames()
+    {
+        foreach (var p in _profiles.Values) if (p.Name != null) yield return (p.SteamId, p.Name);
+        foreach (var (id, name) in _commentNames) yield return (id, name);
+    }
+
+    /// The account behind a profile link's custom name (steamcommunity.com/id/<name>): one read of its public XML through
+    /// SteamGate, kept for the run with the profile it carries (a later ProfileAsync of that account asks nothing). null =
+    /// Steam has no such profile (kept too); Steam unreachable or answering something else throws (nothing kept).
+    // Guard: scripts/test-workshop-social.sh "author: a profile link's custom name, read once"
+    public static async Task<Profile?> VanityAsync(string vanity, CancellationToken ct = default)
+    {
+        var key = vanity.ToLowerInvariant();
+        if (_vanity.TryGetValue(key, out var known)) return known == null ? null : Known(known) ?? new Profile(known, null, null);
+        // one read per name at a time: a field committed twice (Enter, then its blur) asks once
+        var read = _vanityReads.GetOrAdd(key, (k) => new(() => Task.Run(async () =>
+        {
+            try
+            {
+                // a read that ended between this caller's cache check and its GetOrAdd left its answer: no second request
+                if (_vanity.TryGetValue(k, out var done)) return done == null ? null : Known(done) ?? new Profile(done, null, null);
+                var (status, xml) = await SendAsync(Request(HttpMethod.Get, $"/id/{Uri.EscapeDataString(k)}/?xml=1", null, null, null), CancellationToken.None).ConfigureAwait(false);
+                if (status is < 200 or >= 300) throw new HttpRequestException($"Steam answered {status}");
+                XDocument doc;
+                try { doc = XDocument.Parse(xml, LoadOptions.None); }
+                catch (System.Xml.XmlException) { throw new HttpRequestException("Steam's answer wasn't a profile"); }
+                var root = doc.Root;
+                // a custom name no profile has: <response><error>The specified profile could not be found.</error></response>
+                if (root?.Name.LocalName == "response" && root.Element("error") != null) { _vanity[k] = null; return null; }
+                var id = root?.Name.LocalName == "profile" ? root.Element("steamID64")?.Value.Trim() : null;
+                if (!ValidSteamId(id)) throw new HttpRequestException("Steam's answer wasn't a profile");
+                var prof = ParseProfile(id!, xml) ?? new Profile(id!, null, null);
+                _profiles[id!] = prof;
+                _vanity[k] = id;
+                return prof;
+            }
+            finally { _vanityReads.TryRemove(k, out _); }
+        })));
+        return await read.Value.WaitAsync(ct).ConfigureAwait(false);
+    }
 
     public static Profile? ParseProfile(string steamId, string xml)
     {

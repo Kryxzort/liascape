@@ -59,6 +59,11 @@ buffering held the first data ~2 s; `--latency-msec=10` gets it in ~65 ms. `Help
 
 ## Steam & sources
 
+### Pick a creator's or a scene's list in the filter column — 2026-11-27
+Owner's call: Author / Presets of fields the sidebar's rows fill, not top-bar pills. Steam can't search authors or look up
+display names, so Author takes an ID, a profile link or a name already seen; a bare word is never tried as a custom profile
+name (a request per typo). `Helpers/SteamAuthors.cs`, probe-steam `list:*`.
+
 ### Browse the Workshop over Steam's client protocol, anonymously — 2026-11-11
 Scraping steamcommunity.com's browse page (30 items a page, AND-only tags, a page read per detail) trips Steam's per-IP
 limit, locking the user's browser out for 30+ min too. `PublishedFile.QueryFiles` gives 100 items a page with tags,
@@ -84,21 +89,19 @@ of the allowed ages, which drops the few hundred items with no age tag; other gr
 `steamapp` (the default, no login given to Liascape) and `subscribe` (the sign-in). What the chosen mode can't do falls to
 the sign-in (under `steamapp`, when usable: the user gave that trust by signing in), then the item's Steam page; nothing
 else stands in. Owner: the page needs no login and gives Liascape nothing, so it never exceeds the trust chosen. It replaced
-a third mode, "Open in the Steam app", and "no mode uses another's way"; a page can't make a one-off copy, so that stays
-off with why. `.claude/rules/backend/sources-steam.md`.
+a third mode, "Open in the Steam app", and "no mode uses another's way". `.claude/rules/backend/sources-steam.md`.
 
 ### Drive the Steam client through its own `steamclient.so` — 2026-11-11
 `libsteam_api.so` is Valve's redistributable adapter: not ours to ship, and on Linux only SteamVR or Proton carry a
-copy. A short-lived child loads the installed client's `steamclient.so` and calls ISteamUGC by vtable slot, slots read
-from Valve's wrappers with objdump. `Helpers/SteamClientUgc.cs`.
+copy. A short-lived child loads the installed client's `steamclient.so` and calls ISteamUGC by vtable slot.
+`Helpers/SteamClientUgc.cs`.
 
 ### Hold the Steam app connection while the Liascape window is open — 2026-11-26
 Connected, Steam shows "Playing Wallpaper Engine": a connection per download blinked it, each a friends' popup, and holding
-it only while Browse showed the Workshop (what this replaced) blinked it again as the user moved between tabs. One for the
+it only while Browse showed the Workshop blinked it again as the user moved between tabs. One for the
 backend's lifetime would show the user in-game all day, block the real Wallpaper Engine and pause Steam's other downloads.
-It starts at the first Steam-app operation (never for the window alone), stays while the window's page beats (every 5 s),
-and ends three beats (15 s) after the last beat or operation: enough for a reload or a renderer recovery, not a long tail.
-A running favourites watch keeps it to the watch's end. `Helpers/SteamClientHold.cs`, `scripts/test-steam-app-hold.sh`.
+Its timing (from the first operation, a 15 s tail: a reload's worth): `.claude/rules/backend/sources-steam.md` § Workshop
+downloads; `scripts/test-steam-app-hold.sh`.
 
 ### Queue the Steam pages the user must click, one at a time, advanced by Next — 2026-11-11
 Opening N pages at once lost all but one (Steam shows one), and a bulk Delete from Source opened the whole subscriptions
@@ -137,8 +140,7 @@ Tags and trailers are Workshop listing, not files: auto-imported items lack them
 whatever is asked. A failed check stores nothing (WE's offline mode caches "none" for good). `Web/LibraryFactsOps.cs`.
 
 ### Keep the Workshop in Steam's own sort orders — 2026-06-02
-Only Steam's sorts are offered for the Workshop (trend + period, newest, updated, most subscribed, top rated): results
-arrive page by page in Steam's order, so a client-side sort would reshuffle what infinite scroll already loaded. Only
+Only Steam's sorts are offered for the Workshop: results arrive page by page in Steam's order, so a client-side sort would reshuffle what infinite scroll already loaded. Only
 lists held whole (the local Wallpaper Engine source, a Yours set) sort client-side.
 
 ## Library

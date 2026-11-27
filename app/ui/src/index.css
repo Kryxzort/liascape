@@ -1466,7 +1466,8 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-glow .side-chip.accent { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 :root.no-glow .side-chip.accent.preset { box-shadow: inset 0 0 0 1px var(--accent); }
 :root.no-glow .side-open:hover { box-shadow: none; }
-:root.no-glow :is(.ws-creator:hover:not(:disabled), .ws-pill-x:hover, .ws-post textarea:focus) { box-shadow: none; }
+:root.no-glow :is(.ws-creator:hover:not(:disabled), .ws-post textarea:focus) { box-shadow: none; }
+:root.no-glow .wf-field-box :is(.text, .text:hover, .text:focus, .wf-field-x:hover) { box-shadow: none; }
 :root.no-glow .side-crash::before { box-shadow: none; }
 :root.no-glow .side-crash-ico > svg, :root.no-glow .as-note-ico > svg { filter: none; }
 :root.no-glow .sp-fold .sp-chev { filter: none; }
@@ -1543,8 +1544,9 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .wf-col, :root.no-motion .wf-none, :root.no-motion .wf-col *, :root.no-motion .wf-scrim,
 :root.no-motion :is(.ss-filter, .ss-n) { animation: none !important; transition: none !important; }
 :root.no-motion .wf-col.entering, :root.no-motion .wf-col[data-mode="drawer"], :root.no-motion .wf-scrim, :root.no-motion .wf-none,
-:root.no-motion .wf-col .wf-body, :root.no-motion .wf-col .wf-why, :root.no-motion .ss-filter .ss-n.pop { animation: nm-in var(--fade-dur) linear !important; }
-:root.no-motion .wf-col.closing, :root.no-motion .wf-col .wf-why.closing, :root.no-motion .ss-filter .ss-n.out { animation: nm-out var(--fade-dur) linear forwards !important; }
+:root.no-motion .wf-col .wf-body, :root.no-motion .wf-col .wf-why, :root.no-motion .wf-col .wf-field-err, :root.no-motion .ss-filter .ss-n.pop { animation: nm-in var(--fade-dur) linear !important; }
+:root.no-motion .wf-col.closing, :root.no-motion .wf-col .wf-why.closing, :root.no-motion .wf-col .wf-field-err.closing, :root.no-motion .ss-filter .ss-n.out { animation: nm-out var(--fade-dur) linear forwards !important; }
+:root.no-motion .wf-col .wf-field-ring { animation: wf-field-ring .7s linear both !important; }
 :root.no-motion .wf-scrim.closing { transition: opacity var(--fade-dur) linear !important; }
 /* the item sidebar and its scrim fade in and out; a switch cross-fades the old content (the exit layer) into the new; the
    body's rows fade in when they arrive; the picture's layers cross-fade; the volume pill fades in place; nothing in it
@@ -1564,7 +1566,7 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel :is(.side-vol-slide, .side-stage, .side-tool, .side-cta > .side-go, .side-split > .side-go, .side-tile) { transform: none !important; }
 :root.no-motion .side-panel input[type=range]::-webkit-slider-thumb { transform: none !important; }
 :root.no-motion .side-panel .side-sub-spin { animation: side-sub-spin 1s linear infinite !important; }
-/* the comments and the avatars fade in in place; the creator row doesn't lift; the creator's pill fades in and out */
+/* the comments and the avatars fade in in place; the creator row doesn't lift */
 :root.no-motion .side-panel :is(.ws-c, .ws-steam-comment) { animation: nm-in var(--fade-dur) linear both !important; }
 :root.no-motion .side-panel :is(.ws-avatar > img, .ws-creator-name) { transition: opacity var(--fade-dur) linear !important; }
 :root.no-motion .side-panel :is(.ws-creator, .ws-creator-go) { transform: none !important; }
@@ -1574,8 +1576,6 @@ input[type=range]:focus-visible { outline: none; }
 :root.no-motion .side-panel .side-fonts { animation: nm-in var(--fade-dur) linear !important; }
 :root.no-motion .side-panel .side-fonts.leaving { animation: nm-out var(--fade-dur) linear forwards !important; }
 :root.no-motion .ws-stats > .side-pill { transform: none !important; transition: opacity var(--fade-dur) linear !important; }
-:root.no-motion .ws-pill-pair { animation: nm-in var(--fade-dur) linear both; }
-:root.no-motion .ws-pill-pair.closing { animation: nm-out var(--fade-dur) linear forwards; }
 /* the Settings card preview fades in and out in place, its caption fades each new text in (the busy breathing stands still) */
 :root.no-motion .card-pv-frame { transform: none; transition: opacity var(--fade-dur) linear, border-color .2s, box-shadow .25s; }
 :root.no-motion .card-pv-cap > span { animation: nm-in var(--fade-dur) linear both; }
@@ -1979,18 +1979,6 @@ button.side-pill.fav-pill[data-ws-fav=loading] svg { opacity: .55; }
 .ws-post textarea:focus { border-color: var(--accent); box-shadow: var(--glow-sm); }
 .ws-post textarea::placeholder { color: var(--muted); }
 .ws-post-btn { align-self: flex-end; padding: 5px 12px; font-size: 12.5px; }
-/* the Workshop's lists beside its pill in Browse's source strip (components/SourcePills.tsx): Favourites, and the creator's pill
-   (avatar + name + ×) that slides in when a creator row is clicked and out when it's left. Guard: probe-steam ws:pills */
-.ws-pill { display: inline-flex; align-items: center; gap: 6px; }
-.ws-pill .ws-avatar { margin: -3px 0 -3px -6px; }
-.ws-pill-pair { display: inline-flex; align-items: center; gap: 3px; flex: none; animation: ws-pill-in .26s cubic-bezier(.2, 1.2, .4, 1) both; }
-.ws-pill-pair > .pill { flex: none; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
-.ws-pill-pair.closing { animation: ws-pill-out .17s ease-in forwards; pointer-events: none; }
-@keyframes ws-pill-in { from { opacity: 0; transform: translateX(-10px) scale(.92); } }
-@keyframes ws-pill-out { to { opacity: 0; transform: scale(.92); } }
-.ws-pill-x { flex: none; width: 22px; height: 22px; padding: 0; border-radius: 50%; display: grid; place-items: center; color: var(--subtext);
-  background: color-mix(in srgb, var(--surface0) var(--tr), transparent); transition: color .15s, box-shadow .2s; }
-.ws-pill-x:hover { color: var(--text); box-shadow: var(--glow-sm); }
 .side-tile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--surface1)); }
 .side-tile.danger .side-tile-ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent), 0 0 10px -3px var(--danger); }
@@ -2226,6 +2214,41 @@ button.side-pill.fav-pill[data-ws-fav=loading] svg { opacity: .55; }
 .wf-row[data-wf-off] .wf-seg.i[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); box-shadow: none; }
 .wf-row[data-wf-off] .wf-seg.e[aria-checked="true"] { background: color-mix(in srgb, var(--danger) 35%, transparent); color: var(--text); box-shadow: none; }
 :root.bg-live .wf-why { filter: drop-shadow(0 0 3.5px #000); }
+/* COOL: the Workshop's two list fields at the column's top (components/WorkshopListFields.tsx): Author and Presets of, the
+   app's text field (.text) with a lead glyph (the creator's avatar once known) and a clear ×, under a small heading line.
+   What a field can't take is its own state: the box takes the danger colour and the heading line's right end says what to
+   paste, sliding in from the right (motion off: fading); the typed text stays. A row filling it rings the box once (an
+   accent edge fading in and out: opacity alone). Guard: probe-steam list:* */
+.wf-lists { display: grid; gap: 9px; padding: 8px 8px 10px 10px; }
+.wf-lists + .wf-grp { margin-top: 8px; }
+.wf-lists:has([data-wf-field-state="on"]) { border-color: color-mix(in srgb, var(--accent) 32%, var(--surface1)); }
+.wf-lists:has([data-wf-field-state="on"])::before { opacity: .8; }
+.wf-field { display: grid; gap: 4px; min-width: 0; }
+.wf-field-head { display: flex; align-items: baseline; gap: 10px; min-height: 14px; padding: 0 2px; font-size: 11px; line-height: 14px; }
+.wf-field-name { flex: none; font-weight: 700; letter-spacing: .3px; color: var(--subtext); }
+.wf-field[data-wf-field-state="on"] .wf-field-name { color: var(--text); }
+.wf-field[data-wf-field-state="error"] .wf-field-name { color: var(--danger); }
+.wf-field-err { flex: 1 1 auto; min-width: 0; text-align: right; color: var(--danger); font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; animation: wf-err-in .22s cubic-bezier(.2, 1.1, .4, 1) both; }
+.wf-field-err.closing { animation: wf-err-out .16s ease-in forwards; }
+@keyframes wf-err-in { from { opacity: 0; transform: translateX(8px); } }
+@keyframes wf-err-out { to { opacity: 0; transform: translateX(4px); } }
+.wf-field-box { position: relative; display: flex; align-items: center; min-width: 0; }
+.wf-field-box .text { width: 100%; min-width: 0; height: 30px; padding: 5px 28px 5px 34px; font-size: 12.5px; text-overflow: ellipsis; }
+.wf-field-box .text::placeholder { color: var(--muted); }
+.wf-field-box .text[aria-invalid="true"], .wf-field-box .text[aria-invalid="true"]:is(:hover, :focus) {
+  border-color: var(--danger); box-shadow: 0 0 10px -3px var(--danger); }
+.wf-field-lead { position: absolute; left: 6px; top: 50%; width: 22px; height: 22px; margin-top: -11px; display: grid; place-items: center;
+  color: var(--muted); pointer-events: none; }
+.wf-field-lead .ws-avatar { width: 22px !important; height: 22px !important; }
+.wf-field[data-wf-field-state="on"] .wf-field-lead { color: var(--accent); }
+.wf-field-x { position: absolute; right: 4px; top: 50%; width: 22px; height: 22px; margin-top: -11px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; color: var(--subtext); transition: color .15s, box-shadow .2s, background .15s; }
+button.wf-field-x:hover { color: var(--text); background: color-mix(in srgb, var(--surface0) 80%, transparent); box-shadow: var(--glow-sm); }
+.wf-field-ring { position: absolute; inset: 0; border-radius: 7px; pointer-events: none; z-index: 1;
+  box-shadow: inset 0 0 0 1px var(--accent), var(--glow-sm); opacity: 0; animation: wf-field-ring .9s ease-out both; }
+@keyframes wf-field-ring { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+:root.bg-live .wf-field-head { filter: drop-shadow(0 0 3.5px #000); }
 /* Features: All / Any (only meaningful with ≥ 2 included features — muted until then) */
 .wf-fm { flex: none; display: inline-flex; gap: 1px; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--bg-crust) 40%, transparent);
   transition: opacity .15s; }

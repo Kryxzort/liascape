@@ -170,7 +170,7 @@ export interface WorkshopFilter {
   featureMatch: "all" | "any"; genreMatch: "all" | "any";
 }
 // API: POST /browse `list` (Models/WorkshopList.cs): which Workshop items Browse shows — the whole Workshop (null), one
-// creator's items, or the presets made for one scene (`name` / `avatar` only for the pill; `scene`, the scene's own Browse
+// creator's items, or the presets made for one scene (`name` / `avatar` only for the filter column's field; `scene`, the scene's own Browse
 // result when the list was opened from it, only for its presets' "Uses" row: the backend gets the kind and id alone). A list
 // sorts by "lastupdated" or "toprated" only and has no search (Steam's client protocol can't search a user's files or an
 // item's children). The signed-in account's favourites are no list: GET /workshop/my-favorites, a filter row's set.
@@ -454,6 +454,9 @@ export const api = {
   // the Browse sidebar's creator, favourite and comments; favourite / post without a sign-in → ApiError.signIn
   workshopCreator: (id: string, owner?: string | null) =>
     jget<WsCreator>(`/workshop/creator?id=${encodeURIComponent(id)}${owner ? `&owner=${encodeURIComponent(owner)}` : ""}`),
+  // API: the filter column's Author field (Helpers/SteamAuthors.cs): a Steam ID, a profile link or a name seen before → the
+  // account; what it can't take → ApiError with the words for the field's error state (400 / 404), Steam's cooldown 429
+  workshopAuthor: (q: string) => jget<WsCreator>(`/workshop/author?q=${encodeURIComponent(q)}`),
   workshopFavorite: (id: string) => jget<{ signedIn: boolean; favorited: boolean | null }>(`/workshop/favorite?id=${encodeURIComponent(id)}`),
   workshopSetFavorite: (workshopId: string, favorite: boolean) => jpost<{ favorited: boolean }>("/workshop/favorite", { workshopId, favorite }),
   workshopComments: (id: string, owner: string | null | undefined, start: number, count: number) =>

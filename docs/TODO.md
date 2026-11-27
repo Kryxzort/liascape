@@ -89,13 +89,6 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        card preview), and the item sidebar's type chip too (owner 2026-11-27: "scene type also icon"). Follows the design checklist (theme, glow / no-glow, motion, bg-live). Guard: probe cells per type
        (icon present / absent, the tooltip, no pill), and screenshots over light and dark thumbnails.
 
-17. [ ] (owner) The filter half of `docs/superpowers/specs/2026-11-22-sidebar-unify-design.md` § Filters: the top-bar
-       creator / presets pills go (`components/SourcePills.tsx`); the filter column gets two editable fields, Author (a
-       Steam ID, a profile URL, or a name seen before) and Presets of (a scene's Workshop ID or URL); the sidebar's creator
-       / presets rows fill them; Author resolves to a Steam ID itself (a profile URL via the public profile page, a known
-       name from what the app has seen; an unknown plain name says to paste a profile link or ID). Guard: probe cells for
-       both fields, the rows filling them, clearing; a backend test for the resolution.
-
 19. [ ] (owner) The owner's README replaces the agent-written one: `docs/Meat bag's Readme.md` (untracked) and branch
        `readme-preview` (8 commits: collapsible install steps per distro, shorter previews, a readable Settings image, a
        required / optional "You'll need"; `docs/preview/` holds its images, untracked). Bring it up to date with today's
@@ -299,6 +292,10 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 - [ ] probe-sidebar `lib:preset:needsBase` fails on lp-player's own UI: it expects a plain Workshop download disabled
       under "subscribe" when signed out and sent as a one-off, but since the two download modes (`actionBlocked`)
       only the one-off is blocked and a signed-out subscribe opens the item's page. Update the cell to the modes' order.
+- [ ] probe-steam `ws:favoriteSteam` fails on lp-player's own UI too, alone and in the whole probe: "the pill moved or
+      resized as its state landed: [182,0,53,25]" (its `Off` variant passes). probe-icons `icon:centre:filters` failed
+      once in the whole probe ("button.wf-seg.e[Hide Favourites] hover: the glyph is off its chip's centre by (-2.83,
+      -0.47)") and passes alone, on this tree and lp-player's: a hover read mid-motion; find what an earlier cell leaves.
 - [ ] probe-filters `search:keep` fails inside the whole probe (on lp-player too) and passes alone: "840 px, room: after
       a blur holding "k1" it is folded reading "k1" (want open)". An earlier cell leaves something that takes the status
       slot's room (a wallpaper playing, the bar's width); make the cell set up its own state.

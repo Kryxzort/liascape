@@ -409,6 +409,12 @@ function closeFiltersFor(page: FilterPage) {
   if ((page === "library" ? s.libFilterColHidden : s.filterColHidden) || !matchMedia(WF_DOCK_QUERY).matches) return;
   s.setFiltersOpen(page, false);
 }
+// The Workshop list fields' lookups (components/WorkshopListFields.tsx): each field's commit, a source switch, a sidebar
+// row's fill and Clear all start a new generation, and a lookup answering for an older one is dropped, so the newest input
+// wins across both fields. Guard: probe-steam list:race
+let listGen = 0;
+export const nextListGen = () => ++listGen;
+export const listGenNow = () => listGen;
 export const useStore = create<State>((set, get) => ({
   sources: [], activeSource: 0, wallpapers: [], page: 1, loading: false, query: "", hasMore: true, downloads: {}, downloadStatus: {},
   browseFor: "", browseFilter: loadBrowseFilter(), browseSort: LS.get("browseSort", 0),
@@ -455,6 +461,7 @@ export const useStore = create<State>((set, get) => ({
   // browser's 6 connections to the backend, and the new source's /browse queues behind them for seconds — the old list
   // under the new pill all that time. Guard: matrix browse:switchSource.
   setSource(i) {
+    nextListGen();
     // a source pill shows the whole source: the Workshop's own pill leaves a list (a creator's, a scene's presets) for the whole Workshop
     const same = i === get().activeSource && !get().wsList;
     set(same ? { browseFocus: null } : { activeSource: i, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "", wsList: null, wsListNote: null });
@@ -468,6 +475,9 @@ export const useStore = create<State>((set, get) => ({
     // the same list again (kind + id: the pill's words and the scene aren't the list) only takes the newer pill words
     const same = get().activeSource === ws.index && (cur?.kind ?? null) === (l?.kind ?? null) && cur?.id === l?.id;
     if (same) { if (l) set({ wsList: l }); return; }
+    // this reload reads the filter as it is now: a filter change's pending (debounced) reload would ask again (Clear all
+    // clears the tags, then the list)
+    clearTimeout(filterTimer);
     set({ activeSource: ws.index, wsList: l, wsListNote: null, browseFocus: null, wallpapers: [], hasMore: true, browseFor: "" });
     LS.set("activeSource", ws.index); get().reload();
   },

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, Layers, LoaderCircle, MessageSquare, RotateCcw, Send, SlidersHorizontal, Star, User } from "lucide-react";
-import { api, steamPageUrl, thumb, workshopStub, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator } from "../api/client";
-import { presetsOn, useStore } from "../store";
+import { api, steamPageUrl, thumb, workshopStub, ApiError, type LibraryItem, type Wallpaper, type WsComment, type WsCounts, type WsCreator, type WsList } from "../api/client";
+import { nextListGen, presetsOn, useStore, WF_DOCK_QUERY } from "../store";
 import { StatPills } from "./sidePills";
 import { fmtCount } from "./sideFormat";
 import { useMotion } from "./motion";
@@ -75,17 +75,26 @@ export function WsListRow({ lead, by, name, label, loading, disabled, rowClass =
   );
 }
 
+// A row fills its field in Browse's filter column (Author / Presets of: WorkshopListFields.tsx): the list opens (store
+// setWsList; the sidebar closes) and the column shows where the sidebar was, so the filled field is in view; as a drawer (a
+// narrow window) it would cover the grid, so the split button's count says it then. Guard: probe-steam list:rows
+function fillListField(l: WsList) {
+  const st = useStore.getState();
+  nextListGen();
+  st.setWsList(l);
+  if (matchMedia(WF_DOCK_QUERY).matches) st.setFiltersOpen("browse", true);
+}
+
 // a glyph in an avatar's place (a list that isn't a person's)
 const LeadGlyph = ({ icon }: { icon: ReactNode }) => <span className="ws-avatar" style={{ width: 30, height: 30 }}>{icon}</span>;
 
-// The creator: their avatar and name; a click lists every Wallpaper Engine item they made in Browse (store setWsList —
-// a source pill of its own, components/SourcePills.tsx), and `onListed` takes the user there from another tab (the Library
-// sidebar). Guard: probe-steam ws:creator, ws:creatorSelect, lib:ws:creator
+// The creator: their avatar and name; a click lists every Wallpaper Engine item they made in Browse (fillListField: the filter
+// column's Author field), and `onListed` takes the user there from another tab (the Library sidebar).
+// Guard: probe-steam ws:creator, ws:creatorSelect, lib:ws:creator, list:rows
 export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: string; authorId: string | null | undefined; onListed?: () => void }) {
   const settled = useSettled(workshopId);
   const [c, setC] = useState<WsCreator | null>(() => creators.get(workshopId) ?? null);
   const [failed, setFailed] = useState(false);
-  const setWsList = useStore((s) => s.setWsList);
   useEffect(() => {
     if (!settled || creators.has(workshopId)) return;
     let alive = true;
@@ -99,7 +108,7 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
   const name = c?.name ?? (c || failed ? "Steam creator" : null);
   const go = () => {
     if (!id) return;
-    setWsList({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null });
+    fillListField({ kind: "creator", id, name: c?.name ?? null, avatar: c?.avatar ?? null });
     onListed?.();
   };
   return (
@@ -110,19 +119,18 @@ export function CreatorRow({ workshopId, authorId, onListed }: { workshopId: str
 }
 
 // A scene's presets (other people's saved settings of it, each its own Workshop item): a click lists every one made for this
-// scene in Browse (store setWsList, a "Presets · <scene>" pill of its own, components/SourcePills.tsx), with the usual card
+// scene in Browse (fillListField: the filter column's Presets of field), with the usual card
 // actions, sorts and paging; `onListed` takes the user there from another tab. `scene` (its Browse result) lets its presets'
 // "Uses" row bring its whole card back. Shown only while presets can play (store presetsOn); the caller shows it only for a
-// scene that isn't itself a preset. Guard: probe-steam ws:presets, ws:presetsHidden, ws:presetsEmpty
+// scene that isn't itself a preset. Guard: probe-steam ws:presets, ws:presetsHidden, ws:presetsEmpty, list:rows
 export function PresetsRow({ workshopId, title, onListed, scene }: { workshopId: string; title: string | null; onListed?: () => void; scene?: Wallpaper }) {
   const on = useStore((s) => presetsOn(s.settings));
-  const setWsList = useStore((s) => s.setWsList);
   if (!on) return null;
   return (
     <WsListRow lead={<LeadGlyph icon={<SlidersHorizontal size={16} aria-hidden="true" />} />} by="Presets" name="Made for this scene"
       label="All the presets made for this scene"
       data={{ "data-ws-presets": workshopId }}
-      onGo={() => { setWsList({ kind: "presets", id: workshopId, name: title, scene: scene ?? null }); onListed?.(); }} />
+      onGo={() => { fillListField({ kind: "presets", id: workshopId, name: title, scene: scene ?? null }); onListed?.(); }} />
   );
 }
 

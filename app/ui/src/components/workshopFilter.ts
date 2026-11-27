@@ -75,9 +75,10 @@ export const WF_CLOSE_MS = SIDE_CLOSE_MS; // the panel's exit slide: the item si
 const subscribeDock = (cb: () => void) => { const q = matchMedia(WF_DOCK_QUERY); q.addEventListener("change", cb); return () => q.removeEventListener("change", cb); };
 export const useFilterDocked = () => useSyncExternalStore(subscribeDock, () => matchMedia(WF_DOCK_QUERY).matches);
 
-// how many tags are on (include + exclude) — the split button's count
+// how many tags are on (include + exclude), and the Workshop's list (the column's Author / Presets of field) — the split
+// button's count, so a list shows on the top bar while the column is closed. Guard: probe-steam list:author:id, list:rows
 export const useActiveTagCount = (scope: FilterScope = "workshop") =>
-  useStore((s) => filterOf(s, scope).include.length + filterOf(s, scope).exclude.length);
+  useStore((s) => filterOf(s, scope).include.length + filterOf(s, scope).exclude.length + (scope === "workshop" && s.wsList ? 1 : 0));
 
 // ---- the local filters (the Library, Browse's Wallpaper Engine folder): the same column and semantics as the Workshop's,
 // matched here against what each item knows instead of by Steam (docs/decisions.md § "Filter the Library and the local

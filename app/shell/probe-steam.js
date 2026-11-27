@@ -136,8 +136,10 @@
 //                         off); another item's sidebar doesn't say "Copied". Shot steam-copyid.png
 //   ws:counts             the Browse stat pills: subscribers (lucide users) and favourites (the star), no views / heart pill
 //   ws:creator[Off]       the creator row (avatar from the media origin + name, asked once with the item's owner); a click lists
-//                         their items (/browse list creator): the creator's pill slides in (per frame; Off: fades), the search
-//                         goes, the sort is the list's, the sidebar closes; × back (the pill leaves); no-glow + bg-live
+//                         their items (/browse list creator): the sidebar closes, the filter column's Author field reads their
+//                         name with their avatar and rings once (per frame; Off: a fade), no top-bar pill, the Workshop's pill
+//                         lit, the search goes, the sort is the list's, the split button counts 1; the field's × back to the
+//                         whole Workshop; no-glow + bg-live
 //                         the whole row is the target: it ends in a bare chevron (no chip, no tooltip; the row's name "All their
 //                         wallpapers, made by …"), which slides on the spring while the row is hovered and lifts (Off: still)
 //   ws:creatorSelect      the creator's name is selectable text: no Copy beside it; a drag selects it and lists nothing, Ctrl+C copies it
@@ -159,12 +161,29 @@
 //   ws:commentSelect      a comment's text and its commenter's name select with a drag; an old comment's date shows its year
 //                         (never 1970), one with no time shows none
 //   ws:commentPost        signed in: the box posts the text as typed, the new one drops in on top, the box empties; a refusal's words
-//   ws:pills              the strip: the source pills by their plain names (no Favourites pill), the Workshop's lit; a
-//                         creator's pair joins it, lit; × back. Shot steam-ws-pills-creator.png
+//   list:noPills          the strip: the source pills by their plain names alone (no Favourites pill, no list's pill), the
+//                         Workshop's lit through a creator's list from the row and one typed in the field; its click back to the
+//                         whole Workshop (the field empties). Shot steam-list-nopills.png
+//   list:author:{id,url,name}  the filter column's Author field, typed + Enter: one /workshop/author with the text, the
+//                         creator's list, the field showing the name (a link with no known name: the ID), the split button
+//                         counting 1, no search; its blur asks nothing again. Shot steam-list-author-filled.png
+//   list:author:unknown[Off]  a name never seen: the field's own error state (danger edge, aria-invalid, the words in its
+//                         heading line, nothing under the box), sliding in (Off: a fade), the text kept, no list asked; typing
+//                         clears it (Off: a fade out), Escape takes the text back; no-glow + bg-live. Shots
+//                         steam-list-author-error*.png
+//   list:author:real      the stack's own backend resolves the field: an ID, a profile link naming one, an unknown name's error
+//   list:presets:{id,url,bad}  the Presets of field: an ID or its page's link → the scene's presets (exactly its two), the
+//                         scene's name shown, the Author field emptied; anything else → the field's error, nothing asked
+//   list:clear            the text deleted + Enter → the whole Workshop (one /browse); Clear all with a tag → one /browse with
+//                         neither, the count gone
+//   list:rows             a row fills its field over a typed error; narrow (the column a drawer) the row opens no drawer, the
+//                         split button counts the list
+//   list:race             an Author lookup overtaken by a Presets of ID (or Clear all) is dropped when it lands: the newer list
+//                         stays, the Author field empty and not spinning
 //   ws:presets[Off]       a scene's sidebar: a "Presets" row (the creator row's control, 12 px under it); a click lists exactly
-//                         its two presets (the stack's backend + fake Steam servers): "Presets · <scene>" pill slides in (Off:
-//                         fades), lit, the sidebar closes, the library's one marked in library, the list's sorts and second
-//                         page; × back (the pill leaves); no-glow + bg-live
+//                         its two presets (the stack's backend + fake Steam servers): the column's Presets of field reads the
+//                         scene (rings once; Off: a fade), the sidebar closes, the library's one marked in library, the list's
+//                         sorts and second page; the field's × back; no-glow + bg-live
 //   ws:presetsHidden      no Presets row on a video's or a preset's sidebar, nor (live) with scene support off; the filter's
 //                         Type group offers Preset only alongside it
 //   ws:presetsEmpty       a scene with no presets: the list says so in the grid
@@ -228,7 +247,8 @@
 //                         size glides into their room (Off: at once); no-glow + bg-live
 //   lib:ws:size[Off]      every Library item's size on disk (the backend's measure) as the hero's last pill; a late measure fades in
 //                         (on: rising) at the row's end, the Workshop ID pill never moves
-//   lib:ws:creator        the creator (asked without an owner): a click lists their wallpapers on the Browse tab
+//   lib:ws:creator        the creator (asked without an owner): a click lists their wallpapers on the Browse tab, its column's
+//                         Author field filled
 //   lib:ws:favorite       the favourite tile: a click POSTs the Library item's id
 //   lib:ws:comments       the comments: read once in view, 10 of 23; signed in a post goes out with the item's id, on top
 //                         Shots steam-libws*.png
@@ -341,6 +361,19 @@ const STUB = `(() => {
     // the Browse sidebar's Workshop community pieces (ws:*): the state a cell puts in window.__ws, every call recorded
     const W = (window.__ws ??= {});
     if (p === "/workshop/creator") { st.calls.push({ p, q: String(u) }); return res(W.creator ?? { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null }); }
+    // the filter column's Author field (list:*): W.authors (by what was typed, trimmed, lower case), else the creator by their ID,
+    // their profile link (its ID shown: no name) or their name, else the backend's words for a name it never saw; held
+    // W.authorDelay ms. With __probe_author_real the stack's backend answers it (list:author:real)
+    if (p === "/workshop/author") {
+      const q = new URL(String(u), location.href).searchParams.get("q") ?? "";
+      st.calls.push({ p, q });
+      if (localStorage.getItem("__probe_author_real") === "1") return f(u, o);
+      const me = { steamId: "76561190000000007", name: "Probe Creator", avatar: W.avatar ?? null };
+      const A = { "76561190000000007": me, "https://steamcommunity.com/id/probecreator": { ...me, name: null }, "probe creator": me, ...(W.authors ?? {}) };
+      const hit = A[q.trim().toLowerCase()];
+      const out = hit ? res(hit) : res({ error: "Unknown name: paste a profile link or ID", reason: "unknown" }, 400);
+      return W.authorDelay ? new Promise((r) => setTimeout(() => r(out), W.authorDelay)) : out;
+    }
     // a preset's base (ws:presetBase): W.base, else Steam's "not a preset"
     if (p === "/workshop/base") { st.calls.push({ p, q: String(u) }); return W.base ? res(W.base) : res({ error: "Steam lists no base for this item: it isn't a preset" }, 404); }
     // W.favDelay: the state's answer held that many ms (ws:favoriteSteam: the words' swap as it lands)
@@ -2429,6 +2462,51 @@ app.whenReady().then(async () => {
       sc.scrollTop += e.getBoundingClientRect().top - sc.getBoundingClientRect().top - 40; return true;`);
     const looks = (sel) => js(`(() => { const e = document.querySelector(${J(sel)}); if (!e) return null; const cs = getComputedStyle(e);
       return { bg: cs.backgroundColor, shadow: cs.boxShadow, html: document.documentElement.className }; })()`);
+    // the filter column's list fields (components/WorkshopListFields.tsx): Author ("creator") and Presets of ("presets")
+    const LFIELD = (k) => `.wf-col:not(.closing) [data-wf-field="${k}"]`;
+    const field = (k) => page(`const f = document.querySelector(${J(LFIELD(k))}); if (!f) return null;
+      const i = f.querySelector("input"), box = f.querySelector(".wf-field-box").getBoundingClientRect(), e = f.querySelector("[data-wf-field-err]"), cs = getComputedStyle(i);
+      const er = e?.getBoundingClientRect(), next = f.nextElementSibling ?? f.parentElement.nextElementSibling;
+      return { value: i.value, state: f.dataset.wfFieldState, invalid: i.getAttribute("aria-invalid"), err: e && !e.classList.contains("closing") ? e.textContent : null,
+        errAbove: er ? er.bottom <= box.top + 0.5 : null, under: [...f.children].filter((c) => c.getBoundingClientRect().top >= box.bottom - 0.5).length,
+        border: cs.borderTopColor, shadow: cs.boxShadow, focused: document.activeElement === i, avatar: f.querySelector("[data-ws-avatar]")?.dataset.wsAvatar ?? null,
+        clear: !!f.querySelector("[data-wf-field-clear]"), danger: getComputedStyle(document.documentElement).getPropertyValue("--danger").trim(),
+        errColor: e ? getComputedStyle(e).color : null, gap: next ? +(next.getBoundingClientRect().top - box.bottom).toFixed(1) : null };`);
+    // open Browse's filter column (its split button) when it isn't
+    const openCol = () => page(`const t = document.querySelector("[data-sortsplit=browse] [data-wf-toggle]"); if (t?.getAttribute("aria-expanded") !== "true") { t?.click(); await new Promise((r) => setTimeout(r, 650)); }
+      return !!document.querySelector(${J(LFIELD("creator"))});`);
+    // type into a field as the user does (focus, select what's there, the text, Enter)
+    const typeIn = async (k, text, enter = true) => {
+      await page(`const i = document.querySelector(${J(LFIELD(k) + " input")}); i.focus(); i.select(); return true;`);
+      if (text) await type(text); else await key("Backspace");
+      if (enter) await key("Enter");
+    };
+    const clearField = (k) => page(`const b = document.querySelector(${J(LFIELD(k) + " [data-wf-field-clear]")}); if (!b) return false; b.click(); return true;`);
+    const splitCount = () => js(`document.querySelector("[data-sortsplit=browse] .ss-n:not(.out)")?.dataset.wfCount ?? null`);
+    const lastList = async () => (await browses()).at(-1)?.list ?? null;
+    // a sidebar row's click fills its field (WorkshopSocial.tsx fillListField): the sidebar closes, the column shows where it
+    // was (docked), the field reads `want` and rings once: an accent edge fading in and out through in-between frames (motion
+    // off too: opacity alone, the field's box fading in where it stays)
+    const fillFromRow = async (v, rowSel, k, want, motion, shotName) => {
+      const RING = `${LFIELD(k)} .wf-field-ring`;
+      const smp = js(MO.SAMPLE({ ring: RING, box: `${LFIELD(k)} .wf-field-box` }, 1100)); await sleep(40);
+      if (!(await page(`const e = document.querySelector(${J(rowSel)}); if (!e) return false; e.click(); return true;`))) { v.push(`no row ${rowSel} to click`); return null; }
+      if (shotName) { await sleep(260); await shot(shotName); }
+      const s = await smp;
+      const f = await field(k);
+      console.log(`        ${k} filled: ${J(f)}; ring ${MO.brief(s.ring)}`);
+      if (!f) { v.push(`the click didn't show the column's ${k} field`); return null; }
+      if (f.value !== want || f.state !== "on") v.push(`the ${k} field reads ${J(f.value)} (${f.state}), want ${J(want)} (on)`);
+      if (await js(`!!document.querySelector(${J(SIDE)})`)) v.push("the sidebar stayed open");
+      const mid = s.ring.filter((x) => x[1] != null && x[1] > 0.05 && x[1] < 0.95).length;
+      if (!s.ring.some((x) => x[1] != null && x[1] > 0.6)) v.push(`the ${k} field didn't ring (${MO.brief(s.ring)})`);
+      else if (mid < 3) v.push(`the ${k} field's ring popped (${MO.brief(s.ring)})`);
+      if (!motion) {
+        if (!(await js(`document.documentElement.classList.contains("no-motion")`))) v.push("motion off: the page isn't in no-motion — proved nothing");
+        v.push(...MO.judge(`motion off: the ${k} field's box`, s.box, { appear: true }));
+      }
+      return f;
+    };
 
     // the stat pills: Steam's current counts, subscribers with the people icon, favourites with the star; no view count
     await cell("ws:counts", async () => {
@@ -2447,8 +2525,8 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the creator: avatar + name (asked once the sidebar settles), a click lists their wallpapers: the creator's pill slides in
-    // beside the Workshop's, the search goes, the sort is the list's; × goes back to the whole Workshop (the pill slides out)
+    // the creator: avatar + name (asked once the sidebar settles), a click lists their wallpapers: the filter column's Author
+    // field reads their name (fillFromRow), the search goes, the sort is the list's; its × goes back to the whole Workshop
     for (const motion of [true, false]) {
       await cell(`ws:creator${motion ? "" : "Off"}`, async () => {
         const v = [];
@@ -2512,46 +2590,31 @@ app.whenReady().then(async () => {
           await browseWs(); await W({ avatar: libThumb }); await openSide(0);
           await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000); await mvTo(3, 3, 100);
         }
-        const PAIR = '[data-ws-pill="creator"]';
-        const smp = motion ? null : js(MO.SAMPLE({ pair: PAIR }, 600));
-        if (!motion) await sleep(40);
-        const fr = motion ? frames(`document.querySelector(${J(ROW)}).click();`, `(() => { const e = document.querySelector('${PAIR}'); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m41]; })()`, 500) : null;
-        if (!motion) await page(`document.querySelector(${J(ROW)}).click();`);
-        if (motion) { await sleep(90); await shot("ws-creator-pill-in"); }
-        const fin = motion ? await fr : null;
-        await sleep(600);
+        // the click fills the column's Author field (no pill in the top bar): the creator's name, avatar and list, the
+        // Workshop's pill still lit, the search gone, the list's sort, the split button counting it
+        const wsName = (await http("GET", "/sources")).json.find((s) => s.supportsTagFilter)?.name;
+        const f = await fillFromRow(v, ROW, "creator", "Probe Creator", motion, motion ? "ws-creator-field-in" : null);
         const b = (await browses()).at(-1);
         if (b?.list?.kind !== "creator" || b.list.id !== "76561190000000007") v.push(`the click asked /browse ${J(b?.list)}`);
-        const st = await page(`const pair = document.querySelector('${PAIR}');
-          return { pill: pair?.textContent.trim() ?? null, active: !!pair?.querySelector(".pill.active"), side: !!document.querySelector("${SIDE}"),
-            wsActive: [...document.querySelectorAll(".pill-strip > .pill.active")].map((e) => e.textContent.trim()),
+        if (libThumb && f && !(await waitFor(async () => (await field("creator"))?.avatar === "loaded", 3000))) v.push("the Author field never showed the creator's avatar");
+        const st = await page(`return { pills: document.querySelectorAll("[data-ws-pill], .ws-pill, .ws-pill-pair").length, side: !!document.querySelector("${SIDE}"),
+            lit: [...document.querySelectorAll(".pill-strip > .pill.active")].map((e) => e.textContent.trim()),
             search: !!document.querySelector(".topbar .tsearch"), sort: document.querySelector("[data-sortsplit=browse] .ss-sort")?.textContent.trim() ?? null };`);
         console.log(`        after the click: ${J(st)}`);
-        if (st.pill !== "Probe Creator" || !st.active) v.push(`the creator's pill: ${J(st)}`);
-        if (st.wsActive.length) v.push(`another pill is still lit: ${J(st.wsActive)}`);
-        if (st.side) v.push("the sidebar stayed open");
+        if (st.pills) v.push(`a list pill is in the top bar (${st.pills})`);
+        if (J(st.lit) !== J([wsName])) v.push(`lit: ${J(st.lit)} (want the Workshop's ${J(wsName)})`);
         if (st.search) v.push("the search shows on a creator's list (Steam can't search it)");
         if (st.sort !== "Recently Updated") v.push(`the sort reads ${J(st.sort)}, want the list's "Recently Updated"`);
-        if (motion) {
-          const ops = fin.filter((x) => x).map((x) => x[0]), xs = fin.filter((x) => x).map((x) => x[1]);
-          console.log(`        pill in: opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} x ${J(xs.slice(0, 8).map((o) => +o.toFixed(1)))}`);
-          if (between(ops, 0.05) < 3 || between(xs, 0.5) < 3) v.push("the creator's pill popped in (no in-between frames)");
-        } else {
-          const s1 = await smp; console.log(`        motion off: pill in ${MO.brief(s1.pair)}`);
-          v.push(...MO.judge("motion off: the creator's pill appearing", s1.pair, { appear: true, size: false }));
-        }
-        // × → the whole Workshop; the pill leaves
-        const smp2 = js(MO.SAMPLE({ pair: PAIR }, 500)); await sleep(40);
-        await page(`document.querySelector('${PAIR} .ws-pill-x').click();`);
-        if (motion) { await sleep(70); await shot("ws-creator-pill-out"); }
-        const s2 = await smp2; await sleep(400);
-        const after = await page(`return { pair: !!document.querySelector('${PAIR}'), search: !!document.querySelector(".topbar .tsearch") };`);
-        if (after.pair) v.push("the creator's pill stayed after ×");
-        if (!after.search) v.push("the search didn't come back on the whole Workshop");
+        if (await splitCount() !== "1") v.push(`the split button counts ${J(await splitCount())} (want 1: the list)`);
+        // its × → the whole Workshop: the field empties, the search comes back
+        if (!(await clearField("creator"))) v.push("the Author field has no ×");
+        await sleep(600);
+        const after = await field("creator"), search = await js(`!!document.querySelector(".topbar .tsearch")`);
+        if (after?.value !== "" || after?.state !== "off") v.push(`after ×: the field ${J(after)}`);
+        if (!search) v.push("the search didn't come back on the whole Workshop");
         const back = (await browses()).at(-1);
         if (back?.list) v.push(`× still asked a list (${J(back.list)})`);
-        if (!motion) v.push(...MO.judge("motion off: the creator's pill leaving", s2.pair, { leave: true, size: false }));
-        else if (!s2.pair.some((f) => f[1] != null && f[1] > 0.05 && f[1] < 0.95)) v.push("the creator's pill vanished at once (no exit)");
+        if (await splitCount() != null) v.push(`after ×: the split button counts ${J(await splitCount())}`);
         return v;
       });
     }
@@ -2973,10 +3036,12 @@ app.whenReady().then(async () => {
       return v;
     });
 
-    // the strip holds the source pills, each its plain name, and a list's pill only while that list is open: no Favourites pill
-    // (the favourites are a filter row, docs/decisions.md § "Show Favourites and In my library as sets in the filter column");
-    // the Workshop's pill is lit on the whole Workshop, a creator's pair joins the strip, × goes back
-    await cell("ws:pills", async () => {
+    // list:noPills — the strip holds the source pills alone, each its plain name: no Favourites pill (the favourites are a
+    // filter row, docs/decisions.md § "Show Favourites and In my library as sets in the filter column") and no list's pill
+    // (a creator's list is the column's Author field: .claude/rules/ui/design.md § Layout discipline). The Workshop's pill
+    // stays lit through a list opened from the sidebar's row and one typed in the field; its click goes back to the whole
+    // Workshop (the field empties). Shot steam-list-nopills.png
+    await cell("list:noPills", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
       await browseWs();
@@ -2984,28 +3049,37 @@ app.whenReady().then(async () => {
       if (!wsName) return ["no Workshop source in /sources — proved nothing"];
       const strip = () => page(`const s = document.querySelector(".pill-strip");
         return { kids: [...s.children].map((e) => e.matches(".pill") ? "pill:" + e.textContent.trim() : (e.dataset.wsPill ?? e.className)),
-          icons: [...s.querySelectorAll(":scope > .pill svg")].length, fav: !!document.querySelector('[data-ws-pill="favorites"]'),
+          icons: [...s.querySelectorAll(":scope > .pill svg")].length, listPills: document.querySelectorAll("[data-ws-pill], .ws-pill, .ws-pill-pair, .ws-pill-x").length,
           lit: [...s.querySelectorAll(".pill.active")].map((e) => e.textContent.trim()) };`);
+      const want = J(names.map((n) => "pill:" + n));
       const s1 = await strip();
       console.log(`        the whole Workshop: ${J(s1)}`);
-      if (s1.fav) v.push("a Favourites pill is still in the strip");
-      if (J(s1.kids) !== J(names.map((n) => "pill:" + n))) v.push(`the strip holds ${J(s1.kids)} (want the source pills ${J(names)} alone)`);
+      if (s1.kids.length === 0) return ["no source pills — proved nothing"];
+      if (J(s1.kids) !== want) v.push(`the strip holds ${J(s1.kids)} (want the source pills ${J(names)} alone)`);
       if (s1.icons) v.push(`a source pill carries an icon (${s1.icons})`);
       if (J(s1.lit) !== J([wsName])) v.push(`lit: ${J(s1.lit)} (want the Workshop's ${J(wsName)})`);
-      // a creator's list: their pair joins the strip after the source pills and is the one lit
+      // a creator's list from the sidebar's row: the Author field holds it, the strip doesn't change
       await openSide(0);
       const ROW = `${SIDE} [data-ws-creator]`;
       if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return [...v, "the creator row never showed the creator"];
-      await page(`document.querySelector(${J(ROW)}).click();`); await sleep(700);
+      await page(`document.querySelector(${J(ROW)}).click();`); await sleep(800);
+      if ((await lastList())?.kind !== "creator") return [...v, `the row's click asked ${J(await lastList())} — proved nothing`];
       const s2 = await strip();
-      console.log(`        a creator's list: ${J(s2)}`);
-      if (J(s2.kids) !== J([...names.map((n) => "pill:" + n), "creator"])) v.push(`a creator's list: the strip holds ${J(s2.kids)} (want the source pills, then the creator's)`);
-      if (J(s2.lit) !== J(["Probe Creator"])) v.push(`a creator's list: lit ${J(s2.lit)} (want the creator's pill alone)`);
-      await shot("ws-pills-creator");
-      await page(`document.querySelector('[data-ws-pill="creator"] .ws-pill-x').click();`); await sleep(700);
-      const b3 = (await browses()).at(-1), s3 = await strip();
-      if (J(s3.kids) !== J(names.map((n) => "pill:" + n)) || J(s3.lit) !== J([wsName])) v.push(`× back on the whole Workshop: ${J(s3)}`);
-      if (b3?.list) v.push(`× still asked a list (${J(b3.list)})`);
+      console.log(`        a creator's list (the row): ${J(s2)}`);
+      if (J(s2.kids) !== want || s2.listPills) v.push(`a creator's list: the strip holds ${J(s2.kids)}, ${s2.listPills} list pill(s) (want the source pills alone)`);
+      if (J(s2.lit) !== J([wsName])) v.push(`a creator's list: lit ${J(s2.lit)} (want the Workshop's pill)`);
+      await shot("list-nopills");
+      // one typed in the field: the same
+      await clearField("creator"); await sleep(500);
+      await typeIn("creator", "76561190000000007"); await sleep(800);
+      const s3 = await strip();
+      if ((await lastList())?.id !== "76561190000000007") v.push(`typing the ID asked ${J(await lastList())}`);
+      if (J(s3.kids) !== want || s3.listPills || J(s3.lit) !== J([wsName])) v.push(`a typed creator's list: ${J(s3)}`);
+      // the Workshop's lit pill → the whole Workshop, the field empty
+      await page(`[...document.querySelectorAll(".pill-strip > .pill")].find((e) => e.textContent.trim() === ${J(wsName)})?.click();`); await sleep(700);
+      const b4 = await lastList(), f4 = await field("creator");
+      if (b4) v.push(`the Workshop's pill still asked a list (${J(b4)})`);
+      if (f4 && f4.value !== "") v.push(`the Workshop's pill left the Author field reading ${J(f4.value)}`);
       return v;
     });
 
@@ -3042,9 +3116,10 @@ app.whenReady().then(async () => {
     const clickRow = (sel) => page(`const e = document.querySelector(${J(sel)}); if (!e) return false; e.click(); return true;`);
 
     // ws:presets[Off] — a scene's sidebar has a "Presets" row (the creator row's control, 12 px under it); a click lists exactly
-    // its presets: a "Presets · <scene>" pill comes in beside the Workshop's (per frame; Off: fades in place), lit, the sidebar
-    // closes, the one in the library carries Browse's in-library mark, the list's two sorts (Top Rated asks again) and its
-    // second page; × goes back to the whole Workshop (the pill leaves). On: no-glow + bg-live keep the row's own fill, no glow.
+    // its presets: the sidebar closes, the filter column's Presets of field reads the scene's name and rings once (per frame;
+    // Off: fades in place), no pill in the top bar, the one in the library carries Browse's in-library mark, the list's two
+    // sorts (Top Rated asks again) and its second page; the field's × goes back to the whole Workshop. On: no-glow + bg-live
+    // keep the row's own fill, no glow.
     // Shots steam-ws-presets-*.png
     for (const motion of [true, false]) {
       await cell(`ws:presets${motion ? "" : "Off"}`, async () => {
@@ -3062,39 +3137,19 @@ app.whenReady().then(async () => {
           const gap = await js(`(() => { const a = document.querySelector(${J(CROW)}).getBoundingClientRect(), b = document.querySelector(${J(PROW)}).getBoundingClientRect(); return +(b.top - a.bottom).toFixed(1); })()`);
           if (Math.abs(gap - 12) > 0.6) v.push(`the Presets row sits ${gap} px under the creator's (want the sidebar's 12)`);
           if (motion) await shot("ws-presets-row");
-          const PAIR = '[data-ws-pill="presets"]';
-          const smp = motion ? null : js(MO.SAMPLE({ pair: PAIR }, 600));
-          if (!motion) await sleep(40);
-          const fr = motion ? frames(`document.querySelector(${J(PROW)}).click();`, `(() => { const e = document.querySelector('${PAIR}'); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, new DOMMatrix(cs.transform).m41]; })()`, 500) : null;
-          if (!motion) await clickRow(PROW);
-          if (motion) { await sleep(90); await shot("ws-presets-pill-in"); }
-          const fin = motion ? await fr : null;
+          // the click fills the column's Presets of field with the scene's name (no pill in the top bar)
+          await fillFromRow(v, PROW, "presets", "Fixture Workshop Three", motion, motion ? "ws-presets-field-in" : null);
           const t = (await waitFor(async () => { const x = await brTitles(); return J([...x].sort()) === J(PRESETS) ? x : null; }, 4000)) ?? await brTitles();
           const b = (await browses()).filter((x) => x.list).at(-1);
           if (b?.list?.kind !== "presets" || b.list.id !== "910000003") v.push(`the click asked /browse ${J(b?.list)} (want the presets of 910000003)`);
           if (J([...t].sort()) !== J(PRESETS)) v.push(`the list holds ${J(t)} (want exactly ${J(PRESETS)})`);
-          const st = await page(`const pair = document.querySelector('${PAIR}');
-            const sr = document.querySelector(".pill-strip").getBoundingClientRect(), pr = pair?.getBoundingClientRect();
-            return { pill: pair?.textContent.trim() ?? null, active: !!pair?.querySelector(".pill.active"), side: !!document.querySelector("${SIDE}"),
-              shown: !!pr && pr.left >= sr.left - 1 && pr.right <= sr.right + 1, box: pr ? [Math.round(pr.left), Math.round(pr.right), Math.round(sr.left), Math.round(sr.right)] : null,
-              lit: [...document.querySelectorAll(".pill-strip > .pill.active")].map((e) => e.textContent.trim()),
+          const st = await page(`return { pills: document.querySelectorAll("[data-ws-pill], .ws-pill, .ws-pill-pair").length,
               sort: document.querySelector("[data-sortsplit=browse] .ss-sort")?.textContent.trim() ?? null,
               owned: [...document.querySelectorAll(${J(CARDS)})].filter((c) => c.querySelector("[data-in-library]")).map((c) => c.querySelector("[data-title]")?.dataset.title) };`);
           console.log(`        the list ${J(t)}; ${J(st)}`);
-          if (st.pill !== "Presets · Fixture Workshop Three" || !st.active) v.push(`the list's pill: ${J(st.pill)}, lit ${st.active} (want "Presets · Fixture Workshop Three", lit)`);
-          if (st.lit.length) v.push(`another pill is still lit: ${J(st.lit)}`);
-          if (!st.shown) v.push(`the list's pill came in out of the source strip's view (pill, strip edges ${J(st.box)})`);
-          if (st.side) v.push("the sidebar stayed open");
+          if (st.pills) v.push(`a list pill is in the top bar (${st.pills})`);
           if (st.sort !== "Recently Updated") v.push(`the sort reads ${J(st.sort)} (want the list's "Recently Updated")`);
           if (J(st.owned) !== J(["Fixture Preset One"])) v.push(`cards marked in the library: ${J(st.owned)} (want "Fixture Preset One")`);
-          if (motion) {
-            const ops = fin.filter((x) => x).map((x) => x[0]), xs = fin.filter((x) => x).map((x) => x[1]);
-            console.log(`        pill in: opacity ${J(ops.slice(0, 8).map((o) => +o.toFixed(2)))} x ${J(xs.slice(0, 8).map((o) => +o.toFixed(1)))}`);
-            if (between(ops, 0.05) < 3 || between(xs, 0.5) < 3) v.push("the list's pill popped in (no in-between frames)");
-          } else {
-            const s1 = await smp; console.log(`        motion off: pill in ${MO.brief(s1.pair)}`);
-            v.push(...MO.judge("motion off: the presets pill appearing", s1.pair, { appear: true, size: false }));
-          }
           // it pages (its placeholders ask for page 2) and sorts by a list's two sorts
           const paged = () => browses().then((xs) => xs.some((x) => x.list?.kind === "presets" && x.page === 2));
           if (!(await waitFor(paged, 3000))) v.push("the presets list never asked for its second page");
@@ -3108,16 +3163,12 @@ app.whenReady().then(async () => {
           if (sb?.list?.kind !== "presets" || sb.list.sort !== "toprated") v.push(`Top Rated asked ${J(sb?.list)}`);
           const t2 = await brTitles();
           if (J([...t2].sort()) !== J(PRESETS)) v.push(`Top Rated lists ${J(t2)}`);
-          // × → the whole Workshop; the pill leaves
-          const smp2 = js(MO.SAMPLE({ pair: PAIR }, 500)); await sleep(40);
-          await page(`document.querySelector('${PAIR} .ws-pill-x')?.click();`);
-          if (motion) { await sleep(70); await shot("ws-presets-pill-out"); }
-          const s2 = await smp2; await sleep(400);
-          if (await js(`!!document.querySelector('${PAIR}')`)) v.push("the list's pill stayed after ×");
-          const back = (await browses()).at(-1);
+          // the field's × → the whole Workshop, the field empty
+          if (!(await clearField("presets"))) v.push("the Presets of field has no ×");
+          await sleep(500);
+          const back = (await browses()).at(-1), pf = await field("presets");
           if (back?.list) v.push(`× still asked a list (${J(back.list)})`);
-          if (!motion) v.push(...MO.judge("motion off: the presets pill leaving", s2.pair, { leave: true, size: false }));
-          else if (!s2.pair.some((f) => f[1] != null && f[1] > 0.05 && f[1] < 0.95)) v.push("the list's pill vanished at once (no exit)");
+          if (pf?.value !== "" || pf?.state !== "off") v.push(`after ×: the field ${J(pf)}`);
           if (motion) {
             await presetsOn({ glows: false, live: true }); await openSide(0);
             await waitFor(() => js(`!!document.querySelector(${J(PROW)})`), 2000); await sleep(300);
@@ -3137,6 +3188,277 @@ app.whenReady().then(async () => {
         return v;
       });
     }
+
+    // ---- the filter column's list fields (components/WorkshopListFields.tsx): Author and Presets of ----
+    // the danger colour as the page draws it (the theme var resolved on an element)
+    const dangerRgb = () => js(`(() => { const e = document.createElement("span"); e.style.color = "var(--danger)"; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; })()`);
+    const enterIn = (k) => `document.querySelector(${J(LFIELD(k) + " input")}).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));`;
+    const errFrame = (k) => `(() => { const e = document.querySelector('${LFIELD(k)} [data-wf-field-err]'); if (!e) return null; const cs = getComputedStyle(e); return [+cs.opacity, +new DOMMatrix(cs.transform).m41.toFixed(2)]; })()`;
+
+    // list:author:{id,url,name} — typed into the Author field + Enter: one GET /workshop/author with the text as typed, the
+    // list asked for the account it names, the field showing its name (a profile link the backend knows no name for: its
+    // ID), no error, the split button counting the list, the search gone; leaving the field after Enter asks nothing again.
+    // Shot steam-list-author-filled.png
+    for (const [cname, text, want] of [["id", "76561190000000007", "Probe Creator"], ["url", "https://steamcommunity.com/id/probecreator", "76561190000000007"],
+      ["name", "Probe Creator", "Probe Creator"]]) {
+      await cell(`list:author:${cname}`, async () => {
+        const v = [];
+        await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        await browseWs(); await W({ avatar: libThumb });
+        if (!(await openCol())) return ["no Author field in Browse's filter column"];
+        if (await lastList()) return [`a list is open before typing (${J(await lastList())}) — proved nothing`];
+        const n0 = (await wsCalls("/workshop/author")).length;
+        await typeIn("creator", text);
+        await waitFor(async () => (await lastList())?.kind === "creator", 3000); await sleep(300);
+        const asks = (await wsCalls("/workshop/author")).slice(n0), l = await lastList(), f = await field("creator");
+        console.log(`        asked ${J(asks)}; /browse ${J(l)}; the field ${J(f)}`);
+        if (asks.length !== 1 || asks[0].q !== text) v.push(`asked /workshop/author ${J(asks)} (want once with ${J(text)})`);
+        if (l?.kind !== "creator" || l.id !== "76561190000000007") v.push(`/browse asked ${J(l)} (want the creator's list)`);
+        if (f?.value !== want || f.state !== "on" || f.invalid || f.err) v.push(`the field: ${J(f)} (want ${J(want)}, on, no error)`);
+        if (await splitCount() !== "1") v.push(`the split button counts ${J(await splitCount())} (want 1: the list)`);
+        if (await js(`!!document.querySelector(".topbar .tsearch")`)) v.push("the search shows on a creator's list");
+        await page(`document.activeElement?.blur(); return true;`); await sleep(400);
+        if ((await wsCalls("/workshop/author")).length !== n0 + 1) v.push("leaving the field after Enter asked again");
+        if (cname === "id") { await mvTo(3, 3, 300); await shot("list-author-filled"); }
+        await clearField("creator"); await sleep(400);
+        return v;
+      });
+    }
+
+    // list:author:unknown[Off] — a name the backend never saw: the field's own error state, not a line under it: the box in the
+    // danger colour (aria-invalid), the heading line's right end says to paste a profile link or ID, sliding in (Off: a fade,
+    // nothing moving), the typed text kept, no list asked; typing again takes the error away (Off: a fade out); Escape takes
+    // the text back. On: no-glow (the invalid box has no glow) + bg-live (the heading line's shadow). Shots
+    // steam-list-author-error*.png
+    for (const motion of [true, false]) {
+      await cell(`list:author:unknown${motion ? "" : "Off"}`, async () => {
+        const v = [];
+        const run = async (shotName) => {
+          await browseWs();
+          if (!(await openCol())) return v.push("no Author field in Browse's filter column");
+          const nb = (await browses()).length;
+          await typeIn("creator", "Somebody Unknown", false);
+          const ERR = `${LFIELD("creator")} [data-wf-field-err]`;
+          const smp = motion ? null : js(MO.SAMPLE({ err: ERR, box: `${LFIELD("creator")} .wf-field-box` }, 600));
+          if (!motion) await sleep(40);
+          const fr = motion ? frames(enterIn("creator"), errFrame("creator"), 500) : (await page(`${enterIn("creator")} return true;`), null);
+          const fin = motion ? await fr : null, s1 = motion ? null : await smp;
+          await sleep(300);
+          const f = await field("creator"), danger = await dangerRgb();
+          console.log(`        the field ${J(f)}`);
+          if (f?.err !== "Unknown name: paste a profile link or ID") v.push(`the error reads ${J(f?.err)}`);
+          if (f?.state !== "error" || f.invalid !== "true") v.push(`the field isn't in its error state: ${J(f)}`);
+          if (f?.border !== danger) v.push(`the box's edge is ${f?.border} (want the danger colour ${danger})`);
+          if (f?.errColor !== danger) v.push(`the error's words are ${f?.errColor} (want the danger colour ${danger})`);
+          if (!f?.errAbove) v.push("the error isn't in the field's heading line (above its box)");
+          if (f?.under) v.push(`${f.under} element(s) under the field's box (a hint line)`);
+          if (f?.value !== "Somebody Unknown") v.push(`the typed text wasn't kept (${J(f?.value)})`);
+          const sent = (await browses()).slice(nb).filter((b) => b.list);
+          if (sent.length) v.push(`an unknown name asked /browse ${J(sent.map((b) => b.list))}`);
+          if (motion && fin) {
+            const ops = fin.filter((x) => x).map((x) => x[0]), xs = fin.filter((x) => x).map((x) => x[1]);
+            console.log(`        error in: opacity ${J(ops.slice(0, 10))} x ${J(xs.slice(0, 10))}`);
+            if (!ops.length) v.push("the error never showed");
+            else if (between(ops, 0.05) < 2 || between(xs, 0.5) < 2) v.push(`the error popped in (opacity ${J(ops.slice(0, 8))}, x ${J(xs.slice(0, 8))})`);
+          }
+          if (s1) {
+            console.log(`        motion off: error ${MO.brief(s1.err)}`);
+            v.push(...MO.judge("motion off: the error appearing", s1.err, { appear: true, size: false }), ...MO.judge("motion off: the field's box", s1.box));
+          }
+          if (shotName) { await mvTo(3, 3, 200); await shot(shotName); }
+          return f;
+        };
+        await setSettings({ morphs: motion, glows: true, liveWallpaperBehindAllTabs: false });
+        await run(motion ? "list-author-error" : null);
+        // typing again: the error goes (Off: fades out)
+        const smp2 = js(MO.SAMPLE({ err: `${LFIELD("creator")} [data-wf-field-err]` }, 500)); await sleep(40);
+        await page(`document.querySelector(${J(LFIELD("creator") + " input")}).focus(); return true;`); await type("x");
+        const s2 = await smp2; await sleep(200);
+        const f2 = await field("creator");
+        if (f2?.err || f2?.state === "error" || f2?.invalid) v.push(`typing again kept the error: ${J(f2)}`);
+        if (!motion) v.push(...MO.judge("motion off: the error leaving", s2.err, { leave: true, size: false }));
+        // Escape takes the text back; the column stays
+        await key("Escape"); await sleep(300);
+        const f3 = await field("creator");
+        if (f3?.value !== "") v.push(`Escape left ${J(f3?.value)} in the field`);
+        if (motion) {
+          await setSettings({ glows: false, liveWallpaperBehindAllTabs: true });
+          await run("list-author-error-live");
+          const lk = await page(`const i = document.querySelector(${J(LFIELD("creator") + " input")}), h = document.querySelector(${J(LFIELD("creator") + " .wf-field-head")});
+            return { html: document.documentElement.className, shadow: getComputedStyle(i).boxShadow, filter: getComputedStyle(h).filter };`);
+          console.log(`        no-glow + bg-live: ${J(lk)}`);
+          if (!/no-glow/.test(lk.html) || !/bg-live/.test(lk.html)) v.push(`the toggles didn't apply: ${lk.html}`);
+          if (lk.shadow !== "none") v.push(`no-glow: the invalid box glows (${lk.shadow})`);
+          if (!/drop-shadow/.test(lk.filter)) v.push(`bg-live: the field's heading line has no shadow over the wallpaper (${lk.filter})`);
+          await key("Escape");
+        }
+        await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+        return v;
+      });
+    }
+
+    // list:author:real — the stack's own backend resolves the field (no stub; Helpers/SteamAuthors.cs, no network): a Steam ID →
+    // its list; a profile link naming an ID → that ID's list, the field showing the ID; a name it never saw → the field's error
+    await cell("list:author:real", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await js(`localStorage.setItem("__probe_author_real", "1"); true`);
+      try {
+        await browseWs();
+        if (!(await openCol())) return ["no Author field in Browse's filter column"];
+        await typeIn("creator", "76561198000000042");
+        await waitFor(async () => (await lastList())?.id === "76561198000000042", 3000);
+        if ((await lastList())?.id !== "76561198000000042") v.push(`a Steam ID asked ${J(await lastList())}`);
+        await typeIn("creator", "https://steamcommunity.com/profiles/76561198000000043/");
+        await waitFor(async () => (await lastList())?.id === "76561198000000043", 3000);
+        const f = await field("creator");
+        if ((await lastList())?.id !== "76561198000000043" || f?.value !== "76561198000000043") v.push(`a profile link asked ${J(await lastList())}, the field ${J(f?.value)}`);
+        const nb = (await browses()).length;
+        await typeIn("creator", "Nobody This Backend Saw"); await sleep(700);
+        const f2 = await field("creator");
+        console.log(`        unknown name: ${J(f2)}`);
+        if (f2?.err !== "Unknown name: paste a profile link or ID" || f2.state !== "error") v.push(`a name the backend never saw: ${J(f2)}`);
+        if ((await browses()).slice(nb).some((b) => b.list)) v.push("an unknown name asked a list");
+        await key("Escape"); await clearField("creator"); await sleep(300);
+      } finally { await js(`localStorage.removeItem("__probe_author_real"); true`); }
+      return v;
+    });
+
+    // list:presets:{id,url,bad} — the Presets of field (presets on): a scene's Workshop ID or its page's link → the scene's
+    // presets list (the stack's backend: exactly its two), the field showing the scene's name (its card is on the page), an
+    // Author name showing its error emptied; a creator typed after replaces it (the field empties); anything else → the
+    // field's error, saying to paste the scene's ID or link, nothing asked, the open creator's list kept
+    for (const [cname, text] of [["id", "910000003"], ["url", "https://steamcommunity.com/sharedfiles/filedetails/?id=910000003"], ["bad", "the blue one"]]) {
+      await cell(`list:presets:${cname}`, async () => {
+        const v = [];
+        try {
+          await presetsOn();
+          if (!(await openCol())) return ["no filter column"];
+          if (!(await js(`!!document.querySelector(${J(LFIELD("presets"))})`))) return ["no Presets of field with presets on"];
+          if (cname === "bad") {
+            await typeIn("creator", "76561190000000007");
+            await waitFor(async () => (await lastList())?.kind === "creator", 3000);
+          } else {
+            // an Author name it couldn't take, still showing its error: the presets list opening takes it away
+            await typeIn("creator", "Somebody Unknown"); await sleep(500);
+            if ((await field("creator"))?.state !== "error") v.push("the unknown Author name showed no error — proved nothing");
+          }
+          const nb = (await browses()).length;
+          await typeIn("presets", text); await sleep(900);
+          const f = await field("presets"), a = await field("creator"), sent = (await browses()).slice(nb).filter((b) => b.list);
+          console.log(`        the field ${J(f)}; Author ${J(a?.value)}; asked ${J(sent.map((b) => b.list))}`);
+          if (cname === "bad") {
+            if (f?.err !== "Paste the scene's Workshop ID or link" || f.state !== "error" || f.invalid !== "true") v.push(`not an id or link: the field ${J(f)}`);
+            if (sent.length) v.push(`not an id or link asked ${J(sent.map((b) => b.list))}`);
+            if (a?.value !== "Probe Creator") v.push(`the creator's list went (${J(a?.value)})`);
+            await key("Escape");
+          } else {
+            const t = (await waitFor(async () => { const x = await brTitles(); return J([...x].sort()) === J(PRESETS) ? x : null; }, 4000)) ?? await brTitles();
+            if (sent.at(-1)?.list?.kind !== "presets" || sent.at(-1).list.id !== "910000003") v.push(`asked ${J(sent.map((b) => b.list))} (want the presets of 910000003)`);
+            if (f?.value !== "Fixture Workshop Three" || f.state !== "on" || f.err) v.push(`the field: ${J(f)} (want the scene's name, on)`);
+            if (J([...t].sort()) !== J(PRESETS)) v.push(`the list holds ${J(t)} (want exactly ${J(PRESETS)})`);
+            if (a?.value !== "" || a?.state !== "off" || a?.err) v.push(`the Author field kept its unknown name after the presets list opened: ${J(a)}`);
+            if (cname === "id") { await mvTo(3, 3, 200); await shot("list-presets-filled"); }
+            await typeIn("creator", "76561190000000007");
+            await waitFor(async () => (await lastList())?.kind === "creator", 3000); await sleep(300);
+            const p2 = await field("presets"), a2 = await field("creator");
+            if (p2?.value !== "" || p2?.state !== "off" || a2?.value !== "Probe Creator") v.push(`a creator typed after: Presets of ${J(p2?.value)}, Author ${J(a2?.value)}`);
+          }
+          await clearField("creator"); await sleep(300);
+        } finally { await presetsDone(); }
+        return v;
+      });
+    }
+
+    // list:clear — leaving a list from its field: the text deleted + Enter (the whole Workshop, one first page asked), and Clear all
+    // with a tag on (the tags and the list both gone in ONE first page asked, the count gone)
+    await cell("list:clear", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      await browseWs();
+      if (!(await openCol())) return ["no Author field in Browse's filter column"];
+      await typeIn("creator", "76561190000000007");
+      if (!(await waitFor(async () => (await lastList())?.kind === "creator", 3000))) return ["typing the ID opened no list — proved nothing"];
+      let nb = (await browses()).length;
+      await typeIn("creator", ""); await sleep(700);
+      let sent = (await browses()).slice(nb).filter((b) => b.page === 1), f = await field("creator");
+      if (sent.length !== 1 || sent[0].list) v.push(`the text deleted + Enter asked ${J(sent.map((b) => b.list ?? null))} (want one /browse of the whole Workshop)`);
+      if (f?.value !== "" || f?.state !== "off") v.push(`the text deleted: the field ${J(f)}`);
+      await typeIn("creator", "76561190000000007");
+      await waitFor(async () => (await lastList())?.kind === "creator", 3000);
+      await page(`document.querySelector('.wf-col:not(.closing) [data-wf-tag="Anime"] .wf-seg.i')?.click(); return true;`); await sleep(900);
+      if (await splitCount() !== "2") v.push(`a list + a tag: the split button counts ${J(await splitCount())} (want 2)`);
+      nb = (await browses()).length;
+      await page(`document.querySelector(".wf-col:not(.closing) [data-wf-clear]").click(); return true;`); await sleep(900);
+      sent = (await browses()).slice(nb).filter((b) => b.page === 1); f = await field("creator");
+      console.log(`        Clear all asked ${J(sent.map((b) => [b.list ?? null, b.filter?.include]))}; the field ${J(f)}`);
+      if (sent.length !== 1 || sent[0].list || sent[0].filter?.include?.length) v.push(`Clear all asked ${J(sent.map((b) => [b.list ?? null, b.filter?.include]))} (want one /browse, no list, no tag)`);
+      if (f?.value !== "" || f?.state !== "off") v.push(`Clear all left the field ${J(f)}`);
+      if (await splitCount() != null) v.push(`after Clear all the split button counts ${J(await splitCount())}`);
+      return v;
+    });
+
+    // list:rows — a sidebar row fills its field over what was being typed (its error gone); in a narrow window (the column a
+    // drawer) the row doesn't open the drawer over the grid, and the split button counts the list
+    await cell("list:rows", async () => {
+      const v = [];
+      await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false });
+      try {
+        await browseWs();
+        if (!(await openCol())) return ["no Author field in Browse's filter column"];
+        await typeIn("creator", "Somebody Unknown"); await sleep(500);
+        if ((await field("creator"))?.state !== "error") return ["the unknown name showed no error — proved nothing"];
+        await openSide(0);
+        const ROW = `${SIDE} [data-ws-creator]`;
+        if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return ["the creator row never showed the creator"];
+        await fillFromRow(v, ROW, "creator", "Probe Creator", true, null);
+        const f = await field("creator");
+        if (f?.err || f?.invalid) v.push(`the row's fill kept the error: ${J(f)}`);
+        await clearField("creator"); await sleep(400);
+        win.setContentSize(820, 900); await sleep(700);
+        await openSide(0);
+        if (!(await waitFor(() => js(`document.querySelector(${J(ROW)})?.dataset.wsCreator === "known"`), 3000))) return [...v, "narrow: the creator row never showed"];
+        await page(`document.querySelector(${J(ROW)}).click();`); await sleep(800);
+        const st = await page(`return { drawer: !!document.querySelector('.wf-col:not(.closing)[data-mode="drawer"]'), side: !!document.querySelector("${SIDE}") };`);
+        console.log(`        narrow: ${J(st)}, count ${J(await splitCount())}, list ${J(await lastList())}`);
+        if ((await lastList())?.kind !== "creator") v.push(`narrow: the row asked ${J(await lastList())}`);
+        if (st.drawer) v.push("narrow: the row opened the filter drawer over the grid");
+        if (st.side) v.push("narrow: the sidebar stayed open");
+        if (await splitCount() !== "1") v.push(`narrow: the split button counts ${J(await splitCount())} (want 1: the list)`);
+      } finally { win.setContentSize(1400, 900); await sleep(500); }
+      return v;
+    });
+
+    // list:race — the newest input wins across both fields: an Author lookup still out (its answer held) when a Presets of ID
+    // opens that scene's presets is dropped when it lands (the presets list stays, the Author field empty, not spinning); one
+    // still out when Clear all runs opens nothing either
+    await cell("list:race", async () => {
+      const v = [];
+      try {
+        await presetsOn();
+        if (!(await openCol())) return ["no filter column"];
+        await W({ authorDelay: 900 });
+        await typeIn("creator", "76561190000000007"); await sleep(100);
+        if ((await field("creator"))?.state !== "busy") v.push(`the held lookup doesn't show (${J(await field("creator"))}) — proved nothing`);
+        await typeIn("presets", "910000003");
+        await waitFor(async () => (await lastList())?.kind === "presets", 2000);
+        await sleep(1300);
+        const l = await lastList(), a = await field("creator"), p = await field("presets");
+        console.log(`        after the held answer: ${J(l)}; Author ${J(a)}; Presets of ${J(p?.value)}`);
+        if (l?.kind !== "presets") v.push(`the older Author lookup won: /browse ${J(l)}`);
+        if (a?.state !== "off" || a?.value !== "") v.push(`the Author field after its lookup was overtaken: ${J(a)} (want empty, off)`);
+        if (p?.value !== "Fixture Workshop Three") v.push(`the Presets of field reads ${J(p?.value)}`);
+        await clearField("presets"); await sleep(500);
+        await page(`document.querySelector('.wf-col:not(.closing) [data-wf-tag="Anime"] .wf-seg.i')?.click(); return true;`); await sleep(400);
+        await typeIn("creator", "76561190000000007"); await sleep(100);
+        await page(`document.querySelector(".wf-col:not(.closing) [data-wf-clear]").click(); return true;`);
+        await sleep(1400);
+        const l2 = await lastList(), a2 = await field("creator");
+        if (l2) v.push(`a lookup out when Clear all ran opened ${J(l2)}`);
+        if (a2?.state !== "off") v.push(`after Clear all the Author field ${J(a2)}`);
+      } finally { await W({ authorDelay: 0 }); await presetsDone(); }
+      return v;
+    });
 
     // ws:presetsHidden — no Presets row where there's nothing to list (a video's sidebar, a preset's own) nor while presets can't
     // play: scene support off (a WS settings-changed: the page's own settings, the backend's untouched) — live, under an
@@ -3523,7 +3845,8 @@ app.whenReady().then(async () => {
         // the list's empty / error note is the list's pages', never the set's (WorkshopSocial.tsx WsListNote)
         const note = await js(`document.querySelector("[data-ws-list-note]")?.textContent ?? null`);
         if (note) v.push(`creator, Favourites ✓ shows the list's note ${J(note)}`);
-        if (await js(`document.querySelector('[data-ws-pill="creator"] .pill.active') == null`)) v.push("creator, Favourites ✓: the creator's pill isn't lit");
+        const af = await field("creator");
+        if (af?.value !== "Probe Creator" || af.state !== "on") v.push(`creator, Favourites ✓: the Author field ${J(af)} (want the creator, on)`);
         await shot("yours-inlist-creator");
         await setRow("@favorites", "exc", 900);
         const c2 = await shownAs(T("ws-a", "ws-b"));
@@ -3531,7 +3854,7 @@ app.whenReady().then(async () => {
         if (J(sorted(c2)) !== J(T("ws-a", "ws-b"))) v.push(`creator, Favourites ✕: ${J(sorted(c2))} (want ws-a, ws-b)`);
         if (lb?.list?.kind !== "creator") v.push(`creator, Favourites ✕ asked ${J(lb?.list)} (want the creator's list)`);
         await setRow("@favorites", "off");
-        await page(`document.querySelector('[data-ws-pill="creator"] .ws-pill-x')?.click();`); await sleep(700);
+        await clearField("creator"); await sleep(700);
         await openSide(await at("Base Scene"));
         if (!(await waitFor(() => js(`!!document.querySelector("${SIDE} [data-ws-presets]")`), 3000))) return [...v, "Base Scene's sidebar has no Presets row"];
         await page(`document.querySelector("${SIDE} [data-ws-presets]").click();`);
@@ -4850,7 +5173,7 @@ app.whenReady().then(async () => {
     }
 
     // lib:ws:creator — the creator row, asked without an owner (the backend finds it): a click lists their wallpapers in Browse —
-    // the Browse tab shows, the creator's pill lit, the list asked
+    // the Browse tab shows with its filter column's Author field holding the creator, the list asked
     await cell("lib:ws:creator", async () => {
       const v = [];
       await setSettings({ morphs: true, glows: true, liveWallpaperBehindAllTabs: false, autoAddWeWallpapersToLibrary: false });
@@ -4866,12 +5189,12 @@ app.whenReady().then(async () => {
         const nb = (await browses()).length;
         await page(`document.querySelector(${J(ROW)}).click();`); await sleep(900);
         const b = (await browses()).slice(nb).at(-1);
-        const st = await page(`return { tab: document.querySelector(".tab.active")?.textContent.trim() ?? null, pill: document.querySelector('[data-ws-pill="creator"]')?.textContent.trim() ?? null,
-          lit: !!document.querySelector('[data-ws-pill="creator"] .pill.active'), page: document.querySelector(".app")?.dataset.page ?? null };`);
+        const st = await page(`return { tab: document.querySelector(".tab.active")?.textContent.trim() ?? null, page: document.querySelector(".app")?.dataset.page ?? null };`);
+        const af = await field("creator");
         console.log(`        after the click: ${J(st)} | ${J(b?.list)}`);
         if (st.tab !== "Browse" || st.page !== "browse") v.push(`the click didn't take the user to Browse: ${J(st)}`);
         if (b?.list?.kind !== "creator" || b.list.id !== "76561190000000007") v.push(`the click asked /browse ${J(b?.list)}`);
-        if (st.pill !== "Probe Creator" || !st.lit) v.push(`the creator's pill: ${J(st)}`);
+        if (af?.value !== "Probe Creator" || af.state !== "on") v.push(`Browse's Author field: ${J(af)} (want the creator, on)`);
       } finally { await libWsDone(); }
       return v;
     });

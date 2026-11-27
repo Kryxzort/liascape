@@ -178,6 +178,23 @@ public static class WorkshopSocialOps
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
     }
 
+    /// GET /workshop/author?q= → {steamId, name, avatar}: the filter column's Author field, resolved (Helpers/SteamAuthors.cs);
+    /// name / avatar null when this run hasn't read them. 400 {error, reason} = what the field can't take (an unknown or
+    /// shared name, not a profile link); 404 = no profile at that link; 429 Steam's cooldown; 502 Steam unreachable.
+    // Guard: scripts/test-workshop-social.sh § 1c
+    public static async Task<IResult> AuthorAsync(string? q, CancellationToken ct)
+    {
+        if (q is { Length: > 300 }) return Results.Json(new { error = "Paste a profile link or ID", reason = "bad" }, statusCode: 400);
+        try
+        {
+            var p = await SteamAuthors.ResolveAsync(q, ct).ConfigureAwait(false);
+            return Results.Json(new { steamId = p.SteamId, name = p.Name, avatar = p.Avatar });
+        }
+        catch (SteamAuthors.UnresolvedException e)
+        { return Results.Json(new { error = e.Message, reason = e.Reason }, statusCode: e.Reason == "none" ? 404 : 400); }
+        catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { return Fail(e); }
+    }
+
     /// GET /workshop/favorite?id= → {signedIn, favorited (null = unknown)}
     public static async Task<IResult> FavoriteStateAsync(string? id, CancellationToken ct)
     {

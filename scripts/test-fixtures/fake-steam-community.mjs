@@ -9,6 +9,9 @@
 //   POST /comment/PublishedFile_Public/render/O/N/  start, count → {success, start, total_count, comments_html}, newest first
 //   POST /comment/PublishedFile_Public/post/O/N/    comment, count, sessionid + the sign-in → the first page, the new one on top
 //   GET  /profiles/S/?xml=1                         a profile's XML (steamID, avatarMedium)
+//   GET  /id/NAME/?xml=1                            a custom profile name's XML: "probecreator" (any case) = the items'
+//                                                   creator's profile (steamID64 + name), any other Steam's "could not be
+//                                                   found" response, "garbled" an HTML page (an answer that isn't a profile)
 //   GET  /profiles/S/myworkshopfiles/?…myfavorites  S's favourites page (filedetails links + Steam's "Showing a-b of N entries"), 30 a
 //                                                   page, to S's own sign-in cookie only (any account's "<S>||<token>")
 //   POST /ISteamRemoteStorage/GetPublishedFileDetails/v1/  the keyless details, current AND lifetime counts
@@ -151,6 +154,15 @@ const server = http.createServer(async (req, res) => {
 <profile><steamID64>${m[1]}</steamID64><steamID><![CDATA[Creator <b>Bold</b> ${m[1].slice(-2)}]]></steamID><onlineState>offline</onlineState>
 <privacyState>public</privacyState><avatarIcon><![CDATA[https://avatars.example.invalid/${m[1]}.jpg]]></avatarIcon>
 <avatarMedium><![CDATA[https://avatars.example.invalid/${m[1]}_medium.jpg]]></avatarMedium></profile>`, "text/xml");
+  }
+  if (req.method === "GET" && (m = u.pathname.match(/^\/id\/([^/]+)\/$/)) && u.searchParams.get("xml") === "1") {
+    const name = decodeURIComponent(m[1]).toLowerCase();
+    if (name === "garbled") return send(200, "<!DOCTYPE html><html><body>Something went wrong</body></html>", "text/html");
+    if (name !== "probecreator") return send(200, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<response><error><![CDATA[The specified profile could not be found.]]></error></response>`, "text/xml");
+    return send(200, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<profile><steamID64>${OWNER}</steamID64><steamID><![CDATA[Creator <b>Bold</b> ${OWNER.slice(-2)}]]></steamID><customURL><![CDATA[probecreator]]></customURL>
+<avatarMedium><![CDATA[https://avatars.example.invalid/${OWNER}_medium.jpg]]></avatarMedium></profile>`, "text/xml");
   }
   if (req.method === "GET" && (m = u.pathname.match(/^\/profiles\/(\d+)\/myworkshopfiles\/$/))) {
     const myFavs = favLists[m[1]];

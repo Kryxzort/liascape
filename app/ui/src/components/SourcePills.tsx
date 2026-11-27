@@ -1,39 +1,24 @@
-import { useCallback, useEffect, useRef } from "react";
-import { RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { RefreshCw } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../api/client";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
-import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
-import { Avatar } from "./WorkshopSocial";
 
 // Browse's source pills in the top bar. The top bar never wraps from 761 px up (docs/decisions.md § "Filter the Workshop in a
 // column of three-way switches", its placement): when the pills don't fit beside the search and the split button, their
 // strip scrolls sideways (the wheel too, useSmoothScroll), its clipped edge fading out (index.css `.pill-strip`), and the
-// chosen pill is brought into view. Refresh stays outside the strip. Guard: probe-filters split:noWrap:*, probe-layout resize:*
+// chosen pill is brought into view. Refresh stays outside the strip. Only sources: a Workshop list (a creator's, a scene's
+// presets) is a filter, the column's Author / Presets of field (WorkshopListFields.tsx; .claude/rules/ui/design.md § Layout
+// discipline), and the Workshop's pill stays lit under it. Guard: probe-filters split:noWrap:*, probe-layout resize:*,
+// probe-steam list:noPills
 export function SourcePills() {
   const sources = useStore((s) => s.sources);
   const active = useStore((s) => s.activeSource);
   const setSource = useStore((s) => s.setSource);
   const reload = useStore((s) => s.reload);
-  const wsList = useStore((s) => s.wsList);
-  const setWsList = useStore((s) => s.setWsList);
   const motion = useMotion();
-  // a creator's pill (the Browse sidebar's creator row puts it here) stays for its exit
-  const creator = useLinger(wsList?.kind === "creator" ? wsList : null, 170, motion);
-  const presets = useLinger(wsList?.kind === "presets" ? wsList : null, 170, motion);
   const ref = useRef<HTMLDivElement>(null);
-  // a list's pill comes in where the user can see it: the strip is often scrolled short of its end (its × is the way back).
-  // Its layout box (offsetLeft / offsetWidth), not the drawn one: it grows in from a smaller scale. Guard: probe-steam ws:presets
-  const inView = useCallback((el: HTMLElement | null) => {
-    const strip = ref.current;
-    if (!el || !strip) return;
-    // its place in the strip's content (the strip isn't its offsetParent: the offsets of both then follow the strip's scroll)
-    const x = el.offsetParent === strip ? el.offsetLeft : el.offsetLeft - strip.offsetLeft + strip.scrollLeft;
-    const end = Math.min(x + el.offsetWidth + 10 - strip.clientWidth, strip.scrollWidth - strip.clientWidth), start = x - 10;
-    const left = end > strip.scrollLeft ? end : start < strip.scrollLeft ? start : null;
-    if (left != null) strip.scrollTo({ left, behavior: motion ? "smooth" : "instant" });
-  }, [motion]);
   const smoothRef = useSmoothScroll(ref, "x");
   // which edges hide a pill (the fade): read from the strip's own scroll / resize callbacks, written to its attributes —
   // no render, no layout read outside them
@@ -60,34 +45,14 @@ export function SourcePills() {
     <div className="pills">
       <div className="pill-strip" ref={smoothRef}>
         {sources.filter((x) => x.available).map((x) => {
-          const ws = x.supportsTagFilter && active === x.index;
           const into = (e: React.MouseEvent<HTMLElement>) => e.currentTarget.scrollIntoView({ inline: "nearest", block: "nearest", behavior: motion ? "smooth" : "instant" });
           // API: a Workshop pill hovered or focused: Steam's anonymous session connects ahead of its page (api.steamWarm).
           // Guard: probe-steam browse:warm
           const warm = x.supportsTagFilter ? { onPointerEnter: api.steamWarm, onFocus: api.steamWarm } : null;
-          return [
-            <button key={x.index} className={`pill${active === x.index && !(ws && wsList) ? " active" : ""}`}
-              {...warm} onClick={(e) => { into(e); setSource(x.index); }}>{x.name}</button>,
-            // a Workshop list opened from a sidebar, beside its pill only while it's open (store wsList): the creator the
-            // sidebar's creator row picked — its avatar + name, × back to the whole Workshop. The favourites are no list but
-            // a filter row (docs/decisions.md § "Show Favourites and In my library as sets in the filter column").
-            // Guard: probe-steam ws:pills
-            x.supportsTagFilter && creator.value && (
-              <span key="ws-creator" ref={inView} className={`ws-pill-pair${creator.closing ? " closing" : ""}`} data-ws-pill="creator">
-                <button className={`pill ico ws-pill${ws && wsList?.kind === "creator" ? " active" : ""}`}
-                  onClick={(e) => { into(e); setWsList(creator.value); }}><Avatar src={creator.value.avatar} size={20} />{creator.value.name ?? "Creator"}</button>
-                <button className="ws-pill-x" aria-label="Back to the whole Workshop" onClick={() => setSource(x.index)}><X size={12} /></button>
-              </span>
-            ),
-            // a scene's presets (the sidebar's Presets row): the creator's pill's look and motion. Guard: probe-steam ws:presets
-            x.supportsTagFilter && presets.value && (
-              <span key="ws-presets" ref={inView} className={`ws-pill-pair${presets.closing ? " closing" : ""}`} data-ws-pill="presets">
-                <button className={`pill ico ws-pill${ws && wsList?.kind === "presets" ? " active" : ""}`}
-                  onClick={(e) => { into(e); setWsList(presets.value); }}><SlidersHorizontal size={14} />Presets · {presets.value.name ?? "a scene"}</button>
-                <button className="ws-pill-x" aria-label="Back to the whole Workshop" onClick={() => setSource(x.index)}><X size={12} /></button>
-              </span>
-            ),
-          ];
+          return (
+            <button key={x.index} className={`pill${active === x.index ? " active" : ""}`}
+              {...warm} onClick={(e) => { into(e); setSource(x.index); }}>{x.name}</button>
+          );
         })}
       </div>
       <button className="mini" aria-label="Refresh" onClick={() => reload()}><RefreshCw size={16} /></button>

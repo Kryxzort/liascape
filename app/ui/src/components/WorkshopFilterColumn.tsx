@@ -1,11 +1,12 @@
 import { memo, useEffect, useId, useRef, type KeyboardEvent as RKeyboardEvent } from "react";
 import { Check, ChevronDown, Dot, Layers, Monitor, Palette, Shield, Sparkles, Tags, UserRound, X, type LucideIcon } from "lucide-react";
-import { favoritesSignedOut, filterOf, hiddenOnSource, useStore, type FilterScope, type TagState } from "../store";
+import { favoritesSignedOut, filterOf, hiddenOnSource, nextListGen, useStore, type FilterScope, type TagState } from "../store";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { useLinger } from "../hooks/useLinger";
 import { useMotion } from "./motion";
 import { groupsFor, usePresetsOn, visibleGroups, type Group, type GroupMatch, type Tag } from "./workshopFilter";
 import { FAVORITES_TAG } from "../views/localSet";
+import { WorkshopListFields } from "./WorkshopListFields";
 
 // COOL: the filter column — Wallpaper Engine's filter column (docs/decisions.md § "Filter the Workshop in a column of
 // three-way switches"), on the Workshop, on Browse's local Wallpaper Engine folder and on the Library, the same control
@@ -149,6 +150,9 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
   const f = useStore((s) => filterOf(s, scope));
   const presets = usePresetsOn();
   const clearIn = useStore((s) => s.clearTags);
+  // the Workshop's list (Author / Presets of, at the column's top) is a filter too: counted, and Clear all leaves it
+  const listOn = useStore((s) => scope === "workshop" && !!s.wsList);
+  const setWsList = useStore((s) => s.setWsList);
   // the Hidden row is offered while this grid has a hidden card: the Library's, or one of the shown Browse source's
   const hiddenAny = useStore((s) => scope === "library" ? Object.keys(s.hidden.library).length > 0
     : Object.keys(hiddenOnSource(s.hidden, s.sources[s.activeSource]?.name)).length > 0);
@@ -159,14 +163,15 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
   const states = new Map<string, TagState>();
   for (const x of f.include) states.set(x, "inc");
   for (const x of f.exclude) states.set(x, "exc");
-  const n = f.include.length + f.exclude.length;
+  const n = f.include.length + f.exclude.length + (listOn ? 1 : 0);
 
   // the drawer: Escape closes it (before the grid's Escape closes the item sidebar); focus moves into it on open
   useEffect(() => {
     if (mode !== "drawer" || closing) return;
     panelRef.current?.focus({ preventScroll: true });
     const h = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || document.querySelector(".sel-pop, .modal-backdrop")) return;
+      // a list field with something typed takes its Escape back first (WorkshopListFields.tsx)
+      if (e.key !== "Escape" || document.querySelector(".sel-pop, .modal-backdrop") || (e.target as Element | null)?.closest?.("[data-wf-dirty]")) return;
       e.preventDefault(); e.stopImmediatePropagation(); onClose();
     };
     addEventListener("keydown", h, true);
@@ -181,10 +186,11 @@ export const WorkshopFilterColumn = memo(function WorkshopFilterColumn({ mode, s
         tabIndex={mode === "drawer" ? -1 : undefined}>
         <div className="wf-top">
           <span className="wf-title" data-wf-title>Filters</span>
-          <button type="button" className="wf-clear" data-wf-clear disabled={!n} onClick={() => clearIn(scope)}>Clear all</button>
+          <button type="button" className="wf-clear" data-wf-clear disabled={!n} onClick={() => { clearIn(scope); if (scope === "workshop") nextListGen(); if (listOn) setWsList(null); }}>Clear all</button>
           <button type="button" className="mini wf-close" data-wf-close aria-label="Close filters" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="wf-scroll" ref={smoothRef}>
+          {scope === "workshop" && <WorkshopListFields />}
           {visibleGroups(groupsFor(scope, presets), known, states, hiddenAny).map((g) => <GroupBox key={g.id} g={g} states={states} scope={scope} />)}
         </div>
       </aside>
