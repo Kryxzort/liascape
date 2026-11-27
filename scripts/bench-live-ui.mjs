@@ -126,10 +126,12 @@ async function browseRun() {
   const cards = `document.querySelectorAll(".br-scroll .card").length`;
   // every card on screen has its pictures in: its still (the first .thumb) complete, and its gif's where one is mounted
   const shown = `(() => { const sc = document.querySelector(".br-scroll"); if (!sc) return null; const b = sc.getBoundingClientRect();
-    const on = [...sc.querySelectorAll(".card")].filter((c) => { const r = c.getBoundingClientRect(); return r.bottom > b.top && r.top < b.bottom; });
+    const on = [...sc.querySelectorAll(".card:not(.skel-card)")].filter((c) => { const r = c.getBoundingClientRect(); return r.bottom > b.top && r.top < b.bottom; });
     if (!on.length) return null; return on.every((c) => [...c.querySelectorAll("img.thumb")].every((i) => i.complete)) ? on.length : null; })()`;
   const until = async (expr, ms = 60000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await ev(expr); if (v) return { v, ms: Date.now() - t0 }; await sleep(50); } return { v: null, ms: null }; };
-  const step = async (act, listExpr) => { const t0 = Date.now(); await act(); const l = await until(listExpr); const s = await until(shown); return { listMs: l.ms, picturesMs: s.ms == null ? null : Date.now() - t0, onScreen: s.v }; };
+  // both times from the input: the next page's own act waits for its cards
+  const step = async (act, listExpr) => { const t0 = Date.now(); await act(); const l = await until(listExpr); const listMs = l.v ? Date.now() - t0 : null;
+    const s = await until(shown); return { listMs, picturesMs: s.ms == null ? null : Date.now() - t0, onScreen: s.v }; };
   const search = (q) => ev(`(() => { const i = document.querySelector("input.search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(q)}); i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
   const out = {};
   out.first = await step(async () => {
@@ -141,10 +143,13 @@ async function browseRun() {
     const g = await ev(`(() => { const b = document.querySelector(".br-scroll").getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
     for (let i = 0; i < 400 && (await ev(cards)) <= n0; i++) { await call("Input.dispatchMouseEvent", { type: "mouseWheel", x: Math.round(g.x), y: Math.round(g.y), deltaX: 0, deltaY: 400 }); await sleep(40); }
   }, `${cards} > ${n0}`);
-  const first = await ev(`document.querySelector(".br-scroll .card")?.dataset.key`);
-  out.search = await step(() => search("anime"), `document.querySelector(".br-scroll .card")?.dataset.key !== ${JSON.stringify(first)}`);
-  const searched = await ev(`document.querySelector(".br-scroll .card")?.dataset.key`);
-  out.back = await step(() => search(""), `document.querySelector(".br-scroll .card")?.dataset.key !== ${JSON.stringify(searched)}`);
+  // a new list: a first card, and another than before (an emptied grid while it loads is no list)
+  const firstKey = `document.querySelector(".br-scroll .card:not(.skel-card)")?.dataset.key`;
+  const newList = (prev) => `(() => { const k = ${firstKey}; return !!k && k !== ${JSON.stringify(prev)}; })()`;
+  const first = await ev(firstKey);
+  out.search = await step(() => search("anime"), newList(first));
+  const searched = await ev(firstKey);
+  out.back = await step(() => search(""), newList(searched));
   await call("Network.disable");
   const med = (a, p = 0.5) => { const s = a.filter((x) => x != null).sort((x, y) => x - y); return s.length ? Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]) : null; };
   out.requests = Object.fromEntries(["still", "anim", "img", "clip", "media"].map((k) => { const r = pics.filter((x) => x.kind === k && x.ok);

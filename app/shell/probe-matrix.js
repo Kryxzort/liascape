@@ -966,7 +966,8 @@ C["browse:gifAfterStill"] = { states: ["idle"], noSwitch: true, async run(c) {
       c.src = (srcs.find?.((x) => x.index === 3) ?? srcs[3])?.name;
       const items = Array.from({ length: 24 }, (_, i) => ({ title: `ga-${i + 1}`, thumbnailUrl: `https://gif.invalid/ga-${i + 1}.gif`,
         animatedThumbnailUrl: `https://gif.invalid/ga-${i + 1}.gif`, pageUrl: `https://gif.invalid/page/${i + 1}`, isScene: false, workshopId: null, addedAt: null }));
-      await js(`(() => { const items = ${JSON.stringify(items)}, f = window.fetch; window.fetch = (u, o) => {
+      // the page's own fetch kept, put back after (later cells on this page get the real lists)
+      await js(`(() => { const items = ${JSON.stringify(items)}, f = window.__gaFetch = window.fetch; window.fetch = (u, o) => {
         if (String(u).split("?")[0].endsWith("/browse") && o?.method === "POST") { const b = JSON.parse(o.body);
           if (b.source === 3 && !b.query) return Promise.resolve(new Response(JSON.stringify(b.page > 1 ? [] : items), { status: 200, headers: { "Content-Type": "application/json" } })); }
         return f(u, o); }; })(); true`);
@@ -984,6 +985,7 @@ C["browse:gifAfterStill"] = { states: ["idle"], noSwitch: true, async run(c) {
     } finally {
       wr.onBeforeRequest(filter, null); wr.onCompleted(filter, null); wr.onErrorOccurred(filter, null); wr.onHeadersReceived(filter, null);
       for (const go of [...held]) go();
+      await js(`(() => { if (window.__gaFetch) { window.fetch = window.__gaFetch; delete window.__gaFetch; } })(); true`).catch(() => {});
       await ui(`m.tab("Settings"); await m.sleep(400); await m.select("Card previews", "Animate on hover"); await m.sleep(300);`).catch(() => {});
       await post("/settings", { ...(await getSettings()), workshopFolder: s0.workshopFolder, autoAddWeWallpapersToLibrary: s0.autoAddWeWallpapersToLibrary,
         previewOnHover: s0.previewOnHover, previewNotHovered: s0.previewNotHovered });

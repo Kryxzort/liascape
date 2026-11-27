@@ -388,6 +388,8 @@ public static class ServerHost
         {
             if (!_remote.TryGetValue(key, out f!))
             {
+                // a fetch that finished since the check above left its file and its entry is gone
+                if (RemoteCached(u) is { } done) return done;
                 var mine = f = new RemoteFetch();
                 _remote[key] = f;
                 f.Task = Task.Run(async () =>
@@ -417,13 +419,17 @@ public static class ServerHost
     // two of the same preview (one stopped, its follower) never write the same file at once
     private static async Task<string> DownloadPreview(string u, string key, CancellationToken ct)
     {
+        // the client's own timeout ends with the headers: the body gets the same 30 s, so a server that stalls mid-body
+        // never holds the cards waiting for it
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
         using var msg = new HttpRequestMessage(HttpMethod.Get, u);
         msg.Headers.TryAddWithoutValidation("User-Agent", FirefoxUA);
-        using var resp = await Http.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var resp = await Http.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         resp.EnsureSuccessStatusCode();
         var mt = resp.Content.Headers.ContentType?.MediaType ?? "image/gif";
         var ext = mt.Contains("webp") ? ".webp" : mt.Contains("png") ? ".png" : mt.Contains("jpeg") ? ".jpg" : ".gif";
-        var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+        var bytes = await resp.Content.ReadAsByteArrayAsync(deadline.Token);
         var part = $"{key}.{Guid.NewGuid():N}.part{ext}";
         try
         {
@@ -1148,7 +1154,9 @@ public static class ServerHost
                 var jpg = Path.Combine(dir, UrlHash(u) + (width > 0 ? $"_still{width}.jpg" : "_still.jpg"));
                 if (!File.Exists(jpg))
                 {
-                    if (await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted, ApiSecurity.MediaLoopbackForTests) is string refused) return Results.Json(new { error = refused }, statusCode: 403);
+                    if (RemoteCached(u) == null
+                        && await ApiSecurity.CheckPublicUrl(u, ctx.RequestAborted, ApiSecurity.MediaLoopbackForTests) is string refused)
+                        return Results.Json(new { error = refused }, statusCode: 403);
                     // made from the file /anim serves (one download for the card's still and gif): its trim only cut black
                     // frames, which the still skips anyway
                     var src = await RemotePreview(u, ctx.RequestAborted);
