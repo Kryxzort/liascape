@@ -124,6 +124,11 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
 16. [ ] (owner) A change to "Video preview quality" re-encodes only the cards on screen: every card's gif / clip
        should be queued for the new quality (on-screen first, then the rest of the library in the background, as the
        preview backfill does), not only those visible when it changed. Pin it in `scripts/test-clip-sweep.sh`.
+17. [ ] (owner) Previews keep being made after Liascape is quit, so the whole library is ready next time: the
+       pending sweep / backfill carries on in a detached, idle-priority (`nice` / `ionice -c3`) worker that exits when
+       the queue is empty, hands over to the app when it starts again, and never delays `serve`'s 3 s SIGTERM exit
+       (`scripts/test-backend-stop.sh`). Pin it in `scripts/test-preview-backfill.sh` (quit mid-queue, the rest made,
+       a restart takes over without doubled encodes).
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds clean on Arch (`makechrootpkg -c`), `namcap` is clean but
