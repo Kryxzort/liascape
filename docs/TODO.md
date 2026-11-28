@@ -121,6 +121,9 @@ one person's own reminders go in their gitignored `CLAUDE.local.md` / `docs/NIGH
        (`LIASCAPE_TEST_NO_NETWORK`); Electron, ffmpeg and the player in them can still reach the real network and its
        DNS. Run them inside `scripts/test-netns.sh` too (the matrix's private Xvfb, audio server and CDP ports all live
        on loopback), or show that nothing but the guarded backend could look a name up.
+16. [ ] (owner) A change to "Video preview quality" re-encodes only the cards on screen: every card's gif / clip
+       should be queued for the new quality (on-screen first, then the rest of the library in the background, as the
+       preview backfill does), not only those visible when it changed. Pin it in `scripts/test-clip-sweep.sh`.
 
 ## Ready-to-do backlog (owner, 2026-11-16: next after Queued; each gets a short brainstorm before it starts)
 - [ ] **Packaging**: `scripts/PKGBUILD` (`liascape-git`) builds clean on Arch (`makechrootpkg -c`), `namcap` is clean but
